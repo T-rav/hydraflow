@@ -29,6 +29,8 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("max_merge_conflict_fix_attempts", "HYDRAFLOW_MAX_MERGE_CONFLICT_FIX_ATTEMPTS", 3),
     ("data_poll_interval", "HYDRAFLOW_DATA_POLL_INTERVAL", 60),
     ("max_sessions_per_repo", "HYDRAFLOW_MAX_SESSIONS_PER_REPO", 10),
+    ("manifest_refresh_interval", "HYDRAFLOW_MANIFEST_REFRESH_INTERVAL", 3600),
+    ("max_manifest_prompt_chars", "HYDRAFLOW_MAX_MANIFEST_PROMPT_CHARS", 2000),
     ("max_transcript_summary_chars", "HYDRAFLOW_MAX_TRANSCRIPT_SUMMARY_CHARS", 50_000),
     ("pr_unstick_interval", "HYDRAFLOW_PR_UNSTICK_INTERVAL", 3600),
     ("pr_unstick_batch_size", "HYDRAFLOW_PR_UNSTICK_BATCH_SIZE", 10),
@@ -291,6 +293,20 @@ class HydraFlowConfig(BaseModel):
     memory_compaction_model: str = Field(
         default="haiku",
         description="Cheap model for summarising memory digest when over size limit",
+    )
+
+    # Manifest detection
+    manifest_refresh_interval: int = Field(
+        default=3600,
+        ge=60,
+        le=86400,
+        description="Seconds between project manifest refresh scans (default: 1 hour)",
+    )
+    max_manifest_prompt_chars: int = Field(
+        default=2000,
+        ge=200,
+        le=10_000,
+        description="Max characters for project manifest injected into agent prompts",
     )
 
     # Transcript summarization

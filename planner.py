@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from execution import get_default_runner
+from manifest import load_project_manifest
 from memory import load_memory_digest
 from models import GitHubIssue, NewIssueSpec, PlannerStatus, PlanResult
 from runner_utils import stream_claude_process, terminate_processes
@@ -282,6 +283,12 @@ class PlannerRunner:
                 "the surrounding text describes what they show."
             )
 
+        # Project manifest injection
+        manifest_section = ""
+        manifest = load_project_manifest(self._config)
+        if manifest:
+            manifest_section = f"\n\n## Project Context\n\n{manifest}"
+
         # Memory digest injection
         memory_section = ""
         digest = load_memory_digest(self._config)
@@ -347,7 +354,7 @@ class PlannerRunner:
 
 ## Issue: {issue.title}
 
-{body}{image_note}{comments_section}{memory_section}
+{body}{image_note}{comments_section}{manifest_section}{memory_section}
 
 ## Instructions
 

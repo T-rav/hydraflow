@@ -314,6 +314,21 @@ class StateTracker:
             self._data.memory_last_synced,
         )
 
+    # --- manifest state ---
+
+    def update_manifest_state(self, manifest_hash: str) -> None:
+        """Update manifest tracking fields and persist."""
+        self._data.manifest_hash = manifest_hash
+        self._data.manifest_last_updated = datetime.now(UTC).isoformat()
+        self.save()
+
+    def get_manifest_state(self) -> tuple[str, str | None]:
+        """Return ``(manifest_hash, last_updated)``."""
+        return (
+            self._data.manifest_hash,
+            self._data.manifest_last_updated,
+        )
+
     # --- worker interval overrides ---
 
     def get_worker_intervals(self) -> dict[str, int]:

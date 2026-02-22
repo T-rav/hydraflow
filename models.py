@@ -448,6 +448,8 @@ class StateData(BaseModel):
     memory_issue_ids: list[int] = Field(default_factory=list)
     memory_digest_hash: str = ""
     memory_last_synced: str | None = None
+    manifest_hash: str = ""
+    manifest_last_updated: str | None = None
     metrics_issue_number: int | None = None
     metrics_last_snapshot_hash: str = ""
     metrics_last_synced: str | None = None

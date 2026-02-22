@@ -12,16 +12,17 @@ import logging
 import tomllib
 from pathlib import Path
 
+from manifest import JS_MARKERS, PYTHON_MARKERS
+
 logger = logging.getLogger("hydraflow.lint_scaffold")
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-_PYTHON_MARKERS = frozenset(
-    {"pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"}
-)
-_JS_MARKERS = frozenset({"package.json", "tsconfig.json"})
+# Aliases preserved for backward compatibility (frozenset for existing consumers).
+_PYTHON_MARKERS = frozenset(PYTHON_MARKERS)
+_JS_MARKERS = frozenset(JS_MARKERS)
 
 _ESLINT_CONFIG_FILES = frozenset(
     {

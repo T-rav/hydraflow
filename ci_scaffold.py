@@ -13,6 +13,12 @@ from __future__ import annotations
 import dataclasses
 from pathlib import Path
 
+from manifest import JS_MARKERS, PYTHON_MARKERS
+
+# Aliases preserved for backward compatibility.
+_PYTHON_MARKERS = PYTHON_MARKERS
+_JS_MARKERS = JS_MARKERS
+
 
 @dataclasses.dataclass
 class CIScaffoldResult:
@@ -27,20 +33,14 @@ class CIScaffoldResult:
 
 # --- Language Detection ---
 
-_PYTHON_MARKERS = ("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt")
-_JS_MARKERS = ("package.json", "tsconfig.json")
-
 
 def detect_language(repo_root: Path) -> str:
     """Detect the primary language of a repository from marker files.
 
     Returns ``"python"``, ``"javascript"``, ``"mixed"``, or ``"unknown"``.
-
-    Note: duplicated across #562, #563, and #565 for independence within
-    the epic. Consolidate into a shared utility when ``prep.py`` lands.
     """
-    has_python = any((repo_root / m).exists() for m in _PYTHON_MARKERS)
-    has_js = any((repo_root / m).exists() for m in _JS_MARKERS)
+    has_python = any((repo_root / m).exists() for m in PYTHON_MARKERS)
+    has_js = any((repo_root / m).exists() for m in JS_MARKERS)
 
     if has_python and has_js:
         return "mixed"

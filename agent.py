@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from execution import get_default_runner
+from manifest import load_project_manifest
 from memory import load_memory_digest
 from models import GitHubIssue, WorkerResult, WorkerStatus
 from review_insights import ReviewInsightStore, get_common_feedback_section
@@ -296,6 +297,12 @@ class AgentRunner:
 
         feedback_section = self._get_review_feedback_section()
 
+        # Project manifest injection
+        manifest_section = ""
+        manifest = load_project_manifest(self._config)
+        if manifest:
+            manifest_section = f"\n\n## Project Context\n\n{manifest}"
+
         # Memory digest injection
         memory_section = ""
         digest = load_memory_digest(self._config)
@@ -317,7 +324,7 @@ class AgentRunner:
 
 ## Issue: {issue.title}
 
-{body}{plan_section}{review_feedback_section}{comments_section}{memory_section}
+{body}{plan_section}{review_feedback_section}{comments_section}{manifest_section}{memory_section}
 
 ## Instructions
 
