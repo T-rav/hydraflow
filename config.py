@@ -53,6 +53,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_TRANSCRIPT_SUMMARIZATION_ENABLED",
         True,
     ),
+    ("memory_auto_approve", "HYDRAFLOW_MEMORY_AUTO_APPROVE", False),
 ]
 
 # Label env var overrides — maps env key → (field_name, default_value)
@@ -291,6 +292,12 @@ class HydraFlowConfig(BaseModel):
     memory_compaction_model: str = Field(
         default="haiku",
         description="Cheap model for summarising memory digest when over size limit",
+    )
+
+    # Memory auto-approve
+    memory_auto_approve: bool = Field(
+        default=False,
+        description="When True, memory suggestions skip HITL and go directly to the sync queue",
     )
 
     # Transcript summarization

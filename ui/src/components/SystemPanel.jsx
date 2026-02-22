@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useCallback } from 'react'
 import { theme } from '../theme'
 import { BACKGROUND_WORKERS, INTERVAL_PRESETS, EDITABLE_INTERVAL_WORKERS, SYSTEM_WORKER_INTERVALS } from '../constants'
 import { useHydraFlow } from '../context/HydraFlowContext'
@@ -222,6 +222,48 @@ function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssue
 const NON_SYSTEM_WORKERS = BACKGROUND_WORKERS.filter(w => !w.system)
 const SYSTEM_WORKERS = BACKGROUND_WORKERS.filter(w => w.system)
 
+function MemoryAutoApproveToggle() {
+  const { config } = useHydraFlow()
+  const [localEnabled, setLocalEnabled] = useState(null)
+
+  const isEnabled = localEnabled !== null ? localEnabled : (config?.memory_auto_approve ?? false)
+
+  const handleToggle = useCallback(async () => {
+    const newValue = !isEnabled
+    setLocalEnabled(newValue)
+    try {
+      const resp = await fetch('/api/control/config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ memory_auto_approve: newValue, persist: true }),
+      })
+      if (!resp.ok) {
+        setLocalEnabled(isEnabled)
+      }
+    } catch {
+      setLocalEnabled(isEnabled)
+    }
+  }, [isEnabled])
+
+  return (
+    <div style={styles.autoApproveRow}>
+      <div style={styles.autoApproveLabel}>
+        <span style={styles.autoApproveText}>Memory Auto-Approve</span>
+        <span style={styles.autoApproveHint}>
+          Skip HITL queue for memory suggestions
+        </span>
+      </div>
+      <button
+        style={isEnabled ? styles.toggleOn : styles.toggleOff}
+        onClick={handleToggle}
+        data-testid="memory-auto-approve-toggle"
+      >
+        {isEnabled ? 'On' : 'Off'}
+      </button>
+    </div>
+  )
+}
+
 export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onViewLog, onUpdateInterval }) {
   const { pipelinePollerLastRun, orchestratorStatus, events, pipelineIssues } = useHydraFlow()
   const [activeSubTab, setActiveSubTab] = useState('workers')
@@ -261,6 +303,7 @@ export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onViewLog, on
               })}
             </div>
             <h3 style={styles.sectionHeading}>System</h3>
+            <MemoryAutoApproveToggle />
             <div style={styles.grid}>
               {SYSTEM_WORKERS.map((def) => {
                 const state = backgroundWorkers.find(w => w.name === def.key)
@@ -545,6 +588,30 @@ const styles = {
     color: theme.accent,
     cursor: 'pointer',
     transition: 'all 0.15s',
+  },
+  autoApproveRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '8px 16px',
+    marginBottom: 12,
+    border: `1px solid ${theme.border}`,
+    borderRadius: 8,
+    background: theme.surface,
+  },
+  autoApproveLabel: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2,
+  },
+  autoApproveText: {
+    fontSize: 13,
+    fontWeight: 600,
+    color: theme.text,
+  },
+  autoApproveHint: {
+    fontSize: 11,
+    color: theme.textMuted,
   },
 }
 

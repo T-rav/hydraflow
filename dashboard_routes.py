@@ -411,6 +411,7 @@ def create_router(
                 max_hitl_workers=config.max_hitl_workers,
                 batch_size=config.batch_size,
                 model=config.model,
+                memory_auto_approve=config.memory_auto_approve,
             ),
         )
         data = response.model_dump()
@@ -440,6 +441,7 @@ def create_router(
         "poll_interval",
         "pr_unstick_interval",
         "pr_unstick_batch_size",
+        "memory_auto_approve",
     }
 
     @router.patch("/api/control/config")

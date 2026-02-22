@@ -221,6 +221,167 @@ class TestControlStatusImproveLabel:
         assert data["config"]["improve_label"] == config.improve_label
 
 
+class TestControlStatusMemoryAutoApprove:
+    """Tests that /api/control/status includes memory_auto_approve."""
+
+    def _make_router(self, config, event_bus, state, tmp_path):
+        from dashboard_routes import create_router
+        from pr_manager import PRManager
+
+        pr_mgr = PRManager(config, event_bus)
+        return create_router(
+            config=config,
+            event_bus=event_bus,
+            state=state,
+            pr_manager=pr_mgr,
+            get_orchestrator=lambda: None,
+            set_orchestrator=lambda o: None,
+            set_run_task=lambda t: None,
+            ui_dist_dir=tmp_path / "no-dist",
+            template_dir=tmp_path / "no-templates",
+        )
+
+    def _find_endpoint(self, router, path):
+        for route in router.routes:
+            if (
+                hasattr(route, "path")
+                and route.path == path
+                and hasattr(route, "endpoint")
+            ):
+                return route.endpoint
+        return None
+
+    @pytest.mark.asyncio
+    async def test_control_status_includes_memory_auto_approve_default(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """GET /api/control/status should include memory_auto_approve (default False)."""
+        import json
+
+        router = self._make_router(config, event_bus, state, tmp_path)
+        get_control_status = self._find_endpoint(router, "/api/control/status")
+        assert get_control_status is not None
+
+        response = await get_control_status()
+        data = json.loads(response.body)
+        assert "config" in data
+        assert data["config"]["memory_auto_approve"] is False
+
+    @pytest.mark.asyncio
+    async def test_control_status_reflects_memory_auto_approve_true(
+        self, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """GET /api/control/status should reflect True when config has it enabled."""
+        import json
+
+        from tests.helpers import ConfigFactory
+
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path / "repo",
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+            memory_auto_approve=True,
+        )
+        router = self._make_router(cfg, event_bus, state, tmp_path)
+        get_control_status = self._find_endpoint(router, "/api/control/status")
+        assert get_control_status is not None
+
+        response = await get_control_status()
+        data = json.loads(response.body)
+        assert data["config"]["memory_auto_approve"] is True
+
+
+class TestPatchConfigMemoryAutoApprove:
+    """Tests that PATCH /api/control/config accepts memory_auto_approve."""
+
+    def _make_router(self, config, event_bus, state, tmp_path):
+        from dashboard_routes import create_router
+        from pr_manager import PRManager
+
+        pr_mgr = PRManager(config, event_bus)
+        return create_router(
+            config=config,
+            event_bus=event_bus,
+            state=state,
+            pr_manager=pr_mgr,
+            get_orchestrator=lambda: None,
+            set_orchestrator=lambda o: None,
+            set_run_task=lambda t: None,
+            ui_dist_dir=tmp_path / "no-dist",
+            template_dir=tmp_path / "no-templates",
+        )
+
+    def _find_endpoint(self, router, path):
+        for route in router.routes:
+            if (
+                hasattr(route, "path")
+                and route.path == path
+                and hasattr(route, "endpoint")
+            ):
+                return route.endpoint
+        return None
+
+    @pytest.mark.asyncio
+    async def test_patch_config_enables_memory_auto_approve(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """PATCH /api/control/config with memory_auto_approve=True should update config."""
+        import json
+
+        router = self._make_router(config, event_bus, state, tmp_path)
+        patch_config = self._find_endpoint(router, "/api/control/config")
+        assert patch_config is not None
+
+        assert config.memory_auto_approve is False
+        response = await patch_config({"memory_auto_approve": True})
+        data = json.loads(response.body)
+        assert data["status"] == "ok"
+        assert data["updated"]["memory_auto_approve"] is True
+        assert config.memory_auto_approve is True
+
+    @pytest.mark.asyncio
+    async def test_patch_config_disables_memory_auto_approve(
+        self, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """PATCH /api/control/config with memory_auto_approve=False should update config."""
+        import json
+
+        from tests.helpers import ConfigFactory
+
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path / "repo",
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+            memory_auto_approve=True,
+        )
+        router = self._make_router(cfg, event_bus, state, tmp_path)
+        patch_config = self._find_endpoint(router, "/api/control/config")
+        assert patch_config is not None
+
+        assert cfg.memory_auto_approve is True
+        response = await patch_config({"memory_auto_approve": False})
+        data = json.loads(response.body)
+        assert data["status"] == "ok"
+        assert data["updated"]["memory_auto_approve"] is False
+        assert cfg.memory_auto_approve is False
+
+    @pytest.mark.asyncio
+    async def test_patch_config_memory_auto_approve_ignored_field(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """Unknown fields in PATCH should be ignored without error."""
+        import json
+
+        router = self._make_router(config, event_bus, state, tmp_path)
+        patch_config = self._find_endpoint(router, "/api/control/config")
+        assert patch_config is not None
+
+        response = await patch_config({"unknown_field": True})
+        data = json.loads(response.body)
+        assert data["status"] == "ok"
+        assert data["updated"] == {}
+
+
 class TestHITLEndpointCause:
     """Tests that /api/hitl includes the cause from state."""
 

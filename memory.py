@@ -105,16 +105,29 @@ async def file_memory_suggestion(
         reference=reference,
     )
     title = f"[Memory] {suggestion['title']}"
-    labels = list(config.improve_label) + list(config.hitl_label)
-    issue_num = await prs.create_issue(title, body, labels)
-    if issue_num:
-        state.set_hitl_origin(issue_num, config.improve_label[0])
-        state.set_hitl_cause(issue_num, "Memory suggestion")
-        logger.info(
-            "Filed memory suggestion as issue #%d: %s",
-            issue_num,
-            suggestion["title"],
-        )
+
+    if config.memory_auto_approve:
+        # Skip HITL — label directly for memory sync pickup
+        labels = list(config.memory_label)
+        issue_num = await prs.create_issue(title, body, labels)
+        if issue_num:
+            logger.info(
+                "Auto-approved memory suggestion as issue #%d: %s",
+                issue_num,
+                suggestion["title"],
+            )
+    else:
+        # Standard flow — route through HITL for human approval
+        labels = list(config.improve_label) + list(config.hitl_label)
+        issue_num = await prs.create_issue(title, body, labels)
+        if issue_num:
+            state.set_hitl_origin(issue_num, config.improve_label[0])
+            state.set_hitl_cause(issue_num, "Memory suggestion")
+            logger.info(
+                "Filed memory suggestion as issue #%d: %s",
+                issue_num,
+                suggestion["title"],
+            )
 
 
 class MemorySyncWorker:

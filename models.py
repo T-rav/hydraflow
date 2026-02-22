@@ -532,6 +532,7 @@ class ControlStatusConfig(BaseModel):
     max_hitl_workers: int = 0
     batch_size: int = 0
     model: str = ""
+    memory_auto_approve: bool = False
 
 
 class ControlStatusResponse(BaseModel):
