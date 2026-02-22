@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from execution import get_default_runner
+from manifest import load_project_manifest
 from memory import load_memory_digest
 from models import GitHubIssue, PRInfo, ReviewerStatus, ReviewResult, ReviewVerdict
 from runner_utils import stream_claude_process, terminate_processes
@@ -308,6 +309,12 @@ Then a brief summary on the next line starting with "SUMMARY: ".
 
         min_findings = self._config.min_review_findings
 
+        # Project manifest injection
+        manifest_section = ""
+        manifest = load_project_manifest(self._config)
+        if manifest:
+            manifest_section = f"\n\n## Project Context\n\n{manifest}"
+
         # Memory digest injection
         memory_section = ""
         digest = load_memory_digest(self._config)
@@ -318,7 +325,7 @@ Then a brief summary on the next line starting with "SUMMARY: ".
 
 ## Issue: {issue.title}
 
-{issue.body}{memory_section}
+{issue.body}{manifest_section}{memory_section}
 
 ## PR Diff
 

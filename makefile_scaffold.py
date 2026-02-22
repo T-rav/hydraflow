@@ -10,8 +10,11 @@ import dataclasses
 import re
 from pathlib import Path
 
-_PYTHON_MARKERS = ("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt")
-_JS_MARKERS = ("package.json", "tsconfig.json")
+from manifest import JS_MARKERS, PYTHON_MARKERS
+
+# Aliases preserved for backward compatibility.
+_PYTHON_MARKERS = PYTHON_MARKERS
+_JS_MARKERS = JS_MARKERS
 
 _PYTHON_TARGETS: dict[str, str] = {
     "lint": "\truff check . --fix && ruff format .\n",

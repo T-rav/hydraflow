@@ -14,9 +14,13 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from manifest import PYTHON_MARKERS
 from subprocess_util import run_subprocess
 
 logger = logging.getLogger("hydraflow.prep_hooks")
+
+# Alias preserved for backward compatibility.
+_PYTHON_MARKERS = PYTHON_MARKERS
 
 # ---------------------------------------------------------------------------
 # Hook templates
@@ -64,8 +68,6 @@ class PrepHookResult(BaseModel):
 # ---------------------------------------------------------------------------
 # Language detection
 # ---------------------------------------------------------------------------
-
-_PYTHON_MARKERS = ("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt")
 
 
 def _has_typescript_indicators(package_json: Path) -> bool:
