@@ -130,7 +130,7 @@ class PRUnsticker:
 
             # Run conflict resolution loop
             resolved = await self._resolve_conflicts(
-                issue_number, issue, wt_path, branch
+                issue_number, issue, wt_path, branch, pr_url=item.prUrl
             )
 
             if resolved:
@@ -181,16 +181,13 @@ class PRUnsticker:
         issue: Any,
         wt_path: Path,
         branch: str,
+        pr_url: str,
     ) -> bool:
         """Run the conflict resolution loop, mirroring ReviewPhase logic."""
         from conflict_prompt import build_conflict_prompt
 
         max_attempts = self._config.max_merge_conflict_fix_attempts
         last_error: str | None = None
-
-        # Fetch context once before the attempt loop
-        pr_changed_files = await self._prs.get_pr_diff_names(issue.number)
-        main_commits = await self._worktrees.get_main_commits_since_diverge(wt_path)
 
         for attempt in range(1, max_attempts + 1):
             # Abort any prior failed merge before retrying
@@ -210,9 +207,7 @@ class PRUnsticker:
             )
 
             try:
-                prompt = build_conflict_prompt(
-                    issue, pr_changed_files, main_commits, last_error, attempt
-                )
+                prompt = build_conflict_prompt(issue.url, pr_url, last_error, attempt)
                 cmd = self._agents._build_command(wt_path)
                 transcript = await self._agents._execute(
                     cmd, prompt, wt_path, issue_number

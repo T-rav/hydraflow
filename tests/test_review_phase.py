@@ -1521,8 +1521,6 @@ class TestResolveMergeConflicts:
         issue = IssueFactory.create()
 
         phase._worktrees.start_merge_main = AsyncMock(return_value=False)
-        phase._worktrees.get_main_commits_since_diverge = AsyncMock(return_value="")
-        phase._prs.get_pr_diff_names = AsyncMock(return_value=[])
 
         with patch(
             "merge_conflict_resolver.file_memory_suggestion", new_callable=AsyncMock
@@ -1553,8 +1551,6 @@ class TestResolveMergeConflicts:
         issue = IssueFactory.create()
 
         phase._worktrees.start_merge_main = AsyncMock(return_value=False)
-        phase._worktrees.get_main_commits_since_diverge = AsyncMock(return_value="")
-        phase._prs.get_pr_diff_names = AsyncMock(return_value=[])
 
         with patch(
             "merge_conflict_resolver.file_memory_suggestion",
@@ -1566,71 +1562,6 @@ class TestResolveMergeConflicts:
             )
 
             assert result is True
-
-    @pytest.mark.asyncio
-    async def test_passes_conflicting_files_and_diff_to_prompt(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """Should call get_conflicting_files and get_main_diff_for_files and pass to prompt."""
-        mock_agents = AsyncMock()
-        mock_agents._execute = AsyncMock(return_value="transcript")
-        mock_agents._verify_result = AsyncMock(return_value=(True, ""))
-        phase = make_review_phase(config, agents=mock_agents)
-        pr = PRInfoFactory.create()
-        issue = IssueFactory.create()
-
-        phase._worktrees.start_merge_main = AsyncMock(return_value=False)
-        phase._worktrees.get_conflicting_files = AsyncMock(
-            return_value=["src/foo.py", "src/bar.py"]
-        )
-        phase._worktrees.get_main_diff_for_files = AsyncMock(
-            return_value="diff --git a/src/foo.py\n+added"
-        )
-
-        with patch(
-            "merge_conflict_resolver.file_memory_suggestion", new_callable=AsyncMock
-        ):
-            await phase._resolve_merge_conflicts(
-                pr, issue, config.worktree_base / "issue-42", worker_id=0
-            )
-
-        # Verify get_conflicting_files was called
-        phase._worktrees.get_conflicting_files.assert_awaited_once()
-
-        # Verify the prompt passed to the agent contains conflict context
-        prompt_arg = mock_agents._execute.call_args_list[0].args[1]
-        assert "src/foo.py" in prompt_arg
-        assert "src/bar.py" in prompt_arg
-        assert "## Conflicting Files" in prompt_arg
-        assert "## What Changed on Main" in prompt_arg
-
-    @pytest.mark.asyncio
-    async def test_handles_empty_conflicting_files_gracefully(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """When no conflicting files detected, prompt should still work without those sections."""
-        mock_agents = AsyncMock()
-        mock_agents._execute = AsyncMock(return_value="transcript")
-        mock_agents._verify_result = AsyncMock(return_value=(True, ""))
-        phase = make_review_phase(config, agents=mock_agents)
-        pr = PRInfoFactory.create()
-        issue = IssueFactory.create()
-
-        phase._worktrees.start_merge_main = AsyncMock(return_value=False)
-        phase._worktrees.get_conflicting_files = AsyncMock(return_value=[])
-        phase._worktrees.get_main_diff_for_files = AsyncMock(return_value="")
-
-        with patch(
-            "merge_conflict_resolver.file_memory_suggestion", new_callable=AsyncMock
-        ):
-            result = await phase._resolve_merge_conflicts(
-                pr, issue, config.worktree_base / "issue-42", worker_id=0
-            )
-
-        assert result is True
-        prompt_arg = mock_agents._execute.call_args_list[0].args[1]
-        assert "## Conflicting Files" not in prompt_arg
-        assert "## What Changed on Main" not in prompt_arg
 
 
 # ---------------------------------------------------------------------------

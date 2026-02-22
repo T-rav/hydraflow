@@ -132,8 +132,6 @@ class TestCleanMerge:
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         wt.start_merge_main = AsyncMock(return_value=True)  # Clean merge
         wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
-        wt.get_main_commits_since_diverge = AsyncMock(return_value="")
-        prs.get_pr_diff_names = AsyncMock(return_value=[])
         prs.push_branch = AsyncMock(return_value=True)
 
         # Create worktree dir so it "exists"
@@ -168,13 +166,11 @@ class TestSuccessfulResolution:
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         wt.start_merge_main = AsyncMock(return_value=False)  # Conflicts exist
         wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
-        wt.get_main_commits_since_diverge = AsyncMock(return_value="")
 
         agents._build_command = MagicMock(return_value=["claude", "-p"])
         agents._execute = AsyncMock(return_value="resolved conflicts")
         agents._verify_result = AsyncMock(return_value=(True, "OK"))
 
-        prs.get_pr_diff_names = AsyncMock(return_value=[])
         prs.push_branch = AsyncMock(return_value=True)
 
         # Create worktree dir
@@ -219,13 +215,10 @@ class TestFailedResolution:
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         wt.start_merge_main = AsyncMock(return_value=False)
         wt.abort_merge = AsyncMock()
-        wt.get_main_commits_since_diverge = AsyncMock(return_value="")
 
         agents._build_command = MagicMock(return_value=["claude", "-p"])
         agents._execute = AsyncMock(return_value="failed transcript")
         agents._verify_result = AsyncMock(return_value=(False, "make quality failed"))
-
-        prs.get_pr_diff_names = AsyncMock(return_value=[])
 
         # Create worktree dir
         wt_dir = tmp_path / "worktrees" / "issue-42"
@@ -275,7 +268,7 @@ class TestConflictPromptUsesSharedBuilder:
     """Verify that _resolve_conflicts delegates to the shared builder."""
 
     @pytest.mark.asyncio
-    async def test_prompt_includes_enriched_context(self, tmp_path: Path) -> None:
+    async def test_prompt_includes_urls(self, tmp_path: Path) -> None:
         from models import GitHubIssue
 
         issue = GitHubIssue(
@@ -283,19 +276,14 @@ class TestConflictPromptUsesSharedBuilder:
             title="Fix the widget",
             body="Widget description",
             labels=[],
-            comments=["## Implementation Plan\n\n1. Fix it"],
+            url="https://github.com/test-org/test-repo/issues/42",
         )
         unsticker, state, prs, agents, wt, fetcher, bus = _make_unsticker(tmp_path)
         state.set_hitl_cause(42, "Merge conflict")
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         wt.start_merge_main = AsyncMock(return_value=False)
-        wt.get_main_commits_since_diverge = AsyncMock(
-            return_value="abc123 Refactor polling"
-        )
         wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
-
-        prs.get_pr_diff_names = AsyncMock(return_value=["orchestrator.py"])
 
         agents._build_command = MagicMock(return_value=["claude", "-p"])
         agents._execute = AsyncMock(return_value="transcript")
@@ -307,26 +295,26 @@ class TestConflictPromptUsesSharedBuilder:
         wt_dir.mkdir(parents=True)
         (tmp_path / "repo" / ".hydraflow" / "logs").mkdir(parents=True)
 
+        pr_url = "https://github.com/test-org/test-repo/pull/42"
+
         # Capture the prompt passed to agent._execute
         captured_prompt = None
         original_execute = agents._execute
 
-        async def capture_execute(cmd, prompt, wt, issue_num):
+        async def capture_execute(cmd, prompt, wt_arg, issue_num):
             nonlocal captured_prompt
             captured_prompt = prompt
-            return await original_execute(cmd, prompt, wt, issue_num)
+            return await original_execute(cmd, prompt, wt_arg, issue_num)
 
         agents._execute = capture_execute
 
-        stats = await unsticker.unstick([_make_hitl_item(42)])
+        stats = await unsticker.unstick([_make_hitl_item(42, prUrl=pr_url)])
 
         assert stats["resolved"] == 1
         assert captured_prompt is not None
-        assert "Issue Description" in captured_prompt
-        assert "Implementation Plan" in captured_prompt
-        assert "abc123 Refactor polling" in captured_prompt
-        assert "orchestrator.py" in captured_prompt
-        assert "non-conflicted files" in captured_prompt.lower()
+        assert "https://github.com/test-org/test-repo/issues/42" in captured_prompt
+        assert pr_url in captured_prompt
+        assert "merge conflicts" in captured_prompt.lower()
 
 
 class TestSaveTranscript:
@@ -377,13 +365,11 @@ def _setup_memory_test(tmp_path: Path, *, transcript: str = "transcript"):
     fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
     wt.start_merge_main = AsyncMock(return_value=False)
     wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
-    wt.get_main_commits_since_diverge = AsyncMock(return_value="")
 
     agents._build_command = MagicMock(return_value=["claude", "-p"])
     agents._execute = AsyncMock(return_value=transcript)
     agents._verify_result = AsyncMock(return_value=(True, "OK"))
 
-    prs.get_pr_diff_names = AsyncMock(return_value=[])
     prs.push_branch = AsyncMock(return_value=True)
 
     (tmp_path / "worktrees" / "issue-42").mkdir(parents=True)

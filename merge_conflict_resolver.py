@@ -116,10 +116,6 @@ class MergeConflictResolver:
         max_attempts = self._config.max_merge_conflict_fix_attempts
         last_error: str | None = None
 
-        # Fetch context once before the attempt loop
-        pr_changed_files = await self._prs.get_pr_diff_names(pr.number)
-        main_commits = await self._worktrees.get_main_commits_since_diverge(wt_path)
-
         for attempt in range(1, max_attempts + 1):
             # Abort any prior failed merge before retrying
             if attempt > 1:
@@ -141,21 +137,7 @@ class MergeConflictResolver:
             )
 
             try:
-                # Gather conflict-specific context for the prompt
-                conflicting_files = await self._worktrees.get_conflicting_files(wt_path)
-                main_diff = await self._worktrees.get_main_diff_for_files(
-                    wt_path, conflicting_files
-                )
-
-                prompt = build_conflict_prompt(
-                    issue,
-                    pr_changed_files,
-                    main_commits,
-                    last_error,
-                    attempt,
-                    conflicting_files=conflicting_files,
-                    main_diff=main_diff,
-                )
+                prompt = build_conflict_prompt(issue.url, pr.url, last_error, attempt)
                 cmd = self._agents._build_command(wt_path)
                 transcript = await self._agents._execute(
                     cmd, prompt, wt_path, issue.number
