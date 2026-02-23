@@ -12,7 +12,7 @@ from agent import AgentRunner
 from config import HydraFlowConfig
 from epic import EpicCompletionChecker
 from events import EventBus
-from execution import get_default_runner
+from execution import SubprocessRunner, get_default_runner
 from harness_insights import HarnessInsightStore
 from hitl_phase import HITLPhase
 from hitl_runner import HITLRunner
@@ -50,7 +50,7 @@ class ServiceRegistry:
 
     # Core infrastructure
     worktrees: WorktreeManager
-    subprocess_runner: Any
+    subprocess_runner: SubprocessRunner
     agents: AgentRunner
     planners: PlannerRunner
     prs: PRManager

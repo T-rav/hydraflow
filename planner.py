@@ -291,9 +291,7 @@ class PlannerRunner(BaseRunner):
 
         manifest_section, memory_section = self._inject_manifest_and_memory()
 
-        find_label = (
-            self._config.find_label[0] if self._config.find_label else "hydraflow-find"
-        )
+        find_label = self._config.find_label[0]
 
         # --- Scale-adaptive schema section ---
         if scale == "lite":

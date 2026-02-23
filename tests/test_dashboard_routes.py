@@ -1926,27 +1926,6 @@ class TestRequestChangesEndpoint:
         add_calls = [c.args for c in pr_mgr.add_labels.call_args_list]
         assert (7, config.hitl_label) in add_calls
 
-    @pytest.mark.asyncio
-    async def test_request_changes_empty_stage_labels_falls_back_to_stage_name(
-        self, event_bus, state, tmp_path
-    ) -> None:
-        """When a stage label list is empty, origin falls back to the stage key."""
-        import json
-
-        from tests.helpers import ConfigFactory
-
-        cfg = ConfigFactory.create(review_label=[])
-        router, _ = self._make_router(cfg, event_bus, state, tmp_path)
-        endpoint = self._find_endpoint(router, "/api/request-changes")
-        assert endpoint is not None
-
-        response = await endpoint(
-            {"issue_number": 99, "feedback": "Empty label config", "stage": "review"}
-        )
-        data = json.loads(response.body)
-        assert data["status"] == "ok"
-        assert state.get_hitl_origin(99) == "review"
-
 
 class TestDeleteSessionEndpoint:
     """Tests for DELETE /api/sessions/{session_id}."""

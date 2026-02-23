@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from acceptance_criteria import AcceptanceCriteriaGenerator
 from agent import AgentRunner
@@ -18,10 +20,12 @@ from issue_store import IssueStore
 from merge_conflict_resolver import MergeConflictResolver
 from models import (
     GitHubIssue,
+    JudgeResult,
     PRInfo,
     ReviewResult,
     ReviewVerdict,
 )
+from phase_utils import run_concurrent_batch, store_lifecycle
 from post_merge_handler import PostMergeHandler
 from pr_manager import PRManager, SelfReviewError
 from retrospective import RetrospectiveCollector
@@ -111,7 +115,6 @@ class ReviewPhase:
 
         issue_map = {i.number: i for i in issues}
         semaphore = asyncio.Semaphore(self._config.max_reviewers)
-        results: list[ReviewResult] = []
 
         async def _review_one(idx: int, pr: PRInfo) -> ReviewResult:
             if self._stop_event.is_set():
@@ -129,42 +132,26 @@ class ReviewPhase:
                     )
                 self._active_issues.add(pr.issue_number)
                 self._state.set_active_issue_numbers(list(self._active_issues))
-                self._store.mark_active(pr.issue_number, "review")
-                try:
-                    return await self._review_one_inner(idx, pr, issue_map)
-                except Exception:
-                    logger.exception(
-                        "Review failed for PR #%d (issue #%d)",
-                        pr.number,
-                        pr.issue_number,
-                    )
-                    return ReviewResult(
-                        pr_number=pr.number,
-                        issue_number=pr.issue_number,
-                        summary="Review failed due to unexpected error",
-                    )
-                finally:
-                    await self._publish_review_status(pr, idx, "done")
-                    self._active_issues.discard(pr.issue_number)
-                    self._state.set_active_issue_numbers(list(self._active_issues))
-                    self._store.mark_complete(pr.issue_number)
+                async with store_lifecycle(self._store, pr.issue_number, "review"):
+                    try:
+                        return await self._review_one_inner(idx, pr, issue_map)
+                    except Exception:
+                        logger.exception(
+                            "Review failed for PR #%d (issue #%d)",
+                            pr.number,
+                            pr.issue_number,
+                        )
+                        return ReviewResult(
+                            pr_number=pr.number,
+                            issue_number=pr.issue_number,
+                            summary="Review failed due to unexpected error",
+                        )
+                    finally:
+                        await self._publish_review_status(pr, idx, "done")
+                        self._active_issues.discard(pr.issue_number)
+                        self._state.set_active_issue_numbers(list(self._active_issues))
 
-        tasks = [asyncio.create_task(_review_one(i, pr)) for i, pr in enumerate(prs)]
-        try:
-            for task in asyncio.as_completed(tasks):
-                results.append(await task)
-                # Cancel remaining tasks if stop requested
-                if self._stop_event.is_set():
-                    for t in tasks:
-                        t.cancel()
-                    break
-        finally:
-            # Cancel any remaining tasks if this coroutine is cancelled externally
-            for t in tasks:
-                if not t.done():
-                    t.cancel()
-
-        return results
+        return await run_concurrent_batch(prs, _review_one, self._stop_event)
 
     async def _review_one_inner(
         self,
@@ -776,31 +763,31 @@ class ReviewPhase:
 
     # Delegate properties for backward compatibility in tests
     @property
-    def _resolve_merge_conflicts(self):  # noqa: ANN202
+    def _resolve_merge_conflicts(self) -> Callable[..., Coroutine[Any, Any, bool]]:
         """Backward-compatible access to conflict resolver."""
         return self._conflict_resolver.resolve_merge_conflicts
 
     @property
-    def _get_judge_result(self):  # noqa: ANN202
+    def _get_judge_result(self) -> Callable[..., JudgeResult | None]:
         """Backward-compatible access to judge result helper."""
         return self._post_merge._get_judge_result
 
     @property
-    def _create_verification_issue(self):  # noqa: ANN202
+    def _create_verification_issue(self) -> Callable[..., Coroutine[Any, Any, int]]:
         """Backward-compatible access to verification issue creation."""
         return self._post_merge._create_verification_issue
 
     @property
-    def _run_post_merge_hooks(self):  # noqa: ANN202
+    def _run_post_merge_hooks(self) -> Callable[..., Coroutine[Any, Any, None]]:
         """Backward-compatible access to post-merge hooks."""
         return self._post_merge._run_post_merge_hooks
 
     @property
-    def _save_conflict_transcript(self):  # noqa: ANN202
+    def _save_conflict_transcript(self) -> Callable[..., None]:
         """Backward-compatible access to conflict transcript saving."""
         return self._conflict_resolver._save_conflict_transcript
 
     @property
-    def _maybe_summarize_conflict(self):  # noqa: ANN202
+    def _maybe_summarize_conflict(self) -> Callable[..., Coroutine[Any, Any, None]]:
         """Backward-compatible access to conflict summary."""
         return self._conflict_resolver._maybe_summarize_conflict

@@ -148,6 +148,12 @@ class PRManager:
             # gh pr create --json would be better, but the URL is in stdout
             pr_url = output.strip()
 
+            # Validate output looks like a PR URL before parsing
+            if "/pull/" not in pr_url:
+                raise RuntimeError(
+                    f"Unexpected gh pr create output (expected PR URL): {pr_url[:200]}"
+                )
+
             # Get PR number from URL (e.g., https://github.com/org/repo/pull/123)
             pr_number = int(pr_url.rstrip("/").split("/")[-1])
 
@@ -482,8 +488,13 @@ class PRManager:
             output = await self._run_with_body_file(
                 *cmd, body=body, cwd=self._config.repo_root
             )
-            # gh issue create prints the issue URL
-            issue_number = int(output.strip().rstrip("/").split("/")[-1])
+            # gh issue create prints the issue URL — validate before parsing
+            url = output.strip()
+            if "/issues/" not in url:
+                raise RuntimeError(
+                    f"Unexpected gh issue create output (expected issue URL): {url[:200]}"
+                )
+            issue_number = int(url.rstrip("/").split("/")[-1])
 
             await self._bus.publish(
                 HydraFlowEvent(
@@ -684,7 +695,12 @@ class PRManager:
                     "50",
                 )
                 for p in json.loads(raw):
-                    pr_num = p["number"]
+                    pr_num = p.get("number")
+                    if pr_num is None:
+                        logger.debug(
+                            "Skipping PR in list_open_prs: missing 'number' key"
+                        )
+                        continue
                     if pr_num in seen:
                         continue
                     seen.add(pr_num)

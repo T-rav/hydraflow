@@ -636,6 +636,27 @@ class HydraFlowConfig(BaseModel):
         description="GitHub token for gh CLI auth (overrides shell GH_TOKEN)",
     )
 
+    @field_validator(
+        "ready_label",
+        "review_label",
+        "hitl_label",
+        "hitl_active_label",
+        "fixed_label",
+        "improve_label",
+        "memory_label",
+        "metrics_label",
+        "dup_label",
+        "epic_label",
+        "find_label",
+        "planner_label",
+    )
+    @classmethod
+    def labels_must_not_be_empty(cls, v: list[str]) -> list[str]:
+        """Reject empty label lists — downstream code indexes with [0]."""
+        if not v:
+            raise ValueError("Label list must contain at least one label")
+        return v
+
     @field_validator("docker_memory_limit", "docker_tmp_size")
     @classmethod
     def validate_docker_size_notation(cls, v: str) -> str:
@@ -885,13 +906,14 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
         current = getattr(config, field_name)
         env_val = os.environ.get(env_key)
         if env_val is not None and current == default_val:
-            # Empty string → empty list (scan-all mode); otherwise split on comma
+            # Split on comma, ignoring empty parts; skip override if result is empty
             labels = (
                 [part.strip() for part in env_val.split(",") if part.strip()]
                 if env_val
                 else []
             )
-            object.__setattr__(config, field_name, labels)
+            if labels:
+                object.__setattr__(config, field_name, labels)
 
     # Docker execution overrides (PR #545)
     env_docker_enabled = os.environ.get("HYDRA_DOCKER_ENABLED")

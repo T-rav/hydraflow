@@ -217,6 +217,19 @@ class TestSessionPersistence:
         assert result.status == "completed"
         assert result.ended_at == "2024-03-15T15:00:00+00:00"
 
+    def test_corrupt_lines_logged_in_delete_and_prune(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Corrupt JSONL lines produce warning logs in delete/prune paths."""
+        tracker = make_tracker(tmp_path)
+        sessions_file = tmp_path / "sessions.jsonl"
+        s1 = make_session(id="valid", status="completed")
+        with open(sessions_file, "w") as f:
+            f.write("{ corrupt line }\n")
+            f.write(s1.model_dump_json() + "\n")
+        tracker.delete_session("valid")
+        assert "Skipping corrupt session line" in caplog.text
+
     def test_corrupt_lines_are_skipped(self, tmp_path: Path) -> None:
         tracker = make_tracker(tmp_path)
         sessions_file = tmp_path / "sessions.jsonl"
@@ -492,7 +505,7 @@ class TestNarrowedExceptionHandling:
 
         assert result is not None
         assert result.id == "target"
-        assert "Skipping corrupt line" in caplog.text
+        assert "Skipping corrupt session line" in caplog.text
 
     def test_delete_session_logs_debug_for_corrupt_lines(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture

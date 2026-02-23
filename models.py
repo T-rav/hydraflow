@@ -606,6 +606,15 @@ class MemorySyncResult(TypedDict):
     digest_chars: int
 
 
+class UnstickResult(TypedDict):
+    """Return shape of ``PRUnsticker.unstick``."""
+
+    processed: int
+    resolved: int
+    failed: int
+    skipped: int
+
+
 class MetricsSyncResult(TypedDict, total=False):
     """Return shape of ``MetricsManager.sync``.
 

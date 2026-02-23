@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from memory import file_memory_suggestion
 
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from config import HydraFlowConfig
     from events import EventBus
     from issue_fetcher import IssueFetcher
-    from models import HITLItem
+    from models import GitHubIssue, HITLItem, UnstickResult
     from pr_manager import PRManager
     from state import StateTracker
     from worktree import WorktreeManager
@@ -45,7 +45,7 @@ class PRUnsticker:
         self._worktrees = worktrees
         self._fetcher = fetcher
 
-    async def unstick(self, hitl_items: list[HITLItem]) -> dict[str, Any]:
+    async def unstick(self, hitl_items: list[HITLItem]) -> UnstickResult:
         """Process merge-conflict HITL items and return stats.
 
         Returns a dict with keys: ``processed``, ``resolved``, ``failed``,
@@ -53,7 +53,7 @@ class PRUnsticker:
         """
         from events import EventType, HydraFlowEvent
 
-        stats: dict[str, int] = {
+        stats: UnstickResult = {
             "processed": 0,
             "resolved": 0,
             "failed": 0,
@@ -178,7 +178,7 @@ class PRUnsticker:
     async def _resolve_conflicts(
         self,
         issue_number: int,
-        issue: Any,
+        issue: GitHubIssue,
         wt_path: Path,
         branch: str,
         pr_url: str,

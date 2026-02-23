@@ -12,12 +12,31 @@ import contextlib
 import logging
 import struct
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from execution import HostRunner, SimpleResult, get_default_runner
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
+
+
+class DockerSocket(Protocol):
+    """Protocol for Docker attach socket objects."""
+
+    def sendall(self, data: bytes, /) -> None: ...
+    def recv(self, bufsize: int, /) -> bytes: ...
+
+
+class ContainerLike(Protocol):
+    """Protocol for Docker container objects."""
+
+    def kill(self) -> None: ...
+    def wait(self) -> Any: ...
+    def start(self) -> None: ...
+    def remove(self, *, force: bool = False) -> None: ...
+    def logs(self, *, stdout: bool = True, stderr: bool = True) -> Any: ...
+    def attach_socket(self, *, params: dict[str, int] | None = None) -> Any: ...
+
 
 logger = logging.getLogger("hydraflow.docker_runner")
 
@@ -74,7 +93,7 @@ def build_container_kwargs(config: HydraFlowConfig) -> dict[str, Any]:
 class DockerStdinWriter:
     """Wraps a Docker attach socket to provide a stdin-like write interface."""
 
-    def __init__(self, socket: Any) -> None:
+    def __init__(self, socket: DockerSocket) -> None:
         self._socket = socket
         self._closed = False
 
@@ -103,7 +122,7 @@ class DockerStdoutReader:
     used in :func:`stream_claude_process`.
     """
 
-    def __init__(self, socket: Any, loop: asyncio.AbstractEventLoop) -> None:
+    def __init__(self, socket: DockerSocket, loop: asyncio.AbstractEventLoop) -> None:
         self._socket = socket
         self._loop = loop
         self._buffer = b""  # Line buffer for yielding complete lines
@@ -202,8 +221,8 @@ class DockerProcess:
 
     def __init__(
         self,
-        container: Any,
-        socket: Any,
+        container: ContainerLike,
+        socket: DockerSocket,
         loop: asyncio.AbstractEventLoop,
     ) -> None:
         self._container = container
@@ -367,7 +386,9 @@ class DockerRunner:
                     params={"stdin": 1, "stdout": 1, "stderr": 1, "stream": 1}
                 ),
             )
-            return DockerProcess(container, socket, loop)
+            return DockerProcess(
+                cast(ContainerLike, container), cast(DockerSocket, socket), loop
+            )
         except Exception:
             with contextlib.suppress(Exception):
                 await loop.run_in_executor(None, lambda: container.remove(force=True))
