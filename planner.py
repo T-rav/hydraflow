@@ -90,7 +90,15 @@ class PlannerRunner(BaseRunner):
                 result.success = True
                 result.summary = satisfied_explanation[:200]
                 result.duration_seconds = time.monotonic() - start
-                self._save_transcript("plan-issue", issue.number, result.transcript)
+                try:
+                    self._save_transcript("plan-issue", issue.number, result.transcript)
+                except OSError:
+                    logger.warning(
+                        "Failed to save transcript for issue #%d",
+                        issue.number,
+                        exc_info=True,
+                        extra={"issue": issue.number},
+                    )
                 await self._emit_status(issue.number, worker_id, PlannerStatus.DONE)
                 logger.info(
                     "Issue #%d already satisfied — no changes needed",
@@ -187,9 +195,25 @@ class PlannerRunner(BaseRunner):
             await self._emit_status(issue.number, worker_id, PlannerStatus.FAILED)
 
         result.duration_seconds = time.monotonic() - start
-        self._save_transcript("plan-issue", issue.number, result.transcript)
+        try:
+            self._save_transcript("plan-issue", issue.number, result.transcript)
+        except OSError:
+            logger.warning(
+                "Failed to save transcript for issue #%d",
+                issue.number,
+                exc_info=True,
+                extra={"issue": issue.number},
+            )
         if result.success and result.plan:
-            self._save_plan(issue.number, result.plan, result.summary)
+            try:
+                self._save_plan(issue.number, result.plan, result.summary)
+            except OSError:
+                logger.warning(
+                    "Failed to save plan for issue #%d",
+                    issue.number,
+                    exc_info=True,
+                    extra={"issue": issue.number},
+                )
         return result
 
     def _build_command(self, _worktree_path: Path | None = None) -> list[str]:  # type: ignore[override]
