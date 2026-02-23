@@ -8,7 +8,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from cli import _parse_label_arg, _run_main, build_config, parse_args
+from cli import (
+    _build_prep_agent_prompt,
+    _build_prep_failure_error_message,
+    _parse_label_arg,
+    _run_main,
+    build_config,
+    parse_args,
+)
 
 # ---------------------------------------------------------------------------
 # _parse_label_arg
@@ -29,6 +36,37 @@ class TestParseLabelArg:
 
     def test_empty_string_returns_empty_list(self) -> None:
         assert _parse_label_arg("") == []
+
+
+class TestPrepFailureErrorMessage:
+    """Tests for prep failure message classification."""
+
+    def test_classifies_edit_before_read_tool_error(self) -> None:
+        transcript = (
+            "some output\n"
+            "<tool_use_error>File has not been read yet. Read it first before writing to it.</tool_use_error>"
+        )
+        msg = _build_prep_failure_error_message(transcript, ".pre/runs/a.log")
+        assert "tool precondition failure" in msg
+        assert "Transcript path: .pre/runs/a.log" in msg
+
+    def test_classifies_turn_limit_error(self) -> None:
+        transcript = "agent stopped due to max turns reached"
+        msg = _build_prep_failure_error_message(transcript, ".pre/runs/b.log")
+        assert "turn limit" in msg
+
+
+class TestPrepAgentPrompt:
+    """Tests for prep prompt safety constraints."""
+
+    def test_prompt_includes_scope_and_no_parallel_constraints(self) -> None:
+        prompt = _build_prep_agent_prompt(
+            stack="node",
+            failures=[("prep-workflow-agent", ["claude", "opus"], "failed")],
+            issue_filenames=["auto-fix-prep.md"],
+        )
+        assert "Do not run parallel/batch edits" in prompt
+        assert "Do not refactor unrelated application source" in prompt
 
 
 # ---------------------------------------------------------------------------

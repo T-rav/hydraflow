@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import logging
 import os
 import re
 import shutil
 import signal
 import sys
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -66,6 +68,11 @@ async def _await_with_prep_heartbeat(
             )
         except TimeoutError:
             elapsed = int(asyncio.get_running_loop().time() - start)
+            if tail_provider is not None:
+                tail = [line for line in tail_provider() if line.strip()]
+                if tail:
+                    # Live tail already has meaningful output; avoid extra heartbeat noise.
+                    continue
             print(  # noqa: T201
                 _prep_stage_line(
                     stage,
@@ -74,36 +81,103 @@ async def _await_with_prep_heartbeat(
                     color,
                 )
             )
-            if tail_provider is not None:
-                tail = [line for line in tail_provider() if line.strip()]
-                if tail:
-                    print(  # noqa: T201
-                        _prep_stage_line(
-                            stage,
-                            "latest output (rolling 3 lines):",
-                            "start",
-                            color,
-                        )
-                    )
-                    for line in tail[-3:]:
-                        print(f"  {line}")  # noqa: T201
 
 
-def _make_prep_output_tracker() -> tuple[
-    Callable[[str], bool], Callable[[], list[str]]
-]:
+def _make_prep_output_tracker(
+    *,
+    repo_root: Path,
+    task_slug: str,
+    stream_label: str,
+    color: bool,
+    min_emit_interval_seconds: float = 1.5,
+) -> tuple[Callable[[str], bool], Callable[[], list[str]], Path]:
     """Return (on_output callback, tail getter) for rolling prep task output."""
-    state: dict[str, list[str]] = {"tail": []}
+    from pre_issue_tracker import ensure_pre_dirs  # noqa: PLC0415
+
+    _pre_dir, runs_dir = ensure_pre_dirs(repo_root)
+    ts = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
+    safe_slug = re.sub(r"[^a-z0-9]+", "-", task_slug.lower()).strip("-") or "task"
+    live_log_path = runs_dir / f"{ts}-{safe_slug}-live.log"
+
+    state: dict[str, Any] = {
+        "tail": [],
+        "last_emitted_tail": "",
+        "last_emit_at": 0.0,
+        "rendered_lines": 0,
+        "header_printed": False,
+        "start_time": time.monotonic(),
+        "written_line_count": 0,
+    }
+    force_in_place = os.environ.get("HYDRAFLOW_PREP_INPLACE")
+    use_in_place = (
+        force_in_place != "0"
+        and (force_in_place == "1" or sys.stdout.isatty())
+        and os.environ.get("TERM", "").lower() != "dumb"
+    )
 
     def on_output(accumulated_text: str) -> bool:
-        lines = [ln for ln in accumulated_text.splitlines() if ln.strip()]
-        state["tail"] = lines[-3:]
+        all_lines = [ln for ln in accumulated_text.splitlines() if ln.strip()]
+        if len(all_lines) > state["written_line_count"]:
+            new_lines = all_lines[state["written_line_count"] :]
+            with live_log_path.open("a", encoding="utf-8") as fh:
+                for line in new_lines:
+                    fh.write(f"{line}\n")
+            state["written_line_count"] = len(all_lines)
+
+        display_lines = [
+            ln
+            for ln in all_lines
+            if not ln.startswith('{"type":"system"')
+            and '"type":"rate_limit_event"' not in ln
+        ]
+        tail = display_lines[-3:]
+        state["tail"] = tail
+        if not tail:
+            return False
+
+        tail_text = "\n".join(tail)
+        now = time.monotonic()
+        if (
+            tail_text != state["last_emitted_tail"]
+            and now - state["last_emit_at"] >= min_emit_interval_seconds
+        ):
+            elapsed = int(now - state["start_time"])
+            lines_to_render = [
+                _prep_stage_line(
+                    "hardening",
+                    f"{stream_label}: live output (rolling 3 lines, {elapsed}s)",
+                    "start",
+                    color,
+                ),
+                *[f"  {line}" for line in tail],
+            ]
+            if use_in_place:
+                rendered_lines = state["rendered_lines"]
+                if rendered_lines:
+                    # Move cursor to the start of the previously rendered block.
+                    sys.stdout.write(f"\x1b[{rendered_lines}A")
+                clear_count = max(rendered_lines, len(lines_to_render))
+                for i in range(clear_count):
+                    sys.stdout.write("\x1b[2K\r")
+                    if i < len(lines_to_render):
+                        sys.stdout.write(lines_to_render[i])
+                    sys.stdout.write("\n")
+                sys.stdout.flush()
+                state["rendered_lines"] = len(lines_to_render)
+            else:
+                if not state["header_printed"]:
+                    print(lines_to_render[0])  # noqa: T201
+                    state["header_printed"] = True
+                for line in lines_to_render[1:]:
+                    print(line)  # noqa: T201
+            state["last_emitted_tail"] = tail_text
+            state["last_emit_at"] = now
         return False
 
     def get_tail() -> list[str]:
         return list(state["tail"])
 
-    return on_output, get_tail
+    return on_output, get_tail, live_log_path
 
 
 def _write_prep_task_transcript(
@@ -123,6 +197,47 @@ def _write_prep_task_transcript(
     path = runs_dir / f"{ts}-{safe_slug}.log"
     path.write_text(transcript, encoding="utf-8")
     return path
+
+
+def _append_full_run_log_line(repo_root: Path, line: str) -> Path:
+    """Append one line to `.pre/runs/full-run.log` and return its path."""
+    from pre_issue_tracker import ensure_pre_dirs  # noqa: PLC0415
+
+    _pre_dir, runs_dir = ensure_pre_dirs(repo_root)
+    path = runs_dir / "full-run.log"
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(f"{line}\n")
+    return path
+
+
+def _build_prep_failure_error_message(transcript: str, transcript_ref: str) -> str:
+    """Build a concrete failure message for local `.pre` issues."""
+    if re.search(r"PREP_STATUS\s*:\s*FAILED", transcript, re.IGNORECASE):
+        reason = "Agent returned PREP_STATUS: FAILED."
+    elif re.search(r"File has not been read yet", transcript, re.IGNORECASE):
+        reason = (
+            "Agent hit tool precondition failure: attempted Edit before Read "
+            '("File has not been read yet").'
+        )
+    elif re.search(
+        r"(max[\s_-]*turns?|turn limit|conversation limit)", transcript, re.IGNORECASE
+    ):
+        reason = "Agent hit conversation turn limit before finishing prep."
+    elif not transcript.strip():
+        reason = "Agent produced an empty transcript."
+    else:
+        reason = "Agent did not return PREP_STATUS: SUCCESS."
+
+    lines = [ln for ln in transcript.splitlines() if ln.strip()]
+    tail = "\n".join(lines[-30:])
+    tail = tail[-3000:] if tail else "(no output)"
+    return f"{reason}\nTranscript path: {transcript_ref}\n\nLast output tail:\n{tail}"
+
+
+def _prep_failure_signature(error_message: str) -> str:
+    """Return a short stable signature for a prep failure payload."""
+    digest = hashlib.sha256(error_message.encode("utf-8")).hexdigest()
+    return digest[:10]
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -739,7 +854,15 @@ def _build_prep_agent_prompt(
         "1) Read the local prep issue files listed below.\n"
         "2) Apply code/config fixes in this repo to resolve the failures.\n"
         "3) Keep changes minimal and safe.\n"
-        "4) Do not edit files outside this repository.\n\n"
+        "4) Do not edit files outside this repository.\n"
+        "5) Drive verification through Make targets when available "
+        "(lint-fix, lint-check, typecheck, test, quality-lite, quality).\n"
+        "6) Before each Edit, Read that file first. If a tool error says a file has not "
+        "been read yet, immediately read it and retry the edit.\n"
+        "7) Do not run parallel/batch edits. Apply edits one file at a time.\n"
+        "8) Do not refactor unrelated application source to chase existing lint debt. "
+        "If failures are outside prep-managed files, record/update `.pre` issues with "
+        "concrete failing commands and file paths.\n\n"
         "Local prep issue files:\n"
         f"{issues}\n\n"
         "Observed failed steps:\n"
@@ -826,14 +949,26 @@ async def _run_prep_agent_workflow(
         "4) Run and fix quality/test/build failures iteratively.\n"
         "5) Use local `.pre/*.md` files as issue tracker; update and mark done when fixed.\n"
         "6) Keep changes minimal and safe.\n"
-        "7) End response with: PREP_STATUS: SUCCESS or PREP_STATUS: FAILED.\n\n"
+        "7) End response with EXACTLY one final line: PREP_STATUS: SUCCESS or PREP_STATUS: FAILED.\n\n"
+        "8) Prefer Make targets for checks/fixes (lint-fix, lint-check, typecheck, test, "
+        "quality-lite, quality) instead of ad-hoc commands.\n"
+        "9) Before each Edit, Read that file first. If a tool error says the file was not "
+        "read yet, read it and retry the edit.\n"
+        "10) Continue until `make quality` passes or you can provide a concrete failing "
+        "command and file list, then emit the final PREP_STATUS line.\n"
+        "11) Keep edits scoped to prep-managed files only (Makefile, .github/workflows/*, "
+        "package manager files, lint/type config, test scaffold, hooks). Avoid refactoring "
+        "existing app source files for pre-existing lint debt.\n"
+        "12) Never batch or parallelize edits. Work one file at a time and verify each step.\n"
+        "13) If remaining failures are in existing app source, create/update `.pre` issues "
+        "with command output + affected files, then end with PREP_STATUS: FAILED.\n\n"
         "Current local prep issues:\n"
         f"{issue_list}\n"
     )
     cmd = build_agent_command(
         tool=tool,  # type: ignore[arg-type]
         model=model,
-        max_turns=10,
+        max_turns=20,
     )
     transcript = await stream_claude_process(
         cmd=cmd,
@@ -846,7 +981,7 @@ async def _run_prep_agent_workflow(
         on_output=on_output,
         timeout=1800.0,
     )
-    success = "PREP_STATUS: SUCCESS" in transcript
+    success = bool(re.search(r"PREP_STATUS\s*:\s*SUCCESS", transcript, re.IGNORECASE))
     return success, transcript
 
 
@@ -875,6 +1010,10 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
         print("Prep aborted: neither Claude nor Codex is installed.")  # noqa: T201
         return False
     selected_model = _best_model_for_tool(selected_tool)
+    full_run_log_path = _append_full_run_log_line(
+        config.repo_root,
+        f"=== prep run start ({datetime.now(tz=UTC).isoformat()}) ===",
+    )
 
     run_log_lines: list[str] = []
     run_log_lines.append(f"- Repo: `{config.repo}`")
@@ -967,53 +1106,72 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
     failure_count = 0
     agent_runs = 0
     agent_successes = 0
-    print(  # noqa: T201
-        _prep_stage_line(
-            "hardening",
-            f"starting hardening loop ({max_attempts} max attempts)",
-            "start",
-            use_color,
-        )
+    stage_line = _prep_stage_line(
+        "hardening",
+        f"starting hardening loop ({max_attempts} max attempts)",
+        "start",
+        use_color,
     )
+    print(stage_line)  # noqa: T201
+    _append_full_run_log_line(config.repo_root, stage_line)
     for attempt in range(1, max_attempts + 1):
         attempts_used = attempt
         attempt_failures: list[tuple[str, list[str], str]] = []
         run_log_lines.append(f"- Hardening attempt {attempt}/{max_attempts}")
-        print(f"Hardening attempt {attempt}/{max_attempts}")  # noqa: T201
-        print(  # noqa: T201
-            _prep_stage_line(
-                "hardening",
-                f"attempt {attempt}/{max_attempts}: collecting open .pre issues",
-                "start",
-                use_color,
-            )
+        plain_line = f"Hardening attempt {attempt}/{max_attempts}"
+        print(plain_line)  # noqa: T201
+        _append_full_run_log_line(config.repo_root, plain_line)
+        stage_line = _prep_stage_line(
+            "hardening",
+            f"attempt {attempt}/{max_attempts}: collecting open .pre issues",
+            "start",
+            use_color,
         )
+        print(stage_line)  # noqa: T201
+        _append_full_run_log_line(config.repo_root, stage_line)
 
         issue_names = [issue.path.name for issue in load_open_issues(repo_root)]
         issue_preview = ", ".join(issue_names[:3]) if issue_names else "none"
         if len(issue_names) > 3:
             issue_preview = f"{issue_preview}, +{len(issue_names) - 3} more"
-        print(  # noqa: T201
-            _prep_stage_line(
-                "hardening",
-                f"attempt {attempt}/{max_attempts}: active issues [{issue_preview}]",
-                "start",
-                use_color,
-            )
+        stage_line = _prep_stage_line(
+            "hardening",
+            f"attempt {attempt}/{max_attempts}: active issues [{issue_preview}]",
+            "start",
+            use_color,
         )
+        print(stage_line)  # noqa: T201
+        _append_full_run_log_line(config.repo_root, stage_line)
         agent_runs += 1
-        print(  # noqa: T201
-            _prep_stage_line(
-                "hardening",
-                (
-                    f"attempt {attempt}/{max_attempts}: running prep workflow agent "
-                    f"via {selected_tool} ({selected_model}) with {len(issue_names)} issue(s)"
-                ),
-                "start",
-                use_color,
+        stage_line = _prep_stage_line(
+            "hardening",
+            (
+                f"attempt {attempt}/{max_attempts}: running prep workflow agent "
+                f"via {selected_tool} ({selected_model}) with {len(issue_names)} issue(s)"
+            ),
+            "start",
+            use_color,
+        )
+        print(stage_line)  # noqa: T201
+        _append_full_run_log_line(config.repo_root, stage_line)
+        workflow_on_output, workflow_tail, workflow_live_log = (
+            _make_prep_output_tracker(
+                repo_root=repo_root,
+                task_slug=f"attempt-{attempt}-prep-workflow-agent",
+                stream_label=f"attempt {attempt}/{max_attempts}: prep workflow agent",
+                color=use_color,
             )
         )
-        workflow_on_output, workflow_tail = _make_prep_output_tracker()
+        workflow_live_log_ref = workflow_live_log.relative_to(repo_root)
+        stage_line = _prep_stage_line(
+            "hardening",
+            f"attempt {attempt}/{max_attempts}: live log {workflow_live_log_ref}",
+            "start",
+            use_color,
+        )
+        print(stage_line)  # noqa: T201
+        _append_full_run_log_line(config.repo_root, stage_line)
+        run_log_lines.append(f"- Workflow live log: `{workflow_live_log_ref}`")
         agent_ok, transcript = await _await_with_prep_heartbeat(
             _run_prep_agent_workflow(
                 tool=selected_tool,
@@ -1032,14 +1190,14 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
             agent_successes += 1
             hardening_ok = True
             run_log_lines.append("- Prep workflow agent: success")
-            print(  # noqa: T201
-                _prep_stage_line(
-                    "hardening",
-                    f"attempt {attempt}/{max_attempts}: prep workflow agent reported success",
-                    "ok",
-                    use_color,
-                )
+            stage_line = _prep_stage_line(
+                "hardening",
+                f"attempt {attempt}/{max_attempts}: prep workflow agent reported success",
+                "ok",
+                use_color,
             )
+            print(stage_line)  # noqa: T201
+            _append_full_run_log_line(config.repo_root, stage_line)
             break
         hardening_ok = False
         failure_count += 1
@@ -1053,33 +1211,36 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
             if transcript_path is not None
             else "unavailable"
         )
+        error_message = _build_prep_failure_error_message(transcript, transcript_ref)
         attempt_failures.append(
             (
                 "prep-workflow-agent",
                 [selected_tool, selected_model],
-                "Agent reported failure or missing PREP_STATUS: SUCCESS",
+                error_message,
             )
         )
         run_log_lines.append("- Prep workflow agent: failed")
         run_log_lines.append(f"- Agent transcript size: {len(transcript)} chars")
         run_log_lines.append(f"- Agent transcript path: `{transcript_ref}`")
-        print(  # noqa: T201
-            _prep_stage_line(
-                "hardening",
-                (
-                    f"attempt {attempt}/{max_attempts}: prep workflow agent failed "
-                    f"(transcript {len(transcript)} chars, path {transcript_ref})"
-                ),
-                "warn",
-                use_color,
-            )
+        stage_line = _prep_stage_line(
+            "hardening",
+            (
+                f"attempt {attempt}/{max_attempts}: prep workflow agent failed "
+                f"(transcript {len(transcript)} chars, path {transcript_ref})"
+            ),
+            "warn",
+            use_color,
         )
+        print(stage_line)  # noqa: T201
+        _append_full_run_log_line(config.repo_root, stage_line)
 
+        attempt_issue_names: list[str] = []
         for step_name, cmd, error_msg in attempt_failures:
             slug = _slugify_issue_name(step_name)
+            sig = _prep_failure_signature(error_msg)
             issue = upsert_issue(
                 repo_root,
-                filename=f"auto-fix-{slug}.md",
+                filename=f"auto-fix-{slug}-{sig}.md",
                 title=f"[prep] Resolve {step_name} failure",
                 body_lines=[
                     "## Failure",
@@ -1098,30 +1259,44 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
                 ],
             )
             auto_issues.append(issue)
+            attempt_issue_names.append(issue.path.name)
             run_log_lines.append(f"- Opened/updated local issue: `{issue.path.name}`")
-            print(  # noqa: T201
-                _prep_stage_line(
-                    "hardening",
-                    f"attempt {attempt}/{max_attempts}: opened/updated {issue.path.name}",
-                    "warn",
-                    use_color,
-                )
+            stage_line = _prep_stage_line(
+                "hardening",
+                f"attempt {attempt}/{max_attempts}: opened/updated {issue.path.name}",
+                "warn",
+                use_color,
             )
+            print(stage_line)  # noqa: T201
+            _append_full_run_log_line(config.repo_root, stage_line)
 
         if attempt < max_attempts:
-            attempt_issue_names = [
-                f"auto-fix-{_slugify_issue_name(step)}.md"
-                for step, _cmd, _err in attempt_failures
-            ]
-            print(  # noqa: T201
-                _prep_stage_line(
-                    "hardening",
-                    f"attempt {attempt}/{max_attempts}: running correction agent",
-                    "start",
-                    use_color,
+            stage_line = _prep_stage_line(
+                "hardening",
+                f"attempt {attempt}/{max_attempts}: running correction agent",
+                "start",
+                use_color,
+            )
+            print(stage_line)  # noqa: T201
+            _append_full_run_log_line(config.repo_root, stage_line)
+            correction_on_output, correction_tail, correction_live_log = (
+                _make_prep_output_tracker(
+                    repo_root=repo_root,
+                    task_slug=f"attempt-{attempt}-correction-agent",
+                    stream_label=f"attempt {attempt}/{max_attempts}: correction agent",
+                    color=use_color,
                 )
             )
-            correction_on_output, correction_tail = _make_prep_output_tracker()
+            correction_live_log_ref = correction_live_log.relative_to(repo_root)
+            stage_line = _prep_stage_line(
+                "hardening",
+                f"attempt {attempt}/{max_attempts}: correction live log {correction_live_log_ref}",
+                "start",
+                use_color,
+            )
+            print(stage_line)  # noqa: T201
+            _append_full_run_log_line(config.repo_root, stage_line)
+            run_log_lines.append(f"- Correction live log: `{correction_live_log_ref}`")
             agent_ok = await _await_with_prep_heartbeat(
                 _run_prep_agent_correction(
                     config=config,
@@ -1140,61 +1315,61 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
             )
             if agent_ok:
                 agent_successes += 1
-                print(  # noqa: T201
-                    _prep_stage_line(
-                        "hardening",
-                        f"attempt {attempt}/{max_attempts}: correction agent completed",
-                        "ok",
-                        use_color,
-                    )
+                stage_line = _prep_stage_line(
+                    "hardening",
+                    f"attempt {attempt}/{max_attempts}: correction agent completed",
+                    "ok",
+                    use_color,
                 )
+                print(stage_line)  # noqa: T201
+                _append_full_run_log_line(config.repo_root, stage_line)
             else:
-                print(  # noqa: T201
-                    _prep_stage_line(
-                        "hardening",
-                        f"attempt {attempt}/{max_attempts}: correction agent failed",
-                        "warn",
-                        use_color,
-                    )
+                stage_line = _prep_stage_line(
+                    "hardening",
+                    f"attempt {attempt}/{max_attempts}: correction agent failed",
+                    "warn",
+                    use_color,
                 )
+                print(stage_line)  # noqa: T201
+                _append_full_run_log_line(config.repo_root, stage_line)
             run_log_lines.append(
                 f"- Prep agent run {attempt}: {'ok' if agent_ok else 'failed'}"
             )
             run_log_lines.append(
                 "- Correction loop: rerunning hardening with updated local issues"
             )
-            print(  # noqa: T201
-                _prep_stage_line(
-                    "hardening",
-                    f"attempt {attempt}/{max_attempts}: retrying hardening after correction",
-                    "start",
-                    use_color,
-                )
+            stage_line = _prep_stage_line(
+                "hardening",
+                f"attempt {attempt}/{max_attempts}: retrying hardening after correction",
+                "start",
+                use_color,
             )
+            print(stage_line)  # noqa: T201
+            _append_full_run_log_line(config.repo_root, stage_line)
 
     issues_to_close = list(local_issues) + auto_issues
     if hardening_ok and issues_to_close:
         for issue in issues_to_close:
             mark_done(issue)
         run_log_lines.append(f"- Marked {len(issues_to_close)} local issue(s) done")
-        print(  # noqa: T201
-            _prep_stage_line(
-                "hardening",
-                f"marked {len(issues_to_close)} local issue(s) done",
-                "ok",
-                use_color,
-            )
+        stage_line = _prep_stage_line(
+            "hardening",
+            f"marked {len(issues_to_close)} local issue(s) done",
+            "ok",
+            use_color,
         )
+        print(stage_line)  # noqa: T201
+        _append_full_run_log_line(config.repo_root, stage_line)
     elif issues_to_close:
         run_log_lines.append("- Local issues remain open due to hardening failures")
-        print(  # noqa: T201
-            _prep_stage_line(
-                "hardening",
-                f"{len(issues_to_close)} local issue(s) remain open",
-                "warn",
-                use_color,
-            )
+        stage_line = _prep_stage_line(
+            "hardening",
+            f"{len(issues_to_close)} local issue(s) remain open",
+            "warn",
+            use_color,
         )
+        print(stage_line)  # noqa: T201
+        _append_full_run_log_line(config.repo_root, stage_line)
 
     print("Prep summary:")  # noqa: T201
     print(f"- Stack: {stack}")  # noqa: T201
@@ -1207,13 +1382,16 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
     print(  # noqa: T201
         f"- Local issues closed this run: {len(issues_to_close) if hardening_ok else 0}"
     )
-    print(  # noqa: T201
-        _prep_stage_line(
-            "hardening",
-            "hardening loop complete" if hardening_ok else "hardening loop failed",
-            "ok" if hardening_ok else "fail",
-            use_color,
-        )
+    stage_line = _prep_stage_line(
+        "hardening",
+        "hardening loop complete" if hardening_ok else "hardening loop failed",
+        "ok" if hardening_ok else "fail",
+        use_color,
+    )
+    print(stage_line)  # noqa: T201
+    _append_full_run_log_line(config.repo_root, stage_line)
+    _append_full_run_log_line(
+        config.repo_root, f"=== prep run end ({datetime.now(tz=UTC).isoformat()}) ==="
     )
     run_log_lines.append("- Summary printed to console")
 
@@ -1223,6 +1401,7 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
         lines=run_log_lines,
     )
     print(f"Prep run log: {run_log.relative_to(config.repo_root)}")  # noqa: T201
+    print(f"Prep full-run log: {full_run_log_path.relative_to(config.repo_root)}")  # noqa: T201
     return hardening_ok
 
 

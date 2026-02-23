@@ -659,6 +659,19 @@ class TestCheckGitHooks:
         check = auditor._check_git_hooks()
         assert check.status == AuditCheckStatus.MISSING
 
+    def test_git_hooks_precommit_file(self, tmp_path: Path) -> None:
+        """Should report PRESENT when .git/hooks/pre-commit exists."""
+        hooks_dir = tmp_path / ".git" / "hooks"
+        hooks_dir.mkdir(parents=True)
+        (hooks_dir / "pre-commit").write_text("#!/bin/sh\n")
+        config = ConfigFactory.create(repo_root=tmp_path)
+        from prep import RepoAuditor
+
+        auditor = RepoAuditor(config)
+        check = auditor._check_git_hooks()
+        assert check.status == AuditCheckStatus.PRESENT
+        assert ".git/hooks/pre-commit" in check.detail
+
 
 # ---------------------------------------------------------------------------
 # Linting detection
@@ -701,6 +714,17 @@ class TestCheckLinting:
         assert check.status == AuditCheckStatus.PRESENT
         assert "eslint" in check.detail
 
+    def test_check_linting_detects_flat_eslint_config(self, tmp_path: Path) -> None:
+        """Should detect eslint.config.js."""
+        (tmp_path / "eslint.config.js").write_text("export default [];\n")
+        config = ConfigFactory.create(repo_root=tmp_path)
+        from prep import RepoAuditor
+
+        auditor = RepoAuditor(config)
+        check = auditor._check_linting()
+        assert check.status == AuditCheckStatus.PRESENT
+        assert "eslint" in check.detail
+
     def test_biome_json(self, tmp_path: Path) -> None:
         """Should detect biome.json."""
         (tmp_path / "biome.json").write_text("{}\n")
@@ -711,6 +735,32 @@ class TestCheckLinting:
         check = auditor._check_linting()
         assert check.status == AuditCheckStatus.PRESENT
         assert "biome" in check.detail
+
+    def test_check_linting_detects_make_lint_target(self, tmp_path: Path) -> None:
+        """Should detect Makefile lint target as linting capability."""
+        (tmp_path / "Makefile").write_text("lint-check:\n\t@echo ok\n")
+        config = ConfigFactory.create(repo_root=tmp_path)
+        from prep import RepoAuditor
+
+        auditor = RepoAuditor(config)
+        check = auditor._check_linting()
+        assert check.status == AuditCheckStatus.PRESENT
+        assert "make lint target" in check.detail
+
+    def test_check_linting_detects_package_json_lint_script(
+        self, tmp_path: Path
+    ) -> None:
+        """Should detect package.json lint script as linting capability."""
+        (tmp_path / "package.json").write_text(
+            json.dumps({"scripts": {"lint": "eslint ."}})
+        )
+        config = ConfigFactory.create(repo_root=tmp_path)
+        from prep import RepoAuditor
+
+        auditor = RepoAuditor(config)
+        check = auditor._check_linting()
+        assert check.status == AuditCheckStatus.PRESENT
+        assert "npm lint script" in check.detail
 
     def test_no_linting_config(self, tmp_path: Path) -> None:
         """Should report MISSING when no linting config found."""
