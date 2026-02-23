@@ -13,10 +13,16 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
 echo "pre-commit: running make lint-check..."
-make lint-check || {
+if ! make lint-check; then
     echo ""
-    echo "Lint failed. Run 'make lint' to auto-fix, then re-stage."
-    exit 1
-}
+    echo "pre-commit: lint-check failed; attempting self-repair with 'make fix'..."
+    if make fix && make lint-check; then
+        printf '%s\n' "$STAGED_PY" | xargs -I {} git add "{}"
+        echo "pre-commit: self-repair succeeded and staged files were refreshed."
+    else
+        echo "Auto-repair failed. Run 'make fix' and re-stage files."
+        exit 1
+    fi
+fi
 
 echo "pre-commit: lint OK"

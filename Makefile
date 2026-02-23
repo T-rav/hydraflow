@@ -38,7 +38,7 @@ RESET := \033[0m
 # Docker agent image
 DOCKER_IMAGE ?= ghcr.io/t-rav/hydraflow-agent:latest
 
-.PHONY: help run dev dry-run clean test test-fast test-cov lint lint-check typecheck security quality quality-lite install setup status ui ui-dev ui-clean ensure-labels prep hot docker-build docker-test deps
+.PHONY: help run dev dry-run clean test test-fast test-cov lint lint-check fix typecheck security quality quality-lite install setup status ui ui-dev ui-clean ensure-labels prep hot docker-build docker-test deps
 
 help:
 	@echo "$(BLUE)HydraFlow — Intent in. Software out.$(RESET)"
@@ -53,6 +53,7 @@ help:
 	@echo "  make test-cov       Run tests with coverage report"
 	@echo "  make lint           Auto-fix linting"
 	@echo "  make lint-check     Check linting (no fix)"
+	@echo "  make fix            Auto-repair formatting/lint issues"
 	@echo "  make typecheck      Run Pyright type checks"
 	@echo "  make security       Run Bandit security scan"
 	@echo "  make quality-lite   Lint + typecheck + security (parallel)"
@@ -158,6 +159,9 @@ lint-check: deps
 	@echo "$(BLUE)Checking HydraFlow linting...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && $(UV) ruff check . && $(UV) ruff format . --check
 	@echo "$(GREEN)Lint check passed$(RESET)"
+
+fix: lint
+	@echo "$(GREEN)Auto-repair complete$(RESET)"
 
 typecheck: deps
 	@echo "$(BLUE)Running Pyright type checks...$(RESET)"
