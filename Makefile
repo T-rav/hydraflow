@@ -275,6 +275,8 @@ REPO_SLUG := $(shell git remote get-url origin 2>/dev/null | sed 's|.*github\.co
 
 prep:
 	@echo "$(BLUE)Scanning repo and scaffolding CI/tests...$(RESET)"
+	@echo "$(BLUE)Resetting prep scratch directories (.pre/.prep)...$(RESET)"
+	@rm -rf $(HYDRAFLOW_DIR).pre $(HYDRAFLOW_DIR).prep
 	@cd $(HYDRAFLOW_DIR) && $(UV) python cli.py --scaffold
 	@echo "$(GREEN)Prep complete$(RESET)"
 
