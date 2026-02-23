@@ -1344,6 +1344,16 @@ class TestParsePrecheckTranscript:
         assert confidence == 0.0
         assert parse_failed is True
 
+    def test_escalate_yes(self) -> None:
+        transcript = (
+            "PRECHECK_RISK: high\n"
+            "PRECHECK_CONFIDENCE: 0.3\n"
+            "PRECHECK_ESCALATE: yes\n"
+            "PRECHECK_SUMMARY: Needs debug.\n"
+        )
+        _, _, escalate, _, _ = VerificationJudge._parse_precheck_transcript(transcript)
+        assert escalate is True
+
     def test_escalate_no(self) -> None:
         transcript = (
             "PRECHECK_RISK: low\n"
