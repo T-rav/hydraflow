@@ -11,6 +11,7 @@ import shutil
 import signal
 import sys
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -103,6 +104,25 @@ def _make_prep_output_tracker() -> tuple[
         return list(state["tail"])
 
     return on_output, get_tail
+
+
+def _write_prep_task_transcript(
+    *,
+    repo_root: Path,
+    task_slug: str,
+    transcript: str,
+) -> Path | None:
+    """Persist a prep task transcript under ``.pre/runs``."""
+    from pre_issue_tracker import ensure_pre_dirs  # noqa: PLC0415
+
+    if not transcript.strip():
+        return None
+    _pre_dir, runs_dir = ensure_pre_dirs(repo_root)
+    ts = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
+    safe_slug = re.sub(r"[^a-z0-9]+", "-", task_slug.lower()).strip("-") or "task"
+    path = runs_dir / f"{ts}-{safe_slug}.log"
+    path.write_text(transcript, encoding="utf-8")
+    return path
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -1044,6 +1064,16 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
             break
         hardening_ok = False
         failure_count += 1
+        transcript_path = _write_prep_task_transcript(
+            repo_root=repo_root,
+            task_slug=f"attempt-{attempt}-prep-workflow-agent",
+            transcript=transcript,
+        )
+        transcript_ref = (
+            str(transcript_path.relative_to(repo_root))
+            if transcript_path is not None
+            else "unavailable"
+        )
         attempt_failures.append(
             (
                 "prep-workflow-agent",
@@ -1053,12 +1083,13 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
         )
         run_log_lines.append("- Prep workflow agent: failed")
         run_log_lines.append(f"- Agent transcript size: {len(transcript)} chars")
+        run_log_lines.append(f"- Agent transcript path: `{transcript_ref}`")
         print(  # noqa: T201
             _prep_stage_line(
                 "hardening",
                 (
                     f"attempt {attempt}/{max_attempts}: prep workflow agent failed "
-                    f"(transcript {len(transcript)} chars)"
+                    f"(transcript {len(transcript)} chars, path {transcript_ref})"
                 ),
                 "warn",
                 use_color,
