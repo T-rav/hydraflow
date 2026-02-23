@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from escalation_gate import should_escalate_debug
+from escalation_gate import high_risk_diff_touched, should_escalate_debug
 
 
 def test_no_escalation_when_confident_and_low_risk() -> None:
@@ -182,6 +182,7 @@ def test_all_signals_active_simultaneously_escalates_with_all_five_reasons() -> 
         high_risk_files_touched=True,
     )
     assert decision.escalate is True
+    assert len(decision.reasons) == 5
     assert set(decision.reasons) == {
         "precheck_parse_failed",
         "low_confidence",
@@ -222,8 +223,10 @@ def test_no_escalation_on_medium_risk() -> None:
 
 
 def test_escalation_when_max_attempts_is_zero() -> None:
-    # max_subskill_attempts=0 is the production default; retry_count=0 satisfies
-    # the >= condition immediately, so the gate fires even on the first attempt.
+    # max_subskill_attempts=0 is the config default, but all production callers
+    # guard with `if max_subskill_attempts <= 0: return` before reaching this
+    # function.  This test exercises the gate's own boundary arithmetic directly:
+    # retry_count=0 >= max_subskill_attempts=0 is True, so the signal fires.
     decision = should_escalate_debug(
         enabled=True,
         confidence=0.9,
@@ -264,3 +267,43 @@ def test_no_escalation_at_exact_confidence_threshold() -> None:
     )
     assert decision.escalate is False
     assert decision.reasons == []
+
+
+# ---------------------------------------------------------------------------
+# high_risk_diff_touched
+# ---------------------------------------------------------------------------
+
+
+def test_high_risk_diff_touched_auth_path() -> None:
+    diff = "diff --git a/src/auth/login.py b/src/auth/login.py\n+pass"
+    assert high_risk_diff_touched(diff) is True
+
+
+def test_high_risk_diff_touched_security_path() -> None:
+    diff = "diff --git a/src/security/tokens.py b/src/security/tokens.py\n+pass"
+    assert high_risk_diff_touched(diff) is True
+
+
+def test_high_risk_diff_touched_payment_path() -> None:
+    diff = "diff --git a/src/payment/checkout.py b/src/payment/checkout.py\n+pass"
+    assert high_risk_diff_touched(diff) is True
+
+
+def test_high_risk_diff_touched_migration() -> None:
+    diff = "diff --git a/db/migration_001.sql b/db/migration_001.sql\n+CREATE TABLE;"
+    assert high_risk_diff_touched(diff) is True
+
+
+def test_high_risk_diff_touched_infra_path() -> None:
+    diff = "diff --git a/infra/deploy.yml b/infra/deploy.yml\n+step: deploy"
+    assert high_risk_diff_touched(diff) is True
+
+
+def test_high_risk_diff_touched_safe_diff() -> None:
+    diff = "diff --git a/src/utils.py b/src/utils.py\n+def helper(): pass"
+    assert high_risk_diff_touched(diff) is False
+
+
+def test_high_risk_diff_touched_case_insensitive() -> None:
+    diff = "diff --git a/src/Auth/Login.py b/src/Auth/Login.py\n+pass"
+    assert high_risk_diff_touched(diff) is True
