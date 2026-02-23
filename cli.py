@@ -803,6 +803,7 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
     )
     from prep import RepoAuditor  # noqa: PLC0415
 
+    use_color = _supports_color_output()
     ensure_pre_dirs(config.repo_root)
     local_issues = load_open_issues(config.repo_root)
     selected_tool, selection_mode = _choose_prep_tool(config.subskill_tool)
@@ -902,14 +903,41 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
     failure_count = 0
     agent_runs = 0
     agent_successes = 0
+    print(  # noqa: T201
+        _prep_stage_line(
+            "hardening",
+            f"starting hardening loop ({max_attempts} max attempts)",
+            "start",
+            use_color,
+        )
+    )
     for attempt in range(1, max_attempts + 1):
         attempts_used = attempt
         attempt_failures: list[tuple[str, list[str], str]] = []
         run_log_lines.append(f"- Hardening attempt {attempt}/{max_attempts}")
         print(f"Hardening attempt {attempt}/{max_attempts}")  # noqa: T201
+        print(  # noqa: T201
+            _prep_stage_line(
+                "hardening",
+                f"attempt {attempt}/{max_attempts}: collecting open .pre issues",
+                "start",
+                use_color,
+            )
+        )
 
         issue_names = [issue.path.name for issue in load_open_issues(repo_root)]
         agent_runs += 1
+        print(  # noqa: T201
+            _prep_stage_line(
+                "hardening",
+                (
+                    f"attempt {attempt}/{max_attempts}: running prep workflow agent "
+                    f"via {selected_tool} ({selected_model}) with {len(issue_names)} issue(s)"
+                ),
+                "start",
+                use_color,
+            )
+        )
         agent_ok, transcript = await _run_prep_agent_workflow(
             tool=selected_tool,
             model=selected_model,
@@ -921,6 +949,14 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
             agent_successes += 1
             hardening_ok = True
             run_log_lines.append("- Prep workflow agent: success")
+            print(  # noqa: T201
+                _prep_stage_line(
+                    "hardening",
+                    f"attempt {attempt}/{max_attempts}: prep workflow agent reported success",
+                    "ok",
+                    use_color,
+                )
+            )
             break
         hardening_ok = False
         failure_count += 1
@@ -933,6 +969,17 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
         )
         run_log_lines.append("- Prep workflow agent: failed")
         run_log_lines.append(f"- Agent transcript size: {len(transcript)} chars")
+        print(  # noqa: T201
+            _prep_stage_line(
+                "hardening",
+                (
+                    f"attempt {attempt}/{max_attempts}: prep workflow agent failed "
+                    f"(transcript {len(transcript)} chars)"
+                ),
+                "warn",
+                use_color,
+            )
+        )
 
         for step_name, cmd, error_msg in attempt_failures:
             slug = _slugify_issue_name(step_name)
@@ -958,12 +1005,28 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
             )
             auto_issues.append(issue)
             run_log_lines.append(f"- Opened/updated local issue: `{issue.path.name}`")
+            print(  # noqa: T201
+                _prep_stage_line(
+                    "hardening",
+                    f"attempt {attempt}/{max_attempts}: opened/updated {issue.path.name}",
+                    "warn",
+                    use_color,
+                )
+            )
 
         if attempt < max_attempts:
             attempt_issue_names = [
                 f"auto-fix-{_slugify_issue_name(step)}.md"
                 for step, _cmd, _err in attempt_failures
             ]
+            print(  # noqa: T201
+                _prep_stage_line(
+                    "hardening",
+                    f"attempt {attempt}/{max_attempts}: running correction agent",
+                    "start",
+                    use_color,
+                )
+            )
             agent_ok = await _run_prep_agent_correction(
                 config=config,
                 tool=selected_tool,
@@ -975,11 +1038,36 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
             )
             if agent_ok:
                 agent_successes += 1
+                print(  # noqa: T201
+                    _prep_stage_line(
+                        "hardening",
+                        f"attempt {attempt}/{max_attempts}: correction agent completed",
+                        "ok",
+                        use_color,
+                    )
+                )
+            else:
+                print(  # noqa: T201
+                    _prep_stage_line(
+                        "hardening",
+                        f"attempt {attempt}/{max_attempts}: correction agent failed",
+                        "warn",
+                        use_color,
+                    )
+                )
             run_log_lines.append(
                 f"- Prep agent run {attempt}: {'ok' if agent_ok else 'failed'}"
             )
             run_log_lines.append(
                 "- Correction loop: rerunning hardening with updated local issues"
+            )
+            print(  # noqa: T201
+                _prep_stage_line(
+                    "hardening",
+                    f"attempt {attempt}/{max_attempts}: retrying hardening after correction",
+                    "start",
+                    use_color,
+                )
             )
 
     issues_to_close = list(local_issues) + auto_issues
@@ -987,8 +1075,24 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
         for issue in issues_to_close:
             mark_done(issue)
         run_log_lines.append(f"- Marked {len(issues_to_close)} local issue(s) done")
+        print(  # noqa: T201
+            _prep_stage_line(
+                "hardening",
+                f"marked {len(issues_to_close)} local issue(s) done",
+                "ok",
+                use_color,
+            )
+        )
     elif issues_to_close:
         run_log_lines.append("- Local issues remain open due to hardening failures")
+        print(  # noqa: T201
+            _prep_stage_line(
+                "hardening",
+                f"{len(issues_to_close)} local issue(s) remain open",
+                "warn",
+                use_color,
+            )
+        )
 
     print("Prep summary:")  # noqa: T201
     print(f"- Stack: {stack}")  # noqa: T201
@@ -1000,6 +1104,14 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
     print(f"- Local issues initially open: {len(local_issues)}")  # noqa: T201
     print(  # noqa: T201
         f"- Local issues closed this run: {len(issues_to_close) if hardening_ok else 0}"
+    )
+    print(  # noqa: T201
+        _prep_stage_line(
+            "hardening",
+            "hardening loop complete" if hardening_ok else "hardening loop failed",
+            "ok" if hardening_ok else "fail",
+            use_color,
+        )
     )
     run_log_lines.append("- Summary printed to console")
 
