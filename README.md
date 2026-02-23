@@ -35,7 +35,7 @@ hydraflow-find ──> hydraflow-plan ──> hydraflow-ready ──> hydraflow-
 
 ## Design Philosophy
 
-HydraFlow's pipeline draws from three open-source spec-driven development frameworks. Some patterns are already implemented; others are on the [roadmap](#roadmap).
+HydraFlow's pipeline draws from three open-source spec-driven development frameworks. Some patterns are already implemented; others are planned.
 
 ### [spec-kit](https://github.com/github/spec-kit)
 
@@ -362,27 +362,13 @@ ui/                    React dashboard frontend
 - **Bandit** for security scanning
 - **pytest + pytest-asyncio** for testing
 
-## Roadmap
-
-HydraFlow's development is tracked in two epics:
-
-- **[#207 — Spec-Driven Planning Pipeline](https://github.com/T-rav/hydra/issues/207)** — structured plan schemas, delta semantics, progressive rigor, `[NEEDS CLARIFICATION]` markers, RFC 2119 keywords
-- **[#222 — Self-Improving Agent Pipeline](https://github.com/T-rav/hydra/issues/222)** — memory digest, retrospectives, review insight aggregation, constitution amendments, performance tracking
-
-Planned self-improvement capabilities:
-
-- **Memory digest** — agents aggregate learnings across runs into persistent memory
-- **Retrospectives** — automated post-mortem analysis of failed or slow implementations
-- **Review insight aggregation** — patterns from review feedback inform future implementation prompts
-- **Constitution amendments** — agents propose changes to CLAUDE.md conventions based on observed patterns
-
 ## Contributing
 
 - **For AI agents** — see [CLAUDE.md](CLAUDE.md) for project conventions, architecture, and development commands
-- **For humans** — check the [roadmap epics](#roadmap) above, pick an issue, and submit a PR
+- **For humans** — pick an issue and submit a PR
 - **Issue format** — HydraFlow processes its own issues: label with `hydraflow-find` and the pipeline picks it up automatically
 - **Quality gates** — all PRs must pass `make quality` (lint + typecheck + security + tests)
 
 ## License
 
-[MIT](LICENSE) © 2026 Travis Frisinger
+[Apache 2.0](LICENSE) © 2026 Travis Frisinger
