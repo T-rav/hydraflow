@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { ACTIVE_STATUSES, PIPELINE_STAGES, INTERVAL_PRESETS, EDITABLE_INTERVAL_WORKERS } from '../../constants'
+import { ACTIVE_STATUSES, PIPELINE_STAGES, PIPELINE_LOOPS, INTERVAL_PRESETS, EDITABLE_INTERVAL_WORKERS } from '../../constants'
 import { theme } from '../../theme'
 
 describe('ACTIVE_STATUSES', () => {
@@ -105,6 +105,31 @@ describe('PIPELINE_STAGES', () => {
   it('has unique keys', () => {
     const keys = PIPELINE_STAGES.map(s => s.key)
     expect(new Set(keys).size).toBe(keys.length)
+  })
+})
+
+describe('PIPELINE_LOOPS', () => {
+  it('has a configKey property on every entry', () => {
+    for (const loop of PIPELINE_LOOPS) {
+      expect(loop).toHaveProperty('configKey')
+    }
+  })
+
+  it('configKey values match the corresponding PIPELINE_STAGES entries', () => {
+    const stageConfigMap = Object.fromEntries(PIPELINE_STAGES.map(s => [s.key, s.configKey]))
+    for (const loop of PIPELINE_LOOPS) {
+      expect(loop.configKey).toBe(stageConfigMap[loop.key])
+    }
+  })
+
+  it('triage has null configKey and others have string configKeys', () => {
+    for (const loop of PIPELINE_LOOPS) {
+      if (loop.key === 'triage') {
+        expect(loop.configKey).toBeNull()
+      } else {
+        expect(typeof loop.configKey).toBe('string')
+      }
+    }
   })
 })
 

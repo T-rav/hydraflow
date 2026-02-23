@@ -96,7 +96,7 @@ function PipelineWorkerCard({ workerKey, worker }) {
 }
 
 export function PipelineControlPanel({ onToggleBgWorker }) {
-  const { workers, stageStatus, hitlItems } = useHydraFlow()
+  const { workers, stageStatus, hitlItems, config } = useHydraFlow()
 
   const pipelineWorkers = Object.entries(workers || {}).filter(
     ([, w]) => w.role && ACTIVE_STATUSES.includes(w.status)
@@ -113,6 +113,7 @@ export function PipelineControlPanel({ onToggleBgWorker }) {
           const status = stageStatus[loop.key] || {}
           const enabled = status.enabled !== false
           const activeCount = status.workerCount || 0
+          const maxWorkers = loop.configKey ? config?.[loop.configKey] : null
           return (
             <div key={loop.key} style={styles.loopChip}>
               <span style={enabled ? loopDotLit[loop.key] : loopDotDim[loop.key]} />
@@ -121,7 +122,7 @@ export function PipelineControlPanel({ onToggleBgWorker }) {
                 style={enabled && activeCount > 0 ? loopCountActive[loop.key] : loopCountDim}
                 data-testid={`loop-count-${loop.key}`}
               >
-                {activeCount}
+                {maxWorkers != null ? `${activeCount}/${maxWorkers}` : activeCount}
               </span>
               <span style={styles.loopCountLabel}>
                 {activeCount === 1 ? 'worker' : 'workers'}
@@ -211,7 +212,7 @@ const styles = {
   loopCount: {
     fontSize: 10,
     fontWeight: 700,
-    minWidth: 14,
+    minWidth: 28,
     textAlign: 'center',
   },
   loopCountLabel: {
