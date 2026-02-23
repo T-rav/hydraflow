@@ -112,6 +112,24 @@ class TestFindRepoRoot:
         # Assert
         assert result == git_root.resolve()
 
+    def test_prefers_outermost_git_root_when_nested(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should pick the outermost repo when multiple .git roots exist above cwd."""
+        outer = tmp_path / "outer"
+        inner = outer / "inner"
+        nested = inner / "src"
+        outer.mkdir()
+        inner.mkdir()
+        nested.mkdir(parents=True)
+        (outer / ".git").mkdir()
+        (inner / ".git").mkdir()
+        monkeypatch.chdir(nested)
+
+        result = _find_repo_root()
+
+        assert result == outer.resolve()
+
 
 # ---------------------------------------------------------------------------
 # _detect_repo_slug

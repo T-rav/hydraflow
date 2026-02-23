@@ -477,7 +477,14 @@ class TestCheckMakefile:
     def test_makefile_with_all_targets(self, tmp_path: Path) -> None:
         """Should report PRESENT when all required targets exist."""
         (tmp_path / "Makefile").write_text(
-            "quality:\n\t@echo quality\n\nlint:\n\t@echo lint\n\ntest:\n\t@echo test\n"
+            "lint:\n\t@echo lint\n\n"
+            "lint-check:\n\t@echo lint-check\n\n"
+            "lint-fix:\n\t@echo lint-fix\n\n"
+            "typecheck:\n\t@echo typecheck\n\n"
+            "security:\n\t@echo security\n\n"
+            "test:\n\t@echo test\n\n"
+            "quality-lite:\n\t@echo quality-lite\n\n"
+            "quality:\n\t@echo quality\n"
         )
         config = ConfigFactory.create(repo_root=tmp_path)
         from prep import RepoAuditor
@@ -512,7 +519,14 @@ class TestCheckMakefile:
     def test_makefile_with_dependencies_on_targets(self, tmp_path: Path) -> None:
         """Should detect targets that have dependencies."""
         (tmp_path / "Makefile").write_text(
-            "quality: lint test\n\t@echo quality\n\nlint:\n\t@echo lint\n\ntest:\n\t@echo test\n"
+            "lint:\n\t@echo lint\n\n"
+            "lint-check:\n\t@echo lint-check\n\n"
+            "lint-fix: lint\n\t@echo lint-fix\n\n"
+            "typecheck:\n\t@echo typecheck\n\n"
+            "security:\n\t@echo security\n\n"
+            "test:\n\t@echo test\n\n"
+            "quality-lite: lint-check typecheck security\n\t@echo quality-lite\n\n"
+            "quality: quality-lite test\n\t@echo quality\n"
         )
         config = ConfigFactory.create(repo_root=tmp_path)
         from prep import RepoAuditor
@@ -1146,3 +1160,75 @@ class TestCliAudit:
 
         args = parse_args([])
         assert args.audit is False
+
+
+class TestCliScaffold:
+    """Tests for the --scaffold CLI flag."""
+
+    def test_scaffold_flag_parsed(self) -> None:
+        """Should parse --scaffold flag."""
+        from cli import parse_args
+
+        args = parse_args(["--scaffold"])
+        assert args.scaffold is True
+
+    def test_scaffold_flag_default_false(self) -> None:
+        """Should default to False."""
+        from cli import parse_args
+
+        args = parse_args([])
+        assert args.scaffold is False
+
+    def test_main_scaffold_exits_zero_on_success(self) -> None:
+        """main() should exit 0 when scaffold run succeeds."""
+        from cli import main
+
+        with (
+            patch(
+                "cli._run_scaffold", new_callable=AsyncMock, return_value=True
+            ) as mock_run,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main(["--scaffold"])
+
+        mock_run.assert_called_once()
+        assert exc_info.value.code == 0
+
+    def test_main_scaffold_exits_one_on_failure(self) -> None:
+        """main() should exit 1 when scaffold run fails."""
+        from cli import main
+
+        with (
+            patch("cli._run_scaffold", new_callable=AsyncMock, return_value=False),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main(["--scaffold"])
+
+        assert exc_info.value.code == 1
+
+
+def test_run_scaffold_uses_makefile_scaffold() -> None:
+    """_run_scaffold should call scaffold_makefile for root Makefile support."""
+    from pathlib import Path
+
+    cli_file = Path(__file__).resolve().parent.parent / "cli.py"
+    content = cli_file.read_text()
+    assert "scaffold_makefile" in content
+
+
+def test_run_scaffold_prints_summary_block() -> None:
+    """_run_scaffold should print a final prep summary section."""
+    from pathlib import Path
+
+    cli_file = Path(__file__).resolve().parent.parent / "cli.py"
+    content = cli_file.read_text()
+    assert "Prep summary:" in content
+
+
+def test_run_scaffold_uses_prep_agent_correction() -> None:
+    """_run_scaffold should invoke prep agent correction between retries."""
+    from pathlib import Path
+
+    cli_file = Path(__file__).resolve().parent.parent / "cli.py"
+    content = cli_file.read_text()
+    assert "_run_prep_agent_correction(" in content

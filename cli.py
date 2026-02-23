@@ -5,13 +5,124 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
+import re
+import shutil
 import signal
 import sys
+from collections.abc import Callable
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from config import HydraFlowConfig, load_config_file
 from log import setup_logging
 from orchestrator import HydraFlowOrchestrator
+
+
+def _supports_color_output() -> bool:
+    """Return True when ANSI color output should be emitted."""
+    if os.environ.get("NO_COLOR") is not None:
+        return False
+    return sys.stdout.isatty() and os.environ.get("TERM", "").lower() != "dumb"
+
+
+def _prep_stage_line(stage: str, detail: str, status: str, color: bool) -> str:
+    """Format a concise prep stage status line."""
+    colors = {
+        "start": "\033[36m",
+        "ok": "\033[32m",
+        "warn": "\033[33m",
+        "fail": "\033[31m",
+    }
+    glyphs = {
+        "start": "\u25b6",
+        "ok": "\u2713",
+        "warn": "!",
+        "fail": "\u2717",
+    }
+    reset = "\033[0m" if color else ""
+    tint = colors.get(status, "") if color else ""
+    glyph = glyphs.get(status, ">")
+    return f"{tint}[prep:{stage}] {glyph} {detail}{reset}"
+
+
+async def _await_with_prep_heartbeat(
+    awaitable: Any,
+    *,
+    stage: str,
+    detail: str,
+    color: bool,
+    interval_seconds: float = 20.0,
+    tail_provider: Callable[[], list[str]] | None = None,
+) -> Any:
+    """Await long-running prep work while emitting periodic heartbeat lines."""
+    task = asyncio.create_task(awaitable)
+    start = asyncio.get_running_loop().time()
+    while True:
+        try:
+            return await asyncio.wait_for(
+                asyncio.shield(task), timeout=interval_seconds
+            )
+        except TimeoutError:
+            elapsed = int(asyncio.get_running_loop().time() - start)
+            print(  # noqa: T201
+                _prep_stage_line(
+                    stage,
+                    f"{detail} (still running, {elapsed}s elapsed)",
+                    "start",
+                    color,
+                )
+            )
+            if tail_provider is not None:
+                tail = [line for line in tail_provider() if line.strip()]
+                if tail:
+                    print(  # noqa: T201
+                        _prep_stage_line(
+                            stage,
+                            "latest output (rolling 3 lines):",
+                            "start",
+                            color,
+                        )
+                    )
+                    for line in tail[-3:]:
+                        print(f"  {line}")  # noqa: T201
+
+
+def _make_prep_output_tracker() -> tuple[
+    Callable[[str], bool], Callable[[], list[str]]
+]:
+    """Return (on_output callback, tail getter) for rolling prep task output."""
+    state: dict[str, list[str]] = {"tail": []}
+
+    def on_output(accumulated_text: str) -> bool:
+        lines = [ln for ln in accumulated_text.splitlines() if ln.strip()]
+        state["tail"] = lines[-3:]
+        return False
+
+    def get_tail() -> list[str]:
+        return list(state["tail"])
+
+    return on_output, get_tail
+
+
+def _write_prep_task_transcript(
+    *,
+    repo_root: Path,
+    task_slug: str,
+    transcript: str,
+) -> Path | None:
+    """Persist a prep task transcript under ``.pre/runs``."""
+    from pre_issue_tracker import ensure_pre_dirs  # noqa: PLC0415
+
+    if not transcript.strip():
+        return None
+    _pre_dir, runs_dir = ensure_pre_dirs(repo_root)
+    ts = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
+    safe_slug = re.sub(r"[^a-z0-9]+", "-", task_slug.lower()).strip("-") or "task"
+    path = runs_dir / f"{ts}-{safe_slug}.log"
+    path.write_text(transcript, encoding="utf-8")
+    return path
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -380,6 +491,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Create HydraFlow lifecycle labels on the target repo, then exit",
     )
     parser.add_argument(
+        "--scaffold",
+        action="store_true",
+        help="Scan and scaffold GitHub CI + test infrastructure, then exit",
+    )
+    parser.add_argument(
         "--replay",
         type=int,
         metavar="ISSUE",
@@ -512,11 +628,31 @@ async def _run_prep(config: HydraFlowConfig) -> bool:
     Returns ``True`` if all labels were created/updated successfully,
     ``False`` if any labels failed.
     """
-    from prep import ensure_labels  # noqa: PLC0415
+    from prep import RepoAuditor, ensure_labels  # noqa: PLC0415
 
+    use_color = _supports_color_output()
+    print(_prep_stage_line("labels", "syncing lifecycle labels", "start", use_color))  # noqa: T201
     result = await ensure_labels(config)
     summary = result.summary()
     print(f"[dry-run] {summary}" if config.dry_run else summary)  # noqa: T201
+    if result.failed:
+        print(
+            _prep_stage_line(
+                "labels", "label sync completed with failures", "fail", use_color
+            )
+        )  # noqa: T201
+    else:
+        print(_prep_stage_line("labels", "label sync complete", "ok", use_color))  # noqa: T201
+
+    print(
+        _prep_stage_line("audit", "running repository prep audit", "start", use_color)
+    )  # noqa: T201
+    audit = await RepoAuditor(config).run_audit()
+    print(audit.format_report(color=use_color))  # noqa: T201
+    if audit.missing_checks:
+        print(_prep_stage_line("audit", "gaps detected", "warn", use_color))  # noqa: T201
+    else:
+        print(_prep_stage_line("audit", "all checks passing", "ok", use_color))  # noqa: T201
     return not result.failed
 
 
@@ -526,8 +662,589 @@ async def _run_audit(config: HydraFlowConfig) -> bool:
 
     auditor = RepoAuditor(config)
     result = await auditor.run_audit()
-    print(result.format_report())  # noqa: T201
+    print(result.format_report(color=_supports_color_output()))  # noqa: T201
     return result.has_critical_gaps
+
+
+def _makefile_has_target(repo_root: Path, target: str) -> bool:
+    """Return True when ``Makefile`` contains the given target."""
+    makefile = repo_root / "Makefile"
+    if not makefile.is_file():
+        return False
+    try:
+        content = makefile.read_text()
+    except OSError:
+        return False
+    return any(line.startswith(f"{target}:") for line in content.splitlines())
+
+
+async def _run_hardening_step(
+    step: str, cmd: list[str], cwd: Path
+) -> tuple[bool, str | None]:
+    """Run one prep hardening command and print a concise status line."""
+    from subprocess_util import run_subprocess  # noqa: PLC0415
+
+    try:
+        await run_subprocess(*cmd, cwd=cwd, timeout=900.0)
+        print(f"{step}: ok ({' '.join(cmd)})")  # noqa: T201
+        return True, None
+    except RuntimeError as exc:
+        print(f"{step}: failed ({' '.join(cmd)}): {exc}")  # noqa: T201
+        return False, str(exc)
+
+
+def _slugify_issue_name(step_name: str) -> str:
+    """Convert a step name to a safe `.pre` issue slug."""
+    slug = re.sub(r"[^a-z0-9]+", "-", step_name.lower()).strip("-")
+    return slug or "prep-step"
+
+
+def _detect_available_prep_tools() -> list[str]:
+    """Detect available local prep agent CLIs."""
+    tools: list[str] = []
+    if shutil.which("claude"):
+        tools.append("claude")
+    if shutil.which("codex"):
+        tools.append("codex")
+    return tools
+
+
+def _best_model_for_tool(tool: str) -> str:
+    """Return best default model for the selected tool."""
+    if tool == "claude":
+        return "opus"
+    return "gpt-5.3"
+
+
+def _choose_prep_tool(configured: str) -> tuple[str | None, str]:
+    """Choose prep tool from local availability, prompting when both exist."""
+    available = _detect_available_prep_tools()
+    if not available:
+        return None, "none"
+    if len(available) == 1:
+        return available[0], "single"
+
+    # Both tools installed.
+    if sys.stdin.isatty():
+        print("Both Claude and Codex are installed for prep.")  # noqa: T201
+        print("Choose prep driver: [1] claude  [2] codex")  # noqa: T201
+        choice = input("Selection (default 1): ").strip()  # noqa: T201
+        if choice == "2":
+            return "codex", "prompt"
+        return "claude", "prompt"
+
+    # Non-interactive fallback.
+    if configured in ("claude", "codex"):
+        return configured, "configured"
+    return "claude", "fallback"
+
+
+def _build_prep_agent_prompt(
+    *,
+    stack: str,
+    failures: list[tuple[str, list[str], str]],
+    issue_filenames: list[str],
+) -> str:
+    """Build correction prompt for prep-agent runs."""
+    failure_lines = "\n".join(
+        [
+            f"- {step}: `{' '.join(cmd)}`\n  Error: {err[:500]}"
+            for step, cmd, err in failures
+        ]
+    )
+    issues = "\n".join([f"- .pre/{name}" for name in issue_filenames]) or "- (none)"
+    return (
+        "You are the HydraFlow prep correction agent.\n"
+        f"Stack: {stack}\n\n"
+        "Your task:\n"
+        "1) Read the local prep issue files listed below.\n"
+        "2) Apply code/config fixes in this repo to resolve the failures.\n"
+        "3) Keep changes minimal and safe.\n"
+        "4) Do not edit files outside this repository.\n\n"
+        "Local prep issue files:\n"
+        f"{issues}\n\n"
+        "Observed failed steps:\n"
+        f"{failure_lines}\n\n"
+        "Output a concise summary of fixes applied.\n"
+    )
+
+
+async def _run_prep_agent_correction(
+    *,
+    config: HydraFlowConfig,
+    tool: str,
+    model: str,
+    repo_root: Path,
+    stack: str,
+    failures: list[tuple[str, list[str], str]],
+    issue_filenames: list[str],
+    on_output: Callable[[str], bool] | None = None,
+) -> bool:
+    """Run Claude/Codex as a prep correction agent for one attempt."""
+    from agent_cli import build_agent_command  # noqa: PLC0415
+    from events import EventBus  # noqa: PLC0415
+    from runner_utils import stream_claude_process  # noqa: PLC0415
+
+    logger = logging.getLogger("hydraflow.prep")
+    prompt = _build_prep_agent_prompt(
+        stack=stack, failures=failures, issue_filenames=issue_filenames
+    )
+    cmd = build_agent_command(
+        tool=tool,  # type: ignore[arg-type]
+        model=model,
+        max_turns=6,
+    )
+    try:
+        transcript = await stream_claude_process(
+            cmd=cmd,
+            prompt=prompt,
+            cwd=repo_root,
+            active_procs=set(),
+            event_bus=EventBus(),
+            event_data={"source": "prep-agent"},
+            logger=logger,
+            on_output=on_output,
+            timeout=900.0,
+        )
+    except RuntimeError as exc:
+        print(f"Prep agent correction failed: {exc}")  # noqa: T201
+        return False
+    if not transcript.strip():
+        print("Prep agent correction produced no transcript output")  # noqa: T201
+        return False
+    print(  # noqa: T201
+        f"Prep agent correction completed via {tool} ({model})"
+    )
+    return True
+
+
+async def _run_prep_agent_workflow(
+    *,
+    tool: str,
+    model: str,
+    config: HydraFlowConfig,
+    stack: str,
+    local_issue_names: list[str],
+    on_output: Callable[[str], bool] | None = None,
+) -> tuple[bool, str]:
+    """Run an end-to-end prep workflow via Claude/Codex."""
+    from agent_cli import build_agent_command  # noqa: PLC0415
+    from events import EventBus  # noqa: PLC0415
+    from runner_utils import stream_claude_process  # noqa: PLC0415
+
+    logger = logging.getLogger("hydraflow.prep")
+    issue_list = "\n".join([f"- .pre/{name}" for name in local_issue_names]) or "- none"
+    prompt = (
+        "You are the HydraFlow prep operator agent.\n"
+        f"Driver: {tool}\n"
+        f"Stack: {stack}\n\n"
+        "Goal: perform complete repository prep autonomously.\n"
+        "Requirements:\n"
+        "1) Ensure root Makefile has lint/lint-check/lint-fix/typecheck/security/"
+        "test/quality-lite/quality targets.\n"
+        "2) Ensure GitHub CI quality workflow exists for this stack.\n"
+        "3) Ensure test scaffold exists for this stack.\n"
+        "4) Run and fix quality/test/build failures iteratively.\n"
+        "5) Use local `.pre/*.md` files as issue tracker; update and mark done when fixed.\n"
+        "6) Keep changes minimal and safe.\n"
+        "7) End response with: PREP_STATUS: SUCCESS or PREP_STATUS: FAILED.\n\n"
+        "Current local prep issues:\n"
+        f"{issue_list}\n"
+    )
+    cmd = build_agent_command(
+        tool=tool,  # type: ignore[arg-type]
+        model=model,
+        max_turns=10,
+    )
+    transcript = await stream_claude_process(
+        cmd=cmd,
+        prompt=prompt,
+        cwd=config.repo_root,
+        active_procs=set(),
+        event_bus=EventBus(),
+        event_data={"source": "prep-workflow-agent"},
+        logger=logger,
+        on_output=on_output,
+        timeout=1800.0,
+    )
+    success = "PREP_STATUS: SUCCESS" in transcript
+    return success, transcript
+
+
+async def _run_scaffold(config: HydraFlowConfig) -> bool:
+    """Scan and scaffold core repo essentials (CI + test infrastructure)."""
+    from ci_scaffold import scaffold_ci  # noqa: PLC0415
+    from makefile_scaffold import scaffold_makefile  # noqa: PLC0415
+    from polyglot_prep import (  # noqa: PLC0415
+        detect_prep_stack,
+        scaffold_tests_polyglot,
+    )
+    from pre_issue_tracker import (  # noqa: PLC0415
+        ensure_pre_dirs,
+        load_open_issues,
+        mark_done,
+        upsert_issue,
+        write_run_log,
+    )
+    from prep import RepoAuditor  # noqa: PLC0415
+
+    use_color = _supports_color_output()
+    ensure_pre_dirs(config.repo_root)
+    local_issues = load_open_issues(config.repo_root)
+    selected_tool, selection_mode = _choose_prep_tool(config.subskill_tool)
+    if selected_tool is None:
+        print("Prep aborted: neither Claude nor Codex is installed.")  # noqa: T201
+        return False
+    selected_model = _best_model_for_tool(selected_tool)
+
+    run_log_lines: list[str] = []
+    run_log_lines.append(f"- Repo: `{config.repo}`")
+    run_log_lines.append(f"- Dry run: `{config.dry_run}`")
+    run_log_lines.append(
+        f"- Prep driver: `{selected_tool}` (`{selected_model}` via {selection_mode})"
+    )
+    run_log_lines.append(f"- Local issue count: `{len(local_issues)}`")
+    if local_issues:
+        run_log_lines.append("- Local issues:")
+        for issue in local_issues:
+            run_log_lines.append(f"  - `{issue.path.name}`: {issue.title}")
+
+    audit = await RepoAuditor(config).run_audit()
+    print(audit.format_report(color=_supports_color_output()))  # noqa: T201
+    run_log_lines.append("- Audit completed")
+
+    makefile_result = scaffold_makefile(config.repo_root, dry_run=config.dry_run)
+    ci_result = scaffold_ci(config.repo_root, dry_run=config.dry_run)
+    tests_result = scaffold_tests_polyglot(config.repo_root, dry_run=config.dry_run)
+    stack = detect_prep_stack(config.repo_root)
+    run_log_lines.append(f"- Detected prep stack: `{stack}`")
+
+    action = "Would create" if config.dry_run else "Created"
+    makefile_action = "would add" if config.dry_run else "added"
+    if makefile_result.targets_added:
+        targets = ", ".join(makefile_result.targets_added)
+        print(f"Makefile scaffold: {makefile_action} targets [{targets}]")  # noqa: T201
+        run_log_lines.append(
+            f"- Makefile scaffold {makefile_action}: targets [{targets}]"
+        )
+    else:
+        print("Makefile scaffold: skipped (targets already present)")  # noqa: T201
+        run_log_lines.append("- Makefile scaffold skipped: targets already present")
+
+    if makefile_result.warnings:
+        for warning in makefile_result.warnings:
+            print(f"Makefile scaffold warning: {warning}")  # noqa: T201
+            run_log_lines.append(f"- Makefile scaffold warning: {warning}")
+
+    if ci_result.skipped:
+        print(f"CI scaffold: skipped ({ci_result.skip_reason})")  # noqa: T201
+        run_log_lines.append(f"- CI scaffold skipped: {ci_result.skip_reason}")
+    else:
+        print(  # noqa: T201
+            f"CI scaffold: {action} {ci_result.workflow_path} ({ci_result.language})"
+        )
+        run_log_lines.append(
+            f"- CI scaffold {action.lower()}: {ci_result.workflow_path} ({ci_result.language})"
+        )
+
+    if tests_result.skipped:
+        print(f"Test scaffold: skipped ({tests_result.skip_reason})")  # noqa: T201
+        run_log_lines.append(f"- Test scaffold skipped: {tests_result.skip_reason}")
+    else:
+        created_dirs = ", ".join(tests_result.created_dirs) or "-"
+        created_files = ", ".join(tests_result.created_files) or "-"
+        modified_files = ", ".join(tests_result.modified_files) or "-"
+        print(  # noqa: T201
+            "Test scaffold: "
+            f"{action.lower()} dirs [{created_dirs}] files [{created_files}] "
+            f"modified [{modified_files}] ({tests_result.language})"
+        )
+        run_log_lines.append(
+            f"- Test scaffold {action.lower()}: dirs [{created_dirs}] "
+            f"files [{created_files}] modified [{modified_files}]"
+        )
+
+    if config.dry_run:
+        print("Hardening pass: skipped in dry-run mode")  # noqa: T201
+        run_log_lines.append("- Hardening skipped in dry-run mode")
+        print("Prep summary:")  # noqa: T201
+        print(f"- Stack: {stack}")  # noqa: T201
+        print("- Hardening: skipped (dry-run)")  # noqa: T201
+        print(f"- Local issues open: {len(local_issues)}")  # noqa: T201
+        run_log = write_run_log(
+            config.repo_root,
+            title="Prep Workflow Run",
+            lines=run_log_lines,
+        )
+        print(f"Prep run log: {run_log.relative_to(config.repo_root)}")  # noqa: T201
+        return True
+
+    hardening_ok = True
+    repo_root = config.repo_root
+
+    max_attempts = 3
+    attempts_used = 0
+    auto_issues: list[Any] = []
+    failure_count = 0
+    agent_runs = 0
+    agent_successes = 0
+    print(  # noqa: T201
+        _prep_stage_line(
+            "hardening",
+            f"starting hardening loop ({max_attempts} max attempts)",
+            "start",
+            use_color,
+        )
+    )
+    for attempt in range(1, max_attempts + 1):
+        attempts_used = attempt
+        attempt_failures: list[tuple[str, list[str], str]] = []
+        run_log_lines.append(f"- Hardening attempt {attempt}/{max_attempts}")
+        print(f"Hardening attempt {attempt}/{max_attempts}")  # noqa: T201
+        print(  # noqa: T201
+            _prep_stage_line(
+                "hardening",
+                f"attempt {attempt}/{max_attempts}: collecting open .pre issues",
+                "start",
+                use_color,
+            )
+        )
+
+        issue_names = [issue.path.name for issue in load_open_issues(repo_root)]
+        issue_preview = ", ".join(issue_names[:3]) if issue_names else "none"
+        if len(issue_names) > 3:
+            issue_preview = f"{issue_preview}, +{len(issue_names) - 3} more"
+        print(  # noqa: T201
+            _prep_stage_line(
+                "hardening",
+                f"attempt {attempt}/{max_attempts}: active issues [{issue_preview}]",
+                "start",
+                use_color,
+            )
+        )
+        agent_runs += 1
+        print(  # noqa: T201
+            _prep_stage_line(
+                "hardening",
+                (
+                    f"attempt {attempt}/{max_attempts}: running prep workflow agent "
+                    f"via {selected_tool} ({selected_model}) with {len(issue_names)} issue(s)"
+                ),
+                "start",
+                use_color,
+            )
+        )
+        workflow_on_output, workflow_tail = _make_prep_output_tracker()
+        agent_ok, transcript = await _await_with_prep_heartbeat(
+            _run_prep_agent_workflow(
+                tool=selected_tool,
+                model=selected_model,
+                config=config,
+                stack=stack,
+                local_issue_names=issue_names,
+                on_output=workflow_on_output,
+            ),
+            stage="hardening",
+            detail=f"attempt {attempt}/{max_attempts}: prep workflow agent",
+            color=use_color,
+            tail_provider=workflow_tail,
+        )
+        if agent_ok:
+            agent_successes += 1
+            hardening_ok = True
+            run_log_lines.append("- Prep workflow agent: success")
+            print(  # noqa: T201
+                _prep_stage_line(
+                    "hardening",
+                    f"attempt {attempt}/{max_attempts}: prep workflow agent reported success",
+                    "ok",
+                    use_color,
+                )
+            )
+            break
+        hardening_ok = False
+        failure_count += 1
+        transcript_path = _write_prep_task_transcript(
+            repo_root=repo_root,
+            task_slug=f"attempt-{attempt}-prep-workflow-agent",
+            transcript=transcript,
+        )
+        transcript_ref = (
+            str(transcript_path.relative_to(repo_root))
+            if transcript_path is not None
+            else "unavailable"
+        )
+        attempt_failures.append(
+            (
+                "prep-workflow-agent",
+                [selected_tool, selected_model],
+                "Agent reported failure or missing PREP_STATUS: SUCCESS",
+            )
+        )
+        run_log_lines.append("- Prep workflow agent: failed")
+        run_log_lines.append(f"- Agent transcript size: {len(transcript)} chars")
+        run_log_lines.append(f"- Agent transcript path: `{transcript_ref}`")
+        print(  # noqa: T201
+            _prep_stage_line(
+                "hardening",
+                (
+                    f"attempt {attempt}/{max_attempts}: prep workflow agent failed "
+                    f"(transcript {len(transcript)} chars, path {transcript_ref})"
+                ),
+                "warn",
+                use_color,
+            )
+        )
+
+        for step_name, cmd, error_msg in attempt_failures:
+            slug = _slugify_issue_name(step_name)
+            issue = upsert_issue(
+                repo_root,
+                filename=f"auto-fix-{slug}.md",
+                title=f"[prep] Resolve {step_name} failure",
+                body_lines=[
+                    "## Failure",
+                    f"- Step: `{step_name}`",
+                    f"- Command: `{' '.join(cmd)}`",
+                    "",
+                    "## Last Error",
+                    "```",
+                    error_msg,
+                    "```",
+                    "",
+                    "## Resolution Checklist",
+                    "- [ ] identify root cause",
+                    "- [ ] apply code/config fix",
+                    "- [ ] rerun prep successfully",
+                ],
+            )
+            auto_issues.append(issue)
+            run_log_lines.append(f"- Opened/updated local issue: `{issue.path.name}`")
+            print(  # noqa: T201
+                _prep_stage_line(
+                    "hardening",
+                    f"attempt {attempt}/{max_attempts}: opened/updated {issue.path.name}",
+                    "warn",
+                    use_color,
+                )
+            )
+
+        if attempt < max_attempts:
+            attempt_issue_names = [
+                f"auto-fix-{_slugify_issue_name(step)}.md"
+                for step, _cmd, _err in attempt_failures
+            ]
+            print(  # noqa: T201
+                _prep_stage_line(
+                    "hardening",
+                    f"attempt {attempt}/{max_attempts}: running correction agent",
+                    "start",
+                    use_color,
+                )
+            )
+            correction_on_output, correction_tail = _make_prep_output_tracker()
+            agent_ok = await _await_with_prep_heartbeat(
+                _run_prep_agent_correction(
+                    config=config,
+                    tool=selected_tool,
+                    model=selected_model,
+                    repo_root=repo_root,
+                    stack=stack,
+                    failures=attempt_failures,
+                    issue_filenames=attempt_issue_names,
+                    on_output=correction_on_output,
+                ),
+                stage="hardening",
+                detail=f"attempt {attempt}/{max_attempts}: correction agent",
+                color=use_color,
+                tail_provider=correction_tail,
+            )
+            if agent_ok:
+                agent_successes += 1
+                print(  # noqa: T201
+                    _prep_stage_line(
+                        "hardening",
+                        f"attempt {attempt}/{max_attempts}: correction agent completed",
+                        "ok",
+                        use_color,
+                    )
+                )
+            else:
+                print(  # noqa: T201
+                    _prep_stage_line(
+                        "hardening",
+                        f"attempt {attempt}/{max_attempts}: correction agent failed",
+                        "warn",
+                        use_color,
+                    )
+                )
+            run_log_lines.append(
+                f"- Prep agent run {attempt}: {'ok' if agent_ok else 'failed'}"
+            )
+            run_log_lines.append(
+                "- Correction loop: rerunning hardening with updated local issues"
+            )
+            print(  # noqa: T201
+                _prep_stage_line(
+                    "hardening",
+                    f"attempt {attempt}/{max_attempts}: retrying hardening after correction",
+                    "start",
+                    use_color,
+                )
+            )
+
+    issues_to_close = list(local_issues) + auto_issues
+    if hardening_ok and issues_to_close:
+        for issue in issues_to_close:
+            mark_done(issue)
+        run_log_lines.append(f"- Marked {len(issues_to_close)} local issue(s) done")
+        print(  # noqa: T201
+            _prep_stage_line(
+                "hardening",
+                f"marked {len(issues_to_close)} local issue(s) done",
+                "ok",
+                use_color,
+            )
+        )
+    elif issues_to_close:
+        run_log_lines.append("- Local issues remain open due to hardening failures")
+        print(  # noqa: T201
+            _prep_stage_line(
+                "hardening",
+                f"{len(issues_to_close)} local issue(s) remain open",
+                "warn",
+                use_color,
+            )
+        )
+
+    print("Prep summary:")  # noqa: T201
+    print(f"- Stack: {stack}")  # noqa: T201
+    print(f"- Hardening success: {hardening_ok}")  # noqa: T201
+    print(f"- Hardening attempts: {attempts_used}/{max_attempts}")  # noqa: T201
+    print(f"- Hardening failures observed: {failure_count}")  # noqa: T201
+    print(f"- Prep agent runs: {agent_runs} (successful: {agent_successes})")  # noqa: T201
+    print(f"- Auto issues opened/updated: {len(auto_issues)}")  # noqa: T201
+    print(f"- Local issues initially open: {len(local_issues)}")  # noqa: T201
+    print(  # noqa: T201
+        f"- Local issues closed this run: {len(issues_to_close) if hardening_ok else 0}"
+    )
+    print(  # noqa: T201
+        _prep_stage_line(
+            "hardening",
+            "hardening loop complete" if hardening_ok else "hardening loop failed",
+            "ok" if hardening_ok else "fail",
+            use_color,
+        )
+    )
+    run_log_lines.append("- Summary printed to console")
+
+    run_log = write_run_log(
+        config.repo_root,
+        title="Prep Workflow Run",
+        lines=run_log_lines,
+    )
+    print(f"Prep run log: {run_log.relative_to(config.repo_root)}")  # noqa: T201
+    return hardening_ok
 
 
 async def _run_clean(config: HydraFlowConfig) -> None:
@@ -665,6 +1382,10 @@ def main(argv: list[str] | None = None) -> None:
     if args.audit:
         has_gaps = asyncio.run(_run_audit(config))
         sys.exit(1 if has_gaps else 0)
+
+    if args.scaffold:
+        success = asyncio.run(_run_scaffold(config))
+        sys.exit(0 if success else 1)
 
     if args.clean:
         asyncio.run(_run_clean(config))

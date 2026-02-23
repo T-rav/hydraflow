@@ -1544,24 +1544,48 @@ async def test_ensure_labels_exist_handles_individual_failures(
     assert create_count == len(PRManager._HYDRAFLOW_LABELS)
 
 
-def test_makefile_ensure_labels_delegates_to_prep() -> None:
-    """Makefile ensure-labels target must delegate to the prep target.
-
-    This test reads the Makefile to verify that ``ensure-labels``
-    depends on ``prep`` (which calls ``cli.py --prep``), rather than
-    duplicating label-creation logic directly in the Makefile target.
-    """
+def test_makefile_ensure_labels_runs_cli_prep() -> None:
+    """Makefile ensure-labels target should call ``cli.py --prep`` directly."""
     from pathlib import Path
 
     makefile = Path(__file__).resolve().parent.parent / "Makefile"
     content = makefile.read_text()
 
-    # Find the ensure-labels target and assert it depends on prep
     import re
 
-    match = re.search(r"^ensure-labels:\s*(.+)$", content, re.MULTILINE)
-    assert match is not None, "ensure-labels target not found in Makefile"
-    assert "prep" in match.group(1), "ensure-labels must depend on 'prep' target"
+    match = re.search(r"^ensure-labels:[^\n]*\n((?:\t.*\n)+)", content, re.MULTILINE)
+    assert match is not None, "ensure-labels target block not found in Makefile"
+    assert "--prep" in match.group(1), "ensure-labels target must call cli.py --prep"
+
+
+def test_makefile_prep_runs_cli_scaffold() -> None:
+    """Makefile prep target should call ``cli.py --scaffold``."""
+    from pathlib import Path
+
+    makefile = Path(__file__).resolve().parent.parent / "Makefile"
+    content = makefile.read_text()
+
+    import re
+
+    match = re.search(r"^prep:[^\n]*\n((?:\t.*\n)+)", content, re.MULTILINE)
+    assert match is not None, "prep target block not found in Makefile"
+    assert "--scaffold" in match.group(1), "prep target must call cli.py --scaffold"
+
+
+def test_makefile_setup_runs_label_bootstrap() -> None:
+    """Makefile setup target should run ``cli.py --prep`` to ensure labels."""
+    from pathlib import Path
+
+    makefile = Path(__file__).resolve().parent.parent / "Makefile"
+    content = makefile.read_text()
+
+    import re
+
+    match = re.search(r"^setup:[^\n]*\n((?:\t.*\n)+)", content, re.MULTILINE)
+    assert match is not None, "setup target block not found in Makefile"
+    assert "--prep" in match.group(1), (
+        "setup target must ensure labels via cli.py --prep"
+    )
 
 
 def test_makefile_setup_bootstraps_env_from_sample() -> None:

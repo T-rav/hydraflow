@@ -2,6 +2,8 @@
 
 HYDRAFLOW_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 PROJECT_ROOT := $(abspath $(HYDRAFLOW_DIR))
+HYDRAFLOW_CLI := $(PROJECT_ROOT)/cli.py
+TARGET_REPO_ROOT ?= $(shell python3 -c 'from pathlib import Path; cur=Path.cwd().resolve(); roots=[p for p in [cur,*cur.parents] if (p/".git").exists()]; print((roots[-1] if roots else cur).as_posix())')
 
 # Load .env if present (export all variables)
 -include $(PROJECT_ROOT)/.env
@@ -38,7 +40,7 @@ RESET := \033[0m
 # Docker agent image
 DOCKER_IMAGE ?= ghcr.io/t-rav/hydraflow-agent:latest
 
-.PHONY: help run dev dry-run clean test test-fast test-cov lint lint-check typecheck security quality quality-full install setup status ui ui-dev ui-clean ensure-labels prep hot docker-build docker-test deps
+.PHONY: help run dev dry-run clean test test-fast test-cov lint lint-check lint-fix typecheck security quality quality-lite install setup status ui ui-dev ui-clean ensure-labels prep hot docker-build docker-test deps
 
 help:
 	@echo "$(BLUE)HydraFlow — Intent in. Software out.$(RESET)"
@@ -53,12 +55,14 @@ help:
 	@echo "  make test-cov       Run tests with coverage report"
 	@echo "  make lint           Auto-fix linting"
 	@echo "  make lint-check     Check linting (no fix)"
+	@echo "  make lint-fix       Auto-repair formatting/lint issues"
 	@echo "  make typecheck      Run Pyright type checks"
 	@echo "  make security       Run Bandit security scan"
-	@echo "  make quality        Lint + typecheck + test (parallel)"
-	@echo "  make quality-full   quality + security scan"
+	@echo "  make quality-lite   Lint + typecheck + security (parallel)"
+	@echo "  make quality        quality-lite + test (parallel)"
 	@echo "  make ensure-labels  Create HydraFlow labels in GitHub repo"
-	@echo "  make setup          Install git hooks + Claude/Codex assets"
+	@echo "  make prep           Scan + scaffold CI/tests, then run fix/hooks/tests"
+	@echo "  make setup          Install hooks/assets for target repo ($(TARGET_REPO_ROOT))"
 	@echo "  make install        Install dashboard dependencies"
 	@echo "  make ui             Build React dashboard (ui/dist/)"
 	@echo "  make ui-dev         Start React dashboard dev server"
@@ -158,6 +162,9 @@ lint-check: deps
 	@cd $(HYDRAFLOW_DIR) && $(UV) ruff check . && $(UV) ruff format . --check
 	@echo "$(GREEN)Lint check passed$(RESET)"
 
+lint-fix: lint
+	@echo "$(GREEN)Auto-repair complete$(RESET)"
+
 typecheck: deps
 	@echo "$(BLUE)Running Pyright type checks...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && $(UV) pyright
@@ -173,6 +180,7 @@ quality: deps
 	@cd $(HYDRAFLOW_DIR) && ( \
 		$(UV) ruff check . && $(UV) ruff format . --check && echo "[lint OK]" & \
 		$(UV) pyright && echo "[typecheck OK]" & \
+		$(UV) bandit -c pyproject.toml -r . --severity-level medium && echo "[security OK]" & \
 		PYTHONPATH=. $(UV) pytest tests/ && echo "[tests OK]" & \
 		wait_result=0; \
 		for job in $$(jobs -p); do wait $$job || wait_result=1; done; \
@@ -180,15 +188,24 @@ quality: deps
 	)
 	@echo "$(GREEN)HydraFlow quality pipeline passed$(RESET)"
 
-quality-full: quality security
-	@echo "$(GREEN)HydraFlow full quality pipeline passed$(RESET)"
+quality-lite: deps
+	@echo "$(BLUE)Running lightweight quality checks...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && ( \
+		$(UV) ruff check . && $(UV) ruff format . --check && echo "[lint OK]" & \
+		$(UV) pyright && echo "[typecheck OK]" & \
+		$(UV) bandit -c pyproject.toml -r . --severity-level medium && echo "[security OK]" & \
+		wait_result=0; \
+		for job in $$(jobs -p); do wait $$job || wait_result=1; done; \
+		exit $$wait_result; \
+	)
+	@echo "$(GREEN)HydraFlow lightweight quality checks passed$(RESET)"
 
 install:
 	@echo "$(BLUE)Installing HydraFlow dashboard dependencies...$(RESET)"
 	@VIRTUAL_ENV=$(VENV) uv pip install fastapi uvicorn websockets
 	@echo "$(GREEN)Dashboard dependencies installed$(RESET)"
 
-setup:
+setup: deps
 	@if ! command -v gh >/dev/null 2>&1; then \
 		echo "$(BLUE)Installing gh CLI...$(RESET)"; \
 		if command -v brew >/dev/null 2>&1; then \
@@ -216,8 +233,19 @@ setup:
 	else \
 		echo "  .env.sample not found: skipping .env bootstrap"; \
 	fi
+	@echo "$(BLUE)Ensuring HydraFlow lifecycle labels...$(RESET)"
+	@echo "  target repo: $(TARGET_REPO_ROOT)"
+	@cd $(TARGET_REPO_ROOT) && $(UV) python "$(HYDRAFLOW_CLI)" --prep
 	@echo "$(BLUE)Setting up git hooks...$(RESET)"
-	@git config core.hooksPath .githooks
+	@if [ "$(TARGET_REPO_ROOT)" != "$(PROJECT_ROOT)" ]; then \
+		mkdir -p "$(TARGET_REPO_ROOT)/.githooks"; \
+		cp "$(HYDRAFLOW_DIR).githooks/pre-commit" "$(TARGET_REPO_ROOT)/.githooks/pre-commit"; \
+		cp "$(HYDRAFLOW_DIR).githooks/pre-push" "$(TARGET_REPO_ROOT)/.githooks/pre-push"; \
+		chmod +x "$(TARGET_REPO_ROOT)/.githooks/pre-commit" "$(TARGET_REPO_ROOT)/.githooks/pre-push"; \
+	else \
+		echo "  target is HydraFlow repo; using existing .githooks files"; \
+	fi
+	@git -C "$(TARGET_REPO_ROOT)" config core.hooksPath .githooks
 	@echo "$(BLUE)Detecting local agent assets (Claude/Codex)...$(RESET)"
 	@if [ -d "$(PROJECT_ROOT)/.claude/hooks" ]; then \
 		for HOOK in "$(PROJECT_ROOT)"/.claude/hooks/*.sh; do \
@@ -251,17 +279,24 @@ setup:
 		fi; \
 	fi
 	@echo "$(GREEN)Setup complete$(RESET)"
-	@echo "  pre-commit: lint check on staged Python files"
-	@echo "  pre-push:   full quality gate (lint + typecheck + security + tests)"
+	@echo "  pre-commit: make lint-check (when staged Python files exist)"
+	@echo "  pre-push:   make quality-lite"
 
 REPO_SLUG := $(shell git remote get-url origin 2>/dev/null | sed 's|.*github\.com[:/]||;s|\.git$$||')
 
-prep:
-	@echo "$(BLUE)Creating HydraFlow lifecycle labels...$(RESET)"
-	@cd $(HYDRA_DIR) && $(UV) python cli.py --prep
+prep: deps
+	@echo "$(BLUE)Scanning repo and scaffolding CI/tests...$(RESET)"
+	@echo "  target repo: $(TARGET_REPO_ROOT)"
+	@echo "$(BLUE)Resetting prep scratch directories (.pre/.prep)...$(RESET)"
+	@rm -rf $(TARGET_REPO_ROOT)/.pre $(TARGET_REPO_ROOT)/.prep
+	@cd $(TARGET_REPO_ROOT) && $(UV) python "$(HYDRAFLOW_CLI)" --scaffold
 	@echo "$(GREEN)Prep complete$(RESET)"
 
-ensure-labels: prep
+ensure-labels: deps
+	@echo "$(BLUE)Creating HydraFlow lifecycle labels...$(RESET)"
+	@echo "  target repo: $(TARGET_REPO_ROOT)"
+	@cd $(TARGET_REPO_ROOT) && $(UV) python "$(HYDRAFLOW_CLI)" --prep
+	@echo "$(GREEN)Labels ensured$(RESET)"
 
 hot:
 	@echo "$(BLUE)Sending config update to running HydraFlow instance on :$(PORT)...$(RESET)"

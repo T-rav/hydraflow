@@ -934,12 +934,19 @@ def _validate_docker(config: HydraFlowConfig) -> None:
 
 
 def _find_repo_root() -> Path:
-    """Walk up from cwd to find the git repo root."""
+    """Walk up from cwd and return the outermost git repo root.
+
+    This intentionally favors the top-level repository when invoked from
+    nested repos/worktrees under a parent repo.
+    """
     current = Path.cwd().resolve()
+    found: list[Path] = []
     while current != current.parent:
         if (current / ".git").exists():
-            return current
+            found.append(current)
         current = current.parent
+    if found:
+        return found[-1]
     return Path.cwd().resolve()
 
 

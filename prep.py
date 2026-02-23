@@ -128,7 +128,16 @@ async def ensure_labels(config: HydraFlowConfig) -> PrepResult:
 # ---------------------------------------------------------------------------
 
 # Makefile targets HydraFlow requires
-_REQUIRED_MAKE_TARGETS = ("quality", "lint", "test")
+_REQUIRED_MAKE_TARGETS = (
+    "lint",
+    "lint-check",
+    "lint-fix",
+    "typecheck",
+    "security",
+    "test",
+    "quality-lite",
+    "quality",
+)
 
 # Lock files mapped to package manager names
 _LOCK_FILES: tuple[tuple[str, str], ...] = (
