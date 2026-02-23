@@ -243,8 +243,9 @@ class ReviewPhase:
         ):
             skip_worktree_cleanup = await self._handle_rejected_review(pr, result, idx)
 
-        # Preserve worktrees when stop is requested so work can be resumed
-        if self._stop_event.is_set():
+        # Preserve worktrees for interrupted reviews so work can be resumed.
+        # If the PR was already merged, the worktree is no longer needed.
+        if self._stop_event.is_set() and not result.merged:
             skip_worktree_cleanup = True
 
         if not skip_worktree_cleanup:

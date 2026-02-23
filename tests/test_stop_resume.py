@@ -422,23 +422,24 @@ class TestWorktreePreservation:
 
     @pytest.mark.asyncio
     async def test_review_phase_skips_worktree_cleanup_on_stop(self, config) -> None:
-        """_review_one_inner() skips worktree cleanup when stop event is set."""
+        """_review_one_inner() skips worktree cleanup for interrupted (not merged) reviews."""
         from models import ReviewVerdict
 
         phase = make_review_phase(config)
         issue = IssueFactory.create()
         pr = PRInfoFactory.create()
 
-        # Set up mocks for _review_one_inner
-        result = ReviewResultFactory.create(verdict=ReviewVerdict.APPROVE)
+        # COMMENT verdict: no merge happens (result.merged stays False).
+        # Stop event is set → stop-specific guard should preserve the worktree.
+        result = ReviewResultFactory.create(verdict=ReviewVerdict.COMMENT)
         phase._reviewers.review = AsyncMock(return_value=result)
         phase._prs.get_pr_diff = AsyncMock(return_value="diff text")
         phase._prs.get_pr_diff_names = AsyncMock(return_value=[])
         phase._prs.push_branch = AsyncMock(return_value=True)
-        phase._prs.merge_pr = AsyncMock(return_value=True)
         phase._prs.remove_label = AsyncMock()
         phase._prs.add_labels = AsyncMock()
         phase._prs.post_pr_comment = AsyncMock()
+        phase._prs.post_comment = AsyncMock()
         phase._prs.submit_review = AsyncMock()
         phase._prs.swap_pipeline_labels = AsyncMock()
         phase._prs.pull_main = AsyncMock()
@@ -452,8 +453,47 @@ class TestWorktreePreservation:
 
         await phase.review_prs([pr], [issue])
 
-        # Worktree destroy should NOT be called because stop is requested
+        # Worktree destroy should NOT be called — review was interrupted (not merged)
         phase._worktrees.destroy.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_review_phase_cleans_worktree_for_merged_pr_with_stop(
+        self, config
+    ) -> None:
+        """Worktree IS cleaned up when a PR was already merged, even if stop is set.
+
+        A merged review is not "interrupted" — preserving its worktree would
+        create stale artifacts (the branch no longer exists on the remote).
+        """
+        from models import ReviewVerdict
+
+        phase = make_review_phase(config)
+        issue = IssueFactory.create()
+        pr = PRInfoFactory.create()
+
+        result = ReviewResultFactory.create(verdict=ReviewVerdict.APPROVE)
+        phase._reviewers.review = AsyncMock(return_value=result)
+        phase._prs.get_pr_diff = AsyncMock(return_value="diff text")
+        phase._prs.get_pr_diff_names = AsyncMock(return_value=[])
+        phase._prs.push_branch = AsyncMock(return_value=True)
+        phase._prs.merge_pr = AsyncMock(return_value=True)
+        phase._prs.remove_label = AsyncMock()
+        phase._prs.add_labels = AsyncMock()
+        phase._prs.post_pr_comment = AsyncMock()
+        phase._prs.submit_review = AsyncMock()
+        phase._prs.swap_pipeline_labels = AsyncMock()
+        phase._prs.pull_main = AsyncMock()
+
+        wt = config.worktree_base / "issue-42"
+        wt.mkdir(parents=True, exist_ok=True)
+
+        # Stop event is set, but the PR gets merged successfully
+        phase._stop_event.set()
+
+        await phase.review_prs([pr], [issue])
+
+        # Worktree SHOULD be destroyed — merge completed, nothing to resume
+        phase._worktrees.destroy.assert_awaited_once_with(42)
 
     @pytest.mark.asyncio
     async def test_review_phase_cleans_worktree_when_not_stopped(self, config) -> None:
@@ -536,8 +576,9 @@ class TestReviewPhaseStop:
 
         results = await phase.review_prs([pr1, pr2], [issue1, issue2])
 
-        # At least one result should be returned; second may be cancelled
-        assert len(results) >= 1
+        # Exactly one review ran; the second was cancelled after stop was set
+        assert call_count == 1
+        assert len(results) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -618,3 +659,95 @@ class TestSuperviseLoopsTaskStorage:
         await asyncio.sleep(0)
 
         assert task.cancelled()
+
+
+# ---------------------------------------------------------------------------
+# External cancellation propagation tests (try/finally fix — memory #819)
+# ---------------------------------------------------------------------------
+
+
+class TestExternalCancellationPattern:
+    """Verify the try/finally pattern cancels inner tasks on external CancelledError.
+
+    Memory note #819: inner tasks created by asyncio.create_task inside an
+    as_completed loop are NOT automatically cancelled when the outer coroutine
+    receives CancelledError. The try/finally block in plan/implement/review phases
+    is the fix — this class tests that the fix works.
+    """
+
+    @pytest.mark.asyncio
+    async def test_finally_cancels_inner_tasks_on_external_cancel(self) -> None:
+        """Outer coroutine cancellation propagates to inner tasks via finally block."""
+        inner_cancelled = asyncio.Event()
+
+        async def inner_task() -> None:
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                inner_cancelled.set()
+                raise
+
+        async def outer_with_finally() -> list[None]:
+            """Mirrors the try/finally pattern used in plan/implement/review phases."""
+            tasks = [asyncio.create_task(inner_task())]
+            results: list[None] = []
+            try:
+                for task in asyncio.as_completed(tasks):
+                    results.append(await task)
+            finally:
+                for t in tasks:
+                    if not t.done():
+                        t.cancel()
+            return results
+
+        outer = asyncio.create_task(outer_with_finally())
+        await asyncio.sleep(0)  # Let inner_task start
+
+        # Cancel the outer coroutine — mimicking stop() cancelling a loop task
+        outer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await outer
+
+        await asyncio.sleep(0)  # Allow cancellation to propagate to inner_task
+        assert inner_cancelled.is_set(), (
+            "Inner task was not cancelled — the try/finally block in "
+            "plan/implement/review phases is required to propagate CancelledError "
+            "to tasks created inside as_completed loops (see memory note #819)"
+        )
+
+    @pytest.mark.asyncio
+    async def test_without_finally_inner_tasks_are_orphaned(self) -> None:
+        """Without try/finally, cancelled outer leaves inner tasks running (the bug)."""
+        inner_cancelled = asyncio.Event()
+        inner_started = asyncio.Event()
+
+        async def inner_task() -> None:
+            inner_started.set()
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                inner_cancelled.set()
+                raise
+
+        async def outer_without_finally() -> list[None]:
+            """Original broken pattern WITHOUT try/finally — for documentation."""
+            tasks = [asyncio.create_task(inner_task())]
+            results: list[None] = []
+            for task in asyncio.as_completed(tasks):
+                results.append(await task)  # CancelledError propagates here
+            return results
+
+        outer = asyncio.create_task(outer_without_finally())
+        await asyncio.wait_for(inner_started.wait(), timeout=1.0)
+
+        # Cancel the outer coroutine
+        outer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await outer
+
+        await asyncio.sleep(0)
+        # Without try/finally, the inner task is orphaned (not cancelled)
+        assert not inner_cancelled.is_set(), (
+            "Expected inner task to be orphaned without try/finally — "
+            "this confirms why the fix (try/finally) is necessary"
+        )
