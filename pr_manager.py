@@ -721,7 +721,7 @@ class PRManager:
                             title=p.get("title", ""),
                         )
                     )
-            except (RuntimeError, json.JSONDecodeError, KeyError):
+            except (RuntimeError, json.JSONDecodeError, KeyError, TypeError):
                 logger.debug("Skipping PR in list_open_prs", exc_info=True)
                 continue
 
@@ -762,7 +762,7 @@ class PRManager:
                         if issue["number"] not in seen_issues:
                             seen_issues.add(issue["number"])
                             raw_issues.append(issue)
-                except (RuntimeError, json.JSONDecodeError, KeyError):
+                except (RuntimeError, json.JSONDecodeError, KeyError, TypeError):
                     logger.warning(
                         "Failed to fetch HITL issues for label",
                         exc_info=True,
@@ -813,7 +813,7 @@ class PRManager:
                 )
 
             return items
-        except (RuntimeError, json.JSONDecodeError, KeyError):
+        except (RuntimeError, json.JSONDecodeError, KeyError, TypeError):
             logger.warning("Failed to fetch HITL items", exc_info=True)
             return []
 

@@ -126,11 +126,12 @@ class EventLog:
                     continue
                 try:
                     event = HydraFlowEvent.model_validate_json(stripped)
-                except Exception:
+                except ValidationError:
                     logger.warning(
                         "Skipping corrupt event log line %d in %s",
                         line_num,
                         self._path,
+                        exc_info=True,
                     )
                     continue
 
@@ -183,7 +184,7 @@ class EventLog:
                     ts = datetime.fromisoformat(event.timestamp)
                     if ts >= cutoff:
                         kept_lines.append(stripped)
-                except ValidationError:
+                except (ValidationError, ValueError):
                     logger.debug(
                         "Dropping corrupt event line during rotation",
                         exc_info=True,
