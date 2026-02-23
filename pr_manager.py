@@ -20,6 +20,9 @@ from subprocess_util import run_subprocess, run_subprocess_with_retry
 
 logger = logging.getLogger("hydraflow.pr_manager")
 
+# Cache TTL for label-count queries (seconds).
+_LABEL_CACHE_TTL: int = 30
+
 
 class SelfReviewError(RuntimeError):
     """Raised when a formal review fails due to the 'own pull request' restriction."""
@@ -28,7 +31,7 @@ class SelfReviewError(RuntimeError):
 class PRManager:
     """Pushes branches, creates PRs, merges, and manages labels."""
 
-    _GITHUB_COMMENT_LIMIT = 65_536
+    _GITHUB_COMMENT_LIMIT = 65_536  # GitHub maximum comment body size
     _HEADER_RESERVE = 50  # room for "*Part X/Y*\n\n" prefix
 
     # Re-export from prep module for backward compatibility
@@ -970,7 +973,7 @@ class PRManager:
         import time
 
         now = time.monotonic()
-        if self._label_counts_cache and now - self._label_counts_ts < 30:
+        if self._label_counts_cache and now - self._label_counts_ts < _LABEL_CACHE_TTL:
             return self._label_counts_cache
 
         label_map = {
@@ -1000,8 +1003,10 @@ class PRManager:
     _TRUNCATION_MARKER = "\n\n*...truncated to fit GitHub comment limit*"
 
     @staticmethod
-    def _chunk_body(body: str, limit: int = 65_536) -> list[str]:
+    def _chunk_body(body: str, limit: int | None = None) -> list[str]:
         """Split *body* into chunks that fit within GitHub's comment limit."""
+        if limit is None:
+            limit = PRManager._GITHUB_COMMENT_LIMIT
         if len(body) <= limit:
             return [body]
         chunks: list[str] = []
@@ -1017,12 +1022,14 @@ class PRManager:
         return chunks
 
     @classmethod
-    def _cap_body(cls, body: str, limit: int = 65_536) -> str:
+    def _cap_body(cls, body: str, limit: int | None = None) -> str:
         """Hard-truncate *body* to *limit* characters.
 
         Acts as a safety net after chunking / header prepending to guarantee
         no single payload exceeds GitHub's comment size limit.
         """
+        if limit is None:
+            limit = cls._GITHUB_COMMENT_LIMIT
         if len(body) <= limit:
             return body
         marker = cls._TRUNCATION_MARKER

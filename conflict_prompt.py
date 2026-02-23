@@ -13,6 +13,9 @@ from config import HydraFlowConfig
 from manifest import load_project_manifest
 from memory import load_memory_digest
 
+# Max characters of error output to include in conflict resolution prompts.
+_ERROR_OUTPUT_MAX_CHARS: int = 3000
+
 
 def build_conflict_prompt(
     issue_url: str,
@@ -57,11 +60,16 @@ def build_conflict_prompt(
 
     # --- Previous attempt error ---
     if last_error and attempt > 1:
+        max_chars = (
+            config.error_output_max_chars
+            if config is not None
+            else _ERROR_OUTPUT_MAX_CHARS
+        )
         sections.append(
             f"## Previous Attempt Failed\n\n"
             f"Attempt {attempt - 1} resolved the conflicts but "
             f"failed verification:\n"
-            f"```\n{last_error[-3000:]}\n```\n"
+            f"```\n{last_error[-max_chars:]}\n```\n"
             f"Please resolve the conflicts again, paying attention "
             f"to the above errors."
         )
