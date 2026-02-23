@@ -385,4 +385,4 @@ Planned self-improvement capabilities:
 
 ## License
 
-[MIT](LICENSE) © 2026 Travis Frisinger
+[Apache 2.0](LICENSE) © 2026 Travis Frisinger
