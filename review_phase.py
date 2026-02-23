@@ -135,13 +135,19 @@ class ReviewPhase:
                     self._store.mark_complete(pr.issue_number)
 
         tasks = [asyncio.create_task(_review_one(i, pr)) for i, pr in enumerate(prs)]
-        for task in asyncio.as_completed(tasks):
-            results.append(await task)
-            # Cancel remaining tasks if stop requested
-            if self._stop_event.is_set():
-                for t in tasks:
+        try:
+            for task in asyncio.as_completed(tasks):
+                results.append(await task)
+                # Cancel remaining tasks if stop requested
+                if self._stop_event.is_set():
+                    for t in tasks:
+                        t.cancel()
+                    break
+        finally:
+            # Cancel any remaining tasks if this coroutine is cancelled externally
+            for t in tasks:
+                if not t.done():
                     t.cancel()
-                break
 
         return results
 
