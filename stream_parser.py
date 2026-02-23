@@ -1,4 +1,4 @@
-"""Parse Claude Code ``stream-json`` output into human-readable transcript lines."""
+"""Parse Claude/Codex JSON stream output into human-readable transcript lines."""
 
 from __future__ import annotations
 
@@ -21,8 +21,10 @@ class StreamParser:
 
     def __init__(self) -> None:
         self._seen_tool_ids: set[str] = set()
+        self._seen_item_ids: set[str] = set()
         self._prev_text_len: int = 0
         self._prev_msg_id: str = ""
+        self._last_result_text: str = ""
 
     def parse(self, raw_line: str) -> tuple[str, str | None]:
         """Parse a single stream-json line.
@@ -38,16 +40,25 @@ class StreamParser:
 
         event_type = event.get("type", "")
 
+        display = ""
+        result: str | None = None
+
         if event_type == "assistant":
-            return self._parse_assistant(event), None
+            display = self._parse_assistant(event)
+        elif event_type == "result":
+            result = event.get("result", "")
+        elif event_type == "user":
+            display = self._parse_user(event)
+        elif event_type == "item.completed":
+            display = self._parse_codex_item(event)
+        elif event_type == "turn.completed":
+            result = self._last_result_text
+        elif event_type == "error":
+            display = event.get("message", "")
+        else:
+            display = raw_line
 
-        if event_type == "result":
-            return ("", event.get("result", ""))
-
-        if event_type == "user":
-            return self._parse_user(event), None
-
-        return ("", None)
+        return (display, result)
 
     def _parse_assistant(self, event: dict) -> str:  # type: ignore[type-arg]
         """Extract new content from an assistant message event."""
@@ -97,6 +108,29 @@ class StreamParser:
                 if isinstance(content_val, str) and content_val:
                     preview = content_val[:80].replace("\n", " ")
                     return f"    ← {preview}{'…' if len(content_val) > 80 else ''}"
+        return ""
+
+    def _parse_codex_item(self, event: dict) -> str:  # type: ignore[type-arg]
+        """Extract display text from a Codex item completion event."""
+        item = event.get("item", {})
+        item_id = item.get("id", "")
+        if item_id and item_id in self._seen_item_ids:
+            return ""
+        if item_id:
+            self._seen_item_ids.add(item_id)
+
+        item_type = item.get("type", "")
+        if item_type == "agent_message":
+            text = str(item.get("text", "")).strip()
+            if text:
+                self._last_result_text = text
+            return text
+
+        if item_type == "reasoning":
+            return str(item.get("text", "")).strip()
+
+        if item_type:
+            return f"  → {item_type}"
         return ""
 
 

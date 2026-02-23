@@ -3546,3 +3546,39 @@ class TestDockerConfig:
                 state_file=tmp_path / "s.json",
                 docker_spawn_delay=31.0,
             )
+
+
+class TestAgentToolFields:
+    def test_tool_defaults(self, tmp_path: Path) -> None:
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert cfg.implementation_tool == "claude"
+        assert cfg.review_tool == "claude"
+        assert cfg.planner_tool == "claude"
+        assert cfg.triage_tool == "claude"
+        assert cfg.ac_tool == "claude"
+        assert cfg.verification_judge_tool == "claude"
+
+    def test_tool_env_overrides(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HYDRAFLOW_IMPLEMENTATION_TOOL", "codex")
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_TOOL", "codex")
+        monkeypatch.setenv("HYDRAFLOW_PLANNER_TOOL", "codex")
+        monkeypatch.setenv("HYDRAFLOW_TRIAGE_TOOL", "codex")
+        monkeypatch.setenv("HYDRAFLOW_AC_TOOL", "codex")
+        monkeypatch.setenv("HYDRAFLOW_VERIFICATION_JUDGE_TOOL", "codex")
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert cfg.implementation_tool == "codex"
+        assert cfg.review_tool == "codex"
+        assert cfg.planner_tool == "codex"
+        assert cfg.triage_tool == "codex"
+        assert cfg.ac_tool == "codex"
+        assert cfg.verification_judge_tool == "codex"

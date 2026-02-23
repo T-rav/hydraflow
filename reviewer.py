@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agent_cli import build_agent_command
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from execution import get_default_runner
@@ -243,25 +244,16 @@ Then a brief summary on the next line starting with "SUMMARY: ".
 """
 
     def _build_command(self, worktree_path: Path) -> list[str]:
-        """Construct the ``claude`` CLI invocation for review.
+        """Construct the review CLI invocation.
 
         The working directory is set via ``cwd`` in the subprocess call,
         not via a CLI flag.
         """
-        cmd = [
-            "claude",
-            "-p",
-            "--output-format",
-            "stream-json",
-            "--model",
-            self._config.review_model,
-            "--verbose",
-            "--permission-mode",
-            "bypassPermissions",
-        ]
-        if self._config.review_budget_usd > 0:
-            cmd.extend(["--max-budget-usd", str(self._config.review_budget_usd)])
-        return cmd
+        return build_agent_command(
+            tool=self._config.review_tool,
+            model=self._config.review_model,
+            budget_usd=self._config.review_budget_usd,
+        )
 
     def _build_review_prompt(self, pr: PRInfo, issue: GitHubIssue, diff: str) -> str:
         """Build the review prompt for the agent."""

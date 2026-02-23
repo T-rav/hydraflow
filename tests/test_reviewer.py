@@ -75,6 +75,21 @@ def test_build_command_includes_output_format(config, tmp_path):
     assert cmd[fmt_idx + 1] == "stream-json"
 
 
+def test_build_command_supports_codex_backend(tmp_path):
+    cfg = ConfigFactory.create(
+        review_tool="codex",
+        review_model="gpt-5-codex",
+        repo_root=tmp_path / "repo",
+        worktree_base=tmp_path / "wt",
+        state_file=tmp_path / "s.json",
+    )
+    runner = _make_runner(cfg, None)
+    cmd = runner._build_command(tmp_path)
+    assert cmd[:3] == ["codex", "exec", "--json"]
+    assert "--model" in cmd
+    assert cmd[cmd.index("--model") + 1] == "gpt-5-codex"
+
+
 # ---------------------------------------------------------------------------
 # _build_review_prompt
 # ---------------------------------------------------------------------------

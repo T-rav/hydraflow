@@ -7,6 +7,7 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
+from agent_cli import build_agent_command
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from execution import get_default_runner
@@ -323,23 +324,13 @@ REFINED_INSTRUCTIONS_END
 """
 
     def _build_command(self) -> list[str]:
-        """Construct the ``claude`` CLI invocation for the judge."""
-        cmd = [
-            "claude",
-            "-p",
-            "--output-format",
-            "stream-json",
-            "--model",
-            self._config.review_model,
-            "--verbose",
-            "--permission-mode",
-            "bypassPermissions",
-            "--disallowedTools",
-            "Write,Edit,NotebookEdit",
-        ]
-        if self._config.review_budget_usd > 0:
-            cmd.extend(["--max-budget-usd", str(self._config.review_budget_usd)])
-        return cmd
+        """Construct the CLI invocation for the judge."""
+        return build_agent_command(
+            tool=self._config.verification_judge_tool,
+            model=self._config.review_model,
+            budget_usd=self._config.review_budget_usd,
+            disallowed_tools="Write,Edit,NotebookEdit",
+        )
 
     def _parse_criteria_results(self, transcript: str) -> list[CriterionResult]:
         """Parse criterion results from the transcript."""

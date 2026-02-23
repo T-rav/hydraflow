@@ -8,6 +8,7 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
+from agent_cli import build_agent_command
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from execution import get_default_runner
@@ -177,20 +178,12 @@ class TriageRunner:
         return result
 
     def _build_command(self) -> list[str]:
-        """Construct the ``claude`` CLI invocation for triage evaluation."""
-        return [
-            "claude",
-            "-p",
-            "--output-format",
-            "stream-json",
-            "--model",
-            self._config.triage_model,
-            "--verbose",
-            "--permission-mode",
-            "bypassPermissions",
-            "--max-turns",
-            "1",
-        ]
+        """Construct the CLI invocation for triage evaluation."""
+        return build_agent_command(
+            tool=self._config.triage_tool,
+            model=self._config.triage_model,
+            max_turns=1,
+        )
 
     @staticmethod
     def _build_prompt(issue: GitHubIssue) -> str:

@@ -109,9 +109,17 @@ class HydraFlowConfig(BaseModel):
     max_budget_usd: float = Field(
         default=0, ge=0, description="USD cap per implementation agent (0 = unlimited)"
     )
+    implementation_tool: Literal["claude", "codex"] = Field(
+        default="claude",
+        description="CLI backend for implementation agents",
+    )
     model: str = Field(default="opus", description="Model for implementation agents")
 
     # Review configuration
+    review_tool: Literal["claude", "codex"] = Field(
+        default="claude",
+        description="CLI backend for review agents",
+    )
     review_model: str = Field(default="opus", description="Model for review agents")
     review_budget_usd: float = Field(
         default=0, ge=0, description="USD cap per review agent (0 = unlimited)"
@@ -214,7 +222,15 @@ class HydraFlowConfig(BaseModel):
         default=["hydraflow-plan"],
         description="Labels for issues needing plans (OR logic)",
     )
+    planner_tool: Literal["claude", "codex"] = Field(
+        default="claude",
+        description="CLI backend for planning agents",
+    )
     planner_model: str = Field(default="opus", description="Model for planning agents")
+    triage_tool: Literal["claude", "codex"] = Field(
+        default="claude",
+        description="CLI backend for triage agents",
+    )
     triage_model: str = Field(
         default="haiku", description="Model for triage evaluation (fast/cheap)"
     )
@@ -443,8 +459,16 @@ class HydraFlowConfig(BaseModel):
         default="sonnet",
         description="Model for acceptance criteria generation (post-merge)",
     )
+    ac_tool: Literal["claude", "codex"] = Field(
+        default="claude",
+        description="CLI backend for acceptance criteria generation",
+    )
     ac_budget_usd: float = Field(
         default=0, ge=0, description="USD cap for AC generation agent (0 = unlimited)"
+    )
+    verification_judge_tool: Literal["claude", "codex"] = Field(
+        default="claude",
+        description="CLI backend for verification judge agents",
     )
 
     # UI directories (fallback for worktree node_modules symlinking)
@@ -702,6 +726,36 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
         env_net = os.environ.get("HYDRAFLOW_DOCKER_NETWORK_MODE")
         if env_net in ("bridge", "none", "host"):
             object.__setattr__(config, "docker_network_mode", env_net)
+
+    if config.implementation_tool == "claude":
+        env_impl_tool = os.environ.get("HYDRAFLOW_IMPLEMENTATION_TOOL")
+        if env_impl_tool in ("claude", "codex"):
+            object.__setattr__(config, "implementation_tool", env_impl_tool)
+
+    if config.review_tool == "claude":
+        env_review_tool = os.environ.get("HYDRAFLOW_REVIEW_TOOL")
+        if env_review_tool in ("claude", "codex"):
+            object.__setattr__(config, "review_tool", env_review_tool)
+
+    if config.planner_tool == "claude":
+        env_planner_tool = os.environ.get("HYDRAFLOW_PLANNER_TOOL")
+        if env_planner_tool in ("claude", "codex"):
+            object.__setattr__(config, "planner_tool", env_planner_tool)
+
+    if config.triage_tool == "claude":
+        env_triage_tool = os.environ.get("HYDRAFLOW_TRIAGE_TOOL")
+        if env_triage_tool in ("claude", "codex"):
+            object.__setattr__(config, "triage_tool", env_triage_tool)
+
+    if config.ac_tool == "claude":
+        env_ac_tool = os.environ.get("HYDRAFLOW_AC_TOOL")
+        if env_ac_tool in ("claude", "codex"):
+            object.__setattr__(config, "ac_tool", env_ac_tool)
+
+    if config.verification_judge_tool == "claude":
+        env_judge_tool = os.environ.get("HYDRAFLOW_VERIFICATION_JUDGE_TOOL")
+        if env_judge_tool in ("claude", "codex"):
+            object.__setattr__(config, "verification_judge_tool", env_judge_tool)
 
     # Lite plan labels (comma-separated list, special-case)
     env_lite_labels = os.environ.get("HYDRAFLOW_LITE_PLAN_LABELS")

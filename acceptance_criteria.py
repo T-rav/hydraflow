@@ -8,6 +8,7 @@ import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from agent_cli import build_agent_command
 from execution import get_default_runner
 from models import VerificationCriteria
 from runner_utils import stream_claude_process
@@ -97,20 +98,13 @@ class AcceptanceCriteriaGenerator:
         self._persist(criteria)
 
     def _build_command(self) -> list[str]:
-        """Build the ``claude -p`` command for AC generation."""
-        cmd = [
-            "claude",
-            "-p",
-            "--output-format",
-            "stream-json",
-            "--model",
-            self._config.ac_model,
-            "--disallowedTools",
-            "Write,Edit,NotebookEdit",
-        ]
-        if self._config.ac_budget_usd > 0:
-            cmd.extend(["--max-cost", str(self._config.ac_budget_usd)])
-        return cmd
+        """Build the command for AC generation."""
+        return build_agent_command(
+            tool=self._config.ac_tool,
+            model=self._config.ac_model,
+            budget_usd=self._config.ac_budget_usd,
+            disallowed_tools="Write,Edit,NotebookEdit",
+        )
 
     def _build_prompt(
         self,

@@ -195,6 +195,19 @@ class TestBuildCommand:
         cmd = runner._build_command(Path("/tmp/wt"))
         assert "--max-budget-usd" not in cmd
 
+    def test_command_supports_codex_backend(self, event_bus) -> None:
+        from tests.helpers import ConfigFactory
+
+        cfg = ConfigFactory.create(
+            implementation_tool="codex",
+            model="gpt-5-codex",
+        )
+        runner = HITLRunner(cfg, event_bus)
+        cmd = runner._build_command(Path("/tmp/wt"))
+        assert cmd[:3] == ["codex", "exec", "--json"]
+        assert "--model" in cmd
+        assert cmd[cmd.index("--model") + 1] == "gpt-5-codex"
+
 
 # ---------------------------------------------------------------------------
 # Run — dry run mode

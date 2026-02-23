@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agent_cli import build_agent_command
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from execution import get_default_runner
@@ -206,23 +207,13 @@ class PlannerRunner:
         return result
 
     def _build_command(self) -> list[str]:
-        """Construct the ``claude`` CLI invocation for planning."""
-        cmd = [
-            "claude",
-            "-p",
-            "--output-format",
-            "stream-json",
-            "--model",
-            self._config.planner_model,
-            "--verbose",
-            "--permission-mode",
-            "bypassPermissions",
-            "--disallowedTools",
-            "Write,Edit,NotebookEdit",
-        ]
-        if self._config.planner_budget_usd > 0:
-            cmd.extend(["--max-budget-usd", str(self._config.planner_budget_usd)])
-        return cmd
+        """Construct the CLI invocation for planning."""
+        return build_agent_command(
+            tool=self._config.planner_tool,
+            model=self._config.planner_model,
+            budget_usd=self._config.planner_budget_usd,
+            disallowed_tools="Write,Edit,NotebookEdit",
+        )
 
     # Maximum characters for comments in the prompt.
     # Keep conservative to avoid hitting Claude CLI's internal text-splitter

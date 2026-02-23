@@ -263,6 +263,30 @@ class TestStreamParserDelta:
         assert "First result" in display
         assert "Second result" not in display
 
+    def test_codex_item_completed_agent_message(self):
+        parser = StreamParser()
+        event = {
+            "type": "item.completed",
+            "item": {"id": "item_1", "type": "agent_message", "text": "hello"},
+        }
+        display, result = parser.parse(json.dumps(event))
+        assert display == "hello"
+        assert result is None
+
+    def test_codex_turn_completed_uses_last_agent_message(self):
+        parser = StreamParser()
+        parser.parse(
+            json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {"id": "item_1", "type": "agent_message", "text": "done"},
+                }
+            )
+        )
+        display, result = parser.parse(json.dumps({"type": "turn.completed"}))
+        assert display == ""
+        assert result == "done"
+
     def test_user_message_non_tool_result_content(self):
         """User event with only text content (no tool_result) returns empty."""
         parser = StreamParser()

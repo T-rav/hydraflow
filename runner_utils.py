@@ -1,4 +1,4 @@
-"""Shared subprocess streaming utilities for Claude agent runners."""
+"""Shared subprocess streaming utilities for agent runners."""
 
 from __future__ import annotations
 
@@ -35,12 +35,12 @@ async def stream_claude_process(
     timeout: float | None = None,
     runner: SubprocessRunner | None = None,
 ) -> str:
-    """Run a ``claude -p`` subprocess and stream its output.
+    """Run an agent subprocess and stream its output.
 
     Parameters
     ----------
     cmd:
-        Command to execute (e.g. ``["claude", "-p", ...]``).
+        Command to execute (e.g. ``["claude", "-p", ...]`` or ``["codex", "exec", ...]``).
     prompt:
         Text to write to the process's stdin.
     cwd:
@@ -162,7 +162,7 @@ async def stream_claude_process(
     except TimeoutError:
         proc.kill()
         await proc.wait()
-        raise RuntimeError(f"Claude process timed out after {timeout}s") from None
+        raise RuntimeError(f"Agent process timed out after {timeout}s") from None
     except asyncio.CancelledError:
         proc.kill()
         raise

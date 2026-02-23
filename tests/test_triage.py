@@ -368,6 +368,17 @@ class TestBuildCommand:
         perm_idx = cmd.index("--permission-mode")
         assert cmd[perm_idx + 1] == "bypassPermissions"
 
+    def test_command_supports_codex_backend(self, event_bus: EventBus) -> None:
+        config = ConfigFactory.create(
+            triage_tool="codex",
+            triage_model="gpt-5-codex",
+        )
+        runner = TriageRunner(config, event_bus)
+        cmd = runner._build_command()
+        assert cmd[:3] == ["codex", "exec", "--json"]
+        assert "--model" in cmd
+        assert cmd[cmd.index("--model") + 1] == "gpt-5-codex"
+
 
 class TestBuildPrompt:
     """Tests for TriageRunner._build_prompt."""

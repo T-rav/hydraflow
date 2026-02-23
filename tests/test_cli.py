@@ -52,7 +52,9 @@ class TestParseArgs:
             "max_hitl_workers",
             "max_budget_usd",
             "model",
+            "implementation_tool",
             "review_model",
+            "review_tool",
             "review_budget_usd",
             "ci_check_timeout",
             "ci_poll_interval",
@@ -64,10 +66,14 @@ class TestParseArgs:
             "find_label",
             "planner_label",
             "improve_label",
+            "triage_tool",
             "planner_model",
+            "planner_tool",
             "planner_budget_usd",
             "repo",
             "main_branch",
+            "ac_tool",
+            "verification_judge_tool",
             "dashboard_port",
             "gh_token",
         ]
@@ -131,7 +137,9 @@ class TestBuildConfig:
         assert cfg.max_hitl_workers == 1
         assert cfg.hitl_active_label == ["hydraflow-hitl-active"]
         assert cfg.max_budget_usd == pytest.approx(0)
+        assert cfg.implementation_tool == "claude"
         assert cfg.model == "opus"
+        assert cfg.review_tool == "claude"
         assert cfg.review_model == "opus"
         assert cfg.review_budget_usd == pytest.approx(0)
         assert cfg.ci_check_timeout == 600
@@ -143,8 +151,12 @@ class TestBuildConfig:
         assert cfg.find_label == ["hydraflow-find"]
         assert cfg.planner_label == ["hydraflow-plan"]
         assert cfg.improve_label == ["hydraflow-improve"]
+        assert cfg.triage_tool == "claude"
+        assert cfg.planner_tool == "claude"
         assert cfg.planner_model == "opus"
         assert cfg.planner_budget_usd == pytest.approx(0)
+        assert cfg.ac_tool == "claude"
+        assert cfg.verification_judge_tool == "claude"
         assert cfg.main_branch == "main"
         assert cfg.dashboard_port == 5555
         assert cfg.dashboard_enabled is True
@@ -258,6 +270,31 @@ class TestBuildConfig:
         args = parse_args(["--planner-model", "sonnet"])
         cfg = build_config(args)
         assert cfg.planner_model == "sonnet"
+
+    def test_tool_fields_passed_through(self) -> None:
+        args = parse_args(
+            [
+                "--implementation-tool",
+                "codex",
+                "--review-tool",
+                "codex",
+                "--triage-tool",
+                "codex",
+                "--planner-tool",
+                "codex",
+                "--ac-tool",
+                "codex",
+                "--verification-judge-tool",
+                "codex",
+            ]
+        )
+        cfg = build_config(args)
+        assert cfg.implementation_tool == "codex"
+        assert cfg.review_tool == "codex"
+        assert cfg.triage_tool == "codex"
+        assert cfg.planner_tool == "codex"
+        assert cfg.ac_tool == "codex"
+        assert cfg.verification_judge_tool == "codex"
 
     def test_ci_fields_passed_through(self) -> None:
         args = parse_args(

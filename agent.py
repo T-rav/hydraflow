@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agent_cli import build_agent_command
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from execution import get_default_runner
@@ -73,7 +74,7 @@ class AgentRunner:
             return result
 
         try:
-            # Build and run the claude command
+            # Build and run the configured agent command
             cmd = self._build_command(worktree_path)
             prompt = self._build_prompt(issue, review_feedback=review_feedback)
             transcript = await self._execute(cmd, prompt, worktree_path, issue.number)
@@ -152,25 +153,16 @@ class AgentRunner:
             )
 
     def _build_command(self, worktree_path: Path) -> list[str]:
-        """Construct the ``claude`` CLI invocation.
+        """Construct the implementation CLI invocation.
 
         The working directory is set via ``cwd`` in the subprocess call,
         not via a CLI flag.
         """
-        cmd = [
-            "claude",
-            "-p",
-            "--output-format",
-            "stream-json",
-            "--model",
-            self._config.model,
-            "--verbose",
-            "--permission-mode",
-            "bypassPermissions",
-        ]
-        if self._config.max_budget_usd > 0:
-            cmd.extend(["--max-budget-usd", str(self._config.max_budget_usd)])
-        return cmd
+        return build_agent_command(
+            tool=self._config.implementation_tool,
+            model=self._config.model,
+            budget_usd=self._config.max_budget_usd,
+        )
 
     @staticmethod
     def _extract_plan_comment(comments: list[str]) -> tuple[str, list[str]]:

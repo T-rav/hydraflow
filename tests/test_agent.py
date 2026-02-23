@@ -120,6 +120,23 @@ class TestBuildCommand:
         cmd = runner._build_command(tmp_path)
         assert "--verbose" in cmd
 
+    def test_build_command_supports_codex_backend(
+        self, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """Codex backend should build a non-interactive codex exec command."""
+        cfg = ConfigFactory.create(
+            implementation_tool="codex",
+            model="gpt-5-codex",
+            repo_root=tmp_path / "repo",
+            worktree_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        runner = AgentRunner(cfg, event_bus)
+        cmd = runner._build_command(tmp_path)
+        assert cmd[:3] == ["codex", "exec", "--json"]
+        assert "--model" in cmd
+        assert cmd[cmd.index("--model") + 1] == "gpt-5-codex"
+
 
 # ---------------------------------------------------------------------------
 # AgentRunner._build_prompt

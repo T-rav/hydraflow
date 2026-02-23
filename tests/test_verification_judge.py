@@ -167,6 +167,20 @@ class TestBuildCommand:
         idx = cmd.index("--output-format")
         assert cmd[idx + 1] == "stream-json"
 
+    def test_supports_codex_backend(self, tmp_path):
+        cfg = ConfigFactory.create(
+            verification_judge_tool="codex",
+            review_model="gpt-5-codex",
+            repo_root=tmp_path / "repo",
+            worktree_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        judge = _make_judge(cfg)
+        cmd = judge._build_command()
+        assert cmd[:3] == ["codex", "exec", "--json"]
+        assert "--model" in cmd
+        assert cmd[cmd.index("--model") + 1] == "gpt-5-codex"
+
 
 # ---------------------------------------------------------------------------
 # _read_criteria_file
