@@ -348,6 +348,65 @@ class TestSummarizeAndComment:
 
         assert result is False
 
+    @pytest.mark.asyncio
+    async def test_handles_timeout(self, tmp_path: Path) -> None:
+        """Model timeout causes summarize_and_comment to return False (no crash)."""
+        config = ConfigFactory.create(repo_root=tmp_path)
+        prs = MagicMock()
+        prs.post_comment = AsyncMock()
+        bus = MagicMock()
+        state = MagicMock()
+
+        summarizer = TranscriptSummarizer(config, prs, bus, state)
+
+        mock_proc = AsyncMock()
+
+        async def _raise_timeout(*a, **kw):  # noqa: ANN002, ANN003
+            raise TimeoutError
+
+        mock_proc.communicate = _raise_timeout
+
+        import asyncio as _asyncio
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                _asyncio,
+                "create_subprocess_exec",
+                AsyncMock(return_value=mock_proc),
+            )
+            result = await summarizer.summarize_and_comment(
+                transcript="x" * 1000, issue_number=42, phase="implement"
+            )
+
+        assert result is False
+        prs.post_comment.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handles_subprocess_error(self, tmp_path: Path) -> None:
+        """Missing claude binary causes summarize_and_comment to return False (no crash)."""
+        config = ConfigFactory.create(repo_root=tmp_path)
+        prs = MagicMock()
+        prs.post_comment = AsyncMock()
+        bus = MagicMock()
+        state = MagicMock()
+
+        summarizer = TranscriptSummarizer(config, prs, bus, state)
+
+        import asyncio as _asyncio
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                _asyncio,
+                "create_subprocess_exec",
+                AsyncMock(side_effect=FileNotFoundError("claude not found")),
+            )
+            result = await summarizer.summarize_and_comment(
+                transcript="x" * 1000, issue_number=42, phase="implement"
+            )
+
+        assert result is False
+        prs.post_comment.assert_not_called()
+
 
 # --- TranscriptSummarizer.summarize_and_publish tests ---
 

@@ -762,6 +762,37 @@ class TestPlanPhaseTranscriptSummary:
         mock_summarizer.summarize_and_comment.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_already_satisfied_calls_summarize_with_success(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """When plan closes issue as already_satisfied, transcript summary is still posted."""
+        mock_summarizer = AsyncMock()
+        mock_summarizer.summarize_and_comment = AsyncMock(return_value=True)
+        phase, _state, planners, prs, store, _stop = _make_phase(
+            config, summarizer=mock_summarizer
+        )
+        issue = make_issue(42, title="Add feature")
+        plan_result = PlanResult(
+            issue_number=42,
+            success=True,
+            already_satisfied=True,
+            summary="Already implemented.",
+            transcript="x" * 1000,
+            duration_seconds=10.0,
+        )
+
+        planners.plan = AsyncMock(return_value=plan_result)
+        store.get_plannable = lambda _max_count: [issue]  # type: ignore[method-assign]
+
+        await phase.plan_issues()
+
+        mock_summarizer.summarize_and_comment.assert_awaited_once()
+        call_kwargs = mock_summarizer.summarize_and_comment.call_args
+        assert call_kwargs.kwargs["phase"] == "plan"
+        assert call_kwargs.kwargs["status"] == "success"
+        assert call_kwargs.kwargs["issue_title"] == "Add feature"
+
+    @pytest.mark.asyncio
     async def test_no_summarizer_does_not_crash(self, config: HydraFlowConfig) -> None:
         """When transcript_summarizer is None, no crash occurs."""
         phase, _state, planners, prs, store, _stop = _make_phase(config)

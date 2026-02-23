@@ -82,6 +82,22 @@ class PlanPhase:
                             "Issue #%d closed as already satisfied",
                             issue.number,
                         )
+                        if self._summarizer and result.transcript:
+                            try:
+                                await self._summarizer.summarize_and_comment(
+                                    transcript=result.transcript,
+                                    issue_number=issue.number,
+                                    phase="plan",
+                                    status="success",
+                                    issue_title=issue.title,
+                                    duration_seconds=result.duration_seconds,
+                                    log_file=f".hydraflow/logs/plan-issue-{issue.number}.txt",
+                                )
+                            except Exception:
+                                logger.exception(
+                                    "Failed to post transcript summary for issue #%d",
+                                    issue.number,
+                                )
                         return result
 
                     if result.success and result.plan:
