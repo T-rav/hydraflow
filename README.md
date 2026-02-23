@@ -101,7 +101,7 @@ uv pip install -e ".[test,dev,dashboard,docker]" --python .venv/bin/python
 ### 3. Configure environment
 
 ```bash
-cp .env.example .env
+cp .env.sample .env
 ```
 
 The `.env` file is auto-loaded by the Makefile. Defaults are the standard HydraFlow labels — edit only if you need custom label names:
@@ -199,6 +199,7 @@ make setup
 ```
 
 This configures:
+- **Env bootstrap**: creates `.env` from `.env.sample` if missing
 - **pre-commit**: Ruff lint check on staged Python files
 - **pre-push**: Full quality gate (lint + typecheck + security + tests)
 - **Claude assets**: refreshes executable hook scripts under `.claude/hooks`

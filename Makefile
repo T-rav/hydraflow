@@ -208,6 +208,14 @@ setup:
 		gh auth login; \
 	fi
 	@echo "  gh user: $$(gh api user --jq .login)"
+	@if [ ! -f "$(PROJECT_ROOT)/.env" ] && [ -f "$(PROJECT_ROOT)/.env.sample" ]; then \
+		cp "$(PROJECT_ROOT)/.env.sample" "$(PROJECT_ROOT)/.env"; \
+		echo "  .env created from .env.sample"; \
+	elif [ -f "$(PROJECT_ROOT)/.env" ]; then \
+		echo "  .env found: leaving existing file unchanged"; \
+	else \
+		echo "  .env.sample not found: skipping .env bootstrap"; \
+	fi
 	@echo "$(BLUE)Setting up git hooks...$(RESET)"
 	@git config core.hooksPath .githooks
 	@echo "$(BLUE)Detecting local agent assets (Claude/Codex)...$(RESET)"

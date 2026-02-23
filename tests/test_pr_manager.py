@@ -1564,6 +1564,17 @@ def test_makefile_ensure_labels_delegates_to_prep() -> None:
     assert "prep" in match.group(1), "ensure-labels must depend on 'prep' target"
 
 
+def test_makefile_setup_bootstraps_env_from_sample() -> None:
+    """make setup should create .env from .env.sample when .env is missing."""
+    from pathlib import Path
+
+    makefile = Path(__file__).resolve().parent.parent / "Makefile"
+    content = makefile.read_text()
+
+    assert ".env.sample" in content, "setup target must reference .env.sample"
+    assert 'cp "$(PROJECT_ROOT)/.env.sample" "$(PROJECT_ROOT)/.env"' in content
+
+
 # ---------------------------------------------------------------------------
 # _run_with_body_file
 # ---------------------------------------------------------------------------
