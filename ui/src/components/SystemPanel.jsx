@@ -1,9 +1,10 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useMemo } from 'react'
 import { theme } from '../theme'
 import { BACKGROUND_WORKERS, INTERVAL_PRESETS, EDITABLE_INTERVAL_WORKERS, SYSTEM_WORKER_INTERVALS } from '../constants'
 import { useHydraFlow } from '../context/HydraFlowContext'
 import { Livestream } from './Livestream'
 import { PipelineControlPanel } from './PipelineControlPanel'
+import { WorkerLogStream } from './WorkerLogStream'
 
 const SUB_TABS = [
   { key: 'workers', label: 'Workers' },
@@ -54,13 +55,13 @@ function statusColor(status) {
   return theme.textInactive
 }
 
-function formatLogTimestamp(isoString) {
-  if (!isoString) return ''
-  const d = new Date(isoString)
-  return d.toTimeString().slice(0, 8)
+function formatTimestamp(ts) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
-function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssues, orchestratorStatus, onToggleBgWorker, onUpdateInterval, events }) {
+function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssues, orchestratorStatus, onToggleBgWorker, onUpdateInterval, events, extraContent }) {
   const [showIntervalEditor, setShowIntervalEditor] = useState(false)
   const isPipelinePoller = def.key === 'pipeline_poller'
   const isSystem = def.system === true
@@ -124,18 +125,29 @@ function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssue
     details = state.details || {}
   }
 
+  const logLines = useMemo(() => {
+    if (!events || events.length === 0) return []
+    return events
+      .filter(e => e.type === 'background_worker_status' && e.data?.worker === def.key)
+      .slice(0, 15)
+      .reverse()
+      .map(e => {
+        const time = formatTimestamp(e.timestamp)
+        const status = e.data?.status || ''
+        const det = e.data?.details
+          ? Object.entries(e.data.details).map(([k, v]) => `${k}: ${v}`).join(', ')
+          : ''
+        return det ? `${time} ${status} \u00b7 ${det}` : `${time} ${status}`
+      })
+  }, [events, def.key])
+
   const effectiveInterval = state?.interval_seconds ?? SYSTEM_WORKER_INTERVALS[def.key] ?? null
   const enabled = !isSystem && (state ? state.enabled !== false : true)
   const showToggle = onToggleBgWorker && !isSystem
   const isError = statusText === 'error' || statusText === 'stopped'
   const hasDetails = Object.keys(details).length > 0
-  const recentEvents = (events || [])
-    .filter(e => e.type === 'background_worker_status' && e.data?.worker === def.key)
-    .slice(0, 3)
-    .reverse()
-
   return (
-    <div style={styles.card}>
+    <div style={styles.card} data-testid={`worker-card-${def.key}`}>
       <div style={styles.cardHeader}>
         <span
           style={{ ...styles.dot, background: dotColor }}
@@ -205,7 +217,7 @@ function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssue
         </div>
       )}
       {hasDetails && !isPipelinePoller && (
-        <div style={isError ? (recentEvents.length > 0 ? styles.detailsErrorCompact : styles.detailsError) : styles.details}>
+        <div style={isError ? (logLines.length > 0 ? styles.detailsErrorCompact : styles.detailsError) : styles.details}>
           {Object.entries(details).map(([k, v]) => (
             <div key={k} style={k === 'error' ? styles.errorRow : styles.detailRow}>
               <span style={isError ? styles.detailKeyError : styles.detailKey}>{k.replace(/_/g, ' ')}</span>
@@ -214,19 +226,10 @@ function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssue
           ))}
         </div>
       )}
-      {recentEvents.length > 0 && (
-        <div style={styles.logStream} data-testid={`log-stream-${def.key}`}>
-          {recentEvents.map((evt, i) => (
-            <div key={`${evt.timestamp || ''}-${i}`} style={styles.logLine} data-testid="log-line">
-              <span style={styles.logTimestamp}>{formatLogTimestamp(evt.timestamp)}</span>
-              <span style={styles.logStatus}>{evt.data?.status || ''}</span>
-              <span style={styles.logMessage}>
-                {evt.data?.details ? Object.entries(evt.data.details).map(([k, v]) => `${k}: ${v}`).join(', ') : ''}
-              </span>
-            </div>
-          ))}
-        </div>
+      {logLines.length > 0 && (
+        <WorkerLogStream lines={logLines} />
       )}
+      {extraContent}
     </div>
   )
 }
@@ -315,7 +318,6 @@ export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onUpdateInter
               })}
             </div>
             <h3 style={styles.sectionHeading}>System</h3>
-            <MemoryAutoApproveToggle />
             <div style={styles.grid}>
               {SYSTEM_WORKERS.map((def) => {
                 const state = backgroundWorkers.find(w => w.name === def.key)
@@ -330,6 +332,7 @@ export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onUpdateInter
                     onToggleBgWorker={onToggleBgWorker}
                     onUpdateInterval={onUpdateInterval}
                     events={events}
+                    extraContent={def.key === 'memory_sync' ? <MemoryAutoApproveToggle /> : undefined}
                   />
                 )
               })}
@@ -462,35 +465,6 @@ const styles = {
     margin: '0 -16px 0',
     padding: '8px 16px',
   },
-  logStream: {
-    borderTop: `1px solid ${theme.border}`,
-    marginTop: 8,
-    paddingTop: 8,
-  },
-  logLine: {
-    display: 'flex',
-    gap: 8,
-    fontSize: 10,
-    fontFamily: 'monospace',
-    padding: '1px 0',
-  },
-  logTimestamp: {
-    color: theme.textMuted,
-    flexShrink: 0,
-  },
-  logStatus: {
-    fontWeight: 600,
-    color: theme.text,
-    flexShrink: 0,
-  },
-  logMessage: {
-    color: theme.textMuted,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    flex: 1,
-    minWidth: 0,
-  },
   detailRow: {
     display: 'flex',
     justifyContent: 'space-between',
@@ -615,11 +589,9 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '8px 16px',
-    marginBottom: 12,
-    border: `1px solid ${theme.border}`,
-    borderRadius: 8,
-    background: theme.surface,
+    borderTop: `1px solid ${theme.border}`,
+    paddingTop: 8,
+    marginTop: 8,
   },
   autoApproveLabel: {
     display: 'flex',

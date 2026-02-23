@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import { BACKGROUND_WORKERS } from '../../constants'
 import { deriveStageStatus } from '../../hooks/useStageStatus'
 
@@ -183,7 +183,7 @@ describe('SystemPanel', () => {
       expect(screen.getByText('Pipeline Poller')).toBeInTheDocument()
       expect(screen.getByText('Memory Manager')).toBeInTheDocument()
       expect(screen.getByText('Metrics Munger')).toBeInTheDocument()
-      // Count On/Off buttons — should be non-system bg workers + memory auto-approve toggle
+      // Count On/Off buttons — should be non-system bg workers + memory auto-approve toggle (inside memory_sync card)
       const allToggleButtons = [...screen.getAllByText('On'), ...screen.getAllByText('Off')]
       const nonSystemBgCount = BACKGROUND_WORKERS.filter(w => !w.system).length
       expect(allToggleButtons.length).toBe(nonSystemBgCount + 1)
@@ -209,10 +209,8 @@ describe('SystemPanel', () => {
       const onToggle = vi.fn()
       mockUseHydraFlow.mockReturnValue(defaultMockContext({ orchestratorStatus: 'running', backgroundWorkers: mockBgWorkers }))
       render(<SystemPanel backgroundWorkers={mockBgWorkers} onToggleBgWorker={onToggle} />)
-      // Click the worker Off button (not the memory auto-approve toggle)
-      const offButtons = screen.getAllByText('Off')
-      const workerOffButton = offButtons.find(btn => btn.dataset.testid !== 'memory-auto-approve-toggle')
-      fireEvent.click(workerOffButton)
+      const reviewInsightsCard = screen.getByTestId('worker-card-review_insights')
+      fireEvent.click(within(reviewInsightsCard).getByText('Off'))
       expect(onToggle).toHaveBeenCalledWith('review_insights', true)
     })
 
@@ -244,8 +242,32 @@ describe('SystemPanel', () => {
       mockUseHydraFlow.mockReturnValue(defaultMockContext({ backgroundWorkers: disabledWorkers }))
       render(<SystemPanel backgroundWorkers={disabledWorkers} onToggleBgWorker={onToggle} />)
       const offButtons = screen.getAllByText('Off')
-      // 2 disabled background workers + 1 memory auto-approve toggle (default off)
+      // 2 disabled background workers + 1 memory auto-approve toggle (default off, inside memory_sync card)
       expect(offButtons.length).toBe(3)
+    })
+  })
+
+  describe('Memory Auto-Approve toggle location', () => {
+    it('renders the auto-approve toggle inside the Memory Manager card', () => {
+      render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
+      // Assert: toggle is contained within the memory_sync worker card
+      const memoryCard = screen.getByTestId('worker-card-memory_sync')
+      expect(within(memoryCard).getByTestId('memory-auto-approve-toggle')).toBeInTheDocument()
+    })
+
+    it('does not render the auto-approve toggle outside the Memory Manager card', () => {
+      render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
+      const toggle = screen.getByTestId('memory-auto-approve-toggle')
+      const memoryCard = screen.getByTestId('worker-card-memory_sync')
+      // Toggle must be inside the memory_sync card, not in any other card
+      expect(memoryCard).toContainElement(toggle)
+      const otherCards = BACKGROUND_WORKERS
+        .filter(w => w.key !== 'memory_sync')
+        .map(w => screen.queryByTestId(`worker-card-${w.key}`))
+        .filter(Boolean)
+      for (const card of otherCards) {
+        expect(card).not.toContainElement(toggle)
+      }
     })
   })
 
@@ -369,95 +391,72 @@ describe('SystemPanel', () => {
     })
   })
 
-  describe('Inline log stream', () => {
-    function makeWorkerEvent(worker, status, details = {}, timestamp = '2026-02-20T10:30:00Z') {
-      return {
-        type: 'background_worker_status',
-        timestamp,
-        data: { worker, status, details },
-      }
-    }
-
-    it('renders log lines for worker with matching events', () => {
-      const events = [
-        makeWorkerEvent('memory_sync', 'ok', { item_count: 12 }, '2026-02-20T10:32:00Z'),
-        makeWorkerEvent('memory_sync', 'ok', { item_count: 10 }, '2026-02-20T10:31:00Z'),
-        makeWorkerEvent('memory_sync', 'ok', { item_count: 8 }, '2026-02-20T10:30:00Z'),
-      ]
-      mockUseHydraFlow.mockReturnValue(defaultMockContext({ events, orchestratorStatus: 'running' }))
+  describe('Worker Log Stream integration', () => {
+    it('renders log stream when background_worker_status events exist for a worker', () => {
+      mockUseHydraFlow.mockReturnValue(defaultMockContext({
+        orchestratorStatus: 'running',
+        events: [
+          { timestamp: '2026-02-20T10:00:01Z', type: 'background_worker_status', data: { worker: 'memory_sync', status: 'ok', details: { items: 5 } } },
+          { timestamp: '2026-02-20T10:00:00Z', type: 'background_worker_status', data: { worker: 'memory_sync', status: 'ok', details: { items: 3 } } },
+        ],
+      }))
       render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
-      const logStream = screen.getByTestId('log-stream-memory_sync')
-      expect(logStream).toBeInTheDocument()
-      const lines = logStream.querySelectorAll('[data-testid="log-line"]')
-      expect(lines.length).toBe(3)
+      expect(screen.getByTestId('worker-log-stream')).toBeInTheDocument()
     })
 
-    it('shows no log stream when no events match', () => {
-      mockUseHydraFlow.mockReturnValue(defaultMockContext({ events: [], orchestratorStatus: 'running' }))
+    it('does not render log stream when no matching events exist', () => {
+      mockUseHydraFlow.mockReturnValue(defaultMockContext({
+        orchestratorStatus: 'running',
+        events: [
+          { timestamp: '2026-02-20T10:00:00Z', type: 'worker_update', data: { issue: 1, status: 'running' } },
+        ],
+      }))
       render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
-      expect(screen.queryByTestId('log-stream-retrospective')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('worker-log-stream')).not.toBeInTheDocument()
     })
 
-    it('limits to 3 most recent events', () => {
-      const events = [
-        makeWorkerEvent('memory_sync', 'ok', { count: 5 }, '2026-02-20T10:35:00Z'),
-        makeWorkerEvent('memory_sync', 'ok', { count: 4 }, '2026-02-20T10:34:00Z'),
-        makeWorkerEvent('memory_sync', 'ok', { count: 3 }, '2026-02-20T10:33:00Z'),
-        makeWorkerEvent('memory_sync', 'ok', { count: 2 }, '2026-02-20T10:32:00Z'),
-        makeWorkerEvent('memory_sync', 'ok', { count: 1 }, '2026-02-20T10:31:00Z'),
-      ]
-      mockUseHydraFlow.mockReturnValue(defaultMockContext({ events, orchestratorStatus: 'running' }))
+    it('does not render log stream when events array is empty', () => {
+      mockUseHydraFlow.mockReturnValue(defaultMockContext({
+        orchestratorStatus: 'running',
+        events: [],
+      }))
       render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
-      const logStream = screen.getByTestId('log-stream-memory_sync')
-      const lines = logStream.querySelectorAll('[data-testid="log-line"]')
-      expect(lines.length).toBe(3)
+      expect(screen.queryByTestId('worker-log-stream')).not.toBeInTheDocument()
     })
 
-    it('filters events by worker key', () => {
-      const events = [
-        makeWorkerEvent('memory_sync', 'ok', {}, '2026-02-20T10:32:00Z'),
-        makeWorkerEvent('metrics', 'ok', {}, '2026-02-20T10:31:00Z'),
-        makeWorkerEvent('memory_sync', 'ok', {}, '2026-02-20T10:30:00Z'),
-      ]
-      mockUseHydraFlow.mockReturnValue(defaultMockContext({ events, orchestratorStatus: 'running' }))
+    it('renders formatted event lines with status and details separated by middle dot', () => {
+      mockUseHydraFlow.mockReturnValue(defaultMockContext({
+        orchestratorStatus: 'running',
+        events: [
+          { timestamp: '2026-02-20T10:00:00Z', type: 'background_worker_status', data: { worker: 'memory_sync', status: 'ok', details: { items: 5 } } },
+        ],
+      }))
       render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
-      const logStream = screen.getByTestId('log-stream-memory_sync')
-      const lines = logStream.querySelectorAll('[data-testid="log-line"]')
-      expect(lines.length).toBe(2)
+      const stream = screen.getByTestId('worker-log-stream')
+      // Formatted line includes status and details joined by middle dot (·)
+      expect(stream.textContent).toContain('ok · items: 5')
     })
 
-    it('displays events in chronological order (oldest at top)', () => {
-      const events = [
-        makeWorkerEvent('memory_sync', 'ok', { seq: 3 }, '2026-02-20T10:32:00Z'),
-        makeWorkerEvent('memory_sync', 'ok', { seq: 2 }, '2026-02-20T10:31:00Z'),
-        makeWorkerEvent('memory_sync', 'ok', { seq: 1 }, '2026-02-20T10:30:00Z'),
-      ]
-      mockUseHydraFlow.mockReturnValue(defaultMockContext({ events, orchestratorStatus: 'running' }))
+    it('filters events by worker key so each card only shows its own events', () => {
+      mockUseHydraFlow.mockReturnValue(defaultMockContext({
+        orchestratorStatus: 'running',
+        events: [
+          { timestamp: '2026-02-20T10:00:02Z', type: 'background_worker_status', data: { worker: 'memory_sync', status: 'ok', details: { items: 5 } } },
+          { timestamp: '2026-02-20T10:00:01Z', type: 'background_worker_status', data: { worker: 'metrics', status: 'ok', details: { cpu: 42 } } },
+          { timestamp: '2026-02-20T10:00:00Z', type: 'background_worker_status', data: { worker: 'memory_sync', status: 'ok', details: { items: 3 } } },
+        ],
+      }))
       render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
-      const logStream = screen.getByTestId('log-stream-memory_sync')
-      const lines = logStream.querySelectorAll('[data-testid="log-line"]')
-      expect(lines[0].textContent).toContain('seq: 1')
-      expect(lines[2].textContent).toContain('seq: 3')
-    })
-
-    it('shows timestamp and status on each log line', () => {
-      const events = [
-        makeWorkerEvent('memory_sync', 'ok', { item_count: 12 }, '2026-02-20T10:30:45Z'),
-      ]
-      mockUseHydraFlow.mockReturnValue(defaultMockContext({ events, orchestratorStatus: 'running' }))
-      render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
-      const logStream = screen.getByTestId('log-stream-memory_sync')
-      // Timestamp should be in HH:MM:SS format
-      expect(logStream.textContent).toMatch(/\d{2}:\d{2}:\d{2}/)
-      expect(logStream.textContent).toMatch(/ok/)
+      const memorySyncCard = screen.getByTestId('worker-card-memory_sync')
+      const memorySyncStream = within(memorySyncCard).getByTestId('worker-log-stream')
+      // memory_sync card should contain its own events but not metrics events
+      expect(memorySyncStream.textContent).toContain('items: 5')
+      expect(memorySyncStream.textContent).toContain('items: 3')
+      expect(memorySyncStream.textContent).not.toContain('cpu: 42')
     })
 
     it('Pipeline Poller shows log stream but no stats/details', () => {
-      const events = [
-        makeWorkerEvent('pipeline_poller', 'ok', { polled: 5 }, '2026-02-20T10:30:00Z'),
-      ]
       mockUseHydraFlow.mockReturnValue(defaultMockContext({
-        events,
         orchestratorStatus: 'running',
         pipelinePollerLastRun: '2026-02-20T10:00:00Z',
         pipelineIssues: {
@@ -467,10 +466,14 @@ describe('SystemPanel', () => {
           review: [{ number: 4 }],
           hitl: [{ number: 5 }],
         },
+        events: [
+          { timestamp: '2026-02-20T10:30:00Z', type: 'background_worker_status', data: { worker: 'pipeline_poller', status: 'ok', details: { polled: 5 } } },
+        ],
       }))
       render(<SystemPanel backgroundWorkers={[]} />)
-      // Log stream should render for pipeline_poller
-      expect(screen.getByTestId('log-stream-pipeline_poller')).toBeInTheDocument()
+      const pollerCard = screen.getByTestId('worker-card-pipeline_poller')
+      // Log stream should render inside pipeline_poller card
+      expect(within(pollerCard).getByTestId('worker-log-stream')).toBeInTheDocument()
       // Pipeline stage counts should NOT render as detail rows
       expect(screen.queryByText('triage')).not.toBeInTheDocument()
       expect(screen.queryByText('total')).not.toBeInTheDocument()
