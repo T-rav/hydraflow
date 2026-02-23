@@ -3656,3 +3656,55 @@ class TestTieringFields:
         assert cfg.debug_model == "opus"
         assert cfg.max_debug_attempts == 1
         assert cfg.subskill_confidence_threshold == pytest.approx(0.7)
+
+
+# ---------------------------------------------------------------------------
+# Label list validation — empty labels must be rejected
+# ---------------------------------------------------------------------------
+
+
+class TestLabelValidation:
+    """Tests for the field validator that rejects empty label lists."""
+
+    @pytest.mark.parametrize(
+        "field",
+        [
+            "ready_label",
+            "review_label",
+            "hitl_label",
+            "hitl_active_label",
+            "fixed_label",
+            "improve_label",
+            "memory_label",
+            "metrics_label",
+            "dup_label",
+            "epic_label",
+            "find_label",
+            "planner_label",
+        ],
+    )
+    def test_empty_label_list_raises_validation_error(
+        self, tmp_path: Path, field: str
+    ) -> None:
+        """Constructing HydraFlowConfig with an empty label list must raise."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="must contain at least one label"):
+            HydraFlowConfig(
+                **{field: []},  # type: ignore[arg-type]
+                repo_root=tmp_path,
+                worktree_base=tmp_path / "wt",
+                state_file=tmp_path / "s.json",
+            )
+
+    def test_label_env_var_empty_string_does_not_override(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """HYDRAFLOW_LABEL_READY='' should not override to empty list."""
+        monkeypatch.setenv("HYDRAFLOW_LABEL_READY", "")
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert cfg.ready_label == ["hydraflow-ready"]
