@@ -6,6 +6,7 @@ export function SessionSidebar() {
   const { sessions, currentSessionId, selectedSessionId, selectSession, deleteSession } = useHydraFlow()
   const [expandedRepos, setExpandedRepos] = useState({})
   const [hoveredSession, setHoveredSession] = useState(null)
+  const [hoveredDeleteId, setHoveredDeleteId] = useState(null)
 
   const repoGroups = useMemo(() => {
     const groups = {}
@@ -105,7 +106,9 @@ export function SessionSidebar() {
                     {!isActive && isHovered && (
                       <button
                         onClick={(e) => handleDelete(e, session.id)}
-                        style={styles.deleteButton}
+                        onMouseEnter={() => setHoveredDeleteId(session.id)}
+                        onMouseLeave={() => setHoveredDeleteId(null)}
+                        style={hoveredDeleteId === session.id ? deleteButtonHovered : styles.deleteButton}
                         aria-label="Delete session"
                         title="Delete session"
                       >
@@ -308,3 +311,4 @@ const styles = {
 const sessionRowSelected = { ...styles.sessionRow, background: theme.accentSubtle }
 const sessionRowCurrent = { ...styles.sessionRow, borderLeft: `3px solid ${theme.accent}` }
 const sessionRowCurrentSelected = { ...sessionRowCurrent, background: theme.accentSubtle }
+const deleteButtonHovered = { ...styles.deleteButton, color: theme.red, background: theme.redSubtle }

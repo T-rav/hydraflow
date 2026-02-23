@@ -1606,12 +1606,16 @@ class TestDeleteSessionEndpoint:
             template_dir=tmp_path / "no-templates",
         )
 
-    def _find_endpoint(self, router, path):
+    def _find_endpoint(self, router, path, method=None):
         for route in router.routes:
-            if (
+            if not (
                 hasattr(route, "path")
                 and route.path == path
                 and hasattr(route, "endpoint")
+            ):
+                continue
+            if method is None or (
+                hasattr(route, "methods") and method in route.methods
             ):
                 return route.endpoint
         return None
@@ -1633,17 +1637,9 @@ class TestDeleteSessionEndpoint:
             )
         )
         router = self._make_router(config, event_bus, state, tmp_path)
-        # The delete endpoint is separate from get — find by method
-        delete_endpoint = None
-        for route in router.routes:
-            if (
-                hasattr(route, "path")
-                and route.path == "/api/sessions/{session_id}"
-                and hasattr(route, "methods")
-                and "DELETE" in route.methods
-            ):
-                delete_endpoint = route.endpoint
-                break
+        delete_endpoint = self._find_endpoint(
+            router, "/api/sessions/{session_id}", method="DELETE"
+        )
         assert delete_endpoint is not None
         response = await delete_endpoint("s1")
         data = json.loads(response.body)
@@ -1654,16 +1650,9 @@ class TestDeleteSessionEndpoint:
         self, config, event_bus, state, tmp_path
     ) -> None:
         router = self._make_router(config, event_bus, state, tmp_path)
-        delete_endpoint = None
-        for route in router.routes:
-            if (
-                hasattr(route, "path")
-                and route.path == "/api/sessions/{session_id}"
-                and hasattr(route, "methods")
-                and "DELETE" in route.methods
-            ):
-                delete_endpoint = route.endpoint
-                break
+        delete_endpoint = self._find_endpoint(
+            router, "/api/sessions/{session_id}", method="DELETE"
+        )
         assert delete_endpoint is not None
         response = await delete_endpoint("nonexistent")
         assert response.status_code == 404
@@ -1685,16 +1674,9 @@ class TestDeleteSessionEndpoint:
             )
         )
         router = self._make_router(config, event_bus, state, tmp_path)
-        delete_endpoint = None
-        for route in router.routes:
-            if (
-                hasattr(route, "path")
-                and route.path == "/api/sessions/{session_id}"
-                and hasattr(route, "methods")
-                and "DELETE" in route.methods
-            ):
-                delete_endpoint = route.endpoint
-                break
+        delete_endpoint = self._find_endpoint(
+            router, "/api/sessions/{session_id}", method="DELETE"
+        )
         assert delete_endpoint is not None
         response = await delete_endpoint("active-s")
         assert response.status_code == 400
