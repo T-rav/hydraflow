@@ -246,9 +246,25 @@ class TestScaffoldMakefile:
         (tmp_path / "package.json").touch()
         result = scaffold_makefile(tmp_path)
         assert result.created is True
-        assert result.language == "javascript"
+        assert result.language == "node"
         content = (tmp_path / "Makefile").read_text()
         assert "npx eslint" in content
+
+    def test_creates_new_makefile_for_go_repo(self, tmp_path: Path) -> None:
+        (tmp_path / "go.mod").touch()
+        result = scaffold_makefile(tmp_path)
+        assert result.created is True
+        assert result.language == "go"
+        content = (tmp_path / "Makefile").read_text()
+        assert "go test ./..." in content
+
+    def test_creates_new_makefile_for_rust_repo(self, tmp_path: Path) -> None:
+        (tmp_path / "Cargo.toml").touch()
+        result = scaffold_makefile(tmp_path)
+        assert result.created is True
+        assert result.language == "rust"
+        content = (tmp_path / "Makefile").read_text()
+        assert "cargo test --all-targets" in content
 
     def test_merges_into_existing_makefile(self, tmp_path: Path) -> None:
         (tmp_path / "pyproject.toml").touch()
