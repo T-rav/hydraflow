@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import { BACKGROUND_WORKERS } from '../../constants'
 import { deriveStageStatus } from '../../hooks/useStageStatus'
 
@@ -252,39 +252,24 @@ describe('SystemPanel', () => {
   describe('Memory Auto-Approve toggle location', () => {
     it('renders the auto-approve toggle inside the Memory Manager card', () => {
       render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
-      const toggle = screen.getByTestId('memory-auto-approve-toggle')
-      // Walk up the DOM to find the card container, then verify it contains "Memory Manager"
-      const card = toggle.closest('[style]')
-      // Find the card that contains both the toggle and the "Memory Manager" label
-      const memoryManagerLabel = screen.getByText('Memory Manager')
-      const toggleCard = toggle.closest('div')
-      // Both should share a common card ancestor
-      let ancestor = toggle.parentElement
-      let foundCard = false
-      while (ancestor) {
-        if (ancestor.contains(memoryManagerLabel)) {
-          foundCard = true
-          break
-        }
-        ancestor = ancestor.parentElement
-      }
-      expect(foundCard).toBe(true)
+      // Assert: toggle is contained within the memory_sync worker card
+      const memoryCard = screen.getByTestId('worker-card-memory_sync')
+      expect(within(memoryCard).getByTestId('memory-auto-approve-toggle')).toBeInTheDocument()
     })
 
-    it('does not render the auto-approve toggle as a standalone element outside worker cards', () => {
+    it('does not render the auto-approve toggle outside the Memory Manager card', () => {
       render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
       const toggle = screen.getByTestId('memory-auto-approve-toggle')
-      // Verify the toggle is inside a card (element with border and borderRadius styles)
-      let parent = toggle.parentElement
-      let insideCard = false
-      while (parent) {
-        if (parent.style?.borderRadius === '8px' && parent.style?.border) {
-          insideCard = true
-          break
-        }
-        parent = parent.parentElement
+      const memoryCard = screen.getByTestId('worker-card-memory_sync')
+      // Toggle must be inside the memory_sync card, not in any other card
+      expect(memoryCard).toContainElement(toggle)
+      const otherCards = BACKGROUND_WORKERS
+        .filter(w => w.key !== 'memory_sync')
+        .map(w => screen.queryByTestId(`worker-card-${w.key}`))
+        .filter(Boolean)
+      for (const card of otherCards) {
+        expect(card).not.toContainElement(toggle)
       }
-      expect(insideCard).toBe(true)
     })
   })
 

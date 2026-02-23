@@ -125,7 +125,7 @@ function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssue
   const hasDetails = Object.keys(details).length > 0
 
   return (
-    <div style={styles.card}>
+    <div style={styles.card} data-testid={`worker-card-${def.key}`}>
       <div style={styles.cardHeader}>
         <span
           style={{ ...styles.dot, background: dotColor }}
