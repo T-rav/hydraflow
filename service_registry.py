@@ -118,7 +118,9 @@ def build_services(
     reviewers = ReviewRunner(config, event_bus, runner=subprocess_runner)
     hitl_runner = HITLRunner(config, event_bus, runner=subprocess_runner)
     triage = TriageRunner(config, event_bus)
-    summarizer = TranscriptSummarizer(config, prs, event_bus, state, runner=subprocess_runner)
+    summarizer = TranscriptSummarizer(
+        config, prs, event_bus, state, runner=subprocess_runner
+    )
 
     # Data layer
     fetcher = IssueFetcher(config)
