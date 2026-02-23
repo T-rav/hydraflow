@@ -394,21 +394,24 @@ describe('StreamCard transcript rendering', () => {
     const issue = makeIssue({ overallStatus: 'queued' })
     render(<StreamCard issue={issue} defaultExpanded={true} transcript={['line 1']} />)
     expect(screen.queryByTestId('transcript-preview')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('transcript-preview-inline')).not.toBeInTheDocument()
   })
 
   it('does not render TranscriptPreview when status is done', () => {
     const issue = makeIssue({ overallStatus: 'done' })
     render(<StreamCard issue={issue} defaultExpanded={true} transcript={['line 1']} />)
     expect(screen.queryByTestId('transcript-preview')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('transcript-preview-inline')).not.toBeInTheDocument()
   })
 
   it('does not render TranscriptPreview when status is failed', () => {
     const issue = makeIssue({ overallStatus: 'failed' })
     render(<StreamCard issue={issue} defaultExpanded={true} transcript={['line 1']} />)
     expect(screen.queryByTestId('transcript-preview')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('transcript-preview-inline')).not.toBeInTheDocument()
+  })
+
+  it('does not render TranscriptPreview when status is hitl', () => {
+    const issue = makeIssue({ overallStatus: 'hitl' })
+    render(<StreamCard issue={issue} defaultExpanded={true} transcript={['line 1']} />)
+    expect(screen.queryByTestId('transcript-preview')).not.toBeInTheDocument()
   })
 
   it('does not render TranscriptPreview when transcript is empty', () => {
@@ -422,7 +425,6 @@ describe('StreamCard transcript rendering', () => {
     render(<StreamCard issue={issue} defaultExpanded={false} transcript={['line 1']} />)
     // No transcript should be visible when collapsed
     expect(screen.queryByTestId('transcript-preview')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('transcript-preview-inline')).not.toBeInTheDocument()
   })
 
   it('defaults transcript to empty array when not provided', () => {
@@ -441,6 +443,17 @@ describe('StreamCard transcript rendering', () => {
     // Transcript now visible
     expect(screen.getByTestId('transcript-preview')).toBeInTheDocument()
     expect(screen.getByText('line 2')).toBeInTheDocument()
+  })
+
+  it('hides transcript after collapsing an expanded active card', () => {
+    const issue = makeIssue({ overallStatus: 'active' })
+    render(<StreamCard issue={issue} defaultExpanded={true} transcript={['line 1', 'line 2']} />)
+    // Expanded — transcript visible
+    expect(screen.getByTestId('transcript-preview')).toBeInTheDocument()
+    // Collapse by clicking the title
+    fireEvent.click(screen.getByText('Fix the frobnicator'))
+    // Transcript gone after collapse
+    expect(screen.queryByTestId('transcript-preview')).not.toBeInTheDocument()
   })
 
   it('does not render a View Transcript button for active issues with transcript', () => {
