@@ -564,25 +564,53 @@ async def _run_hardening_step(step: str, cmd: list[str], cwd: Path) -> bool:
 async def _run_scaffold(config: HydraFlowConfig) -> bool:
     """Scan and scaffold core repo essentials (CI + test infrastructure)."""
     from ci_scaffold import scaffold_ci  # noqa: PLC0415
+    from polyglot_prep import (  # noqa: PLC0415
+        detect_prep_stack,
+        scaffold_tests_polyglot,
+    )
+    from pre_issue_tracker import (  # noqa: PLC0415
+        ensure_pre_dirs,
+        load_open_issues,
+        mark_done,
+        write_run_log,
+    )
     from prep import RepoAuditor  # noqa: PLC0415
-    from test_scaffold import scaffold_tests  # noqa: PLC0415
+
+    ensure_pre_dirs(config.repo_root)
+    local_issues = load_open_issues(config.repo_root)
+    run_log_lines: list[str] = []
+    run_log_lines.append(f"- Repo: `{config.repo}`")
+    run_log_lines.append(f"- Dry run: `{config.dry_run}`")
+    run_log_lines.append(f"- Local issue count: `{len(local_issues)}`")
+    if local_issues:
+        run_log_lines.append("- Local issues:")
+        for issue in local_issues:
+            run_log_lines.append(f"  - `{issue.path.name}`: {issue.title}")
 
     audit = await RepoAuditor(config).run_audit()
     print(audit.format_report())  # noqa: T201
+    run_log_lines.append("- Audit completed")
 
     ci_result = scaffold_ci(config.repo_root, dry_run=config.dry_run)
-    tests_result = scaffold_tests(config.repo_root, dry_run=config.dry_run)
+    tests_result = scaffold_tests_polyglot(config.repo_root, dry_run=config.dry_run)
+    stack = detect_prep_stack(config.repo_root)
+    run_log_lines.append(f"- Detected prep stack: `{stack}`")
 
     action = "Would create" if config.dry_run else "Created"
     if ci_result.skipped:
         print(f"CI scaffold: skipped ({ci_result.skip_reason})")  # noqa: T201
+        run_log_lines.append(f"- CI scaffold skipped: {ci_result.skip_reason}")
     else:
         print(  # noqa: T201
             f"CI scaffold: {action} {ci_result.workflow_path} ({ci_result.language})"
         )
+        run_log_lines.append(
+            f"- CI scaffold {action.lower()}: {ci_result.workflow_path} ({ci_result.language})"
+        )
 
     if tests_result.skipped:
         print(f"Test scaffold: skipped ({tests_result.skip_reason})")  # noqa: T201
+        run_log_lines.append(f"- Test scaffold skipped: {tests_result.skip_reason}")
     else:
         created_dirs = ", ".join(tests_result.created_dirs) or "-"
         created_files = ", ".join(tests_result.created_files) or "-"
@@ -592,49 +620,94 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
             f"{action.lower()} dirs [{created_dirs}] files [{created_files}] "
             f"modified [{modified_files}] ({tests_result.language})"
         )
+        run_log_lines.append(
+            f"- Test scaffold {action.lower()}: dirs [{created_dirs}] "
+            f"files [{created_files}] modified [{modified_files}]"
+        )
 
     if config.dry_run:
         print("Hardening pass: skipped in dry-run mode")  # noqa: T201
+        run_log_lines.append("- Hardening skipped in dry-run mode")
+        run_log = write_run_log(
+            config.repo_root,
+            title="Prep Workflow Run",
+            lines=run_log_lines,
+        )
+        print(f"Prep run log: {run_log.relative_to(config.repo_root)}")  # noqa: T201
         return True
 
     hardening_ok = True
     repo_root = config.repo_root
 
-    # Auto-fix pass before validation.
+    hardening_plan: list[tuple[str, list[str]]] = []
     if _makefile_has_target(repo_root, "lint"):
-        hardening_ok = (
-            await _run_hardening_step("Fix pass", ["make", "lint"], repo_root)
-            and hardening_ok
-        )
+        hardening_plan.append(("Fix pass", ["make", "lint"]))
+    elif (repo_root / "package.json").is_file():
+        hardening_plan.append(("Fix pass", ["npm", "run", "lint", "--if-present"]))
+    elif (repo_root / "go.mod").is_file():
+        hardening_plan.append(("Fix pass", ["go", "vet", "./..."]))
+    elif (repo_root / "Cargo.toml").is_file():
+        hardening_plan.append(("Fix pass", ["cargo", "fmt", "--check"]))
+    elif (repo_root / "Gemfile").is_file():
+        hardening_plan.append(("Fix pass", ["bundle", "exec", "rubocop"]))
 
     # Run hooks when configured.
     if (repo_root / ".pre-commit-config.yaml").is_file():
-        hardening_ok = (
-            await _run_hardening_step(
-                "Hook pass", ["pre-commit", "run", "--all-files"], repo_root
-            )
-            and hardening_ok
-        )
+        hardening_plan.append(("Hook pass", ["pre-commit", "run", "--all-files"]))
 
     # Ensure at least one test/quality pass runs.
     if _makefile_has_target(repo_root, "quality"):
-        hardening_ok = (
-            await _run_hardening_step("Quality pass", ["make", "quality"], repo_root)
-            and hardening_ok
-        )
+        hardening_plan.append(("Quality pass", ["make", "quality"]))
     elif _makefile_has_target(repo_root, "test-fast"):
-        hardening_ok = (
-            await _run_hardening_step("Test pass", ["make", "test-fast"], repo_root)
-            and hardening_ok
-        )
+        hardening_plan.append(("Test pass", ["make", "test-fast"]))
     elif _makefile_has_target(repo_root, "test"):
-        hardening_ok = (
-            await _run_hardening_step("Test pass", ["make", "test"], repo_root)
-            and hardening_ok
-        )
+        hardening_plan.append(("Test pass", ["make", "test"]))
+    elif (repo_root / "package.json").is_file():
+        hardening_plan.append(("Test pass", ["npm", "test", "--if-present"]))
+        hardening_plan.append(("Build pass", ["npm", "run", "build", "--if-present"]))
+    elif (repo_root / "go.mod").is_file():
+        hardening_plan.append(("Test pass", ["go", "test", "./..."]))
+        hardening_plan.append(("Build pass", ["go", "build", "./..."]))
+    elif (repo_root / "Cargo.toml").is_file():
+        hardening_plan.append(("Test pass", ["cargo", "test"]))
+        hardening_plan.append(("Build pass", ["cargo", "build"]))
+    elif any(repo_root.glob("*.sln")) or any(repo_root.glob("*.csproj")):
+        hardening_plan.append(("Test pass", ["dotnet", "test"]))
+        hardening_plan.append(("Build pass", ["dotnet", "build"]))
+    elif (repo_root / "pom.xml").is_file():
+        hardening_plan.append(("Quality pass", ["mvn", "-B", "verify"]))
+    elif (repo_root / "build.gradle").is_file() or (
+        repo_root / "build.gradle.kts"
+    ).is_file():
+        hardening_plan.append(("Quality pass", ["gradle", "check", "build"]))
+    elif (repo_root / "Gemfile").is_file() and (repo_root / "bin" / "rails").is_file():
+        hardening_plan.append(("Test pass", ["bundle", "exec", "rails", "test"]))
+    elif (repo_root / "Gemfile").is_file():
+        hardening_plan.append(("Test pass", ["bundle", "exec", "rspec"]))
     else:
         print("Test pass: skipped (no make quality/test targets found)")  # noqa: T201
+        run_log_lines.append("- Test pass skipped: no compatible test command found")
 
+    for step_name, cmd in hardening_plan:
+        step_ok = await _run_hardening_step(step_name, cmd, repo_root)
+        hardening_ok = step_ok and hardening_ok
+        run_log_lines.append(
+            f"- {step_name}: {'ok' if step_ok else 'failed'} ({' '.join(cmd)})"
+        )
+
+    if hardening_ok and local_issues:
+        for issue in local_issues:
+            mark_done(issue)
+        run_log_lines.append(f"- Marked {len(local_issues)} local issue(s) done")
+    elif local_issues:
+        run_log_lines.append("- Local issues were not marked done due to failures")
+
+    run_log = write_run_log(
+        config.repo_root,
+        title="Prep Workflow Run",
+        lines=run_log_lines,
+    )
+    print(f"Prep run log: {run_log.relative_to(config.repo_root)}")  # noqa: T201
     return hardening_ok
 
 

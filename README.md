@@ -214,7 +214,13 @@ make prep
 
 `make prep` scans the repo and scaffolds:
 - GitHub Actions quality workflow (`.github/workflows/quality.yml`)
-- Language-specific test infrastructure (Python `tests/` + pytest config, JS `__tests__/` + vitest config)
+- Language-specific test infrastructure for common stacks:
+  Python, Node (JS/TS and UI frameworks via npm scripts), Java, Ruby/Rails, C#, Go, Rust, C++
+
+`make prep` also uses local markdown issues from `.pre/*.md`:
+- open files are treated as local prep issues for the run
+- successful prep marks them done in-place
+- each run writes a log to `.pre/runs/<timestamp>-prep-run.md`
 
 Then it runs hardening passes when available:
 - `make lint` (auto-fix)
