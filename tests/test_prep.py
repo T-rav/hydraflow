@@ -479,7 +479,7 @@ class TestCheckMakefile:
         (tmp_path / "Makefile").write_text(
             "lint:\n\t@echo lint\n\n"
             "lint-check:\n\t@echo lint-check\n\n"
-            "fix-lint:\n\t@echo fix-lint\n\n"
+            "lint-fix:\n\t@echo lint-fix\n\n"
             "typecheck:\n\t@echo typecheck\n\n"
             "security:\n\t@echo security\n\n"
             "test:\n\t@echo test\n\n"
@@ -521,7 +521,7 @@ class TestCheckMakefile:
         (tmp_path / "Makefile").write_text(
             "lint:\n\t@echo lint\n\n"
             "lint-check:\n\t@echo lint-check\n\n"
-            "fix-lint: lint\n\t@echo fix-lint\n\n"
+            "lint-fix: lint\n\t@echo lint-fix\n\n"
             "typecheck:\n\t@echo typecheck\n\n"
             "security:\n\t@echo security\n\n"
             "test:\n\t@echo test\n\n"

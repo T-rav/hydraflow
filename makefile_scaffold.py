@@ -1,6 +1,6 @@
 """Makefile scaffolding for target repos.
 
-Generates or merges Makefile targets (lint, lint-check, fix-lint, typecheck,
+Generates or merges Makefile targets (lint, lint-check, lint-fix, typecheck,
 security, test, quality-lite, quality) based on detected repo language
 (Python or JS/TS).
 """
@@ -16,7 +16,7 @@ from manifest import detect_language
 _PYTHON_TARGETS: dict[str, str] = {
     "lint": "\truff check . --fix && ruff format .\n",
     "lint-check": "\truff check . && ruff format . --check\n",
-    "fix-lint": "\t$(MAKE) lint\n",
+    "lint-fix": "\t$(MAKE) lint\n",
     "typecheck": "\tpyright\n",
     "security": "\tbandit -r . --severity-level medium\n",
     "test": "\tpytest tests/ -x -q\n",
@@ -25,7 +25,7 @@ _PYTHON_TARGETS: dict[str, str] = {
 _JS_TARGETS: dict[str, str] = {
     "lint": "\tnpx eslint . --fix\n",
     "lint-check": "\tnpx eslint .\n",
-    "fix-lint": "\t$(MAKE) lint\n",
+    "lint-fix": "\t$(MAKE) lint\n",
     "typecheck": "\tnpx tsc --noEmit\n",
     "security": "\tnpm audit --audit-level=moderate\n",
     "test": "\tnpx vitest run\n",
@@ -38,7 +38,7 @@ _QUALITY_LINE = "quality: quality-lite test\n"
 _ALL_TARGET_NAMES = [
     "lint",
     "lint-check",
-    "fix-lint",
+    "lint-fix",
     "typecheck",
     "security",
     "test",

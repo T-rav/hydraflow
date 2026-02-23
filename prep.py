@@ -131,7 +131,7 @@ async def ensure_labels(config: HydraFlowConfig) -> PrepResult:
 _REQUIRED_MAKE_TARGETS = (
     "lint",
     "lint-check",
-    "fix-lint",
+    "lint-fix",
     "typecheck",
     "security",
     "test",

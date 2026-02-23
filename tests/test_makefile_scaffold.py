@@ -100,7 +100,7 @@ class TestGenerateMakefile:
         assert ".PHONY:" in content
         assert "lint" in content
         assert "lint-check" in content
-        assert "fix-lint" in content
+        assert "lint-fix" in content
         assert "typecheck" in content
         assert "security" in content
         assert "test" in content
