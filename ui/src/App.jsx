@@ -159,7 +159,7 @@ function AppContent() {
               <TranscriptView workers={workers} selectedWorker={selectedWorker} />
             )}
             {activeTab === 'hitl' && <HITLTable items={hitlItems} onRefresh={refreshHitl} />}
-            {activeTab === 'system' && <SystemPanel backgroundWorkers={backgroundWorkers} onToggleBgWorker={toggleBgWorker} onViewLog={handleViewTranscript} onUpdateInterval={updateBgWorkerInterval} />}
+            {activeTab === 'system' && <SystemPanel backgroundWorkers={backgroundWorkers} onToggleBgWorker={toggleBgWorker} onUpdateInterval={updateBgWorkerInterval} />}
             {activeTab === 'metrics' && <MetricsPanel />}
           </div>
         </div>

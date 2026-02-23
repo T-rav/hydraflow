@@ -54,7 +54,13 @@ function statusColor(status) {
   return theme.textInactive
 }
 
-function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssues, orchestratorStatus, onToggleBgWorker, onViewLog, onUpdateInterval }) {
+function formatLogTimestamp(isoString) {
+  if (!isoString) return ''
+  const d = new Date(isoString)
+  return d.toTimeString().slice(0, 8)
+}
+
+function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssues, orchestratorStatus, onToggleBgWorker, onUpdateInterval, events }) {
   const [showIntervalEditor, setShowIntervalEditor] = useState(false)
   const isPipelinePoller = def.key === 'pipeline_poller'
   const isSystem = def.system === true
@@ -194,8 +200,8 @@ function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssue
           ))}
         </div>
       )}
-      {hasDetails && (
-        <div style={isError ? (onViewLog ? styles.detailsErrorCompact : styles.detailsError) : styles.details}>
+      {hasDetails && !isPipelinePoller && (
+        <div style={isError ? styles.detailsError : styles.details}>
           {Object.entries(details).map(([k, v]) => (
             <div key={k} style={k === 'error' ? styles.errorRow : styles.detailRow}>
               <span style={isError ? styles.detailKeyError : styles.detailKey}>{k.replace(/_/g, ' ')}</span>
@@ -204,17 +210,25 @@ function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssue
           ))}
         </div>
       )}
-      {onViewLog && (
-        <div style={styles.cardActions}>
-          <span
-            style={styles.viewLogLink}
-            onClick={() => onViewLog(`bg-${def.key}`)}
-            data-testid={`view-log-${def.key}`}
-          >
-            View Log
-          </span>
-        </div>
-      )}
+      {(() => {
+        const recentEvents = (events || [])
+          .filter(e => e.type === 'background_worker_status' && e.data?.worker === def.key)
+          .slice(0, 3)
+        if (recentEvents.length === 0) return null
+        return (
+          <div style={styles.logStream} data-testid={`log-stream-${def.key}`}>
+            {recentEvents.map((evt, i) => (
+              <div key={i} style={styles.logLine} data-testid="log-line">
+                <span style={styles.logTimestamp}>{formatLogTimestamp(evt.timestamp)}</span>
+                <span style={styles.logStatus}>{evt.data?.status || ''}</span>
+                <span style={styles.logMessage}>
+                  {evt.data?.details ? Object.entries(evt.data.details).map(([k, v]) => `${k}: ${v}`).join(', ') : ''}
+                </span>
+              </div>
+            ))}
+          </div>
+        )
+      })()}
     </div>
   )
 }
@@ -264,7 +278,7 @@ function MemoryAutoApproveToggle() {
   )
 }
 
-export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onViewLog, onUpdateInterval }) {
+export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onUpdateInterval }) {
   const { pipelinePollerLastRun, orchestratorStatus, events, pipelineIssues } = useHydraFlow()
   const [activeSubTab, setActiveSubTab] = useState('workers')
 
@@ -296,8 +310,8 @@ export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onViewLog, on
                     pipelinePollerLastRun={pipelinePollerLastRun}
                     orchestratorStatus={orchestratorStatus}
                     onToggleBgWorker={onToggleBgWorker}
-                    onViewLog={onViewLog}
                     onUpdateInterval={onUpdateInterval}
+                    events={events}
                   />
                 )
               })}
@@ -316,8 +330,8 @@ export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onViewLog, on
                     pipelineIssues={pipelineIssues}
                     orchestratorStatus={orchestratorStatus}
                     onToggleBgWorker={onToggleBgWorker}
-                    onViewLog={onViewLog}
                     onUpdateInterval={onUpdateInterval}
+                    events={events}
                   />
                 )
               })}
@@ -444,12 +458,33 @@ const styles = {
     padding: '8px 16px 16px',
     borderRadius: '0 0 8px 8px',
   },
-  detailsErrorCompact: {
-    borderTop: `1px solid ${theme.red}`,
+  logStream: {
+    borderTop: `1px solid ${theme.border}`,
+    marginTop: 8,
     paddingTop: 8,
-    background: theme.redSubtle,
-    margin: '0 -16px 0',
-    padding: '8px 16px',
+  },
+  logLine: {
+    display: 'flex',
+    gap: 8,
+    fontSize: 10,
+    fontFamily: 'monospace',
+    padding: '1px 0',
+    minWidth: 0,
+  },
+  logTimestamp: {
+    color: theme.textMuted,
+    flexShrink: 0,
+  },
+  logStatus: {
+    fontWeight: 600,
+    color: theme.text,
+    flexShrink: 0,
+  },
+  logMessage: {
+    color: theme.textMuted,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   detailRow: {
     display: 'flex',
@@ -520,24 +555,6 @@ const styles = {
     borderRadius: 10,
     padding: '1px 8px',
     textTransform: 'uppercase',
-  },
-  cardActions: {
-    display: 'flex',
-    gap: 8,
-    paddingTop: 8,
-    borderTop: `1px solid ${theme.border}`,
-    marginTop: 8,
-  },
-  viewLogLink: {
-    fontSize: 10,
-    fontWeight: 600,
-    color: theme.accent,
-    cursor: 'pointer',
-    padding: '3px 8px',
-    borderRadius: 4,
-    border: `1px solid ${theme.border}`,
-    background: 'transparent',
-    transition: 'background 0.15s',
   },
   scheduleRow: {
     fontSize: 11,
