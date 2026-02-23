@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
-from log_context import load_runtime_logs, parse_error_summary, truncate_log
+from log_context import load_runtime_logs, truncate_log
 from tests.helpers import ConfigFactory
 
 # ---------------------------------------------------------------------------
@@ -113,40 +114,16 @@ class TestLoadRuntimeLogs:
         )
         assert load_runtime_logs(config) == ""
 
+    def test_returns_empty_on_oserror(self, tmp_path: Path) -> None:
+        """OSError reading the log file returns empty string."""
+        log_dir = tmp_path / ".hydraflow" / "logs"
+        log_dir.mkdir(parents=True)
+        log_file = log_dir / "hydraflow.log"
+        log_file.write_text("some content")
 
-# ---------------------------------------------------------------------------
-# parse_error_summary
-# ---------------------------------------------------------------------------
-
-
-class TestParseErrorSummary:
-    """Tests for parse_error_summary()."""
-
-    def test_extracts_error_lines(self) -> None:
-        """Lines containing ERROR are extracted."""
-        log = "INFO: all good\n2024-01-01 ERROR: disk full\nDEBUG: trace\n"
-        result = parse_error_summary(log)
-        assert "ERROR: disk full" in result
-        assert "INFO" not in result
-
-    def test_extracts_exception_lines(self) -> None:
-        """Lines containing EXCEPTION are extracted."""
-        log = "INFO: ok\nFatal EXCEPTION in handler\nDEBUG: done\n"
-        result = parse_error_summary(log)
-        assert "EXCEPTION" in result
-
-    def test_deduplicates_errors(self) -> None:
-        """Repeated error lines produce a single entry."""
-        log = "ERROR: timeout\nERROR: timeout\nERROR: timeout\n"
-        result = parse_error_summary(log)
-        assert result.count("ERROR: timeout") == 1
-
-    def test_returns_empty_for_no_errors(self) -> None:
-        """Clean log returns empty string."""
-        log = "INFO: all good\nDEBUG: trace\n"
-        result = parse_error_summary(log)
-        assert result == ""
-
-    def test_returns_empty_for_empty_input(self) -> None:
-        """Empty input returns empty string."""
-        assert parse_error_summary("") == ""
+        config = ConfigFactory.create(
+            inject_runtime_logs=True,
+            repo_root=tmp_path,
+        )
+        with patch("pathlib.Path.read_text", side_effect=OSError("permission denied")):
+            assert load_runtime_logs(config) == ""
