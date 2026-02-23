@@ -44,9 +44,6 @@ class TriagePhase:
         comment explaining what is missing so the dashboard surfaces
         them as "needs attention".
         """
-        if not self._config.find_label:
-            return
-
         issues = self._store.get_triageable(self._config.batch_size)
         if not issues:
             return

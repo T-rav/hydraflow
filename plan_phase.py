@@ -138,11 +138,7 @@ class PlanPhase:
                                     len(new_issue.body),
                                 )
                                 continue
-                            labels = new_issue.labels or (
-                                [self._config.planner_label[0]]
-                                if self._config.planner_label
-                                else []
-                            )
+                            labels = new_issue.labels or [self._config.planner_label[0]]
                             await self._prs.create_issue(
                                 new_issue.title, new_issue.body, labels
                             )

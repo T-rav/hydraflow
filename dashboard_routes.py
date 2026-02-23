@@ -151,7 +151,7 @@ def create_router(
             )
 
         stage_labels: list[str] = getattr(config, label_field, [])
-        origin_label: str = stage_labels[0] if stage_labels else stage
+        origin_label: str = stage_labels[0]
 
         for lbl in stage_labels:
             await pr_manager.remove_label(issue_number, lbl)
