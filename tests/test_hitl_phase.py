@@ -16,8 +16,8 @@ from typing import TYPE_CHECKING
 from events import EventBus, EventType
 from hitl_phase import HITLPhase
 from issue_store import IssueStore
-from models import GitHubIssue
 from state import StateTracker
+from tests.conftest import IssueFactory
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -25,19 +25,6 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def make_issue(
-    number: int = 42, title: str = "Fix bug", body: str = "Details"
-) -> GitHubIssue:
-    return GitHubIssue(
-        number=number,
-        title=title,
-        body=body,
-        labels=["ready"],
-        comments=[],
-        url=f"https://github.com/test-org/test-repo/issues/{number}",
-    )
 
 
 def _make_phase(
@@ -104,7 +91,7 @@ class TestHITLPhaseProcessing:
         from models import HITLResult
 
         phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = make_issue(42, title="Test HITL", body="Fix it")
+        issue = IssueFactory.create(number=42, title="Test HITL", body="Fix it")
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -128,7 +115,7 @@ class TestHITLPhaseProcessing:
         from models import HITLResult
 
         phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = make_issue(42, title="Test HITL", body="Fix it")
+        issue = IssueFactory.create(number=42, title="Test HITL", body="Fix it")
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -155,7 +142,7 @@ class TestHITLPhaseProcessing:
         from models import HITLResult
 
         phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = make_issue(42)
+        issue = IssueFactory.create(number=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -174,7 +161,7 @@ class TestHITLPhaseProcessing:
         from models import HITLResult
 
         phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = make_issue(42)
+        issue = IssueFactory.create(number=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -211,7 +198,7 @@ class TestHITLPhaseProcessing:
         from models import HITLResult
 
         phase, state, fetcher, prs, wt, runner, bus = _make_phase(config)
-        issue = make_issue(42)
+        issue = IssueFactory.create(number=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -236,7 +223,7 @@ class TestHITLPhaseProcessing:
         from models import HITLResult
 
         phase, state, fetcher, prs, wt, runner, bus = _make_phase(config)
-        issue = make_issue(42)
+        issue = IssueFactory.create(number=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -262,7 +249,7 @@ class TestHITLPhaseProcessing:
         from models import HITLResult
 
         phase, _state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = make_issue(42)
+        issue = IssueFactory.create(number=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
 
@@ -279,7 +266,7 @@ class TestHITLPhaseProcessing:
         from models import HITLResult
 
         phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = make_issue(42)
+        issue = IssueFactory.create(number=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -298,7 +285,7 @@ class TestHITLPhaseProcessing:
         from models import HITLResult
 
         phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = make_issue(42)
+        issue = IssueFactory.create(number=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -318,7 +305,7 @@ class TestHITLPhaseProcessing:
         from models import HITLResult
 
         phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = make_issue(42)
+        issue = IssueFactory.create(number=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -383,7 +370,9 @@ class TestHITLResetsAttempts:
         state.set_hitl_cause(42, "Cap exceeded")
 
         # Mock fetcher and PR manager
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=make_issue(42))
+        fetcher.fetch_issue_by_number = AsyncMock(
+            return_value=IssueFactory.create(number=42)
+        )
 
         # Create worktree directory
         wt_path = config.worktree_base / "issue-42"
@@ -413,7 +402,7 @@ class TestHITLImproveTransition:
         from models import HITLResult
 
         phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = make_issue(42, title="Improve: test", body="Details")
+        issue = IssueFactory.create(number=42, title="Improve: test", body="Details")
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-improve")
@@ -439,7 +428,7 @@ class TestHITLImproveTransition:
         from models import HITLResult
 
         phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = make_issue(42, title="Test", body="Details")
+        issue = IssueFactory.create(number=42, title="Test", body="Details")
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -465,7 +454,7 @@ class TestHITLImproveTransition:
         from models import HITLResult
 
         phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = make_issue(42, title="Improve: test", body="Details")
+        issue = IssueFactory.create(number=42, title="Improve: test", body="Details")
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-improve")
@@ -495,7 +484,7 @@ class TestHITLImproveTransition:
         from models import HITLResult
 
         phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = make_issue(42, title="Improve: test", body="Details")
+        issue = IssueFactory.create(number=42, title="Improve: test", body="Details")
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-improve")
@@ -534,7 +523,7 @@ class TestHITLMemorySuggestionFiling:
         from models import HITLResult
 
         phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = make_issue(42)
+        issue = IssueFactory.create(number=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -566,7 +555,7 @@ class TestHITLMemorySuggestionFiling:
         from models import HITLResult
 
         phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = make_issue(42)
+        issue = IssueFactory.create(number=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -601,7 +590,7 @@ class TestHITLMemorySuggestionFiling:
         from models import HITLResult
 
         phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = make_issue(42)
+        issue = IssueFactory.create(number=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -626,7 +615,7 @@ class TestHITLMemorySuggestionFiling:
         from models import HITLResult
 
         phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = make_issue(42)
+        issue = IssueFactory.create(number=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")

@@ -22,27 +22,12 @@ from acceptance_criteria import (
     _VERIFY_START,
     AcceptanceCriteriaGenerator,
 )
-from models import GitHubIssue, VerificationCriteria
+from models import VerificationCriteria
+from tests.conftest import IssueFactory
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _make_issue(
-    number: int = 42,
-    title: str = "Add dark mode toggle",
-    body: str = "Add a dark mode toggle to the settings page.",
-    comments: list[str] | None = None,
-) -> GitHubIssue:
-    return GitHubIssue(
-        number=number,
-        title=title,
-        body=body,
-        labels=["ready"],
-        comments=comments or [],
-        url=f"https://github.com/test-org/test-repo/issues/{number}",
-    )
 
 
 def _make_generator(
@@ -109,7 +94,7 @@ class TestBuildPrompt:
 
     def test_includes_issue_body(self, config: HydraFlowConfig, event_bus) -> None:
         gen, _ = _make_generator(config, event_bus)
-        issue = _make_issue(body="The frobnicator needs fixing")
+        issue = IssueFactory.create(body="The frobnicator needs fixing")
         prompt = gen._build_prompt(issue, "", "", [])
         assert "The frobnicator needs fixing" in prompt
 
@@ -117,7 +102,7 @@ class TestBuildPrompt:
         self, config: HydraFlowConfig, event_bus
     ) -> None:
         gen, _ = _make_generator(config, event_bus)
-        issue = _make_issue(number=99, title="Fix the widget")
+        issue = IssueFactory.create(number=99, title="Fix the widget")
         prompt = gen._build_prompt(issue, "", "", [])
         assert "#99" in prompt
         assert "Fix the widget" in prompt
@@ -126,7 +111,7 @@ class TestBuildPrompt:
         self, config: HydraFlowConfig, event_bus
     ) -> None:
         gen, _ = _make_generator(config, event_bus)
-        issue = _make_issue()
+        issue = IssueFactory.create()
         prompt = gen._build_prompt(issue, "## Step 1\nDo the thing", "", [])
         assert "## Step 1" in prompt
         assert "Do the thing" in prompt
@@ -136,13 +121,13 @@ class TestBuildPrompt:
         self, config: HydraFlowConfig, event_bus
     ) -> None:
         gen, _ = _make_generator(config, event_bus)
-        issue = _make_issue()
+        issue = IssueFactory.create()
         prompt = gen._build_prompt(issue, "", "", [])
         assert "## Implementation Plan" not in prompt
 
     def test_includes_diff_summary(self, config: HydraFlowConfig, event_bus) -> None:
         gen, _ = _make_generator(config, event_bus)
-        issue = _make_issue()
+        issue = IssueFactory.create()
         prompt = gen._build_prompt(issue, "", "some diff content", [])
         assert "some diff content" in prompt
         assert "## PR Diff Summary" in prompt
@@ -151,13 +136,13 @@ class TestBuildPrompt:
         self, config: HydraFlowConfig, event_bus
     ) -> None:
         gen, _ = _make_generator(config, event_bus)
-        issue = _make_issue()
+        issue = IssueFactory.create()
         prompt = gen._build_prompt(issue, "", "", [])
         assert "## PR Diff Summary" not in prompt
 
     def test_includes_test_files(self, config: HydraFlowConfig, event_bus) -> None:
         gen, _ = _make_generator(config, event_bus)
-        issue = _make_issue()
+        issue = IssueFactory.create()
         prompt = gen._build_prompt(
             issue, "", "", ["tests/test_foo.py", "tests/test_bar.py"]
         )
@@ -169,7 +154,7 @@ class TestBuildPrompt:
         self, config: HydraFlowConfig, event_bus
     ) -> None:
         gen, _ = _make_generator(config, event_bus)
-        issue = _make_issue()
+        issue = IssueFactory.create()
         prompt = gen._build_prompt(issue, "", "", [])
         assert "## Test Files" not in prompt
 
@@ -177,7 +162,7 @@ class TestBuildPrompt:
         self, config: HydraFlowConfig, event_bus
     ) -> None:
         gen, _ = _make_generator(config, event_bus)
-        issue = _make_issue()
+        issue = IssueFactory.create()
         prompt = gen._build_prompt(issue, "", "", [])
         assert _AC_START in prompt
         assert _AC_END in prompt
@@ -188,7 +173,7 @@ class TestBuildPrompt:
         self, config: HydraFlowConfig, event_bus
     ) -> None:
         gen, _ = _make_generator(config, event_bus)
-        issue = _make_issue()
+        issue = IssueFactory.create()
         prompt = gen._build_prompt(issue, "", "", [])
         assert "UAT" in prompt
         assert "functional" in prompt
@@ -558,7 +543,7 @@ class TestGenerate:
         self, config: HydraFlowConfig, event_bus
     ) -> None:
         gen, mock_prs = _make_generator(config, event_bus)
-        issue = _make_issue()
+        issue = IssueFactory.create()
         transcript = _make_transcript()
 
         with patch(
@@ -583,7 +568,7 @@ class TestGenerate:
         self, dry_config: HydraFlowConfig, event_bus
     ) -> None:
         gen, mock_prs = _make_generator(dry_config, event_bus)
-        issue = _make_issue()
+        issue = IssueFactory.create()
 
         await gen.generate(
             issue_number=42, pr_number=101, issue=issue, diff="some diff"
@@ -598,7 +583,7 @@ class TestGenerate:
         self, config: HydraFlowConfig, event_bus
     ) -> None:
         gen, mock_prs = _make_generator(config, event_bus)
-        issue = _make_issue()
+        issue = IssueFactory.create()
 
         with (
             patch(
@@ -622,7 +607,7 @@ class TestGenerate:
         self, config: HydraFlowConfig, event_bus
     ) -> None:
         gen, mock_prs = _make_generator(config, event_bus)
-        issue = _make_issue()
+        issue = IssueFactory.create()
 
         with patch(
             "acceptance_criteria.stream_claude_process",
@@ -640,7 +625,7 @@ class TestGenerate:
         self, config: HydraFlowConfig, event_bus
     ) -> None:
         gen, mock_prs = _make_generator(config, event_bus)
-        issue = _make_issue()
+        issue = IssueFactory.create()
 
         # Write a plan file
         plan_dir = config.repo_root / ".hydraflow" / "plans"
