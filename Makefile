@@ -2,6 +2,7 @@
 
 HYDRAFLOW_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 PROJECT_ROOT := $(abspath $(HYDRAFLOW_DIR))
+HYDRAFLOW_CLI := $(PROJECT_ROOT)/cli.py
 TARGET_REPO_ROOT ?= $(shell python3 -c 'from pathlib import Path; cur=Path.cwd().resolve(); roots=[p for p in [cur,*cur.parents] if (p/".git").exists()]; print((roots[-1] if roots else cur).as_posix())')
 
 # Load .env if present (export all variables)
@@ -234,7 +235,7 @@ setup:
 	fi
 	@echo "$(BLUE)Ensuring HydraFlow lifecycle labels...$(RESET)"
 	@echo "  target repo: $(TARGET_REPO_ROOT)"
-	@cd $(TARGET_REPO_ROOT) && $(UV) python $(HYDRAFLOW_DIR)cli.py --prep
+	@cd $(TARGET_REPO_ROOT) && $(UV) python "$(HYDRAFLOW_CLI)" --prep
 	@echo "$(BLUE)Setting up git hooks...$(RESET)"
 	@if [ "$(TARGET_REPO_ROOT)" != "$(PROJECT_ROOT)" ]; then \
 		mkdir -p "$(TARGET_REPO_ROOT)/.githooks"; \
@@ -288,13 +289,13 @@ prep:
 	@echo "  target repo: $(TARGET_REPO_ROOT)"
 	@echo "$(BLUE)Resetting prep scratch directories (.pre/.prep)...$(RESET)"
 	@rm -rf $(TARGET_REPO_ROOT)/.pre $(TARGET_REPO_ROOT)/.prep
-	@cd $(TARGET_REPO_ROOT) && $(UV) python $(HYDRAFLOW_DIR)cli.py --scaffold
+	@cd $(TARGET_REPO_ROOT) && $(UV) python "$(HYDRAFLOW_CLI)" --scaffold
 	@echo "$(GREEN)Prep complete$(RESET)"
 
 ensure-labels:
 	@echo "$(BLUE)Creating HydraFlow lifecycle labels...$(RESET)"
 	@echo "  target repo: $(TARGET_REPO_ROOT)"
-	@cd $(TARGET_REPO_ROOT) && $(UV) python $(HYDRAFLOW_DIR)cli.py --prep
+	@cd $(TARGET_REPO_ROOT) && $(UV) python "$(HYDRAFLOW_CLI)" --prep
 	@echo "$(GREEN)Labels ensured$(RESET)"
 
 hot:
