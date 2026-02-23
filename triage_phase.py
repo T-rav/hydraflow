@@ -8,6 +8,7 @@ import logging
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from issue_store import IssueStore
+from phase_utils import escalate_to_hitl, store_lifecycle
 from pr_manager import PRManager
 from state import StateTracker
 from triage import TriageRunner
@@ -54,8 +55,7 @@ class TriagePhase:
                 logger.info("Stop requested — aborting triage loop")
                 return
 
-            self._store.mark_active(issue.number, "find")
-            try:
+            async with store_lifecycle(self._store, issue.number, "find"):
                 result = await self._triage.evaluate(issue)
 
                 if self._config.dry_run:
@@ -71,16 +71,13 @@ class TriagePhase:
                         self._config.planner_label[0],
                     )
                 else:
-                    self._state.set_hitl_origin(
-                        issue.number, self._config.find_label[0]
-                    )
-                    self._state.set_hitl_cause(
+                    await escalate_to_hitl(
+                        self._state,
+                        self._prs,
                         issue.number,
-                        "Insufficient issue detail for triage",
-                    )
-                    self._state.record_hitl_escalation()
-                    await self._prs.swap_pipeline_labels(
-                        issue.number, self._config.hitl_label[0]
+                        cause="Insufficient issue detail for triage",
+                        origin_label=self._config.find_label[0],
+                        hitl_label=self._config.hitl_label[0],
                     )
                     note = (
                         "## Needs More Information\n\n"
@@ -109,5 +106,3 @@ class TriagePhase:
                         self._config.hitl_label[0],
                         "; ".join(result.reasons),
                     )
-            finally:
-                self._store.mark_complete(issue.number)

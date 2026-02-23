@@ -536,7 +536,7 @@ class TestHITLMemorySuggestionFiling:
         )
 
         with patch(
-            "hitl_phase.file_memory_suggestion", new_callable=AsyncMock
+            "phase_utils.file_memory_suggestion", new_callable=AsyncMock
         ) as mock_mem:
             semaphore = asyncio.Semaphore(1)
             await phase._process_one_hitl(42, "Fix the tests", semaphore)
@@ -571,7 +571,7 @@ class TestHITLMemorySuggestionFiling:
         )
 
         with patch(
-            "hitl_phase.file_memory_suggestion", new_callable=AsyncMock
+            "phase_utils.file_memory_suggestion", new_callable=AsyncMock
         ) as mock_mem:
             semaphore = asyncio.Semaphore(1)
             await phase._process_one_hitl(42, "Fix the tests", semaphore)
@@ -600,7 +600,7 @@ class TestHITLMemorySuggestionFiling:
         )
 
         with patch(
-            "hitl_phase.file_memory_suggestion", new_callable=AsyncMock
+            "phase_utils.file_memory_suggestion", new_callable=AsyncMock
         ) as mock_mem:
             semaphore = asyncio.Semaphore(1)
             await phase._process_one_hitl(42, "Fix it", semaphore)
@@ -628,7 +628,7 @@ class TestHITLMemorySuggestionFiling:
         )
 
         with patch(
-            "hitl_phase.file_memory_suggestion",
+            "phase_utils.file_memory_suggestion",
             new_callable=AsyncMock,
             side_effect=RuntimeError("GitHub API error"),
         ) as mock_mem:

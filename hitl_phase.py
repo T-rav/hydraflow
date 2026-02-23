@@ -11,7 +11,7 @@ from events import EventBus, EventType, HydraFlowEvent
 from hitl_runner import HITLRunner
 from issue_fetcher import IssueFetcher
 from issue_store import IssueStore
-from memory import file_memory_suggestion
+from phase_utils import safe_file_memory_suggestion
 from pr_manager import PRManager
 from state import StateTracker
 from worktree import WorktreeManager
@@ -162,20 +162,14 @@ class HITLPhase:
 
                 # File memory suggestion if present in transcript
                 if result.transcript:
-                    try:
-                        await file_memory_suggestion(
-                            result.transcript,
-                            "hitl",
-                            f"issue #{issue_number}",
-                            self._config,
-                            self._prs,
-                            self._state,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "Failed to file memory suggestion for issue #%d",
-                            issue_number,
-                        )
+                    await safe_file_memory_suggestion(
+                        result.transcript,
+                        "hitl",
+                        f"issue #{issue_number}",
+                        self._config,
+                        self._prs,
+                        self._state,
+                    )
 
                 if result.success:
                     await self._prs.push_branch(wt_path, branch)

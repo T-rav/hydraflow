@@ -25,6 +25,7 @@ from models import (
     ReviewResult,
     ReviewVerdict,
 )
+from phase_utils import run_concurrent_batch, store_lifecycle
 from post_merge_handler import PostMergeHandler
 from pr_manager import PRManager, SelfReviewError
 from retrospective import RetrospectiveCollector
@@ -114,7 +115,6 @@ class ReviewPhase:
 
         issue_map = {i.number: i for i in issues}
         semaphore = asyncio.Semaphore(self._config.max_reviewers)
-        results: list[ReviewResult] = []
 
         async def _review_one(idx: int, pr: PRInfo) -> ReviewResult:
             if self._stop_event.is_set():
@@ -132,42 +132,26 @@ class ReviewPhase:
                     )
                 self._active_issues.add(pr.issue_number)
                 self._state.set_active_issue_numbers(list(self._active_issues))
-                self._store.mark_active(pr.issue_number, "review")
-                try:
-                    return await self._review_one_inner(idx, pr, issue_map)
-                except Exception:
-                    logger.exception(
-                        "Review failed for PR #%d (issue #%d)",
-                        pr.number,
-                        pr.issue_number,
-                    )
-                    return ReviewResult(
-                        pr_number=pr.number,
-                        issue_number=pr.issue_number,
-                        summary="Review failed due to unexpected error",
-                    )
-                finally:
-                    await self._publish_review_status(pr, idx, "done")
-                    self._active_issues.discard(pr.issue_number)
-                    self._state.set_active_issue_numbers(list(self._active_issues))
-                    self._store.mark_complete(pr.issue_number)
+                async with store_lifecycle(self._store, pr.issue_number, "review"):
+                    try:
+                        return await self._review_one_inner(idx, pr, issue_map)
+                    except Exception:
+                        logger.exception(
+                            "Review failed for PR #%d (issue #%d)",
+                            pr.number,
+                            pr.issue_number,
+                        )
+                        return ReviewResult(
+                            pr_number=pr.number,
+                            issue_number=pr.issue_number,
+                            summary="Review failed due to unexpected error",
+                        )
+                    finally:
+                        await self._publish_review_status(pr, idx, "done")
+                        self._active_issues.discard(pr.issue_number)
+                        self._state.set_active_issue_numbers(list(self._active_issues))
 
-        tasks = [asyncio.create_task(_review_one(i, pr)) for i, pr in enumerate(prs)]
-        try:
-            for task in asyncio.as_completed(tasks):
-                results.append(await task)
-                # Cancel remaining tasks if stop requested
-                if self._stop_event.is_set():
-                    for t in tasks:
-                        t.cancel()
-                    break
-        finally:
-            # Cancel any remaining tasks if this coroutine is cancelled externally
-            for t in tasks:
-                if not t.done():
-                    t.cancel()
-
-        return results
+        return await run_concurrent_batch(prs, _review_one, self._stop_event)
 
     async def _review_one_inner(
         self,

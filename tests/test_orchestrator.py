@@ -1871,7 +1871,7 @@ class TestMemorySuggestionFiling:
         orch._implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
 
         with patch(
-            "orchestrator.file_memory_suggestion", new_callable=AsyncMock
+            "phase_utils.file_memory_suggestion", new_callable=AsyncMock
         ) as mock_mem:
             await orch._implement_loop()
             mock_mem.assert_awaited_once()
@@ -1895,7 +1895,7 @@ class TestMemorySuggestionFiling:
         orch._implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
 
         with patch(
-            "orchestrator.file_memory_suggestion", new_callable=AsyncMock
+            "phase_utils.file_memory_suggestion", new_callable=AsyncMock
         ) as mock_mem:
             await orch._implement_loop()
             mock_mem.assert_not_awaited()
@@ -1921,7 +1921,7 @@ class TestMemorySuggestionFiling:
         orch._implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
 
         with patch(
-            "orchestrator.file_memory_suggestion", new_callable=AsyncMock
+            "phase_utils.file_memory_suggestion", new_callable=AsyncMock
         ) as mock_mem:
             await orch._implement_loop()
             assert mock_mem.await_count == 2
@@ -1963,7 +1963,7 @@ class TestMemorySuggestionFiling:
         orch._store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
 
         with patch(
-            "orchestrator.file_memory_suggestion", new_callable=AsyncMock
+            "phase_utils.file_memory_suggestion", new_callable=AsyncMock
         ) as mock_mem:
             await orch._review_loop()
             mock_mem.assert_awaited_once()
@@ -2005,7 +2005,7 @@ class TestMemorySuggestionFiling:
         orch._store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
 
         with patch(
-            "orchestrator.file_memory_suggestion", new_callable=AsyncMock
+            "phase_utils.file_memory_suggestion", new_callable=AsyncMock
         ) as mock_mem:
             await orch._review_loop()
             mock_mem.assert_not_awaited()
@@ -2046,7 +2046,7 @@ class TestMemorySuggestionFiling:
         orch._store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
 
         with patch(
-            "orchestrator.file_memory_suggestion", new_callable=AsyncMock
+            "phase_utils.file_memory_suggestion", new_callable=AsyncMock
         ) as mock_mem:
             await orch._review_loop()
             mock_mem.assert_awaited_once()
@@ -2074,7 +2074,7 @@ class TestMemorySuggestionFiling:
         orch._implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
 
         with patch(
-            "orchestrator.file_memory_suggestion",
+            "phase_utils.file_memory_suggestion",
             new_callable=AsyncMock,
             side_effect=[RuntimeError("transient"), None],
         ) as mock_mem:
@@ -2113,7 +2113,7 @@ class TestMemorySuggestionFiling:
         orch._store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
 
         with patch(
-            "orchestrator.file_memory_suggestion",
+            "phase_utils.file_memory_suggestion",
             new_callable=AsyncMock,
             side_effect=RuntimeError("transient"),
         ) as mock_mem:
@@ -2147,7 +2147,7 @@ class TestTranscriptSummaryFiling:
         orch._summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
 
         with patch(
-            "orchestrator.file_memory_suggestion",
+            "phase_utils.file_memory_suggestion",
             new_callable=AsyncMock,
         ):
             await orch._implement_loop()
@@ -2177,7 +2177,7 @@ class TestTranscriptSummaryFiling:
         orch._summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
 
         with patch(
-            "orchestrator.file_memory_suggestion",
+            "phase_utils.file_memory_suggestion",
             new_callable=AsyncMock,
         ):
             await orch._implement_loop()
@@ -2203,7 +2203,7 @@ class TestTranscriptSummaryFiling:
         orch._summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
 
         with patch(
-            "orchestrator.file_memory_suggestion",
+            "phase_utils.file_memory_suggestion",
             new_callable=AsyncMock,
         ):
             await orch._implement_loop()
@@ -2243,7 +2243,7 @@ class TestTranscriptSummaryFiling:
         orch._store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
 
         with patch(
-            "orchestrator.file_memory_suggestion",
+            "phase_utils.file_memory_suggestion",
             new_callable=AsyncMock,
         ):
             await orch._review_loop()
@@ -2294,7 +2294,7 @@ class TestTranscriptSummaryFiling:
         orch._store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
 
         with patch(
-            "orchestrator.file_memory_suggestion",
+            "phase_utils.file_memory_suggestion",
             new_callable=AsyncMock,
         ):
             await orch._review_loop()
@@ -2343,7 +2343,7 @@ class TestTranscriptSummaryFiling:
         orch._store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
 
         with patch(
-            "orchestrator.file_memory_suggestion",
+            "phase_utils.file_memory_suggestion",
             new_callable=AsyncMock,
         ):
             await orch._review_loop()
@@ -2391,7 +2391,7 @@ class TestTranscriptSummaryFiling:
         orch._store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
 
         with patch(
-            "orchestrator.file_memory_suggestion",
+            "phase_utils.file_memory_suggestion",
             new_callable=AsyncMock,
         ):
             await orch._review_loop()
@@ -2420,7 +2420,7 @@ class TestTranscriptSummaryFiling:
         )
 
         with patch(
-            "orchestrator.file_memory_suggestion",
+            "phase_utils.file_memory_suggestion",
             new_callable=AsyncMock,
         ):
             # Should not raise
@@ -2447,7 +2447,7 @@ class TestPostRunHooks:
         orch._summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
 
         with patch(
-            "orchestrator.file_memory_suggestion", new_callable=AsyncMock
+            "phase_utils.file_memory_suggestion", new_callable=AsyncMock
         ) as mock_mem:
             await orch._post_run_hooks(
                 transcript="some transcript",
@@ -2471,7 +2471,7 @@ class TestPostRunHooks:
         orch._summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
 
         with patch(
-            "orchestrator.file_memory_suggestion",
+            "phase_utils.file_memory_suggestion",
             new_callable=AsyncMock,
             side_effect=RuntimeError("boom"),
         ):
@@ -2497,7 +2497,7 @@ class TestPostRunHooks:
             side_effect=RuntimeError("summarize failed")
         )
 
-        with patch("orchestrator.file_memory_suggestion", new_callable=AsyncMock):
+        with patch("phase_utils.file_memory_suggestion", new_callable=AsyncMock):
             # Should not raise
             await orch._post_run_hooks(
                 transcript="transcript",
@@ -2519,7 +2519,7 @@ class TestPostRunHooks:
         orch._summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
 
         with patch(
-            "orchestrator.file_memory_suggestion", new_callable=AsyncMock
+            "phase_utils.file_memory_suggestion", new_callable=AsyncMock
         ) as mock_mem:
             await orch._post_run_hooks(
                 transcript="transcript",
@@ -2543,7 +2543,7 @@ class TestPostRunHooks:
         orch._summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
 
         with patch(
-            "orchestrator.file_memory_suggestion", new_callable=AsyncMock
+            "phase_utils.file_memory_suggestion", new_callable=AsyncMock
         ) as mock_mem:
             await orch._post_run_hooks(
                 transcript="tx",
@@ -2567,7 +2567,7 @@ class TestPostRunHooks:
         orch = HydraFlowOrchestrator(config)
         orch._summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
 
-        with patch("orchestrator.file_memory_suggestion", new_callable=AsyncMock):
+        with patch("phase_utils.file_memory_suggestion", new_callable=AsyncMock):
             await orch._post_run_hooks(
                 transcript="tx",
                 source="implementer",

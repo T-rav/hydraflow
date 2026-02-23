@@ -11,6 +11,7 @@ from config import HydraFlowConfig
 from harness_insights import FailureCategory, FailureRecord, HarnessInsightStore
 from issue_store import IssueStore
 from models import GitHubIssue, WorkerResult
+from phase_utils import escalate_to_hitl, run_concurrent_batch, store_lifecycle
 from pr_manager import PRManager
 from run_recorder import RunRecorder
 from state import StateTracker
@@ -81,7 +82,6 @@ class ImplementPhase:
             return [], []
 
         semaphore = asyncio.Semaphore(self._config.max_workers)
-        results: list[WorkerResult] = []
 
         async def _worker(idx: int, issue: GitHubIssue) -> WorkerResult:
             if self._stop_event.is_set():
@@ -102,48 +102,31 @@ class ImplementPhase:
                 branch = f"agent/issue-{issue.number}"
                 self._active_issues.add(issue.number)
                 self._state.set_active_issue_numbers(list(self._active_issues))
-                self._store.mark_active(issue.number, "implement")
-                self._state.mark_issue(issue.number, "in_progress")
-                self._state.set_branch(issue.number, branch)
+                async with store_lifecycle(self._store, issue.number, "implement"):
+                    self._state.mark_issue(issue.number, "in_progress")
+                    self._state.set_branch(issue.number, branch)
 
-                try:
-                    return await self._worker_inner(idx, issue, branch)
-                except Exception:
-                    logger.exception("Worker failed for issue #%d", issue.number)
-                    self._state.mark_issue(issue.number, "failed")
-                    self._record_harness_failure(
-                        issue.number,
-                        FailureCategory.IMPLEMENTATION_ERROR,
-                        f"Worker exception for issue #{issue.number}",
-                    )
-                    return WorkerResult(
-                        issue_number=issue.number,
-                        branch=branch,
-                        error=f"Worker exception for issue #{issue.number}",
-                    )
-                finally:
-                    self._active_issues.discard(issue.number)
-                    self._state.set_active_issue_numbers(list(self._active_issues))
-                    self._store.mark_complete(issue.number)
+                    try:
+                        return await self._worker_inner(idx, issue, branch)
+                    except Exception:
+                        logger.exception("Worker failed for issue #%d", issue.number)
+                        self._state.mark_issue(issue.number, "failed")
+                        self._record_harness_failure(
+                            issue.number,
+                            FailureCategory.IMPLEMENTATION_ERROR,
+                            f"Worker exception for issue #{issue.number}",
+                        )
+                        return WorkerResult(
+                            issue_number=issue.number,
+                            branch=branch,
+                            error=f"Worker exception for issue #{issue.number}",
+                        )
+                    finally:
+                        self._active_issues.discard(issue.number)
+                        self._state.set_active_issue_numbers(list(self._active_issues))
 
-        all_tasks = [
-            asyncio.create_task(_worker(i, issue)) for i, issue in enumerate(issues)
-        ]
-        try:
-            for task in asyncio.as_completed(all_tasks):
-                results.append(await task)
-                # Cancel remaining tasks if stop requested
-                if self._stop_event.is_set():
-                    for t in all_tasks:
-                        t.cancel()
-                    break
-        finally:
-            # Cancel any remaining tasks if this coroutine is cancelled externally
-            for t in all_tasks:
-                if not t.done():
-                    t.cancel()
-
-        return results, issues
+        all_results = await run_concurrent_batch(issues, _worker, self._stop_event)
+        return all_results, issues
 
     async def _worker_inner(
         self, idx: int, issue: GitHubIssue, branch: str
@@ -214,18 +197,19 @@ class ImplementPhase:
             f"Last error: {last_error}\n\n"
             f"Escalating to human review.",
         )
-        self._state.set_hitl_origin(issue.number, self._config.ready_label[0])
-        self._state.set_hitl_cause(
+        await escalate_to_hitl(
+            self._state,
+            self._prs,
             issue.number,
-            f"Implementation attempt cap exceeded after {attempts - 1} attempt(s)",
+            cause=f"Implementation attempt cap exceeded after {attempts - 1} attempt(s)",
+            origin_label=self._config.ready_label[0],
+            hitl_label=self._config.hitl_label[0],
         )
-        self._state.record_hitl_escalation()
         self._record_harness_failure(
             issue.number,
             FailureCategory.HITL_ESCALATION,
             f"Implementation attempt cap exceeded after {attempts - 1} attempt(s): {last_error}",
         )
-        await self._prs.swap_pipeline_labels(issue.number, self._config.hitl_label[0])
         self._state.mark_issue(issue.number, "failed")
         return WorkerResult(
             issue_number=issue.number,

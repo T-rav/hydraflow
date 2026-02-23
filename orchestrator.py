@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING, Any
 
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
-from memory import file_memory_suggestion
 from models import BackgroundWorkerState, Phase, SessionLog
+from phase_utils import safe_file_memory_suggestion
 from service_registry import OrchestratorCallbacks, build_services
 from state import StateTracker
 from subprocess_util import AuthenticationError, CreditExhaustedError
@@ -670,20 +670,14 @@ class HydraFlowOrchestrator:
         log_file: str,
     ) -> None:
         """Run memory-suggestion filing and transcript summarization for a completed run."""
-        try:
-            await file_memory_suggestion(
-                transcript,
-                source,
-                reference,
-                self._config,
-                self._prs,
-                self._state,
-            )
-        except Exception:
-            logger.exception(
-                "Failed to file memory suggestion for %s",
-                reference,
-            )
+        await safe_file_memory_suggestion(
+            transcript,
+            source,
+            reference,
+            self._config,
+            self._prs,
+            self._state,
+        )
         if issue_number > 0:
             try:
                 await self._summarizer.summarize_and_comment(
