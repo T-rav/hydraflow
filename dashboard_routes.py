@@ -518,6 +518,7 @@ def create_router(
         ("retrospective", "Retrospective"),
         ("metrics", "Metrics"),
         ("review_insights", "Review Insights"),
+        ("pipeline_poller", "Pipeline Poller"),
         ("pr_unsticker", "PR Unsticker"),
     ]
 
@@ -563,6 +564,8 @@ def create_router(
                     interval = config.metrics_sync_interval
                 elif name == "pr_unsticker":
                     interval = config.pr_unstick_interval
+                elif name == "pipeline_poller":
+                    interval = 5
             elif name in _PIPELINE_WORKERS:
                 interval = config.poll_interval
 

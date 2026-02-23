@@ -1369,6 +1369,78 @@ class TestBgWorkerIntervalEndpoint:
         assert response.status_code == 400
         assert data["error"] == "no orchestrator"
 
+    @pytest.mark.asyncio
+    async def test_interval_rejects_below_minimum_for_memory_sync(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        import json
+
+        mock_orch = MagicMock()
+        router = self._make_router(
+            config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
+        )
+        endpoint = self._find_endpoint(router, "/api/control/bg-worker/interval")
+        assert endpoint is not None
+
+        response = await endpoint({"name": "memory_sync", "interval_seconds": 5})
+        data = json.loads(response.body)
+        assert response.status_code == 422
+        assert "between 10 and 14400" in data["error"]
+
+    @pytest.mark.asyncio
+    async def test_interval_rejects_above_maximum_for_memory_sync(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        import json
+
+        mock_orch = MagicMock()
+        router = self._make_router(
+            config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
+        )
+        endpoint = self._find_endpoint(router, "/api/control/bg-worker/interval")
+        assert endpoint is not None
+
+        response = await endpoint({"name": "memory_sync", "interval_seconds": 20000})
+        data = json.loads(response.body)
+        assert response.status_code == 422
+        assert "between 10 and 14400" in data["error"]
+
+    @pytest.mark.asyncio
+    async def test_interval_rejects_below_minimum_for_metrics(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        import json
+
+        mock_orch = MagicMock()
+        router = self._make_router(
+            config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
+        )
+        endpoint = self._find_endpoint(router, "/api/control/bg-worker/interval")
+        assert endpoint is not None
+
+        response = await endpoint({"name": "metrics", "interval_seconds": 10})
+        data = json.loads(response.body)
+        assert response.status_code == 422
+        assert "between 30 and 14400" in data["error"]
+
+    @pytest.mark.asyncio
+    async def test_interval_rejects_above_maximum_for_metrics(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        import json
+
+        mock_orch = MagicMock()
+        router = self._make_router(
+            config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
+        )
+        endpoint = self._find_endpoint(router, "/api/control/bg-worker/interval")
+        assert endpoint is not None
+
+        response = await endpoint({"name": "metrics", "interval_seconds": 20000})
+        data = json.loads(response.body)
+        assert response.status_code == 422
+        assert "between 30 and 14400" in data["error"]
+
 
 # ---------------------------------------------------------------------------
 # /api/pipeline endpoint
