@@ -15,6 +15,7 @@ from pydantic import ValidationError
 
 from config import HydraFlowConfig, save_config_file
 from events import EventBus, EventType, HydraFlowEvent
+from metrics_manager import get_metrics_cache_dir
 from models import (
     BackgroundWorkersResponse,
     BackgroundWorkerStatus,
@@ -86,10 +87,7 @@ def create_router(
         limit: int = 100,
     ) -> list[MetricsSnapshot]:
         """Load metrics snapshots from local disk cache without requiring the orchestrator."""
-        repo_slug = config.repo.replace("/", "-") or "unknown"
-        cache_file = (
-            config.state_file.parent / "metrics" / repo_slug / "snapshots.jsonl"
-        )
+        cache_file = get_metrics_cache_dir(config) / "snapshots.jsonl"
         if not cache_file.exists():
             return []
         snapshots: list[MetricsSnapshot] = []

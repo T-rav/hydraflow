@@ -18,6 +18,16 @@ from state import StateTracker
 logger = logging.getLogger("hydraflow.metrics_manager")
 
 
+def get_metrics_cache_dir(config: HydraFlowConfig) -> Path:
+    """Return the local metrics cache directory for a given config.
+
+    Path: ``<state_dir>/metrics/{repo_slug}/`` where *repo_slug* is the repo
+    name with ``/`` replaced by ``-`` (e.g. ``owner/repo`` → ``owner-repo``).
+    """
+    repo_slug = config.repo.replace("/", "-") or "unknown"
+    return config.state_file.parent / "metrics" / repo_slug
+
+
 class MetricsManager:
     """Aggregates metrics into timestamped snapshots and persists to GitHub.
 
@@ -48,8 +58,7 @@ class MetricsManager:
     @property
     def _cache_dir(self) -> Path:
         """Return the local metrics cache directory for the current repo."""
-        repo_slug = self._config.repo.replace("/", "-") or "unknown"
-        return self._config.state_file.parent / "metrics" / repo_slug
+        return get_metrics_cache_dir(self._config)
 
     async def sync(self, queue_stats: QueueStats | None = None) -> MetricsSyncResult:
         """Aggregate, snapshot, and persist metrics. Returns status details."""
