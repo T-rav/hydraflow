@@ -1357,6 +1357,21 @@ class TestThresholdTracking:
         proposals = tracker.check_thresholds(0.5, 0.5, 0.2)
         assert proposals == []
 
+    def test_check_thresholds_all_three_crossed(self, tmp_path: Path) -> None:
+        """All three thresholds can fire simultaneously."""
+        tracker = make_tracker(tmp_path)
+        for _ in range(5):
+            tracker.record_issue_completed()
+        tracker.record_quality_fix_rounds(4)  # qf rate 0.8 > 0.5
+        for _ in range(4):
+            tracker.record_review_verdict("request-changes", fixes_made=False)
+        tracker.record_review_verdict("approve", fixes_made=False)  # approval 0.2 < 0.5
+        for _ in range(2):
+            tracker.record_hitl_escalation()  # hitl 0.4 > 0.2
+        proposals = tracker.check_thresholds(0.5, 0.5, 0.2)
+        names = {p["name"] for p in proposals}
+        assert names == {"quality_fix_rate", "approval_rate", "hitl_rate"}
+
     def test_check_thresholds_returns_correct_values(self, tmp_path: Path) -> None:
         tracker = make_tracker(tmp_path)
         for _ in range(10):
@@ -1714,7 +1729,7 @@ class TestGetSessionCorruptLines:
 
         assert result is not None
         assert result.id == "sess-2"
-        assert "Skipping corrupt line" in caplog.text
+        assert "Skipping corrupt session line" in caplog.text
 
     def test_corrupt_only_returns_none(self, tmp_path: Path) -> None:
         """A sessions file with only corrupt lines returns None."""
