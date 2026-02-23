@@ -1333,7 +1333,9 @@ class TestJudgeResult:
         assert len(failed) == 2
         assert {c.description for c in failed} == {"A", "C"}
 
-    def test_judge_result_defaults_to_empty_criteria_list(self) -> None:
+    def test_judge_result_defaults_to_empty_criteria_instructions_and_summary(
+        self,
+    ) -> None:
         judge = JudgeResult(issue_number=1, pr_number=2)
         assert judge.criteria == []
         assert judge.verification_instructions == ""

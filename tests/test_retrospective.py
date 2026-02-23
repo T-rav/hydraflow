@@ -159,7 +159,7 @@ class TestComputeAccuracy:
         assert unplanned == ["src/bar.py"]
         assert missed == ["src/foo.py"]
 
-    def test_empty_planned_list(self) -> None:
+    def test_empty_planned_list_treats_all_actual_as_unplanned(self) -> None:
         accuracy, unplanned, missed = RetrospectiveCollector._compute_accuracy(
             [],
             ["src/bar.py"],
@@ -168,7 +168,7 @@ class TestComputeAccuracy:
         assert unplanned == ["src/bar.py"]
         assert missed == []
 
-    def test_empty_actual_list(self) -> None:
+    def test_empty_actual_list_treats_all_planned_as_missed(self) -> None:
         accuracy, unplanned, missed = RetrospectiveCollector._compute_accuracy(
             ["src/foo.py"],
             [],
