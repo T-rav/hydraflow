@@ -217,7 +217,7 @@ function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssue
       {recentEvents.length > 0 && (
         <div style={styles.logStream} data-testid={`log-stream-${def.key}`}>
           {recentEvents.map((evt, i) => (
-            <div key={evt.timestamp || String(i)} style={styles.logLine} data-testid="log-line">
+            <div key={`${evt.timestamp || ''}-${i}`} style={styles.logLine} data-testid="log-line">
               <span style={styles.logTimestamp}>{formatLogTimestamp(evt.timestamp)}</span>
               <span style={styles.logStatus}>{evt.data?.status || ''}</span>
               <span style={styles.logMessage}>
@@ -473,7 +473,6 @@ const styles = {
     fontSize: 10,
     fontFamily: 'monospace',
     padding: '1px 0',
-    minWidth: 0,
   },
   logTimestamp: {
     color: theme.textMuted,
@@ -489,6 +488,8 @@ const styles = {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
+    flex: 1,
+    minWidth: 0,
   },
   detailRow: {
     display: 'flex',
