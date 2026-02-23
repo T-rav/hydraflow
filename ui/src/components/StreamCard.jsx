@@ -177,34 +177,36 @@ export function StreamCard({ issue, intent, defaultExpanded, onRequestChanges, t
           {isActive && transcript.length > 0 && (
             <TranscriptPreview transcript={transcript} />
           )}
-          <div style={styles.actions}>
-            {issue.pr?.url && (
-              <a
-                style={styles.actionBtn}
-                href={issue.pr.url}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                View PR
-              </a>
-            )}
-            {onRequestChanges && (
-              <span
-                style={submitting ? requestChangesBtnDisabled : styles.actionBtn}
-                onClick={() => {
-                  if (submitting) return
-                  if (showFeedback) {
-                    setFeedbackText('')
-                    setSubmitError(null)
-                  }
-                  setShowFeedback(v => !v)
-                }}
-                data-testid={`request-changes-btn-${issue.issueNumber}`}
-              >
-                Request Changes
-              </span>
-            )}
-          </div>
+          {(issue.pr?.url || onRequestChanges) && (
+            <div style={styles.actions}>
+              {issue.pr?.url && (
+                <a
+                  style={styles.actionBtn}
+                  href={issue.pr.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  View PR
+                </a>
+              )}
+              {onRequestChanges && (
+                <span
+                  style={submitting ? requestChangesBtnDisabled : styles.actionBtn}
+                  onClick={() => {
+                    if (submitting) return
+                    if (showFeedback) {
+                      setFeedbackText('')
+                      setSubmitError(null)
+                    }
+                    setShowFeedback(v => !v)
+                  }}
+                  data-testid={`request-changes-btn-${issue.issueNumber}`}
+                >
+                  Request Changes
+                </span>
+              )}
+            </div>
+          )}
           {showFeedback && (
             <div style={styles.feedbackPanel}>
               <textarea
