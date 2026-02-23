@@ -112,7 +112,6 @@ class AcceptanceCriteriaGenerator:
         return build_agent_command(
             tool=self._config.ac_tool,
             model=self._config.ac_model,
-            budget_usd=self._config.ac_budget_usd,
             disallowed_tools="Write,Edit,NotebookEdit",
         )
 

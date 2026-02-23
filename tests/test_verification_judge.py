@@ -147,20 +147,6 @@ class TestBuildCommand:
         assert "Edit" in cmd[idx + 1]
         assert "NotebookEdit" in cmd[idx + 1]
 
-    def test_includes_budget_when_nonzero(self, config):
-        judge = _make_judge(config)
-        cmd = judge._build_command()
-        assert "--max-budget-usd" in cmd
-
-    def test_omits_budget_when_zero(self, tmp_path):
-        cfg = ConfigFactory.create(
-            review_budget_usd=0,
-            repo_root=tmp_path / "repo",
-        )
-        judge = _make_judge(cfg)
-        cmd = judge._build_command()
-        assert "--max-budget-usd" not in cmd
-
     def test_includes_stream_json_output(self, config):
         judge = _make_judge(config)
         cmd = judge._build_command()

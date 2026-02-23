@@ -113,7 +113,6 @@ class BaseRunner:
         return build_agent_command(
             tool=self._config.implementation_tool,
             model=self._config.model,
-            budget_usd=self._config.max_budget_usd,
         )
 
     async def _verify_quality(self, worktree_path: Path) -> tuple[bool, str]:

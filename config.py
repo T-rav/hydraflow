@@ -118,9 +118,6 @@ class HydraFlowConfig(BaseModel):
     max_hitl_workers: int = Field(
         default=1, ge=1, le=5, description="Concurrent HITL correction agents"
     )
-    max_budget_usd: float = Field(
-        default=0, ge=0, description="USD cap per implementation agent (0 = unlimited)"
-    )
     implementation_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for implementation agents",
@@ -133,9 +130,6 @@ class HydraFlowConfig(BaseModel):
         description="CLI backend for review agents",
     )
     review_model: str = Field(default="sonnet", description="Model for review agents")
-    review_budget_usd: float = Field(
-        default=0, ge=0, description="USD cap per review agent (0 = unlimited)"
-    )
 
     # CI check configuration
     ci_check_timeout: int = Field(
@@ -251,9 +245,6 @@ class HydraFlowConfig(BaseModel):
     )
     triage_model: str = Field(
         default="haiku", description="Model for triage evaluation (fast/cheap)"
-    )
-    planner_budget_usd: float = Field(
-        default=0, ge=0, description="USD cap per planning agent (0 = unlimited)"
     )
     min_plan_words: int = Field(
         default=200,
@@ -532,9 +523,6 @@ class HydraFlowConfig(BaseModel):
     ac_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for acceptance criteria generation",
-    )
-    ac_budget_usd: float = Field(
-        default=0, ge=0, description="USD cap for AC generation agent (0 = unlimited)"
     )
     verification_judge_tool: Literal["claude", "codex"] = Field(
         default="claude",

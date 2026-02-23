@@ -20,11 +20,8 @@ WORKERS ?= 3
 MODEL ?= opus
 REVIEW_MODEL ?= sonnet
 BATCH_SIZE ?= 15
-BUDGET ?= 0
-REVIEW_BUDGET ?= 0
 PLANNER_LABEL ?= hydraflow-plan
 PLANNER_MODEL ?= opus
-PLANNER_BUDGET ?= 0
 REVIEWERS ?= 5
 HITL_WORKERS ?= 1
 PORT ?= 5555
@@ -77,11 +74,8 @@ help:
 	@echo "  MODEL            Implementation model (default: sonnet)"
 	@echo "  REVIEW_MODEL     Review model (default: opus)"
 	@echo "  BATCH_SIZE       Issues per batch (default: 15)"
-	@echo "  BUDGET           USD per impl agent (default: 0 = unlimited)"
-	@echo "  REVIEW_BUDGET    USD per review agent (default: 0 = unlimited)"
 	@echo "  PLANNER_LABEL    Planner issue label (default: hydraflow-plan)"
 	@echo "  PLANNER_MODEL    Planner model (default: opus)"
-	@echo "  PLANNER_BUDGET   USD per planner agent (default: 0 = unlimited)"
 	@echo "  HITL_WORKERS     Max concurrent HITL agents (default: 1)"
 	@echo "  PORT             Dashboard port (default: 5555)"
 	@echo "  LOG_DIR          Log directory (default: .hydraflow/logs)"
@@ -98,11 +92,8 @@ run:
 		--model $(MODEL) \
 		--review-model $(REVIEW_MODEL) \
 		--batch-size $(BATCH_SIZE) \
-		--max-budget-usd $(BUDGET) \
-		--review-budget-usd $(REVIEW_BUDGET) \
 		--planner-label $(PLANNER_LABEL) \
 		--planner-model $(PLANNER_MODEL) \
-		--planner-budget-usd $(PLANNER_BUDGET) \
 		--max-reviewers $(REVIEWERS) \
 		--max-hitl-workers $(HITL_WORKERS) \
 		--dashboard-port $(PORT) & \
@@ -303,7 +294,6 @@ hot:
 	@JSON='{"persist": true'; \
 	[ "$(origin WORKERS)" = "command line" ] && JSON="$$JSON, \"max_workers\": $(WORKERS)"; \
 	[ "$(origin MODEL)" = "command line" ] && JSON="$$JSON, \"model\": \"$(MODEL)\""; \
-	[ "$(origin BUDGET)" = "command line" ] && JSON="$$JSON, \"max_budget_usd\": $(BUDGET)"; \
 	[ "$(origin BATCH_SIZE)" = "command line" ] && JSON="$$JSON, \"batch_size\": $(BATCH_SIZE)"; \
 	[ "$(origin REVIEWERS)" = "command line" ] && JSON="$$JSON, \"max_reviewers\": $(REVIEWERS)"; \
 	[ "$(origin REVIEW_MODEL)" = "command line" ] && JSON="$$JSON, \"review_model\": \"$(REVIEW_MODEL)\""; \

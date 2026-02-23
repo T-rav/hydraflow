@@ -310,9 +310,6 @@ All configuration is via CLI flags or environment variables. Defaults are sensib
 | `--model` | -- | `sonnet` | Model for implementation agents |
 | `--planner-model` | -- | `opus` | Model for planning agents |
 | `--review-model` | -- | `opus` | Model for review agents |
-| `--max-budget-usd` | -- | `0` (unlimited) | USD cap per implementation agent |
-| `--planner-budget-usd` | -- | `0` (unlimited) | USD cap per planning agent |
-| `--review-budget-usd` | -- | `0` (unlimited) | USD cap per review agent |
 | `--ci-check-timeout` | -- | `600` | Seconds to wait for CI checks |
 | `--ci-poll-interval` | -- | `30` | Seconds between CI status polls |
 | `--max-ci-fix-attempts` | -- | `2` | Max CI fix-and-retry cycles (0 disables CI wait) |

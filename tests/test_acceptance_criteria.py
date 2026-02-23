@@ -507,24 +507,7 @@ class TestBuildCommand:
         cmd = gen._build_command()
         assert "--disallowedTools" in cmd
 
-    def test_includes_budget_when_budget_set(
-        self, config: HydraFlowConfig, event_bus, tmp_path: Path
-    ) -> None:
-        cfg = ConfigFactory.create(
-            ac_budget_usd=1.5,
-            repo_root=tmp_path / "repo",
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "state.json",
-        )
-        gen, _ = _make_generator(cfg, event_bus)
-        cmd = gen._build_command()
-        assert "--max-budget-usd" in cmd
-        cost_idx = cmd.index("--max-budget-usd")
-        assert cmd[cost_idx + 1] == "1.5"
-
-    def test_excludes_budget_when_budget_zero(
-        self, config: HydraFlowConfig, event_bus
-    ) -> None:
+    def test_excludes_budget_flag(self, config: HydraFlowConfig, event_bus) -> None:
         gen, _ = _make_generator(config, event_bus)
         cmd = gen._build_command()
         assert "--max-budget-usd" not in cmd
