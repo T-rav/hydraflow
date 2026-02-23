@@ -349,6 +349,14 @@ class RepoAuditor:
                     detail=f"{hook_dir_name}/pre-commit",
                 )
 
+        git_hook = self._root / ".git" / "hooks" / "pre-commit"
+        if git_hook.is_file():
+            return AuditCheck(
+                name="Git hooks",
+                status=AuditCheckStatus.PRESENT,
+                detail=".git/hooks/pre-commit",
+            )
+
         return AuditCheck(
             name="Git hooks",
             status=AuditCheckStatus.MISSING,
@@ -358,6 +366,28 @@ class RepoAuditor:
     def _check_linting(self) -> AuditCheck:
         """Check for linting configuration."""
         tools: list[str] = []
+
+        # Capability-based checks first (language-agnostic entry points).
+        makefile = self._root / "Makefile"
+        if makefile.is_file():
+            try:
+                content = makefile.read_text()
+                if re.search(r"^lint(-check)?\s*:", content, re.MULTILINE):
+                    tools.append("make lint target")
+            except OSError:
+                pass
+
+        package_json = self._root / "package.json"
+        if package_json.is_file():
+            try:
+                data = json.loads(package_json.read_text())
+                scripts = data.get("scripts", {})
+                if isinstance(scripts, dict) and any(
+                    key in scripts for key in ("lint", "lint:check")
+                ):
+                    tools.append("npm lint script")
+            except (OSError, json.JSONDecodeError):
+                pass
 
         if (self._root / "ruff.toml").is_file():
             tools.append("ruff")
@@ -374,11 +404,17 @@ class RepoAuditor:
             if (self._root / name).is_file():
                 tools.append("eslint")
                 break
+        if "eslint" not in tools:
+            for name in ("eslint.config.js", "eslint.config.cjs", "eslint.config.mjs"):
+                if (self._root / name).is_file():
+                    tools.append("eslint")
+                    break
 
         if (self._root / "biome.json").is_file():
             tools.append("biome")
 
         if tools:
+            tools = list(dict.fromkeys(tools))
             return AuditCheck(
                 name="Linting",
                 status=AuditCheckStatus.PRESENT,
