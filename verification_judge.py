@@ -351,7 +351,6 @@ REFINED_INSTRUCTIONS_END
         return build_agent_command(
             tool=self._config.verification_judge_tool,
             model=self._config.review_model,
-            budget_usd=self._config.review_budget_usd,
             disallowed_tools="Write,Edit,NotebookEdit",
         )
 

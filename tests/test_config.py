@@ -362,14 +362,6 @@ class TestHydraFlowConfigDefaults:
         )
         assert cfg.hitl_active_label == ["hydraflow-hitl-active"]
 
-    def test_max_budget_usd_default(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.max_budget_usd == pytest.approx(0)
-
     def test_model_default(self, tmp_path: Path) -> None:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
@@ -385,14 +377,6 @@ class TestHydraFlowConfigDefaults:
             state_file=tmp_path / "s.json",
         )
         assert cfg.review_model == "sonnet"
-
-    def test_review_budget_usd_default(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.review_budget_usd == pytest.approx(0)
 
     def test_main_branch_default(self, tmp_path: Path) -> None:
         cfg = HydraFlowConfig(
@@ -474,15 +458,6 @@ class TestHydraFlowConfigCustomValues:
         )
         assert cfg.max_workers == 3
 
-    def test_custom_max_budget_usd(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            max_budget_usd=20.0,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.max_budget_usd == pytest.approx(20.0)
-
     def test_custom_model(self, tmp_path: Path) -> None:
         cfg = HydraFlowConfig(
             model="haiku",
@@ -500,15 +475,6 @@ class TestHydraFlowConfigCustomValues:
             state_file=tmp_path / "s.json",
         )
         assert cfg.review_model == "sonnet"
-
-    def test_custom_review_budget_usd(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            review_budget_usd=10.0,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.review_budget_usd == pytest.approx(10.0)
 
     def test_custom_main_branch(self, tmp_path: Path) -> None:
         cfg = HydraFlowConfig(
@@ -900,55 +866,6 @@ class TestHydraFlowConfigValidationConstraints:
                 worktree_base=tmp_path / "wt",
                 state_file=tmp_path / "s.json",
             )
-
-    # max_budget_usd: gt=0
-
-    def test_max_budget_usd_positive_value_accepted(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            max_budget_usd=0.01,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.max_budget_usd == pytest.approx(0.01)
-
-    def test_max_budget_usd_zero_is_unlimited(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            max_budget_usd=0.0,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.max_budget_usd == pytest.approx(0)
-
-    def test_max_budget_usd_negative_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError):
-            HydraFlowConfig(
-                max_budget_usd=-1.0,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    # review_budget_usd: gt=0
-
-    def test_review_budget_usd_positive_value_accepted(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            review_budget_usd=0.50,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.review_budget_usd == pytest.approx(0.50)
-
-    def test_review_budget_usd_zero_is_unlimited(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            review_budget_usd=0.0,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.review_budget_usd == pytest.approx(0)
 
     # dashboard_port: ge=1024, le=65535
 

@@ -94,32 +94,6 @@ class TestBuildCommand:
         model_index = cmd.index("--model")
         assert cmd[model_index + 1] == config.model
 
-    def test_build_command_includes_max_budget(
-        self, config, event_bus: EventBus, tmp_path: Path
-    ) -> None:
-        """Command should include --max-budget-usd matching config.max_budget_usd."""
-        runner = AgentRunner(config, event_bus)
-        cmd = runner._build_command(tmp_path)
-        assert "--max-budget-usd" in cmd
-        budget_index = cmd.index("--max-budget-usd")
-        assert cmd[budget_index + 1] == str(config.max_budget_usd)
-
-    def test_build_command_omits_budget_when_zero(
-        self, event_bus: EventBus, tmp_path: Path
-    ) -> None:
-        """Command should omit --max-budget-usd when budget is 0 (unlimited)."""
-        from tests.conftest import ConfigFactory
-
-        cfg = ConfigFactory.create(
-            max_budget_usd=0,
-            repo_root=tmp_path / "repo",
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        runner = AgentRunner(cfg, event_bus)
-        cmd = runner._build_command(tmp_path)
-        assert "--max-budget-usd" not in cmd
-
     def test_build_command_includes_output_format_text(
         self, config, event_bus: EventBus, tmp_path: Path
     ) -> None:

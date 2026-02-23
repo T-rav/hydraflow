@@ -49,35 +49,6 @@ def _make_runner(config, event_bus):
 # ---------------------------------------------------------------------------
 
 
-def test_build_command_uses_review_model_and_budget(config, tmp_path):
-    runner = _make_runner(config, None)
-    cmd = runner._build_command(tmp_path)
-
-    assert "claude" in cmd
-    assert "-p" in cmd
-    assert "--model" in cmd
-    model_idx = cmd.index("--model")
-    assert cmd[model_idx + 1] == config.review_model
-
-    assert "--max-budget-usd" in cmd
-    budget_idx = cmd.index("--max-budget-usd")
-    assert cmd[budget_idx + 1] == str(config.review_budget_usd)
-
-
-def test_build_command_omits_budget_when_zero(tmp_path):
-    from tests.conftest import ConfigFactory
-
-    cfg = ConfigFactory.create(
-        review_budget_usd=0,
-        repo_root=tmp_path / "repo",
-        worktree_base=tmp_path / "wt",
-        state_file=tmp_path / "s.json",
-    )
-    runner = _make_runner(cfg, None)
-    cmd = runner._build_command(tmp_path)
-    assert "--max-budget-usd" not in cmd
-
-
 def test_build_command_does_not_include_cwd(config, tmp_path):
     runner = _make_runner(config, None)
     cmd = runner._build_command(tmp_path)

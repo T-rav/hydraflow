@@ -423,7 +423,6 @@ SUMMARY: <one-line summary>
         return build_agent_command(
             tool=self._config.review_tool,
             model=self._config.review_model,
-            budget_usd=self._config.review_budget_usd,
         )
 
     @staticmethod

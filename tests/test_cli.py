@@ -50,12 +50,10 @@ class TestParseArgs:
             "max_planners",
             "max_reviewers",
             "max_hitl_workers",
-            "max_budget_usd",
             "model",
             "implementation_tool",
             "review_model",
             "review_tool",
-            "review_budget_usd",
             "ci_check_timeout",
             "ci_poll_interval",
             "max_ci_fix_attempts",
@@ -70,7 +68,6 @@ class TestParseArgs:
             "triage_tool",
             "planner_model",
             "planner_tool",
-            "planner_budget_usd",
             "repo",
             "main_branch",
             "ac_tool",
@@ -104,8 +101,8 @@ class TestParseArgs:
         assert args.batch_size == 10
 
     def test_explicit_float_arg_preserved(self) -> None:
-        args = parse_args(["--max-budget-usd", "5.5"])
-        assert args.max_budget_usd == pytest.approx(5.5)
+        args = parse_args(["--docker-cpu-limit", "5.5"])
+        assert args.docker_cpu_limit == pytest.approx(5.5)
 
     def test_explicit_string_arg_preserved(self) -> None:
         args = parse_args(["--model", "haiku"])
@@ -129,12 +126,10 @@ _CLI_DEFAULT_EXPECTATIONS: list[tuple[str, object]] = [
     ("max_reviewers", 5),
     ("max_hitl_workers", 1),
     ("hitl_active_label", ["hydraflow-hitl-active"]),
-    ("max_budget_usd", pytest.approx(0)),
     ("implementation_tool", "claude"),
     ("model", "opus"),
     ("review_tool", "claude"),
     ("review_model", "sonnet"),
-    ("review_budget_usd", pytest.approx(0)),
     ("ci_check_timeout", 600),
     ("ci_poll_interval", 30),
     ("max_ci_fix_attempts", 2),
@@ -148,7 +143,6 @@ _CLI_DEFAULT_EXPECTATIONS: list[tuple[str, object]] = [
     ("triage_tool", "claude"),
     ("planner_tool", "claude"),
     ("planner_model", "opus"),
-    ("planner_budget_usd", pytest.approx(0)),
     ("ac_tool", "claude"),
     ("verification_judge_tool", "claude"),
     ("main_branch", "main"),
@@ -331,22 +325,6 @@ class TestBuildConfig:
         args = parse_args(["--dashboard-port", "8080"])
         cfg = build_config(args)
         assert cfg.dashboard_port == 8080
-
-    def test_budget_fields_passed_through(self) -> None:
-        args = parse_args(
-            [
-                "--max-budget-usd",
-                "10.5",
-                "--review-budget-usd",
-                "5.0",
-                "--planner-budget-usd",
-                "3.0",
-            ]
-        )
-        cfg = build_config(args)
-        assert cfg.max_budget_usd == pytest.approx(10.5)
-        assert cfg.review_budget_usd == pytest.approx(5.0)
-        assert cfg.planner_budget_usd == pytest.approx(3.0)
 
     def test_min_plan_words_passed_through(self) -> None:
         args = parse_args(["--min-plan-words", "300"])

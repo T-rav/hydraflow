@@ -226,7 +226,6 @@ class PlannerRunner(BaseRunner):
         return build_agent_command(
             tool=self._config.planner_tool,
             model=self._config.planner_model,
-            budget_usd=self._config.planner_budget_usd,
             disallowed_tools="Write,Edit,NotebookEdit",
         )
 

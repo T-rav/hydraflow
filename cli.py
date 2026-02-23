@@ -57,12 +57,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Max concurrent HITL correction agents (default: 1)",
     )
     parser.add_argument(
-        "--max-budget-usd",
-        type=float,
-        default=None,
-        help="USD budget cap per implementation agent (0 = unlimited, default: 0)",
-    )
-    parser.add_argument(
         "--model",
         default=None,
         help="Model for implementation agents (default: opus)",
@@ -83,12 +77,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         choices=["claude", "codex"],
         help="CLI backend for review agents (default: claude)",
-    )
-    parser.add_argument(
-        "--review-budget-usd",
-        type=float,
-        default=None,
-        help="USD budget cap per review agent (0 = unlimited, default: 0)",
     )
     parser.add_argument(
         "--ci-check-timeout",
@@ -216,12 +204,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         choices=["claude", "codex"],
         help="CLI backend for triage agents (default: claude)",
-    )
-    parser.add_argument(
-        "--planner-budget-usd",
-        type=float,
-        default=None,
-        help="USD budget cap per planning agent (0 = unlimited, default: 0)",
     )
     parser.add_argument(
         "--min-plan-words",
@@ -433,12 +415,10 @@ def build_config(args: argparse.Namespace) -> HydraFlowConfig:
         "max_planners",
         "max_reviewers",
         "max_hitl_workers",
-        "max_budget_usd",
         "model",
         "implementation_tool",
         "review_model",
         "review_tool",
-        "review_budget_usd",
         "ci_check_timeout",
         "ci_poll_interval",
         "max_ci_fix_attempts",
@@ -450,7 +430,6 @@ def build_config(args: argparse.Namespace) -> HydraFlowConfig:
         "triage_tool",
         "planner_model",
         "planner_tool",
-        "planner_budget_usd",
         "min_plan_words",
         "test_command",
         "repo",
