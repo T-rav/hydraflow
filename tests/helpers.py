@@ -32,9 +32,18 @@ def make_proc(
 ) -> AsyncMock:
     """Build a minimal mock subprocess object (communicate style).
 
-    Unlike ``make_streaming_proc`` (which provides an async-iterable stdout for
-    line-by-line streaming), this helper returns a simple process mock whose
-    ``communicate()`` resolves to ``(stdout, stderr)`` bytes.
+    Unlike ``make_streaming_proc`` (which returns a callable factory mock that
+    can be passed directly to ``patch("asyncio.create_subprocess_exec", ...)``),
+    this helper returns the **raw process mock**.  Callers must wrap it when
+    patching::
+
+        proc = make_proc(returncode=0, stdout=b"output")
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)):
+            ...
+
+    The process mock's ``communicate()`` resolves to ``(stdout, stderr)`` bytes,
+    suitable for code paths that call ``await proc.communicate()`` rather than
+    iterating ``proc.stdout`` line by line.
     """
     proc = AsyncMock()
     proc.returncode = returncode
