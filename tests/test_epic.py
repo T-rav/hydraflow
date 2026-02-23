@@ -8,6 +8,7 @@ import pytest
 
 from epic import EpicCompletionChecker, check_all_checkboxes, parse_epic_sub_issues
 from models import GitHubIssue
+from tests.conftest import IssueFactory
 from tests.helpers import ConfigFactory
 
 # ---------------------------------------------------------------------------
@@ -83,12 +84,6 @@ class TestCheckAllCheckboxes:
 # ---------------------------------------------------------------------------
 
 
-def _make_issue(number: int, labels: list[str], body: str = "") -> GitHubIssue:
-    return GitHubIssue(
-        number=number, title=f"Issue #{number}", body=body, labels=labels
-    )
-
-
 def _make_epic(number: int, sub_issues: list[int]) -> GitHubIssue:
     lines = [f"- [ ] #{n} — Sub-issue {n}" for n in sub_issues]
     body = "## Epic\n\n" + "\n".join(lines)
@@ -121,9 +116,15 @@ class TestEpicCompletionChecker:
     async def test_closes_epic_when_all_sub_issues_completed(self) -> None:
         epic = _make_epic(100, [1, 2, 3])
         sub_issues = {
-            1: _make_issue(1, ["hydraflow-fixed"]),
-            2: _make_issue(2, ["hydraflow-fixed"]),
-            3: _make_issue(3, ["hydraflow-fixed"]),
+            1: IssueFactory.create(
+                number=1, labels=["hydraflow-fixed"], title="Issue #1"
+            ),
+            2: IssueFactory.create(
+                number=2, labels=["hydraflow-fixed"], title="Issue #2"
+            ),
+            3: IssueFactory.create(
+                number=3, labels=["hydraflow-fixed"], title="Issue #3"
+            ),
         }
         checker, prs, _ = _make_checker(epics=[epic], sub_issues=sub_issues)
 
@@ -138,9 +139,15 @@ class TestEpicCompletionChecker:
     async def test_skips_epic_when_some_sub_issues_incomplete(self) -> None:
         epic = _make_epic(100, [1, 2, 3])
         sub_issues = {
-            1: _make_issue(1, ["hydraflow-fixed"]),
-            2: _make_issue(2, []),  # Not completed
-            3: _make_issue(3, ["hydraflow-fixed"]),
+            1: IssueFactory.create(
+                number=1, labels=["hydraflow-fixed"], title="Issue #1"
+            ),
+            2: IssueFactory.create(
+                number=2, labels=[], title="Issue #2"
+            ),  # Not completed
+            3: IssueFactory.create(
+                number=3, labels=["hydraflow-fixed"], title="Issue #3"
+            ),
         }
         checker, prs, _ = _make_checker(epics=[epic], sub_issues=sub_issues)
 
@@ -201,8 +208,12 @@ class TestEpicCompletionChecker:
     async def test_updates_epic_body_checkboxes(self) -> None:
         epic = _make_epic(100, [1, 2])
         sub_issues = {
-            1: _make_issue(1, ["hydraflow-fixed"]),
-            2: _make_issue(2, ["hydraflow-fixed"]),
+            1: IssueFactory.create(
+                number=1, labels=["hydraflow-fixed"], title="Issue #1"
+            ),
+            2: IssueFactory.create(
+                number=2, labels=["hydraflow-fixed"], title="Issue #2"
+            ),
         }
         checker, prs, _ = _make_checker(epics=[epic], sub_issues=sub_issues)
 
@@ -216,7 +227,11 @@ class TestEpicCompletionChecker:
     @pytest.mark.asyncio
     async def test_posts_closing_comment(self) -> None:
         epic = _make_epic(100, [1])
-        sub_issues = {1: _make_issue(1, ["hydraflow-fixed"])}
+        sub_issues = {
+            1: IssueFactory.create(
+                number=1, labels=["hydraflow-fixed"], title="Issue #1"
+            )
+        }
         checker, prs, _ = _make_checker(epics=[epic], sub_issues=sub_issues)
 
         await checker.check_and_close_epics(1)
@@ -228,7 +243,9 @@ class TestEpicCompletionChecker:
     async def test_skips_when_sub_issue_not_found(self) -> None:
         epic = _make_epic(100, [1, 2])
         sub_issues = {
-            1: _make_issue(1, ["hydraflow-fixed"]),
+            1: IssueFactory.create(
+                number=1, labels=["hydraflow-fixed"], title="Issue #1"
+            ),
             # Issue 2 not found (returns None)
         }
         checker, prs, _ = _make_checker(epics=[epic], sub_issues=sub_issues)
@@ -252,7 +269,11 @@ class TestEpicCompletionChecker:
     async def test_does_not_close_when_fixed_label_not_configured(self) -> None:
         """With fixed_label=[], no sub-issue can be confirmed complete — epic stays open."""
         epic = _make_epic(100, [1])
-        sub_issues = {1: _make_issue(1, ["hydraflow-fixed"])}
+        sub_issues = {
+            1: IssueFactory.create(
+                number=1, labels=["hydraflow-fixed"], title="Issue #1"
+            )
+        }
         config = ConfigFactory.create(epic_label=["hydraflow-epic"], fixed_label=[])
         prs = AsyncMock()
         fetcher = AsyncMock()
@@ -269,9 +290,13 @@ class TestEpicCompletionChecker:
         epic_a = _make_epic(100, [1, 2])
         epic_b = _make_epic(200, [1, 3])
         sub_issues = {
-            1: _make_issue(1, ["hydraflow-fixed"]),
-            2: _make_issue(2, ["hydraflow-fixed"]),
-            3: _make_issue(3, []),  # Not done
+            1: IssueFactory.create(
+                number=1, labels=["hydraflow-fixed"], title="Issue #1"
+            ),
+            2: IssueFactory.create(
+                number=2, labels=["hydraflow-fixed"], title="Issue #2"
+            ),
+            3: IssueFactory.create(number=3, labels=[], title="Issue #3"),  # Not done
         }
         checker, prs, _ = _make_checker(epics=[epic_a, epic_b], sub_issues=sub_issues)
 

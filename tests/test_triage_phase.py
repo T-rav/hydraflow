@@ -15,8 +15,8 @@ from typing import TYPE_CHECKING
 
 from events import EventBus
 from issue_store import IssueStore
-from models import GitHubIssue
 from state import StateTracker
+from tests.conftest import IssueFactory
 from triage_phase import TriagePhase
 
 if TYPE_CHECKING:
@@ -25,19 +25,6 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def make_issue(
-    number: int = 42, title: str = "Fix bug", body: str = "Details"
-) -> GitHubIssue:
-    return GitHubIssue(
-        number=number,
-        title=title,
-        body=body,
-        labels=["ready"],
-        comments=[],
-        url=f"https://github.com/test-org/test-repo/issues/{number}",
-    )
 
 
 def _make_phase(
@@ -77,7 +64,9 @@ class TestTriagePhase:
         from models import TriageResult
 
         phase, _state, triage, prs, store, _stop = _make_phase(config)
-        issue = make_issue(1, title="Implement feature X", body="A" * 100)
+        issue = IssueFactory.create(
+            number=1, title="Implement feature X", body="A" * 100
+        )
 
         triage.evaluate = AsyncMock(
             return_value=TriageResult(issue_number=1, ready=True)
@@ -97,7 +86,7 @@ class TestTriagePhase:
         from models import TriageResult
 
         phase, _state, triage, prs, store, _stop = _make_phase(config)
-        issue = make_issue(2, title="Fix the bug please", body="")
+        issue = IssueFactory.create(number=2, title="Fix the bug please", body="")
 
         triage.evaluate = AsyncMock(
             return_value=TriageResult(
@@ -124,7 +113,7 @@ class TestTriagePhase:
         from models import TriageResult
 
         phase, state, triage, _prs, store, _stop = _make_phase(config)
-        issue = make_issue(2, title="Fix the bug please", body="")
+        issue = IssueFactory.create(number=2, title="Fix the bug please", body="")
 
         triage.evaluate = AsyncMock(
             return_value=TriageResult(
@@ -147,7 +136,7 @@ class TestTriagePhase:
         from models import TriageResult
 
         phase, state, triage, _prs, store, _stop = _make_phase(config)
-        issue = make_issue(2, title="Fix the bug please", body="")
+        issue = IssueFactory.create(number=2, title="Fix the bug please", body="")
 
         triage.evaluate = AsyncMock(
             return_value=TriageResult(
@@ -181,8 +170,12 @@ class TestTriagePhase:
 
         phase, _state, triage, prs, store, _stop = _make_phase(config)
         issues = [
-            make_issue(1, title="Issue one long enough", body="A" * 100),
-            make_issue(2, title="Issue two long enough", body="B" * 100),
+            IssueFactory.create(
+                number=1, title="Issue one long enough", body="A" * 100
+            ),
+            IssueFactory.create(
+                number=2, title="Issue two long enough", body="B" * 100
+            ),
         ]
 
         call_count = 0
@@ -221,7 +214,7 @@ class TestTriagePhase:
         from models import TriageResult
 
         phase, _state, triage, prs, store, _stop = _make_phase(config)
-        issue = make_issue(1, title="Triage test", body="A" * 100)
+        issue = IssueFactory.create(number=1, title="Triage test", body="A" * 100)
 
         was_active_during_evaluate = False
 
