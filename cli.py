@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import re
 import shutil
 import signal
@@ -15,6 +16,33 @@ from typing import Any
 from config import HydraFlowConfig, load_config_file
 from log import setup_logging
 from orchestrator import HydraFlowOrchestrator
+
+
+def _supports_color_output() -> bool:
+    """Return True when ANSI color output should be emitted."""
+    if os.environ.get("NO_COLOR") is not None:
+        return False
+    return sys.stdout.isatty() and os.environ.get("TERM", "").lower() != "dumb"
+
+
+def _prep_stage_line(stage: str, detail: str, status: str, color: bool) -> str:
+    """Format a concise prep stage status line."""
+    colors = {
+        "start": "\033[36m",
+        "ok": "\033[32m",
+        "warn": "\033[33m",
+        "fail": "\033[31m",
+    }
+    glyphs = {
+        "start": "\u25b6",
+        "ok": "\u2713",
+        "warn": "!",
+        "fail": "\u2717",
+    }
+    reset = "\033[0m" if color else ""
+    tint = colors.get(status, "") if color else ""
+    glyph = glyphs.get(status, ">")
+    return f"{tint}[prep:{stage}] {glyph} {detail}{reset}"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -520,11 +548,31 @@ async def _run_prep(config: HydraFlowConfig) -> bool:
     Returns ``True`` if all labels were created/updated successfully,
     ``False`` if any labels failed.
     """
-    from prep import ensure_labels  # noqa: PLC0415
+    from prep import RepoAuditor, ensure_labels  # noqa: PLC0415
 
+    use_color = _supports_color_output()
+    print(_prep_stage_line("labels", "syncing lifecycle labels", "start", use_color))  # noqa: T201
     result = await ensure_labels(config)
     summary = result.summary()
     print(f"[dry-run] {summary}" if config.dry_run else summary)  # noqa: T201
+    if result.failed:
+        print(
+            _prep_stage_line(
+                "labels", "label sync completed with failures", "fail", use_color
+            )
+        )  # noqa: T201
+    else:
+        print(_prep_stage_line("labels", "label sync complete", "ok", use_color))  # noqa: T201
+
+    print(
+        _prep_stage_line("audit", "running repository prep audit", "start", use_color)
+    )  # noqa: T201
+    audit = await RepoAuditor(config).run_audit()
+    print(audit.format_report(color=use_color))  # noqa: T201
+    if audit.missing_checks:
+        print(_prep_stage_line("audit", "gaps detected", "warn", use_color))  # noqa: T201
+    else:
+        print(_prep_stage_line("audit", "all checks passing", "ok", use_color))  # noqa: T201
     return not result.failed
 
 
@@ -534,7 +582,7 @@ async def _run_audit(config: HydraFlowConfig) -> bool:
 
     auditor = RepoAuditor(config)
     result = await auditor.run_audit()
-    print(result.format_report())  # noqa: T201
+    print(result.format_report(color=_supports_color_output()))  # noqa: T201
     return result.has_critical_gaps
 
 
@@ -776,7 +824,7 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
             run_log_lines.append(f"  - `{issue.path.name}`: {issue.title}")
 
     audit = await RepoAuditor(config).run_audit()
-    print(audit.format_report())  # noqa: T201
+    print(audit.format_report(color=_supports_color_output()))  # noqa: T201
     run_log_lines.append("- Audit completed")
 
     makefile_result = scaffold_makefile(config.repo_root, dry_run=config.dry_run)
