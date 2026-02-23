@@ -10,6 +10,7 @@ import re
 import shutil
 import signal
 import sys
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -89,15 +90,44 @@ async def _await_with_prep_heartbeat(
                         print(f"  {line}")  # noqa: T201
 
 
-def _make_prep_output_tracker() -> tuple[
-    Callable[[str], bool], Callable[[], list[str]]
-]:
+def _make_prep_output_tracker(
+    *,
+    stream_label: str,
+    color: bool,
+    min_emit_interval_seconds: float = 1.5,
+) -> tuple[Callable[[str], bool], Callable[[], list[str]]]:
     """Return (on_output callback, tail getter) for rolling prep task output."""
-    state: dict[str, list[str]] = {"tail": []}
+    state: dict[str, Any] = {
+        "tail": [],
+        "last_emitted_tail": "",
+        "last_emit_at": 0.0,
+    }
 
     def on_output(accumulated_text: str) -> bool:
         lines = [ln for ln in accumulated_text.splitlines() if ln.strip()]
-        state["tail"] = lines[-3:]
+        tail = lines[-3:]
+        state["tail"] = tail
+        if not tail:
+            return False
+
+        tail_text = "\n".join(tail)
+        now = time.monotonic()
+        if (
+            tail_text != state["last_emitted_tail"]
+            and now - state["last_emit_at"] >= min_emit_interval_seconds
+        ):
+            print(  # noqa: T201
+                _prep_stage_line(
+                    "hardening",
+                    f"{stream_label}: live output (rolling 3 lines)",
+                    "start",
+                    color,
+                )
+            )
+            for line in tail:
+                print(f"  {line}")  # noqa: T201
+            state["last_emitted_tail"] = tail_text
+            state["last_emit_at"] = now
         return False
 
     def get_tail() -> list[str]:
@@ -1034,7 +1064,10 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
                 use_color,
             )
         )
-        workflow_on_output, workflow_tail = _make_prep_output_tracker()
+        workflow_on_output, workflow_tail = _make_prep_output_tracker(
+            stream_label=f"attempt {attempt}/{max_attempts}: prep workflow agent",
+            color=use_color,
+        )
         agent_ok, transcript = await _await_with_prep_heartbeat(
             _run_prep_agent_workflow(
                 tool=selected_tool,
@@ -1142,7 +1175,10 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
                     use_color,
                 )
             )
-            correction_on_output, correction_tail = _make_prep_output_tracker()
+            correction_on_output, correction_tail = _make_prep_output_tracker(
+                stream_label=f"attempt {attempt}/{max_attempts}: correction agent",
+                color=use_color,
+            )
             agent_ok = await _await_with_prep_heartbeat(
                 _run_prep_agent_correction(
                     config=config,
