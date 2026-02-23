@@ -420,7 +420,7 @@ async def file_harness_suggestions(
         if issue_num:
             state.set_hitl_origin(issue_num, improve_label[0])
             state.set_hitl_cause(issue_num, f"Harness pattern detected: {desc}")
-        store.mark_pattern_proposed(key)
-        filed += 1
+            store.mark_pattern_proposed(key)
+            filed += 1
 
     return filed

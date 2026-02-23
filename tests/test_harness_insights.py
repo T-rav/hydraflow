@@ -636,6 +636,36 @@ class TestFileHarnessSuggestions:
         assert filed == 0
         mock_prs.create_issue.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_create_issue_failure_does_not_mark_proposed(
+        self, tmp_path: Path
+    ) -> None:
+        """If create_issue returns None, the pattern must not be marked proposed."""
+        store = HarnessInsightStore(tmp_path / "memory")
+        mock_prs = AsyncMock()
+        mock_prs.create_issue = AsyncMock(return_value=None)
+        state = StateTracker(tmp_path / "state.json")
+
+        suggestion = ImprovementSuggestion(
+            category=FailureCategory.QUALITY_GATE,
+            occurrence_count=5,
+            window_size=20,
+            description="Quality gate failure",
+            suggestion="Improve lint checks",
+        )
+
+        filed = await file_harness_suggestions(
+            [suggestion],
+            store,
+            mock_prs,
+            state,
+            improve_label=["hydraflow-improve"],
+            hitl_label=["hydraflow-hitl"],
+        )
+
+        assert filed == 0
+        assert store.get_proposed_patterns() == set()
+
 
 # ---------------------------------------------------------------------------
 # Config integration

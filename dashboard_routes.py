@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import Counter
 from collections.abc import Callable
 from datetime import UTC
 from pathlib import Path
@@ -775,8 +776,6 @@ def create_router(
         )
 
         # Build category summary
-        from collections import Counter
-
         cat_counts: Counter[str] = Counter(r.category for r in records)
         sub_counts: Counter[str] = Counter()
         for r in records:
