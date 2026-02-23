@@ -240,6 +240,7 @@ or
             event_bus=self._bus,
             event_data={"issue": issue.number, "source": "triage"},
             logger=logger,
+            timeout=self._config.agent_timeout,
             runner=self._runner,
         )
 

@@ -660,6 +660,7 @@ Diff excerpt:
             event_bus=self._bus,
             event_data={"issue": issue_number, "source": "verification_judge"},
             logger=logger,
+            timeout=self._config.agent_timeout,
             runner=self._runner,
         )
 

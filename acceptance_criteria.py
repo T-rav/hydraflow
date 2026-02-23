@@ -92,6 +92,7 @@ class AcceptanceCriteriaGenerator:
                 "source": "ac_generator",
             },
             logger=logger,
+            timeout=self._config.agent_timeout,
             runner=self._runner,
         )
 
@@ -270,6 +271,7 @@ Diff summary:
                         "source": "ac_precheck",
                     },
                     logger=logger,
+                    timeout=self._config.agent_timeout,
                     runner=self._runner,
                 )
                 risk, confidence, _escalate, summary, parse_failed = (
@@ -311,6 +313,7 @@ Diff summary:
                     "source": "ac_precheck_debug",
                 },
                 logger=logger,
+                timeout=self._config.agent_timeout,
                 runner=self._runner,
             )
             context.append("Debug precheck transcript:")

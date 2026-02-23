@@ -65,6 +65,7 @@ class BaseRunner:
             event_data=event_data,
             logger=self._log,
             on_output=on_output,
+            timeout=self._config.agent_timeout,
             runner=self._runner,
         )
 
