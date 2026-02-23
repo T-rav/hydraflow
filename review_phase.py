@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from acceptance_criteria import AcceptanceCriteriaGenerator
 from agent import AgentRunner
@@ -18,6 +20,7 @@ from issue_store import IssueStore
 from merge_conflict_resolver import MergeConflictResolver
 from models import (
     GitHubIssue,
+    JudgeResult,
     PRInfo,
     ReviewResult,
     ReviewVerdict,
@@ -776,31 +779,31 @@ class ReviewPhase:
 
     # Delegate properties for backward compatibility in tests
     @property
-    def _resolve_merge_conflicts(self):  # noqa: ANN202
+    def _resolve_merge_conflicts(self) -> Callable[..., Coroutine[Any, Any, bool]]:
         """Backward-compatible access to conflict resolver."""
         return self._conflict_resolver.resolve_merge_conflicts
 
     @property
-    def _get_judge_result(self):  # noqa: ANN202
+    def _get_judge_result(self) -> Callable[..., JudgeResult | None]:
         """Backward-compatible access to judge result helper."""
         return self._post_merge._get_judge_result
 
     @property
-    def _create_verification_issue(self):  # noqa: ANN202
+    def _create_verification_issue(self) -> Callable[..., Coroutine[Any, Any, int]]:
         """Backward-compatible access to verification issue creation."""
         return self._post_merge._create_verification_issue
 
     @property
-    def _run_post_merge_hooks(self):  # noqa: ANN202
+    def _run_post_merge_hooks(self) -> Callable[..., Coroutine[Any, Any, None]]:
         """Backward-compatible access to post-merge hooks."""
         return self._post_merge._run_post_merge_hooks
 
     @property
-    def _save_conflict_transcript(self):  # noqa: ANN202
+    def _save_conflict_transcript(self) -> Callable[..., None]:
         """Backward-compatible access to conflict transcript saving."""
         return self._conflict_resolver._save_conflict_transcript
 
     @property
-    def _maybe_summarize_conflict(self):  # noqa: ANN202
+    def _maybe_summarize_conflict(self) -> Callable[..., Coroutine[Any, Any, None]]:
         """Backward-compatible access to conflict summary."""
         return self._conflict_resolver._maybe_summarize_conflict
