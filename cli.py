@@ -104,6 +104,7 @@ def _make_prep_output_tracker(
         "last_emitted_tail": "",
         "last_emit_at": 0.0,
         "rendered_lines": 0,
+        "header_printed": False,
         "start_time": time.monotonic(),
         "written_line_count": 0,
     }
@@ -164,7 +165,10 @@ def _make_prep_output_tracker(
                 sys.stdout.flush()
                 state["rendered_lines"] = len(lines_to_render)
             else:
-                for line in lines_to_render:
+                if not state["header_printed"]:
+                    print(lines_to_render[0])  # noqa: T201
+                    state["header_printed"] = True
+                for line in lines_to_render[1:]:
                     print(line)  # noqa: T201
             state["last_emitted_tail"] = tail_text
             state["last_emit_at"] = now
