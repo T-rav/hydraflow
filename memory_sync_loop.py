@@ -26,7 +26,7 @@ class MemorySyncLoop:
         config: HydraFlowConfig,
         fetcher: IssueFetcher,
         memory_sync: MemorySyncWorker,
-        bus: EventBus,
+        event_bus: EventBus,
         stop_event: asyncio.Event,
         status_cb: Callable[[str, str, dict[str, Any] | None], None],
         enabled_cb: Callable[[str], bool],
@@ -36,7 +36,7 @@ class MemorySyncLoop:
         self._config = config
         self._fetcher = fetcher
         self._memory_sync = memory_sync
-        self._bus = bus
+        self._bus = event_bus
         self._stop_event = stop_event
         self._status_cb = status_cb
         self._enabled_cb = enabled_cb

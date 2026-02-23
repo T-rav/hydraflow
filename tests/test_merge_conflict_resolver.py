@@ -29,7 +29,7 @@ def _make_resolver(config: HydraFlowConfig, *, agents=None) -> MergeConflictReso
         worktrees=AsyncMock(),
         agents=agents,
         prs=AsyncMock(),
-        bus=EventBus(),
+        event_bus=EventBus(),
         state=state,
         summarizer=None,
     )

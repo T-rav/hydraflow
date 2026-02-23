@@ -54,7 +54,7 @@ def _make_loop(
         config=config,
         pr_unsticker=pr_unsticker,
         prs=prs,
-        bus=bus,
+        event_bus=bus,
         stop_event=stop_event,
         status_cb=MagicMock(),
         enabled_cb=lambda _name: enabled,

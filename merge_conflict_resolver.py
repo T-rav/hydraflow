@@ -29,7 +29,7 @@ class MergeConflictResolver:
         worktrees: WorktreeManager,
         agents: AgentRunner | None,
         prs: PRManager,
-        bus: EventBus,
+        event_bus: EventBus,
         state: StateTracker,
         summarizer: TranscriptSummarizer | None,
     ) -> None:
@@ -37,7 +37,7 @@ class MergeConflictResolver:
         self._worktrees = worktrees
         self._agents = agents
         self._prs = prs
-        self._bus = bus
+        self._bus = event_bus
         self._state = state
         self._summarizer = summarizer
 

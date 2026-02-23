@@ -29,7 +29,7 @@ class PlanPhase:
         store: IssueStore,
         planners: PlannerRunner,
         prs: PRManager,
-        bus: EventBus,
+        event_bus: EventBus,
         stop_event: asyncio.Event,
         transcript_summarizer: TranscriptSummarizer | None = None,
     ) -> None:
@@ -38,7 +38,7 @@ class PlanPhase:
         self._store = store
         self._planners = planners
         self._prs = prs
-        self._bus = bus
+        self._bus = event_bus
         self._stop_event = stop_event
         self._summarizer = transcript_summarizer
 

@@ -40,7 +40,7 @@ def _make_handler(
         config=config,
         state=state,
         prs=AsyncMock(),
-        bus=EventBus(),
+        event_bus=EventBus(),
         ac_generator=ac_generator,
         retrospective=retrospective,
         verification_judge=verification_judge,

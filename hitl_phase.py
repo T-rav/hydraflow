@@ -38,7 +38,7 @@ class HITLPhase:
         worktrees: WorktreeManager,
         hitl_runner: HITLRunner,
         prs: PRManager,
-        bus: EventBus,
+        event_bus: EventBus,
         stop_event: asyncio.Event,
         active_issues_cb: Any = None,
     ) -> None:
@@ -49,7 +49,7 @@ class HITLPhase:
         self._worktrees = worktrees
         self._hitl_runner = hitl_runner
         self._prs = prs
-        self._bus = bus
+        self._bus = event_bus
         self._stop_event = stop_event
         self._active_issues_cb = active_issues_cb
         # HITL corrections: {issue_number: correction_text}

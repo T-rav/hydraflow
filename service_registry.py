@@ -99,7 +99,7 @@ class OrchestratorCallbacks:
 
 def build_services(
     config: HydraFlowConfig,
-    bus: EventBus,
+    event_bus: EventBus,
     state: StateTracker,
     stop_event: asyncio.Event,
     callbacks: OrchestratorCallbacks,
@@ -111,27 +111,27 @@ def build_services(
     # Core runners
     worktrees = WorktreeManager(config)
     subprocess_runner = get_default_runner()
-    agents = AgentRunner(config, bus, runner=subprocess_runner)
-    planners = PlannerRunner(config, bus, runner=subprocess_runner)
-    prs = PRManager(config, bus)
-    reviewers = ReviewRunner(config, bus, runner=subprocess_runner)
-    hitl_runner = HITLRunner(config, bus, runner=subprocess_runner)
-    triage = TriageRunner(config, bus)
-    summarizer = TranscriptSummarizer(config, prs, bus, state)
+    agents = AgentRunner(config, event_bus, runner=subprocess_runner)
+    planners = PlannerRunner(config, event_bus, runner=subprocess_runner)
+    prs = PRManager(config, event_bus)
+    reviewers = ReviewRunner(config, event_bus, runner=subprocess_runner)
+    hitl_runner = HITLRunner(config, event_bus, runner=subprocess_runner)
+    triage = TriageRunner(config, event_bus)
+    summarizer = TranscriptSummarizer(config, prs, event_bus, state)
 
     # Data layer
     fetcher = IssueFetcher(config)
-    store = IssueStore(config, fetcher, bus)
+    store = IssueStore(config, fetcher, event_bus)
 
     # Phase coordinators
-    triager = TriagePhase(config, state, store, triage, prs, bus, stop_event)
+    triager = TriagePhase(config, state, store, triage, prs, event_bus, stop_event)
     planner_phase = PlanPhase(
         config,
         state,
         store,
         planners,
         prs,
-        bus,
+        event_bus,
         stop_event,
         transcript_summarizer=summarizer,
     )
@@ -143,7 +143,7 @@ def build_services(
         worktrees,
         hitl_runner,
         prs,
-        bus,
+        event_bus,
         stop_event,
         active_issues_cb=callbacks.sync_active_issue_numbers,
     )
@@ -161,14 +161,16 @@ def build_services(
 
     from metrics_manager import MetricsManager
 
-    metrics_manager = MetricsManager(config, state, prs, bus)
-    pr_unsticker = PRUnsticker(config, state, bus, prs, agents, worktrees, fetcher)
-    memory_sync = MemorySyncWorker(config, state, bus)
+    metrics_manager = MetricsManager(config, state, prs, event_bus)
+    pr_unsticker = PRUnsticker(
+        config, state, event_bus, prs, agents, worktrees, fetcher
+    )
+    memory_sync = MemorySyncWorker(config, state, event_bus)
     retrospective = RetrospectiveCollector(config, state, prs)
     ac_generator = AcceptanceCriteriaGenerator(
-        config, prs, bus, runner=subprocess_runner
+        config, prs, event_bus, runner=subprocess_runner
     )
-    verification_judge = VerificationJudge(config, bus, runner=subprocess_runner)
+    verification_judge = VerificationJudge(config, event_bus, runner=subprocess_runner)
     epic_checker = EpicCompletionChecker(config, prs, fetcher)
     reviewer = ReviewPhase(
         config,
@@ -179,7 +181,7 @@ def build_services(
         stop_event,
         store,
         agents=agents,
-        event_bus=bus,
+        event_bus=event_bus,
         retrospective=retrospective,
         ac_generator=ac_generator,
         verification_judge=verification_judge,
@@ -192,7 +194,7 @@ def build_services(
         config,
         fetcher,
         memory_sync,
-        bus,
+        event_bus,
         stop_event,
         status_cb=callbacks.update_bg_worker_status,
         enabled_cb=callbacks.is_bg_worker_enabled,
@@ -203,7 +205,7 @@ def build_services(
         config,
         store,
         metrics_manager,
-        bus,
+        event_bus,
         stop_event,
         status_cb=callbacks.update_bg_worker_status,
         enabled_cb=callbacks.is_bg_worker_enabled,
@@ -214,7 +216,7 @@ def build_services(
         config,
         pr_unsticker,
         prs,
-        bus,
+        event_bus,
         stop_event,
         status_cb=callbacks.update_bg_worker_status,
         enabled_cb=callbacks.is_bg_worker_enabled,
@@ -225,7 +227,7 @@ def build_services(
         config,
         manifest_manager,
         state,
-        bus,
+        event_bus,
         stop_event,
         status_cb=callbacks.update_bg_worker_status,
         enabled_cb=callbacks.is_bg_worker_enabled,

@@ -43,7 +43,7 @@ def _make_loop(
         config=config,
         manifest_manager=manager,
         state=state,
-        bus=bus,
+        event_bus=bus,
         stop_event=stop_event,
         status_cb=MagicMock(),
         enabled_cb=lambda _name: enabled,

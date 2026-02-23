@@ -25,7 +25,7 @@ class PRUnstickerLoop:
         config: HydraFlowConfig,
         pr_unsticker: PRUnsticker,
         prs: PRManager,
-        bus: EventBus,
+        event_bus: EventBus,
         stop_event: asyncio.Event,
         status_cb: Callable[[str, str, dict[str, Any] | None], None],
         enabled_cb: Callable[[str], bool],
@@ -34,7 +34,7 @@ class PRUnstickerLoop:
         self._config = config
         self._pr_unsticker = pr_unsticker
         self._prs = prs
-        self._bus = bus
+        self._bus = event_bus
         self._stop_event = stop_event
         self._status_cb = status_cb
         self._enabled_cb = enabled_cb

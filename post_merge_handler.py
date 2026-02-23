@@ -37,7 +37,7 @@ class PostMergeHandler:
         config: HydraFlowConfig,
         state: StateTracker,
         prs: PRManager,
-        bus: EventBus,
+        event_bus: EventBus,
         ac_generator: AcceptanceCriteriaGenerator | None,
         retrospective: RetrospectiveCollector | None,
         verification_judge: VerificationJudge | None,
@@ -46,7 +46,7 @@ class PostMergeHandler:
         self._config = config
         self._state = state
         self._prs = prs
-        self._bus = bus
+        self._bus = event_bus
         self._ac_generator = ac_generator
         self._retrospective = retrospective
         self._verification_judge = verification_judge

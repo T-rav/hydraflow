@@ -25,7 +25,7 @@ class TriagePhase:
         store: IssueStore,
         triage: TriageRunner,
         prs: PRManager,
-        bus: EventBus,
+        event_bus: EventBus,
         stop_event: asyncio.Event,
     ) -> None:
         self._config = config
@@ -33,7 +33,7 @@ class TriagePhase:
         self._store = store
         self._triage = triage
         self._prs = prs
-        self._bus = bus
+        self._bus = event_bus
         self._stop_event = stop_event
 
     async def triage_issues(self) -> None:
