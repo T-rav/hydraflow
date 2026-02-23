@@ -52,7 +52,7 @@ export const INTERVAL_PRESETS = [
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'metrics'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'metrics', 'pr_unsticker'])
 
 /**
  * Default intervals (in seconds) for system workers.

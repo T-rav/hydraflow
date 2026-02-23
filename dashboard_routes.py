@@ -590,6 +590,7 @@ def create_router(
     _INTERVAL_BOUNDS = {
         "memory_sync": (10, 14400),
         "metrics": (30, 14400),
+        "pr_unsticker": (60, 86400),
     }
 
     @router.post("/api/control/bg-worker/interval")
