@@ -610,7 +610,9 @@ def create_router(
         orch.set_bg_worker_enabled(name, bool(enabled))
         return JSONResponse({"status": "ok", "name": name, "enabled": bool(enabled)})
 
-    # Interval bounds per editable worker (must match config.py Field constraints).
+    # Interval bounds per editable worker.
+    # memory_sync, metrics, pr_unsticker bounds must match config.py Field constraints.
+    # pipeline_poller has no config Field; 5s minimum matches the hardcoded default.
     _INTERVAL_BOUNDS = {
         "memory_sync": (10, 14400),
         "metrics": (30, 14400),
