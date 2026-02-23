@@ -4052,3 +4052,35 @@ class TestTimeoutAndLimitFields:
                 state_file=tmp_path / "s.json",
                 error_output_max_chars=100,
             )
+
+    def test_git_command_timeout_above_maximum_rejected(self, tmp_path: Path) -> None:
+        """git_command_timeout above le=120 should be rejected by Pydantic."""
+        with pytest.raises(ValueError, match="less than or equal to 120"):
+            HydraFlowConfig(
+                repo_root=tmp_path,
+                worktree_base=tmp_path / "wt",
+                state_file=tmp_path / "s.json",
+                git_command_timeout=300,
+            )
+
+    def test_summarizer_timeout_above_maximum_rejected(self, tmp_path: Path) -> None:
+        """summarizer_timeout above le=600 should be rejected by Pydantic."""
+        with pytest.raises(ValueError, match="less than or equal to 600"):
+            HydraFlowConfig(
+                repo_root=tmp_path,
+                worktree_base=tmp_path / "wt",
+                state_file=tmp_path / "s.json",
+                summarizer_timeout=1200,
+            )
+
+    def test_error_output_max_chars_above_maximum_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        """error_output_max_chars above le=20_000 should be rejected by Pydantic."""
+        with pytest.raises(ValueError, match="less than or equal to 20000"):
+            HydraFlowConfig(
+                repo_root=tmp_path,
+                worktree_base=tmp_path / "wt",
+                state_file=tmp_path / "s.json",
+                error_output_max_chars=50_000,
+            )
