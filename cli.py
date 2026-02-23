@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import logging
 import os
 import re
@@ -153,6 +154,27 @@ def _write_prep_task_transcript(
     path = runs_dir / f"{ts}-{safe_slug}.log"
     path.write_text(transcript, encoding="utf-8")
     return path
+
+
+def _build_prep_failure_error_message(transcript: str, transcript_ref: str) -> str:
+    """Build a concrete failure message for local `.pre` issues."""
+    if "PREP_STATUS: FAILED" in transcript:
+        reason = "Agent returned PREP_STATUS: FAILED."
+    elif not transcript.strip():
+        reason = "Agent produced an empty transcript."
+    else:
+        reason = "Agent did not return PREP_STATUS: SUCCESS."
+
+    lines = [ln for ln in transcript.splitlines() if ln.strip()]
+    tail = "\n".join(lines[-30:])
+    tail = tail[-3000:] if tail else "(no output)"
+    return f"{reason}\nTranscript path: {transcript_ref}\n\nLast output tail:\n{tail}"
+
+
+def _prep_failure_signature(error_message: str) -> str:
+    """Return a short stable signature for a prep failure payload."""
+    digest = hashlib.sha256(error_message.encode("utf-8")).hexdigest()
+    return digest[:10]
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -1107,11 +1129,12 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
             if transcript_path is not None
             else "unavailable"
         )
+        error_message = _build_prep_failure_error_message(transcript, transcript_ref)
         attempt_failures.append(
             (
                 "prep-workflow-agent",
                 [selected_tool, selected_model],
-                "Agent reported failure or missing PREP_STATUS: SUCCESS",
+                error_message,
             )
         )
         run_log_lines.append("- Prep workflow agent: failed")
@@ -1129,11 +1152,13 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
             )
         )
 
+        attempt_issue_names: list[str] = []
         for step_name, cmd, error_msg in attempt_failures:
             slug = _slugify_issue_name(step_name)
+            sig = _prep_failure_signature(error_msg)
             issue = upsert_issue(
                 repo_root,
-                filename=f"auto-fix-{slug}.md",
+                filename=f"auto-fix-{slug}-{sig}.md",
                 title=f"[prep] Resolve {step_name} failure",
                 body_lines=[
                     "## Failure",
@@ -1152,6 +1177,7 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
                 ],
             )
             auto_issues.append(issue)
+            attempt_issue_names.append(issue.path.name)
             run_log_lines.append(f"- Opened/updated local issue: `{issue.path.name}`")
             print(  # noqa: T201
                 _prep_stage_line(
@@ -1163,10 +1189,6 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
             )
 
         if attempt < max_attempts:
-            attempt_issue_names = [
-                f"auto-fix-{_slugify_issue_name(step)}.md"
-                for step, _cmd, _err in attempt_failures
-            ]
             print(  # noqa: T201
                 _prep_stage_line(
                     "hardening",
