@@ -380,6 +380,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Create HydraFlow lifecycle labels on the target repo, then exit",
     )
     parser.add_argument(
+        "--scaffold",
+        action="store_true",
+        help="Scan and scaffold GitHub CI + test infrastructure, then exit",
+    )
+    parser.add_argument(
         "--replay",
         type=int,
         metavar="ISSUE",
@@ -530,6 +535,41 @@ async def _run_audit(config: HydraFlowConfig) -> bool:
     return result.has_critical_gaps
 
 
+async def _run_scaffold(config: HydraFlowConfig) -> bool:
+    """Scan and scaffold core repo essentials (CI + test infrastructure)."""
+    from ci_scaffold import scaffold_ci  # noqa: PLC0415
+    from prep import RepoAuditor  # noqa: PLC0415
+    from test_scaffold import scaffold_tests  # noqa: PLC0415
+
+    audit = await RepoAuditor(config).run_audit()
+    print(audit.format_report())  # noqa: T201
+
+    ci_result = scaffold_ci(config.repo_root, dry_run=config.dry_run)
+    tests_result = scaffold_tests(config.repo_root, dry_run=config.dry_run)
+
+    action = "Would create" if config.dry_run else "Created"
+    if ci_result.skipped:
+        print(f"CI scaffold: skipped ({ci_result.skip_reason})")  # noqa: T201
+    else:
+        print(  # noqa: T201
+            f"CI scaffold: {action} {ci_result.workflow_path} ({ci_result.language})"
+        )
+
+    if tests_result.skipped:
+        print(f"Test scaffold: skipped ({tests_result.skip_reason})")  # noqa: T201
+    else:
+        created_dirs = ", ".join(tests_result.created_dirs) or "-"
+        created_files = ", ".join(tests_result.created_files) or "-"
+        modified_files = ", ".join(tests_result.modified_files) or "-"
+        print(  # noqa: T201
+            "Test scaffold: "
+            f"{action.lower()} dirs [{created_dirs}] files [{created_files}] "
+            f"modified [{modified_files}] ({tests_result.language})"
+        )
+
+    return True
+
+
 async def _run_clean(config: HydraFlowConfig) -> None:
     """Remove all worktrees and reset state."""
     from state import StateTracker
@@ -665,6 +705,10 @@ def main(argv: list[str] | None = None) -> None:
     if args.audit:
         has_gaps = asyncio.run(_run_audit(config))
         sys.exit(1 if has_gaps else 0)
+
+    if args.scaffold:
+        success = asyncio.run(_run_scaffold(config))
+        sys.exit(0 if success else 1)
 
     if args.clean:
         asyncio.run(_run_clean(config))

@@ -119,7 +119,7 @@ HYDRAFLOW_LABEL_FIXED=hydraflow-fixed
 
 ### 4. Create GitHub labels
 
-HydraFlow uses 7 lifecycle labels. Create them in your repo (reads label names from `.env`):
+`make setup` creates HydraFlow lifecycle labels automatically. To run label setup manually:
 
 ```bash
 # From the hydraflow directory (auto-detects your repo from git remote)
@@ -200,12 +200,23 @@ make setup
 
 This configures:
 - **Env bootstrap**: creates `.env` from `.env.sample` if missing
+- **Label bootstrap**: creates HydraFlow lifecycle labels via `gh`
 - **pre-commit**: Ruff lint check on staged Python files
 - **pre-push**: Full quality gate (lint + typecheck + security + tests)
 - **Claude assets**: refreshes executable hook scripts under `.claude/hooks`
 - **Codex assets**: installs skills from `.codex/skills/*` into `~/.codex/skills`
 
-### 8. Run HydraFlow
+### 8. Scaffold CI/tests (optional)
+
+```bash
+make prep
+```
+
+`make prep` scans the repo and scaffolds:
+- GitHub Actions quality workflow (`.github/workflows/quality.yml`)
+- Language-specific test infrastructure (Python `tests/` + pytest config, JS `__tests__/` + vitest config)
+
+### 9. Run HydraFlow
 
 ```bash
 cd hydraflow
@@ -326,6 +337,7 @@ make typecheck      # Run Pyright type checks
 make security       # Run Bandit security scan
 make quality        # All of the above
 make ensure-labels  # Create HydraFlow labels in GitHub repo
+make prep           # Scan + scaffold CI/tests
 make setup          # Install git hooks
 make ui             # Build React dashboard
 make ui-dev         # Start dashboard dev server

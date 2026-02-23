@@ -1146,3 +1146,36 @@ class TestCliAudit:
 
         args = parse_args([])
         assert args.audit is False
+
+
+class TestCliScaffold:
+    """Tests for the --scaffold CLI flag."""
+
+    def test_scaffold_flag_parsed(self) -> None:
+        """Should parse --scaffold flag."""
+        from cli import parse_args
+
+        args = parse_args(["--scaffold"])
+        assert args.scaffold is True
+
+    def test_scaffold_flag_default_false(self) -> None:
+        """Should default to False."""
+        from cli import parse_args
+
+        args = parse_args([])
+        assert args.scaffold is False
+
+    def test_main_scaffold_exits_zero_on_success(self) -> None:
+        """main() should exit 0 when scaffold run succeeds."""
+        from cli import main
+
+        with (
+            patch(
+                "cli._run_scaffold", new_callable=AsyncMock, return_value=True
+            ) as mock_run,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main(["--scaffold"])
+
+        mock_run.assert_called_once()
+        assert exc_info.value.code == 0
