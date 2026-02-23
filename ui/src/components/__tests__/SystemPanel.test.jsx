@@ -394,6 +394,52 @@ describe('SystemPanel', () => {
       expect(onViewLog).toHaveBeenCalledWith('bg-memory_sync')
     })
   })
+
+  describe('Worker Log Stream integration', () => {
+    it('renders log stream when background_worker_status events exist for a worker', () => {
+      mockUseHydraFlow.mockReturnValue(defaultMockContext({
+        orchestratorStatus: 'running',
+        events: [
+          { timestamp: '2026-02-20T10:00:01Z', type: 'background_worker_status', data: { worker: 'memory_sync', status: 'ok', details: { items: 5 } } },
+          { timestamp: '2026-02-20T10:00:00Z', type: 'background_worker_status', data: { worker: 'memory_sync', status: 'ok', details: { items: 3 } } },
+        ],
+      }))
+      render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
+      expect(screen.getByTestId('worker-log-stream')).toBeInTheDocument()
+    })
+
+    it('does not render log stream when no matching events exist', () => {
+      mockUseHydraFlow.mockReturnValue(defaultMockContext({
+        orchestratorStatus: 'running',
+        events: [
+          { timestamp: '2026-02-20T10:00:00Z', type: 'worker_update', data: { issue: 1, status: 'running' } },
+        ],
+      }))
+      render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
+      expect(screen.queryByTestId('worker-log-stream')).not.toBeInTheDocument()
+    })
+
+    it('does not render log stream when events array is empty', () => {
+      mockUseHydraFlow.mockReturnValue(defaultMockContext({
+        orchestratorStatus: 'running',
+        events: [],
+      }))
+      render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
+      expect(screen.queryByTestId('worker-log-stream')).not.toBeInTheDocument()
+    })
+
+    it('renders formatted event lines with timestamp and status', () => {
+      mockUseHydraFlow.mockReturnValue(defaultMockContext({
+        orchestratorStatus: 'running',
+        events: [
+          { timestamp: '2026-02-20T10:00:00Z', type: 'background_worker_status', data: { worker: 'memory_sync', status: 'ok' } },
+        ],
+      }))
+      render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
+      const stream = screen.getByTestId('worker-log-stream')
+      expect(stream.textContent).toContain('ok')
+    })
+  })
 })
 
 describe('formatInterval', () => {
