@@ -85,17 +85,27 @@ async def _await_with_prep_heartbeat(
 
 def _make_prep_output_tracker(
     *,
+    repo_root: Path,
+    task_slug: str,
     stream_label: str,
     color: bool,
     min_emit_interval_seconds: float = 1.5,
-) -> tuple[Callable[[str], bool], Callable[[], list[str]]]:
+) -> tuple[Callable[[str], bool], Callable[[], list[str]], Path]:
     """Return (on_output callback, tail getter) for rolling prep task output."""
+    from pre_issue_tracker import ensure_pre_dirs  # noqa: PLC0415
+
+    _pre_dir, runs_dir = ensure_pre_dirs(repo_root)
+    ts = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
+    safe_slug = re.sub(r"[^a-z0-9]+", "-", task_slug.lower()).strip("-") or "task"
+    live_log_path = runs_dir / f"{ts}-{safe_slug}-live.log"
+
     state: dict[str, Any] = {
         "tail": [],
         "last_emitted_tail": "",
         "last_emit_at": 0.0,
         "rendered_lines": 0,
         "start_time": time.monotonic(),
+        "written_line_count": 0,
     }
     force_in_place = os.environ.get("HYDRAFLOW_PREP_INPLACE")
     use_in_place = (
@@ -105,14 +115,21 @@ def _make_prep_output_tracker(
     )
 
     def on_output(accumulated_text: str) -> bool:
-        lines = [
+        all_lines = [ln for ln in accumulated_text.splitlines() if ln.strip()]
+        if len(all_lines) > state["written_line_count"]:
+            new_lines = all_lines[state["written_line_count"] :]
+            with live_log_path.open("a", encoding="utf-8") as fh:
+                for line in new_lines:
+                    fh.write(f"{line}\n")
+            state["written_line_count"] = len(all_lines)
+
+        display_lines = [
             ln
-            for ln in accumulated_text.splitlines()
-            if ln.strip()
-            and not ln.startswith('{"type":"system"')
+            for ln in all_lines
+            if not ln.startswith('{"type":"system"')
             and '"type":"rate_limit_event"' not in ln
         ]
-        tail = lines[-3:]
+        tail = display_lines[-3:]
         state["tail"] = tail
         if not tail:
             return False
@@ -156,7 +173,7 @@ def _make_prep_output_tracker(
     def get_tail() -> list[str]:
         return list(state["tail"])
 
-    return on_output, get_tail
+    return on_output, get_tail, live_log_path
 
 
 def _write_prep_task_transcript(
@@ -1108,10 +1125,24 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
                 use_color,
             )
         )
-        workflow_on_output, workflow_tail = _make_prep_output_tracker(
-            stream_label=f"attempt {attempt}/{max_attempts}: prep workflow agent",
-            color=use_color,
+        workflow_on_output, workflow_tail, workflow_live_log = (
+            _make_prep_output_tracker(
+                repo_root=repo_root,
+                task_slug=f"attempt-{attempt}-prep-workflow-agent",
+                stream_label=f"attempt {attempt}/{max_attempts}: prep workflow agent",
+                color=use_color,
+            )
         )
+        workflow_live_log_ref = workflow_live_log.relative_to(repo_root)
+        print(  # noqa: T201
+            _prep_stage_line(
+                "hardening",
+                f"attempt {attempt}/{max_attempts}: live log {workflow_live_log_ref}",
+                "start",
+                use_color,
+            )
+        )
+        run_log_lines.append(f"- Workflow live log: `{workflow_live_log_ref}`")
         agent_ok, transcript = await _await_with_prep_heartbeat(
             _run_prep_agent_workflow(
                 tool=selected_tool,
@@ -1219,10 +1250,24 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
                     use_color,
                 )
             )
-            correction_on_output, correction_tail = _make_prep_output_tracker(
-                stream_label=f"attempt {attempt}/{max_attempts}: correction agent",
-                color=use_color,
+            correction_on_output, correction_tail, correction_live_log = (
+                _make_prep_output_tracker(
+                    repo_root=repo_root,
+                    task_slug=f"attempt-{attempt}-correction-agent",
+                    stream_label=f"attempt {attempt}/{max_attempts}: correction agent",
+                    color=use_color,
+                )
             )
+            correction_live_log_ref = correction_live_log.relative_to(repo_root)
+            print(  # noqa: T201
+                _prep_stage_line(
+                    "hardening",
+                    f"attempt {attempt}/{max_attempts}: correction live log {correction_live_log_ref}",
+                    "start",
+                    use_color,
+                )
+            )
+            run_log_lines.append(f"- Correction live log: `{correction_live_log_ref}`")
             agent_ok = await _await_with_prep_heartbeat(
                 _run_prep_agent_correction(
                     config=config,
