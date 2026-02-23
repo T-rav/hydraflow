@@ -36,7 +36,7 @@ class TestPlanPhaseHarnessRecording:
             store=MagicMock(),
             planners=MagicMock(),
             prs=AsyncMock(),
-            bus=MagicMock(),
+            event_bus=MagicMock(),
             stop_event=MagicMock(),
             harness_insights=store,
         )
@@ -65,7 +65,7 @@ class TestPlanPhaseHarnessRecording:
             store=MagicMock(),
             planners=MagicMock(),
             prs=AsyncMock(),
-            bus=MagicMock(),
+            event_bus=MagicMock(),
             stop_event=MagicMock(),
             harness_insights=None,
         )
@@ -90,7 +90,7 @@ class TestPlanPhaseHarnessRecording:
             store=MagicMock(),
             planners=MagicMock(),
             prs=AsyncMock(),
-            bus=MagicMock(),
+            event_bus=MagicMock(),
             stop_event=MagicMock(),
             harness_insights=store,
         )
