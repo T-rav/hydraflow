@@ -216,6 +216,11 @@ make prep
 - GitHub Actions quality workflow (`.github/workflows/quality.yml`)
 - Language-specific test infrastructure (Python `tests/` + pytest config, JS `__tests__/` + vitest config)
 
+Then it runs hardening passes when available:
+- `make lint` (auto-fix)
+- `pre-commit run --all-files` (when `.pre-commit-config.yaml` exists)
+- `make quality` (or `make test-fast` / `make test` fallback)
+
 ### 9. Run HydraFlow
 
 ```bash

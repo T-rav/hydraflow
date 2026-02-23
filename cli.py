@@ -7,6 +7,7 @@ import asyncio
 import logging
 import signal
 import sys
+from pathlib import Path
 from typing import Any
 
 from config import HydraFlowConfig, load_config_file
@@ -535,6 +536,31 @@ async def _run_audit(config: HydraFlowConfig) -> bool:
     return result.has_critical_gaps
 
 
+def _makefile_has_target(repo_root: Path, target: str) -> bool:
+    """Return True when ``Makefile`` contains the given target."""
+    makefile = repo_root / "Makefile"
+    if not makefile.is_file():
+        return False
+    try:
+        content = makefile.read_text()
+    except OSError:
+        return False
+    return any(line.startswith(f"{target}:") for line in content.splitlines())
+
+
+async def _run_hardening_step(step: str, cmd: list[str], cwd: Path) -> bool:
+    """Run one prep hardening command and print a concise status line."""
+    from subprocess_util import run_subprocess  # noqa: PLC0415
+
+    try:
+        await run_subprocess(*cmd, cwd=cwd, timeout=900.0)
+        print(f"{step}: ok ({' '.join(cmd)})")  # noqa: T201
+        return True
+    except RuntimeError as exc:
+        print(f"{step}: failed ({' '.join(cmd)}): {exc}")  # noqa: T201
+        return False
+
+
 async def _run_scaffold(config: HydraFlowConfig) -> bool:
     """Scan and scaffold core repo essentials (CI + test infrastructure)."""
     from ci_scaffold import scaffold_ci  # noqa: PLC0415
@@ -567,7 +593,49 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
             f"modified [{modified_files}] ({tests_result.language})"
         )
 
-    return True
+    if config.dry_run:
+        print("Hardening pass: skipped in dry-run mode")  # noqa: T201
+        return True
+
+    hardening_ok = True
+    repo_root = config.repo_root
+
+    # Auto-fix pass before validation.
+    if _makefile_has_target(repo_root, "lint"):
+        hardening_ok = (
+            await _run_hardening_step("Fix pass", ["make", "lint"], repo_root)
+            and hardening_ok
+        )
+
+    # Run hooks when configured.
+    if (repo_root / ".pre-commit-config.yaml").is_file():
+        hardening_ok = (
+            await _run_hardening_step(
+                "Hook pass", ["pre-commit", "run", "--all-files"], repo_root
+            )
+            and hardening_ok
+        )
+
+    # Ensure at least one test/quality pass runs.
+    if _makefile_has_target(repo_root, "quality"):
+        hardening_ok = (
+            await _run_hardening_step("Quality pass", ["make", "quality"], repo_root)
+            and hardening_ok
+        )
+    elif _makefile_has_target(repo_root, "test-fast"):
+        hardening_ok = (
+            await _run_hardening_step("Test pass", ["make", "test-fast"], repo_root)
+            and hardening_ok
+        )
+    elif _makefile_has_target(repo_root, "test"):
+        hardening_ok = (
+            await _run_hardening_step("Test pass", ["make", "test"], repo_root)
+            and hardening_ok
+        )
+    else:
+        print("Test pass: skipped (no make quality/test targets found)")  # noqa: T201
+
+    return hardening_ok
 
 
 async def _run_clean(config: HydraFlowConfig) -> None:

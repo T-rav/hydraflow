@@ -1179,3 +1179,15 @@ class TestCliScaffold:
 
         mock_run.assert_called_once()
         assert exc_info.value.code == 0
+
+    def test_main_scaffold_exits_one_on_failure(self) -> None:
+        """main() should exit 1 when scaffold run fails."""
+        from cli import main
+
+        with (
+            patch("cli._run_scaffold", new_callable=AsyncMock, return_value=False),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main(["--scaffold"])
+
+        assert exc_info.value.code == 1

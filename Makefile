@@ -58,7 +58,7 @@ help:
 	@echo "  make quality        Lint + typecheck + test (parallel)"
 	@echo "  make quality-full   quality + security scan"
 	@echo "  make ensure-labels  Create HydraFlow labels in GitHub repo"
-	@echo "  make prep           Scan + scaffold CI/tests (GitHub Actions + language tests)"
+	@echo "  make prep           Scan + scaffold CI/tests, then run fix/hooks/tests"
 	@echo "  make setup          Install git hooks + Claude/Codex assets"
 	@echo "  make install        Install dashboard dependencies"
 	@echo "  make ui             Build React dashboard (ui/dist/)"
