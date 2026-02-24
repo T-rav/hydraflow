@@ -121,9 +121,12 @@ make quality
 
 ## Contributing
 
-- See `CLAUDE.md` for project conventions.
-- Open issues in GitHub and use lifecycle labels for pipeline pickup.
-- Keep changes green with `make quality` before PR.
+- Fork it.
+- Run it.
+- Modify it.
+- Validate it with `make quality`.
+- PR it back.
+- See `CLAUDE.md` for project conventions and lifecycle labels.
 
 ## License
 
