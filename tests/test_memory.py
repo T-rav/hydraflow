@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1043,6 +1044,31 @@ class TestSummariseWithModel:
         assert result is None
 
     @pytest.mark.asyncio
+    async def test_nonzero_returncode_logs_stdout_and_model(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        config = ConfigFactory.create(
+            repo_root=tmp_path, memory_compaction_model="haiku"
+        )
+        runner = AsyncMock()
+        runner.run_simple = AsyncMock(
+            return_value=SimpleResult(
+                stdout="You've hit your limit",
+                stderr="",
+                returncode=1,
+            )
+        )
+        worker = MemorySyncWorker(config, MagicMock(), MagicMock(), runner=runner)
+
+        with caplog.at_level(logging.WARNING, logger="hydraflow.memory"):
+            result = await worker._summarise_with_model("content", 4000)
+
+        assert result is None
+        assert "Memory compaction model failed" in caplog.text
+        assert "model=haiku" in caplog.text
+        assert 'stdout="You\'ve hit your limit"' in caplog.text
+
+    @pytest.mark.asyncio
     async def test_timeout_returns_none(self, tmp_path: Path) -> None:
         config = ConfigFactory.create(repo_root=tmp_path)
         runner = AsyncMock()
@@ -1103,6 +1129,29 @@ class TestSummariseWithModel:
         call_kwargs = runner.run_simple.call_args[1]
         assert call_kwargs["input"] is not None
         assert isinstance(call_kwargs["input"], bytes)
+
+    @pytest.mark.asyncio
+    async def test_codex_tool_passes_prompt_as_cli_arg(self, tmp_path: Path) -> None:
+        config = ConfigFactory.create(
+            repo_root=tmp_path,
+            memory_compaction_tool="codex",
+            memory_compaction_model="gpt-5-codex",
+        )
+        runner = AsyncMock()
+        runner.run_simple = AsyncMock(
+            return_value=SimpleResult(stdout="Summary", stderr="", returncode=0)
+        )
+        worker = MemorySyncWorker(config, MagicMock(), MagicMock(), runner=runner)
+
+        await worker._summarise_with_model("content", 4000)
+
+        runner.run_simple.assert_awaited_once()
+        call_args = runner.run_simple.call_args[0][0]
+        call_kwargs = runner.run_simple.call_args[1]
+        assert call_args[:3] == ["codex", "exec", "--json"]
+        assert call_args[call_args.index("--model") + 1] == "gpt-5-codex"
+        assert call_args[-1].endswith("content")
+        assert call_kwargs["input"] is None
 
 
 # --- PR Manager tests ---

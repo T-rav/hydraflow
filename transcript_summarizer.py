@@ -298,19 +298,36 @@ class TranscriptSummarizer:
         return None
 
     async def _call_model(self, prompt: str) -> str | None:
-        """Call the Claude CLI to summarize.
+        """Call the configured CLI backend to summarize.
 
         Returns the model output, or ``None`` on failure.
         """
+        tool = self._config.transcript_summary_tool
         model = self._config.transcript_summary_model
-        cmd = ["claude", "-p", "--model", model]
+        if tool == "codex":
+            cmd = [
+                "codex",
+                "exec",
+                "--json",
+                "--model",
+                model,
+                "--sandbox",
+                "danger-full-access",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--skip-git-repo-check",
+                prompt,
+            ]
+            cmd_input = None
+        else:
+            cmd = ["claude", "-p", "--model", model]
+            cmd_input = prompt.encode()
         env = make_clean_env(self._config.gh_token)
 
         try:
             result = await self._runner.run_simple(
                 cmd,
                 env=env,
-                input=prompt.encode(),
+                input=cmd_input,
                 timeout=self._config.transcript_summary_timeout,
             )
             if result.returncode != 0:

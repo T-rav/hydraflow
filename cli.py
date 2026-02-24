@@ -400,6 +400,28 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Model for implementation agents (default: opus)",
     )
     parser.add_argument(
+        "--system-tool",
+        default=None,
+        choices=["inherit", "claude", "codex"],
+        help="Global default tool for system agents; per-agent explicit settings still win (default: inherit)",
+    )
+    parser.add_argument(
+        "--system-model",
+        default=None,
+        help="Global default model for system agents; per-agent explicit settings still win",
+    )
+    parser.add_argument(
+        "--background-tool",
+        default=None,
+        choices=["inherit", "claude", "codex"],
+        help="Global default tool for background workers; per-worker explicit settings still win (default: inherit)",
+    )
+    parser.add_argument(
+        "--background-model",
+        default=None,
+        help="Global default model for background workers; per-worker explicit settings still win",
+    )
+    parser.add_argument(
         "--implementation-tool",
         default=None,
         choices=["claude", "codex"],
@@ -511,6 +533,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Seconds between memory sync polls (default: 3600)",
     )
     parser.add_argument(
+        "--memory-compaction-tool",
+        default=None,
+        choices=["claude", "codex"],
+        help="CLI backend for memory digest compaction (default: claude)",
+    )
+    parser.add_argument(
+        "--memory-compaction-model",
+        default=None,
+        help="Model for memory digest compaction (default: haiku)",
+    )
+    parser.add_argument(
         "--metrics-label",
         default=None,
         help="Labels for the metrics persistence issue, comma-separated (default: hydraflow-metrics)",
@@ -580,6 +613,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         choices=["claude", "codex"],
         help="CLI backend for verification judge (default: claude)",
+    )
+    parser.add_argument(
+        "--transcript-summary-tool",
+        default=None,
+        choices=["claude", "codex"],
+        help="CLI backend for transcript summarization (default: claude)",
+    )
+    parser.add_argument(
+        "--transcript-summary-model",
+        default=None,
+        help="Model for transcript summarization (default: haiku)",
     )
     parser.add_argument(
         "--dashboard-port",
@@ -758,6 +802,10 @@ def build_config(args: argparse.Namespace) -> HydraFlowConfig:
         "max_planners",
         "max_reviewers",
         "max_hitl_workers",
+        "system_tool",
+        "system_model",
+        "background_tool",
+        "background_model",
         "model",
         "implementation_tool",
         "review_model",
@@ -784,7 +832,11 @@ def build_config(args: argparse.Namespace) -> HydraFlowConfig:
         "git_user_name",
         "git_user_email",
         "memory_sync_interval",
+        "memory_compaction_tool",
+        "memory_compaction_model",
         "metrics_sync_interval",
+        "transcript_summary_tool",
+        "transcript_summary_model",
         "execution_mode",
         "docker_image",
         "docker_cpu_limit",
@@ -1515,6 +1567,9 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
     if tests_result.skipped:
         print(f"Test scaffold: skipped ({tests_result.skip_reason})")  # noqa: T201
         run_log_lines.append(f"- Test scaffold skipped: {tests_result.skip_reason}")
+        if getattr(tests_result, "progress", ""):
+            print(f"Test scaffold progress: {tests_result.progress}")  # noqa: T201
+            run_log_lines.append(f"- Test scaffold progress: {tests_result.progress}")
     else:
         created_dirs = ", ".join(tests_result.created_dirs) or "-"
         created_files = ", ".join(tests_result.created_files) or "-"
@@ -1528,6 +1583,11 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
             f"- Test scaffold {action.lower()}: dirs [{created_dirs}] "
             f"files [{created_files}] modified [{modified_files}]"
         )
+        if getattr(tests_result, "progress", ""):
+            print(f"Test scaffold progress: {tests_result.progress}")  # noqa: T201
+            run_log_lines.append(f"- Test scaffold progress: {tests_result.progress}")
+
+    run_log_lines.extend(_seed_context_assets(config))
 
     run_log_lines.extend(_seed_context_assets(config))
 

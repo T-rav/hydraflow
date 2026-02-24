@@ -3801,8 +3801,12 @@ class TestAgentToolFields:
         assert cfg.review_tool == "claude"
         assert cfg.planner_tool == "claude"
         assert cfg.triage_tool == "claude"
+        assert cfg.transcript_summary_tool == "claude"
+        assert cfg.memory_compaction_tool == "claude"
         assert cfg.ac_tool == "claude"
         assert cfg.verification_judge_tool == "claude"
+        assert cfg.system_tool == "inherit"
+        assert cfg.background_tool == "inherit"
 
     def test_tool_env_overrides(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -3811,6 +3815,8 @@ class TestAgentToolFields:
         monkeypatch.setenv("HYDRAFLOW_REVIEW_TOOL", "codex")
         monkeypatch.setenv("HYDRAFLOW_PLANNER_TOOL", "codex")
         monkeypatch.setenv("HYDRAFLOW_TRIAGE_TOOL", "codex")
+        monkeypatch.setenv("HYDRAFLOW_TRANSCRIPT_SUMMARY_TOOL", "codex")
+        monkeypatch.setenv("HYDRAFLOW_MEMORY_COMPACTION_TOOL", "codex")
         monkeypatch.setenv("HYDRAFLOW_AC_TOOL", "codex")
         monkeypatch.setenv("HYDRAFLOW_VERIFICATION_JUDGE_TOOL", "codex")
         cfg = HydraFlowConfig(
@@ -3822,8 +3828,68 @@ class TestAgentToolFields:
         assert cfg.review_tool == "codex"
         assert cfg.planner_tool == "codex"
         assert cfg.triage_tool == "codex"
+        assert cfg.transcript_summary_tool == "codex"
+        assert cfg.memory_compaction_tool == "codex"
         assert cfg.ac_tool == "codex"
         assert cfg.verification_judge_tool == "codex"
+
+    def test_profile_tool_overrides_apply_to_defaults(self, tmp_path: Path) -> None:
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+            system_tool="codex",
+            background_tool="codex",
+        )
+        assert cfg.implementation_tool == "codex"
+        assert cfg.review_tool == "codex"
+        assert cfg.planner_tool == "codex"
+        assert cfg.ac_tool == "codex"
+        assert cfg.verification_judge_tool == "codex"
+        assert cfg.subskill_tool == "codex"
+        assert cfg.debug_tool == "codex"
+        assert cfg.triage_tool == "codex"
+        assert cfg.transcript_summary_tool == "codex"
+        assert cfg.memory_compaction_tool == "codex"
+
+    def test_profile_model_overrides_apply_to_defaults(self, tmp_path: Path) -> None:
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+            system_model="gpt-5-codex",
+            background_model="gpt-5-codex",
+        )
+        assert cfg.model == "gpt-5-codex"
+        assert cfg.review_model == "gpt-5-codex"
+        assert cfg.planner_model == "gpt-5-codex"
+        assert cfg.ac_model == "gpt-5-codex"
+        assert cfg.subskill_model == "gpt-5-codex"
+        assert cfg.debug_model == "gpt-5-codex"
+        assert cfg.triage_model == "gpt-5-codex"
+        assert cfg.transcript_summary_model == "gpt-5-codex"
+        assert cfg.memory_compaction_model == "gpt-5-codex"
+
+    def test_profile_overrides_do_not_clobber_explicit_per_field(
+        self, tmp_path: Path
+    ) -> None:
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+            system_tool="codex",
+            background_tool="codex",
+            system_model="gpt-5-codex",
+            background_model="gpt-5-codex",
+            review_tool="claude",
+            review_model="sonnet",
+            transcript_summary_tool="claude",
+            transcript_summary_model="haiku",
+        )
+        assert cfg.review_tool == "claude"
+        assert cfg.review_model == "sonnet"
+        assert cfg.transcript_summary_tool == "claude"
+        assert cfg.transcript_summary_model == "haiku"
 
 
 class TestTieringFields:

@@ -58,6 +58,9 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("test_command", "HYDRAFLOW_TEST_COMMAND", "make test"),
     ("docker_image", "HYDRAFLOW_DOCKER_IMAGE", "ghcr.io/t-rav/hydraflow-agent:latest"),
     ("docker_network", "HYDRAFLOW_DOCKER_NETWORK", ""),
+    ("system_model", "HYDRAFLOW_SYSTEM_MODEL", ""),
+    ("background_model", "HYDRAFLOW_BACKGROUND_MODEL", ""),
+    ("memory_compaction_model", "HYDRAFLOW_MEMORY_COMPACTION_MODEL", "haiku"),
     ("transcript_summary_model", "HYDRAFLOW_TRANSCRIPT_SUMMARY_MODEL", "haiku"),
     ("triage_model", "HYDRAFLOW_TRIAGE_MODEL", "haiku"),
     ("subskill_model", "HYDRAFLOW_SUBSKILL_MODEL", "haiku"),
@@ -101,10 +104,14 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
 _ENV_LITERAL_OVERRIDES: list[tuple[str, str]] = [
     ("execution_mode", "HYDRAFLOW_EXECUTION_MODE"),
     ("docker_network_mode", "HYDRAFLOW_DOCKER_NETWORK_MODE"),
+    ("system_tool", "HYDRAFLOW_SYSTEM_TOOL"),
+    ("background_tool", "HYDRAFLOW_BACKGROUND_TOOL"),
     ("implementation_tool", "HYDRAFLOW_IMPLEMENTATION_TOOL"),
     ("review_tool", "HYDRAFLOW_REVIEW_TOOL"),
     ("planner_tool", "HYDRAFLOW_PLANNER_TOOL"),
     ("triage_tool", "HYDRAFLOW_TRIAGE_TOOL"),
+    ("transcript_summary_tool", "HYDRAFLOW_TRANSCRIPT_SUMMARY_TOOL"),
+    ("memory_compaction_tool", "HYDRAFLOW_MEMORY_COMPACTION_TOOL"),
     ("ac_tool", "HYDRAFLOW_AC_TOOL"),
     ("verification_judge_tool", "HYDRAFLOW_VERIFICATION_JUDGE_TOOL"),
     ("subskill_tool", "HYDRAFLOW_SUBSKILL_TOOL"),
@@ -166,6 +173,22 @@ class HydraFlowConfig(BaseModel):
     )
     max_hitl_workers: int = Field(
         default=1, ge=1, le=5, description="Concurrent HITL correction agents"
+    )
+    system_tool: Literal["inherit", "claude", "codex"] = Field(
+        default="inherit",
+        description="Optional global default tool for system agents; 'inherit' keeps per-agent defaults",
+    )
+    system_model: str = Field(
+        default="",
+        description="Optional global default model for system agents; empty keeps per-agent defaults",
+    )
+    background_tool: Literal["inherit", "claude", "codex"] = Field(
+        default="inherit",
+        description="Optional global default tool for background workers; 'inherit' keeps per-worker defaults",
+    )
+    background_model: str = Field(
+        default="",
+        description="Optional global default model for background workers; empty keeps per-worker defaults",
     )
     implementation_tool: Literal["claude", "codex"] = Field(
         default="claude",
@@ -458,6 +481,10 @@ class HydraFlowConfig(BaseModel):
         le=50_000,
         description="Max characters for memory digest injected into agent prompts",
     )
+    memory_compaction_tool: Literal["claude", "codex"] = Field(
+        default="claude",
+        description="CLI backend for memory digest compaction",
+    )
     memory_compaction_model: str = Field(
         default="haiku",
         description="Cheap model for summarising memory digest when over size limit",
@@ -509,6 +536,10 @@ class HydraFlowConfig(BaseModel):
     transcript_summary_model: str = Field(
         default="haiku",
         description="Cheap model for summarising agent transcripts into structured learnings",
+    )
+    transcript_summary_tool: Literal["claude", "codex"] = Field(
+        default="claude",
+        description="CLI backend for transcript summarization",
     )
     max_transcript_summary_chars: int = Field(
         default=50_000,
@@ -868,8 +899,60 @@ class HydraFlowConfig(BaseModel):
         _resolve_paths(self)
         _resolve_repo_and_identity(self)
         _apply_env_overrides(self)
+        _apply_profile_overrides(self)
         _validate_docker(self)
         return self
+
+
+def _apply_profile_overrides(config: HydraFlowConfig) -> None:
+    """Apply grouped tool/model defaults for background and system workloads."""
+
+    explicit_fields = set(config.__pydantic_fields_set__)
+
+    def _apply_if_default(field: str, value: str) -> None:
+        if field in explicit_fields:
+            return
+        if getattr(config, field) == HydraFlowConfig.model_fields[field].default:
+            object.__setattr__(config, field, value)
+
+    if config.system_tool != "inherit":
+        for field in (
+            "implementation_tool",
+            "review_tool",
+            "planner_tool",
+            "ac_tool",
+            "verification_judge_tool",
+            "subskill_tool",
+            "debug_tool",
+        ):
+            _apply_if_default(field, config.system_tool)
+
+    if config.system_model.strip():
+        for field in (
+            "model",
+            "review_model",
+            "planner_model",
+            "ac_model",
+            "subskill_model",
+            "debug_model",
+        ):
+            _apply_if_default(field, config.system_model)
+
+    if config.background_tool != "inherit":
+        for field in (
+            "triage_tool",
+            "transcript_summary_tool",
+            "memory_compaction_tool",
+        ):
+            _apply_if_default(field, config.background_tool)
+
+    if config.background_model.strip():
+        for field in (
+            "triage_model",
+            "transcript_summary_model",
+            "memory_compaction_model",
+        ):
+            _apply_if_default(field, config.background_model)
 
 
 def _resolve_paths(config: HydraFlowConfig) -> None:

@@ -276,6 +276,10 @@ class TestParseArgs:
             "max_planners",
             "max_reviewers",
             "max_hitl_workers",
+            "system_tool",
+            "system_model",
+            "background_tool",
+            "background_model",
             "model",
             "implementation_tool",
             "review_model",
@@ -298,6 +302,10 @@ class TestParseArgs:
             "main_branch",
             "ac_tool",
             "verification_judge_tool",
+            "memory_compaction_tool",
+            "memory_compaction_model",
+            "transcript_summary_tool",
+            "transcript_summary_model",
             "dashboard_port",
             "gh_token",
         ]
@@ -351,6 +359,10 @@ _CLI_DEFAULT_EXPECTATIONS: list[tuple[str, object]] = [
     ("max_planners", 1),
     ("max_reviewers", 5),
     ("max_hitl_workers", 1),
+    ("system_tool", "inherit"),
+    ("system_model", ""),
+    ("background_tool", "inherit"),
+    ("background_model", ""),
     ("hitl_active_label", ["hydraflow-hitl-active"]),
     ("implementation_tool", "claude"),
     ("model", "opus"),
@@ -369,6 +381,10 @@ _CLI_DEFAULT_EXPECTATIONS: list[tuple[str, object]] = [
     ("triage_tool", "claude"),
     ("planner_tool", "claude"),
     ("planner_model", "opus"),
+    ("memory_compaction_tool", "claude"),
+    ("memory_compaction_model", "haiku"),
+    ("transcript_summary_tool", "claude"),
+    ("transcript_summary_model", "haiku"),
     ("ac_tool", "claude"),
     ("verification_judge_tool", "claude"),
     ("main_branch", "main"),
@@ -506,6 +522,14 @@ class TestBuildConfig:
     def test_tool_fields_passed_through(self) -> None:
         args = parse_args(
             [
+                "--system-tool",
+                "codex",
+                "--system-model",
+                "gpt-5-codex",
+                "--background-tool",
+                "codex",
+                "--background-model",
+                "gpt-5-codex",
                 "--implementation-tool",
                 "codex",
                 "--review-tool",
@@ -514,6 +538,14 @@ class TestBuildConfig:
                 "codex",
                 "--planner-tool",
                 "codex",
+                "--memory-compaction-tool",
+                "codex",
+                "--memory-compaction-model",
+                "gpt-5-codex",
+                "--transcript-summary-tool",
+                "codex",
+                "--transcript-summary-model",
+                "gpt-5-codex",
                 "--ac-tool",
                 "codex",
                 "--verification-judge-tool",
@@ -521,10 +553,18 @@ class TestBuildConfig:
             ]
         )
         cfg = build_config(args)
+        assert cfg.system_tool == "codex"
+        assert cfg.system_model == "gpt-5-codex"
+        assert cfg.background_tool == "codex"
+        assert cfg.background_model == "gpt-5-codex"
         assert cfg.implementation_tool == "codex"
         assert cfg.review_tool == "codex"
         assert cfg.triage_tool == "codex"
         assert cfg.planner_tool == "codex"
+        assert cfg.memory_compaction_tool == "codex"
+        assert cfg.memory_compaction_model == "gpt-5-codex"
+        assert cfg.transcript_summary_tool == "codex"
+        assert cfg.transcript_summary_model == "gpt-5-codex"
         assert cfg.ac_tool == "codex"
         assert cfg.verification_judge_tool == "codex"
 

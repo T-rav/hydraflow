@@ -394,6 +394,34 @@ class TestSummarizeAndComment:
         assert call_kwargs["input"] is not None
         assert isinstance(call_kwargs["input"], bytes)
 
+    @pytest.mark.asyncio
+    async def test_codex_tool_passes_prompt_as_cli_arg(self, tmp_path: Path) -> None:
+        config = ConfigFactory.create(
+            repo_root=tmp_path,
+            transcript_summary_tool="codex",
+            transcript_summary_model="gpt-5-codex",
+        )
+        prs = MagicMock()
+        prs.post_comment = AsyncMock()
+        bus = MagicMock()
+        bus.publish = AsyncMock()
+        state = MagicMock()
+        runner = _make_mock_runner(stdout="Summary")
+
+        summarizer = TranscriptSummarizer(config, prs, bus, state, runner=runner)
+        await summarizer.summarize_and_comment(
+            transcript="x" * 1000, issue_number=42, phase="implement"
+        )
+
+        runner.run_simple.assert_awaited_once()
+        call_args = runner.run_simple.call_args[0][0]
+        call_kwargs = runner.run_simple.call_args[1]
+        assert call_args[:3] == ["codex", "exec", "--json"]
+        assert call_args[call_args.index("--model") + 1] == "gpt-5-codex"
+        assert "--skip-git-repo-check" in call_args
+        assert call_args[-1]
+        assert call_kwargs["input"] is None
+
 
 # --- TranscriptSummarizer.summarize_and_publish tests ---
 

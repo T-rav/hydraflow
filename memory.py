@@ -409,6 +409,7 @@ class MemorySyncWorker:
         Returns the summarised text or ``None`` on failure (caller
         falls back to truncation).
         """
+        tool = self._config.memory_compaction_tool
         model = self._config.memory_compaction_model
         prompt = (
             f"Condense the following agent learnings into at most {max_chars} characters. "
@@ -416,21 +417,41 @@ class MemorySyncWorker:
             "Output ONLY the condensed markdown list — no preamble.\n\n"
             f"{content}"
         )
-        cmd = ["claude", "-p", "--model", model]
+        if tool == "codex":
+            cmd = [
+                "codex",
+                "exec",
+                "--json",
+                "--model",
+                model,
+                "--sandbox",
+                "danger-full-access",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--skip-git-repo-check",
+                prompt,
+            ]
+            cmd_input = None
+        else:
+            cmd = ["claude", "-p", "--model", model]
+            cmd_input = prompt.encode()
         env = make_clean_env(self._config.gh_token)
 
         try:
             result = await self._runner.run_simple(
                 cmd,
                 env=env,
-                input=prompt.encode(),
+                input=cmd_input,
                 timeout=self._config.memory_compaction_timeout,
             )
             if result.returncode != 0:
+                stderr_excerpt = result.stderr[:200]
+                stdout_excerpt = result.stdout[:200]
                 logger.warning(
-                    "Memory compaction model failed (rc=%d): %s",
+                    "Memory compaction model failed (rc=%d, model=%s): stderr=%r stdout=%r",
                     result.returncode,
-                    result.stderr[:200],
+                    model,
+                    stderr_excerpt,
+                    stdout_excerpt,
                 )
                 return None
             if not result.stdout:
