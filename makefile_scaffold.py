@@ -119,6 +119,8 @@ _CPP_TARGETS: dict[str, str] = {
 _QUALITY_LITE_LINE = "quality-lite: lint-check typecheck security\n"
 _QUALITY_LINE = "quality: quality-lite test\n"
 _DEFAULT_GOAL_LINE = ".DEFAULT_GOAL := help"
+_COVERAGE_MIN_LINE = "COVERAGE_MIN ?= 50"
+_COVERAGE_TARGET_LINE = "COVERAGE_TARGET ?= 70"
 _HELP_RECIPE = (
     '\t@echo "Available targets:"\n'
     '\t@echo "  help         Show this help"\n'
@@ -128,6 +130,7 @@ _HELP_RECIPE = (
     '\t@echo "  typecheck    Run type checks"\n'
     '\t@echo "  security     Run security checks"\n'
     '\t@echo "  test         Run tests"\n'
+    '\t@echo "  coverage vars COVERAGE_MIN=50 COVERAGE_TARGET=70"\n'
     '\t@echo "  quality-lite Run lint/type/security"\n'
     '\t@echo "  quality      Run quality-lite + tests"\n'
 )
@@ -279,6 +282,8 @@ def generate_makefile(language: str) -> str:
 
     lines: list[str] = []
     lines.append(_DEFAULT_GOAL_LINE)
+    lines.append(_COVERAGE_MIN_LINE)
+    lines.append(_COVERAGE_TARGET_LINE)
     lines.append("")
     lines.append(f".PHONY: {' '.join(_ALL_TARGET_NAMES)}")
     lines.append("")

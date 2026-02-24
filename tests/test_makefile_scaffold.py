@@ -113,8 +113,11 @@ class TestGenerateMakefile:
     def test_sets_help_as_default_goal(self) -> None:
         content = generate_makefile("python")
         assert ".DEFAULT_GOAL := help" in content
+        assert "COVERAGE_MIN ?= 50" in content
+        assert "COVERAGE_TARGET ?= 70" in content
         assert "help:" in content
         assert "Available targets:" in content
+        assert "coverage vars COVERAGE_MIN=50 COVERAGE_TARGET=70" in content
 
     def test_unknown_language_returns_empty(self) -> None:
         content = generate_makefile("unknown")
@@ -125,7 +128,10 @@ class TestGenerateMakefile:
         recipe_lines = [
             line
             for line in content.split("\n")
-            if line and not line.startswith((".", "#")) and ":" not in line
+            if line
+            and not line.startswith((".", "#"))
+            and ":" not in line
+            and "=" not in line
         ]
         for line in recipe_lines:
             assert line.startswith("\t"), f"Recipe line should start with tab: {line!r}"

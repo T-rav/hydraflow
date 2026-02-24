@@ -892,6 +892,54 @@ class TestCheckTestFramework:
 
 
 # ---------------------------------------------------------------------------
+# Coverage policy detection
+# ---------------------------------------------------------------------------
+
+
+class TestCheckCoveragePolicy:
+    """Tests for RepoAuditor._check_coverage_policy."""
+
+    def test_missing_threshold_reports_partial(self, tmp_path: Path) -> None:
+        config = ConfigFactory.create(repo_root=tmp_path)
+        from prep import RepoAuditor
+
+        auditor = RepoAuditor(config)
+        check = auditor._check_coverage_policy()
+        assert check.status == AuditCheckStatus.PARTIAL
+        assert "no enforced coverage threshold" in check.detail
+
+    def test_threshold_below_minimum_reports_partial(self, tmp_path: Path) -> None:
+        (tmp_path / "Makefile").write_text("COVERAGE_MIN ?= 35\n")
+        config = ConfigFactory.create(repo_root=tmp_path)
+        from prep import RepoAuditor
+
+        auditor = RepoAuditor(config)
+        check = auditor._check_coverage_policy()
+        assert check.status == AuditCheckStatus.PARTIAL
+        assert "below minimum 50%" in check.detail
+
+    def test_threshold_between_minimum_and_target_warns(self, tmp_path: Path) -> None:
+        (tmp_path / "Makefile").write_text("COVERAGE_MIN ?= 60\nCOVERAGE_TARGET ?= 70\n")
+        config = ConfigFactory.create(repo_root=tmp_path)
+        from prep import RepoAuditor
+
+        auditor = RepoAuditor(config)
+        check = auditor._check_coverage_policy()
+        assert check.status == AuditCheckStatus.PARTIAL
+        assert "target 70%+" in check.detail
+
+    def test_threshold_at_target_reports_present(self, tmp_path: Path) -> None:
+        (tmp_path / "Makefile").write_text("COVERAGE_MIN ?= 70\nCOVERAGE_TARGET ?= 70\n")
+        config = ConfigFactory.create(repo_root=tmp_path)
+        from prep import RepoAuditor
+
+        auditor = RepoAuditor(config)
+        check = auditor._check_coverage_policy()
+        assert check.status == AuditCheckStatus.PRESENT
+        assert "70%" in check.detail
+
+
+# ---------------------------------------------------------------------------
 # Package manager detection
 # ---------------------------------------------------------------------------
 
@@ -1139,6 +1187,7 @@ class TestRunAudit:
         assert "Linting" in check_names
         assert "Type check" in check_names
         assert "Tests" in check_names
+        assert "Coverage" in check_names
         assert "Pkg manager" in check_names
         assert "gh CLI" in check_names
         assert "Labels" in check_names
