@@ -10,9 +10,8 @@ from typing import Any
 from agent import AgentRunner
 from config import HydraFlowConfig
 from events import EventBus
-from memory import file_memory_suggestion
 from models import GitHubIssue, PRInfo, WorkerStatus
-from phase_utils import publish_review_status
+from phase_utils import publish_review_status, safe_file_memory_suggestion
 from pr_manager import PRManager
 from state import StateTracker
 from transcript_summarizer import TranscriptSummarizer
@@ -102,7 +101,8 @@ class MergeConflictResolver:
         pr: PRInfo,
         issue: GitHubIssue,
         wt_path: Path,
-        worker_id: int,
+        worker_id: int | None = None,
+        source: str = "merge_conflict",
     ) -> tuple[bool, bool]:
         """Use the implementation agent to resolve merge conflicts.
 
@@ -158,27 +158,21 @@ class MergeConflictResolver:
                     cmd,
                     prompt,
                     wt_path,
-                    {"issue": issue.number, "source": "merge_conflict"},
+                    {"issue": issue.number, "source": source},
                 )
 
-                self._save_conflict_transcript(
-                    pr.number, issue.number, attempt, transcript
+                self.save_conflict_transcript(
+                    pr.number, issue.number, attempt, transcript, source=source
                 )
 
-                try:
-                    await file_memory_suggestion(
-                        transcript,
-                        "conflict_resolver",
-                        f"PR #{pr.number}",
-                        self._config,
-                        self._prs,
-                        self._state,
-                    )
-                except Exception:
-                    logger.exception(
-                        "Failed to file memory suggestion for conflict resolution on PR #%d",
-                        pr.number,
-                    )
+                await safe_file_memory_suggestion(
+                    transcript,
+                    source,
+                    f"PR #{pr.number}",
+                    self._config,
+                    self._prs,
+                    self._state,
+                )
 
                 success, error_msg = await self._agents._verify_result(
                     wt_path, pr.branch
@@ -220,7 +214,9 @@ class MergeConflictResolver:
             max_attempts,
             pr.number,
         )
-        rebuilt = await self.fresh_branch_rebuild(pr, issue, worker_id)
+        rebuilt = await self.fresh_branch_rebuild(
+            pr, issue, worker_id=worker_id, source=source
+        )
         if rebuilt:
             return True, True
 
@@ -230,7 +226,8 @@ class MergeConflictResolver:
         self,
         pr: PRInfo,
         issue: GitHubIssue,
-        worker_id: int,
+        worker_id: int | None = None,
+        source: str = "fresh_rebuild",
     ) -> bool:
         """Rebuild the PR branch from scratch on a fresh branch from main.
 
@@ -285,25 +282,21 @@ class MergeConflictResolver:
                 cmd,
                 prompt,
                 new_wt,
-                {"issue": issue.number, "source": "fresh_rebuild"},
+                {"issue": issue.number, "source": source},
             )
 
-            self._save_conflict_transcript(pr.number, issue.number, 0, transcript)
+            self.save_conflict_transcript(
+                pr.number, issue.number, 0, transcript, source=source
+            )
 
-            try:
-                await file_memory_suggestion(
-                    transcript,
-                    "fresh_rebuild",
-                    f"PR #{pr.number}",
-                    self._config,
-                    self._prs,
-                    self._state,
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to file memory suggestion for fresh rebuild on PR #%d",
-                    pr.number,
-                )
+            await safe_file_memory_suggestion(
+                transcript,
+                source,
+                f"PR #{pr.number}",
+                self._config,
+                self._prs,
+                self._state,
+            )
 
             success, error_msg = await self._agents._verify_result(new_wt, pr.branch)
             if success:
@@ -345,26 +338,43 @@ class MergeConflictResolver:
                 pr_number,
             )
 
-    def _save_conflict_transcript(
+    def save_conflict_transcript(
         self,
         pr_number: int,
         issue_number: int,
         attempt: int,
         transcript: str,
+        *,
+        source: str = "conflict",
     ) -> None:
         """Save a conflict resolution transcript to ``.hydraflow/logs/``."""
         log_dir = self._config.log_dir
-        log_dir.mkdir(parents=True, exist_ok=True)
-        path = log_dir / f"conflict-pr-{pr_number}-attempt-{attempt}.txt"
-        path.write_text(transcript)
-        logger.info(
-            "Conflict resolution transcript saved to %s",
-            path,
-            extra={"issue": issue_number},
-        )
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+            path = log_dir / f"{source}-pr-{pr_number}-attempt-{attempt}.txt"
+            path.write_text(transcript)
+            logger.info(
+                "Conflict resolution transcript saved to %s",
+                path,
+                extra={"issue": issue_number},
+            )
+        except OSError:
+            logger.warning(
+                "Could not save conflict transcript to %s",
+                log_dir,
+                exc_info=True,
+                extra={"issue": issue_number},
+            )
 
     async def _publish_review_status(
-        self, pr: PRInfo, worker_id: int, status: str
+        self, pr: PRInfo, worker_id: int | None, status: str
     ) -> None:
-        """Emit a REVIEW_UPDATE event with the given status."""
+        """Emit a REVIEW_UPDATE event with the given status.
+
+        When *worker_id* is ``None`` (e.g. called from PRUnsticker),
+        the event is silently skipped because the caller does not
+        participate in review status tracking.
+        """
+        if worker_id is None:
+            return
         await publish_review_status(self._bus, pr, worker_id, status)
