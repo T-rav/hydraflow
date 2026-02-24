@@ -2196,4 +2196,4 @@ class TestCriticalExceptionPropagation:
             await phase.review_prs([pr], [issue])
 
         # finally block should still clean up active issues
-        assert not phase._store.is_active(42)
+        assert 42 not in phase._active_issues
