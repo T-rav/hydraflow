@@ -343,7 +343,7 @@ class PRUnsticker:
                 url=pr_url,
             )
             return await self._resolver.resolve_merge_conflicts(
-                pr, issue, wt_path, worker_id=None, source="pr_unsticker"
+                pr, issue.to_task(), wt_path, worker_id=None, source="pr_unsticker"
             )
         if cause in (FailureCause.CI_FAILURE, FailureCause.REVIEW_FIX_CAP):
             success = await self._resolve_ci_or_quality(
