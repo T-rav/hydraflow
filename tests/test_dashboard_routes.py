@@ -3175,7 +3175,8 @@ class TestHITLApproveMemoryEndpoint:
         response = await endpoint(42)
         data = json.loads(response.body)
         assert data["status"] == "ok"
-        # Should add memory label
+        # Should remove all pipeline labels and add memory label
+        pr_mgr.remove_label.assert_called()
         pr_mgr.add_labels.assert_called()
 
     @pytest.mark.asyncio

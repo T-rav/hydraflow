@@ -4278,6 +4278,9 @@ class TestAllPipelineLabels:
         assert cfg.hitl_label[0] in labels
         assert cfg.planner_label[0] in labels
         assert cfg.find_label[0] in labels
+        assert cfg.hitl_active_label[0] in labels
+        assert cfg.fixed_label[0] in labels
+        assert cfg.improve_label[0] in labels
 
     def test_returns_flat_list(self, tmp_path: Path) -> None:
         from tests.helpers import ConfigFactory
