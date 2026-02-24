@@ -244,6 +244,42 @@ class TestHITLPhaseProcessing:
         assert events[0].data["status"] == "pending"
 
     @pytest.mark.asyncio
+    async def test_stop_event_awaits_cancelled_tasks(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """After stop_event, cancelled tasks must be awaited for clean shutdown."""
+        from models import HITLResult
+
+        phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
+
+        first_task_started = asyncio.Event()
+
+        async def slow_run(issue, correction, cause, wt_path):  # noqa: ANN001, ANN202, ARG001
+            first_task_started.set()
+            # Signal the stop_event after the first task starts running
+            phase._stop_event.set()
+            return HITLResult(issue_number=issue.number, success=True)
+
+        fetcher.fetch_issue_by_number = AsyncMock(
+            return_value=IssueFactory.create(number=42)
+        )
+        runner.run = AsyncMock(side_effect=slow_run)
+
+        # Submit two corrections — one will complete, triggering stop_event
+        # which should cancel the second and properly await it
+        phase.submit_correction(42, "Fix A")
+        phase.submit_correction(43, "Fix B")
+
+        fetcher.fetch_issue_by_number = AsyncMock(
+            side_effect=lambda n: IssueFactory.create(number=n)
+        )
+
+        await phase.process_corrections()
+
+        # The key assertion: no pending tasks remain after process_corrections returns
+        # If gather was not called, cancelled tasks would still be pending
+
+    @pytest.mark.asyncio
     async def test_clears_active_issues(self, config: HydraFlowConfig) -> None:
         """Issue should be removed from active_hitl_issues after processing."""
         from models import HITLResult

@@ -325,6 +325,91 @@ class TestStreamClaudeProcessLifecycle:
         assert mock_proc not in active_procs
 
     @pytest.mark.asyncio
+    async def test_timeout_cancels_stderr_task(self, event_bus) -> None:
+        """On timeout, stderr_task must be cancelled and awaited — no pending task leak."""
+        stderr_read_started = asyncio.Event()
+
+        async def hanging_stderr_read() -> bytes:
+            stderr_read_started.set()
+            await asyncio.sleep(3600)
+            return b""
+
+        class HangingIter:
+            def __aiter__(self):  # noqa: ANN204
+                return self
+
+            async def __anext__(self) -> bytes:
+                await asyncio.sleep(3600)
+                return b""
+
+        mock_proc = AsyncMock()
+        mock_proc.returncode = None
+        mock_proc.stdin = MagicMock()
+        mock_proc.stdin.drain = AsyncMock()
+        mock_proc.stdout = HangingIter()
+        mock_proc.stderr = AsyncMock()
+        mock_proc.stderr.read = hanging_stderr_read
+        mock_proc.kill = MagicMock()
+        mock_proc.wait = AsyncMock()
+
+        mock_create = AsyncMock(return_value=mock_proc)
+
+        with (
+            patch("asyncio.create_subprocess_exec", mock_create),
+            pytest.raises(RuntimeError, match="timed out"),
+        ):
+            await stream_claude_process(**_default_kwargs(event_bus), timeout=0.01)
+
+        # After the timeout, give the event loop a tick to process cancellation
+        await asyncio.sleep(0)
+
+        # The key assertion: no pending tasks should remain for stderr
+        # If stderr_task was not cancelled, we'd see "Task was destroyed" warnings
+        # We verify indirectly that the function completed without warnings
+        # by checking that the process was killed and cleaned up
+        mock_proc.kill.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_cancellation_cancels_stderr_task(self, event_bus) -> None:
+        """On CancelledError, stderr_task must be cancelled — no pending task leak."""
+        stderr_read_started = asyncio.Event()
+
+        async def hanging_stderr_read() -> bytes:
+            stderr_read_started.set()
+            await asyncio.sleep(3600)
+            return b""
+
+        class CancellingIter:
+            def __aiter__(self):  # noqa: ANN204
+                return self
+
+            async def __anext__(self) -> bytes:
+                raise asyncio.CancelledError
+
+        mock_proc = AsyncMock()
+        mock_proc.returncode = 0
+        mock_proc.stdin = MagicMock()
+        mock_proc.stdin.drain = AsyncMock()
+        mock_proc.stdout = CancellingIter()
+        mock_proc.stderr = AsyncMock()
+        mock_proc.stderr.read = hanging_stderr_read
+        mock_proc.kill = MagicMock()
+        mock_proc.wait = AsyncMock()
+
+        mock_create = AsyncMock(return_value=mock_proc)
+
+        with (
+            patch("asyncio.create_subprocess_exec", mock_create),
+            pytest.raises(asyncio.CancelledError),
+        ):
+            await stream_claude_process(**_default_kwargs(event_bus))
+
+        # Give the event loop a tick to process cancellation
+        await asyncio.sleep(0)
+
+        mock_proc.kill.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_tracks_process_in_active_set(self, event_bus) -> None:
         """Process should be in active_procs during execution and removed after."""
         active_procs: set[asyncio.subprocess.Process] = set()
