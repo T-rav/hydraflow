@@ -104,15 +104,6 @@ def _make_manager(config, event_bus):
     return PRManager(config=config, event_bus=event_bus)
 
 
-def _make_subprocess_mock(returncode: int = 0, stdout: str = "", stderr: str = ""):
-    """Build a mock for asyncio.create_subprocess_exec."""
-    mock_proc = AsyncMock()
-    mock_proc.returncode = returncode
-    mock_proc.communicate = AsyncMock(return_value=(stdout.encode(), stderr.encode()))
-    mock_proc.wait = AsyncMock(return_value=returncode)
-    return AsyncMock(return_value=mock_proc)
-
-
 def _assert_search_api_cmd(cmd: tuple[str, ...]) -> None:
     """Assert common structure of a gh API search command."""
     assert "api" in cmd
@@ -494,7 +485,7 @@ async def test_create_issue_passes_correct_gh_args(config, event_bus, tmp_path):
     )
     mgr = _make_manager(cfg, event_bus)
     issue_url = "https://github.com/test-org/test-repo/issues/99"
-    mock_create = _make_subprocess_mock(returncode=0, stdout=issue_url)
+    mock_create = SubprocessMockBuilder().with_stdout(issue_url).build()
 
     with patch("asyncio.create_subprocess_exec", mock_create):
         await mgr.create_issue("Bug found", "Details here", ["bug"])
@@ -650,7 +641,7 @@ async def test_create_pr_calls_gh_pr_create(config, event_bus, issue):
 async def test_create_pr_includes_required_flags(config, event_bus, issue):
     manager = _make_manager(config, event_bus)
     pr_url = "https://github.com/test-org/test-repo/pull/55"
-    mock_create = _make_subprocess_mock(returncode=0, stdout=pr_url)
+    mock_create = SubprocessMockBuilder().with_stdout(pr_url).build()
 
     with patch("asyncio.create_subprocess_exec", mock_create):
         await manager.create_pr(issue, "agent/issue-42")
@@ -819,7 +810,7 @@ async def test_merge_pr_calls_gh_pr_merge(config, event_bus):
 @pytest.mark.asyncio
 async def test_merge_pr_uses_squash_and_delete_branch(config, event_bus):
     manager = _make_manager(config, event_bus)
-    mock_create = _make_subprocess_mock(returncode=0, stdout="")
+    mock_create = SubprocessMockBuilder().build()
 
     with patch("asyncio.create_subprocess_exec", mock_create):
         await manager.merge_pr(101)
@@ -2302,7 +2293,7 @@ class TestCreatePrEdgeCases:
     ) -> None:
         """create_pr should return PRInfo(number=0) when gh output is empty."""
         manager = _make_manager(config, event_bus)
-        mock_create = _make_subprocess_mock(returncode=0, stdout="")
+        mock_create = SubprocessMockBuilder().build()
 
         with patch("asyncio.create_subprocess_exec", mock_create):
             result = await manager.create_pr(issue, "agent/issue-42")
@@ -2321,8 +2312,8 @@ class TestCreateIssueEdgeCases:
     ) -> None:
         """create_issue should return 0 when gh output is not a valid URL."""
         mgr = _make_manager(config, event_bus)
-        mock_create = _make_subprocess_mock(
-            returncode=0, stdout="Error: something went wrong"
+        mock_create = (
+            SubprocessMockBuilder().with_stdout("Error: something went wrong").build()
         )
 
         with patch("asyncio.create_subprocess_exec", mock_create):
@@ -2336,7 +2327,7 @@ class TestCreateIssueEdgeCases:
     ) -> None:
         """create_issue should return 0 when gh output is empty."""
         mgr = _make_manager(config, event_bus)
-        mock_create = _make_subprocess_mock(returncode=0, stdout="")
+        mock_create = SubprocessMockBuilder().build()
 
         with patch("asyncio.create_subprocess_exec", mock_create):
             result = await mgr.create_issue("Bug found", "Details here", ["bug"])
@@ -2457,7 +2448,7 @@ class TestListOpenPrsEdgeCases:
                 },
             ]
         )
-        mock_create = _make_subprocess_mock(returncode=0, stdout=pr_json)
+        mock_create = SubprocessMockBuilder().with_stdout(pr_json).build()
 
         with patch("asyncio.create_subprocess_exec", mock_create):
             result = await mgr.list_open_prs(["test-label"])
@@ -3015,7 +3006,7 @@ class TestFetchCiFailureLogs:
                 {"name": "Lint", "state": "SUCCESS", "detailsUrl": ""},
             ]
         )
-        mock_create = _make_subprocess_mock(returncode=0, stdout=checks_json)
+        mock_create = SubprocessMockBuilder().with_stdout(checks_json).build()
 
         with patch("asyncio.create_subprocess_exec", mock_create):
             result = await manager.fetch_ci_failure_logs(101)
@@ -3070,7 +3061,7 @@ class TestFetchCiFailureLogs:
                 {"name": "External", "state": "FAILURE", "detailsUrl": ""},
             ]
         )
-        mock_create = _make_subprocess_mock(returncode=0, stdout=checks_json)
+        mock_create = SubprocessMockBuilder().with_stdout(checks_json).build()
 
         with patch("asyncio.create_subprocess_exec", mock_create):
             result = await manager.fetch_ci_failure_logs(101)
@@ -3081,7 +3072,9 @@ class TestFetchCiFailureLogs:
     async def test_handles_gh_error_gracefully(self, config, event_bus):
         """RuntimeError from gh returns empty string."""
         manager = _make_manager(config, event_bus)
-        mock_create = _make_subprocess_mock(returncode=1, stderr="not found")
+        mock_create = (
+            SubprocessMockBuilder().with_returncode(1).with_stderr("not found").build()
+        )
 
         with patch("asyncio.create_subprocess_exec", mock_create):
             result = await manager.fetch_ci_failure_logs(101)
@@ -3143,7 +3136,7 @@ class TestFetchCiFailureLogs:
                 },
             ]
         )
-        mock_create = _make_subprocess_mock(returncode=0, stdout=checks_json)
+        mock_create = SubprocessMockBuilder().with_stdout(checks_json).build()
 
         with patch("asyncio.create_subprocess_exec", mock_create):
             result = await manager.fetch_ci_failure_logs(101)
@@ -3200,7 +3193,7 @@ class TestListOpenPrsExceptionHandling:
         mgr = _make_manager(config, event_bus)
         # JSON with one item missing the 'number' key
         pr_json = json.dumps([{"url": "...", "headRefName": "agent/issue-1"}])
-        mock_create = _make_subprocess_mock(returncode=0, stdout=pr_json)
+        mock_create = SubprocessMockBuilder().with_stdout(pr_json).build()
 
         with (
             caplog.at_level(logging.DEBUG, logger="hydraflow.pr_manager"),
@@ -3219,7 +3212,9 @@ class TestListOpenPrsExceptionHandling:
         import logging
 
         mgr = _make_manager(config, event_bus)
-        mock_create = _make_subprocess_mock(returncode=1, stderr="gh error")
+        mock_create = (
+            SubprocessMockBuilder().with_returncode(1).with_stderr("gh error").build()
+        )
 
         with (
             caplog.at_level(logging.DEBUG, logger="hydraflow.pr_manager"),
@@ -3251,7 +3246,9 @@ class TestListHitlItemsExceptionHandling:
             state_file=tmp_path / "state.json",
         )
         mgr = _make_manager(cfg, event_bus)
-        mock_create = _make_subprocess_mock(returncode=1, stderr="gh error")
+        mock_create = (
+            SubprocessMockBuilder().with_returncode(1).with_stderr("gh error").build()
+        )
 
         with (
             caplog.at_level(logging.WARNING, logger="hydraflow.pr_manager"),
@@ -3333,7 +3330,7 @@ class TestListHitlItemsExceptionHandling:
         # Issue list succeeds, but branch_for_issue raises KeyError
         # which is outside the inner try/except blocks
         issues_json = json.dumps([{"number": 42, "title": "Test", "url": ""}])
-        mock_create = _make_subprocess_mock(returncode=0, stdout=issues_json)
+        mock_create = SubprocessMockBuilder().with_stdout(issues_json).build()
 
         with (
             caplog.at_level(logging.WARNING, logger="hydraflow.pr_manager"),

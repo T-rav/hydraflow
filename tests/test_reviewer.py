@@ -16,7 +16,14 @@ from escalation_gate import EscalationDecision
 from events import EventType
 from models import ReviewerStatus, ReviewVerdict
 from reviewer import ReviewRunner
+from tests.conftest import PRInfoFactory
 from tests.helpers import ConfigFactory, make_streaming_proc
+
+
+@pytest.fixture
+def pr_info():
+    return PRInfoFactory.create()
+
 
 # ---------------------------------------------------------------------------
 # Inheritance

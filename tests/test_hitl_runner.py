@@ -16,6 +16,12 @@ from events import EventBus, EventType
 from hitl_runner import HITLRunner, _classify_cause
 from tests.conftest import HITLResultFactory, IssueFactory
 
+
+@pytest.fixture
+def hitl_runner(config, event_bus):
+    return HITLRunner(config, event_bus)
+
+
 # ---------------------------------------------------------------------------
 # Inheritance
 # ---------------------------------------------------------------------------
