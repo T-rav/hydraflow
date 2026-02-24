@@ -5,13 +5,16 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+# conftest.py already inserts the hydraflow package directory into sys.path
+from typing import get_args
+
 import pytest
 
-# conftest.py already inserts the hydraflow package directory into sys.path
 from config import (
     _ENV_BOOL_OVERRIDES,
     _ENV_FLOAT_OVERRIDES,
     _ENV_INT_OVERRIDES,
+    _ENV_LITERAL_OVERRIDES,
     _ENV_STR_OVERRIDES,
     HydraFlowConfig,
     _detect_repo_slug,
@@ -2709,6 +2712,89 @@ class TestEnvVarOverrideTable:
         )
         assert getattr(cfg, field) is explicit
 
+    @pytest.mark.parametrize(
+        ("field", "env_key"),
+        _ENV_LITERAL_OVERRIDES,
+        ids=[entry[0] for entry in _ENV_LITERAL_OVERRIDES],
+    )
+    def test_env_literal_override_applies_when_at_default(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        field: str,
+        env_key: str,
+    ) -> None:
+        """Each Literal override should apply when the field is at its default."""
+        allowed = get_args(HydraFlowConfig.model_fields[field].annotation)
+        default = HydraFlowConfig.model_fields[field].default
+        # Pick a non-default value from the allowed values
+        non_default = next(v for v in allowed if v != default)
+        monkeypatch.setenv(env_key, non_default)
+        # execution_mode="docker" triggers _validate_docker which needs shutil.which
+        if field == "execution_mode" and non_default == "docker":
+            import shutil
+
+            monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/docker")
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert getattr(cfg, field) == non_default
+
+    @pytest.mark.parametrize(
+        ("field", "env_key"),
+        _ENV_LITERAL_OVERRIDES,
+        ids=[entry[0] for entry in _ENV_LITERAL_OVERRIDES],
+    )
+    def test_env_literal_override_ignored_when_explicit_value_set(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        field: str,
+        env_key: str,
+    ) -> None:
+        """Explicit values should take precedence over Literal env var overrides."""
+        allowed = get_args(HydraFlowConfig.model_fields[field].annotation)
+        default = HydraFlowConfig.model_fields[field].default
+        non_default = next(v for v in allowed if v != default)
+        # Pass non-default explicitly, set env var to default
+        monkeypatch.setenv(env_key, default)
+        # execution_mode="docker" triggers _validate_docker which needs shutil.which
+        if field == "execution_mode" and non_default == "docker":
+            import shutil
+
+            monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/docker")
+        cfg = HydraFlowConfig(
+            **{field: non_default},  # type: ignore[arg-type]
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert getattr(cfg, field) == non_default
+
+    @pytest.mark.parametrize(
+        ("field", "env_key"),
+        _ENV_LITERAL_OVERRIDES,
+        ids=[entry[0] for entry in _ENV_LITERAL_OVERRIDES],
+    )
+    def test_env_literal_override_invalid_value_ignored(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        field: str,
+        env_key: str,
+    ) -> None:
+        """Invalid Literal env var values should be rejected and field stays at default."""
+        default = HydraFlowConfig.model_fields[field].default
+        monkeypatch.setenv(env_key, "bogus")
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert getattr(cfg, field) == default
+
     def test_override_table_field_names_are_valid(self) -> None:
         """Every field in the override tables should be a real HydraFlowConfig attribute."""
         all_fields = (
@@ -2716,6 +2802,7 @@ class TestEnvVarOverrideTable:
             | {f for f, _, _ in _ENV_STR_OVERRIDES}
             | {f for f, _, _ in _ENV_FLOAT_OVERRIDES}
             | {f for f, _, _ in _ENV_BOOL_OVERRIDES}
+            | {f for f, _ in _ENV_LITERAL_OVERRIDES}
         )
         config_fields = set(HydraFlowConfig.model_fields.keys())
         invalid = all_fields - config_fields
