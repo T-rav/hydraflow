@@ -3347,3 +3347,191 @@ class TestListHitlItemsExceptionHandling:
 
         assert result == []
         assert "Failed to fetch HITL items" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# get_pr_head_sha (issue #853)
+# ---------------------------------------------------------------------------
+
+
+class TestGetPrHeadSha:
+    """Tests for PRManager.get_pr_head_sha."""
+
+    @pytest.mark.asyncio
+    async def test_returns_sha_on_success(self, event_bus, tmp_path):
+        """get_pr_head_sha should parse headRefOid from JSON response."""
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+        )
+        mgr = _make_manager(cfg, event_bus)
+        response = '{"headRefOid":"abc123def456789"}'
+        mock_create = SubprocessMockBuilder().with_stdout(response).build()
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            sha = await mgr.get_pr_head_sha(101)
+
+        assert sha == "abc123def456789"
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_on_failure(self, event_bus, tmp_path):
+        """get_pr_head_sha should return empty string on subprocess failure."""
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+        )
+        mgr = _make_manager(cfg, event_bus)
+        mock_create = (
+            SubprocessMockBuilder().with_returncode(1).with_stderr("not found").build()
+        )
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            sha = await mgr.get_pr_head_sha(999)
+
+        assert sha == ""
+
+    @pytest.mark.asyncio
+    async def test_dry_run_returns_empty(self, dry_config, event_bus):
+        """In dry-run mode, get_pr_head_sha should return empty string."""
+        mgr = _make_manager(dry_config, event_bus)
+        mock_create = SubprocessMockBuilder().build()
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            sha = await mgr.get_pr_head_sha(101)
+
+        mock_create.assert_not_called()
+        assert sha == ""
+
+
+# ---------------------------------------------------------------------------
+# get_pr_reviews (issue #853)
+# ---------------------------------------------------------------------------
+
+
+class TestGetPrReviews:
+    """Tests for PRManager.get_pr_reviews."""
+
+    @pytest.mark.asyncio
+    async def test_returns_reviews_on_success(self, event_bus, tmp_path):
+        """get_pr_reviews should parse review data from JSON response."""
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+        )
+        mgr = _make_manager(cfg, event_bus)
+        response = json.dumps(
+            [
+                {
+                    "author": "reviewer1",
+                    "state": "APPROVED",
+                    "submitted_at": "2025-01-01T00:00:00Z",
+                    "commit_id": "abc123",
+                }
+            ]
+        )
+        mock_create = SubprocessMockBuilder().with_stdout(response).build()
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            reviews = await mgr.get_pr_reviews(101)
+
+        assert len(reviews) == 1
+        assert reviews[0]["author"] == "reviewer1"
+        assert reviews[0]["state"] == "APPROVED"
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_on_failure(self, event_bus, tmp_path):
+        """get_pr_reviews should return empty list on subprocess failure."""
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+        )
+        mgr = _make_manager(cfg, event_bus)
+        mock_create = (
+            SubprocessMockBuilder().with_returncode(1).with_stderr("not found").build()
+        )
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            reviews = await mgr.get_pr_reviews(999)
+
+        assert reviews == []
+
+    @pytest.mark.asyncio
+    async def test_dry_run_returns_empty(self, dry_config, event_bus):
+        """In dry-run mode, get_pr_reviews should return empty list."""
+        mgr = _make_manager(dry_config, event_bus)
+        mock_create = SubprocessMockBuilder().build()
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            reviews = await mgr.get_pr_reviews(101)
+
+        mock_create.assert_not_called()
+        assert reviews == []
+
+
+# ---------------------------------------------------------------------------
+# get_pr_comments (issue #853)
+# ---------------------------------------------------------------------------
+
+
+class TestGetPrComments:
+    """Tests for PRManager.get_pr_comments."""
+
+    @pytest.mark.asyncio
+    async def test_returns_comments_on_success(self, event_bus, tmp_path):
+        """get_pr_comments should parse comment data from JSON response."""
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+        )
+        mgr = _make_manager(cfg, event_bus)
+        response = json.dumps(
+            [
+                {
+                    "author": "commenter1",
+                    "created_at": "2025-01-01T12:00:00Z",
+                }
+            ]
+        )
+        mock_create = SubprocessMockBuilder().with_stdout(response).build()
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            comments = await mgr.get_pr_comments(101)
+
+        assert len(comments) == 1
+        assert comments[0]["author"] == "commenter1"
+        assert comments[0]["created_at"] == "2025-01-01T12:00:00Z"
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_on_failure(self, event_bus, tmp_path):
+        """get_pr_comments should return empty list on subprocess failure."""
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+        )
+        mgr = _make_manager(cfg, event_bus)
+        mock_create = (
+            SubprocessMockBuilder().with_returncode(1).with_stderr("not found").build()
+        )
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            comments = await mgr.get_pr_comments(999)
+
+        assert comments == []
+
+    @pytest.mark.asyncio
+    async def test_dry_run_returns_empty(self, dry_config, event_bus):
+        """In dry-run mode, get_pr_comments should return empty list."""
+        mgr = _make_manager(dry_config, event_bus)
+        mock_create = SubprocessMockBuilder().build()
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            comments = await mgr.get_pr_comments(101)
+
+        mock_create.assert_not_called()
+        assert comments == []

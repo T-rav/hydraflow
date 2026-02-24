@@ -1654,6 +1654,57 @@ class TestRetriesPerStage:
 
 
 # ---------------------------------------------------------------------------
+# Last reviewed SHA tracking (issue #853)
+# ---------------------------------------------------------------------------
+
+
+class TestLastReviewedSha:
+    """Tests for set/get/clear_last_reviewed_sha."""
+
+    def test_set_and_get(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        tracker.set_last_reviewed_sha(42, "abc123def456")
+        assert tracker.get_last_reviewed_sha(42) == "abc123def456"
+
+    def test_get_returns_none_when_unset(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        assert tracker.get_last_reviewed_sha(999) is None
+
+    def test_clear_removes_entry(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        tracker.set_last_reviewed_sha(42, "abc123")
+        tracker.clear_last_reviewed_sha(42)
+        assert tracker.get_last_reviewed_sha(42) is None
+
+    def test_clear_nonexistent_is_noop(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        # Should not raise
+        tracker.clear_last_reviewed_sha(999)
+        assert tracker.get_last_reviewed_sha(999) is None
+
+    def test_persists_across_reload(self, tmp_path: Path) -> None:
+        state_file = tmp_path / "state.json"
+        tracker = StateTracker(state_file)
+        tracker.set_last_reviewed_sha(42, "deadbeef1234")
+
+        tracker2 = StateTracker(state_file)
+        assert tracker2.get_last_reviewed_sha(42) == "deadbeef1234"
+
+    def test_overwrite_updates(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        tracker.set_last_reviewed_sha(42, "sha-v1")
+        tracker.set_last_reviewed_sha(42, "sha-v2")
+        assert tracker.get_last_reviewed_sha(42) == "sha-v2"
+
+    def test_multiple_issues_independent(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        tracker.set_last_reviewed_sha(1, "sha-issue-1")
+        tracker.set_last_reviewed_sha(2, "sha-issue-2")
+        assert tracker.get_last_reviewed_sha(1) == "sha-issue-1"
+        assert tracker.get_last_reviewed_sha(2) == "sha-issue-2"
+
+
+# ---------------------------------------------------------------------------
 # Narrowed exception handling (issue #879)
 # ---------------------------------------------------------------------------
 
