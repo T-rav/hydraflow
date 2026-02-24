@@ -8,8 +8,7 @@
   Intent in. Software out.
 </p>
 
-HydraFlow is a multi-agent orchestration system for the GitHub issue lifecycle.
-Label an issue and HydraFlow can triage, plan, implement, review, and merge it through one pipeline.
+Log an issue. Agents handle the rest - triaging, planning, implementing, reviewing, and merging every change to HydraFlow.
 
 ## Why Teams Use It
 
