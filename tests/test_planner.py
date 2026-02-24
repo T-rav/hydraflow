@@ -1763,3 +1763,51 @@ def test_build_retry_prompt_full_has_all_sections(config, event_bus, issue):
     assert "## Files to Modify" in prompt
     assert "## Acceptance Criteria" in prompt
     assert "## Key Considerations" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Section descriptions constant — drift guard
+# ---------------------------------------------------------------------------
+
+
+def test_section_descriptions_cover_all_required_sections():
+    """Every header in REQUIRED_SECTIONS has a corresponding entry in _PLAN_SECTION_DESCRIPTIONS."""
+    from planner import _PLAN_SECTION_DESCRIPTIONS
+
+    desc_headers = {h for h, _ in _PLAN_SECTION_DESCRIPTIONS}
+    for header in PlannerRunner.REQUIRED_SECTIONS:
+        assert header in desc_headers, (
+            f"{header} missing from _PLAN_SECTION_DESCRIPTIONS"
+        )
+
+
+def test_section_descriptions_cover_all_lite_sections():
+    """Every header in LITE_REQUIRED_SECTIONS has a corresponding entry in _PLAN_SECTION_DESCRIPTIONS."""
+    from planner import _PLAN_SECTION_DESCRIPTIONS
+
+    desc_headers = {h for h, _ in _PLAN_SECTION_DESCRIPTIONS}
+    for header in PlannerRunner.LITE_REQUIRED_SECTIONS:
+        assert header in desc_headers, (
+            f"{header} missing from _PLAN_SECTION_DESCRIPTIONS"
+        )
+
+
+def test_format_sections_list_full_has_all_sections():
+    """_format_sections_list('full') includes all 7 required section headers."""
+    result = PlannerRunner._format_sections_list("full")
+    for header in PlannerRunner.REQUIRED_SECTIONS:
+        assert header in result, f"{header} missing from full sections list"
+
+
+def test_format_sections_list_lite_has_only_three_sections():
+    """_format_sections_list('lite') includes only the 3 lite-required headers."""
+    result = PlannerRunner._format_sections_list("lite")
+    for header in PlannerRunner.LITE_REQUIRED_SECTIONS:
+        assert header in result, f"{header} missing from lite sections list"
+
+    # Full-only headers should be absent
+    full_only = set(PlannerRunner.REQUIRED_SECTIONS) - set(
+        PlannerRunner.LITE_REQUIRED_SECTIONS
+    )
+    for header in full_only:
+        assert header not in result, f"{header} should not be in lite sections list"
