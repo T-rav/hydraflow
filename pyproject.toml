@@ -16,6 +16,9 @@ dependencies = [
 [project.scripts]
 hf = "hf_cli.__main__:entrypoint"
 
+[tool.setuptools.package-data]
+hf_cli = ["assets.tar.gz"]
+
 [project.optional-dependencies]
 test = [
     "pytest>=7.4.0",
