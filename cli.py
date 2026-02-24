@@ -1515,6 +1515,9 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
     if tests_result.skipped:
         print(f"Test scaffold: skipped ({tests_result.skip_reason})")  # noqa: T201
         run_log_lines.append(f"- Test scaffold skipped: {tests_result.skip_reason}")
+        if getattr(tests_result, "progress", ""):
+            print(f"Test scaffold progress: {tests_result.progress}")  # noqa: T201
+            run_log_lines.append(f"- Test scaffold progress: {tests_result.progress}")
     else:
         created_dirs = ", ".join(tests_result.created_dirs) or "-"
         created_files = ", ".join(tests_result.created_files) or "-"
@@ -1528,6 +1531,9 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
             f"- Test scaffold {action.lower()}: dirs [{created_dirs}] "
             f"files [{created_files}] modified [{modified_files}]"
         )
+        if getattr(tests_result, "progress", ""):
+            print(f"Test scaffold progress: {tests_result.progress}")  # noqa: T201
+            run_log_lines.append(f"- Test scaffold progress: {tests_result.progress}")
 
     run_log_lines.extend(_seed_context_assets(config))
 
