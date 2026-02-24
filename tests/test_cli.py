@@ -138,6 +138,20 @@ class TestCoverageValidation:
         assert warn is False
         assert "no coverage report artifact found" in detail
 
+    def test_validation_warns_without_artifact_when_missing_allowed(
+        self, tmp_path: Path
+    ) -> None:
+        ok, warn, detail = _evaluate_coverage_validation(
+            tmp_path,
+            min_required=20.0,
+            target=70.0,
+            allow_missing_artifact=True,
+        )
+        assert ok is True
+        assert warn is True
+        assert "fallback floor 20%" in detail
+        assert "CI target remains 70%+" in detail
+
     def test_validation_fails_below_minimum(self, tmp_path: Path) -> None:
         (tmp_path / "lcov.info").write_text("LF:100\nLH:60\n")
         ok, warn, detail = _evaluate_coverage_validation(tmp_path)
@@ -190,6 +204,19 @@ class TestCoverageValidation:
         assert warn is False
         assert "packages/a:" in detail
         assert "below minimum 70%" in detail
+
+    def test_coverage_projects_warns_when_missing_allowed(self, tmp_path: Path) -> None:
+        (tmp_path / "Makefile").write_text("test:\n\t@echo test\n")
+        ok, warn, detail = _evaluate_coverage_validation_projects(
+            tmp_path,
+            [tmp_path],
+            min_required=20.0,
+            target=70.0,
+            allow_missing_artifact=True,
+        )
+        assert ok is True
+        assert warn is True
+        assert "fallback floor 20%" in detail
 
 
 # ---------------------------------------------------------------------------
