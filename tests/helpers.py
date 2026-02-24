@@ -452,13 +452,35 @@ def make_review_phase(
     config,
     *,
     event_bus=None,
+    agents=None,
+    ac_generator=None,
+    default_mocks: bool = False,
+    review_result=None,
+    issue_number: int = 42,
 ):
     """Build a ReviewPhase with standard mock dependencies.
 
     Promoted from test_review_phase._make_phase() for reuse across test files.
+
+    Args:
+        agents: Optional AgentRunner mock; wired into a MergeConflictResolver.
+        ac_generator: Optional AcceptanceCriteriaGenerator mock; wired into a
+            PostMergeHandler.
+
+    When ``default_mocks=True``, the phase is returned with the standard happy-path
+    mocks pre-wired so tests only need to override the specific mocks they care about:
+
+    * ``_reviewers.review`` → returns *review_result* (default ``ReviewResultFactory.create()``)
+    * ``_prs.get_pr_diff`` → ``"diff text"``
+    * ``_prs.push_branch`` → ``True``
+    * ``_prs.merge_pr`` → ``True``
+    * ``_prs.remove_label`` / ``add_labels`` / ``post_pr_comment`` / ``submit_review``
+    * worktree directory ``issue-{issue_number}`` created under ``config.worktree_base``
     """
     from events import EventBus
     from issue_store import IssueStore
+    from merge_conflict_resolver import MergeConflictResolver
+    from post_merge_handler import PostMergeHandler
     from review_phase import ReviewPhase
     from state import StateTracker
 
@@ -476,7 +498,34 @@ def make_review_phase(
     mock_store.mark_complete = lambda _num: None
     mock_store.is_active = lambda _num: False
 
-    return ReviewPhase(
+    bus = event_bus or EventBus()
+
+    conflict_resolver = None
+    if agents is not None:
+        conflict_resolver = MergeConflictResolver(
+            config=config,
+            worktrees=mock_wt,
+            agents=agents,
+            prs=mock_prs,
+            event_bus=bus,
+            state=state,
+            summarizer=None,
+        )
+
+    post_merge = None
+    if ac_generator is not None:
+        post_merge = PostMergeHandler(
+            config=config,
+            state=state,
+            prs=mock_prs,
+            event_bus=bus,
+            ac_generator=ac_generator,
+            retrospective=None,
+            verification_judge=None,
+            epic_checker=None,
+        )
+
+    phase = ReviewPhase(
         config=config,
         state=state,
         worktrees=mock_wt,
@@ -484,5 +533,26 @@ def make_review_phase(
         prs=mock_prs,
         stop_event=stop_event,
         store=mock_store,
-        event_bus=event_bus or EventBus(),
+        event_bus=bus,
+        conflict_resolver=conflict_resolver,
+        post_merge=post_merge,
     )
+
+    if default_mocks:
+        from tests.conftest import ReviewResultFactory
+
+        phase._reviewers.review = AsyncMock(
+            return_value=review_result or ReviewResultFactory.create()
+        )
+        phase._prs.get_pr_diff = AsyncMock(return_value="diff text")
+        phase._prs.push_branch = AsyncMock(return_value=True)
+        phase._prs.merge_pr = AsyncMock(return_value=True)
+        phase._prs.remove_label = AsyncMock()
+        phase._prs.add_labels = AsyncMock()
+        phase._prs.post_pr_comment = AsyncMock()
+        phase._prs.submit_review = AsyncMock(return_value=True)
+
+        wt = config.worktree_base / f"issue-{issue_number}"
+        wt.mkdir(parents=True, exist_ok=True)
+
+    return phase
