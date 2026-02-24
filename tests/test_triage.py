@@ -11,6 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from base_runner import BaseRunner
 from events import EventBus, EventType
 from models import TriageResult
 from subprocess_util import CreditExhaustedError
@@ -586,3 +587,24 @@ class TestTriageTerminate:
         # After terminate, the proc should have been killed
         # (terminate_processes uses os.killpg which we don't mock here,
         # so we just verify it doesn't crash with our mock)
+
+
+# ---------------------------------------------------------------------------
+# BaseRunner inheritance
+# ---------------------------------------------------------------------------
+
+
+class TestTriageRunnerInheritance:
+    """Tests confirming TriageRunner extends BaseRunner."""
+
+    def test_triage_runner_extends_base_runner(self) -> None:
+        assert issubclass(TriageRunner, BaseRunner)
+
+    def test_log_class_attribute_is_triage_logger(self) -> None:
+        assert TriageRunner._log.name == "hydraflow.triage"
+
+    def test_inherits_execute_method(self) -> None:
+        """TriageRunner should inherit _execute from BaseRunner."""
+        assert hasattr(TriageRunner, "_execute")
+        # _execute should come from BaseRunner, not be overridden
+        assert TriageRunner._execute is BaseRunner._execute
