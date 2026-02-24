@@ -1591,3 +1591,101 @@ class TestRunDeltaVerification:
             await phase._run_delta_verification(pr, "some diff")
 
             mock_parse.assert_called_once_with(plan_content)
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_when_parse_returns_empty_list(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Plan file exists but has no File Delta section → returns empty string."""
+        from unittest.mock import patch
+
+        plans_dir = config.repo_root / ".hydraflow" / "plans"
+        plans_dir.mkdir(parents=True, exist_ok=True)
+        (plans_dir / "issue-42.md").write_text("## Implementation\nSome plan text.")
+
+        phase = make_review_phase(config)
+        pr = PRInfoFactory.create(issue_number=42)
+
+        with patch("delta_verifier.parse_file_delta", return_value=[]):
+            result = await phase._run_delta_verification(pr, "diff")
+
+        assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_returns_summary_on_drift(self, config: HydraFlowConfig) -> None:
+        """When verify_delta reports drift, should return non-empty summary."""
+        from unittest.mock import patch
+
+        from models import DeltaReport
+
+        plans_dir = config.repo_root / ".hydraflow" / "plans"
+        plans_dir.mkdir(parents=True, exist_ok=True)
+        (plans_dir / "issue-42.md").write_text(
+            "## File Delta\n\n```\nMODIFIED: foo.py\n```\n"
+        )
+
+        phase = make_review_phase(config)
+        pr = PRInfoFactory.create(issue_number=42)
+        phase._prs.get_pr_diff_names = AsyncMock(return_value=["bar.py"])
+
+        drift_report = DeltaReport(
+            planned=["foo.py"],
+            actual=["bar.py"],
+            missing=["foo.py"],
+            unexpected=["bar.py"],
+        )
+
+        with (
+            patch("delta_verifier.parse_file_delta", return_value=["foo.py"]),
+            patch("delta_verifier.verify_delta", return_value=drift_report),
+        ):
+            result = await phase._run_delta_verification(pr, "diff")
+
+        assert result != ""
+        assert "foo.py" in result
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_on_plan_read_oserror(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Plan file exists but reading raises OSError → returns empty string."""
+        from unittest.mock import patch
+
+        plans_dir = config.repo_root / ".hydraflow" / "plans"
+        plans_dir.mkdir(parents=True, exist_ok=True)
+        plan_file = plans_dir / "issue-42.md"
+        plan_file.write_text("some content")
+
+        phase = make_review_phase(config)
+        pr = PRInfoFactory.create(issue_number=42)
+
+        with patch.object(
+            type(plan_file), "read_text", side_effect=OSError("disk error")
+        ):
+            result = await phase._run_delta_verification(pr, "diff")
+
+        assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_calls_get_pr_diff_names(self, config: HydraFlowConfig) -> None:
+        """Should call get_pr_diff_names with the PR number."""
+        from unittest.mock import patch
+
+        plans_dir = config.repo_root / ".hydraflow" / "plans"
+        plans_dir.mkdir(parents=True, exist_ok=True)
+        (plans_dir / "issue-42.md").write_text(
+            "## File Delta\n\n```\nMODIFIED: foo.py\n```\n"
+        )
+
+        phase = make_review_phase(config)
+        pr = PRInfoFactory.create(number=101, issue_number=42)
+        phase._prs.get_pr_diff_names = AsyncMock(return_value=["foo.py"])
+
+        with (
+            patch("delta_verifier.parse_file_delta", return_value=["foo.py"]),
+            patch("delta_verifier.verify_delta") as mock_verify,
+        ):
+            mock_verify.return_value.has_drift = False
+            await phase._run_delta_verification(pr, "diff")
+
+        phase._prs.get_pr_diff_names.assert_awaited_once_with(101)
