@@ -483,7 +483,7 @@ class StateData(BaseModel):
     hitl_causes: dict[str, str] = Field(default_factory=dict)
     review_attempts: dict[str, int] = Field(default_factory=dict)
     review_feedback: dict[str, str] = Field(default_factory=dict)
-    worker_result_meta: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    worker_result_meta: dict[str, WorkerResultMeta] = Field(default_factory=dict)
     verification_issues: dict[str, int] = Field(default_factory=dict)
     issue_attempts: dict[str, int] = Field(default_factory=dict)
     active_issue_numbers: list[int] = Field(default_factory=list)
@@ -611,6 +611,198 @@ class BackgroundWorkerState(TypedDict):
     last_run: str | None
     details: dict[str, Any]
     enabled: NotRequired[bool]  # added by get_bg_worker_states()
+
+
+class TranscriptEventData(TypedDict, total=False):
+    """Event data shape passed to ``stream_claude_process`` and ``BaseRunner._execute``.
+
+    All keys are optional since different runners include different subsets.
+    """
+
+    issue: int
+    pr: int
+    source: str
+
+
+class WorkerUpdatePayload(TypedDict):
+    """Payload for ``EventType.WORKER_UPDATE``."""
+
+    issue: int
+    worker: int
+    status: str
+    role: str
+
+
+class PlannerUpdatePayload(TypedDict):
+    """Payload for ``EventType.PLANNER_UPDATE``."""
+
+    issue: int
+    worker: int
+    status: str
+    role: str
+
+
+class TriageUpdatePayload(TypedDict):
+    """Payload for ``EventType.TRIAGE_UPDATE``."""
+
+    issue: int
+    worker: int
+    status: str
+    role: str
+
+
+class ReviewUpdatePayload(TypedDict, total=False):
+    """Payload for ``EventType.REVIEW_UPDATE``."""
+
+    pr: int
+    issue: int
+    worker: int
+    status: str
+    role: str
+    verdict: str
+    duration: float
+
+
+class PRCreatedPayload(TypedDict):
+    """Payload for ``EventType.PR_CREATED``."""
+
+    pr: int
+    issue: int
+    branch: str
+    draft: bool
+    url: str
+
+
+class MergeUpdatePayload(TypedDict):
+    """Payload for ``EventType.MERGE_UPDATE``."""
+
+    pr: int
+    status: str
+
+
+class CICheckPayload(TypedDict, total=False):
+    """Payload for ``EventType.CI_CHECK``."""
+
+    pr: int
+    issue: int
+    status: str
+    pending: int
+    total: int
+    failed: list[str]
+    worker: int
+    attempt: int
+
+
+class HITLEscalationPayload(TypedDict, total=False):
+    """Payload for ``EventType.HITL_ESCALATION``."""
+
+    issue: int
+    cause: str
+    origin: str
+    ci_fix_attempts: int
+    pr: int
+    status: str
+    role: str
+
+
+class IssueCreatedPayload(TypedDict):
+    """Payload for ``EventType.ISSUE_CREATED``."""
+
+    number: int
+    title: str
+    labels: list[str]
+
+
+class HITLUpdatePayload(TypedDict, total=False):
+    """Payload for ``EventType.HITL_UPDATE``."""
+
+    issue: int
+    status: str
+    action: str
+    worker: int
+    duration: float
+
+
+class ErrorPayload(TypedDict):
+    """Payload for ``EventType.ERROR``."""
+
+    message: str
+    source: str
+
+
+class BackgroundWorkerStatusPayload(TypedDict):
+    """Payload for ``EventType.BACKGROUND_WORKER_STATUS``."""
+
+    worker: str
+    status: str
+    last_run: str
+    details: dict[str, Any]
+
+
+class OrchestratorStatusPayload(TypedDict, total=False):
+    """Payload for ``EventType.ORCHESTRATOR_STATUS``."""
+
+    status: str
+    reset: bool
+
+
+class SessionStartPayload(TypedDict):
+    """Payload for ``EventType.SESSION_START``."""
+
+    session_id: str
+    repo: str
+
+
+class SessionEndPayload(TypedDict):
+    """Payload for ``EventType.SESSION_END``."""
+
+    session_id: str
+    status: str
+    issues_processed: list[int]
+    issues_succeeded: int
+    issues_failed: int
+
+
+class PipelineSnapshotEntry(TypedDict):
+    """Shape of issue dicts returned by ``IssueStore.get_pipeline_snapshot``."""
+
+    issue_number: int
+    title: str
+    url: str
+    status: str
+
+
+class LabelCounts(TypedDict):
+    """Return shape of ``PRManager.get_label_counts``."""
+
+    open_by_label: dict[str, int]
+    total_closed: int
+    total_merged: int
+
+
+class WorkerResultMeta(TypedDict, total=False):
+    """Metadata stored by ``StateTracker.set_worker_result_meta``."""
+
+    quality_fix_attempts: int
+    duration_seconds: float
+    error: str | None
+    commits: int
+
+
+class ManifestRefreshSummary(TypedDict):
+    """Return shape of ``ManifestRefreshLoop._do_work``."""
+
+    hash: str
+    length: int
+
+
+class TimelineStageMetadata(TypedDict, total=False):
+    """Metadata for ``TimelineStage.metadata``."""
+
+    verdict: str
+    duration: float
+    commits: int
+    hitl_cause: str
 
 
 class MemoryType(StrEnum):
@@ -863,7 +1055,7 @@ class TimelineStage(BaseModel):
     completed_at: str | None = None
     duration_seconds: float | None = None
     transcript_preview: list[str] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: TimelineStageMetadata = Field(default_factory=dict)  # type: ignore[assignment]
 
 
 class IssueTimeline(BaseModel):

@@ -17,6 +17,7 @@ from models import (
     SessionStatus,
     StateData,
     ThresholdProposal,
+    WorkerResultMeta,
 )
 
 logger = logging.getLogger("hydraflow.state")
@@ -245,12 +246,12 @@ class StateTracker:
 
     # --- worker result metadata ---
 
-    def set_worker_result_meta(self, issue_number: int, meta: dict[str, Any]) -> None:
+    def set_worker_result_meta(self, issue_number: int, meta: WorkerResultMeta) -> None:
         """Persist worker result metadata for *issue_number*."""
         self._data.worker_result_meta[str(issue_number)] = meta
         self.save()
 
-    def get_worker_result_meta(self, issue_number: int) -> dict[str, Any]:
+    def get_worker_result_meta(self, issue_number: int) -> WorkerResultMeta:
         """Return worker result metadata for *issue_number*, or empty dict."""
         return self._data.worker_result_meta.get(str(issue_number), {})
 
