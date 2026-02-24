@@ -471,7 +471,7 @@ class StateTracker:
                         )
                         continue
                     seen[session.id] = session
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             logger.warning(
                 "Could not open sessions file %s",
                 self._sessions_path,

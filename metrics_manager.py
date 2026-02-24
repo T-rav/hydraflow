@@ -136,7 +136,11 @@ class MetricsManager:
                 f.flush()
             logger.debug("Metrics snapshot cached locally at %s", snapshots_file)
         except OSError:
-            logger.warning("Failed to write metrics cache to %s", snapshots_file)
+            logger.warning(
+                "Failed to write metrics cache to %s",
+                snapshots_file,
+                exc_info=True,
+            )
 
     def load_local_history(self, limit: int = 100) -> list[MetricsSnapshot]:
         """Load metrics snapshots from local disk cache.
