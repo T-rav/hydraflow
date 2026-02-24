@@ -11,7 +11,7 @@ from enum import StrEnum
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from issue_fetcher import IssueFetcher
-from models import GitHubIssue, QueueStats
+from models import GitHubIssue, PipelineSnapshotEntry, QueueStats
 from subprocess_util import AuthenticationError
 
 logger = logging.getLogger("hydraflow.issue_store")
@@ -341,53 +341,53 @@ class IssueStore:
     # Stats
     # ------------------------------------------------------------------
 
-    def get_pipeline_snapshot(self) -> dict[str, list[dict[str, object]]]:
+    def get_pipeline_snapshot(self) -> dict[str, list[PipelineSnapshotEntry]]:
         """Return a snapshot of all pipeline stages with their issues.
 
         Each stage maps to a list of dicts with keys:
         ``issue_number``, ``title``, ``url``, ``status``.
         """
-        snapshot: dict[str, list[dict[str, object]]] = {}
+        snapshot: dict[str, list[PipelineSnapshotEntry]] = {}
 
         # Queued issues from stage queues
         for stage, q in self._queues.items():
-            stage_issues: list[dict[str, object]] = []
+            stage_issues: list[PipelineSnapshotEntry] = []
             for issue in q:
                 stage_issues.append(
-                    {
-                        "issue_number": issue.number,
-                        "title": issue.title,
-                        "url": issue.url,
-                        "status": "queued",
-                    }
+                    PipelineSnapshotEntry(
+                        issue_number=issue.number,
+                        title=issue.title,
+                        url=issue.url,
+                        status="queued",
+                    )
                 )
             snapshot[stage] = stage_issues
 
         # Active issues (look up details from cache)
         for issue_number, stage in self._active.items():
             cached = self._issue_cache.get(issue_number)
-            entry: dict[str, object] = {
-                "issue_number": issue_number,
-                "title": cached.title if cached else f"Issue #{issue_number}",
-                "url": cached.url if cached else "",
-                "status": "active",
-            }
+            entry = PipelineSnapshotEntry(
+                issue_number=issue_number,
+                title=cached.title if cached else f"Issue #{issue_number}",
+                url=cached.url if cached else "",
+                status="active",
+            )
             if stage in snapshot:
                 snapshot[stage].append(entry)
             else:
                 snapshot[stage] = [entry]
 
         # HITL issues
-        hitl_list: list[dict[str, object]] = []
+        hitl_list: list[PipelineSnapshotEntry] = []
         for issue_number in self._hitl_numbers:
             cached = self._issue_cache.get(issue_number)
             hitl_list.append(
-                {
-                    "issue_number": issue_number,
-                    "title": cached.title if cached else f"Issue #{issue_number}",
-                    "url": cached.url if cached else "",
-                    "status": "hitl",
-                }
+                PipelineSnapshotEntry(
+                    issue_number=issue_number,
+                    title=cached.title if cached else f"Issue #{issue_number}",
+                    url=cached.url if cached else "",
+                    status="hitl",
+                )
             )
         snapshot[STAGE_HITL] = hitl_list
 

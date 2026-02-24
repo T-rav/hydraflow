@@ -11,6 +11,7 @@ from models import (
     PRInfoExtract,
     StageStatus,
     TimelineStage,
+    TimelineStageMetadata,
 )
 
 STAGE_ORDER: list[PipelineStage] = [
@@ -179,7 +180,7 @@ class TimelineBuilder:
         started_at = events[0].timestamp
         completed_at: str | None = None
         status = StageStatus.IN_PROGRESS
-        metadata: dict[str, object] = {}
+        metadata: TimelineStageMetadata = {}
 
         # Find terminal status and extract metadata
         for event in events:

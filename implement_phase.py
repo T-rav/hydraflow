@@ -10,7 +10,7 @@ from agent import AgentRunner
 from config import HydraFlowConfig
 from harness_insights import FailureCategory, HarnessInsightStore
 from issue_store import IssueStore
-from models import GitHubIssue, PipelineStage, WorkerResult
+from models import GitHubIssue, PipelineStage, WorkerResult, WorkerResultMeta
 from phase_utils import (
     escalate_to_hitl,
     record_harness_failure,
@@ -281,15 +281,13 @@ class ImplementPhase:
                 stage=PipelineStage.IMPLEMENT,
             )
 
-        self._state.set_worker_result_meta(
-            issue.number,
-            {
-                "quality_fix_attempts": result.quality_fix_attempts,
-                "duration_seconds": result.duration_seconds,
-                "error": result.error,
-                "commits": result.commits,
-            },
-        )
+        meta: WorkerResultMeta = {
+            "quality_fix_attempts": result.quality_fix_attempts,
+            "duration_seconds": result.duration_seconds,
+            "error": result.error,
+            "commits": result.commits,
+        }
+        self._state.set_worker_result_meta(issue.number, meta)
 
         return result
 
