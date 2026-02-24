@@ -8,10 +8,15 @@ from pathlib import Path
 
 from agent import AgentRunner
 from config import HydraFlowConfig
-from harness_insights import FailureCategory, FailureRecord, HarnessInsightStore
+from harness_insights import FailureCategory, HarnessInsightStore
 from issue_store import IssueStore
 from models import GitHubIssue, Task, WorkerResult
-from phase_utils import escalate_to_hitl, run_concurrent_batch, store_lifecycle
+from phase_utils import (
+    escalate_to_hitl,
+    record_harness_failure,
+    run_concurrent_batch,
+    store_lifecycle,
+)
 from pr_manager import PRManager
 from run_recorder import RunRecorder
 from state import StateTracker
@@ -113,10 +118,12 @@ class ImplementPhase:
                     except Exception:
                         logger.exception("Worker failed for issue #%d", issue.id)
                         self._state.mark_issue(issue.id, "failed")
-                        self._record_harness_failure(
+                        record_harness_failure(
+                            self._harness_insights,
                             issue.id,
                             FailureCategory.IMPLEMENTATION_ERROR,
                             f"Worker exception for issue #{issue.id}",
+                            stage="implement",
                         )
                         return WorkerResult(
                             issue_number=issue.id,
@@ -174,6 +181,38 @@ class ImplementPhase:
         except OSError:
             return ""
 
+    def _build_cap_exceeded_comment(self, attempts: int, last_error: str) -> str:
+        """Build the human-readable comment explaining why the cap was exceeded."""
+        return (
+            f"**Implementation attempt cap exceeded** — "
+            f"{attempts - 1} attempt(s) exhausted "
+            f"(max {self._config.max_issue_attempts}).\n\n"
+            f"Last error: {last_error}\n\n"
+            f"Escalating to human review."
+        )
+
+    async def _escalate_capped_issue(
+        self, issue: Task, attempts: int, last_error: str
+    ) -> None:
+        """Post the cap comment, escalate to HITL, record harness failure."""
+        comment = self._build_cap_exceeded_comment(attempts, last_error)
+        await self._transitioner.post_comment(issue.id, comment)
+        await escalate_to_hitl(
+            self._state,
+            self._prs,
+            issue.id,
+            cause=f"Implementation attempt cap exceeded after {attempts - 1} attempt(s)",
+            origin_label=self._config.ready_label[0],
+            hitl_label=self._config.hitl_label[0],
+        )
+        record_harness_failure(
+            self._harness_insights,
+            issue.id,
+            FailureCategory.HITL_ESCALATION,
+            f"Implementation attempt cap exceeded after {attempts - 1} attempt(s): {last_error}",
+            stage="implement",
+        )
+
     async def _check_attempt_cap(self, issue: Task, branch: str) -> WorkerResult | None:
         """Check per-issue attempt cap.  Returns a WorkerResult on cap exceeded, else None."""
         attempts = self._state.increment_issue_attempts(issue.id)
@@ -185,27 +224,7 @@ class ImplementPhase:
             last_meta.get("error", "No error details available")
             or "No error details available"
         )
-        await self._transitioner.post_comment(
-            issue.id,
-            f"**Implementation attempt cap exceeded** — "
-            f"{attempts - 1} attempt(s) exhausted "
-            f"(max {self._config.max_issue_attempts}).\n\n"
-            f"Last error: {last_error}\n\n"
-            f"Escalating to human review.",
-        )
-        await escalate_to_hitl(
-            self._state,
-            self._prs,
-            issue.id,
-            cause=f"Implementation attempt cap exceeded after {attempts - 1} attempt(s)",
-            origin_label=self._config.ready_label[0],
-            hitl_label=self._config.hitl_label[0],
-        )
-        self._record_harness_failure(
-            issue.id,
-            FailureCategory.HITL_ESCALATION,
-            f"Implementation attempt cap exceeded after {attempts - 1} attempt(s): {last_error}",
-        )
+        await self._escalate_capped_issue(issue, attempts, last_error)
         self._state.mark_issue(issue.id, "failed")
         return WorkerResult(
             issue_number=issue.id,
@@ -213,21 +232,14 @@ class ImplementPhase:
             error=f"Implementation attempt cap exceeded ({attempts - 1} attempts)",
         )
 
-    async def _run_implementation(
-        self,
-        issue: Task,
-        branch: str,
-        worker_id: int,
-        review_feedback: str,
-    ) -> WorkerResult:
-        """Set up worktree, push branch, run agent, record metrics."""
+    async def _setup_worktree_and_branch(self, issue: Task, branch: str) -> Path:
+        """Ensure worktree exists/resumed and branch is pushed."""
         wt_path = self._config.worktree_base / f"issue-{issue.id}"
         if wt_path.is_dir():
             logger.info("Resuming existing worktree for issue #%d", issue.id)
         else:
             wt_path = await self._worktrees.create(issue.id, branch)
         self._state.set_worktree(issue.id, str(wt_path))
-
         await self._prs.push_branch(wt_path, branch)
         await self._transitioner.post_comment(
             issue.id,
@@ -235,31 +247,28 @@ class ImplementPhase:
             f"{self._config.repo}/tree/{branch})\n\n"
             f"Implementation in progress.",
         )
+        return wt_path
 
-        result = await self._agents.run(
-            issue,
-            wt_path,
-            branch,
-            worker_id=worker_id,
-            review_feedback=review_feedback,
-        )
-
+    async def _record_impl_metrics(
+        self, issue: Task, result: WorkerResult, review_feedback: str
+    ) -> None:
+        """Record quality-fix-attempt, duration, harness metrics to state/store."""
         if review_feedback:
             self._state.clear_review_feedback(issue.id)
-
         if result.duration_seconds > 0:
             self._state.record_implementation_duration(result.duration_seconds)
         if result.quality_fix_attempts > 0:
             self._state.record_quality_fix_rounds(result.quality_fix_attempts)
             for _ in range(result.quality_fix_attempts):
                 self._state.record_stage_retry(issue.id, "quality_fix")
-            self._record_harness_failure(
+            record_harness_failure(
+                self._harness_insights,
                 issue.id,
                 FailureCategory.QUALITY_GATE,
                 f"Quality fix needed: {result.quality_fix_attempts} round(s). "
                 f"Error: {result.error or 'none'}",
+                stage="implement",
             )
-
         self._state.set_worker_result_meta(
             issue.id,
             {
@@ -270,6 +279,25 @@ class ImplementPhase:
             },
         )
 
+    async def _run_implementation(
+        self,
+        issue: Task,
+        branch: str,
+        worker_id: int,
+        review_feedback: str,
+    ) -> WorkerResult:
+        """Set up worktree, push branch, run agent, record metrics."""
+        wt_path = await self._setup_worktree_and_branch(issue, branch)
+
+        result = await self._agents.run(
+            issue,
+            wt_path,
+            branch,
+            worker_id=worker_id,
+            review_feedback=review_feedback,
+        )
+
+        await self._record_impl_metrics(issue, result, review_feedback)
         return result
 
     async def _handle_implementation_result(
@@ -316,23 +344,11 @@ class ImplementPhase:
         category: FailureCategory,
         details: str,
     ) -> None:
-        """Record a failure to the harness insight store (non-blocking)."""
-        if self._harness_insights is None:
-            return
-        try:
-            from harness_insights import extract_subcategories
-
-            record = FailureRecord(
-                issue_number=issue_number,
-                category=category,
-                subcategories=extract_subcategories(details),
-                details=details,
-                stage="implement",
-            )
-            self._harness_insights.append_failure(record)
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "Failed to record harness failure for issue #%d",
-                issue_number,
-                exc_info=True,
-            )
+        """Delegate to :func:`phase_utils.record_harness_failure` (backward compat)."""
+        record_harness_failure(
+            self._harness_insights,
+            issue_number,
+            category,
+            details,
+            stage="implement",
+        )

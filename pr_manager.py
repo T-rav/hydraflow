@@ -28,10 +28,51 @@ class SelfReviewError(RuntimeError):
     """Raised when a formal review fails due to the 'own pull request' restriction."""
 
 
+class CommentFormatter:
+    """GitHub comment body formatting — chunking and hard-truncation."""
+
+    GITHUB_COMMENT_LIMIT: int = 65_536  # GitHub maximum comment body size
+    TRUNCATION_MARKER: str = "\n\n*...truncated to fit GitHub comment limit*"
+
+    @staticmethod
+    def chunk(body: str, limit: int | None = None) -> list[str]:
+        """Split *body* into chunks that fit within *limit* characters."""
+        if limit is None:
+            limit = CommentFormatter.GITHUB_COMMENT_LIMIT
+        if len(body) <= limit:
+            return [body]
+        chunks: list[str] = []
+        while body:
+            if len(body) <= limit:
+                chunks.append(body)
+                break
+            split_at = body.rfind("\n", 0, limit)
+            if split_at <= 0:
+                split_at = limit
+            chunks.append(body[:split_at])
+            body = body[split_at:].lstrip("\n")
+        return chunks
+
+    @staticmethod
+    def cap(body: str, limit: int | None = None) -> str:
+        """Hard-truncate *body* to *limit* characters.
+
+        Acts as a safety net after chunking / header prepending to guarantee
+        no single payload exceeds GitHub's comment size limit.
+        """
+        if limit is None:
+            limit = CommentFormatter.GITHUB_COMMENT_LIMIT
+        if len(body) <= limit:
+            return body
+        marker = CommentFormatter.TRUNCATION_MARKER
+        return body[: limit - len(marker)] + marker
+
+
 class PRManager:
     """Pushes branches, creates PRs, merges, and manages labels."""
 
-    _GITHUB_COMMENT_LIMIT = 65_536  # GitHub maximum comment body size
+    _GITHUB_COMMENT_LIMIT = CommentFormatter.GITHUB_COMMENT_LIMIT
+    _TRUNCATION_MARKER = CommentFormatter.TRUNCATION_MARKER
     _HEADER_RESERVE = 50  # room for "*Part X/Y*\n\n" prefix
 
     # Re-export from prep module for backward compatibility
@@ -262,13 +303,13 @@ class PRManager:
         if self._config.dry_run:
             logger.info("[dry-run] Would post comment on %s #%d", target, number)
             return
-        chunk_limit = self._GITHUB_COMMENT_LIMIT - self._HEADER_RESERVE
-        chunks = self._chunk_body(body, chunk_limit)
+        chunk_limit = CommentFormatter.GITHUB_COMMENT_LIMIT - self._HEADER_RESERVE
+        chunks = CommentFormatter.chunk(body, chunk_limit)
         for idx, chunk in enumerate(chunks):
             part = chunk
             if len(chunks) > 1:
                 part = f"*Part {idx + 1}/{len(chunks)}*\n\n{chunk}"
-            part = self._cap_body(part, self._GITHUB_COMMENT_LIMIT)
+            part = CommentFormatter.cap(part, CommentFormatter.GITHUB_COMMENT_LIMIT)
             try:
                 await self._run_with_body_file(
                     "gh",
@@ -319,7 +360,7 @@ class PRManager:
             )
             return True
 
-        body = self._cap_body(body, self._GITHUB_COMMENT_LIMIT)
+        body = CommentFormatter.cap(body, CommentFormatter.GITHUB_COMMENT_LIMIT)
         try:
             await self._run_with_body_file(
                 "gh",
@@ -622,36 +663,22 @@ class PRManager:
 
     _RUN_ID_PATTERN = re.compile(r"/actions/runs/(\d+)")
 
-    async def fetch_ci_failure_logs(self, pr_number: int) -> str:
-        """Fetch full CI failure logs for *pr_number*.
+    async def _get_failed_check_runs(self, pr_number: int) -> list[tuple[str, str]]:
+        """Return [(name, run_id), ...] for failed CI checks on this PR."""
+        raw = await self._run_gh(
+            "gh",
+            "pr",
+            "checks",
+            str(pr_number),
+            "--repo",
+            self._repo,
+            "--json",
+            "name,state,detailsUrl",
+        )
+        checks = json.loads(raw)
 
-        Queries check runs, extracts run IDs from failed checks, and
-        fetches their ``--log-failed`` output.  Returns the concatenated
-        log text (one section per failed check) or an empty string on
-        error or in dry-run mode.
-        """
-        if self._config.dry_run:
-            return ""
-
-        try:
-            raw = await self._run_gh(
-                "gh",
-                "pr",
-                "checks",
-                str(pr_number),
-                "--repo",
-                self._repo,
-                "--json",
-                "name,state,detailsUrl",
-            )
-            checks = json.loads(raw)
-        except (RuntimeError, json.JSONDecodeError) as exc:
-            logger.warning("Could not fetch CI checks for PR #%d: %s", pr_number, exc)
-            return ""
-
-        # Collect run IDs from failed checks
         seen_run_ids: set[str] = set()
-        failed_names: list[tuple[str, str]] = []  # (name, run_id)
+        failed_names: list[tuple[str, str]] = []
         for check in checks:
             state = check.get("state", "").upper()
             if state in self._PASSING_STATES or state in self._PENDING_STATES:
@@ -666,27 +693,51 @@ class PRManager:
             if run_id not in seen_run_ids:
                 seen_run_ids.add(run_id)
                 failed_names.append((check.get("name", "unknown"), run_id))
+        return failed_names
 
-        if not failed_names:
+    async def _fetch_run_log(self, name: str, run_id: str) -> str:
+        """Fetch the --log-failed output for one run, or '' on error."""
+        try:
+            log_output = await self._run_gh(
+                "gh",
+                "run",
+                "view",
+                run_id,
+                "--repo",
+                self._repo,
+                "--log-failed",
+            )
+            if log_output.strip():
+                return f"### {name} (run {run_id})\n\n{log_output}"
+        except RuntimeError as exc:
+            logger.debug("Could not fetch log for run %s: %s", run_id, exc)
+        return ""
+
+    async def fetch_ci_failure_logs(self, pr_number: int) -> str:
+        """Fetch full CI failure logs for *pr_number*.
+
+        Queries check runs, extracts run IDs from failed checks, and
+        fetches their ``--log-failed`` output.  Returns the concatenated
+        log text (one section per failed check) or an empty string on
+        error or in dry-run mode.
+        """
+        if self._config.dry_run:
             return ""
 
-        sections: list[str] = []
-        for name, run_id in failed_names:
-            try:
-                log_output = await self._run_gh(
-                    "gh",
-                    "run",
-                    "view",
-                    run_id,
-                    "--repo",
-                    self._repo,
-                    "--log-failed",
-                )
-                if log_output.strip():
-                    sections.append(f"### {name} (run {run_id})\n\n{log_output}")
-            except RuntimeError as exc:
-                logger.debug("Could not fetch log for run %s: %s", run_id, exc)
+        try:
+            failed_runs = await self._get_failed_check_runs(pr_number)
+        except (RuntimeError, json.JSONDecodeError) as exc:
+            logger.warning("Could not fetch CI checks for PR #%d: %s", pr_number, exc)
+            return ""
 
+        if not failed_runs:
+            return ""
+
+        sections = [
+            log
+            for name, run_id in failed_runs
+            if (log := await self._fetch_run_log(name, run_id))
+        ]
         return "\n\n".join(sections)
 
     _PASSING_STATES = frozenset({"SUCCESS", "NEUTRAL", "SKIPPED"})
@@ -694,7 +745,30 @@ class PRManager:
         {"PENDING", "QUEUED", "IN_PROGRESS", "REQUESTED", "WAITING"}
     )
 
-    async def wait_for_ci(  # noqa: PLR0911
+    def _evaluate_ci_checks(
+        self, checks: list[dict[str, Any]], pr_number: int
+    ) -> tuple[bool, str] | None:
+        """Evaluate completed CI checks.
+
+        Returns ``(passed, message)`` if all checks have finished,
+        or ``None`` if any check is still pending.
+        """
+        pending = [
+            c for c in checks if c.get("state", "").upper() in self._PENDING_STATES
+        ]
+        if pending:
+            return None
+
+        failed = [
+            c["name"]
+            for c in checks
+            if c.get("state", "").upper() not in self._PASSING_STATES
+        ]
+        if failed:
+            return False, f"Failed checks: {', '.join(str(n) for n in failed)}"
+        return True, f"All {len(checks)} checks passed"
+
+    async def wait_for_ci(
         self,
         pr_number: int,
         timeout: int,
@@ -719,48 +793,48 @@ class PRManager:
             if not checks:
                 return True, "No CI checks found"
 
-            pending = [
-                c for c in checks if c.get("state", "").upper() in self._PENDING_STATES
-            ]
-            if pending:
+            verdict = self._evaluate_ci_checks(checks, pr_number)
+            if verdict is None:
+                # Still pending — publish event and wait
+                pending_count = sum(
+                    1
+                    for c in checks
+                    if c.get("state", "").upper() in self._PENDING_STATES
+                )
                 await self._bus.publish(
                     HydraFlowEvent(
                         type=EventType.CI_CHECK,
                         data={
                             "pr": pr_number,
                             "status": "pending",
-                            "pending": len(pending),
+                            "pending": pending_count,
                             "total": len(checks),
                         },
                     )
                 )
                 try:
                     await asyncio.wait_for(stop_event.wait(), timeout=poll_interval)
-                    # If we get here, stop_event was set
                     return False, "Stopped"
                 except TimeoutError:
                     elapsed += poll_interval
                     continue
 
-            # All checks completed — check states
-            failed = [
-                c["name"]
-                for c in checks
-                if c.get("state", "").upper() not in self._PASSING_STATES
-            ]
-            passed = not failed
-            status = "passed" if passed else "failed"
-            data: dict[str, object] = {"pr": pr_number, "status": status}
-            if failed:
-                data["failed"] = failed
+            passed, msg = verdict
+            data: dict[str, object] = {
+                "pr": pr_number,
+                "status": "passed" if passed else "failed",
+            }
+            if not passed:
+                # Extract failed names from the message for the event
+                data["failed"] = [
+                    c["name"]
+                    for c in checks
+                    if c.get("state", "").upper() not in self._PASSING_STATES
+                ]
             else:
                 data["total"] = len(checks)
-
             await self._bus.publish(HydraFlowEvent(type=EventType.CI_CHECK, data=data))
-
-            if passed:
-                return True, f"All {len(checks)} checks passed"
-            return False, f"Failed checks: {', '.join(failed)}"
+            return passed, msg
 
         return False, f"Timeout after {timeout}s"
 
@@ -900,6 +974,80 @@ class PRManager:
 
         return prs
 
+    async def _fetch_hitl_raw_issues(
+        self, hitl_labels: list[str]
+    ) -> list[dict[str, Any]]:
+        """Fetch and deduplicate open issues matching any of the given HITL labels."""
+        seen_issues: set[int] = set()
+        raw_issues: list[dict[str, Any]] = []
+        for label in hitl_labels:
+            try:
+                raw = await self._run_gh(
+                    "gh",
+                    "issue",
+                    "list",
+                    "--repo",
+                    self._repo,
+                    "--label",
+                    label,
+                    "--state",
+                    "open",
+                    "--json",
+                    "number,title,url",
+                    "--limit",
+                    "50",
+                )
+                for issue in json.loads(raw):
+                    if issue["number"] not in seen_issues:
+                        seen_issues.add(issue["number"])
+                        raw_issues.append(issue)
+            except (RuntimeError, json.JSONDecodeError, KeyError, TypeError):
+                logger.warning(
+                    "Failed to fetch HITL issues for label",
+                    exc_info=True,
+                )
+        return raw_issues
+
+    async def _build_hitl_item(self, raw_issue: dict[str, Any]) -> HITLItem:
+        """Look up the associated PR for one raw issue and assemble a HITLItem."""
+        branch = self._config.branch_for_issue(raw_issue["number"])
+        pr_number = 0
+        pr_url = ""
+        try:
+            pr_raw = await self._run_gh(
+                "gh",
+                "pr",
+                "list",
+                "--repo",
+                self._repo,
+                "--head",
+                branch,
+                "--state",
+                "open",
+                "--json",
+                "number,url",
+                "--limit",
+                "1",
+            )
+            pr_data = json.loads(pr_raw)
+            if pr_data:
+                pr_number = pr_data[0]["number"]
+                pr_url = pr_data[0].get("url", "")
+        except (RuntimeError, json.JSONDecodeError, KeyError, TypeError):
+            logger.debug(
+                "PR lookup failed for branch %s",
+                branch,
+                exc_info=True,
+            )
+        return HITLItem(
+            issue=raw_issue["number"],
+            title=raw_issue.get("title", ""),
+            issueUrl=raw_issue.get("url", ""),
+            pr=pr_number,
+            prUrl=pr_url,
+            branch=branch,
+        )
+
     async def list_hitl_items(self, hitl_labels: list[str]) -> list[HITLItem]:
         """Fetch HITL issues and look up their associated PRs.
 
@@ -911,81 +1059,8 @@ class PRManager:
             return []
 
         try:
-            seen_issues: set[int] = set()
-            raw_issues: list[dict[str, Any]] = []
-
-            for label in hitl_labels:
-                try:
-                    raw = await self._run_gh(
-                        "gh",
-                        "issue",
-                        "list",
-                        "--repo",
-                        self._repo,
-                        "--label",
-                        label,
-                        "--state",
-                        "open",
-                        "--json",
-                        "number,title,url",
-                        "--limit",
-                        "50",
-                    )
-                    for issue in json.loads(raw):
-                        if issue["number"] not in seen_issues:
-                            seen_issues.add(issue["number"])
-                            raw_issues.append(issue)
-                except (RuntimeError, json.JSONDecodeError, KeyError, TypeError):
-                    logger.warning(
-                        "Failed to fetch HITL issues for label",
-                        exc_info=True,
-                    )
-                    continue
-
-            items: list[HITLItem] = []
-            for issue in raw_issues:
-                branch = self._config.branch_for_issue(issue["number"])
-                pr_number = 0
-                pr_url = ""
-                try:
-                    pr_raw = await self._run_gh(
-                        "gh",
-                        "pr",
-                        "list",
-                        "--repo",
-                        self._repo,
-                        "--head",
-                        branch,
-                        "--state",
-                        "open",
-                        "--json",
-                        "number,url",
-                        "--limit",
-                        "1",
-                    )
-                    pr_data = json.loads(pr_raw)
-                    if pr_data:
-                        pr_number = pr_data[0]["number"]
-                        pr_url = pr_data[0].get("url", "")
-                except (RuntimeError, json.JSONDecodeError, KeyError, TypeError):
-                    logger.debug(
-                        "PR lookup failed for branch %s",
-                        branch,
-                        exc_info=True,
-                    )
-
-                items.append(
-                    HITLItem(
-                        issue=issue["number"],
-                        title=issue.get("title", ""),
-                        issueUrl=issue.get("url", ""),
-                        pr=pr_number,
-                        prUrl=pr_url,
-                        branch=branch,
-                    )
-                )
-
-            return items
+            raw_issues = await self._fetch_hitl_raw_issues(hitl_labels)
+            return [await self._build_hitl_item(issue) for issue in raw_issues]
         except (RuntimeError, json.JSONDecodeError, KeyError, TypeError):
             logger.warning("Failed to fetch HITL items", exc_info=True)
             return []
@@ -994,6 +1069,24 @@ class PRManager:
 
     _label_counts_cache: dict[str, object] = {}
     _label_counts_ts: float = 0.0
+
+    async def _search_github_count(self, query: str) -> int:
+        """Run a GitHub search query and return the total_count.
+
+        Issues a ``gh api search/issues`` request with the given *query*
+        string and returns the ``total_count`` integer.  Returns 0 on
+        any error so callers can safely sum results.
+        """
+        raw = await self._run_gh(
+            "gh",
+            "api",
+            "search/issues",
+            "-f",
+            f"q={query}",
+            "--jq",
+            ".total_count",
+        )
+        return int(raw.strip() or "0")
 
     async def _count_open_issues_by_label(
         self, label_map: dict[str, list[str]]
@@ -1007,19 +1100,10 @@ class PRManager:
         for display_key, label_names in label_map.items():
             count = 0
             for label in label_names:
-                try:
-                    raw = await self._run_gh(
-                        "gh",
-                        "api",
-                        "search/issues",
-                        "-f",
-                        f'q=repo:{self._repo} is:issue is:open label:"{label}"',
-                        "--jq",
-                        ".total_count",
+                with contextlib.suppress(RuntimeError, ValueError):
+                    count += await self._search_github_count(
+                        f'repo:{self._repo} is:issue is:open label:"{label}"'
                     )
-                    count += int(raw.strip() or "0")
-                except (RuntimeError, ValueError):
-                    pass
             open_by_label[display_key] = count
         return open_by_label
 
@@ -1031,19 +1115,10 @@ class PRManager:
         """
         total = 0
         for label in labels:
-            try:
-                raw = await self._run_gh(
-                    "gh",
-                    "api",
-                    "search/issues",
-                    "-f",
-                    f'q=repo:{self._repo} is:issue is:closed label:"{label}"',
-                    "--jq",
-                    ".total_count",
+            with contextlib.suppress(RuntimeError, ValueError):
+                total += await self._search_github_count(
+                    f'repo:{self._repo} is:issue is:closed label:"{label}"'
                 )
-                total += int(raw.strip() or "0")
-            except (RuntimeError, ValueError):
-                pass
         return total
 
     async def _count_merged_prs(self, label: str) -> int:
@@ -1053,16 +1128,9 @@ class PRManager:
         ``total_count`` directly — no pagination, scales to 10k+ issues.
         """
         try:
-            raw = await self._run_gh(
-                "gh",
-                "api",
-                "search/issues",
-                "-f",
-                f'q=repo:{self._repo} is:pr is:merged label:"{label}"',
-                "--jq",
-                ".total_count",
+            return await self._search_github_count(
+                f'repo:{self._repo} is:pr is:merged label:"{label}"'
             )
-            return int(raw.strip() or "0")
         except (RuntimeError, ValueError):
             return 0
 
@@ -1102,40 +1170,16 @@ class PRManager:
 
     # --- body-file helpers ---
 
-    _TRUNCATION_MARKER = "\n\n*...truncated to fit GitHub comment limit*"
-
+    # Backward-compatible aliases — delegates to CommentFormatter
     @staticmethod
     def _chunk_body(body: str, limit: int | None = None) -> list[str]:
         """Split *body* into chunks that fit within GitHub's comment limit."""
-        if limit is None:
-            limit = PRManager._GITHUB_COMMENT_LIMIT
-        if len(body) <= limit:
-            return [body]
-        chunks: list[str] = []
-        while body:
-            if len(body) <= limit:
-                chunks.append(body)
-                break
-            split_at = body.rfind("\n", 0, limit)
-            if split_at <= 0:
-                split_at = limit
-            chunks.append(body[:split_at])
-            body = body[split_at:].lstrip("\n")
-        return chunks
+        return CommentFormatter.chunk(body, limit)
 
     @classmethod
     def _cap_body(cls, body: str, limit: int | None = None) -> str:
-        """Hard-truncate *body* to *limit* characters.
-
-        Acts as a safety net after chunking / header prepending to guarantee
-        no single payload exceeds GitHub's comment size limit.
-        """
-        if limit is None:
-            limit = cls._GITHUB_COMMENT_LIMIT
-        if len(body) <= limit:
-            return body
-        marker = cls._TRUNCATION_MARKER
-        return body[: limit - len(marker)] + marker
+        """Hard-truncate *body* to *limit* characters."""
+        return CommentFormatter.cap(body, limit)
 
     async def _run_with_body_file(self, *cmd: str, body: str, cwd: Path) -> str:
         """Run a ``gh`` command using ``--body-file`` instead of ``--body``.

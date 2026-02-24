@@ -11,8 +11,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from harness_insights import FailureCategory, HarnessInsightStore
 from phase_utils import (
     escalate_to_hitl,
+    record_harness_failure,
     run_concurrent_batch,
     safe_file_memory_suggestion,
     store_lifecycle,
@@ -256,3 +258,77 @@ class TestStoreLifecycle:
 
         store.mark_active.assert_called_once_with(42, "implement")
         store.mark_complete.assert_called_once_with(42)
+
+
+# ---------------------------------------------------------------------------
+# record_harness_failure
+# ---------------------------------------------------------------------------
+
+
+class TestRecordHarnessFailure:
+    """Tests for record_harness_failure."""
+
+    def test_records_to_store(self, tmp_path: Path) -> None:
+        """Should append a FailureRecord to the insight store."""
+        store = HarnessInsightStore(tmp_path)
+        record_harness_failure(
+            store,
+            issue_number=42,
+            category=FailureCategory.PLAN_VALIDATION,
+            details="validation error",
+            stage="plan",
+        )
+        records = store.load_recent(10)
+        assert len(records) == 1
+        assert records[0].issue_number == 42
+        assert records[0].category == FailureCategory.PLAN_VALIDATION
+        assert records[0].stage == "plan"
+
+    def test_none_guard(self) -> None:
+        """Should silently skip when harness_insights is None."""
+        # Should not raise
+        record_harness_failure(
+            None,
+            issue_number=1,
+            category=FailureCategory.CI_FAILURE,
+            details="ci failed",
+        )
+
+    def test_exception_suppressed(self) -> None:
+        """Should suppress exceptions from the insight store."""
+        store = MagicMock(spec=HarnessInsightStore)
+        store.append_failure.side_effect = RuntimeError("disk full")
+        # Should not raise
+        record_harness_failure(
+            store,
+            issue_number=7,
+            category=FailureCategory.REVIEW_REJECTION,
+            details="rejection details",
+            stage="review",
+        )
+
+    def test_pr_number_forwarded(self, tmp_path: Path) -> None:
+        """pr_number should be stored on the record."""
+        store = HarnessInsightStore(tmp_path)
+        record_harness_failure(
+            store,
+            issue_number=5,
+            category=FailureCategory.CI_FAILURE,
+            details="ci error",
+            pr_number=99,
+            stage="review",
+        )
+        records = store.load_recent(10)
+        assert records[0].pr_number == 99
+
+    def test_default_stage_is_plan(self, tmp_path: Path) -> None:
+        """Default stage should be 'plan'."""
+        store = HarnessInsightStore(tmp_path)
+        record_harness_failure(
+            store,
+            issue_number=3,
+            category=FailureCategory.PLAN_VALIDATION,
+            details="details",
+        )
+        records = store.load_recent(10)
+        assert records[0].stage == "plan"

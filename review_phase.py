@@ -15,7 +15,7 @@ from agent import AgentRunner
 from config import HydraFlowConfig
 from epic import EpicCompletionChecker
 from events import EventBus, EventType, HydraFlowEvent
-from harness_insights import FailureCategory, FailureRecord, HarnessInsightStore
+from harness_insights import FailureCategory, HarnessInsightStore
 from issue_store import IssueStore
 from merge_conflict_resolver import MergeConflictResolver
 from models import (
@@ -25,7 +25,7 @@ from models import (
     ReviewVerdict,
     Task,
 )
-from phase_utils import run_concurrent_batch, store_lifecycle
+from phase_utils import record_harness_failure, run_concurrent_batch, store_lifecycle
 from post_merge_handler import PostMergeHandler
 from pr_manager import PRManager, SelfReviewError
 from retrospective import RetrospectiveCollector
@@ -155,6 +155,34 @@ class ReviewPhase:
 
         return await run_concurrent_batch(prs, _review_one, self._stop_event)
 
+    async def _should_skip_review(self, pr: PRInfo, last_sha: str | None) -> bool:
+        """Return True if the PR HEAD SHA is unchanged since last review."""
+        current_sha = await self._prs.get_pr_head_sha(pr.number)
+        if not current_sha:
+            return False
+        if last_sha and last_sha == current_sha:
+            logger.info(
+                "PR #%d (issue #%d): skipping review — no new commits since "
+                "last review (SHA %s)",
+                pr.number,
+                pr.issue_number,
+                current_sha[:12],
+            )
+            return True
+        return False
+
+    async def _prepare_review_worktree(
+        self, pr: PRInfo, task: Task, idx: int
+    ) -> Path | None:
+        """Ensure worktree exists and main is merged. Returns path or None on conflict."""
+        wt_path = self._config.worktree_base / f"issue-{pr.issue_number}"
+        if not wt_path.exists():
+            wt_path = await self._worktrees.create(pr.issue_number, pr.branch)
+        merged = await self._merge_with_main(pr, task, wt_path, idx)
+        if not merged:
+            return None
+        return wt_path
+
     async def _review_one_inner(
         self,
         idx: int,
@@ -173,30 +201,16 @@ class ReviewPhase:
             )
 
         # Skip guard: avoid re-reviewing when no new commits since last review
-        current_sha = await self._prs.get_pr_head_sha(pr.number)
-        if current_sha:
-            stored_sha = self._state.get_last_reviewed_sha(pr.issue_number)
-            if stored_sha and stored_sha == current_sha:
-                logger.info(
-                    "PR #%d (issue #%d): skipping review — no new commits since "
-                    "last review (SHA %s)",
-                    pr.number,
-                    pr.issue_number,
-                    current_sha[:12],
-                )
-                return ReviewResult(
-                    pr_number=pr.number,
-                    issue_number=pr.issue_number,
-                    summary="Skipped — no new commits since last review",
-                )
+        last_sha = self._state.get_last_reviewed_sha(pr.issue_number)
+        if await self._should_skip_review(pr, last_sha):
+            return ReviewResult(
+                pr_number=pr.number,
+                issue_number=pr.issue_number,
+                summary="Skipped — no new commits since last review",
+            )
 
-        wt_path = self._config.worktree_base / f"issue-{pr.issue_number}"
-        if not wt_path.exists():
-            wt_path = await self._worktrees.create(pr.issue_number, pr.branch)
-
-        # Merge main and push — returns False on unresolvable conflicts
-        merged = await self._merge_with_main(pr, task, wt_path, idx)
-        if not merged:
+        wt_path = await self._prepare_review_worktree(pr, task, idx)
+        if wt_path is None:
             return ReviewResult(
                 pr_number=pr.number,
                 issue_number=pr.issue_number,
@@ -232,11 +246,13 @@ class ReviewPhase:
             self._state.record_review_duration(result.duration_seconds)
         await self._record_review_insight(result)
         if result.verdict != ReviewVerdict.APPROVE:
-            self._record_harness_failure(
+            record_harness_failure(
+                self._harness_insights,
                 pr.issue_number,
                 FailureCategory.REVIEW_REJECTION,
                 f"Review verdict: {result.verdict.value}. {result.summary[:200]}",
                 pr_number=pr.number,
+                stage="review",
             )
 
         # Verdict-specific handling
@@ -428,6 +444,81 @@ class ReviewPhase:
             publish_fn=self._publish_review_status,
         )
 
+    async def _run_ci_wait_attempt(
+        self, pr: PRInfo, attempt: int, worker_id: int
+    ) -> tuple[bool, str]:
+        """Poll CI once. Return (passed, message)."""
+        await self._publish_review_status(pr, worker_id, "ci_wait")
+        return await self._prs.wait_for_ci(
+            pr.number,
+            self._config.ci_check_timeout,
+            self._config.ci_poll_interval,
+            self._stop_event,
+        )
+
+    async def _run_ci_fix_attempt(
+        self,
+        pr: PRInfo,
+        issue: Task,
+        wt_path: Path,
+        summary: str,
+        worker_id: int,
+        attempt: int,
+        *,
+        ci_logs: str = "",
+    ) -> bool:
+        """Run the CI fix agent. Return True if changes were made and pushed."""
+        await self._publish_review_status(pr, worker_id, "ci_fix")
+        fix_result = await self._reviewers.fix_ci(
+            pr,
+            issue,
+            wt_path,
+            summary,
+            attempt=attempt,
+            worker_id=worker_id,
+            ci_logs=ci_logs,
+        )
+        if not fix_result.fixes_made:
+            logger.info(
+                "CI fix agent made no changes for PR #%d — stopping retries",
+                pr.number,
+            )
+            return False
+        await self._prs.push_branch(wt_path, pr.branch)
+        return True
+
+    async def _escalate_ci_failure(
+        self,
+        pr: PRInfo,
+        issue: Task,
+        logs: str,
+        ci_fix_attempts: int,
+    ) -> None:
+        """Record state, record harness failure, escalate to HITL."""
+        self._state.record_ci_fix_rounds(ci_fix_attempts)
+        record_harness_failure(
+            self._harness_insights,
+            issue.id,
+            FailureCategory.CI_FAILURE,
+            f"CI failed after {ci_fix_attempts} fix attempt(s): {logs[:200]}",
+            pr_number=pr.number,
+            stage="review",
+        )
+        cause = f"CI failed after {ci_fix_attempts} fix attempt(s)"
+        await self._escalate_to_hitl(
+            issue.id,
+            pr.number,
+            cause=cause,
+            origin_label=self._config.review_label[0],
+            comment=(
+                f"**CI failed** after {ci_fix_attempts} fix attempt(s).\n\n"
+                f"Last failure: {logs}\n\n"
+                f"PR not merged — escalating to human review."
+            ),
+            event_cause="ci_failed",
+            extra_event_data={"ci_fix_attempts": ci_fix_attempts},
+        )
+
     async def wait_and_fix_ci(
         self,
         pr: PRInfo,
@@ -445,18 +536,11 @@ class ReviewPhase:
         summary = ""
 
         for attempt in range(max_attempts + 1):
-            await self._publish_review_status(pr, worker_id, "ci_wait")
-            passed, summary = await self._prs.wait_for_ci(
-                pr.number,
-                self._config.ci_check_timeout,
-                self._config.ci_poll_interval,
-                self._stop_event,
-            )
+            passed, summary = await self._run_ci_wait_attempt(pr, attempt, worker_id)
             if passed:
                 result.ci_passed = True
                 return True
 
-            # Last attempt — no more retries
             if attempt >= max_attempts:
                 break
 
@@ -476,53 +560,16 @@ class ReviewPhase:
                         exc_info=True,
                     )
 
-            # Run the CI fix agent
-            await self._publish_review_status(pr, worker_id, "ci_fix")
-            fix_result = await self._reviewers.fix_ci(
-                pr,
-                issue,
-                wt_path,
-                summary,
-                attempt=attempt + 1,
-                worker_id=worker_id,
-                ci_logs=ci_logs,
+            made_changes = await self._run_ci_fix_attempt(
+                pr, issue, wt_path, summary, worker_id, attempt + 1, ci_logs=ci_logs
             )
             result.ci_fix_attempts += 1
-
-            if not fix_result.fixes_made:
-                logger.info(
-                    "CI fix agent made no changes for PR #%d — stopping retries",
-                    pr.number,
-                )
+            if not made_changes:
                 break
 
-            # Push fixes and loop back to wait_for_ci
-            await self._prs.push_branch(wt_path, pr.branch)
-
-        # CI failed after all attempts — escalate to human
         result.ci_passed = False
-        self._state.record_ci_fix_rounds(result.ci_fix_attempts)
-        self._record_harness_failure(
-            issue.id,
-            FailureCategory.CI_FAILURE,
-            f"CI failed after {result.ci_fix_attempts} fix attempt(s): {summary[:200]}",
-            pr_number=pr.number,
-        )
         await self._publish_review_status(pr, worker_id, "escalating")
-        cause = f"CI failed after {result.ci_fix_attempts} fix attempt(s)"
-        await self._escalate_to_hitl(
-            issue.id,
-            pr.number,
-            cause=cause,
-            origin_label=self._config.review_label[0],
-            comment=(
-                f"**CI failed** after {result.ci_fix_attempts} fix attempt(s).\n\n"
-                f"Last failure: {summary}\n\n"
-                f"PR not merged — escalating to human review."
-            ),
-            event_cause="ci_failed",
-            extra_event_data={"ci_fix_attempts": result.ci_fix_attempts},
-        )
+        await self._escalate_ci_failure(pr, issue, summary, result.ci_fix_attempts)
         return False
 
     async def _record_review_insight(self, result: ReviewResult) -> None:
@@ -742,11 +789,13 @@ class ReviewPhase:
                 max_attempts,
                 pr.issue_number,
             )
-            self._record_harness_failure(
+            record_harness_failure(
+                self._harness_insights,
                 pr.issue_number,
                 FailureCategory.HITL_ESCALATION,
                 f"Review fix cap exceeded after {max_attempts} attempt(s)",
                 pr_number=pr.number,
+                stage="review",
             )
             await self._publish_review_status(pr, worker_id, "escalating")
             await self._escalate_to_hitl(
@@ -771,27 +820,15 @@ class ReviewPhase:
         *,
         pr_number: int = 0,
     ) -> None:
-        """Record a failure to the harness insight store (non-blocking)."""
-        if self._harness_insights is None:
-            return
-        try:
-            from harness_insights import extract_subcategories
-
-            record = FailureRecord(
-                issue_number=issue_number,
-                pr_number=pr_number,
-                category=category,
-                subcategories=extract_subcategories(details),
-                details=details,
-                stage="review",
-            )
-            self._harness_insights.append_failure(record)
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "Failed to record harness failure for issue #%d",
-                issue_number,
-                exc_info=True,
-            )
+        """Delegate to :func:`phase_utils.record_harness_failure` (backward compat)."""
+        record_harness_failure(
+            self._harness_insights,
+            issue_number,
+            category,
+            details,
+            pr_number=pr_number,
+            stage="review",
+        )
 
     # Delegate properties for backward compatibility in tests
     @property
