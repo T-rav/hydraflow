@@ -216,43 +216,43 @@ class TestReadCriteriaFile:
 class TestParseCriteria:
     def test_extracts_checkbox_items(self):
         judge = _make_judge()
-        criteria, _ = judge._parse_criteria(SAMPLE_CRITERIA_FILE)
-        assert len(criteria) == 3
-        assert "Button renders correctly in the sidebar" in criteria[0]
-        assert "API endpoint returns 200 with correct schema" in criteria[1]
-        assert "Edge case for empty input is handled" in criteria[2]
+        parsed = judge._parse_criteria(SAMPLE_CRITERIA_FILE)
+        assert len(parsed.criteria_list) == 3
+        assert "Button renders correctly in the sidebar" in parsed.criteria_list[0]
+        assert "API endpoint returns 200 with correct schema" in parsed.criteria_list[1]
+        assert "Edge case for empty input is handled" in parsed.criteria_list[2]
 
     def test_extracts_instructions_section(self):
         judge = _make_judge()
-        _, instructions = judge._parse_criteria(SAMPLE_CRITERIA_FILE)
-        assert "Open the sidebar" in instructions
-        assert "Verify the button" in instructions
-        assert "GET request" in instructions
+        parsed = judge._parse_criteria(SAMPLE_CRITERIA_FILE)
+        assert "Open the sidebar" in parsed.instructions_text
+        assert "Verify the button" in parsed.instructions_text
+        assert "GET request" in parsed.instructions_text
 
     def test_handles_empty_text(self):
         judge = _make_judge()
-        criteria, instructions = judge._parse_criteria("")
-        assert criteria == []
-        assert instructions == ""
+        parsed = judge._parse_criteria("")
+        assert parsed.criteria_list == []
+        assert parsed.instructions_text == ""
 
     def test_handles_no_criteria_section(self):
         judge = _make_judge()
         text = "# Just a heading\n\nSome text without criteria."
-        criteria, instructions = judge._parse_criteria(text)
-        assert criteria == []
+        parsed = judge._parse_criteria(text)
+        assert parsed.criteria_list == []
 
     def test_handles_no_instructions_section(self):
         judge = _make_judge()
         text = "## Acceptance Criteria\n\n- [ ] First thing\n- [ ] Second thing"
-        criteria, instructions = judge._parse_criteria(text)
-        assert len(criteria) == 2
-        assert instructions == ""
+        parsed = judge._parse_criteria(text)
+        assert len(parsed.criteria_list) == 2
+        assert parsed.instructions_text == ""
 
     def test_instructions_stop_at_next_heading(self):
         judge = _make_judge()
-        _, instructions = judge._parse_criteria(SAMPLE_CRITERIA_FILE)
+        parsed = judge._parse_criteria(SAMPLE_CRITERIA_FILE)
         # "Notes" section content should NOT be in instructions
-        assert "additional notes" not in instructions
+        assert "additional notes" not in parsed.instructions_text
 
     def test_ignores_checkboxes_outside_criteria_section(self):
         judge = _make_judge()
@@ -262,9 +262,9 @@ class TestParseCriteria:
             "## Notes\n\n"
             "- [ ] This is a note checkbox, not a criterion\n"
         )
-        criteria, _ = judge._parse_criteria(text)
-        assert len(criteria) == 1
-        assert "Real criterion" in criteria[0]
+        parsed = judge._parse_criteria(text)
+        assert len(parsed.criteria_list) == 1
+        assert "Real criterion" in parsed.criteria_list[0]
 
 
 # ---------------------------------------------------------------------------
@@ -416,25 +416,23 @@ class TestParseCriteriaResults:
 class TestParseInstructionsQuality:
     def test_parses_ready(self):
         judge = _make_judge()
-        quality, feedback = judge._parse_instructions_quality(
-            SAMPLE_INSTRUCTIONS_READY_TRANSCRIPT
-        )
-        assert quality == InstructionsQuality.READY
-        assert feedback == ""
+        result = judge._parse_instructions_quality(SAMPLE_INSTRUCTIONS_READY_TRANSCRIPT)
+        assert result.quality == InstructionsQuality.READY
+        assert result.feedback == ""
 
     def test_parses_needs_refinement_with_feedback(self):
         judge = _make_judge()
-        quality, feedback = judge._parse_instructions_quality(
+        result = judge._parse_instructions_quality(
             SAMPLE_INSTRUCTIONS_NEEDS_REFINEMENT_TRANSCRIPT
         )
-        assert quality == InstructionsQuality.NEEDS_REFINEMENT
-        assert "Step 2" in feedback
+        assert result.quality == InstructionsQuality.NEEDS_REFINEMENT
+        assert "Step 2" in result.feedback
 
     def test_no_match_defaults_to_needs_refinement(self):
         judge = _make_judge()
-        quality, feedback = judge._parse_instructions_quality("No verdict here.")
-        assert quality == InstructionsQuality.NEEDS_REFINEMENT
-        assert feedback == ""
+        result = judge._parse_instructions_quality("No verdict here.")
+        assert result.quality == InstructionsQuality.NEEDS_REFINEMENT
+        assert result.feedback == ""
 
     def test_captures_multi_paragraph_feedback(self):
         judge = _make_judge()
@@ -444,10 +442,10 @@ class TestParseInstructionsQuality:
             "\n"
             "Step 4 needs more detail about expected output."
         )
-        quality, feedback = judge._parse_instructions_quality(transcript)
-        assert quality == InstructionsQuality.NEEDS_REFINEMENT
-        assert "Step 2" in feedback
-        assert "Step 4" in feedback
+        result = judge._parse_instructions_quality(transcript)
+        assert result.quality == InstructionsQuality.NEEDS_REFINEMENT
+        assert "Step 2" in result.feedback
+        assert "Step 4" in result.feedback
 
 
 # ---------------------------------------------------------------------------

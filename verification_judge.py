@@ -73,23 +73,23 @@ class VerificationJudge:
             )
             return JudgeVerdict(issue_number=issue_number)
 
-        criteria_list, instructions_text = self._parse_criteria(criteria_text)
+        parsed_criteria = self._parse_criteria(criteria_text)
         precheck_context = await self._run_precheck_context(
             issue_number, criteria_text, diff
         )
 
         verdict = JudgeVerdict(
             issue_number=issue_number,
-            verification_instructions=instructions_text,
+            verification_instructions=parsed_criteria.instructions_text,
         )
 
         cmd = self._build_command()
 
         # --- Code validation ---
-        if criteria_list:
+        if parsed_criteria.criteria_list:
             try:
                 code_prompt = self._build_code_validation_prompt(
-                    criteria_list,
+                    parsed_criteria.criteria_list,
                     diff,
                     issue_number,
                     precheck_context=precheck_context,
@@ -113,22 +113,24 @@ class VerificationJudge:
                 )
 
         # --- Instructions validation ---
-        if instructions_text.strip():
+        if parsed_criteria.instructions_text.strip():
             try:
                 instr_prompt = self._build_instructions_validation_prompt(
-                    instructions_text,
+                    parsed_criteria.instructions_text,
                     issue_number,
                     precheck_context=precheck_context,
                 )
                 transcript = await self._execute(cmd, instr_prompt, issue_number)
-                quality, feedback = self._parse_instructions_quality(transcript)
-                verdict.instructions_quality = quality
-                verdict.instructions_feedback = feedback
+                instr_result = self._parse_instructions_quality(transcript)
+                verdict.instructions_quality = instr_result.quality
+                verdict.instructions_feedback = instr_result.feedback
 
                 # Refine once if needed
-                if quality == InstructionsQuality.NEEDS_REFINEMENT:
+                if instr_result.quality == InstructionsQuality.NEEDS_REFINEMENT:
                     refine_prompt = self._build_refinement_prompt(
-                        instructions_text, feedback, issue_number
+                        parsed_criteria.instructions_text,
+                        instr_result.feedback,
+                        issue_number,
                     )
                     refine_transcript = await self._execute(
                         cmd, refine_prompt, issue_number
@@ -138,7 +140,7 @@ class VerificationJudge:
                         self._update_criteria_file(issue_number, refined)
 
                     # Re-validate refined instructions
-                    revalidate_text = refined or instructions_text
+                    revalidate_text = refined or parsed_criteria.instructions_text
                     verdict.verification_instructions = revalidate_text
                     revalidate_prompt = self._build_instructions_validation_prompt(
                         revalidate_text,
@@ -148,11 +150,11 @@ class VerificationJudge:
                     revalidate_transcript = await self._execute(
                         cmd, revalidate_prompt, issue_number
                     )
-                    quality2, feedback2 = self._parse_instructions_quality(
+                    revalidate_result = self._parse_instructions_quality(
                         revalidate_transcript
                     )
-                    verdict.instructions_quality = quality2
-                    verdict.instructions_feedback = feedback2
+                    verdict.instructions_quality = revalidate_result.quality
+                    verdict.instructions_feedback = revalidate_result.feedback
                     verdict.refined = bool(refined)
             except CreditExhaustedError:
                 raise
