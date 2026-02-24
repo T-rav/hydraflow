@@ -50,7 +50,7 @@ describe('PIPELINE_STAGES', () => {
   it('maps each stage to the correct theme color', () => {
     const colorMap = Object.fromEntries(PIPELINE_STAGES.map(s => [s.key, s.color]))
     expect(colorMap).toEqual({
-      triage: theme.triageGreen,
+      triage: theme.yellow,
       plan: theme.purple,
       implement: theme.accent,
       review: theme.orange,
@@ -83,7 +83,7 @@ describe('PIPELINE_STAGES', () => {
   it('maps each stage to the correct subtle color', () => {
     const subtleMap = Object.fromEntries(PIPELINE_STAGES.map(s => [s.key, s.subtleColor]))
     expect(subtleMap).toEqual({
-      triage: theme.greenSubtle,
+      triage: theme.yellowSubtle,
       plan: theme.purpleSubtle,
       implement: theme.accentSubtle,
       review: theme.orangeSubtle,

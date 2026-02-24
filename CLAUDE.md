@@ -60,7 +60,7 @@ HydraFlow runs five concurrent async loops from `orchestrator.py`:
 
 ## Worktree Management
 
-HydraFlow creates isolated git worktrees for each issue. **Always clean up worktrees when their PRs are merged or issues are closed.**
+HydraFlow creates isolated git worktrees for each issue. **Always clean up worktrees when their PRs are merged or issues are closed. Always implement issue work on a dedicated git worktree branch; do not implement directly in the primary repo checkout.**
 
 - **Default location:** `../hydraflow-worktrees/` (sibling to repo root)
 - **Naming:** `issue-{issue_number}/`
