@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -3573,3 +3574,125 @@ class TestWebSocketEndpoint:
         mock_ws.accept.assert_called_once()
         # At least one history event should have been sent
         assert len(sent_texts) >= 1
+
+
+# ---------------------------------------------------------------------------
+# DashboardAPI class-based routing
+# ---------------------------------------------------------------------------
+
+
+class TestDashboardAPIClass:
+    """Tests for DashboardAPI class-based routing."""
+
+    def test_dashboard_api_creates_router(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """DashboardAPI exposes a .router attribute that is an APIRouter."""
+        from fastapi import APIRouter
+
+        from dashboard_routes import DashboardAPI
+        from pr_manager import PRManager
+
+        api = DashboardAPI(
+            config=config,
+            event_bus=event_bus,
+            state=state,
+            pr_manager=PRManager(config, event_bus),
+            get_orchestrator=lambda: None,
+            set_orchestrator=lambda o: None,
+            set_run_task=lambda t: None,
+            ui_dist_dir=tmp_path / "no-dist",
+            template_dir=tmp_path / "no-templates",
+        )
+        assert isinstance(api.router, APIRouter)
+
+    def test_dashboard_api_equivalent_to_create_router(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """DashboardAPI.router produces the same route set as create_router()."""
+        from dashboard_routes import DashboardAPI, create_router
+        from pr_manager import PRManager
+
+        pr_mgr = PRManager(config, event_bus)
+        kwargs: dict[str, Any] = {
+            "config": config,
+            "event_bus": event_bus,
+            "state": state,
+            "pr_manager": pr_mgr,
+            "get_orchestrator": lambda: None,
+            "set_orchestrator": lambda o: None,
+            "set_run_task": lambda t: None,
+            "ui_dist_dir": tmp_path / "no-dist",
+            "template_dir": tmp_path / "no-templates",
+        }
+        router_from_factory = create_router(**kwargs)
+        api = DashboardAPI(**kwargs)
+        factory_paths = {
+            r.path for r in router_from_factory.routes if hasattr(r, "path")
+        }
+        class_paths = {r.path for r in api.router.routes if hasattr(r, "path")}
+        assert factory_paths == class_paths
+
+    def test_dashboard_api_stores_instance_attributes(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """DashboardAPI stores all dependencies as instance attributes."""
+        from dashboard_routes import DashboardAPI
+        from pr_manager import PRManager
+
+        pr_mgr = PRManager(config, event_bus)
+
+        def get_orch():  # type: ignore[return]
+            return None
+
+        def set_orch(_o):  # type: ignore[no-untyped-def]
+            pass
+
+        def set_task(_t):  # type: ignore[no-untyped-def]
+            pass
+
+        ui_dir = tmp_path / "no-dist"
+        tpl_dir = tmp_path / "no-templates"
+
+        api = DashboardAPI(
+            config=config,
+            event_bus=event_bus,
+            state=state,
+            pr_manager=pr_mgr,
+            get_orchestrator=get_orch,
+            set_orchestrator=set_orch,
+            set_run_task=set_task,
+            ui_dist_dir=ui_dir,
+            template_dir=tpl_dir,
+        )
+        assert api._config is config
+        assert api._event_bus is event_bus
+        assert api._state is state
+        assert api._pr_manager is pr_mgr
+        assert api._get_orchestrator is get_orch
+        assert api._set_orchestrator is set_orch
+        assert api._set_run_task is set_task
+        assert api._ui_dist_dir is ui_dir
+        assert api._template_dir is tpl_dir
+
+    @pytest.mark.asyncio
+    async def test_dashboard_api_method_directly_callable(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """Instance methods can be called directly without router machinery."""
+        from dashboard_routes import DashboardAPI
+        from pr_manager import PRManager
+
+        api = DashboardAPI(
+            config=config,
+            event_bus=event_bus,
+            state=state,
+            pr_manager=PRManager(config, event_bus),
+            get_orchestrator=lambda: None,
+            set_orchestrator=lambda o: None,
+            set_run_task=lambda t: None,
+            ui_dist_dir=tmp_path / "no-dist",
+            template_dir=tmp_path / "no-templates",
+        )
+        response = await api.get_state()
+        assert response.status_code == 200
