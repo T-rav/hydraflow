@@ -209,12 +209,60 @@ def _scaffold_go_tests(repo_root: Path, dry_run: bool) -> TestScaffoldResult:
         content = (
             f"package {package_name}\n\n"
             "import (\n"
+            '\t"bytes"\n'
             '\t"os"\n'
             '\t"testing"\n'
             ")\n\n"
-            f"func TestPrepPlaceholder_{fn_name}(t *testing.T) {{\n"
+            f"func prepRead_{fn_name}(t *testing.T) []byte {{\n"
+            "\tt.Helper()\n"
+            f'\tdata, err := os.ReadFile("{source.name}")\n'
+            f'\t\tt.Fatalf("expected source file {rel} to exist: %v", err)\n'
+            "\t}\n"
+            "\treturn data\n"
+            "}\n\n"
+            f"func TestPrepPlaceholder_{fn_name}_Exists(t *testing.T) {{\n"
             f'\tif _, err := os.Stat("{source.name}"); err != nil {{\n'
             f'\t\tt.Fatalf("expected source file {rel} to exist: %v", err)\n'
+            "\t}\n"
+            "}\n"
+            f"\nfunc TestPrepPlaceholder_{fn_name}_NonEmpty(t *testing.T) {{\n"
+            f"\tdata := prepRead_{fn_name}(t)\n"
+            "\tif len(bytes.TrimSpace(data)) == 0 {\n"
+            f'\t\tt.Fatalf("expected source file {rel} to be non-empty")\n'
+            "\t}\n"
+            "}\n"
+            f"\nfunc TestPrepPlaceholder_{fn_name}_HasCodeLikeCharacters(t *testing.T) {{\n"
+            f"\tdata := prepRead_{fn_name}(t)\n"
+            "\tfound := false\n"
+            "\tfor _, b := range data {\n"
+            "\t\tif (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') {\n"
+            "\t\t\tfound = true\n"
+            "\t\t\tbreak\n"
+            "\t\t}\n"
+            "\t}\n"
+            "\tif !found {\n"
+            f'\t\tt.Fatalf("expected source file {rel} to contain code-like characters")\n'
+            "\t}\n"
+            "}\n"
+            f"\nfunc TestPrepPlaceholder_{fn_name}_NoNulBytes(t *testing.T) {{\n"
+            f"\tdata := prepRead_{fn_name}(t)\n"
+            "\tif bytes.Contains(data, []byte{0}) {\n"
+            f'\t\tt.Fatalf("expected source file {rel} to have no NUL bytes")\n'
+            "\t}\n"
+            "}\n"
+            f"\nfunc TestPrepPlaceholder_{fn_name}_HasAtLeastOneLine(t *testing.T) {{\n"
+            f"\tdata := prepRead_{fn_name}(t)\n"
+            "\tif len(bytes.Split(data, []byte{'\\n'})) < 1 {\n"
+            f'\t\tt.Fatalf("expected source file {rel} to have at least one line")\n'
+            "\t}\n"
+            "}\n"
+            f"\nfunc TestPrepPlaceholder_{fn_name}_IsRegularFile(t *testing.T) {{\n"
+            f'\tinfo, err := os.Stat("{source.name}")\n'
+            "\tif err != nil {\n"
+            f'\t\tt.Fatalf("expected source file {rel} to exist: %v", err)\n'
+            "\t}\n"
+            "\tif !info.Mode().IsRegular() {\n"
+            f'\t\tt.Fatalf("expected source file {rel} to be regular file")\n'
             "\t}\n"
             "}\n"
         )
@@ -254,9 +302,37 @@ def _scaffold_rust_tests(repo_root: Path, dry_run: bool) -> TestScaffoldResult:
             continue
         content = (
             "use std::path::Path;\n\n"
+            f"fn prep_read_{test_name}() -> String {{\n"
+            f'    std::fs::read_to_string("{rel}").expect("source file should be readable as UTF-8")\n'
+            "}\n\n"
             "#[test]\n"
-            f"fn prep_placeholder_{test_name}() {{\n"
+            f"fn prep_placeholder_{test_name}_exists() {{\n"
             f'    assert!(Path::new("{rel}").exists());\n'
+            "}\n"
+            "\n#[test]\n"
+            f"fn prep_placeholder_{test_name}_non_empty() {{\n"
+            f"    let content = prep_read_{test_name}();\n"
+            "    assert!(!content.trim().is_empty());\n"
+            "}\n"
+            "\n#[test]\n"
+            f"fn prep_placeholder_{test_name}_has_codeish_characters() {{\n"
+            f"    let content = prep_read_{test_name}();\n"
+            "    assert!(content.chars().any(|c| c.is_alphanumeric()));\n"
+            "}\n"
+            "\n#[test]\n"
+            f"fn prep_placeholder_{test_name}_no_nul_bytes() {{\n"
+            f"    let content = prep_read_{test_name}();\n"
+            "    assert!(!content.contains('\\0'));\n"
+            "}\n"
+            "\n#[test]\n"
+            f"fn prep_placeholder_{test_name}_has_at_least_one_line() {{\n"
+            f"    let content = prep_read_{test_name}();\n"
+            "    assert!(content.lines().count() >= 1);\n"
+            "}\n"
+            "\n#[test]\n"
+            f"fn prep_placeholder_{test_name}_is_regular_file() {{\n"
+            f'    let meta = std::fs::metadata("{rel}").expect("source metadata should exist");\n'
+            "    assert!(meta.is_file());\n"
             "}\n"
         )
         result.created_files.append(str(test_file.relative_to(repo_root)))
