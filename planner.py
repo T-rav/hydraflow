@@ -11,7 +11,7 @@ from typing import Literal
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from events import EventType, HydraFlowEvent
-from models import GitHubIssue, NewIssueSpec, PlannerStatus, PlanResult
+from models import NewIssueSpec, PlannerStatus, PlanResult, Task
 from runner_constants import MEMORY_SUGGESTION_PROMPT
 from subprocess_util import CreditExhaustedError
 
@@ -73,10 +73,10 @@ class PlannerRunner(BaseRunner):
 
     async def plan(
         self,
-        issue: GitHubIssue,
+        task: Task,
         worker_id: int = 0,
     ) -> PlanResult:
-        """Run the planning agent for *issue*.
+        """Run the planning agent for *task*.
 
         Returns a :class:`PlanResult` with the plan and summary.
 
@@ -85,36 +85,36 @@ class PlannerRunner(BaseRunner):
         ``retry_attempted=True`` so the orchestrator can escalate to HITL.
         """
         start = time.monotonic()
-        result = PlanResult(issue_number=issue.number)
+        result = PlanResult(issue_number=task.id)
 
-        await self._emit_status(issue.number, worker_id, PlannerStatus.PLANNING)
+        await self._emit_status(task.id, worker_id, PlannerStatus.PLANNING)
 
         if self._config.dry_run:
-            logger.info("[dry-run] Would plan issue #%d", issue.number)
+            logger.info("[dry-run] Would plan issue #%d", task.id)
             result.success = True
             result.summary = "Dry-run: plan skipped"
             result.duration_seconds = time.monotonic() - start
-            await self._emit_status(issue.number, worker_id, PlannerStatus.DONE)
+            await self._emit_status(task.id, worker_id, PlannerStatus.DONE)
             return result
 
         try:
-            scale = self._detect_plan_scale(issue)
-            logger.info("Issue #%d classified as %s plan", issue.number, scale)
+            scale = self._detect_plan_scale(task)
+            logger.info("Issue #%d classified as %s plan", task.id, scale)
 
             cmd = self._build_command()
-            prompt = self._build_prompt(issue, scale=scale)
+            prompt = self._build_prompt(task, scale=scale)
 
             def _check_plan_complete(accumulated: str) -> bool:
                 if "PLAN_END" in accumulated:
                     logger.info(
                         "Plan markers found for issue #%d — terminating planner",
-                        issue.number,
+                        task.id,
                     )
                     return True
                 if "ALREADY_SATISFIED_END" in accumulated:
                     logger.info(
                         "Already-satisfied markers found for issue #%d — terminating planner",
-                        issue.number,
+                        task.id,
                     )
                     return True
                 return False
@@ -123,7 +123,7 @@ class PlannerRunner(BaseRunner):
                 cmd,
                 prompt,
                 self._config.repo_root,
-                {"issue": issue.number, "source": "planner"},
+                {"issue": task.id, "source": "planner"},
                 on_output=_check_plan_complete,
             )
             result.transcript = transcript
@@ -136,18 +136,18 @@ class PlannerRunner(BaseRunner):
                 result.summary = satisfied_explanation[:200]
                 result.duration_seconds = time.monotonic() - start
                 try:
-                    self._save_transcript("plan-issue", issue.number, result.transcript)
+                    self._save_transcript("plan-issue", task.id, result.transcript)
                 except OSError:
                     logger.warning(
                         "Failed to save transcript for issue #%d",
-                        issue.number,
+                        task.id,
                         exc_info=True,
-                        extra={"issue": issue.number},
+                        extra={"issue": task.id},
                     )
-                await self._emit_status(issue.number, worker_id, PlannerStatus.DONE)
+                await self._emit_status(task.id, worker_id, PlannerStatus.DONE)
                 logger.info(
                     "Issue #%d already satisfied — no changes needed",
-                    issue.number,
+                    task.id,
                 )
                 return result
 
@@ -156,10 +156,8 @@ class PlannerRunner(BaseRunner):
             result.new_issues = self._extract_new_issues(transcript)
 
             if result.plan:
-                await self._emit_status(
-                    issue.number, worker_id, PlannerStatus.VALIDATING
-                )
-                validation_errors = self._validate_plan(issue, result.plan, scale=scale)
+                await self._emit_status(task.id, worker_id, PlannerStatus.VALIDATING)
+                validation_errors = self._validate_plan(task, result.plan, scale=scale)
                 if scale == "lite":
                     gate_errors: list[str] = []
                 else:
@@ -175,20 +173,18 @@ class PlannerRunner(BaseRunner):
                     # --- Retry once with feedback ---
                     logger.warning(
                         "Plan for issue #%d failed validation (%d errors) — retrying",
-                        issue.number,
+                        task.id,
                         len(all_errors),
                     )
-                    await self._emit_status(
-                        issue.number, worker_id, PlannerStatus.RETRYING
-                    )
+                    await self._emit_status(task.id, worker_id, PlannerStatus.RETRYING)
                     retry_prompt = self._build_retry_prompt(
-                        issue, result.plan, all_errors, scale=scale
+                        task, result.plan, all_errors, scale=scale
                     )
                     retry_transcript = await self._execute(
                         cmd,
                         retry_prompt,
                         self._config.repo_root,
-                        {"issue": issue.number, "source": "planner"},
+                        {"issue": task.id, "source": "planner"},
                         on_output=_check_plan_complete,
                     )
                     result.transcript += "\n\n--- RETRY ---\n\n" + retry_transcript
@@ -196,7 +192,7 @@ class PlannerRunner(BaseRunner):
                     retry_plan = self._extract_plan(retry_transcript)
                     if retry_plan:
                         retry_validation = self._validate_plan(
-                            issue, retry_plan, scale=scale
+                            task, retry_plan, scale=scale
                         )
                         if scale == "lite":
                             retry_gate_errors: list[str] = []
@@ -224,7 +220,7 @@ class PlannerRunner(BaseRunner):
                 result.success = False
 
             status = PlannerStatus.DONE if result.success else PlannerStatus.FAILED
-            await self._emit_status(issue.number, worker_id, status)
+            await self._emit_status(task.id, worker_id, status)
 
         except CreditExhaustedError:
             raise
@@ -233,31 +229,31 @@ class PlannerRunner(BaseRunner):
             result.error = str(exc)
             logger.error(
                 "Planner failed for issue #%d: %s",
-                issue.number,
+                task.id,
                 exc,
-                extra={"issue": issue.number},
+                extra={"issue": task.id},
             )
-            await self._emit_status(issue.number, worker_id, PlannerStatus.FAILED)
+            await self._emit_status(task.id, worker_id, PlannerStatus.FAILED)
 
         result.duration_seconds = time.monotonic() - start
         try:
-            self._save_transcript("plan-issue", issue.number, result.transcript)
+            self._save_transcript("plan-issue", task.id, result.transcript)
         except OSError:
             logger.warning(
                 "Failed to save transcript for issue #%d",
-                issue.number,
+                task.id,
                 exc_info=True,
-                extra={"issue": issue.number},
+                extra={"issue": task.id},
             )
         if result.success and result.plan:
             try:
-                self._save_plan(issue.number, result.plan, result.summary)
+                self._save_plan(task.id, result.plan, result.summary)
             except OSError:
                 logger.warning(
                     "Failed to save plan for issue #%d",
-                    issue.number,
+                    task.id,
                     exc_info=True,
-                    extra={"issue": issue.number},
+                    extra={"issue": task.id},
                 )
         return result
 
@@ -323,7 +319,7 @@ class PlannerRunner(BaseRunner):
                 lines.append(f"- `{header}` \u2014 {desc}")
         return "\n".join(lines)
 
-    def _build_prompt(self, issue: GitHubIssue, *, scale: PlanScale = "full") -> str:
+    def _build_prompt(self, issue: Task, *, scale: PlanScale = "full") -> str:
         """Build the planning prompt for the agent.
 
         *scale* is ``"lite"`` or ``"full"``.  The prompt adjusts which
@@ -387,7 +383,7 @@ class PlannerRunner(BaseRunner):
                 "`## Key Considerations` section."
             )
 
-        return f"""You are a planning agent for GitHub issue #{issue.number}.
+        return f"""You are a planning agent for GitHub issue #{issue.id}.
 
 ## Issue: {issue.title}
 
@@ -531,14 +527,14 @@ requirements are already implemented — not when the issue is unclear or you ar
         re.IGNORECASE,
     )
 
-    def _detect_plan_scale(self, issue: GitHubIssue) -> PlanScale:
+    def _detect_plan_scale(self, issue: Task) -> PlanScale:
         """Determine whether *issue* needs a ``"lite"`` or ``"full"`` plan.
 
         Lite plans are used for small issues (bug fixes, typos, docs).
         Full plans are the default for features and multi-file changes.
         """
         lite_labels = {lbl.lower() for lbl in self._config.lite_plan_labels}
-        for label in issue.labels:
+        for label in issue.tags:
             if label.lower() in lite_labels:
                 return "lite"
 
@@ -590,7 +586,7 @@ requirements are already implemented — not when the issue is unclear or you ar
         return words
 
     def _validate_plan(
-        self, issue: GitHubIssue, plan: str, scale: PlanScale = "full"
+        self, issue: Task, plan: str, scale: PlanScale = "full"
     ) -> list[str]:
         """Validate that *plan* has all required sections and minimum content.
 
@@ -675,7 +671,7 @@ requirements are already implemented — not when the issue is unclear or you ar
             logger.warning(
                 "Plan for issue #%d may not address the issue title %r "
                 "(no significant word overlap)",
-                issue.number,
+                issue.id,
                 issue.title,
             )
 
@@ -845,7 +841,7 @@ requirements are already implemented — not when the issue is unclear or you ar
 
     def _build_retry_prompt(
         self,
-        issue: GitHubIssue,
+        issue: Task,
         failed_plan: str,
         validation_errors: list[str],
         *,
@@ -855,7 +851,7 @@ requirements are already implemented — not when the issue is unclear or you ar
         error_list = "\n".join(f"- {e}" for e in validation_errors)
         sections_list = self._format_sections_list(scale)
 
-        return f"""You previously generated a plan for GitHub issue #{issue.number} but it failed validation.
+        return f"""You previously generated a plan for GitHub issue #{issue.id} but it failed validation.
 
 ## Issue: {issue.title}
 

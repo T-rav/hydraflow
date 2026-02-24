@@ -17,8 +17,8 @@ if TYPE_CHECKING:
 
 from models import ConflictResolutionResult
 from tests.conftest import (
-    IssueFactory,
     PRInfoFactory,
+    TaskFactory,
 )
 from tests.helpers import make_review_phase
 
@@ -35,7 +35,7 @@ class TestResolveMergeConflicts:
         """Without an agent runner, should return False immediately."""
         phase = make_review_phase(config)  # No agents
         pr = PRInfoFactory.create()
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
 
         result = await phase._resolve_merge_conflicts(
             pr, issue, config.worktree_base / "issue-42", worker_id=0
@@ -52,7 +52,7 @@ class TestResolveMergeConflicts:
         phase = make_review_phase(config)
         phase._conflict_resolver._agents = mock_agents
         pr = PRInfoFactory.create()
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
 
         phase._worktrees.start_merge_main = AsyncMock(return_value=True)
 
@@ -75,7 +75,7 @@ class TestResolveMergeConflicts:
         phase = make_review_phase(config)
         phase._conflict_resolver._agents = mock_agents
         pr = PRInfoFactory.create()
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
 
         phase._worktrees.start_merge_main = AsyncMock(return_value=False)
 
@@ -98,7 +98,7 @@ class TestResolveMergeConflicts:
         phase = make_review_phase(config)
         phase._conflict_resolver._agents = mock_agents
         pr = PRInfoFactory.create()
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
 
         phase._worktrees.start_merge_main = AsyncMock(return_value=False)
         phase._worktrees.abort_merge = AsyncMock()
@@ -122,7 +122,7 @@ class TestResolveMergeConflicts:
         phase = make_review_phase(config)
         phase._conflict_resolver._agents = mock_agents
         pr = PRInfoFactory.create()
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
 
         phase._worktrees.start_merge_main = AsyncMock(return_value=False)
         phase._worktrees.abort_merge = AsyncMock()
@@ -154,7 +154,7 @@ class TestResolveMergeConflicts:
         phase = make_review_phase(cfg)
         phase._conflict_resolver._agents = mock_agents
         pr = PRInfoFactory.create()
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
 
         phase._worktrees.start_merge_main = AsyncMock(return_value=False)
         phase._worktrees.abort_merge = AsyncMock()
@@ -179,7 +179,7 @@ class TestResolveMergeConflicts:
         phase = make_review_phase(config)
         phase._conflict_resolver._agents = mock_agents
         pr = PRInfoFactory.create()
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
 
         phase._worktrees.start_merge_main = AsyncMock(return_value=False)
         phase._worktrees.abort_merge = AsyncMock()
@@ -205,7 +205,7 @@ class TestResolveMergeConflicts:
         phase = make_review_phase(config)
         phase._conflict_resolver._agents = mock_agents
         pr = PRInfoFactory.create()
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
 
         phase._worktrees.start_merge_main = AsyncMock(return_value=False)
         phase._worktrees.abort_merge = AsyncMock()
@@ -228,7 +228,7 @@ class TestResolveMergeConflicts:
         phase = make_review_phase(config)
         phase._conflict_resolver._agents = mock_agents
         pr = PRInfoFactory.create()
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
 
         phase._worktrees.start_merge_main = AsyncMock(return_value=False)
         phase._worktrees.abort_merge = AsyncMock()
@@ -259,7 +259,7 @@ class TestResolveMergeConflicts:
         phase = make_review_phase(cfg)
         phase._conflict_resolver._agents = mock_agents
         pr = PRInfoFactory.create()
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
 
         phase._worktrees.start_merge_main = AsyncMock(return_value=False)
         phase._worktrees.abort_merge = AsyncMock()
@@ -287,7 +287,7 @@ class TestResolveMergeConflicts:
         phase = make_review_phase(cfg)
         phase._conflict_resolver._agents = mock_agents
         pr = PRInfoFactory.create()
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
 
         phase._worktrees.start_merge_main = AsyncMock(return_value=False)
         phase._worktrees.abort_merge = AsyncMock()
@@ -312,7 +312,7 @@ class TestResolveMergeConflicts:
         phase = make_review_phase(config)
         phase._conflict_resolver._agents = mock_agents
         pr = PRInfoFactory.create()
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
 
         phase._worktrees.start_merge_main = AsyncMock(return_value=False)
 
@@ -344,7 +344,7 @@ class TestResolveMergeConflicts:
         phase = make_review_phase(config)
         phase._conflict_resolver._agents = mock_agents
         pr = PRInfoFactory.create()
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
 
         phase._worktrees.start_merge_main = AsyncMock(return_value=False)
 
@@ -367,7 +367,7 @@ class TestMergeWithMain:
     async def test_returns_true_on_clean_merge(self, config: HydraFlowConfig) -> None:
         """When merge_main succeeds, should push and return True."""
         phase = make_review_phase(config)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         phase._worktrees.merge_main = AsyncMock(return_value=True)
@@ -388,9 +388,8 @@ class TestMergeWithMain:
         mock_agents = AsyncMock()
         mock_agents._execute = AsyncMock(return_value="transcript")
         mock_agents._verify_result = AsyncMock(return_value=(True, ""))
-        phase = make_review_phase(config)
-        phase._conflict_resolver._agents = mock_agents
-        issue = IssueFactory.create()
+        phase = make_review_phase(config, agents=mock_agents)
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         phase._worktrees.merge_main = AsyncMock(return_value=False)
@@ -409,7 +408,7 @@ class TestMergeWithMain:
     ) -> None:
         """When conflict resolution fails, should escalate and return False."""
         phase = make_review_phase(config, event_bus=event_bus)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         phase._worktrees.merge_main = AsyncMock(return_value=False)

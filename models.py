@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -53,6 +54,79 @@ def _check_iso_timestamp(v: str) -> str:
 HttpUrl = Annotated[str, AfterValidator(_check_url)]
 IsoTimestamp = Annotated[str, AfterValidator(_check_iso_timestamp)]
 
+# --- Task (source-agnostic task abstraction) ---
+
+
+class TaskLinkKind(StrEnum):
+    """Relationship kind between two tasks."""
+
+    RELATES_TO = "relates_to"
+    DUPLICATES = "duplicates"
+    SUPERSEDES = "supersedes"
+    REPLIES_TO = "replies_to"
+
+
+class TaskLink(BaseModel):
+    """A directed relationship from one task to another."""
+
+    kind: TaskLinkKind
+    target_id: int
+    target_url: str = ""
+
+
+# Compiled patterns: (pattern, kind). Order matters — first match per target_id wins.
+_LINK_PATTERNS: list[tuple[re.Pattern[str], TaskLinkKind]] = [
+    (re.compile(r"\brelates?\s+to\s+#(\d+)", re.IGNORECASE), TaskLinkKind.RELATES_TO),
+    (re.compile(r"\brelated:?\s+#(\d+)", re.IGNORECASE), TaskLinkKind.RELATES_TO),
+    (re.compile(r"\bduplicates?\s+#(\d+)", re.IGNORECASE), TaskLinkKind.DUPLICATES),
+    (re.compile(r"\bduplicate\s+of\s+#(\d+)", re.IGNORECASE), TaskLinkKind.DUPLICATES),
+    (re.compile(r"\bsupersedes?\s+#(\d+)", re.IGNORECASE), TaskLinkKind.SUPERSEDES),
+    (re.compile(r"\breplaces?\s+#(\d+)", re.IGNORECASE), TaskLinkKind.SUPERSEDES),
+    (
+        re.compile(r"\brepl(?:ies|y)\s+to\s+#(\d+)", re.IGNORECASE),
+        TaskLinkKind.REPLIES_TO,
+    ),
+    (
+        re.compile(r"\bin\s+response\s+to\s+#(\d+)", re.IGNORECASE),
+        TaskLinkKind.REPLIES_TO,
+    ),
+]
+
+
+def parse_task_links(body: str) -> list[TaskLink]:
+    """Extract structured cross-task links from a task body.
+
+    Scans *body* for Markdown prose patterns (e.g. "relates to #12",
+    "duplicate of #5") and returns a deduplicated list of
+    :class:`TaskLink` objects.  First match wins per *target_id*.
+    """
+    seen: dict[int, TaskLink] = {}
+    for pattern, kind in _LINK_PATTERNS:
+        for match in pattern.finditer(body):
+            target_id = int(match.group(1))
+            if target_id not in seen:
+                seen[target_id] = TaskLink(kind=kind, target_id=target_id)
+    # Preserve discovery order (Python 3.7+ dict maintains insertion order).
+    return list(seen.values())
+
+
+class Task(BaseModel):
+    """Source-agnostic task representation.
+
+    Maps to a GitHub issue or any other task backend.
+    """
+
+    id: int
+    title: str
+    body: str = ""
+    tags: list[str] = Field(default_factory=list)
+    comments: list[str] = Field(default_factory=list)
+    source_url: str = ""
+    created_at: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    links: list[TaskLink] = Field(default_factory=list)
+
+
 # --- GitHub ---
 
 
@@ -85,6 +159,32 @@ class GitHubIssue(BaseModel):
         if isinstance(v, list):
             return [c.get("body", "") if isinstance(c, dict) else str(c) for c in v]
         return v  # type: ignore[return-value]
+
+    def to_task(self) -> Task:
+        """Convert to a source-agnostic :class:`Task`."""
+        return Task(
+            id=self.number,
+            title=self.title,
+            body=self.body,
+            tags=list(self.labels),
+            comments=list(self.comments),
+            source_url=self.url,
+            created_at=self.created_at,
+            links=parse_task_links(self.body),
+        )
+
+    @classmethod
+    def from_task(cls, task: Task) -> GitHubIssue:
+        """Reconstruct a :class:`GitHubIssue` from a :class:`Task`."""
+        return cls(
+            number=task.id,
+            title=task.title,
+            body=task.body,
+            labels=list(task.tags),
+            comments=list(task.comments),
+            url=task.source_url,
+            created_at=task.created_at,
+        )
 
 
 # --- Triage ---
@@ -404,7 +504,7 @@ class BatchResult(BaseModel):
     """Summary of a full batch cycle."""
 
     batch_number: int
-    issues: list[GitHubIssue] = Field(default_factory=list)
+    issues: list[Task] = Field(default_factory=list)
     plan_results: list[PlanResult] = Field(default_factory=list)
     worker_results: list[WorkerResult] = Field(default_factory=list)
     pr_infos: list[PRInfo] = Field(default_factory=list)
@@ -1208,7 +1308,7 @@ class CiGateFn(Protocol):
     async def __call__(
         self,
         pr: PRInfo,
-        issue: GitHubIssue,
+        issue: Task,
         wt_path: Path,
         result: ReviewResult,
         worker_id: int,

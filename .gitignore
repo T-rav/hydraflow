@@ -211,6 +211,11 @@ node_modules/
 
 # HydraFlow runtime state
 .hydraflow/
+.hydra/
+jolly-sea-65a9/
 .DS_Store
+
+# Claude Code
+.claude/plans/
 
 .pre

@@ -10,7 +10,13 @@ from pathlib import Path
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from events import EventType, HydraFlowEvent
-from models import GitHubIssue, PRInfo, ReviewerStatus, ReviewResult, ReviewVerdict
+from models import (
+    PRInfo,
+    ReviewerStatus,
+    ReviewResult,
+    ReviewVerdict,
+    Task,
+)
 from precheck import run_precheck_context
 from runner_constants import MEMORY_SUGGESTION_PROMPT
 from subprocess_util import CreditExhaustedError
@@ -43,7 +49,7 @@ class ReviewRunner(BaseRunner):
     async def review(
         self,
         pr: PRInfo,
-        issue: GitHubIssue,
+        issue: Task,
         worktree_path: Path,
         diff: str,
         worker_id: int = 0,
@@ -55,7 +61,7 @@ class ReviewRunner(BaseRunner):
         start = time.monotonic()
         result = ReviewResult(
             pr_number=pr.number,
-            issue_number=issue.number,
+            issue_number=issue.id,
         )
 
         await self._bus.publish(
@@ -63,7 +69,7 @@ class ReviewRunner(BaseRunner):
                 type=EventType.REVIEW_UPDATE,
                 data={
                     "pr": pr.number,
-                    "issue": issue.number,
+                    "issue": issue.id,
                     "worker": worker_id,
                     "status": ReviewerStatus.REVIEWING.value,
                     "role": "reviewer",
@@ -116,7 +122,7 @@ class ReviewRunner(BaseRunner):
                 type=EventType.REVIEW_UPDATE,
                 data={
                     "pr": pr.number,
-                    "issue": issue.number,
+                    "issue": issue.id,
                     "worker": worker_id,
                     "status": ReviewerStatus.DONE.value,
                     "verdict": result.verdict.value,
@@ -131,7 +137,7 @@ class ReviewRunner(BaseRunner):
     async def fix_ci(
         self,
         pr: PRInfo,
-        issue: GitHubIssue,
+        issue: Task,
         worktree_path: Path,
         failure_summary: str,
         attempt: int = 1,
@@ -147,7 +153,7 @@ class ReviewRunner(BaseRunner):
         start = time.monotonic()
         result = ReviewResult(
             pr_number=pr.number,
-            issue_number=issue.number,
+            issue_number=issue.id,
         )
 
         await self._bus.publish(
@@ -155,7 +161,7 @@ class ReviewRunner(BaseRunner):
                 type=EventType.CI_CHECK,
                 data={
                     "pr": pr.number,
-                    "issue": issue.number,
+                    "issue": issue.id,
                     "worker": worker_id,
                     "status": ReviewerStatus.FIXING.value,
                     "attempt": attempt,
@@ -196,7 +202,7 @@ class ReviewRunner(BaseRunner):
                 type=EventType.CI_CHECK,
                 data={
                     "pr": pr.number,
-                    "issue": issue.number,
+                    "issue": issue.id,
                     "worker": worker_id,
                     "status": ReviewerStatus.FIX_DONE.value,
                     "attempt": attempt,
@@ -211,7 +217,7 @@ class ReviewRunner(BaseRunner):
     def _build_ci_fix_prompt(
         self,
         pr: PRInfo,
-        issue: GitHubIssue,
+        issue: Task,
         failure_summary: str,
         attempt: int,
         ci_logs: str = "",
@@ -222,7 +228,7 @@ class ReviewRunner(BaseRunner):
             ci_logs_section = f"\n\n## Full CI Failure Logs\n\n```\n{ci_logs}\n```"
 
         test_cmd = self._config.test_command
-        return f"""You are fixing CI failures on PR #{pr.number} (issue #{issue.number}: {issue.title}).
+        return f"""You are fixing CI failures on PR #{pr.number} (issue #{issue.id}: {issue.title}).
 
 ## CI Failure Summary
 
@@ -258,7 +264,7 @@ Then a brief summary on the next line starting with "SUMMARY: ".
     def _build_review_prompt(
         self,
         pr: PRInfo,
-        issue: GitHubIssue,
+        issue: Task,
         diff: str,
         precheck_context: str = "",
     ) -> str:
@@ -318,7 +324,7 @@ Then a brief summary on the next line starting with "SUMMARY: ".
             if logs:
                 log_section = f"\n\n## Recent Application Logs\n\n```\n{logs}\n```"
 
-        return f"""You are reviewing PR #{pr.number} which implements issue #{issue.number}.
+        return f"""You are reviewing PR #{pr.number} which implements issue #{issue.id}.
 
 ## Issue: {issue.title}
 
@@ -395,10 +401,22 @@ SUMMARY: Implementation looks good, tests are comprehensive, all checks pass.
 
 {MEMORY_SUGGESTION_PROMPT.format(context="review")}"""
 
-    def _build_precheck_prompt(self, pr: PRInfo, issue: GitHubIssue, diff: str) -> str:
+    def _build_subskill_command(self) -> list[str]:
+        return build_agent_command(
+            tool=self._config.subskill_tool,
+            model=self._config.subskill_model,
+        )
+
+    def _build_debug_command(self) -> list[str]:
+        return build_agent_command(
+            tool=self._config.debug_tool,
+            model=self._config.debug_model,
+        )
+
+    def _build_precheck_prompt(self, pr: PRInfo, issue: Task, diff: str) -> str:
         max_diff = min(len(diff), 6000)
         diff_snippet = diff[:max_diff]
-        return f"""Run a compact review precheck for PR #{pr.number} (issue #{issue.number}).
+        return f"""Run a compact review precheck for PR #{pr.number} (issue #{issue.id}).
 
 Goal:
 - estimate risk and confidence
@@ -419,7 +437,7 @@ Diff snippet:
 """
 
     async def _run_precheck_context(
-        self, pr: PRInfo, issue: GitHubIssue, diff: str, worktree_path: Path
+        self, pr: PRInfo, issue: Task, diff: str, worktree_path: Path
     ) -> str:
         prompt = self._build_precheck_prompt(pr, issue, diff)
 

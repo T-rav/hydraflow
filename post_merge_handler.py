@@ -21,6 +21,7 @@ from models import (
     PRInfo,
     PublishFn,
     ReviewResult,
+    Task,
     VerificationCriterion,
 )
 from pr_manager import PRManager
@@ -60,7 +61,7 @@ class PostMergeHandler:
     async def handle_approved(
         self,
         pr: PRInfo,
-        issue: GitHubIssue,
+        issue: Task,
         result: ReviewResult,
         diff: str,
         worker_id: int,
@@ -165,7 +166,7 @@ class PostMergeHandler:
     async def _run_post_merge_hooks(
         self,
         pr: PRInfo,
-        issue: GitHubIssue,
+        issue: Task,
         result: ReviewResult,
         diff: str,
     ) -> None:
@@ -176,7 +177,7 @@ class PostMergeHandler:
                 self._ac_generator.generate(
                     issue_number=pr.issue_number,
                     pr_number=pr.number,
-                    issue=issue,
+                    issue=GitHubIssue.from_task(issue),
                     diff=diff,
                 ),
                 pr.issue_number,
@@ -222,7 +223,7 @@ class PostMergeHandler:
 
     def _get_judge_result(
         self,
-        issue: GitHubIssue,
+        issue: Task,
         pr: PRInfo,
         verdict: JudgeVerdict | None,
     ) -> JudgeResult | None:
@@ -240,7 +241,7 @@ class PostMergeHandler:
         ]
 
         return JudgeResult(
-            issue_number=issue.number,
+            issue_number=issue.id,
             pr_number=pr.number,
             criteria=criteria,
             verification_instructions=verdict.verification_instructions,
@@ -249,7 +250,7 @@ class PostMergeHandler:
 
     async def _create_verification_issue(
         self,
-        issue: GitHubIssue,
+        issue: Task,
         pr: PRInfo,
         judge_result: JudgeResult,
     ) -> int:
@@ -266,11 +267,11 @@ class PostMergeHandler:
         issue_number = await self._prs.create_issue(title, body, [label])
 
         if issue_number > 0:
-            self._state.set_verification_issue(issue.number, issue_number)
+            self._state.set_verification_issue(issue.id, issue_number)
             logger.info(
                 "Created verification issue #%d for issue #%d (PR #%d)",
                 issue_number,
-                issue.number,
+                issue.id,
                 pr.number,
             )
 

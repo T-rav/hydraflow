@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from cli import _seed_context_assets
 from models import AuditCheckStatus
 from prep import HYDRAFLOW_LABELS, PrepResult, _list_existing_labels, ensure_labels
 from tests.conftest import SubprocessMockBuilder
@@ -1337,3 +1338,58 @@ def test_run_scaffold_uses_prep_agent_correction() -> None:
     cli_file = Path(__file__).resolve().parent.parent / "cli.py"
     content = cli_file.read_text()
     assert "_run_prep_agent_correction(" in content
+
+
+class TestContextSeed:
+    """Tests for seeding local manifest/memory assets during prep."""
+
+    def test_seed_creates_manifest_digest_and_metrics_cache(
+        self, tmp_path: Path
+    ) -> None:
+        state_file = tmp_path / ".hydraflow" / "state.json"
+        config = ConfigFactory.create(repo_root=tmp_path, state_file=state_file)
+
+        log_lines = _seed_context_assets(config)
+
+        manifest_path = tmp_path / ".hydraflow" / "memory" / "manifest.md"
+        digest_path = tmp_path / ".hydraflow" / "memory" / "digest.md"
+        repo_slug = config.repo.replace("/", "-") if config.repo else "unknown"
+        metrics_file = state_file.parent / "metrics" / repo_slug / "snapshots.jsonl"
+
+        assert manifest_path.is_file()
+        assert digest_path.is_file()
+        assert metrics_file.is_file()
+        assert any("Manifest seed" in line for line in log_lines)
+        assert "Seeded during prep" in digest_path.read_text()
+
+    def test_seed_skipped_in_dry_run(self, tmp_path: Path) -> None:
+        state_file = tmp_path / ".hydraflow" / "state.json"
+        config = ConfigFactory.create(
+            repo_root=tmp_path, dry_run=True, state_file=state_file
+        )
+
+        log_lines = _seed_context_assets(config)
+
+        assert not (tmp_path / ".hydraflow").exists()
+        assert "- Context seed skipped" in log_lines[0]
+
+    def test_seed_does_not_overwrite_existing_files(self, tmp_path: Path) -> None:
+        state_file = tmp_path / ".hydraflow" / "state.json"
+        config = ConfigFactory.create(repo_root=tmp_path, state_file=state_file)
+        _seed_context_assets(config)
+
+        digest_path = tmp_path / ".hydraflow" / "memory" / "digest.md"
+        metrics_file = (
+            state_file.parent
+            / "metrics"
+            / config.repo.replace("/", "-")
+            / "snapshots.jsonl"
+        )
+        digest_path.write_text("custom digest")
+        metrics_file.write_text("existing metrics line\n")
+
+        log_lines = _seed_context_assets(config)
+
+        assert digest_path.read_text() == "custom digest"
+        assert metrics_file.read_text() == "existing metrics line\n"
+        assert any("already existed" in line for line in log_lines)

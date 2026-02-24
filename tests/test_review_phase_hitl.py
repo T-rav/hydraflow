@@ -17,16 +17,16 @@ if TYPE_CHECKING:
 
 from events import EventType
 from models import (
-    GitHubIssue,
     PRInfo,
     ReviewResult,
     ReviewVerdict,
+    Task,
 )
 from review_phase import ReviewPhase
 from tests.conftest import (
-    IssueFactory,
     PRInfoFactory,
     ReviewResultFactory,
+    TaskFactory,
 )
 from tests.helpers import ConfigFactory, make_review_phase
 
@@ -42,9 +42,8 @@ class TestHITLEscalationEvents:
         mock_agents = AsyncMock()
         mock_agents._execute = AsyncMock(return_value="transcript")
         mock_agents._verify_result = AsyncMock(return_value=(False, ""))
-        phase = make_review_phase(config, event_bus=event_bus)
-        phase._conflict_resolver._agents = mock_agents
-        issue = IssueFactory.create()
+        phase = make_review_phase(config, agents=mock_agents, event_bus=event_bus)
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         phase._prs.post_pr_comment = AsyncMock()
@@ -78,7 +77,7 @@ class TestHITLEscalationEvents:
     ) -> None:
         """Merge failure escalation should emit HITL_ESCALATION with cause merge_failed."""
         phase = make_review_phase(config, event_bus=event_bus)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         phase._reviewers.review = AsyncMock(return_value=ReviewResultFactory.create())
@@ -120,7 +119,7 @@ class TestHITLEscalationEvents:
             state_file=config.state_file,
         )
         phase = make_review_phase(cfg, event_bus=event_bus)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         fix_result = ReviewResult(
@@ -166,7 +165,7 @@ class TestHITLEscalationEvents:
     ) -> None:
         """Happy path (approve + merge) should NOT emit HITL_ESCALATION."""
         phase = make_review_phase(config, event_bus=event_bus)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         phase._reviewers.review = AsyncMock(return_value=ReviewResultFactory.create())
@@ -193,7 +192,7 @@ class TestHITLEscalationEvents:
     ) -> None:
         """Review fix cap exceeded should emit HITL_ESCALATION with cause review_fix_cap_exceeded."""
         phase = make_review_phase(config, event_bus=event_bus)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         # Set attempts to max so cap is exceeded
@@ -243,10 +242,10 @@ class TestRequestChangesRetry:
 
     def _setup_phase_for_retry(
         self, config: HydraFlowConfig
-    ) -> tuple[ReviewPhase, PRInfo, GitHubIssue]:
+    ) -> tuple[ReviewPhase, PRInfo, Task]:
         """Helper to set up a ReviewPhase ready for retry tests."""
         phase = make_review_phase(config)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         phase._reviewers.review = AsyncMock(
@@ -279,9 +278,7 @@ class TestRequestChangesRetry:
 
         await phase.review_prs([pr], [issue])
 
-        phase._prs.swap_pipeline_labels.assert_any_await(
-            42, config.ready_label[0], pr_number=101
-        )
+        phase._prs.transition.assert_any_await(42, "ready", pr_number=101)
 
     @pytest.mark.asyncio
     async def test_request_changes_under_cap_preserves_worktree(
@@ -330,9 +327,7 @@ class TestRequestChangesRetry:
 
         await phase.review_prs([pr], [issue])
 
-        phase._prs.swap_pipeline_labels.assert_any_await(
-            42, "hydraflow-hitl", pr_number=101
-        )
+        phase._prs.transition.assert_any_await(42, "hitl", pr_number=101)
 
     @pytest.mark.asyncio
     async def test_request_changes_at_cap_posts_escalation_comment(
@@ -355,7 +350,7 @@ class TestRequestChangesRetry:
     ) -> None:
         """COMMENT verdict should trigger the same retry flow as REQUEST_CHANGES."""
         phase = make_review_phase(config)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         phase._reviewers.review = AsyncMock(
@@ -377,9 +372,7 @@ class TestRequestChangesRetry:
         await phase.review_prs([pr], [issue])
 
         # Should swap to ready label (same as REQUEST_CHANGES)
-        phase._prs.swap_pipeline_labels.assert_any_await(
-            42, config.ready_label[0], pr_number=101
-        )
+        phase._prs.transition.assert_any_await(42, "ready", pr_number=101)
         # Worktree should be preserved
         phase._worktrees.destroy.assert_not_awaited()
 
@@ -389,7 +382,7 @@ class TestRequestChangesRetry:
     ) -> None:
         """APPROVE should reset review attempt counter on successful merge."""
         phase = make_review_phase(config)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         # Simulate previous review attempts
@@ -415,7 +408,7 @@ class TestRequestChangesRetry:
     ) -> None:
         """APPROVE should clear stored review feedback on successful merge."""
         phase = make_review_phase(config)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         # Simulate stored feedback from a previous review
@@ -450,7 +443,7 @@ class TestAdversarialReview:
     ) -> None:
         """APPROVE with >= min_review_findings should be accepted without re-review."""
         phase = make_review_phase(config)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         # Summary with 3+ findings (bullets)
@@ -482,7 +475,7 @@ class TestAdversarialReview:
     ) -> None:
         """APPROVE with THOROUGH_REVIEW_COMPLETE block should be accepted."""
         phase = make_review_phase(config)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         result = ReviewResult(
@@ -514,7 +507,7 @@ class TestAdversarialReview:
     ) -> None:
         """APPROVE with too few findings and no justification should trigger re-review."""
         phase = make_review_phase(config)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         # First review: few findings, no THOROUGH_REVIEW_COMPLETE
@@ -562,7 +555,7 @@ class TestAdversarialReview:
             state_file=config.state_file,
         )
         phase = make_review_phase(cfg)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         # Approve with zero findings and no justification — should NOT trigger re-review
@@ -595,7 +588,7 @@ class TestAdversarialReview:
     ) -> None:
         """Re-review still under threshold with no justification should accept (no infinite loop)."""
         phase = make_review_phase(config)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         # Both reviews: under threshold, no justification
@@ -636,7 +629,7 @@ class TestAdversarialReview:
     async def test_re_review_pushes_fixes(self, config: HydraFlowConfig) -> None:
         """Re-review with fixes_made=True should push the branch."""
         phase = make_review_phase(config)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         # First review: under threshold, no justification
@@ -743,9 +736,7 @@ class TestEscalateToHitl:
             comment="comment",
         )
 
-        phase._prs.swap_pipeline_labels.assert_awaited_once_with(
-            42, "hydraflow-hitl", pr_number=101
-        )
+        phase._prs.transition.assert_awaited_once_with(42, "hitl", pr_number=101)
 
     @pytest.mark.asyncio
     async def test_posts_comment_on_pr_by_default(

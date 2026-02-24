@@ -331,7 +331,7 @@ Diff summary:
 
     def _persist(self, criteria: VerificationCriteria) -> None:
         """Write criteria to ``.hydraflow/verification/issue-N.md``."""
-        verification_dir = self._config.repo_root / ".hydraflow" / "verification"
+        verification_dir = self._config.data_path("verification")
         path = verification_dir / f"issue-{criteria.issue_number}.md"
 
         content = (

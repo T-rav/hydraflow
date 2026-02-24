@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from models import GitHubIssue, JudgeResult, PRInfo
+from models import JudgeResult, PRInfo, Task
 
 # GitHub issue body limit is 65,536 chars; reserve space for structured sections.
 _MAX_INSTRUCTIONS_CHARS = 50_000
@@ -10,7 +10,7 @@ _MAX_INSTRUCTIONS_CHARS = 50_000
 
 def format_verification_issue_body(
     judge_result: JudgeResult,
-    issue: GitHubIssue,
+    issue: Task,
     pr: PRInfo,
 ) -> str:
     """Build a markdown body for the verification issue.
@@ -24,7 +24,7 @@ def format_verification_issue_body(
     # Header with links
     lines.append(f"## Verification: {issue.title}")
     lines.append("")
-    lines.append(f"**Original issue:** #{issue.number}")
+    lines.append(f"**Original issue:** #{issue.id}")
     lines.append(f"**Merged PR:** #{pr.number}")
     lines.append("")
 

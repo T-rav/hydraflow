@@ -13,7 +13,7 @@ import pytest
 
 from base_runner import BaseRunner
 from events import EventType
-from models import PlannerStatus
+from models import PlannerStatus, Task
 from planner import PlannerRunner
 from tests.helpers import ConfigFactory, make_streaming_proc
 
@@ -136,22 +136,25 @@ def test_build_command_supports_codex_backend(tmp_path):
 
 def test_build_prompt_includes_issue_number(config, event_bus, issue):
     runner = _make_runner(config, event_bus)
-    prompt = runner._build_prompt(issue)
+    task = issue.to_task()
+    prompt = runner._build_prompt(task)
 
-    assert f"#{issue.number}" in prompt
+    assert f"#{task.id}" in prompt
 
 
 def test_build_prompt_includes_issue_context(config, event_bus, issue):
     runner = _make_runner(config, event_bus)
-    prompt = runner._build_prompt(issue)
+    task = issue.to_task()
+    prompt = runner._build_prompt(task)
 
-    assert issue.title in prompt
-    assert issue.body in prompt
+    assert task.title in prompt
+    assert task.body in prompt
 
 
 def test_build_prompt_includes_read_only_instructions(config, event_bus, issue):
     runner = _make_runner(config, event_bus)
-    prompt = runner._build_prompt(issue)
+    task = issue.to_task()
+    prompt = runner._build_prompt(task)
 
     assert "READ-ONLY" in prompt
     assert "Do NOT create, modify, or delete any files" in prompt
@@ -159,7 +162,8 @@ def test_build_prompt_includes_read_only_instructions(config, event_bus, issue):
 
 def test_build_prompt_includes_plan_markers(config, event_bus, issue):
     runner = _make_runner(config, event_bus)
-    prompt = runner._build_prompt(issue)
+    task = issue.to_task()
+    prompt = runner._build_prompt(task)
 
     assert "PLAN_START" in prompt
     assert "PLAN_END" in prompt
@@ -167,16 +171,14 @@ def test_build_prompt_includes_plan_markers(config, event_bus, issue):
 
 
 def test_build_prompt_includes_comments_when_present(config, event_bus):
-    from models import GitHubIssue
-
-    issue = GitHubIssue(
-        number=42,
+    task = Task(
+        id=42,
         title="Fix the frobnicator",
         body="It is broken.",
         comments=["First comment", "Second comment"],
     )
     runner = _make_runner(config, event_bus)
-    prompt = runner._build_prompt(issue)
+    prompt = runner._build_prompt(task)
 
     assert "First comment" in prompt
     assert "Second comment" in prompt
@@ -185,37 +187,34 @@ def test_build_prompt_includes_comments_when_present(config, event_bus):
 
 def test_build_prompt_omits_comments_section_when_empty(config, event_bus, issue):
     runner = _make_runner(config, event_bus)
-    prompt = runner._build_prompt(issue)
+    task = issue.to_task()
+    prompt = runner._build_prompt(task)
 
     assert "Discussion" not in prompt
 
 
 def test_build_prompt_truncates_long_body(config, event_bus):
-    from models import GitHubIssue
-
-    issue = GitHubIssue(
-        number=1, title="Big issue", body="X" * 20_000, labels=[], comments=[], url=""
+    task = Task(
+        id=1, title="Big issue", body="X" * 20_000, tags=[], comments=[], source_url=""
     )
     runner = _make_runner(config, event_bus)
-    prompt = runner._build_prompt(issue)
+    prompt = runner._build_prompt(task)
 
     assert "…(truncated)" in prompt
     assert len(prompt) < 10_000  # well under original 20k body
 
 
 def test_build_prompt_truncates_long_comments(config, event_bus):
-    from models import GitHubIssue
-
-    issue = GitHubIssue(
-        number=1,
+    task = Task(
+        id=1,
         title="Big comments",
         body="Normal body with enough content",
-        labels=[],
+        tags=[],
         comments=["C" * 5000, "Short"],
-        url="",
+        source_url="",
     )
     runner = _make_runner(config, event_bus)
-    prompt = runner._build_prompt(issue)
+    prompt = runner._build_prompt(task)
 
     # First comment should be truncated, second should be intact
     assert "…" in prompt
@@ -225,15 +224,13 @@ def test_build_prompt_truncates_long_comments(config, event_bus):
 def test_build_prompt_truncates_long_lines(config, event_bus):
     """Lines exceeding _MAX_LINE_CHARS are hard-truncated to prevent
     Claude CLI text-splitter failures."""
-    from models import GitHubIssue
-
     long_line = "A" * 2000
     body = f"Short line\n{long_line}\nAnother short line"
-    issue = GitHubIssue(
-        number=1, title="Long lines", body=body, labels=[], comments=[], url=""
+    task = Task(
+        id=1, title="Long lines", body=body, tags=[], comments=[], source_url=""
     )
     runner = _make_runner(config, event_bus)
-    prompt = runner._build_prompt(issue)
+    prompt = runner._build_prompt(task)
 
     # No line in the prompt should exceed _MAX_LINE_CHARS + ellipsis
     for line in prompt.splitlines():
@@ -266,18 +263,16 @@ def test_truncate_text_no_truncation_when_under_limit():
 
 def test_build_prompt_notes_images_in_body(config, event_bus):
     """When the issue body contains markdown images, the prompt should note them."""
-    from models import GitHubIssue
-
-    issue = GitHubIssue(
-        number=99,
+    task = Task(
+        id=99,
         title="Fix layout bug",
         body="The layout is broken.\n\n![screenshot](https://example.com/img.png)\n\nSee above.",
-        labels=[],
+        tags=[],
         comments=[],
-        url="",
+        source_url="",
     )
     runner = _make_runner(config, event_bus)
-    prompt = runner._build_prompt(issue)
+    prompt = runner._build_prompt(task)
 
     assert "image" in prompt.lower() or "screenshot" in prompt.lower()
     assert "visual" in prompt.lower() or "attached" in prompt.lower()
@@ -285,18 +280,16 @@ def test_build_prompt_notes_images_in_body(config, event_bus):
 
 def test_build_prompt_notes_html_images_in_body(config, event_bus):
     """When the issue body contains HTML img tags, the prompt should note them."""
-    from models import GitHubIssue
-
-    issue = GitHubIssue(
-        number=99,
+    task = Task(
+        id=99,
         title="Fix layout bug",
         body='See screenshot:\n\n<img src="https://example.com/img.png" />\n\nPlease fix.',
-        labels=[],
+        tags=[],
         comments=[],
-        url="",
+        source_url="",
     )
     runner = _make_runner(config, event_bus)
-    prompt = runner._build_prompt(issue)
+    prompt = runner._build_prompt(task)
 
     assert "image" in prompt.lower() or "screenshot" in prompt.lower()
 
@@ -304,27 +297,26 @@ def test_build_prompt_notes_html_images_in_body(config, event_bus):
 def test_build_prompt_no_image_note_when_no_images(config, event_bus, issue):
     """When the issue body has no images, no image note should be added."""
     runner = _make_runner(config, event_bus)
-    prompt = runner._build_prompt(issue)
+    task = issue.to_task()
+    prompt = runner._build_prompt(task)
 
-    assert "image" not in prompt.lower() or "image" in issue.body.lower()
+    assert "image" not in prompt.lower() or "image" in task.body.lower()
     # The specific note about attached images should not appear
     assert "visual context" not in prompt.lower()
 
 
 def test_build_prompt_handles_multiple_images(config, event_bus):
     """Multiple images in the body should still produce a single note."""
-    from models import GitHubIssue
-
-    issue = GitHubIssue(
-        number=99,
+    task = Task(
+        id=99,
         title="Fix layout bug",
         body="![img1](https://example.com/1.png)\n![img2](https://example.com/2.png)",
-        labels=[],
+        tags=[],
         comments=[],
-        url="",
+        source_url="",
     )
     runner = _make_runner(config, event_bus)
-    prompt = runner._build_prompt(issue)
+    prompt = runner._build_prompt(task)
 
     # Should mention images
     assert "image" in prompt.lower()
@@ -338,7 +330,8 @@ def test_build_prompt_handles_multiple_images(config, event_bus):
 def test_build_prompt_includes_ui_exploration_guidance(config, event_bus, issue):
     """Planner prompt should include UI exploration patterns."""
     runner = _make_runner(config, event_bus)
-    prompt = runner._build_prompt(issue)
+    task = issue.to_task()
+    prompt = runner._build_prompt(task)
 
     assert "ui/src/components/" in prompt
     assert "constants.js" in prompt
@@ -500,25 +493,24 @@ def test_extract_already_satisfied_multiline():
 
 def test_build_prompt_includes_already_satisfied_markers(config, event_bus, issue):
     runner = _make_runner(config, event_bus)
-    prompt = runner._build_prompt(issue)
+    task = issue.to_task()
+    prompt = runner._build_prompt(task)
 
     assert "ALREADY_SATISFIED_START" in prompt
     assert "ALREADY_SATISFIED_END" in prompt
 
 
 def test_build_prompt_lite_includes_already_satisfied_markers(config, event_bus):
-    """Lite prompt (for bug/typo labels) should also include markers."""
-    from models import GitHubIssue
-
-    issue = GitHubIssue(
-        number=42,
+    """Lite prompt (for bug/typo tags) should also include markers."""
+    task = Task(
+        id=42,
         title="Fix typo",
         body="There's a typo in the docs.",
-        labels=["bug"],
+        tags=["bug"],
         comments=[],
     )
     runner = _make_runner(config, event_bus)
-    prompt = runner._build_prompt(issue)
+    prompt = runner._build_prompt(task)
 
     assert "ALREADY_SATISFIED_START" in prompt
     assert "ALREADY_SATISFIED_END" in prompt
@@ -568,76 +560,64 @@ def test_significant_words_empty_string(config, event_bus):
 
 def test_validate_plan_all_sections_present(config, event_bus):
     """A valid plan with all 6 sections and sufficient words passes."""
-    from models import GitHubIssue
-
     runner = _make_runner(config, event_bus)
-    issue = GitHubIssue(number=1, title="Fix authentication handler")
-    errors = runner._validate_plan(issue, _valid_plan())
+    task = Task(id=1, title="Fix authentication handler")
+    errors = runner._validate_plan(task, _valid_plan())
     assert errors == []
 
 
 def test_validate_plan_missing_section_returns_errors(config, event_bus):
     """Plan missing '## Testing Strategy' returns that specific error."""
-    from models import GitHubIssue
-
     runner = _make_runner(config, event_bus)
-    issue = GitHubIssue(number=1, title="Fix authentication handler")
+    task = Task(id=1, title="Fix authentication handler")
     plan = _valid_plan().replace("## Testing Strategy", "## Tests")
-    errors = runner._validate_plan(issue, plan)
+    errors = runner._validate_plan(task, plan)
     assert any("Testing Strategy" in e for e in errors)
 
 
 def test_validate_plan_missing_multiple_sections(config, event_bus):
     """Plan missing 3 sections returns 3 corresponding errors."""
-    from models import GitHubIssue
-
     runner = _make_runner(config, event_bus)
-    issue = GitHubIssue(number=1, title="Fix auth")
+    task = Task(id=1, title="Fix auth")
     plan = _valid_plan()
     plan = plan.replace("## Testing Strategy", "## Tests")
     plan = plan.replace("## Acceptance Criteria", "## Done")
     plan = plan.replace("## Key Considerations", "## Notes")
-    errors = runner._validate_plan(issue, plan)
+    errors = runner._validate_plan(task, plan)
     missing = [e for e in errors if "Missing required section" in e]
     assert len(missing) == 3
 
 
 def test_validate_plan_files_to_modify_requires_file_path(config, event_bus):
     """Files to Modify section present but with no file paths fails."""
-    from models import GitHubIssue
-
     runner = _make_runner(config, event_bus)
-    issue = GitHubIssue(number=1, title="Fix it")
+    task = Task(id=1, title="Fix it")
     plan = _valid_plan().replace(
         "- src/models.py — add new data model\n"
         "- src/config.py — add configuration field",
         "- Some vague description without paths",
     )
-    errors = runner._validate_plan(issue, plan)
+    errors = runner._validate_plan(task, plan)
     assert any("file path" in e for e in errors)
 
 
 def test_validate_plan_testing_strategy_requires_test_reference(config, event_bus):
     """Testing Strategy section present but with no test file references fails."""
-    from models import GitHubIssue
-
     runner = _make_runner(config, event_bus)
-    issue = GitHubIssue(number=1, title="Fix it")
+    task = Task(id=1, title="Fix it")
     plan = _valid_plan().replace(
         "- Add tests/test_models.py for the new model\n"
         "- Add tests/test_config.py for the new config field",
         "- Write some unit checks\n- Verify behavior manually",
     )
-    errors = runner._validate_plan(issue, plan)
+    errors = runner._validate_plan(task, plan)
     assert any("test file" in e for e in errors)
 
 
 def test_validate_plan_implementation_steps_requires_three(config, event_bus):
     """Less than 3 numbered steps fails."""
-    from models import GitHubIssue
-
     runner = _make_runner(config, event_bus)
-    issue = GitHubIssue(number=1, title="Fix it")
+    task = Task(id=1, title="Fix it")
     plan = _valid_plan().replace(
         "1. Add the new model class to models.py\n"
         "2. Add configuration field to config.py\n"
@@ -645,16 +625,14 @@ def test_validate_plan_implementation_steps_requires_three(config, event_bus):
         "4. Add validation logic",
         "1. Do the thing\n2. Done",
     )
-    errors = runner._validate_plan(issue, plan)
+    errors = runner._validate_plan(task, plan)
     assert any("3 numbered steps" in e for e in errors)
 
 
 def test_validate_plan_minimum_word_count(config, event_bus):
     """Plan below min_plan_words fails."""
-    from models import GitHubIssue
-
     runner = _make_runner(config, event_bus)
-    issue = GitHubIssue(number=1, title="Fix it")
+    task = Task(id=1, title="Fix it")
     # Create a short plan that has all sections but few words
     short_plan = (
         "## Files to Modify\n\n- src/app.py — fix\n\n"
@@ -664,17 +642,15 @@ def test_validate_plan_minimum_word_count(config, event_bus):
         "## Acceptance Criteria\n\n- Done\n\n"
         "## Key Considerations\n\n- None\n"
     )
-    errors = runner._validate_plan(issue, short_plan)
+    errors = runner._validate_plan(task, short_plan)
     assert any("words" in e for e in errors)
 
 
 def test_validate_plan_word_count_configurable(event_bus, tmp_path):
     """Custom min_plan_words is respected."""
-    from models import GitHubIssue
-
     cfg = ConfigFactory.create(min_plan_words=50, repo_root=tmp_path)
     runner = _make_runner(cfg, event_bus)
-    issue = GitHubIssue(number=1, title="Fix it")
+    task = Task(id=1, title="Fix it")
     # This plan has all sections but only ~50 words
     plan = (
         "## Files to Modify\n\n- src/app.py — fix bug\n\n"
@@ -686,7 +662,7 @@ def test_validate_plan_word_count_configurable(event_bus, tmp_path):
         "## Acceptance Criteria\n\n- Bug is fixed\n\n"
         "## Key Considerations\n\n- Backward compatibility\n"
     )
-    errors = runner._validate_plan(issue, plan)
+    errors = runner._validate_plan(task, plan)
     assert not any("words" in e for e in errors)
 
 
@@ -694,15 +670,13 @@ def test_validate_plan_logs_warning_on_word_mismatch(config, event_bus):
     """Word-overlap check logs a warning but doesn't produce errors."""
     from unittest.mock import patch as mock_patch
 
-    from models import GitHubIssue
-
     runner = _make_runner(config, event_bus)
-    issue = GitHubIssue(number=1, title="Fix authentication handler")
+    task = Task(id=1, title="Fix authentication handler")
     # Valid plan but title words don't overlap with plan
     plan = _valid_plan().replace("authentication", "database")
 
     with mock_patch("planner.logger") as mock_logger:
-        runner._validate_plan(issue, plan)
+        runner._validate_plan(task, plan)
 
     mock_logger.warning.assert_called_once()
 
@@ -787,6 +761,7 @@ def test_extract_new_issues_multiline_body(config, event_bus):
 async def test_plan_success_path(config, event_bus, issue, tmp_path):
     runner = _make_runner(config, event_bus)
     transcript = _valid_transcript()
+    task = issue.to_task()
 
     mock_execute = AsyncMock(return_value=transcript)
 
@@ -794,9 +769,9 @@ async def test_plan_success_path(config, event_bus, issue, tmp_path):
         patch.object(runner, "_execute", mock_execute),
         patch.object(runner, "_save_transcript"),
     ):
-        result = await runner.plan(issue, worker_id=0)
+        result = await runner.plan(task, worker_id=0)
 
-    assert result.issue_number == issue.number
+    assert result.issue_number == task.id
     assert result.success is True
     assert "## Files to Modify" in result.plan
     assert result.summary == "Implementation plan for the feature"
@@ -811,11 +786,12 @@ async def test_plan_success_path(config, event_bus, issue, tmp_path):
 @pytest.mark.asyncio
 async def test_plan_failure_on_exception(config, event_bus, issue, tmp_path):
     runner = _make_runner(config, event_bus)
+    task = issue.to_task()
 
     mock_execute = AsyncMock(side_effect=RuntimeError("subprocess crashed"))
 
     with patch.object(runner, "_execute", mock_execute):
-        result = await runner.plan(issue, worker_id=0)
+        result = await runner.plan(task, worker_id=0)
 
     assert result.success is False
     assert result.error == "subprocess crashed"
@@ -829,10 +805,11 @@ async def test_plan_failure_on_exception(config, event_bus, issue, tmp_path):
 @pytest.mark.asyncio
 async def test_plan_dry_run(dry_config, event_bus, issue, tmp_path):
     runner = _make_runner(dry_config, event_bus)
+    task = issue.to_task()
     mock_create = make_streaming_proc(returncode=0, stdout="")
 
     with patch("asyncio.create_subprocess_exec", mock_create):
-        result = await runner.plan(issue, worker_id=0)
+        result = await runner.plan(task, worker_id=0)
 
     mock_create.assert_not_called()
     assert result.success is True
@@ -851,6 +828,7 @@ async def test_plan_already_satisfied_sets_flag_and_skips_validation(
     """When transcript contains ALREADY_SATISFIED markers, plan() should
     set already_satisfied=True, success=True, and skip plan extraction."""
     runner = _make_runner(config, event_bus)
+    task = issue.to_task()
     transcript = (
         "Analysis complete.\n"
         "ALREADY_SATISFIED_START\n"
@@ -864,7 +842,7 @@ async def test_plan_already_satisfied_sets_flag_and_skips_validation(
         patch.object(runner, "_execute", mock_execute),
         patch.object(runner, "_save_transcript"),
     ):
-        result = await runner.plan(issue, worker_id=0)
+        result = await runner.plan(task, worker_id=0)
 
     assert result.already_satisfied is True
     assert result.success is True
@@ -876,6 +854,7 @@ async def test_plan_already_satisfied_sets_flag_and_skips_validation(
 async def test_plan_already_satisfied_does_not_extract_plan(config, event_bus, issue):
     """When already_satisfied markers are present, _extract_plan should NOT be called."""
     runner = _make_runner(config, event_bus)
+    task = issue.to_task()
     transcript = "ALREADY_SATISFIED_START\nAlready done.\nALREADY_SATISFIED_END\n"
 
     mock_execute = AsyncMock(return_value=transcript)
@@ -885,7 +864,7 @@ async def test_plan_already_satisfied_does_not_extract_plan(config, event_bus, i
         patch.object(runner, "_save_transcript"),
         patch.object(runner, "_extract_plan") as mock_extract,
     ):
-        result = await runner.plan(issue, worker_id=0)
+        result = await runner.plan(task, worker_id=0)
 
     mock_extract.assert_not_called()
     assert result.already_satisfied is True
@@ -982,15 +961,16 @@ async def test_plan_returns_result_when_save_transcript_raises_os_error(
     """plan() should return a valid PlanResult even if _save_transcript raises OSError."""
     runner = _make_runner(config, event_bus)
     transcript = _valid_transcript()
+    task = issue.to_task()
 
     with (
         patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
         patch.object(runner, "_save_transcript", side_effect=OSError("disk full")),
     ):
-        result = await runner.plan(issue, worker_id=0)
+        result = await runner.plan(task, worker_id=0)
 
     assert result.success is True
-    assert result.issue_number == issue.number
+    assert result.issue_number == task.id
     assert "## Files to Modify" in result.plan
     assert "Failed to save transcript" in caplog.text
 
@@ -1002,16 +982,17 @@ async def test_plan_returns_result_when_save_plan_raises_os_error(
     """plan() should return a successful PlanResult even if _save_plan raises OSError."""
     runner = _make_runner(config, event_bus)
     transcript = _valid_transcript()
+    task = issue.to_task()
 
     with (
         patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
         patch.object(runner, "_save_transcript"),
         patch.object(runner, "_save_plan", side_effect=OSError("disk full")),
     ):
-        result = await runner.plan(issue, worker_id=0)
+        result = await runner.plan(task, worker_id=0)
 
     assert result.success is True
-    assert result.issue_number == issue.number
+    assert result.issue_number == task.id
     assert "## Files to Modify" in result.plan
     assert "Failed to save plan" in caplog.text
 
@@ -1022,6 +1003,7 @@ async def test_plan_returns_failure_result_when_save_transcript_raises_after_exc
 ):
     """plan() should return failure result even if _save_transcript raises after a planner error."""
     runner = _make_runner(config, event_bus)
+    task = issue.to_task()
 
     with (
         patch.object(
@@ -1029,7 +1011,7 @@ async def test_plan_returns_failure_result_when_save_transcript_raises_after_exc
         ),
         patch.object(runner, "_save_transcript", side_effect=OSError("disk full")),
     ):
-        result = await runner.plan(issue, worker_id=0)
+        result = await runner.plan(task, worker_id=0)
 
     assert result.success is False
     assert "planner crashed" in (result.error or "")
@@ -1043,6 +1025,7 @@ async def test_plan_already_satisfied_returns_success_when_save_transcript_raise
     """plan() should return already_satisfied=True even if _save_transcript raises OSError
     in the early-return path."""
     runner = _make_runner(config, event_bus)
+    task = issue.to_task()
     transcript = (
         "ALREADY_SATISFIED_START\n"
         "The feature is already implemented in src/models.py.\n"
@@ -1053,7 +1036,7 @@ async def test_plan_already_satisfied_returns_success_when_save_transcript_raise
         patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
         patch.object(runner, "_save_transcript", side_effect=OSError("disk full")),
     ):
-        result = await runner.plan(issue, worker_id=0)
+        result = await runner.plan(task, worker_id=0)
 
     assert result.success is True
     assert result.already_satisfied is True
@@ -1070,12 +1053,13 @@ async def test_planner_events_include_planner_role(config, event_bus, issue, tmp
     """PLANNER_UPDATE events should carry role='planner'."""
     runner = _make_runner(config, event_bus)
     transcript = _valid_transcript()
+    task = issue.to_task()
 
     with (
         patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
         patch.object(runner, "_save_transcript"),
     ):
-        await runner.plan(issue, worker_id=1)
+        await runner.plan(task, worker_id=1)
 
     events = event_bus.get_history()
     planner_events = [e for e in events if e.type == EventType.PLANNER_UPDATE]
@@ -1089,12 +1073,13 @@ async def test_plan_emits_planning_and_done_events(config, event_bus, issue, tmp
     """Status should go through planning → done on success."""
     runner = _make_runner(config, event_bus)
     transcript = _valid_transcript()
+    task = issue.to_task()
 
     with (
         patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
         patch.object(runner, "_save_transcript"),
     ):
-        await runner.plan(issue, worker_id=0)
+        await runner.plan(task, worker_id=0)
 
     events = event_bus.get_history()
     planner_events = [e for e in events if e.type == EventType.PLANNER_UPDATE]
@@ -1110,9 +1095,10 @@ async def test_plan_emits_planning_and_failed_events_on_error(
 ):
     """Status should go through planning → failed on exception."""
     runner = _make_runner(config, event_bus)
+    task = issue.to_task()
 
     with patch.object(runner, "_execute", AsyncMock(side_effect=RuntimeError("boom"))):
-        await runner.plan(issue, worker_id=0)
+        await runner.plan(task, worker_id=0)
 
     events = event_bus.get_history()
     planner_events = [e for e in events if e.type == EventType.PLANNER_UPDATE]
@@ -1163,6 +1149,7 @@ def test_terminate_with_no_active_processes(config, event_bus):
 async def test_execute_publishes_transcript_lines(config, event_bus, issue, tmp_path):
     runner = _make_runner(config, event_bus)
     output = "Line one\nLine two\nLine three"
+    task = issue.to_task()
     mock_create = make_streaming_proc(returncode=0, stdout=output)
 
     with patch("asyncio.create_subprocess_exec", mock_create):
@@ -1170,7 +1157,7 @@ async def test_execute_publishes_transcript_lines(config, event_bus, issue, tmp_
             ["claude", "-p"],
             "prompt",
             tmp_path,
-            {"issue": issue.number, "source": "planner"},
+            {"issue": task.id, "source": "planner"},
         )
 
     assert transcript == output
@@ -1180,13 +1167,14 @@ async def test_execute_publishes_transcript_lines(config, event_bus, issue, tmp_
     assert len(transcript_events) == 3
     for ev in transcript_events:
         assert ev.data["source"] == "planner"
-        assert ev.data["issue"] == issue.number
+        assert ev.data["issue"] == task.id
 
 
 @pytest.mark.asyncio
 async def test_execute_uses_large_stream_limit(config, event_bus, issue, tmp_path):
     """_execute should set limit=1MB to handle large stream-json lines."""
     runner = _make_runner(config, event_bus)
+    task = issue.to_task()
     mock_create = make_streaming_proc(returncode=0, stdout="ok")
 
     with patch("asyncio.create_subprocess_exec", mock_create) as mock_exec:
@@ -1194,7 +1182,7 @@ async def test_execute_uses_large_stream_limit(config, event_bus, issue, tmp_pat
             ["claude", "-p"],
             "prompt",
             tmp_path,
-            {"issue": issue.number, "source": "planner"},
+            {"issue": task.id, "source": "planner"},
         )
 
     kwargs = mock_exec.call_args[1]
@@ -1280,6 +1268,7 @@ def test_phase_minus_one_constitution_gate_reads_file(event_bus, tmp_path):
 async def test_plan_retries_on_validation_failure(config, event_bus, issue):
     """First attempt fails validation, second succeeds."""
     runner = _make_runner(config, event_bus)
+    task = issue.to_task()
 
     bad_transcript = "PLAN_START\nJust a one-liner.\nPLAN_END\nSUMMARY: bad"
     good_transcript = _valid_transcript()
@@ -1296,7 +1285,7 @@ async def test_plan_retries_on_validation_failure(config, event_bus, issue):
         patch.object(runner, "_execute", side_effect=mock_execute),
         patch.object(runner, "_save_transcript"),
     ):
-        result = await runner.plan(issue, worker_id=0)
+        result = await runner.plan(task, worker_id=0)
 
     assert result.success is True
     assert call_count["n"] == 2
@@ -1307,6 +1296,7 @@ async def test_plan_retries_on_validation_failure(config, event_bus, issue):
 async def test_plan_retry_prompt_includes_feedback(config, event_bus, issue):
     """Retry prompt contains specific validation errors."""
     runner = _make_runner(config, event_bus)
+    task = issue.to_task()
 
     bad_transcript = "PLAN_START\nJust a one-liner.\nPLAN_END\nSUMMARY: bad"
 
@@ -1322,7 +1312,7 @@ async def test_plan_retry_prompt_includes_feedback(config, event_bus, issue):
         patch.object(runner, "_execute", side_effect=mock_execute),
         patch.object(runner, "_save_transcript"),
     ):
-        await runner.plan(issue, worker_id=0)
+        await runner.plan(task, worker_id=0)
 
     assert len(prompts_used) == 2
     retry_prompt = prompts_used[1]
@@ -1334,6 +1324,7 @@ async def test_plan_retry_prompt_includes_feedback(config, event_bus, issue):
 async def test_plan_gives_up_after_two_failures(config, event_bus, issue):
     """Both attempts fail — result has retry_attempted=True."""
     runner = _make_runner(config, event_bus)
+    task = issue.to_task()
 
     bad_transcript = "PLAN_START\nJust a one-liner.\nPLAN_END\nSUMMARY: bad"
 
@@ -1341,7 +1332,7 @@ async def test_plan_gives_up_after_two_failures(config, event_bus, issue):
         patch.object(runner, "_execute", AsyncMock(return_value=bad_transcript)),
         patch.object(runner, "_save_transcript"),
     ):
-        result = await runner.plan(issue, worker_id=0)
+        result = await runner.plan(task, worker_id=0)
 
     assert result.success is False
     assert result.retry_attempted is True
@@ -1352,6 +1343,7 @@ async def test_plan_gives_up_after_two_failures(config, event_bus, issue):
 async def test_plan_no_retry_on_first_success(config, event_bus, issue):
     """Valid first attempt doesn't trigger retry."""
     runner = _make_runner(config, event_bus)
+    task = issue.to_task()
 
     mock_execute = AsyncMock(return_value=_valid_transcript())
 
@@ -1359,7 +1351,7 @@ async def test_plan_no_retry_on_first_success(config, event_bus, issue):
         patch.object(runner, "_execute", mock_execute),
         patch.object(runner, "_save_transcript"),
     ):
-        result = await runner.plan(issue, worker_id=0)
+        result = await runner.plan(task, worker_id=0)
 
     assert result.success is True
     assert result.retry_attempted is False
@@ -1371,6 +1363,7 @@ async def test_plan_no_retry_on_first_success(config, event_bus, issue):
 async def test_plan_retry_emits_retrying_status(config, event_bus, issue):
     """RETRYING status event is emitted when retrying."""
     runner = _make_runner(config, event_bus)
+    task = issue.to_task()
 
     bad_transcript = "PLAN_START\nJust a one-liner.\nPLAN_END\nSUMMARY: bad"
 
@@ -1378,7 +1371,7 @@ async def test_plan_retry_emits_retrying_status(config, event_bus, issue):
         patch.object(runner, "_execute", AsyncMock(return_value=bad_transcript)),
         patch.object(runner, "_save_transcript"),
     ):
-        await runner.plan(issue, worker_id=0)
+        await runner.plan(task, worker_id=0)
 
     events = event_bus.get_history()
     planner_events = [e for e in events if e.type == EventType.PLANNER_UPDATE]
@@ -1390,12 +1383,13 @@ async def test_plan_retry_emits_retrying_status(config, event_bus, issue):
 async def test_plan_emits_validating_status(config, event_bus, issue):
     """VALIDATING status event is emitted before validation."""
     runner = _make_runner(config, event_bus)
+    task = issue.to_task()
 
     with (
         patch.object(runner, "_execute", AsyncMock(return_value=_valid_transcript())),
         patch.object(runner, "_save_transcript"),
     ):
-        await runner.plan(issue, worker_id=0)
+        await runner.plan(task, worker_id=0)
 
     events = event_bus.get_history()
     planner_events = [e for e in events if e.type == EventType.PLANNER_UPDATE]
@@ -1411,13 +1405,14 @@ async def test_plan_emits_validating_status(config, event_bus, issue):
 def test_build_retry_prompt_includes_issue_and_errors(config, event_bus, issue):
     """Retry prompt contains issue title, failed plan, and errors."""
     runner = _make_runner(config, event_bus)
+    task = issue.to_task()
     failed_plan = "Some bad plan text"
     errors = ["Missing required section: ## Testing Strategy", "Plan has 10 words"]
 
-    prompt = runner._build_retry_prompt(issue, failed_plan, errors)
+    prompt = runner._build_retry_prompt(task, failed_plan, errors)
 
-    assert f"#{issue.number}" in prompt
-    assert issue.title in prompt
+    assert f"#{task.id}" in prompt
+    assert task.title in prompt
     assert "Some bad plan text" in prompt
     assert "Missing required section: ## Testing Strategy" in prompt
     assert "Plan has 10 words" in prompt
@@ -1433,7 +1428,8 @@ def test_build_retry_prompt_includes_issue_and_errors(config, event_bus, issue):
 def test_build_prompt_includes_required_schema_headers(config, event_bus, issue):
     """The updated prompt should mention all 7 required section headers."""
     runner = _make_runner(config, event_bus)
-    prompt = runner._build_prompt(issue)
+    task = issue.to_task()
+    prompt = runner._build_prompt(task)
 
     assert "## Files to Modify" in prompt
     assert "## New Files" in prompt
@@ -1448,7 +1444,8 @@ def test_build_prompt_includes_required_schema_headers(config, event_bus, issue)
 def test_build_prompt_warns_about_rejection(config, event_bus, issue):
     """The prompt should warn that plans with missing sections will be rejected."""
     runner = _make_runner(config, event_bus)
-    prompt = runner._build_prompt(issue)
+    task = issue.to_task()
+    prompt = runner._build_prompt(task)
 
     assert "rejected" in prompt.lower()
 
@@ -1477,43 +1474,37 @@ def test_required_sections_has_seven_entries(config, event_bus):
 
 def test_validate_plan_accepts_three_clarification_markers(config, event_bus):
     """Plans with 0-3 [NEEDS CLARIFICATION] markers are acceptable."""
-    from models import GitHubIssue
-
     runner = _make_runner(config, event_bus)
-    issue = GitHubIssue(number=1, title="Fix authentication handler")
+    task = Task(id=1, title="Fix authentication handler")
     plan = _valid_plan() + (
         "\n[NEEDS CLARIFICATION: unclear if OAuth or JWT]\n"
         "[NEEDS CLARIFICATION: which database?]\n"
         "[NEEDS CLARIFICATION: migration strategy?]\n"
     )
-    errors = runner._validate_plan(issue, plan)
+    errors = runner._validate_plan(task, plan)
     assert not any("NEEDS CLARIFICATION" in e for e in errors)
 
 
 def test_validate_plan_rejects_four_clarification_markers(config, event_bus):
     """Plans with 4+ [NEEDS CLARIFICATION] markers escalate."""
-    from models import GitHubIssue
-
     runner = _make_runner(config, event_bus)
-    issue = GitHubIssue(number=1, title="Fix authentication handler")
+    task = Task(id=1, title="Fix authentication handler")
     plan = _valid_plan() + (
         "\n[NEEDS CLARIFICATION: unclear if OAuth or JWT]\n"
         "[NEEDS CLARIFICATION: which database?]\n"
         "[NEEDS CLARIFICATION: migration strategy?]\n"
         "[NEEDS CLARIFICATION: backward compat?]\n"
     )
-    errors = runner._validate_plan(issue, plan)
+    errors = runner._validate_plan(task, plan)
     assert any("NEEDS CLARIFICATION" in e for e in errors)
     assert any("4" in e for e in errors if "NEEDS CLARIFICATION" in e)
 
 
 def test_validate_plan_zero_clarification_markers_ok(config, event_bus):
     """Plans with no [NEEDS CLARIFICATION] markers pass."""
-    from models import GitHubIssue
-
     runner = _make_runner(config, event_bus)
-    issue = GitHubIssue(number=1, title="Fix authentication handler")
-    errors = runner._validate_plan(issue, _valid_plan())
+    task = Task(id=1, title="Fix authentication handler")
+    errors = runner._validate_plan(task, _valid_plan())
     assert not any("NEEDS CLARIFICATION" in e for e in errors)
 
 
@@ -1525,7 +1516,8 @@ def test_validate_plan_zero_clarification_markers_ok(config, event_bus):
 def test_build_prompt_includes_clarification_instruction(config, event_bus, issue):
     """Prompt should instruct the planner about [NEEDS CLARIFICATION] markers."""
     runner = _make_runner(config, event_bus)
-    prompt = runner._build_prompt(issue)
+    task = issue.to_task()
+    prompt = runner._build_prompt(task)
     assert "NEEDS CLARIFICATION" in prompt
 
 
@@ -1534,7 +1526,8 @@ def test_build_retry_prompt_includes_clarification_instruction(
 ):
     """Retry prompt should also mention [NEEDS CLARIFICATION] markers."""
     runner = _make_runner(config, event_bus)
-    prompt = runner._build_retry_prompt(issue, "failed plan", ["some error"])
+    task = issue.to_task()
+    prompt = runner._build_retry_prompt(task, "failed plan", ["some error"])
     assert "NEEDS CLARIFICATION" in prompt
 
 
@@ -1544,76 +1537,62 @@ def test_build_retry_prompt_includes_clarification_instruction(
 
 
 def test_detect_plan_scale_lite_by_label(config, event_bus):
-    """Issues with a lite-plan label (e.g. 'bug') get a lite plan."""
-    from models import GitHubIssue
-
+    """Issues with a lite-plan tag (e.g. 'bug') get a lite plan."""
     runner = _make_runner(config, event_bus)
-    issue = GitHubIssue(number=1, title="Fix crash", labels=["bug"])
-    assert runner._detect_plan_scale(issue) == "lite"
+    task = Task(id=1, title="Fix crash", tags=["bug"])
+    assert runner._detect_plan_scale(task) == "lite"
 
 
 def test_detect_plan_scale_lite_label_case_insensitive(config, event_bus):
-    """Label matching is case-insensitive."""
-    from models import GitHubIssue
-
+    """Tag matching is case-insensitive."""
     runner = _make_runner(config, event_bus)
-    issue = GitHubIssue(number=1, title="Fix typo", labels=["BUG"])
-    assert runner._detect_plan_scale(issue) == "lite"
+    task = Task(id=1, title="Fix typo", tags=["BUG"])
+    assert runner._detect_plan_scale(task) == "lite"
 
 
 def test_detect_plan_scale_lite_by_short_body_and_title(config, event_bus):
     """Short body + small-fix title keyword → lite plan."""
-    from models import GitHubIssue
-
     runner = _make_runner(config, event_bus)
-    issue = GitHubIssue(
-        number=1, title="Fix typo in README", body="Small change needed.", labels=[]
-    )
-    assert runner._detect_plan_scale(issue) == "lite"
+    task = Task(id=1, title="Fix typo in README", body="Small change needed.", tags=[])
+    assert runner._detect_plan_scale(task) == "lite"
 
 
 def test_detect_plan_scale_full_by_default(config, event_bus):
-    """Issues without lite labels or short body default to full plan."""
-    from models import GitHubIssue
-
+    """Issues without lite tags or short body default to full plan."""
     runner = _make_runner(config, event_bus)
-    issue = GitHubIssue(
-        number=1,
+    task = Task(
+        id=1,
         title="Add authentication system",
         body="A" * 600,
-        labels=["feature"],
+        tags=["feature"],
     )
-    assert runner._detect_plan_scale(issue) == "full"
+    assert runner._detect_plan_scale(task) == "full"
 
 
 def test_detect_plan_scale_short_body_but_no_fix_keyword(config, event_bus):
     """Short body without small-fix keyword in title → full plan."""
-    from models import GitHubIssue
-
     runner = _make_runner(config, event_bus)
-    issue = GitHubIssue(
-        number=1,
+    task = Task(
+        id=1,
         title="Implement new auth system",
         body="Short body",
-        labels=[],
+        tags=[],
     )
-    assert runner._detect_plan_scale(issue) == "full"
+    assert runner._detect_plan_scale(task) == "full"
 
 
 def test_detect_plan_scale_custom_lite_labels(event_bus, tmp_path):
     """Custom lite_plan_labels config is respected."""
-    from models import GitHubIssue
-
     cfg = ConfigFactory.create(
         lite_plan_labels=["hotfix", "patch"],
         repo_root=tmp_path,
     )
     runner = _make_runner(cfg, event_bus)
-    issue = GitHubIssue(number=1, title="Critical fix", labels=["hotfix"])
-    assert runner._detect_plan_scale(issue) == "lite"
+    task = Task(id=1, title="Critical fix", tags=["hotfix"])
+    assert runner._detect_plan_scale(task) == "lite"
 
-    issue2 = GitHubIssue(number=2, title="Add authentication", labels=["bug"])
-    assert runner._detect_plan_scale(issue2) == "full"
+    task2 = Task(id=2, title="Add authentication", tags=["bug"])
+    assert runner._detect_plan_scale(task2) == "full"
 
 
 # ---------------------------------------------------------------------------
@@ -1637,43 +1616,35 @@ def _lite_plan() -> str:
 
 def test_validate_lite_plan_accepts_three_sections(config, event_bus):
     """A lite plan with only 3 sections passes validation."""
-    from models import GitHubIssue
-
     runner = _make_runner(config, event_bus)
-    issue = GitHubIssue(number=1, title="Fix crash")
-    errors = runner._validate_plan(issue, _lite_plan(), scale="lite")
+    task = Task(id=1, title="Fix crash")
+    errors = runner._validate_plan(task, _lite_plan(), scale="lite")
     assert errors == []
 
 
 def test_validate_lite_plan_no_minimum_word_count(config, event_bus):
     """Lite plans skip the minimum word count check."""
-    from models import GitHubIssue
-
     runner = _make_runner(config, event_bus)
-    issue = GitHubIssue(number=1, title="Fix crash")
+    task = Task(id=1, title="Fix crash")
     # _lite_plan() is well under 200 words
-    errors = runner._validate_plan(issue, _lite_plan(), scale="lite")
+    errors = runner._validate_plan(task, _lite_plan(), scale="lite")
     assert not any("words" in e for e in errors)
 
 
 def test_validate_lite_plan_rejects_missing_required_section(config, event_bus):
     """Lite plan missing a required section (e.g. Testing Strategy) is rejected."""
-    from models import GitHubIssue
-
     runner = _make_runner(config, event_bus)
-    issue = GitHubIssue(number=1, title="Fix crash")
+    task = Task(id=1, title="Fix crash")
     plan = _lite_plan().replace("## Testing Strategy", "## Tests")
-    errors = runner._validate_plan(issue, plan, scale="lite")
+    errors = runner._validate_plan(task, plan, scale="lite")
     assert any("Testing Strategy" in e for e in errors)
 
 
 def test_validate_full_plan_rejects_lite_sections_only(config, event_bus):
     """A full plan with only 3 sections fails (missing Acceptance Criteria etc.)."""
-    from models import GitHubIssue
-
     runner = _make_runner(config, event_bus)
-    issue = GitHubIssue(number=1, title="Add feature")
-    errors = runner._validate_plan(issue, _lite_plan(), scale="full")
+    task = Task(id=1, title="Add feature")
+    errors = runner._validate_plan(task, _lite_plan(), scale="full")
     missing = [e for e in errors if "Missing required section" in e]
     assert (
         len(missing) >= 3
@@ -1688,10 +1659,8 @@ def test_validate_full_plan_rejects_lite_sections_only(config, event_bus):
 @pytest.mark.asyncio
 async def test_lite_plan_skips_phase_minus_one_gates(config, event_bus):
     """Lite plan issues should not run Phase -1 gates."""
-    from models import GitHubIssue
-
     runner = _make_runner(config, event_bus)
-    issue = GitHubIssue(number=1, title="Fix typo", labels=["bug"])
+    task = Task(id=1, title="Fix typo", tags=["bug"])
 
     lite_transcript = f"PLAN_START\n{_lite_plan()}\nPLAN_END\nSUMMARY: Fix the crash"
 
@@ -1700,7 +1669,7 @@ async def test_lite_plan_skips_phase_minus_one_gates(config, event_bus):
         patch.object(runner, "_save_transcript"),
         patch.object(runner, "_run_phase_minus_one_gates") as mock_gates,
     ):
-        result = await runner.plan(issue, worker_id=0)
+        result = await runner.plan(task, worker_id=0)
 
     assert result.success is True
     mock_gates.assert_not_called()
@@ -1714,7 +1683,8 @@ async def test_lite_plan_skips_phase_minus_one_gates(config, event_bus):
 def test_build_prompt_includes_pre_mortem_for_full(config, event_bus, issue):
     """Full plan prompt includes the pre-mortem section."""
     runner = _make_runner(config, event_bus)
-    prompt = runner._build_prompt(issue, scale="full")
+    task = issue.to_task()
+    prompt = runner._build_prompt(task, scale="full")
     assert "pre-mortem" in prompt.lower()
     assert "top 3 most likely reasons" in prompt.lower()
 
@@ -1722,18 +1692,20 @@ def test_build_prompt_includes_pre_mortem_for_full(config, event_bus, issue):
 def test_build_prompt_no_pre_mortem_for_lite(config, event_bus, issue):
     """Lite plan prompt does NOT include the pre-mortem section."""
     runner = _make_runner(config, event_bus)
-    prompt = runner._build_prompt(issue, scale="lite")
+    task = issue.to_task()
+    prompt = runner._build_prompt(task, scale="lite")
     assert "pre-mortem" not in prompt.lower()
 
 
 def test_build_prompt_indicates_plan_mode(config, event_bus, issue):
     """Prompt indicates the plan mode (LITE or FULL)."""
     runner = _make_runner(config, event_bus)
+    task = issue.to_task()
 
-    full_prompt = runner._build_prompt(issue, scale="full")
+    full_prompt = runner._build_prompt(task, scale="full")
     assert "FULL" in full_prompt
 
-    lite_prompt = runner._build_prompt(issue, scale="lite")
+    lite_prompt = runner._build_prompt(task, scale="lite")
     assert "LITE" in lite_prompt
 
 
@@ -1745,8 +1717,9 @@ def test_build_prompt_indicates_plan_mode(config, event_bus, issue):
 def test_build_retry_prompt_lite_has_fewer_sections(config, event_bus, issue):
     """Retry prompt for lite plan only lists 3 required sections."""
     runner = _make_runner(config, event_bus)
+    task = issue.to_task()
     prompt = runner._build_retry_prompt(
-        issue, "failed plan", ["some error"], scale="lite"
+        task, "failed plan", ["some error"], scale="lite"
     )
     assert "## Files to Modify" in prompt
     assert "## Implementation Steps" in prompt
@@ -1758,8 +1731,9 @@ def test_build_retry_prompt_lite_has_fewer_sections(config, event_bus, issue):
 def test_build_retry_prompt_full_has_all_sections(config, event_bus, issue):
     """Retry prompt for full plan lists all 7 required sections."""
     runner = _make_runner(config, event_bus)
+    task = issue.to_task()
     prompt = runner._build_retry_prompt(
-        issue, "failed plan", ["some error"], scale="full"
+        task, "failed plan", ["some error"], scale="full"
     )
     assert "## Files to Modify" in prompt
     assert "## Acceptance Criteria" in prompt

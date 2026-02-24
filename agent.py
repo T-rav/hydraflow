@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from events import EventBus, EventType, HydraFlowEvent
-from models import GitHubIssue, WorkerResult, WorkerStatus
+from models import Task, WorkerResult, WorkerStatus
 from review_insights import ReviewInsightStore, get_common_feedback_section
 from runner_constants import MEMORY_SUGGESTION_PROMPT
 from subprocess_util import CreditExhaustedError
@@ -43,38 +43,38 @@ class AgentRunner(BaseRunner):
 
     async def run(
         self,
-        issue: GitHubIssue,
+        task: Task,
         worktree_path: Path,
         branch: str,
         worker_id: int = 0,
         review_feedback: str = "",
     ) -> WorkerResult:
-        """Run the implementation agent for *issue*.
+        """Run the implementation agent for *task*.
 
         Returns a :class:`WorkerResult` with success/failure info.
         """
         start = time.monotonic()
         result = WorkerResult(
-            issue_number=issue.number,
+            issue_number=task.id,
             branch=branch,
             worktree_path=str(worktree_path),
         )
 
-        await self._emit_status(issue.number, worker_id, WorkerStatus.RUNNING)
+        await self._emit_status(task.id, worker_id, WorkerStatus.RUNNING)
 
         if self._config.dry_run:
-            logger.info("[dry-run] Would run agent for issue #%d", issue.number)
+            logger.info("[dry-run] Would run agent for issue #%d", task.id)
             result.success = True
             result.duration_seconds = time.monotonic() - start
-            await self._emit_status(issue.number, worker_id, WorkerStatus.DONE)
+            await self._emit_status(task.id, worker_id, WorkerStatus.DONE)
             return result
 
         try:
             # Build and run the configured agent command
             cmd = self._build_command(worktree_path)
-            prompt = self._build_prompt(issue, review_feedback=review_feedback)
+            prompt = self._build_prompt(task, review_feedback=review_feedback)
             transcript = await self._execute(
-                cmd, prompt, worktree_path, {"issue": issue.number}
+                cmd, prompt, worktree_path, {"issue": task.id}
             )
             result.transcript = transcript
 
@@ -84,19 +84,19 @@ class AgentRunner(BaseRunner):
                 pre_quality_msg,
                 pre_quality_attempts,
             ) = await self._run_pre_quality_review_loop(
-                issue, worktree_path, branch, worker_id
+                task, worktree_path, branch, worker_id
             )
             result.pre_quality_review_attempts = pre_quality_attempts
             if not pre_quality_success:
                 result.success = False
                 result.error = pre_quality_msg
                 result.commits = await self._count_commits(worktree_path, branch)
-                await self._emit_status(issue.number, worker_id, WorkerStatus.FAILED)
+                await self._emit_status(task.id, worker_id, WorkerStatus.FAILED)
                 result.duration_seconds = time.monotonic() - start
                 return result
 
             # Verify the agent produced valid work
-            await self._emit_status(issue.number, worker_id, WorkerStatus.TESTING)
+            await self._emit_status(task.id, worker_id, WorkerStatus.TESTING)
             success, verify_msg = await self._verify_result(worktree_path, branch)
 
             # If quality failed but commits exist, try the fix loop
@@ -106,7 +106,7 @@ class AgentRunner(BaseRunner):
                 and self._config.max_quality_fix_attempts > 0
             ):
                 success, verify_msg, attempts = await self._run_quality_fix_loop(
-                    issue, worktree_path, branch, verify_msg, worker_id
+                    task, worktree_path, branch, verify_msg, worker_id
                 )
                 result.quality_fix_attempts = attempts
 
@@ -118,7 +118,7 @@ class AgentRunner(BaseRunner):
             result.commits = await self._count_commits(worktree_path, branch)
 
             status = WorkerStatus.DONE if success else WorkerStatus.FAILED
-            await self._emit_status(issue.number, worker_id, status)
+            await self._emit_status(task.id, worker_id, status)
 
         except CreditExhaustedError:
             raise
@@ -127,11 +127,11 @@ class AgentRunner(BaseRunner):
             result.error = str(exc)
             logger.error(
                 "Agent failed for issue #%d: %s",
-                issue.number,
+                task.id,
                 exc,
-                extra={"issue": issue.number},
+                extra={"issue": task.id},
             )
-            await self._emit_status(issue.number, worker_id, WorkerStatus.FAILED)
+            await self._emit_status(task.id, worker_id, WorkerStatus.FAILED)
 
         result.duration_seconds = time.monotonic() - start
 
@@ -232,18 +232,18 @@ class AgentRunner(BaseRunner):
         except Exception:  # noqa: BLE001
             return ""
 
-    def _build_prompt(self, issue: GitHubIssue, review_feedback: str = "") -> str:
+    def _build_prompt(self, issue: Task, review_feedback: str = "") -> str:
         """Build the implementation prompt for the agent."""
         plan_comment, other_comments = self._extract_plan_comment(issue.comments)
 
         # Fallback to saved plan file
         if not plan_comment:
-            plan_comment = self._load_plan_fallback(issue.number)
+            plan_comment = self._load_plan_fallback(issue.id)
             if not plan_comment:
                 logger.error(
                     "No plan found for issue #%d — implementer will proceed without a plan",
-                    issue.number,
-                    extra={"issue": issue.number},
+                    issue.id,
+                    extra={"issue": issue.id},
                 )
 
         plan_section = ""
@@ -293,7 +293,7 @@ class AgentRunner(BaseRunner):
 
         test_cmd = self._config.test_command
 
-        return f"""You are implementing GitHub issue #{issue.number}.
+        return f"""You are implementing GitHub issue #{issue.id}.
 
 ## Issue: {issue.title}
 
@@ -314,7 +314,7 @@ class AgentRunner(BaseRunner):
    - run `{test_cmd}`,
    - run `make quality`,
    - fix failures and rerun until green or clearly blocked.
-7. Commit your changes with a message: "Fixes #{issue.number}: <concise summary>"
+7. Commit your changes with a message: "Fixes #{issue.id}: <concise summary>"
 {feedback_section}
 ## UI Guidelines
 
@@ -352,12 +352,12 @@ class AgentRunner(BaseRunner):
 
     def _build_quality_fix_prompt(
         self,
-        issue: GitHubIssue,
+        issue: Task,
         error_output: str,
         attempt: int,
     ) -> str:
         """Build a focused prompt for fixing quality gate failures."""
-        return f"""You are fixing quality gate failures for issue #{issue.number}: {issue.title}
+        return f"""You are fixing quality gate failures for issue #{issue.id}: {issue.title}
 
 ## Quality Gate Failure Output
 
@@ -371,14 +371,14 @@ class AgentRunner(BaseRunner):
 2. Fix ALL lint, type-check, security, and test issues.
 3. Do NOT skip or disable tests, type checks, or lint rules.
 4. Run `make quality` to verify your fixes pass the full pipeline.
-5. Commit your fixes with message: "quality-fix: <description> (#{issue.number})"
+5. Commit your fixes with message: "quality-fix: <description> (#{issue.id})"
 
 Focus on fixing the root causes, not suppressing warnings.
 """
 
-    def _build_pre_quality_review_prompt(self, issue: GitHubIssue, attempt: int) -> str:
+    def _build_pre_quality_review_prompt(self, issue: Task, attempt: int) -> str:
         """Build the pre-quality review/correction skill prompt."""
-        return f"""You are running the Pre-Quality Review Skill for issue #{issue.number}: {issue.title}.
+        return f"""You are running the Pre-Quality Review Skill for issue #{issue.id}: {issue.title}.
 
 Attempt: {attempt}
 
@@ -399,12 +399,10 @@ PRE_QUALITY_REVIEW_RESULT: RETRY
 SUMMARY: <one-line summary>
 """
 
-    def _build_pre_quality_run_tool_prompt(
-        self, issue: GitHubIssue, attempt: int
-    ) -> str:
+    def _build_pre_quality_run_tool_prompt(self, issue: Task, attempt: int) -> str:
         """Build the run-tool skill prompt for quality/test commands."""
         test_cmd = self._config.test_command
-        return f"""You are running the Run-Tool Skill for issue #{issue.number}: {issue.title}.
+        return f"""You are running the Run-Tool Skill for issue #{issue.id}: {issue.title}.
 
 Attempt: {attempt}
 
@@ -450,7 +448,7 @@ SUMMARY: <one-line summary>
 
     async def _run_pre_quality_review_loop(
         self,
-        issue: GitHubIssue,
+        issue: Task,
         worktree_path: Path,
         branch: str,
         worker_id: int,
@@ -463,13 +461,13 @@ SUMMARY: <one-line summary>
 
         for attempt in range(1, max_attempts + 1):
             await self._emit_status(
-                issue.number, worker_id, WorkerStatus.PRE_QUALITY_REVIEW
+                issue.id, worker_id, WorkerStatus.PRE_QUALITY_REVIEW
             )
 
             review_prompt = self._build_pre_quality_review_prompt(issue, attempt)
             review_cmd = self._build_pre_quality_review_command()
             review_transcript = await self._execute(
-                review_cmd, review_prompt, worktree_path, {"issue": issue.number}
+                review_cmd, review_prompt, worktree_path, {"issue": issue.id}
             )
             review_ok, review_summary = self._parse_skill_result(
                 review_transcript, "PRE_QUALITY_REVIEW_RESULT"
@@ -478,7 +476,7 @@ SUMMARY: <one-line summary>
             run_tool_prompt = self._build_pre_quality_run_tool_prompt(issue, attempt)
             run_tool_cmd = self._build_command(worktree_path)
             run_tool_transcript = await self._execute(
-                run_tool_cmd, run_tool_prompt, worktree_path, {"issue": issue.number}
+                run_tool_cmd, run_tool_prompt, worktree_path, {"issue": issue.id}
             )
             run_tool_ok, run_tool_summary = self._parse_skill_result(
                 run_tool_transcript, "RUN_TOOL_RESULT"
@@ -502,7 +500,7 @@ SUMMARY: <one-line summary>
 
     async def _run_quality_fix_loop(
         self,
-        issue: GitHubIssue,
+        issue: Task,
         worktree_path: Path,
         branch: str,
         error_output: str,
@@ -520,13 +518,13 @@ SUMMARY: <one-line summary>
                 "Quality fix attempt %d/%d for issue #%d",
                 attempt,
                 max_attempts,
-                issue.number,
+                issue.id,
             )
-            await self._emit_status(issue.number, worker_id, WorkerStatus.QUALITY_FIX)
+            await self._emit_status(issue.id, worker_id, WorkerStatus.QUALITY_FIX)
 
             prompt = self._build_quality_fix_prompt(issue, last_error, attempt)
             cmd = self._build_command(worktree_path)
-            await self._execute(cmd, prompt, worktree_path, {"issue": issue.number})
+            await self._execute(cmd, prompt, worktree_path, {"issue": issue.id})
 
             success, verify_msg = await self._verify_result(worktree_path, branch)
             if success:

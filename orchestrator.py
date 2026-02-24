@@ -11,7 +11,14 @@ from typing import TYPE_CHECKING, Any
 
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
-from models import BackgroundWorkerState, Phase, SessionLog, SessionStatus, WorkFn
+from models import (
+    BackgroundWorkerState,
+    GitHubIssue,
+    Phase,
+    SessionLog,
+    SessionStatus,
+    WorkFn,
+)
 from phase_utils import safe_file_memory_suggestion
 from service_registry import OrchestratorCallbacks, build_services
 from state import StateTracker
@@ -358,8 +365,8 @@ class HydraFlowOrchestrator:
             )
         )
 
-    def _restore_state(self) -> None:
-        """Restore interval overrides, crash-recovered issues, and interrupted issues."""
+    def _restore_worker_intervals(self) -> None:
+        """Restore saved background-worker poll-interval overrides from state."""
         saved_intervals = self._state.get_worker_intervals()
         if saved_intervals:
             self._bg_worker_intervals.update(saved_intervals)
@@ -368,10 +375,11 @@ class HydraFlowOrchestrator:
                 len(saved_intervals),
             )
 
+    def _restore_crash_recovered_issues(self) -> None:
+        """Load crash-recovered active issues so they're skipped for one poll cycle."""
         recovered = set(self._state.get_active_issue_numbers())
         if recovered:
             self._recovered_issues = recovered
-            # Add to implementation active set so they're skipped for one poll cycle
             self._active_impl_issues.update(recovered)
             logger.info(
                 "Crash recovery: loaded %d active issue(s) from state: %s",
@@ -379,10 +387,8 @@ class HydraFlowOrchestrator:
                 recovered,
             )
 
-        # Restore interrupted issues from a previous stop.
-        # Remove them from crash-recovery tracking sets so the IssueStore
-        # can route each issue to the correct pipeline stage based on its
-        # current GitHub labels.
+    def _restore_interrupted_issues(self) -> None:
+        """Remove interrupted issues from crash-recovery sets so they re-route normally."""
         interrupted = self._state.get_interrupted_issues()
         if interrupted:
             for issue_num in interrupted:
@@ -396,6 +402,12 @@ class HydraFlowOrchestrator:
                 interrupted,
             )
             self._state.clear_interrupted_issues()
+
+    def _restore_state(self) -> None:
+        """Restore interval overrides, crash-recovered issues, and interrupted issues."""
+        self._restore_worker_intervals()
+        self._restore_crash_recovered_issues()
+        self._restore_interrupted_issues()
 
     async def _start_session(self) -> None:
         """Create a new session log and publish SESSION_START."""
@@ -489,6 +501,59 @@ class HydraFlowOrchestrator:
             await self._publish_status()
             logger.info("HydraFlow stopped")
 
+    async def _handle_auth_error(self, loop_name: str) -> None:
+        """Set auth_failed, publish SYSTEM_ALERT, stop all loops."""
+        logger.error(
+            "GitHub authentication failed in %r — pausing all loops",
+            loop_name,
+        )
+        self._auth_failed = True
+        await self._bus.publish(
+            HydraFlowEvent(
+                type=EventType.SYSTEM_ALERT,
+                data={
+                    "message": (
+                        "GitHub authentication failed. Check your gh token and restart."
+                    ),
+                    "source": loop_name,
+                },
+            )
+        )
+        self._stop_event.set()
+
+    async def _handle_credit_exhaustion(
+        self,
+        exc: CreditExhaustedError,
+        loop_name: str,
+        tasks: dict[str, asyncio.Task[None]],
+        loop_factories: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]],
+    ) -> None:
+        """Delegate to _pause_for_credits."""
+        await self._pause_for_credits(exc, loop_name, tasks, loop_factories)
+
+    async def _restart_loop(
+        self,
+        loop_name: str,
+        exc: BaseException,
+        tasks: dict[str, asyncio.Task[None]],
+        loop_factories: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]],
+    ) -> None:
+        """Log, publish ERROR event, create a new loop task."""
+        logger.error("Loop %r crashed — restarting: %s", loop_name, exc)
+        await self._bus.publish(
+            HydraFlowEvent(
+                type=EventType.ERROR,
+                data={
+                    "message": f"Loop {loop_name} crashed and was restarted",
+                    "source": loop_name,
+                },
+            )
+        )
+        factory_fn = dict(loop_factories)[loop_name]
+        tasks[loop_name] = asyncio.create_task(
+            factory_fn(), name=f"hydraflow-{loop_name}"
+        )
+
     async def _handle_loop_exception(
         self,
         name: str,
@@ -498,43 +563,14 @@ class HydraFlowOrchestrator:
     ) -> None:
         """Handle a crashed loop task — auth failure, credit exhaustion, or generic restart."""
         if isinstance(exc, AuthenticationError):
-            logger.error(
-                "GitHub authentication failed in %r — pausing all loops: %s",
-                name,
-                exc,
-            )
-            self._auth_failed = True
-            await self._bus.publish(
-                HydraFlowEvent(
-                    type=EventType.SYSTEM_ALERT,
-                    data={
-                        "message": (
-                            "GitHub authentication failed. "
-                            "Check your gh token and restart."
-                        ),
-                        "source": name,
-                    },
-                )
-            )
-            self._stop_event.set()
+            await self._handle_auth_error(name)
             return
 
         if isinstance(exc, CreditExhaustedError):
-            await self._pause_for_credits(exc, name, tasks, loop_factories)
+            await self._handle_credit_exhaustion(exc, name, tasks, loop_factories)
             return
 
-        logger.error("Loop %r crashed — restarting: %s", name, exc)
-        await self._bus.publish(
-            HydraFlowEvent(
-                type=EventType.ERROR,
-                data={
-                    "message": f"Loop {name} crashed and was restarted",
-                    "source": name,
-                },
-            )
-        )
-        factory_fn = dict(loop_factories)[name]
-        tasks[name] = asyncio.create_task(factory_fn(), name=f"hydraflow-{name}")
+        await self._restart_loop(name, exc, tasks, loop_factories)
 
     async def _supervise_loops(self) -> None:
         """Run all loops plus the IssueStore poller, restarting any that crash."""
@@ -714,6 +750,11 @@ class HydraFlowOrchestrator:
                     issue_number,
                 )
 
+    def _log_reference(self, filename: str) -> str:
+        """Return a repo- or data-relative log reference for display."""
+        path = self._config.log_dir / filename
+        return self._config.format_path_for_display(path)
+
     async def _do_implement_work(self) -> None:
         """Work function for the implement loop."""
         # After one poll cycle, release crash-recovered issues
@@ -740,7 +781,7 @@ class HydraFlowOrchestrator:
                     phase="implement",
                     status="success" if result.success else "failed",
                     duration_seconds=result.duration_seconds,
-                    log_file=f".hydraflow/logs/issue-{result.issue_number}.txt",
+                    log_file=self._log_reference(f"issue-{result.issue_number}.txt"),
                 )
 
     async def _do_review_work(self) -> None:
@@ -749,12 +790,15 @@ class HydraFlowOrchestrator:
         if not review_issues:
             return
         active_in_store = set(self._store.get_active_issues().keys())
-        prs, issues = await self._fetcher.fetch_reviewable_prs(
-            active_in_store, prefetched_issues=review_issues
+        gh_review_issues = [GitHubIssue.from_task(t) for t in review_issues]
+        prs, gh_issues = await self._fetcher.fetch_reviewable_prs(
+            active_in_store, prefetched_issues=gh_review_issues
         )
         if not prs:
             return
-        review_results = await self._reviewer.review_prs(prs, issues)
+        review_results = await self._reviewer.review_prs(
+            prs, [i.to_task() for i in gh_issues]
+        )
         for result in review_results:
             if result.transcript:
                 if result.merged:
@@ -771,7 +815,7 @@ class HydraFlowOrchestrator:
                     phase="review",
                     status=review_status,
                     duration_seconds=result.duration_seconds,
-                    log_file=f".hydraflow/logs/review-pr-{result.pr_number}.txt",
+                    log_file=self._log_reference(f"review-pr-{result.pr_number}.txt"),
                 )
         if any(r.merged for r in review_results):
             await asyncio.sleep(_POST_MERGE_DELAY)
@@ -781,6 +825,31 @@ class HydraFlowOrchestrator:
         """Sleep for *seconds*, waking early if stop is requested."""
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(self._stop_event.wait(), timeout=seconds)
+
+    def _compute_resume_time(self, exc: CreditExhaustedError) -> datetime:
+        """Compute the UTC datetime at which credit pause should end."""
+        buffer = timedelta(minutes=self._config.credit_pause_buffer_minutes)
+        now = datetime.now(UTC)
+        if exc.resume_at is not None:
+            return exc.resume_at + buffer
+        return now + timedelta(hours=5) + buffer
+
+    async def _cancel_all_loops_and_runners(
+        self, tasks: dict[str, asyncio.Task[None]]
+    ) -> None:
+        """Cancel all loop tasks and terminate active subprocesses."""
+        for task in tasks.values():
+            task.cancel()
+        await asyncio.gather(*tasks.values(), return_exceptions=True)
+        self._planners.terminate()
+        self._agents.terminate()
+        self._reviewers.terminate()
+        self._hitl_runner.terminate()
+
+    async def _sleep_until_resume(self, resume_at: datetime) -> None:
+        """Sleep until *resume_at* (interruptible by stop event)."""
+        pause_seconds = max((resume_at - datetime.now(UTC)).total_seconds(), 0)
+        await self._sleep_or_stop(pause_seconds)
 
     async def _pause_for_credits(
         self,
@@ -802,17 +871,9 @@ class HydraFlowOrchestrator:
             ):
                 return
 
-            buffer = timedelta(minutes=self._config.credit_pause_buffer_minutes)
-            now = datetime.now(UTC)
-
-            if exc.resume_at is not None:
-                resume_at = exc.resume_at + buffer
-            else:
-                # Default: 5 hours if no reset time is parseable
-                resume_at = now + timedelta(hours=5) + buffer
-
+            resume_at = self._compute_resume_time(exc)
             self._credits_paused_until = resume_at
-            pause_seconds = max((resume_at - now).total_seconds(), 0)
+            pause_seconds = max((resume_at - datetime.now(UTC)).total_seconds(), 0)
 
             logger.warning(
                 "Credit limit reached (detected in %r). "
@@ -836,19 +897,9 @@ class HydraFlowOrchestrator:
                 )
             )
 
-            # Cancel all running loop tasks
-            for task in tasks.values():
-                task.cancel()
-            await asyncio.gather(*tasks.values(), return_exceptions=True)
+            await self._cancel_all_loops_and_runners(tasks)
 
-            # Terminate active subprocesses — no point running them
-            self._planners.terminate()
-            self._agents.terminate()
-            self._reviewers.terminate()
-            self._hitl_runner.terminate()
-
-        # Sleep until resume (interruptible by stop)
-        await self._sleep_or_stop(pause_seconds)
+        await self._sleep_until_resume(resume_at)
 
         if self._stop_event.is_set():
             self._credits_paused_until = None

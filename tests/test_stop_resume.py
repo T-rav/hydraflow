@@ -20,7 +20,7 @@ import pytest
 if TYPE_CHECKING:
     from orchestrator import HydraFlowOrchestrator
 
-from tests.conftest import IssueFactory, PRInfoFactory, ReviewResultFactory
+from tests.conftest import PRInfoFactory, ReviewResultFactory, TaskFactory
 from tests.helpers import ConfigFactory, make_review_phase
 
 # ---------------------------------------------------------------------------
@@ -430,7 +430,7 @@ class TestWorktreePreservation:
         from models import ReviewVerdict
 
         phase = make_review_phase(config)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         # COMMENT verdict: no merge happens (result.merged stays False).
@@ -475,7 +475,7 @@ class TestWorktreePreservation:
         from models import ReviewVerdict
 
         phase = make_review_phase(config)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         result = ReviewResultFactory.create(verdict=ReviewVerdict.APPROVE)
@@ -512,7 +512,7 @@ class TestWorktreePreservation:
         from models import ReviewVerdict
 
         phase = make_review_phase(config)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         result = ReviewResultFactory.create(verdict=ReviewVerdict.APPROVE)
@@ -554,8 +554,8 @@ class TestReviewPhaseStop:
         phase = make_review_phase(config)
         pr1 = PRInfoFactory.create(number=101, issue_number=10)
         pr2 = PRInfoFactory.create(number=102, issue_number=20)
-        issue1 = IssueFactory.create(number=10)
-        issue2 = IssueFactory.create(number=20)
+        issue1 = TaskFactory.create(id=10)
+        issue2 = TaskFactory.create(id=20)
 
         call_count = 0
 

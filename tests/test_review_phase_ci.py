@@ -20,9 +20,9 @@ from models import (
     ReviewVerdict,
 )
 from tests.conftest import (
-    IssueFactory,
     PRInfoFactory,
     ReviewResultFactory,
+    TaskFactory,
 )
 from tests.helpers import ConfigFactory, make_review_phase
 
@@ -46,7 +46,7 @@ class TestWaitAndFixCI:
             state_file=config.state_file,
         )
         phase = make_review_phase(cfg, default_mocks=True)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         phase._prs.wait_for_ci = AsyncMock(return_value=(True, "All 3 checks passed"))
@@ -69,7 +69,7 @@ class TestWaitAndFixCI:
             state_file=config.state_file,
         )
         phase = make_review_phase(cfg, default_mocks=True)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         fix_result = ReviewResult(
@@ -100,7 +100,7 @@ class TestWaitAndFixCI:
             state_file=config.state_file,
         )
         phase = make_review_phase(cfg, default_mocks=True)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         phase._prs.wait_for_ci = AsyncMock(return_value=(True, "passed"))
@@ -123,7 +123,7 @@ class TestWaitAndFixCI:
             state_file=config.state_file,
         )
         phase = make_review_phase(cfg, default_mocks=True)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         phase._reviewers.review = AsyncMock(
@@ -151,7 +151,7 @@ class TestWaitAndFixCI:
             state_file=config.state_file,
         )
         phase = make_review_phase(cfg, default_mocks=True)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         # CI fails first, then passes after fix
@@ -196,7 +196,7 @@ class TestWaitAndFixCI:
             state_file=config.state_file,
         )
         phase = make_review_phase(cfg, default_mocks=True)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         fix_result = ReviewResult(
@@ -230,7 +230,7 @@ class TestWaitAndFixCI:
             state_file=config.state_file,
         )
         phase = make_review_phase(cfg, default_mocks=True)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         fix_result = ReviewResult(
@@ -252,9 +252,7 @@ class TestWaitAndFixCI:
         assert "Failed checks: ci" in ci_comments[0][1]
 
         # Should swap label to hydraflow-hitl on both issue and PR
-        phase._prs.swap_pipeline_labels.assert_any_call(
-            42, "hydraflow-hitl", pr_number=101
-        )
+        phase._prs.transition.assert_any_call(42, "hitl", pr_number=101)
 
     @pytest.mark.asyncio
     async def test_ci_failure_sets_hitl_cause(self, config: HydraFlowConfig) -> None:
@@ -266,7 +264,7 @@ class TestWaitAndFixCI:
             state_file=config.state_file,
         )
         phase = make_review_phase(cfg, default_mocks=True)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         fix_result = ReviewResult(
@@ -295,7 +293,7 @@ class TestWaitAndFixCI:
             state_file=config.state_file,
         )
         phase = make_review_phase(cfg, default_mocks=True)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         fix_result = ReviewResult(
@@ -333,7 +331,7 @@ class TestWaitAndFixCIEdgeCases:
             state_file=config.state_file,
         )
         phase = make_review_phase(cfg, default_mocks=True)
-        issue = IssueFactory.create(number=42)
+        issue = TaskFactory.create(id=42)
         pr = PRInfoFactory.create(number=101, issue_number=42)
 
         phase._reviewers.review = AsyncMock(
@@ -366,7 +364,7 @@ class TestWaitAndFixCIEdgeCases:
             state_file=config.state_file,
         )
         phase = make_review_phase(cfg, default_mocks=True)
-        issue = IssueFactory.create(number=42)
+        issue = TaskFactory.create(id=42)
         pr = PRInfoFactory.create(number=101, issue_number=42)
 
         phase._reviewers.review = AsyncMock(
@@ -406,7 +404,7 @@ class TestWaitAndFixCIWithLogs:
         )
         phase = make_review_phase(config, default_mocks=True)
         pr = PRInfoFactory.create()
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         result = ReviewResultFactory.create()
 
         # First call: wait_for_ci fails; second: CI fix; third: wait_for_ci passes
@@ -439,7 +437,7 @@ class TestWaitAndFixCIWithLogs:
         """When inject_runtime_logs is False, fetch_ci_failure_logs is NOT called."""
         phase = make_review_phase(config, default_mocks=True)
         pr = PRInfoFactory.create()
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         result = ReviewResultFactory.create()
         wt = tmp_path / "wt" / "issue-42"
         wt.mkdir(parents=True, exist_ok=True)

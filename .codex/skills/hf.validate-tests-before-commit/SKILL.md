@@ -1,3 +1,6 @@
+# hf.validate-tests-before-commit
+
+```bash
 #!/bin/bash
 # Hook: Validate tests exist for staged changes and pass before allowing commit.
 # Fires on PreToolUse for Bash commands matching git commit.
@@ -129,3 +132,4 @@ fi
 
 echo "All tests passed for affected services." >&2
 exit 0
+```

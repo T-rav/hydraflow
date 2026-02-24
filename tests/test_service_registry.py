@@ -78,4 +78,7 @@ class TestBuildServices:
 
         registry = build_services(config, bus, state, stop_event, callbacks)
 
-        assert registry.store._fetcher is registry.fetcher
+        from issue_fetcher import GitHubTaskFetcher
+
+        assert isinstance(registry.store._fetcher, GitHubTaskFetcher)
+        assert registry.store._fetcher._fetcher is registry.fetcher

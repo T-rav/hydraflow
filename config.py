@@ -236,6 +236,12 @@ class HydraFlowConfig(BaseModel):
         description="Max retry attempts for gh CLI calls",
     )
 
+    # Task source
+    task_source_type: Literal["github"] = Field(
+        default="github",
+        description="Task source backend. Only 'github' supported today.",
+    )
+
     # Label lifecycle
     review_label: list[str] = Field(
         default=["hydraflow-review"],
@@ -531,6 +537,10 @@ class HydraFlowConfig(BaseModel):
     worktree_base: Path = Field(
         default=Path("."), description="Base directory for worktrees"
     )
+    data_root: Path = Field(
+        default=Path("."),
+        description="Directory for persistent HydraFlow data (.hydraflow)",
+    )
     state_file: Path = Field(default=Path("."), description="Path to state JSON file")
 
     # Event persistence
@@ -802,17 +812,28 @@ class HydraFlowConfig(BaseModel):
     @property
     def log_dir(self) -> Path:
         """Return the directory for transcript / log files."""
-        return self.repo_root / ".hydraflow" / "logs"
+        return self.data_root / "logs"
 
     @property
     def plans_dir(self) -> Path:
         """Return the directory for saved plan files."""
-        return self.repo_root / ".hydraflow" / "plans"
+        return self.data_root / "plans"
 
     @property
     def memory_dir(self) -> Path:
         """Return the directory for memory / review-insight files."""
-        return self.repo_root / ".hydraflow" / "memory"
+        return self.data_root / "memory"
+
+    def data_path(self, *parts: str | os.PathLike[str]) -> Path:
+        """Return an absolute path inside the HydraFlow data_root."""
+        return self.data_root.joinpath(*parts)
+
+    def format_path_for_display(self, path: Path) -> str:
+        """Return a human-friendly path relative to repo or data root when possible."""
+        for base in (self.repo_root, self.data_root):
+            with contextlib.suppress(ValueError):
+                return str(path.relative_to(base))
+        return str(path)
 
     def branch_for_issue(self, issue_number: int) -> str:
         """Return the canonical branch name for a given issue number."""
@@ -854,13 +875,36 @@ class HydraFlowConfig(BaseModel):
 def _resolve_paths(config: HydraFlowConfig) -> None:
     """Resolve repo_root, worktree_base, state_file, and event_log_path."""
     if config.repo_root == Path("."):
-        config.repo_root = _find_repo_root()
+        object.__setattr__(config, "repo_root", _find_repo_root())
+    else:
+        object.__setattr__(config, "repo_root", config.repo_root.expanduser().resolve())
     if config.worktree_base == Path("."):
-        config.worktree_base = config.repo_root.parent / "hydraflow-worktrees"
+        default_worktrees = config.repo_root.parent / "hydraflow-worktrees"
+        object.__setattr__(config, "worktree_base", default_worktrees)
+    else:
+        object.__setattr__(
+            config, "worktree_base", config.worktree_base.expanduser().resolve()
+        )
+    env_home = os.environ.get("HYDRAFLOW_HOME", "").strip()
+    if env_home:
+        data_root = Path(env_home).expanduser().resolve()
+    elif config.data_root == Path("."):
+        data_root = (config.repo_root / ".hydraflow").resolve()
+    else:
+        data_root = config.data_root.expanduser().resolve()
+    object.__setattr__(config, "data_root", data_root)
     if config.state_file == Path("."):
-        config.state_file = config.repo_root / ".hydraflow" / "state.json"
+        object.__setattr__(config, "state_file", data_root / "state.json")
+    else:
+        object.__setattr__(
+            config, "state_file", config.state_file.expanduser().resolve()
+        )
     if config.event_log_path == Path("."):
-        config.event_log_path = config.repo_root / ".hydraflow" / "events.jsonl"
+        object.__setattr__(config, "event_log_path", data_root / "events.jsonl")
+    else:
+        object.__setattr__(
+            config, "event_log_path", config.event_log_path.expanduser().resolve()
+        )
 
 
 def _resolve_repo_and_identity(config: HydraFlowConfig) -> None:

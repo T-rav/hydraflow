@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from events import EventBus, EventType
-from tests.conftest import EventFactory, IssueFactory
+from tests.conftest import EventFactory, TaskFactory
 from tests.helpers import ConfigFactory
 
 # ---------------------------------------------------------------------------
@@ -115,13 +115,11 @@ class TestImplementPhaseActiveIssuesLock:
             stop_event=asyncio.Event(),
         )
 
-        issues = [
-            IssueFactory.create(number=i, labels=["test-label"]) for i in range(1, 4)
-        ]
+        issues = [TaskFactory.create(id=i) for i in range(1, 4)]
 
         # Create worktree dirs so the phase finds them
         for issue in issues:
-            wt = tmp_path / "worktrees" / f"issue-{issue.number}"
+            wt = tmp_path / "worktrees" / f"issue-{issue.id}"
             wt.mkdir(parents=True, exist_ok=True)
 
         await phase.run_batch(issues)

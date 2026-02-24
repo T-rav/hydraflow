@@ -24,9 +24,9 @@ class LocalPrepIssue:
     body: str
 
 
-def ensure_pre_dirs(repo_root: Path) -> tuple[Path, Path]:
-    """Create and return ``(.hydraflow/prep, .hydraflow/prep/runs/<run-id>)``."""
-    pre_dir = repo_root / ".hydraflow" / "prep"
+def ensure_pre_dirs(data_root: Path) -> tuple[Path, Path]:
+    """Create and return ``(<data_root>/prep, <data_root>/prep/runs/<run-id>)``."""
+    pre_dir = data_root / "prep"
     run_id = os.environ.get(_RUN_ID_ENV) or datetime.now(tz=UTC).strftime(
         "%Y%m%d-%H%M%S-%f"
     )
@@ -44,9 +44,9 @@ def _parse_title(path: Path, body: str) -> str:
     return path.stem.replace("-", " ").replace("_", " ").strip() or path.name
 
 
-def load_open_issues(repo_root: Path) -> list[LocalPrepIssue]:
-    """Load open issues from ``.hydraflow/prep/*.md``."""
-    pre_dir = repo_root / ".hydraflow" / "prep"
+def load_open_issues(data_root: Path) -> list[LocalPrepIssue]:
+    """Load open issues from ``<data_root>/prep/*.md``."""
+    pre_dir = data_root / "prep"
     if not pre_dir.is_dir():
         return []
 
@@ -79,9 +79,9 @@ def mark_done(issue: LocalPrepIssue) -> None:
     )
 
 
-def write_run_log(repo_root: Path, *, title: str, lines: list[str]) -> Path:
-    """Write a markdown run log under ``.hydraflow/prep/runs/<run-id>``."""
-    _, runs_dir = ensure_pre_dirs(repo_root)
+def write_run_log(data_root: Path, *, title: str, lines: list[str]) -> Path:
+    """Write a markdown run log under ``<data_root>/prep/runs/<run-id>``."""
+    _, runs_dir = ensure_pre_dirs(data_root)
     ts = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
     path = runs_dir / f"{ts}-prep-run.md"
     body = "\n".join(lines)
@@ -90,14 +90,14 @@ def write_run_log(repo_root: Path, *, title: str, lines: list[str]) -> Path:
 
 
 def upsert_issue(
-    repo_root: Path,
+    data_root: Path,
     *,
     filename: str,
     title: str,
     body_lines: list[str],
 ) -> LocalPrepIssue:
     """Create or update a local `.hydraflow/prep` markdown issue file."""
-    pre_dir, _ = ensure_pre_dirs(repo_root)
+    pre_dir, _ = ensure_pre_dirs(data_root)
     path = pre_dir / filename
     body = "\n".join([f"# {title}", "", *body_lines, ""])
     path.write_text(body, encoding="utf-8")

@@ -78,6 +78,37 @@ make quality-lite # lint + typecheck + security
 make quality      # quality-lite + tests
 ```
 
+## CLI Installation
+
+HydraFlow now exposes an `hf` console script so you can run `hf init`, `hf prep`, `hf run`, etc.
+
+```bash
+# install locally (inside this repo)
+uv tool run pip install -e .
+
+# show available commands
+hf --help
+
+# copy bundled assets (.claude, .codex, githooks) into the current repo
+hf init
+
+# run the standard prep flow without invoking make
+hf prep
+
+# register the current repo with the background supervisor (starts orchestrator + dashboard)
+hf run
+
+# list/stop registered repos (state lives under ~/.hydraflow/<repo-slug>)
+hf status
+hf stop
+```
+
+> HydraFlow still writes prep logs, memory, manifests, and run artifacts to
+> `.hydraflow/` by default when you run `make` commands directly inside a repo.
+> When you use `hf run`, the supervisor sets `HYDRAFLOW_HOME=~/.hydraflow/<repo-slug>`
+> so all of those artifacts move under `~/.hydraflow/<repo-slug>/...` instead of
+> cluttering your working tree.
+
 ## Issue Flow Labels
 
 - `hydraflow-find`
@@ -96,6 +127,10 @@ You can override label names via `.env` (created from `.env.sample` during `make
 
 - `.hydraflow/prep/*.md` for local prep issues
 - `.hydraflow/prep/runs/<run-id>/` for run logs/transcripts
+
+When `HYDRAFLOW_HOME` is set (the default under `hf run`), the same structure
+lives under `~/.hydraflow/<repo-slug>/prep/...` so every repo can share a single
+machine-wide HydraFlow home.
 
 Each prep run gets one locked run ID at start, and all logs for that run are written under the same run directory.
 

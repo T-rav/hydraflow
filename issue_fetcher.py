@@ -7,7 +7,7 @@ import json
 import logging
 
 from config import HydraFlowConfig
-from models import GitHubIssue, PRInfo
+from models import GitHubIssue, PRInfo, Task
 from subprocess_util import run_subprocess
 
 logger = logging.getLogger("hydraflow.issue_fetcher")
@@ -255,3 +255,14 @@ class IssueFetcher:
                 "Could not fetch comments for issue #%d: %s", issue_number, exc
             )
             return []
+
+
+class GitHubTaskFetcher:
+    """Wraps :class:`IssueFetcher` to implement the :class:`task_source.TaskFetcher` protocol."""
+
+    def __init__(self, fetcher: IssueFetcher) -> None:
+        self._fetcher = fetcher
+
+    async def fetch_all(self) -> list[Task]:
+        issues = await self._fetcher.fetch_all_hydraflow_issues()
+        return [i.to_task() for i in issues]

@@ -109,12 +109,14 @@ def record_harness_failure(
 ) -> None:
     """Record a failure to the harness insight store (non-blocking).
 
-    Shared by plan, implement, and review phases to avoid duplication.
+    Shared across plan, implement, and review phases.  Silently skips
+    when *harness_insights* is ``None`` and suppresses exceptions so
+    insight recording never interrupts the pipeline.
     """
     if harness_insights is None:
         return
     try:
-        from harness_insights import extract_subcategories
+        from harness_insights import extract_subcategories  # noqa: PLC0415
 
         record = FailureRecord(
             issue_number=issue_number,

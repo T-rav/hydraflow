@@ -44,11 +44,15 @@ from models import (
     SessionStatus,
     StageStatus,
     StateData,
+    Task,
+    TaskLink,
+    TaskLinkKind,
     TimelineStage,
     VerificationCriteria,
     VerificationCriterion,
     WorkerResult,
     WorkerStatus,
+    parse_task_links,
 )
 from tests.conftest import AnalysisResultFactory, ReviewResultFactory
 
@@ -237,6 +241,62 @@ class TestGitHubIssue:
         assert issue.labels == ["hydraflow-ready", "perf"]
         assert issue.comments == ["LGTM", "Needs tests"]
         assert issue.url == "https://github.com/org/repo/issues/42"
+
+
+# ---------------------------------------------------------------------------
+# Task
+# ---------------------------------------------------------------------------
+
+
+class TestTask:
+    """Tests for the Task model and GitHubIssue conversion helpers."""
+
+    def test_defaults(self) -> None:
+        """Task should accept only id and title with sensible defaults."""
+        task = Task(id=1, title="Fix it")
+        assert task.id == 1
+        assert task.title == "Fix it"
+        assert task.body == ""
+        assert task.tags == []
+        assert task.comments == []
+        assert task.source_url == ""
+        assert task.created_at == ""
+        assert task.metadata == {}
+
+    def test_round_trip_to_task(self) -> None:
+        """GitHubIssue.to_task() followed by from_task() should reproduce the original."""
+        issue = GitHubIssue(
+            number=7,
+            title="Round trip",
+            body="Body text",
+            labels=["hydraflow-ready", "bug"],
+            comments=["LGTM"],
+            url="https://github.com/org/repo/issues/7",
+            created_at="2024-01-01T00:00:00Z",
+        )
+        task = issue.to_task()
+        assert task.id == 7
+        assert task.title == "Round trip"
+        assert task.body == "Body text"
+        assert task.tags == ["hydraflow-ready", "bug"]
+        assert task.comments == ["LGTM"]
+        assert task.source_url == "https://github.com/org/repo/issues/7"
+        assert task.created_at == "2024-01-01T00:00:00Z"
+
+        restored = GitHubIssue.from_task(task)
+        assert restored.number == 7
+        assert restored.title == "Round trip"
+        assert restored.body == "Body text"
+        assert restored.labels == ["hydraflow-ready", "bug"]
+        assert restored.comments == ["LGTM"]
+        assert restored.url == "https://github.com/org/repo/issues/7"
+        assert restored.created_at == "2024-01-01T00:00:00Z"
+
+    def test_label_preservation(self) -> None:
+        """Labels survive the GitHubIssue → Task → GitHubIssue trip."""
+        labels = ["hydraflow-plan", "enhancement", "priority-high"]
+        issue = GitHubIssue(number=99, title="t", labels=labels)
+        assert GitHubIssue.from_task(issue.to_task()).labels == labels
 
 
 # ---------------------------------------------------------------------------
@@ -850,8 +910,8 @@ class TestBatchResult:
         """Should hold multiple issues, worker results, PRs, reviews, and merged PR numbers."""
         # Arrange
         issues = [
-            GitHubIssue(number=1, title="Issue 1"),
-            GitHubIssue(number=2, title="Issue 2"),
+            Task(id=1, title="Issue 1"),
+            Task(id=2, title="Issue 2"),
         ]
         worker_results = [
             WorkerResult(
@@ -884,8 +944,8 @@ class TestBatchResult:
         # Assert
         assert batch.batch_number == 3
         assert len(batch.issues) == 2
-        assert batch.issues[0].number == 1
-        assert batch.issues[1].number == 2
+        assert batch.issues[0].id == 1
+        assert batch.issues[1].id == 2
         assert len(batch.worker_results) == 2
         assert batch.worker_results[0].success is True
         assert batch.worker_results[1].success is False
@@ -899,7 +959,7 @@ class TestBatchResult:
         # Arrange
         batch = BatchResult(
             batch_number=2,
-            issues=[GitHubIssue(number=10, title="T")],
+            issues=[Task(id=10, title="T")],
             merged_prs=[200, 201],
         )
 
@@ -909,7 +969,7 @@ class TestBatchResult:
         # Assert
         assert data["batch_number"] == 2
         assert len(data["issues"]) == 1
-        assert data["issues"][0]["number"] == 10
+        assert data["issues"][0]["id"] == 10
         assert data["merged_prs"] == [200, 201]
         assert data["worker_results"] == []
         assert data["pr_infos"] == []
@@ -1387,6 +1447,260 @@ class TestStateDataVerificationIssues:
         data = StateData(verification_issues={"42": 500, "99": 501})
         assert data.verification_issues["42"] == 500
         assert data.verification_issues["99"] == 501
+
+
+# ---------------------------------------------------------------------------
+# TaskLink / TaskLinkKind
+# ---------------------------------------------------------------------------
+
+
+class TestTaskLink:
+    """Tests for the TaskLink and TaskLinkKind models."""
+
+    def test_tasklink_kind_values(self) -> None:
+        # Arrange / Act / Assert
+        assert TaskLinkKind.RELATES_TO == "relates_to"
+        assert TaskLinkKind.DUPLICATES == "duplicates"
+        assert TaskLinkKind.SUPERSEDES == "supersedes"
+        assert TaskLinkKind.REPLIES_TO == "replies_to"
+
+    def test_tasklink_minimal(self) -> None:
+        link = TaskLink(kind=TaskLinkKind.RELATES_TO, target_id=7)
+
+        assert link.kind == TaskLinkKind.RELATES_TO
+        assert link.target_id == 7
+        assert link.target_url == ""
+
+    def test_tasklink_with_url(self) -> None:
+        url = "https://github.com/org/repo/issues/7"
+        link = TaskLink(kind=TaskLinkKind.DUPLICATES, target_id=7, target_url=url)
+
+        assert link.target_url == url
+
+    def test_task_links_field_defaults_to_empty(self) -> None:
+        task = Task(id=1, title="t")
+
+        assert task.links == []
+
+    def test_task_links_field_accepts_links(self) -> None:
+        links = [
+            TaskLink(kind=TaskLinkKind.SUPERSEDES, target_id=3),
+            TaskLink(kind=TaskLinkKind.REPLIES_TO, target_id=9),
+        ]
+        task = Task(id=1, title="t", links=links)
+
+        assert len(task.links) == 2
+        assert task.links[0].kind == TaskLinkKind.SUPERSEDES
+        assert task.links[1].target_id == 9
+
+    def test_task_links_independent_between_instances(self) -> None:
+        """Default mutable lists must not be shared between Task instances."""
+        task_a = Task(id=1, title="a")
+        task_b = Task(id=2, title="b")
+
+        task_a.links.append(TaskLink(kind=TaskLinkKind.RELATES_TO, target_id=5))
+
+        assert task_b.links == []
+
+
+# ---------------------------------------------------------------------------
+# parse_task_links
+# ---------------------------------------------------------------------------
+
+
+class TestParseTaskLinks:
+    """Tests for the parse_task_links() function."""
+
+    # --- Empty / plain body ---
+
+    def test_empty_body_returns_empty_list(self) -> None:
+        assert parse_task_links("") == []
+
+    def test_plain_body_no_links(self) -> None:
+        assert parse_task_links("Fix the frobnicator widget so it works.") == []
+
+    # --- relates_to ---
+
+    def test_relates_to_pattern_relates_to(self) -> None:
+        links = parse_task_links("This relates to #12.")
+
+        assert len(links) == 1
+        assert links[0].kind == TaskLinkKind.RELATES_TO
+        assert links[0].target_id == 12
+
+    def test_relates_to_pattern_related(self) -> None:
+        links = parse_task_links("Also related: #99")
+
+        assert len(links) == 1
+        assert links[0].kind == TaskLinkKind.RELATES_TO
+        assert links[0].target_id == 99
+
+    def test_relates_to_case_insensitive(self) -> None:
+        links = parse_task_links("RELATES TO #7")
+
+        assert len(links) == 1
+        assert links[0].kind == TaskLinkKind.RELATES_TO
+
+    # --- duplicates ---
+
+    def test_duplicates_pattern_duplicates(self) -> None:
+        links = parse_task_links("This duplicates #5.")
+
+        assert len(links) == 1
+        assert links[0].kind == TaskLinkKind.DUPLICATES
+        assert links[0].target_id == 5
+
+    def test_duplicates_pattern_duplicate_of(self) -> None:
+        links = parse_task_links("duplicate of #5")
+
+        assert len(links) == 1
+        assert links[0].kind == TaskLinkKind.DUPLICATES
+        assert links[0].target_id == 5
+
+    def test_duplicates_case_insensitive(self) -> None:
+        links = parse_task_links("DUPLICATE OF #10")
+
+        assert len(links) == 1
+        assert links[0].kind == TaskLinkKind.DUPLICATES
+
+    # --- supersedes ---
+
+    def test_supersedes_pattern_supersedes(self) -> None:
+        links = parse_task_links("This supersedes #3.")
+
+        assert len(links) == 1
+        assert links[0].kind == TaskLinkKind.SUPERSEDES
+        assert links[0].target_id == 3
+
+    def test_supersedes_pattern_replaces(self) -> None:
+        links = parse_task_links("This replaces #3.")
+
+        assert len(links) == 1
+        assert links[0].kind == TaskLinkKind.SUPERSEDES
+        assert links[0].target_id == 3
+
+    def test_supersedes_case_insensitive(self) -> None:
+        links = parse_task_links("REPLACES #20")
+
+        assert len(links) == 1
+        assert links[0].kind == TaskLinkKind.SUPERSEDES
+
+    # --- replies_to ---
+
+    def test_replies_to_pattern_replies_to(self) -> None:
+        links = parse_task_links("This replies to #8.")
+
+        assert len(links) == 1
+        assert links[0].kind == TaskLinkKind.REPLIES_TO
+        assert links[0].target_id == 8
+
+    def test_replies_to_pattern_reply_to(self) -> None:
+        links = parse_task_links("reply to #8")
+
+        assert len(links) == 1
+        assert links[0].kind == TaskLinkKind.REPLIES_TO
+        assert links[0].target_id == 8
+
+    def test_replies_to_pattern_in_response_to(self) -> None:
+        links = parse_task_links("In response to #8, see here.")
+
+        assert len(links) == 1
+        assert links[0].kind == TaskLinkKind.REPLIES_TO
+        assert links[0].target_id == 8
+
+    def test_replies_to_case_insensitive(self) -> None:
+        links = parse_task_links("IN RESPONSE TO #30")
+
+        assert len(links) == 1
+        assert links[0].kind == TaskLinkKind.REPLIES_TO
+
+    # --- Multiple links ---
+
+    def test_multiple_links_different_targets(self) -> None:
+        body = "This relates to #1 and duplicates #2 and supersedes #3."
+        links = parse_task_links(body)
+
+        target_ids = [lnk.target_id for lnk in links]
+        assert 1 in target_ids
+        assert 2 in target_ids
+        assert 3 in target_ids
+        assert len(links) == 3
+
+    def test_multiple_links_preserve_kinds(self) -> None:
+        body = "Relates to #10. Duplicate of #20."
+        links = parse_task_links(body)
+
+        by_id = {lnk.target_id: lnk for lnk in links}
+        assert by_id[10].kind == TaskLinkKind.RELATES_TO
+        assert by_id[20].kind == TaskLinkKind.DUPLICATES
+
+    # --- Deduplication ---
+
+    def test_dedup_same_target_mentioned_twice_keeps_first(self) -> None:
+        body = "This relates to #5. Also duplicates #5."
+        links = parse_task_links(body)
+
+        assert len(links) == 1
+        assert links[0].target_id == 5
+        assert links[0].kind == TaskLinkKind.RELATES_TO
+
+    def test_dedup_same_pattern_same_target(self) -> None:
+        body = "Relates to #7 and relates to #7."
+        links = parse_task_links(body)
+
+        assert len(links) == 1
+        assert links[0].target_id == 7
+
+    # --- GitHubIssue.to_task() propagation ---
+
+    def test_github_issue_to_task_propagates_links(self) -> None:
+        issue = GitHubIssue(
+            number=42,
+            title="Improve widget",
+            body="This relates to #10 and duplicates #20.",
+        )
+        task = issue.to_task()
+
+        assert len(task.links) == 2
+        target_ids = {lnk.target_id for lnk in task.links}
+        assert target_ids == {10, 20}
+
+    def test_github_issue_to_task_empty_body_no_links(self) -> None:
+        issue = GitHubIssue(number=1, title="t", body="")
+        task = issue.to_task()
+
+        assert task.links == []
+
+    def test_github_issue_to_task_plain_body_no_links(self) -> None:
+        issue = GitHubIssue(number=1, title="t", body="Just a plain description.")
+        task = issue.to_task()
+
+        assert task.links == []
+
+    # --- Round-trip via from_task ---
+
+    def test_from_task_round_trip_preserves_links(self) -> None:
+        links = [TaskLink(kind=TaskLinkKind.SUPERSEDES, target_id=3)]
+        task = Task(id=42, title="t", links=links)
+
+        reconstructed = GitHubIssue.from_task(task).to_task()
+
+        assert (
+            len(reconstructed.links) == 0
+        )  # from_task body is empty → no links parsed
+
+    def test_pydantic_serialization_round_trip(self) -> None:
+        task = Task(
+            id=1,
+            title="t",
+            links=[TaskLink(kind=TaskLinkKind.REPLIES_TO, target_id=9)],
+        )
+        data = task.model_dump()
+        restored = Task.model_validate(data)
+
+        assert len(restored.links) == 1
+        assert restored.links[0].kind == TaskLinkKind.REPLIES_TO
+        assert restored.links[0].target_id == 9
 
 
 # --- DeltaReport ---

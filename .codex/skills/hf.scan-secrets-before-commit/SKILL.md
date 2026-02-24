@@ -1,3 +1,6 @@
+# hf.scan-secrets-before-commit
+
+```bash
 #!/bin/bash
 # Hook: Scan staged files for potential secrets before allowing commit.
 # Fires on PreToolUse for Bash commands matching git commit.
@@ -66,3 +69,4 @@ if [ -n "$MATCHES" ]; then
   echo "If this is a false positive (e.g., test fixtures), ask the user to confirm." >&2
   exit 2
 fi
+```

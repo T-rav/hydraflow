@@ -516,13 +516,13 @@ class TestManifestInjectionInRunners:
         manifest_path.write_text("## Project Manifest\npython, make")
 
         runner = AgentRunner(config, EventBus())
-        from models import GitHubIssue
+        from models import Task
 
-        issue = GitHubIssue(
-            number=1,
+        issue = Task(
+            id=1,
             title="Test",
             body="body",
-            labels=[],
+            tags=[],
             comments=[],
         )
         prompt = runner._build_prompt(issue)

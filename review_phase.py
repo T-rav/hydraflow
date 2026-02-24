@@ -17,12 +17,12 @@ from issue_store import IssueStore
 from merge_conflict_resolver import MergeConflictResolver
 from models import (
     ConflictResolutionResult,
-    GitHubIssue,
     JudgeResult,
     PipelineStage,
     PRInfo,
     ReviewResult,
     ReviewVerdict,
+    Task,
 )
 from phase_utils import (
     publish_review_status,
@@ -43,6 +43,7 @@ from review_insights import (
 from reviewer import ReviewRunner
 from state import StateTracker
 from subprocess_util import AuthenticationError, CreditExhaustedError
+from task_source import TaskTransitioner
 from worktree import WorktreeManager
 
 logger = logging.getLogger("hydraflow.review_phase")
@@ -70,6 +71,7 @@ class ReviewPhase:
         self._worktrees = worktrees
         self._reviewers = reviewers
         self._prs = prs
+        self._transitioner: TaskTransitioner = prs
         self._stop_event = stop_event
         self._store = store
         self._bus = event_bus or EventBus()
@@ -100,13 +102,13 @@ class ReviewPhase:
     async def review_prs(
         self,
         prs: list[PRInfo],
-        issues: list[GitHubIssue],
+        issues: list[Task],
     ) -> list[ReviewResult]:
         """Run reviewer agents on non-draft PRs, merging approved ones inline."""
         if not prs:
             return []
 
-        issue_map = {i.number: i for i in issues}
+        issue_map = {i.id: i for i in issues}
         semaphore = asyncio.Semaphore(self._config.max_reviewers)
 
         async def _review_one(idx: int, pr: PRInfo) -> ReviewResult:
@@ -152,33 +154,62 @@ class ReviewPhase:
 
         return await run_concurrent_batch(prs, _review_one, self._stop_event)
 
+    async def _should_skip_review(self, pr: PRInfo, last_sha: str | None) -> bool:
+        """Return True if the PR HEAD SHA is unchanged since last review."""
+        current_sha = await self._prs.get_pr_head_sha(pr.number)
+        if not current_sha:
+            return False
+        if last_sha and last_sha == current_sha:
+            logger.info(
+                "PR #%d (issue #%d): skipping review — no new commits since "
+                "last review (SHA %s)",
+                pr.number,
+                pr.issue_number,
+                current_sha[:12],
+            )
+            return True
+        return False
+
+    async def _prepare_review_worktree(
+        self, pr: PRInfo, task: Task, idx: int
+    ) -> Path | None:
+        """Ensure worktree exists and main is merged. Returns path or None on conflict."""
+        wt_path = self._config.worktree_base / f"issue-{pr.issue_number}"
+        if not wt_path.exists():
+            wt_path = await self._worktrees.create(pr.issue_number, pr.branch)
+        merged = await self._merge_with_main(pr, task, wt_path, idx)
+        if not merged:
+            return None
+        return wt_path
+
     async def _review_one_inner(
         self,
         idx: int,
         pr: PRInfo,
-        issue_map: dict[int, GitHubIssue],
+        issue_map: dict[int, Task],
     ) -> ReviewResult:
         """Core review logic for a single PR — called inside the semaphore."""
         await self._publish_review_status(pr, idx, "start")
 
-        issue = issue_map.get(pr.issue_number)
-        if issue is None:
+        task = issue_map.get(pr.issue_number)
+        if task is None:
             return ReviewResult(
                 pr_number=pr.number,
                 issue_number=pr.issue_number,
                 summary="Issue not found",
             )
 
-        skip_result = await self._check_sha_skip_guard(pr)
-        if skip_result:
-            return skip_result
+        # Skip guard: avoid re-reviewing when no new commits since last review
+        last_sha = self._state.get_last_reviewed_sha(pr.issue_number)
+        if await self._should_skip_review(pr, last_sha):
+            return ReviewResult(
+                pr_number=pr.number,
+                issue_number=pr.issue_number,
+                summary="Skipped — no new commits since last review",
+            )
 
-        wt_path = self._config.worktree_base / f"issue-{pr.issue_number}"
-        if not wt_path.exists():
-            wt_path = await self._worktrees.create(pr.issue_number, pr.branch)
-
-        merged = await self._merge_with_main(pr, issue, wt_path, idx)
-        if not merged:
+        wt_path = await self._prepare_review_worktree(pr, task, idx)
+        if wt_path is None:
             return ReviewResult(
                 pr_number=pr.number,
                 issue_number=pr.issue_number,
@@ -186,23 +217,27 @@ class ReviewPhase:
             )
 
         diff = await self._prs.get_pr_diff(pr.number)
+
+        # Delta verification: compare planned vs actual files
         await self._run_delta_verification(pr, diff)
 
-        result = await self._run_and_post_review(pr, issue, wt_path, diff, idx)
+        result = await self._run_and_post_review(pr, task, wt_path, diff, idx)
 
+        # If reviewer fixed its own findings, re-review the updated code
         if result.fixes_made and result.verdict in (
             ReviewVerdict.REQUEST_CHANGES,
             ReviewVerdict.COMMENT,
         ):
             result, diff = await self._handle_self_fix_re_review(
-                pr, issue, wt_path, result, diff, idx
+                pr, task, wt_path, result, diff, idx
             )
 
         await self._record_review_outcome(pr, result)
 
+        # Verdict-specific handling
         skip_worktree_cleanup = False
         if result.verdict == ReviewVerdict.APPROVE and pr.number > 0:
-            await self._handle_approved_merge(pr, issue, result, diff, idx)
+            await self._handle_approved_merge(pr, task, result, diff, idx)
         elif result.verdict in (
             ReviewVerdict.REQUEST_CHANGES,
             ReviewVerdict.COMMENT,
@@ -282,7 +317,7 @@ class ReviewPhase:
     async def _merge_with_main(
         self,
         pr: PRInfo,
-        issue: GitHubIssue,
+        issue: Task,
         wt_path: Path,
         worker_id: int,
     ) -> bool:
@@ -302,7 +337,7 @@ class ReviewPhase:
     async def _run_and_post_review(
         self,
         pr: PRInfo,
-        issue: GitHubIssue,
+        issue: Task,
         wt_path: Path,
         diff: str,
         worker_id: int,
@@ -339,7 +374,7 @@ class ReviewPhase:
     async def _handle_self_fix_re_review(
         self,
         pr: PRInfo,
-        issue: GitHubIssue,
+        issue: Task,
         wt_path: Path,
         result: ReviewResult,
         diff: str,
@@ -425,7 +460,7 @@ class ReviewPhase:
     async def _handle_approved_merge(
         self,
         pr: PRInfo,
-        issue: GitHubIssue,
+        issue: Task,
         result: ReviewResult,
         diff: str,
         worker_id: int,
@@ -442,10 +477,85 @@ class ReviewPhase:
             publish_fn=self._publish_review_status,
         )
 
+    async def _run_ci_wait_attempt(
+        self, pr: PRInfo, attempt: int, worker_id: int
+    ) -> tuple[bool, str]:
+        """Poll CI once. Return (passed, message)."""
+        await self._publish_review_status(pr, worker_id, "ci_wait")
+        return await self._prs.wait_for_ci(
+            pr.number,
+            self._config.ci_check_timeout,
+            self._config.ci_poll_interval,
+            self._stop_event,
+        )
+
+    async def _run_ci_fix_attempt(
+        self,
+        pr: PRInfo,
+        issue: Task,
+        wt_path: Path,
+        summary: str,
+        worker_id: int,
+        attempt: int,
+        *,
+        ci_logs: str = "",
+    ) -> bool:
+        """Run the CI fix agent. Return True if changes were made and pushed."""
+        await self._publish_review_status(pr, worker_id, "ci_fix")
+        fix_result = await self._reviewers.fix_ci(
+            pr,
+            issue,
+            wt_path,
+            summary,
+            attempt=attempt,
+            worker_id=worker_id,
+            ci_logs=ci_logs,
+        )
+        if not fix_result.fixes_made:
+            logger.info(
+                "CI fix agent made no changes for PR #%d — stopping retries",
+                pr.number,
+            )
+            return False
+        await self._prs.push_branch(wt_path, pr.branch)
+        return True
+
+    async def _escalate_ci_failure(
+        self,
+        pr: PRInfo,
+        issue: Task,
+        logs: str,
+        ci_fix_attempts: int,
+    ) -> None:
+        """Record state, record harness failure, escalate to HITL."""
+        self._state.record_ci_fix_rounds(ci_fix_attempts)
+        record_harness_failure(
+            self._harness_insights,
+            issue.id,
+            FailureCategory.CI_FAILURE,
+            f"CI failed after {ci_fix_attempts} fix attempt(s): {logs[:200]}",
+            pr_number=pr.number,
+            stage=PipelineStage.REVIEW,
+        )
+        cause = f"CI failed after {ci_fix_attempts} fix attempt(s)"
+        await self._escalate_to_hitl(
+            issue.id,
+            pr.number,
+            cause=cause,
+            origin_label=self._config.review_label[0],
+            comment=(
+                f"**CI failed** after {ci_fix_attempts} fix attempt(s).\n\n"
+                f"Last failure: {logs}\n\n"
+                f"PR not merged — escalating to human review."
+            ),
+            event_cause="ci_failed",
+            extra_event_data={"ci_fix_attempts": ci_fix_attempts},
+        )
+
     async def wait_and_fix_ci(
         self,
         pr: PRInfo,
-        issue: GitHubIssue,
+        issue: Task,
         wt_path: Path,
         result: ReviewResult,
         worker_id: int,
@@ -459,18 +569,11 @@ class ReviewPhase:
         summary = ""
 
         for attempt in range(max_attempts + 1):
-            await self._publish_review_status(pr, worker_id, "ci_wait")
-            passed, summary = await self._prs.wait_for_ci(
-                pr.number,
-                self._config.ci_check_timeout,
-                self._config.ci_poll_interval,
-                self._stop_event,
-            )
+            passed, summary = await self._run_ci_wait_attempt(pr, attempt, worker_id)
             if passed:
                 result.ci_passed = True
                 return True
 
-            # Last attempt — no more retries
             if attempt >= max_attempts:
                 break
 
@@ -490,55 +593,16 @@ class ReviewPhase:
                         exc_info=True,
                     )
 
-            # Run the CI fix agent
-            await self._publish_review_status(pr, worker_id, "ci_fix")
-            fix_result = await self._reviewers.fix_ci(
-                pr,
-                issue,
-                wt_path,
-                summary,
-                attempt=attempt + 1,
-                worker_id=worker_id,
-                ci_logs=ci_logs,
+            made_changes = await self._run_ci_fix_attempt(
+                pr, issue, wt_path, summary, worker_id, attempt + 1, ci_logs=ci_logs
             )
             result.ci_fix_attempts += 1
-
-            if not fix_result.fixes_made:
-                logger.info(
-                    "CI fix agent made no changes for PR #%d — stopping retries",
-                    pr.number,
-                )
+            if not made_changes:
                 break
 
-            # Push fixes and loop back to wait_for_ci
-            await self._prs.push_branch(wt_path, pr.branch)
-
-        # CI failed after all attempts — escalate to human
         result.ci_passed = False
-        self._state.record_ci_fix_rounds(result.ci_fix_attempts)
-        record_harness_failure(
-            self._harness_insights,
-            issue.number,
-            FailureCategory.CI_FAILURE,
-            f"CI failed after {result.ci_fix_attempts} fix attempt(s): {summary[:200]}",
-            stage=PipelineStage.REVIEW,
-            pr_number=pr.number,
-        )
         await self._publish_review_status(pr, worker_id, "escalating")
-        cause = f"CI failed after {result.ci_fix_attempts} fix attempt(s)"
-        await self._escalate_to_hitl(
-            issue.number,
-            pr.number,
-            cause=cause,
-            origin_label=self._config.review_label[0],
-            comment=(
-                f"**CI failed** after {result.ci_fix_attempts} fix attempt(s).\n\n"
-                f"Last failure: {summary}\n\n"
-                f"PR not merged — escalating to human review."
-            ),
-            event_cause="ci_failed",
-            extra_event_data={"ci_fix_attempts": result.ci_fix_attempts},
-        )
+        await self._escalate_ci_failure(pr, issue, summary, result.ci_fix_attempts)
         return False
 
     async def _record_review_insight(self, result: ReviewResult) -> None:
@@ -569,7 +633,7 @@ class ReviewPhase:
                 desc = CATEGORY_DESCRIPTIONS.get(category, category)
                 title = f"[Review Insight] Recurring feedback: {desc}"
                 labels = self._config.improve_label[:1] + self._config.hitl_label[:1]
-                issue_num = await self._prs.create_issue(title, body, labels)
+                issue_num = await self._transitioner.create_task(title, body, labels)
                 if issue_num:
                     self._state.set_hitl_origin(
                         issue_num, self._config.improve_label[0]
@@ -608,11 +672,7 @@ class ReviewPhase:
         self._state.set_hitl_cause(issue_number, cause)
         self._state.record_hitl_escalation()
 
-        await self._prs.swap_pipeline_labels(
-            issue_number,
-            self._config.hitl_label[0],
-            pr_number=pr_number,
-        )
+        await self._transitioner.transition(issue_number, "hitl", pr_number=pr_number)
 
         if post_on_pr:
             await self._prs.post_pr_comment(pr_number, comment)
@@ -651,7 +711,7 @@ class ReviewPhase:
     async def _check_adversarial_threshold(
         self,
         pr: PRInfo,
-        issue: GitHubIssue,
+        issue: Task,
         wt_path: Path,
         diff: str,
         result: ReviewResult,
@@ -724,13 +784,11 @@ class ReviewPhase:
             self._state.set_review_feedback(pr.issue_number, result.summary)
 
             # Swap labels: review → ready (issue and PR)
-            await self._prs.swap_pipeline_labels(
-                pr.issue_number,
-                self._config.ready_label[0],
-                pr_number=pr.number,
+            await self._transitioner.transition(
+                pr.issue_number, "ready", pr_number=pr.number
             )
 
-            await self._prs.post_comment(
+            await self._transitioner.post_comment(
                 pr.issue_number,
                 f"**Review requested changes** (attempt {new_count}/{max_attempts}). "
                 f"Re-queuing for implementation with feedback.",
@@ -775,6 +833,24 @@ class ReviewPhase:
                 event_cause="review_fix_cap_exceeded",
             )
             return False  # Destroy worktree
+
+    def _record_harness_failure(
+        self,
+        issue_number: int,
+        category: FailureCategory,
+        details: str,
+        *,
+        pr_number: int = 0,
+    ) -> None:
+        """Delegate to :func:`phase_utils.record_harness_failure` (backward compat)."""
+        record_harness_failure(
+            self._harness_insights,
+            issue_number,
+            category,
+            details,
+            pr_number=pr_number,
+            stage=PipelineStage.REVIEW,
+        )
 
     # Delegate properties for backward compatibility in tests
     @property

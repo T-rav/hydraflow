@@ -192,12 +192,7 @@ class VerificationJudge:
 
     def _read_criteria_file(self, issue_number: int) -> str | None:
         """Read the verification criteria file for the given issue."""
-        path = (
-            self._config.repo_root
-            / ".hydraflow"
-            / "verification"
-            / f"issue-{issue_number}.md"
-        )
+        path = self._config.data_path("verification", f"issue-{issue_number}.md")
         if not path.exists():
             return None
         try:
@@ -460,12 +455,7 @@ Diff excerpt:
 
     def _save_judge_report(self, issue_number: int, verdict: JudgeVerdict) -> None:
         """Write the judge report to ``.hydraflow/verification/issue-N-judge.md``."""
-        path = (
-            self._config.repo_root
-            / ".hydraflow"
-            / "verification"
-            / f"issue-{issue_number}-judge.md"
-        )
+        path = self._config.data_path("verification", f"issue-{issue_number}-judge.md")
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(self._format_judge_report(verdict))
@@ -523,12 +513,7 @@ Diff excerpt:
         self, issue_number: int, refined_instructions: str
     ) -> None:
         """Replace the instructions section in the verification file with refined text."""
-        path = (
-            self._config.repo_root
-            / ".hydraflow"
-            / "verification"
-            / f"issue-{issue_number}.md"
-        )
+        path = self._config.data_path("verification", f"issue-{issue_number}.md")
         if not path.exists():
             return
 

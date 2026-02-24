@@ -15,12 +15,11 @@ from events import EventBus, EventType
 from models import (
     CriterionResult,
     CriterionVerdict,
-    GitHubIssue,
     InstructionsQuality,
     JudgeVerdict,
     PRInfo,
 )
-from tests.conftest import ReviewResultFactory
+from tests.conftest import ReviewResultFactory, TaskFactory
 from tests.helpers import ConfigFactory
 from verification_judge import VerificationJudge
 
@@ -1161,11 +1160,8 @@ class TestReviewPhaseWiring:
             branch="agent/issue-42",
             url="https://github.com/test/repo/pull/101",
         )
-        issue = GitHubIssue(
-            number=42,
-            title="Fix bug",
-            body="Details",
-            labels=["ready"],
+        issue = TaskFactory.create(
+            id=42, title="Fix bug", body="Details", tags=["ready"]
         )
 
         await phase.review_prs([pr], [issue])
@@ -1229,11 +1225,8 @@ class TestReviewPhaseWiring:
             branch="agent/issue-42",
             url="https://github.com/test/repo/pull/101",
         )
-        issue = GitHubIssue(
-            number=42,
-            title="Fix bug",
-            body="Details",
-            labels=["ready"],
+        issue = TaskFactory.create(
+            id=42, title="Fix bug", body="Details", tags=["ready"]
         )
 
         results = await phase.review_prs([pr], [issue])

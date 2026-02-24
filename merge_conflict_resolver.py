@@ -11,9 +11,9 @@ from events import EventBus
 from models import (
     ConflictResolutionResult,
     EscalateFn,
-    GitHubIssue,
     PRInfo,
     PublishFn,
+    Task,
     WorkerStatus,
 )
 from phase_utils import publish_review_status, safe_file_memory_suggestion
@@ -49,7 +49,7 @@ class MergeConflictResolver:
     async def merge_with_main(
         self,
         pr: PRInfo,
-        issue: GitHubIssue,
+        issue: Task,
         wt_path: Path,
         worker_id: int,
         escalate_fn: EscalateFn,
@@ -106,7 +106,7 @@ class MergeConflictResolver:
     async def resolve_merge_conflicts(
         self,
         pr: PRInfo,
-        issue: GitHubIssue,
+        issue: Task,
         wt_path: Path,
         worker_id: int | None = None,
         source: str = "merge_conflict",
@@ -158,18 +158,18 @@ class MergeConflictResolver:
 
             try:
                 prompt = build_conflict_prompt(
-                    issue.url, pr.url, last_error, attempt, config=self._config
+                    issue.source_url, pr.url, last_error, attempt, config=self._config
                 )
                 cmd = self._agents._build_command(wt_path)
                 transcript = await self._agents._execute(
                     cmd,
                     prompt,
                     wt_path,
-                    {"issue": issue.number, "source": source},
+                    {"issue": issue.id, "source": source},
                 )
 
                 self.save_conflict_transcript(
-                    pr.number, issue.number, attempt, transcript, source=source
+                    pr.number, issue.id, attempt, transcript, source=source
                 )
 
                 await safe_file_memory_suggestion(
@@ -186,7 +186,7 @@ class MergeConflictResolver:
                 )
                 if success:
                     await self._maybe_summarize_conflict(
-                        transcript, issue.number, pr.number
+                        transcript, issue.id, pr.number
                     )
                     return ConflictResolutionResult(success=True, used_rebuild=False)
 
@@ -201,7 +201,7 @@ class MergeConflictResolver:
                 # Summarize final failed attempt
                 if attempt == max_attempts:
                     await self._maybe_summarize_conflict(
-                        transcript, issue.number, pr.number
+                        transcript, issue.id, pr.number
                     )
             except Exception as exc:
                 logger.error(
@@ -232,7 +232,7 @@ class MergeConflictResolver:
     async def fresh_branch_rebuild(
         self,
         pr: PRInfo,
-        issue: GitHubIssue,
+        issue: Task,
         worker_id: int | None = None,
         source: str = "fresh_rebuild",
     ) -> bool:
@@ -278,9 +278,9 @@ class MergeConflictResolver:
 
         try:
             prompt = build_rebuild_prompt(
-                issue.url,
+                issue.source_url,
                 pr.url,
-                issue.number,
+                issue.id,
                 pr_diff,
                 config=self._config,
             )
@@ -289,11 +289,11 @@ class MergeConflictResolver:
                 cmd,
                 prompt,
                 new_wt,
-                {"issue": issue.number, "source": source},
+                {"issue": issue.id, "source": source},
             )
 
             self.save_conflict_transcript(
-                pr.number, issue.number, 0, transcript, source=source
+                pr.number, issue.id, 0, transcript, source=source
             )
 
             await safe_file_memory_suggestion(
@@ -307,9 +307,7 @@ class MergeConflictResolver:
 
             success, error_msg = await self._agents._verify_result(new_wt, pr.branch)
             if success:
-                await self._maybe_summarize_conflict(
-                    transcript, issue.number, pr.number
-                )
+                await self._maybe_summarize_conflict(transcript, issue.id, pr.number)
                 logger.info("Fresh branch rebuild succeeded for PR #%d", pr.number)
                 return True
 

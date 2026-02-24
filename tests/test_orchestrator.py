@@ -24,11 +24,12 @@ from models import (
     PRInfo,
     ReviewResult,
     ReviewVerdict,
+    Task,
     WorkerResult,
 )
 from orchestrator import HydraFlowOrchestrator
 from subprocess_util import AuthenticationError
-from tests.conftest import IssueFactory
+from tests.conftest import IssueFactory, TaskFactory
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -375,7 +376,7 @@ class TestRunLoop:
             orch._stop_event.set()
             return []
 
-        async def fake_implement() -> tuple[list[WorkerResult], list[GitHubIssue]]:
+        async def fake_implement() -> tuple[list[WorkerResult], list[Task]]:
             started.append("implement")
             await asyncio.sleep(0)
             return [], []
@@ -686,7 +687,7 @@ class TestStopMechanism:
         _mock_fetcher_noop(orch)
         observed_running = False
 
-        async def spy_implement() -> tuple[list[WorkerResult], list[GitHubIssue]]:
+        async def spy_implement() -> tuple[list[WorkerResult], list[Task]]:
             nonlocal observed_running
             observed_running = orch.running
             orch._stop_event.set()
@@ -727,11 +728,11 @@ class TestStopMechanism:
 
         call_count = 0
 
-        async def counting_implement() -> tuple[list[WorkerResult], list[GitHubIssue]]:
+        async def counting_implement() -> tuple[list[WorkerResult], list[Task]]:
             nonlocal call_count
             call_count += 1
             await orch.request_stop()
-            return [make_worker_result(42)], [IssueFactory.create(number=42)]
+            return [make_worker_result(42)], [TaskFactory.create(id=42)]
 
         orch._planner_phase.plan_issues = AsyncMock(return_value=[])  # type: ignore[method-assign]
         orch._implementer.run_batch = counting_implement  # type: ignore[method-assign]
@@ -772,9 +773,9 @@ class TestStopMechanism:
         orch._prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
         _mock_fetcher_noop(orch)
 
-        async def stop_on_implement() -> tuple[list[WorkerResult], list[GitHubIssue]]:
+        async def stop_on_implement() -> tuple[list[WorkerResult], list[Task]]:
             await orch.request_stop()
-            return [make_worker_result(42)], [IssueFactory.create(number=42)]
+            return [make_worker_result(42)], [TaskFactory.create(id=42)]
 
         orch._planner_phase.plan_issues = AsyncMock(return_value=[])  # type: ignore[method-assign]
         orch._implementer.run_batch = stop_on_implement  # type: ignore[method-assign]
@@ -1005,7 +1006,7 @@ class TestConcurrentLoops:
             orch._stop_event.set()
             return []
 
-        async def fake_implement() -> tuple[list[WorkerResult], list[GitHubIssue]]:
+        async def fake_implement() -> tuple[list[WorkerResult], list[Task]]:
             execution_order.append("implement_start")
             await asyncio.sleep(0)
             execution_order.append("implement_end")
@@ -1280,7 +1281,7 @@ class TestLoopExceptionIsolation:
         orch = HydraFlowOrchestrator(config)
         call_count = 0
 
-        async def failing_batch() -> tuple[list[WorkerResult], list[GitHubIssue]]:
+        async def failing_batch() -> tuple[list[WorkerResult], list[Task]]:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -1302,7 +1303,7 @@ class TestLoopExceptionIsolation:
         orch = HydraFlowOrchestrator(config)
         call_count = 0
 
-        def failing_get_reviewable(_max_count: int) -> list[GitHubIssue]:
+        def failing_get_reviewable(_max_count: int) -> list[Task]:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -1348,7 +1349,7 @@ class TestLoopExceptionIsolation:
         orch = HydraFlowOrchestrator(config)
         call_count = 0
 
-        async def failing_batch() -> tuple[list[WorkerResult], list[GitHubIssue]]:
+        async def failing_batch() -> tuple[list[WorkerResult], list[Task]]:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -1372,7 +1373,7 @@ class TestLoopExceptionIsolation:
         orch = HydraFlowOrchestrator(config)
         call_count = 0
 
-        def failing_get_reviewable(_max_count: int) -> list[GitHubIssue]:
+        def failing_get_reviewable(_max_count: int) -> list[Task]:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -1395,7 +1396,7 @@ class TestLoopExceptionIsolation:
         """CancelledError should NOT be caught — it propagates for clean shutdown."""
         orch = HydraFlowOrchestrator(config)
 
-        async def cancelling_batch() -> tuple[list[WorkerResult], list[GitHubIssue]]:
+        async def cancelling_batch() -> tuple[list[WorkerResult], list[Task]]:
             raise asyncio.CancelledError()
 
         orch._implementer.run_batch = cancelling_batch  # type: ignore[method-assign]
@@ -1442,7 +1443,7 @@ class TestSupervisorLoops:
 
         implement_calls = 0
 
-        async def failing_implement() -> tuple[list[WorkerResult], list[GitHubIssue]]:
+        async def failing_implement() -> tuple[list[WorkerResult], list[Task]]:
             nonlocal implement_calls
             implement_calls += 1
             if implement_calls == 1:
@@ -1554,7 +1555,7 @@ class TestStoreBasedActiveIssueTracking:
     ) -> None:
         """_review_loop should pass store active issues to fetch_reviewable_prs."""
         orch = HydraFlowOrchestrator(config)
-        review_issue = IssueFactory.create(number=42)
+        review_issue = TaskFactory.create(id=42)
         captured_active: set[int] | None = None
 
         orch._store.get_reviewable = lambda _max_count: [review_issue]  # type: ignore[method-assign]
@@ -1777,9 +1778,7 @@ class TestAuthFailure:
         orch = HydraFlowOrchestrator(config)
         orch._prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
 
-        async def auth_failing_implement() -> tuple[
-            list[WorkerResult], list[GitHubIssue]
-        ]:
+        async def auth_failing_implement() -> tuple[list[WorkerResult], list[Task]]:
             raise AuthenticationError("401 Unauthorized")
 
         orch._triager.triage_issues = AsyncMock()  # type: ignore[method-assign]
@@ -1907,9 +1906,9 @@ class TestMemorySuggestionFiling:
         orch = HydraFlowOrchestrator(config)
         result = make_worker_result(issue_number=42, transcript=MEMORY_TRANSCRIPT)
 
-        async def batch_and_stop() -> tuple[list[WorkerResult], list[GitHubIssue]]:
+        async def batch_and_stop() -> tuple[list[WorkerResult], list[Task]]:
             orch._stop_event.set()
-            return [result], [IssueFactory.create(number=42)]
+            return [result], [TaskFactory.create(id=42)]
 
         orch._implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
 
@@ -1931,9 +1930,9 @@ class TestMemorySuggestionFiling:
         orch = HydraFlowOrchestrator(config)
         result = make_worker_result(issue_number=42, transcript="")
 
-        async def batch_and_stop() -> tuple[list[WorkerResult], list[GitHubIssue]]:
+        async def batch_and_stop() -> tuple[list[WorkerResult], list[Task]]:
             orch._stop_event.set()
-            return [result], [IssueFactory.create(number=42)]
+            return [result], [TaskFactory.create(id=42)]
 
         orch._implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
 
@@ -1953,12 +1952,12 @@ class TestMemorySuggestionFiling:
         r2 = make_worker_result(issue_number=20, transcript="")
         r3 = make_worker_result(issue_number=30, transcript=MEMORY_TRANSCRIPT)
 
-        async def batch_and_stop() -> tuple[list[WorkerResult], list[GitHubIssue]]:
+        async def batch_and_stop() -> tuple[list[WorkerResult], list[Task]]:
             orch._stop_event.set()
             return [r1, r2, r3], [
-                IssueFactory.create(number=10),
-                IssueFactory.create(number=20),
-                IssueFactory.create(number=30),
+                TaskFactory.create(id=10),
+                TaskFactory.create(id=20),
+                TaskFactory.create(id=30),
             ]
 
         orch._implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
@@ -1980,6 +1979,7 @@ class TestMemorySuggestionFiling:
     ) -> None:
         """Reviewer transcripts with MEMORY_SUGGESTION blocks trigger filing."""
         orch = HydraFlowOrchestrator(config)
+        review_task = TaskFactory.create(id=42)
         review_issue = IssueFactory.create(number=42)
         pr = make_pr_info(number=101, issue_number=42)
         review_result = make_review_result(
@@ -1995,11 +1995,11 @@ class TestMemorySuggestionFiling:
 
         call_count = 0
 
-        def get_reviewable_once(_max_count: int) -> list[GitHubIssue]:
+        def get_reviewable_once(_max_count: int) -> list[Task]:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                return [review_issue]
+                return [review_task]
             orch._stop_event.set()
             return []
 
@@ -2021,13 +2021,13 @@ class TestMemorySuggestionFiling:
     ) -> None:
         """Reviewer results with empty transcripts should not trigger filing."""
         orch = HydraFlowOrchestrator(config)
+        review_task = TaskFactory.create(id=42)
         review_issue = IssueFactory.create(number=42)
         pr = make_pr_info(number=101, issue_number=42)
         review_result = make_review_result(
             pr_number=101, issue_number=42, transcript=""
         )
 
-        orch._store.get_reviewable = lambda _max_count: [review_issue]  # type: ignore[method-assign]
         orch._store.get_active_issues = lambda: {42: "review"}  # type: ignore[method-assign]
         orch._fetcher.fetch_reviewable_prs = AsyncMock(  # type: ignore[method-assign]
             return_value=([pr], [review_issue])
@@ -2037,11 +2037,11 @@ class TestMemorySuggestionFiling:
 
         call_count = 0
 
-        def get_reviewable_once(_max_count: int) -> list[GitHubIssue]:
+        def get_reviewable_once(_max_count: int) -> list[Task]:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                return [review_issue]
+                return [review_task]
             orch._stop_event.set()
             return []
 
@@ -2059,6 +2059,8 @@ class TestMemorySuggestionFiling:
     ) -> None:
         """Multiple reviewer results: only those with transcripts trigger filing."""
         orch = HydraFlowOrchestrator(config)
+        task_a = TaskFactory.create(id=10)
+        task_b = TaskFactory.create(id=20)
         issue_a = IssueFactory.create(number=10)
         issue_b = IssueFactory.create(number=20)
         pr_a = make_pr_info(number=201, issue_number=10)
@@ -2068,7 +2070,6 @@ class TestMemorySuggestionFiling:
         )
         r2 = make_review_result(pr_number=202, issue_number=20, transcript="")
 
-        orch._store.get_reviewable = lambda _max_count: [issue_a, issue_b]  # type: ignore[method-assign]
         orch._store.get_active_issues = lambda: {10: "review", 20: "review"}  # type: ignore[method-assign]
         orch._fetcher.fetch_reviewable_prs = AsyncMock(  # type: ignore[method-assign]
             return_value=([pr_a, pr_b], [issue_a, issue_b])
@@ -2078,11 +2079,11 @@ class TestMemorySuggestionFiling:
 
         call_count = 0
 
-        def get_reviewable_once(_max_count: int) -> list[GitHubIssue]:
+        def get_reviewable_once(_max_count: int) -> list[Task]:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                return [issue_a, issue_b]
+                return [task_a, task_b]
             orch._stop_event.set()
             return []
 
@@ -2107,11 +2108,11 @@ class TestMemorySuggestionFiling:
         r1 = make_worker_result(issue_number=10, transcript=MEMORY_TRANSCRIPT)
         r2 = make_worker_result(issue_number=20, transcript=MEMORY_TRANSCRIPT)
 
-        async def batch_and_stop() -> tuple[list[WorkerResult], list[GitHubIssue]]:
+        async def batch_and_stop() -> tuple[list[WorkerResult], list[Task]]:
             orch._stop_event.set()
             return [r1, r2], [
-                IssueFactory.create(number=10),
-                IssueFactory.create(number=20),
+                TaskFactory.create(id=10),
+                TaskFactory.create(id=20),
             ]
 
         orch._implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
@@ -2130,6 +2131,7 @@ class TestMemorySuggestionFiling:
     ) -> None:
         """Memory filing failure in reviewer must not crash the loop."""
         orch = HydraFlowOrchestrator(config)
+        task_a = TaskFactory.create(id=10)
         issue_a = IssueFactory.create(number=10)
         pr_a = make_pr_info(number=201, issue_number=10)
         r1 = make_review_result(
@@ -2145,11 +2147,11 @@ class TestMemorySuggestionFiling:
 
         call_count = 0
 
-        def get_reviewable_once(_max_count: int) -> list[GitHubIssue]:
+        def get_reviewable_once(_max_count: int) -> list[Task]:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                return [issue_a]
+                return [task_a]
             orch._stop_event.set()
             return []
 
@@ -2182,9 +2184,9 @@ class TestTranscriptSummaryFiling:
         orch = HydraFlowOrchestrator(config)
         result = make_worker_result(issue_number=42, transcript=SUMMARY_TRANSCRIPT)
 
-        async def batch_and_stop() -> tuple[list[WorkerResult], list[GitHubIssue]]:
+        async def batch_and_stop() -> tuple[list[WorkerResult], list[Task]]:
             orch._stop_event.set()
-            return [result], [IssueFactory.create(number=42)]
+            return [result], [TaskFactory.create(id=42)]
 
         orch._implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
         orch._summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
@@ -2212,9 +2214,9 @@ class TestTranscriptSummaryFiling:
             issue_number=42, transcript=SUMMARY_TRANSCRIPT, success=False
         )
 
-        async def batch_and_stop() -> tuple[list[WorkerResult], list[GitHubIssue]]:
+        async def batch_and_stop() -> tuple[list[WorkerResult], list[Task]]:
             orch._stop_event.set()
-            return [result], [IssueFactory.create(number=42)]
+            return [result], [TaskFactory.create(id=42)]
 
         orch._implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
         orch._summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
@@ -2238,9 +2240,9 @@ class TestTranscriptSummaryFiling:
         orch = HydraFlowOrchestrator(config)
         result = make_worker_result(issue_number=42, transcript="")
 
-        async def batch_and_stop() -> tuple[list[WorkerResult], list[GitHubIssue]]:
+        async def batch_and_stop() -> tuple[list[WorkerResult], list[Task]]:
             orch._stop_event.set()
-            return [result], [IssueFactory.create(number=42)]
+            return [result], [TaskFactory.create(id=42)]
 
         orch._implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
         orch._summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
@@ -2259,6 +2261,7 @@ class TestTranscriptSummaryFiling:
     ) -> None:
         """Reviewer transcripts post summary on the original issue (not the PR)."""
         orch = HydraFlowOrchestrator(config)
+        review_task = TaskFactory.create(id=42)
         review_issue = IssueFactory.create(number=42)
         pr = make_pr_info(number=101, issue_number=42)
         review_result = make_review_result(
@@ -2275,11 +2278,11 @@ class TestTranscriptSummaryFiling:
 
         call_count = 0
 
-        def get_reviewable_once(_max_count: int) -> list[GitHubIssue]:
+        def get_reviewable_once(_max_count: int) -> list[Task]:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                return [review_issue]
+                return [review_task]
             orch._stop_event.set()
             return []
 
@@ -2305,6 +2308,7 @@ class TestTranscriptSummaryFiling:
     ) -> None:
         """Merged review results post summary with status='success'."""
         orch = HydraFlowOrchestrator(config)
+        review_task = TaskFactory.create(id=42)
         review_issue = IssueFactory.create(number=42)
         pr = make_pr_info(number=101, issue_number=42)
         review_result = ReviewResult(
@@ -2326,11 +2330,11 @@ class TestTranscriptSummaryFiling:
 
         call_count = 0
 
-        def get_reviewable_once(_max_count: int) -> list[GitHubIssue]:
+        def get_reviewable_once(_max_count: int) -> list[Task]:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                return [review_issue]
+                return [review_task]
             orch._stop_event.set()
             return []
 
@@ -2353,6 +2357,7 @@ class TestTranscriptSummaryFiling:
     ) -> None:
         """CI-failed review results post summary with status='failed'."""
         orch = HydraFlowOrchestrator(config)
+        review_task = TaskFactory.create(id=42)
         review_issue = IssueFactory.create(number=42)
         pr = make_pr_info(number=101, issue_number=42)
         review_result = ReviewResult(
@@ -2375,11 +2380,11 @@ class TestTranscriptSummaryFiling:
 
         call_count = 0
 
-        def get_reviewable_once(_max_count: int) -> list[GitHubIssue]:
+        def get_reviewable_once(_max_count: int) -> list[Task]:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                return [review_issue]
+                return [review_task]
             orch._stop_event.set()
             return []
 
@@ -2402,6 +2407,7 @@ class TestTranscriptSummaryFiling:
     ) -> None:
         """Review results with issue_number=0 skip transcript summary posting."""
         orch = HydraFlowOrchestrator(config)
+        review_task = TaskFactory.create(id=0)
         review_issue = IssueFactory.create(number=0)
         pr = make_pr_info(number=101, issue_number=0)
         review_result = ReviewResult(
@@ -2423,11 +2429,11 @@ class TestTranscriptSummaryFiling:
 
         call_count = 0
 
-        def get_reviewable_once(_max_count: int) -> list[GitHubIssue]:
+        def get_reviewable_once(_max_count: int) -> list[Task]:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                return [review_issue]
+                return [review_task]
             orch._stop_event.set()
             return []
 
@@ -2450,11 +2456,11 @@ class TestTranscriptSummaryFiling:
         r1 = make_worker_result(issue_number=10, transcript=SUMMARY_TRANSCRIPT)
         r2 = make_worker_result(issue_number=20, transcript=SUMMARY_TRANSCRIPT)
 
-        async def batch_and_stop() -> tuple[list[WorkerResult], list[GitHubIssue]]:
+        async def batch_and_stop() -> tuple[list[WorkerResult], list[Task]]:
             orch._stop_event.set()
             return [r1, r2], [
-                IssueFactory.create(number=10),
-                IssueFactory.create(number=20),
+                TaskFactory.create(id=10),
+                TaskFactory.create(id=20),
             ]
 
         orch._implementer.run_batch = batch_and_stop  # type: ignore[method-assign]

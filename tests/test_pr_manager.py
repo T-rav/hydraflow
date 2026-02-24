@@ -3494,6 +3494,44 @@ class TestListHitlItemsExceptionHandling:
 
 
 # ---------------------------------------------------------------------------
+# TaskTransitioner protocol compliance
+# ---------------------------------------------------------------------------
+
+
+class TestTaskTransitionerProtocol:
+    """PRManager satisfies the TaskTransitioner protocol."""
+
+    def _make_mgr(self):
+        from unittest.mock import MagicMock
+
+        from pr_manager import PRManager
+        from tests.helpers import ConfigFactory
+
+        return PRManager(ConfigFactory.create(), event_bus=MagicMock())
+
+    def test_pr_manager_is_task_transitioner(self) -> None:
+        """PRManager should be recognised as TaskTransitioner at runtime."""
+        from task_source import TaskTransitioner
+
+        assert isinstance(self._make_mgr(), TaskTransitioner)
+
+    def test_pr_manager_has_transition_method(self) -> None:
+        mgr = self._make_mgr()
+        assert hasattr(mgr, "transition")
+        assert callable(mgr.transition)
+
+    def test_pr_manager_has_close_task_method(self) -> None:
+        mgr = self._make_mgr()
+        assert hasattr(mgr, "close_task")
+        assert callable(mgr.close_task)
+
+    def test_pr_manager_has_create_task_method(self) -> None:
+        mgr = self._make_mgr()
+        assert hasattr(mgr, "create_task")
+        assert callable(mgr.create_task)
+
+
+# ---------------------------------------------------------------------------
 # get_pr_head_sha (issue #853)
 # ---------------------------------------------------------------------------
 

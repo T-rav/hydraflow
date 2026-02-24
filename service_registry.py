@@ -17,7 +17,7 @@ from harness_insights import HarnessInsightStore
 from hitl_phase import HITLPhase
 from hitl_runner import HITLRunner
 from implement_phase import ImplementPhase
-from issue_fetcher import IssueFetcher
+from issue_fetcher import GitHubTaskFetcher, IssueFetcher
 from issue_store import IssueStore
 from manifest import ProjectManifestManager
 from manifest_refresh_loop import ManifestRefreshLoop
@@ -127,10 +127,10 @@ def build_services(
 
     # Data layer
     fetcher = IssueFetcher(config)
-    store = IssueStore(config, fetcher, event_bus)
+    store = IssueStore(config, GitHubTaskFetcher(fetcher), event_bus)
 
     # Harness insight store (shared across phases)
-    harness_insights = HarnessInsightStore(config.repo_root / ".hydraflow" / "memory")
+    harness_insights = HarnessInsightStore(config.data_path("memory"))
 
     # Phase coordinators
     triager = TriagePhase(config, state, store, triage, prs, event_bus, stop_event)

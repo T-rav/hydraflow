@@ -19,19 +19,19 @@ from events import EventType
 from models import (
     CriterionResult,
     CriterionVerdict,
-    GitHubIssue,
     JudgeResult,
     JudgeVerdict,
     PRInfo,
     ReviewResult,
     ReviewVerdict,
+    Task,
     VerificationCriterion,
 )
 from review_phase import ReviewPhase
 from tests.conftest import (
-    IssueFactory,
     PRInfoFactory,
     ReviewResultFactory,
+    TaskFactory,
 )
 from tests.helpers import make_review_phase
 
@@ -49,7 +49,7 @@ class TestLifecycleMetricRecording:
     ) -> None:
         """Approving a PR should record an approval verdict in state."""
         phase = make_review_phase(config, default_mocks=True)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         await phase.review_prs([pr], [issue])
@@ -71,7 +71,7 @@ class TestLifecycleMetricRecording:
             fixes_made=False,
         )
         phase = make_review_phase(config, default_mocks=True, review_result=result)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         await phase.review_prs([pr], [issue])
@@ -91,7 +91,7 @@ class TestLifecycleMetricRecording:
             fixes_made=True,
         )
         phase = make_review_phase(config, default_mocks=True, review_result=result)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         await phase.review_prs([pr], [issue])
@@ -110,7 +110,7 @@ class TestLifecycleMetricRecording:
             duration_seconds=45.5,
         )
         phase = make_review_phase(config, default_mocks=True, review_result=result)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         await phase.review_prs([pr], [issue])
@@ -131,7 +131,7 @@ class TestLifecycleMetricRecording:
             duration_seconds=0.0,
         )
         phase = make_review_phase(config, default_mocks=True, review_result=result)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         await phase.review_prs([pr], [issue])
@@ -147,7 +147,7 @@ class TestLifecycleMetricRecording:
         mock_agents = AsyncMock()
         mock_agents._verify_result = AsyncMock(return_value=(False, ""))
         phase = make_review_phase(config, agents=mock_agents, default_mocks=True)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         phase._prs.remove_pr_label = AsyncMock()
@@ -167,7 +167,7 @@ class TestLifecycleMetricRecording:
     ) -> None:
         """PR merge failure should increment the hitl counter."""
         phase = make_review_phase(config, default_mocks=True)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         phase._prs.merge_pr = AsyncMock(return_value=False)
@@ -194,7 +194,7 @@ class TestLifecycleMetricRecording:
             state_file=config.state_file,
         )
         phase = make_review_phase(cfg, default_mocks=True)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         fix_result = ReviewResult(
@@ -227,7 +227,7 @@ class TestLifecycleMetricRecording:
             state_file=config.state_file,
         )
         phase = make_review_phase(cfg, default_mocks=True)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         ci_results = [
@@ -277,7 +277,7 @@ class TestRetrospectiveIntegration:
         phase._retrospective = mock_retro
         phase._post_merge._retrospective = mock_retro
 
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         await phase.review_prs([pr], [issue])
@@ -298,7 +298,7 @@ class TestRetrospectiveIntegration:
         phase._retrospective = mock_retro
         phase._post_merge._retrospective = mock_retro
 
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         phase._prs.merge_pr = AsyncMock(return_value=False)
@@ -321,7 +321,7 @@ class TestRetrospectiveIntegration:
         phase._retrospective = mock_retro
         phase._post_merge._retrospective = mock_retro
 
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         # Should not raise despite retro failure
@@ -337,7 +337,7 @@ class TestRetrospectiveIntegration:
         phase = make_review_phase(config, default_mocks=True)
         # phase._retrospective and phase._post_merge._retrospective are None by default
 
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         results = await phase.review_prs([pr], [issue])
@@ -359,7 +359,7 @@ class TestReviewInsightIntegration:
     ) -> None:
         """After a review, a record should be appended to the insight store."""
         phase = make_review_phase(config, default_mocks=True)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         await phase.review_prs([pr], [issue])
@@ -378,7 +378,7 @@ class TestReviewInsightIntegration:
         from review_insights import ReviewInsightStore, ReviewRecord
 
         phase = make_review_phase(config, default_mocks=True)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         # Pre-populate the insight store with records near threshold
@@ -410,8 +410,8 @@ class TestReviewInsightIntegration:
         await phase.review_prs([pr], [issue])
 
         # Should have filed an improvement issue
-        phase._prs.create_issue.assert_awaited_once()
-        call_args = phase._prs.create_issue.call_args
+        phase._prs.create_task.assert_awaited_once()
+        call_args = phase._prs.create_task.call_args
         assert "[Review Insight]" in call_args.args[0]
         assert "hydraflow-improve" in call_args.args[2]
         assert "hydraflow-hitl" in call_args.args[2]
@@ -433,7 +433,7 @@ class TestReviewInsightIntegration:
         phase = make_review_phase(
             config, default_mocks=True, review_result=review_result
         )
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         # Pre-populate and mark as proposed
@@ -457,7 +457,7 @@ class TestReviewInsightIntegration:
         await phase.review_prs([pr], [issue])
 
         # Should NOT have filed an improvement issue
-        phase._prs.create_issue.assert_not_awaited()
+        phase._prs.create_task.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_review_insight_failure_does_not_crash_review(
@@ -467,7 +467,7 @@ class TestReviewInsightIntegration:
         from unittest.mock import patch
 
         phase = make_review_phase(config, default_mocks=True)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         # Make the insight store raise
@@ -495,7 +495,7 @@ class TestGranularReviewStatusEvents:
     ) -> None:
         """A 'merge_main' event should be published before merging main."""
         phase = make_review_phase(config, default_mocks=True, event_bus=event_bus)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         await phase.review_prs([pr], [issue])
@@ -521,7 +521,7 @@ class TestGranularReviewStatusEvents:
         phase = make_review_phase(
             config, agents=mock_agents, default_mocks=True, event_bus=event_bus
         )
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         phase._worktrees.merge_main = AsyncMock(return_value=False)
@@ -550,7 +550,7 @@ class TestGranularReviewStatusEvents:
         phase = make_review_phase(
             config, agents=mock_agents, default_mocks=True, event_bus=event_bus
         )
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         phase._prs.remove_pr_label = AsyncMock()
@@ -577,7 +577,7 @@ class TestGranularReviewStatusEvents:
     ) -> None:
         """A 'merging' event should be published before merging the PR."""
         phase = make_review_phase(config, default_mocks=True, event_bus=event_bus)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         await phase.review_prs([pr], [issue])
@@ -597,7 +597,7 @@ class TestGranularReviewStatusEvents:
     ) -> None:
         """An 'escalating' event should be published when PR merge fails."""
         phase = make_review_phase(config, default_mocks=True, event_bus=event_bus)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         phase._prs.merge_pr = AsyncMock(return_value=False)
@@ -630,7 +630,7 @@ class TestGranularReviewStatusEvents:
             state_file=config.state_file,
         )
         phase = make_review_phase(cfg, default_mocks=True, event_bus=event_bus)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         phase._prs.wait_for_ci = AsyncMock(return_value=(True, "All checks passed"))
@@ -660,7 +660,7 @@ class TestGranularReviewStatusEvents:
             state_file=config.state_file,
         )
         phase = make_review_phase(cfg, default_mocks=True, event_bus=event_bus)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         ci_results = [
@@ -710,7 +710,7 @@ class TestGranularReviewStatusEvents:
             state_file=config.state_file,
         )
         phase = make_review_phase(cfg, default_mocks=True, event_bus=event_bus)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         fix_result = ReviewResult(
@@ -741,7 +741,7 @@ class TestGranularReviewStatusEvents:
     ) -> None:
         """Events should be emitted in order: start -> merge_main -> reviewing -> merging."""
         phase = make_review_phase(config, default_mocks=True, event_bus=event_bus)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         await phase.review_prs([pr], [issue])
@@ -802,12 +802,10 @@ class TestSelfFixReReview:
     updated code and upgrade the verdict to APPROVE if the re-review passes.
     """
 
-    def _setup_phase(
-        self, config: HydraFlowConfig
-    ) -> tuple[ReviewPhase, PRInfo, GitHubIssue]:
+    def _setup_phase(self, config: HydraFlowConfig) -> tuple[ReviewPhase, PRInfo, Task]:
         """Helper to set up a ReviewPhase ready for self-fix re-review tests."""
         phase = make_review_phase(config, default_mocks=True)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         phase._prs.remove_pr_label = AsyncMock()
@@ -864,8 +862,8 @@ class TestSelfFixReReview:
         assert phase._reviewers.review.await_count == 2
         phase._prs.merge_pr.assert_not_awaited()
         # Should swap labels to ready (re-queue)
-        phase._prs.swap_pipeline_labels.assert_any_await(
-            pr.issue_number, config.ready_label[0], pr_number=pr.number
+        phase._prs.transition.assert_any_await(
+            pr.issue_number, "ready", pr_number=pr.number
         )
         assert phase._state.get_review_attempts(42) == 1
 
@@ -883,8 +881,8 @@ class TestSelfFixReReview:
         await phase.review_prs([pr], [issue])
 
         assert phase._reviewers.review.await_count == 1
-        phase._prs.swap_pipeline_labels.assert_any_await(
-            pr.issue_number, config.ready_label[0], pr_number=pr.number
+        phase._prs.transition.assert_any_await(
+            pr.issue_number, "ready", pr_number=pr.number
         )
 
     @pytest.mark.asyncio
@@ -976,8 +974,8 @@ class TestSelfFixReReview:
         # Exception falls back to original rejection — no merge
         phase._prs.merge_pr.assert_not_awaited()
         # Label swapped to ready (re-queue as original REQUEST_CHANGES)
-        phase._prs.swap_pipeline_labels.assert_any_await(
-            pr.issue_number, config.ready_label[0], pr_number=pr.number
+        phase._prs.transition.assert_any_await(
+            pr.issue_number, "ready", pr_number=pr.number
         )
         assert phase._state.get_review_attempts(pr.issue_number) == 1
 
@@ -1031,7 +1029,7 @@ class TestCreateVerificationIssue:
     ) -> None:
         """Judge with all criteria passing creates issue with correct title and label."""
         phase = make_review_phase(config)
-        issue = IssueFactory.create(title="Fix the frobnicator")
+        issue = TaskFactory.create(title="Fix the frobnicator")
         pr = PRInfoFactory.create()
         judge = _make_judge_result()
 
@@ -1058,7 +1056,7 @@ class TestCreateVerificationIssue:
     ) -> None:
         """Judge with mixed results highlights failures in the body."""
         phase = make_review_phase(config)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
         judge = _make_judge_result(all_pass=False)
 
@@ -1077,7 +1075,7 @@ class TestCreateVerificationIssue:
     ) -> None:
         """Body includes the verification instructions from judge result."""
         phase = make_review_phase(config)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
         judge = _make_judge_result(
             verification_instructions="1. Start server\n2. Check /health"
@@ -1096,7 +1094,7 @@ class TestCreateVerificationIssue:
     async def test_creates_issue_includes_links(self, config: HydraFlowConfig) -> None:
         """Body contains references to the original issue and PR."""
         phase = make_review_phase(config)
-        issue = IssueFactory.create(number=99, title="Add auth")
+        issue = TaskFactory.create(id=99, title="Add auth")
         pr = PRInfoFactory.create(number=200, issue_number=99)
         judge = _make_judge_result(issue_number=99, pr_number=200)
 
@@ -1112,7 +1110,7 @@ class TestCreateVerificationIssue:
     async def test_returns_zero_on_failure(self, config: HydraFlowConfig) -> None:
         """When create_issue returns 0, method returns 0."""
         phase = make_review_phase(config)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
         judge = _make_judge_result()
 
@@ -1126,7 +1124,7 @@ class TestCreateVerificationIssue:
     async def test_state_tracked_on_success(self, config: HydraFlowConfig) -> None:
         """After successful creation, state tracks the verification issue."""
         phase = make_review_phase(config)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
         judge = _make_judge_result()
 
@@ -1140,7 +1138,7 @@ class TestCreateVerificationIssue:
     async def test_state_not_tracked_on_failure(self, config: HydraFlowConfig) -> None:
         """When create_issue returns 0, state is not updated."""
         phase = make_review_phase(config)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
         judge = _make_judge_result()
 
@@ -1162,7 +1160,7 @@ class TestGetJudgeResult:
     def test_returns_none_when_verdict_is_none(self, config: HydraFlowConfig) -> None:
         """When no verdict is produced, returns None."""
         phase = make_review_phase(config)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
         result = phase._get_judge_result(issue, pr, None)
@@ -1172,10 +1170,10 @@ class TestGetJudgeResult:
     def test_maps_pass_criterion(self, config: HydraFlowConfig) -> None:
         """PASS criterion is converted with passed=True."""
         phase = make_review_phase(config)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
         verdict = JudgeVerdict(
-            issue_number=issue.number,
+            issue_number=issue.id,
             criteria_results=[
                 CriterionResult(
                     criterion="AC-1",
@@ -1196,10 +1194,10 @@ class TestGetJudgeResult:
     def test_maps_fail_criterion(self, config: HydraFlowConfig) -> None:
         """FAIL criterion is converted with passed=False."""
         phase = make_review_phase(config)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
         verdict = JudgeVerdict(
-            issue_number=issue.number,
+            issue_number=issue.id,
             criteria_results=[
                 CriterionResult(
                     criterion="AC-2",
@@ -1219,10 +1217,10 @@ class TestGetJudgeResult:
     def test_maps_mixed_criteria(self, config: HydraFlowConfig) -> None:
         """Multiple criteria with mixed verdicts are all converted."""
         phase = make_review_phase(config)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
         verdict = JudgeVerdict(
-            issue_number=issue.number,
+            issue_number=issue.id,
             criteria_results=[
                 CriterionResult(
                     criterion="AC-1",
@@ -1255,10 +1253,10 @@ class TestGetJudgeResult:
     ) -> None:
         """verification_instructions from verdict flows to result."""
         phase = make_review_phase(config)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
         verdict = JudgeVerdict(
-            issue_number=issue.number,
+            issue_number=issue.id,
             verification_instructions="1. Run app\n2. Check output",
         )
 
@@ -1270,10 +1268,10 @@ class TestGetJudgeResult:
     def test_passes_through_summary(self, config: HydraFlowConfig) -> None:
         """summary from verdict flows to result."""
         phase = make_review_phase(config)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
         verdict = JudgeVerdict(
-            issue_number=issue.number,
+            issue_number=issue.id,
             summary="2/3 criteria passed, instructions: ready",
         )
 
@@ -1285,7 +1283,7 @@ class TestGetJudgeResult:
     def test_uses_issue_and_pr_numbers(self, config: HydraFlowConfig) -> None:
         """issue_number and pr_number come from the issue/pr args, not verdict."""
         phase = make_review_phase(config)
-        issue = IssueFactory.create(number=99)
+        issue = TaskFactory.create(id=99)
         pr = PRInfoFactory.create(number=200, issue_number=99)
         verdict = JudgeVerdict(issue_number=99)
 
@@ -1298,9 +1296,9 @@ class TestGetJudgeResult:
     def test_empty_criteria(self, config: HydraFlowConfig) -> None:
         """Verdict with no criteria produces result with empty criteria list."""
         phase = make_review_phase(config)
-        issue = IssueFactory.create()
+        issue = TaskFactory.create()
         pr = PRInfoFactory.create()
-        verdict = JudgeVerdict(issue_number=issue.number)
+        verdict = JudgeVerdict(issue_number=issue.id)
 
         result = phase._get_judge_result(issue, pr, verdict)
 
@@ -1480,7 +1478,7 @@ class TestRecordReviewInsight:
         """When a recurring pattern is detected, a GitHub improvement issue is created."""
         phase = make_review_phase(config)
         result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
-        phase._prs.create_issue = AsyncMock(return_value=123)
+        phase._prs.create_task = AsyncMock(return_value=123)
 
         mock_insights = MagicMock()
         mock_insights.load_recent.return_value = [MagicMock()] * 5
@@ -1515,7 +1513,12 @@ class TestRecordReviewInsight:
         ):
             await phase._record_review_insight(result)
 
-        phase._prs.create_issue.assert_awaited_once()
+        phase._prs.create_task.assert_awaited_once()
+        call_title, _call_body, call_labels = phase._prs.create_task.call_args[0]
+        assert (
+            "test_coverage" in call_title.lower() or "Recurring feedback" in call_title
+        )
+        assert config.improve_label[0] in call_labels
         mock_insights.mark_category_proposed.assert_called_once_with("test_coverage")
 
     @pytest.mark.asyncio
@@ -1525,7 +1528,7 @@ class TestRecordReviewInsight:
         """Should not create a duplicate issue for an already-proposed category."""
         phase = make_review_phase(config)
         result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
-        phase._prs.create_issue = AsyncMock(return_value=None)
+        phase._prs.create_task = AsyncMock(return_value=None)
 
         mock_insights = MagicMock()
         mock_insights.load_recent.return_value = [MagicMock()] * 5
@@ -1542,7 +1545,7 @@ class TestRecordReviewInsight:
         ):
             await phase._record_review_insight(result)
 
-        phase._prs.create_issue.assert_not_awaited()
+        phase._prs.create_task.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_sets_hitl_state_when_issue_created(
@@ -1553,7 +1556,7 @@ class TestRecordReviewInsight:
         result = ReviewResultFactory.create(
             issue_number=42, verdict=ReviewVerdict.REQUEST_CHANGES
         )
-        phase._prs.create_issue = AsyncMock(return_value=99)
+        phase._prs.create_task = AsyncMock(return_value=99)
 
         mock_insights = MagicMock()
         mock_insights.load_recent.return_value = [MagicMock()] * 5

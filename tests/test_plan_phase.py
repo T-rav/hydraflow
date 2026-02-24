@@ -16,10 +16,10 @@ from typing import TYPE_CHECKING
 
 from events import EventBus
 from issue_store import IssueStore
-from models import GitHubIssue, PlanResult
+from models import PlanResult, Task
 from plan_phase import PlanPhase
 from state import StateTracker
-from tests.conftest import IssueFactory
+from tests.conftest import TaskFactory
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -48,8 +48,9 @@ def _make_phase(
     prs.remove_label = AsyncMock()
     prs.add_labels = AsyncMock()
     prs.swap_pipeline_labels = AsyncMock()
-    prs.create_issue = AsyncMock(return_value=99)
-    prs.close_issue = AsyncMock()
+    prs.transition = AsyncMock()
+    prs.create_task = AsyncMock(return_value=99)
+    prs.close_task = AsyncMock()
     stop_event = asyncio.Event()
     phase = PlanPhase(
         config,
@@ -78,7 +79,7 @@ class TestPlanPhase:
     ) -> None:
         """On successful plan, post_comment should be called."""
         phase, _state, planners, prs, store, _stop = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        issue = TaskFactory.create(id=42)
         plan_result = PlanResult(
             issue_number=42,
             success=True,
@@ -104,7 +105,7 @@ class TestPlanPhase:
     ) -> None:
         """On success, planner_label should be removed and config.ready_label added."""
         phase, _state, planners, prs, store, _stop = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        issue = TaskFactory.create(id=42)
         plan_result = PlanResult(
             issue_number=42,
             success=True,
@@ -117,7 +118,7 @@ class TestPlanPhase:
 
         await phase.plan_issues()
 
-        prs.swap_pipeline_labels.assert_awaited_once_with(42, config.ready_label[0])
+        prs.transition.assert_awaited_once_with(42, "ready")
 
     @pytest.mark.asyncio
     async def test_plan_issues_skips_label_swap_on_failure(
@@ -125,7 +126,7 @@ class TestPlanPhase:
     ) -> None:
         """On failure, no label changes should be made."""
         phase, _state, planners, prs, store, _stop = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        issue = TaskFactory.create(id=42)
         plan_result = PlanResult(
             issue_number=42,
             success=False,
@@ -161,7 +162,7 @@ class TestPlanPhase:
         from models import NewIssueSpec
 
         phase, state, planners, prs, store, _stop = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        issue = TaskFactory.create(id=42)
         plan_result = PlanResult(
             issue_number=42,
             success=True,
@@ -197,7 +198,7 @@ class TestPlanPhase:
         from models import NewIssueSpec
 
         phase, _state, planners, prs, store, _stop = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        issue = TaskFactory.create(id=42)
         plan_result = PlanResult(
             issue_number=42,
             success=True,
@@ -218,7 +219,7 @@ class TestPlanPhase:
 
         await phase.plan_issues()
 
-        prs.create_issue.assert_awaited_once_with(
+        prs.create_task.assert_awaited_once_with(
             "Tech debt",
             "The auth module has accumulated significant tech debt "
             "that needs cleanup and refactoring.",
@@ -232,7 +233,7 @@ class TestPlanPhase:
         """max_planners=1 means at most 1 planner runs concurrently."""
         concurrency_counter = {"current": 0, "peak": 0}
 
-        async def fake_plan(issue: GitHubIssue, worker_id: int = 0) -> PlanResult:
+        async def fake_plan(issue: Task, worker_id: int = 0) -> PlanResult:
             concurrency_counter["current"] += 1
             concurrency_counter["peak"] = max(
                 concurrency_counter["peak"], concurrency_counter["current"]
@@ -240,13 +241,13 @@ class TestPlanPhase:
             await asyncio.sleep(0)  # yield to allow other tasks to start
             concurrency_counter["current"] -= 1
             return PlanResult(
-                issue_number=issue.number,
+                issue_number=issue.id,
                 success=True,
                 plan="The plan",
                 summary="Done",
             )
 
-        issues = [IssueFactory.create(number=i) for i in range(1, 6)]
+        issues = [TaskFactory.create(id=i) for i in range(1, 6)]
 
         phase, _state, planners, prs, store, _stop = _make_phase(config)
         planners.plan = fake_plan
@@ -262,7 +263,7 @@ class TestPlanPhase:
     ) -> None:
         """Plan should mark issues active to prevent re-queuing by refresh."""
         phase, _state, planners, prs, store, _stop = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        issue = TaskFactory.create(id=42)
 
         was_active_during_plan = False
 
@@ -289,7 +290,7 @@ class TestPlanPhase:
     ) -> None:
         """Plan failure (success=False) should still return the result."""
         phase, _state, planners, prs, store, _stop = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        issue = TaskFactory.create(id=42)
         plan_result = PlanResult(
             issue_number=42,
             success=False,
@@ -313,7 +314,7 @@ class TestPlanPhase:
         from models import NewIssueSpec
 
         phase, _state, planners, prs, store, _stop = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        issue = TaskFactory.create(id=42)
         plan_result = PlanResult(
             issue_number=42,
             success=True,
@@ -333,7 +334,7 @@ class TestPlanPhase:
 
         await phase.plan_issues()
 
-        prs.create_issue.assert_awaited_once_with(
+        prs.create_task.assert_awaited_once_with(
             "Discovered issue",
             "This issue was discovered during planning — the config "
             "parser does not handle nested environment variables.",
@@ -348,7 +349,7 @@ class TestPlanPhase:
         from models import NewIssueSpec
 
         phase, state, planners, prs, store, _stop = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        issue = TaskFactory.create(id=42)
         plan_result = PlanResult(
             issue_number=42,
             success=True,
@@ -364,7 +365,7 @@ class TestPlanPhase:
 
         await phase.plan_issues()
 
-        prs.create_issue.assert_not_awaited()
+        prs.create_task.assert_not_awaited()
         assert state.get_lifetime_stats().issues_created == 0
 
     @pytest.mark.asyncio
@@ -374,18 +375,18 @@ class TestPlanPhase:
         """Setting stop_event after first plan should cancel remaining."""
         phase, _state, planners, prs, store, stop_event = _make_phase(config)
         issues = [
-            IssueFactory.create(number=1),
-            IssueFactory.create(number=2),
-            IssueFactory.create(number=3),
+            TaskFactory.create(id=1),
+            TaskFactory.create(id=2),
+            TaskFactory.create(id=3),
         ]
         call_count = {"n": 0}
 
-        async def fake_plan(issue: GitHubIssue, worker_id: int = 0) -> PlanResult:
+        async def fake_plan(issue: Task, worker_id: int = 0) -> PlanResult:
             call_count["n"] += 1
             if call_count["n"] == 1:
                 stop_event.set()
             return PlanResult(
-                issue_number=issue.number,
+                issue_number=issue.id,
                 success=False,
                 error="stopped",
             )
@@ -404,7 +405,7 @@ class TestPlanPhase:
     ) -> None:
         """Failed retry triggers HITL label swap and comment."""
         phase, state, planners, prs, store, _stop = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        issue = TaskFactory.create(id=42)
         plan_result = PlanResult(
             issue_number=42,
             success=False,
@@ -428,7 +429,7 @@ class TestPlanPhase:
         assert "Plan Validation Failed" in comment
         assert "Testing Strategy" in comment
 
-        # Planner label removed, HITL label added via swap
+        # Planner label removed, HITL label added via swap (escalate_to_hitl still uses swap_pipeline_labels)
         prs.swap_pipeline_labels.assert_awaited_once_with(42, config.hitl_label[0])
 
         # HITL origin and cause tracked in state
@@ -441,7 +442,7 @@ class TestPlanPhase:
     ) -> None:
         """Normal failure (no retry) should NOT escalate to HITL."""
         phase, _state, planners, prs, store, _stop = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        issue = TaskFactory.create(id=42)
         plan_result = PlanResult(
             issue_number=42,
             success=False,
@@ -464,7 +465,7 @@ class TestPlanPhase:
     ) -> None:
         """Analysis comment should be posted after the plan comment."""
         phase, _state, planners, prs, store, _stop = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        issue = TaskFactory.create(id=42)
         plan_result = PlanResult(
             issue_number=42,
             success=True,
@@ -498,7 +499,7 @@ class TestPlanPhase:
         from models import AnalysisResult, AnalysisSection, AnalysisVerdict
 
         phase, _state, planners, prs, store, _stop = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        issue = TaskFactory.create(id=42)
         plan_result = PlanResult(
             issue_number=42,
             success=True,
@@ -524,7 +525,7 @@ class TestPlanPhase:
             await phase.plan_issues()
 
         # Should swap to ready label
-        prs.swap_pipeline_labels.assert_awaited_once_with(42, config.ready_label[0])
+        prs.transition.assert_awaited_once_with(42, "ready")
 
     @pytest.mark.asyncio
     async def test_plan_issues_proceeds_on_analysis_warn(
@@ -535,7 +536,7 @@ class TestPlanPhase:
         from models import AnalysisResult, AnalysisSection, AnalysisVerdict
 
         phase, _state, planners, prs, store, _stop = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        issue = TaskFactory.create(id=42)
         plan_result = PlanResult(
             issue_number=42,
             success=True,
@@ -561,7 +562,7 @@ class TestPlanPhase:
             await phase.plan_issues()
 
         # Should swap to ready label (warn doesn't block)
-        prs.swap_pipeline_labels.assert_awaited_once_with(42, config.ready_label[0])
+        prs.transition.assert_awaited_once_with(42, "ready")
 
 
 # ---------------------------------------------------------------------------
@@ -578,7 +579,7 @@ class TestPlanPhaseAlreadySatisfied:
     ) -> None:
         """When planner returns already_satisfied, issue should be closed with dup label."""
         phase, _state, planners, prs, store, _stop = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        issue = TaskFactory.create(id=42)
         plan_result = PlanResult(
             issue_number=42,
             success=True,
@@ -601,7 +602,7 @@ class TestPlanPhaseAlreadySatisfied:
         assert "HydraFlow Planner" in comment
 
         # Issue should be closed
-        prs.close_issue.assert_awaited_once_with(42)
+        prs.close_task.assert_awaited_once_with(42)
 
     @pytest.mark.asyncio
     async def test_plan_already_satisfied_does_not_swap_to_ready(
@@ -609,7 +610,7 @@ class TestPlanPhaseAlreadySatisfied:
     ) -> None:
         """When already_satisfied, issue should NOT get hydraflow-ready label."""
         phase, _state, planners, prs, store, _stop = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        issue = TaskFactory.create(id=42)
         plan_result = PlanResult(
             issue_number=42,
             success=True,
@@ -646,7 +647,7 @@ class TestPlanPhaseTranscriptSummary:
         phase, _state, planners, prs, store, _stop = _make_phase(
             config, summarizer=mock_summarizer
         )
-        issue = IssueFactory.create(number=42, title="Fix bug")
+        issue = TaskFactory.create(id=42, title="Fix bug")
         plan_result = PlanResult(
             issue_number=42,
             success=True,
@@ -679,7 +680,7 @@ class TestPlanPhaseTranscriptSummary:
         phase, _state, planners, prs, store, _stop = _make_phase(
             config, summarizer=mock_summarizer
         )
-        issue = IssueFactory.create(number=42)
+        issue = TaskFactory.create(id=42)
         plan_result = PlanResult(
             issue_number=42,
             success=False,
@@ -709,7 +710,7 @@ class TestPlanPhaseTranscriptSummary:
         phase, _state, planners, prs, store, _stop = _make_phase(
             config, summarizer=mock_summarizer
         )
-        issue = IssueFactory.create(number=42)
+        issue = TaskFactory.create(id=42)
         plan_result = PlanResult(
             issue_number=42,
             success=False,
@@ -737,7 +738,7 @@ class TestPlanPhaseTranscriptSummary:
         phase, _state, planners, prs, store, _stop = _make_phase(
             config, summarizer=mock_summarizer
         )
-        issue = IssueFactory.create(number=42)
+        issue = TaskFactory.create(id=42)
         plan_result = PlanResult(
             issue_number=42,
             success=True,
@@ -763,7 +764,7 @@ class TestPlanPhaseTranscriptSummary:
         phase, _state, planners, prs, store, _stop = _make_phase(
             config, summarizer=mock_summarizer
         )
-        issue = IssueFactory.create(number=42, title="Add feature")
+        issue = TaskFactory.create(id=42, title="Add feature")
         plan_result = PlanResult(
             issue_number=42,
             success=True,
@@ -788,7 +789,7 @@ class TestPlanPhaseTranscriptSummary:
     async def test_no_summarizer_does_not_crash(self, config: HydraFlowConfig) -> None:
         """When transcript_summarizer is None, no crash occurs."""
         phase, _state, planners, prs, store, _stop = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        issue = TaskFactory.create(id=42)
         plan_result = PlanResult(
             issue_number=42,
             success=True,
