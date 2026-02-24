@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections import deque
 from datetime import UTC, datetime
+from enum import StrEnum
 
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
@@ -15,22 +16,33 @@ from subprocess_util import AuthenticationError
 
 logger = logging.getLogger("hydraflow.issue_store")
 
-# Pipeline stage names used as queue keys
-STAGE_FIND = "find"
-STAGE_PLAN = "plan"
-STAGE_READY = "ready"
-STAGE_REVIEW = "review"
-STAGE_HITL = "hitl"
+
+class IssueStoreStage(StrEnum):
+    """Internal routing stage names for the issue store queues."""
+
+    FIND = "find"
+    PLAN = "plan"
+    READY = "ready"
+    REVIEW = "review"
+    HITL = "hitl"
+
+
+# Backward-compatible module-level aliases
+STAGE_FIND = IssueStoreStage.FIND
+STAGE_PLAN = IssueStoreStage.PLAN
+STAGE_READY = IssueStoreStage.READY
+STAGE_REVIEW = IssueStoreStage.REVIEW
+STAGE_HITL = IssueStoreStage.HITL
 
 # Priority order — higher index = further along in the pipeline.
 # When an issue has multiple HydraFlow labels, it is routed to the
 # most advanced stage (highest priority).
 _STAGE_PRIORITY = {
-    STAGE_FIND: 0,
-    STAGE_PLAN: 1,
-    STAGE_READY: 2,
-    STAGE_REVIEW: 3,
-    STAGE_HITL: 4,
+    IssueStoreStage.FIND: 0,
+    IssueStoreStage.PLAN: 1,
+    IssueStoreStage.READY: 2,
+    IssueStoreStage.REVIEW: 3,
+    IssueStoreStage.HITL: 4,
 }
 
 
@@ -53,14 +65,14 @@ class IssueStore:
         self._bus = event_bus
 
         # Per-stage queues (FIFO)
-        self._queues: dict[str, deque[GitHubIssue]] = {
+        self._queues: dict[IssueStoreStage, deque[GitHubIssue]] = {
             STAGE_FIND: deque(),
             STAGE_PLAN: deque(),
             STAGE_READY: deque(),
             STAGE_REVIEW: deque(),
         }
         # Companion sets for O(1) membership checks (issue numbers in each queue)
-        self._queue_members: dict[str, set[int]] = {
+        self._queue_members: dict[IssueStoreStage, set[int]] = {
             STAGE_FIND: set(),
             STAGE_PLAN: set(),
             STAGE_READY: set(),
@@ -147,13 +159,13 @@ class IssueStore:
         """
         # Build a mapping of issue_number → (best_stage, issue)
         label_to_stage = self._build_label_map()
-        incoming: dict[int, tuple[str, GitHubIssue]] = {}
+        incoming: dict[int, tuple[IssueStoreStage, GitHubIssue]] = {}
 
         for issue in issues:
             # Cache every issue for pipeline snapshot lookups
             self._issue_cache[issue.number] = issue
 
-            best_stage: str | None = None
+            best_stage: IssueStoreStage | None = None
             best_priority = -1
             for label in issue.labels:
                 stage = label_to_stage.get(label)
@@ -207,9 +219,9 @@ class IssueStore:
             self._queues[stage].append(issue)
             self._queue_members[stage].add(issue_num)
 
-    def _build_label_map(self) -> dict[str, str]:
+    def _build_label_map(self) -> dict[str, IssueStoreStage]:
         """Build a mapping from label name → pipeline stage."""
-        m: dict[str, str] = {}
+        m: dict[str, IssueStoreStage] = {}
         for lbl in self._config.find_label:
             m[lbl] = STAGE_FIND
         for lbl in self._config.planner_label:
@@ -224,14 +236,14 @@ class IssueStore:
             m[lbl] = STAGE_HITL
         return m
 
-    def _find_queue_stage(self, issue_number: int) -> str | None:
+    def _find_queue_stage(self, issue_number: int) -> IssueStoreStage | None:
         """Return the stage name if the issue is in any queue, else None."""
         for stage, members in self._queue_members.items():
             if issue_number in members:
                 return stage
         return None
 
-    def _remove_from_queue(self, stage: str, issue_number: int) -> None:
+    def _remove_from_queue(self, stage: IssueStoreStage, issue_number: int) -> None:
         """Remove an issue from a specific queue."""
         if issue_number in self._queue_members[stage]:
             self._queues[stage] = deque(
@@ -268,7 +280,9 @@ class IssueStore:
         """Return the set of HITL issue numbers."""
         return set(self._hitl_numbers)
 
-    def _take_from_queue(self, stage: str, max_count: int) -> list[GitHubIssue]:
+    def _take_from_queue(
+        self, stage: IssueStoreStage, max_count: int
+    ) -> list[GitHubIssue]:
         """Pop up to *max_count* issues from *stage* queue, skipping active.
 
         Safety note: This method is synchronous with no ``await`` points, so
