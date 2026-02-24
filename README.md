@@ -95,12 +95,16 @@ hf init
 # run the standard prep flow without invoking make
 hf prep
 
-# register the current repo with the background supervisor (starts orchestrator + dashboard)
-hf run
+# register the current repo (or an explicit path) with the background supervisor
+hf run              # uses cwd
+hf run /path/to/repo
 
 # list/stop registered repos (state lives under ~/.hydraflow/<repo-slug>)
-hf status
-hf stop
+hf status                   # show every repo with RUNNING/STOPPED status
+hf status repo-slug         # show a single slug
+hf stop                     # stop repo in cwd
+hf stop repo-slug           # or stop by slug
+hf stop /path/to/repo
 ```
 
 > HydraFlow still writes prep logs, memory, manifests, and run artifacts to

@@ -54,12 +54,12 @@ def add_repo(path: Path) -> dict[str, Any]:
     return resp
 
 
-def remove_repo(path: Path) -> None:
-    resp = _send(
-        {
-            "action": "remove_repo",
-            "path": str(path.resolve()),
-        }
-    )
+def remove_repo(path: Path | None = None, slug: str | None = None) -> None:
+    payload: dict[str, Any] = {"action": "remove_repo"}
+    if path is not None:
+        payload["path"] = str(path.resolve())
+    if slug:
+        payload["slug"] = slug
+    resp = _send(payload)
     if resp.get("status") != "ok":
         raise RuntimeError(resp.get("error", "unknown error"))

@@ -21,27 +21,53 @@ _FLAG_COMMANDS = {
 }
 
 
+def _parse_repo_argument(
+    rest: Sequence[str],
+    *,
+    require_path: bool,
+    allow_slug: bool,
+) -> tuple[Path | None, str | None]:
+    if rest:
+        candidate = Path(rest[0]).expanduser()
+        if candidate.exists():
+            return candidate.resolve(), None
+        if require_path or not allow_slug:
+            raise SystemExit(f"Path not found: {candidate}")
+        return None, rest[0]
+    if require_path:
+        return Path.cwd(), None
+    return Path.cwd(), None
+
+
 def _dispatch_flag_command(flag: str, rest: Iterable[str]) -> None:
     hydraflow_main([flag, *rest])
 
 
-def _handle_run(rest: Iterable[str]) -> None:
+def _handle_run(rest: Sequence[str]) -> None:
     ensure_running()
-    repo_path = Path.cwd()
+    repo_path, _ = _parse_repo_argument(rest, require_path=True, allow_slug=False)
     info = add_repo(repo_path)
     url = info.get("dashboard_url")
     print(f"Registered repo {repo_path} with hf supervisor")
+    if not info.get("started", True):
+        print("  (already running)")
     if url:
         print(f"Dashboard: {url}")
     if info.get("log_file"):
         print(f"Logs: {info['log_file']}")
 
 
-def _handle_view() -> None:
+def _handle_view(rest: Sequence[str]) -> None:
+    slug_filter = rest[0] if rest else None
     repos = list_repos()
     if not repos:
         print("No repos registered. Run `hf run` inside a repo first.")
         return
+    if slug_filter:
+        repos = [repo for repo in repos if repo.get("slug") == slug_filter]
+        if not repos:
+            print(f"No repo with slug '{slug_filter}' registered.")
+            return
     print("Registered repos:")
     for repo in repos:
         path = repo.get("path")
@@ -49,9 +75,11 @@ def _handle_view() -> None:
         port = repo.get("port")
         slug = repo.get("slug")
         log_file = repo.get("log_file")
-        line = f"- {path}"
+        running = repo.get("running", False)
+        status = "RUNNING" if running else "STOPPED"
+        line = f"- {path} [{status}]"
         if slug:
-            line += f" [{slug}]"
+            line += f" slug={slug}"
         if port:
             line += f" port={port}"
         if url:
@@ -61,11 +89,12 @@ def _handle_view() -> None:
             print(f"    logs: {log_file}")
 
 
-def _handle_stop() -> None:
-    repo_path = Path.cwd()
+def _handle_stop(rest: Sequence[str]) -> None:
+    repo_path, slug = _parse_repo_argument(rest, require_path=False, allow_slug=True)
     try:
-        remove_repo(repo_path)
-        print(f"Removed repo {repo_path} from hf supervisor")
+        remove_repo(repo_path, slug=slug)
+        target = slug or repo_path
+        print(f"Removed repo {target} from hf supervisor")
     except RuntimeError as exc:
         print(f"{exc}")
 
@@ -85,9 +114,9 @@ def entrypoint(argv: Sequence[str] | None = None) -> None:
         raise SystemExit(run_init(rest))
 
     command_map = {
-        "view": _handle_view,
-        "status": _handle_view,
-        "stop": _handle_stop,
+        "view": lambda: _handle_view(rest),
+        "status": lambda: _handle_view(rest),
+        "stop": lambda: _handle_stop(rest),
         "run": lambda: _handle_run(rest),
         "start": lambda: hydraflow_main(rest),
     }
