@@ -5,7 +5,13 @@ from __future__ import annotations
 from datetime import datetime
 
 from events import EventBus, EventType, HydraFlowEvent
-from models import IssueTimeline, PipelineStage, PRInfoExtract, StageStatus, TimelineStage
+from models import (
+    IssueTimeline,
+    PipelineStage,
+    PRInfoExtract,
+    StageStatus,
+    TimelineStage,
+)
 
 STAGE_ORDER: list[PipelineStage] = [
     PipelineStage.TRIAGE,
