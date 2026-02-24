@@ -358,7 +358,7 @@ class MetricsManager:
             try:
                 data = json.loads(match.group(1))
                 snapshots.append(MetricsSnapshot.model_validate(data))
-            except (json.JSONDecodeError, Exception):
+            except Exception:  # JSON parse or Pydantic validation
                 continue
 
         return snapshots

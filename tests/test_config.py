@@ -268,6 +268,23 @@ class TestDetectRepoSlug:
         # Assert
         assert result == ""
 
+    def test_subprocess_timeout_returns_empty_string(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should return empty string when git command times out."""
+
+        # Arrange
+        def _raise(*_args: object, **_kwargs: object) -> None:
+            raise subprocess.TimeoutExpired(cmd="git", timeout=10)
+
+        monkeypatch.setattr(subprocess, "run", _raise)
+
+        # Act
+        result = _detect_repo_slug(tmp_path)
+
+        # Assert
+        assert result == ""
+
     def test_non_github_remote_returns_empty_string(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -119,6 +119,7 @@ class TestBuildCommand:
         assert cmd[cmd.index("--model") + 1] == "gpt-5-codex"
         assert "--sandbox" in cmd
         assert cmd[cmd.index("--sandbox") + 1] == "danger-full-access"
+        assert "--dangerously-bypass-approvals-and-sandbox" in cmd
         assert "--skip-git-repo-check" in cmd
         assert "--ask-for-approval" not in cmd
 

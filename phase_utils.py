@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from typing import Any, TypeVar
 
 from config import HydraFlowConfig
+from harness_insights import FailureCategory, FailureRecord, HarnessInsightStore
 from issue_store import IssueStore
 from memory import file_memory_suggestion
 from pr_manager import PRManager
@@ -92,6 +93,41 @@ async def safe_file_memory_suggestion(
         logger.exception(
             "Failed to file memory suggestion for %s",
             reference,
+        )
+
+
+def record_harness_failure(
+    harness_insights: HarnessInsightStore | None,
+    issue_number: int,
+    category: FailureCategory,
+    details: str,
+    *,
+    stage: str,
+    pr_number: int = 0,
+) -> None:
+    """Record a failure to the harness insight store (non-blocking).
+
+    Shared by plan, implement, and review phases to avoid duplication.
+    """
+    if harness_insights is None:
+        return
+    try:
+        from harness_insights import extract_subcategories
+
+        record = FailureRecord(
+            issue_number=issue_number,
+            pr_number=pr_number,
+            category=category,
+            subcategories=extract_subcategories(details),
+            details=details,
+            stage=stage,
+        )
+        harness_insights.append_failure(record)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Failed to record harness failure for issue #%d",
+            issue_number,
+            exc_info=True,
         )
 
 
