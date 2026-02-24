@@ -1306,7 +1306,7 @@ class TestWebSocketEndpoint:
         while time.monotonic() < deadline:
             if len(event_bus._subscribers) == 0:
                 break
-            time.sleep(0.05)
+            time.sleep(0)
 
         assert len(event_bus._subscribers) == 0
 
