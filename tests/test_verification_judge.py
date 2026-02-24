@@ -1107,7 +1107,7 @@ class TestPrecheckHighRiskFiles:
                 judge, "_execute", AsyncMock(return_value=precheck_transcript)
             ),
             patch(
-                "verification_judge.should_escalate_debug",
+                "precheck_pipeline.should_escalate_debug",
                 return_value=EscalationDecision(escalate=False, reasons=[]),
             ) as mock_escalate,
         ):
@@ -1133,7 +1133,7 @@ class TestPrecheckHighRiskFiles:
                 judge, "_execute", AsyncMock(return_value=precheck_transcript)
             ),
             patch(
-                "verification_judge.should_escalate_debug",
+                "precheck_pipeline.should_escalate_debug",
                 return_value=EscalationDecision(escalate=False, reasons=[]),
             ) as mock_escalate,
         ):
@@ -1291,139 +1291,6 @@ class TestReviewPhaseWiring:
 # ---------------------------------------------------------------------------
 
 
-class TestParsePrecheckTranscript:
-    """Tests for VerificationJudge._parse_precheck_transcript."""
-
-    def test_all_fields_present(self) -> None:
-        transcript = (
-            "PRECHECK_RISK: low\n"
-            "PRECHECK_CONFIDENCE: 0.95\n"
-            "PRECHECK_ESCALATE: no\n"
-            "PRECHECK_SUMMARY: All looks good.\n"
-        )
-        risk, confidence, escalate, summary, parse_failed = (
-            VerificationJudge._parse_precheck_transcript(transcript)
-        )
-        assert risk == "low"
-        assert confidence == 0.95
-        assert escalate is False
-        assert summary == "All looks good."
-        assert parse_failed is False
-
-    def test_missing_risk_defaults_to_medium(self) -> None:
-        transcript = (
-            "PRECHECK_CONFIDENCE: 0.8\nPRECHECK_ESCALATE: no\nPRECHECK_SUMMARY: Fine.\n"
-        )
-        risk, _, _, _, parse_failed = VerificationJudge._parse_precheck_transcript(
-            transcript
-        )
-        assert risk == "medium"
-        assert parse_failed is True
-
-    def test_missing_confidence_defaults_to_zero(self) -> None:
-        transcript = (
-            "PRECHECK_RISK: high\nPRECHECK_ESCALATE: yes\nPRECHECK_SUMMARY: Risky.\n"
-        )
-        _, confidence, _, _, parse_failed = (
-            VerificationJudge._parse_precheck_transcript(transcript)
-        )
-        assert confidence == 0.0
-        assert parse_failed is True
-
-    def test_escalate_yes(self) -> None:
-        transcript = (
-            "PRECHECK_RISK: high\n"
-            "PRECHECK_CONFIDENCE: 0.3\n"
-            "PRECHECK_ESCALATE: yes\n"
-            "PRECHECK_SUMMARY: Needs debug.\n"
-        )
-        _, _, escalate, _, _ = VerificationJudge._parse_precheck_transcript(transcript)
-        assert escalate is True
-
-    def test_escalate_no(self) -> None:
-        transcript = (
-            "PRECHECK_RISK: low\n"
-            "PRECHECK_CONFIDENCE: 0.9\n"
-            "PRECHECK_ESCALATE: no\n"
-            "PRECHECK_SUMMARY: OK.\n"
-        )
-        _, _, escalate, _, _ = VerificationJudge._parse_precheck_transcript(transcript)
-        assert escalate is False
-
-    def test_case_insensitive_parsing(self) -> None:
-        transcript = (
-            "precheck_risk: HIGH\n"
-            "precheck_confidence: 0.42\n"
-            "precheck_escalate: YES\n"
-            "precheck_summary: Mixed case.\n"
-        )
-        risk, confidence, escalate, summary, parse_failed = (
-            VerificationJudge._parse_precheck_transcript(transcript)
-        )
-        assert risk == "high"
-        assert confidence == 0.42
-        assert escalate is True
-        assert summary == "Mixed case."
-        assert parse_failed is False
-
-    def test_empty_string_returns_defaults(self) -> None:
-        risk, confidence, escalate, summary, parse_failed = (
-            VerificationJudge._parse_precheck_transcript("")
-        )
-        assert risk == "medium"
-        assert confidence == 0.0
-        assert escalate is False
-        assert summary == ""
-        assert parse_failed is True
-
-
-# ---------------------------------------------------------------------------
-# _build_subskill_command / _build_debug_command
-# ---------------------------------------------------------------------------
-
-
-class TestBuildSubskillAndDebugCommands:
-    """Tests for VerificationJudge _build_subskill_command and _build_debug_command."""
-
-    def test_subskill_command_uses_config_tool_and_model(self, config) -> None:
-        judge = _make_judge(config)
-        cmd = judge._build_subskill_command()
-        assert "claude" in cmd
-        assert "--model" in cmd
-        idx = cmd.index("--model")
-        assert cmd[idx + 1] == "haiku"
-
-    def test_subskill_command_codex_backend(self, tmp_path) -> None:
-        cfg = ConfigFactory.create(
-            subskill_tool="codex",
-            subskill_model="gpt-4",
-            repo_root=tmp_path / "repo",
-        )
-        judge = _make_judge(cfg)
-        cmd = judge._build_subskill_command()
-        assert cmd[:3] == ["codex", "exec", "--json"]
-        assert cmd[cmd.index("--model") + 1] == "gpt-4"
-
-    def test_debug_command_uses_config_tool_and_model(self, config) -> None:
-        judge = _make_judge(config)
-        cmd = judge._build_debug_command()
-        assert "claude" in cmd
-        assert "--model" in cmd
-        idx = cmd.index("--model")
-        assert cmd[idx + 1] == "opus"
-
-    def test_debug_command_codex_backend(self, tmp_path) -> None:
-        cfg = ConfigFactory.create(
-            debug_tool="codex",
-            debug_model="gpt-5",
-            repo_root=tmp_path / "repo",
-        )
-        judge = _make_judge(cfg)
-        cmd = judge._build_debug_command()
-        assert cmd[:3] == ["codex", "exec", "--json"]
-        assert cmd[cmd.index("--model") + 1] == "gpt-5"
-
-
 # ---------------------------------------------------------------------------
 # _build_precheck_prompt
 # ---------------------------------------------------------------------------
@@ -1460,159 +1327,55 @@ class TestBuildPrecheckPrompt:
 
 
 class TestRunPrecheckContext:
-    """Tests for VerificationJudge._run_precheck_context."""
+    """Tests that _run_precheck_context delegates to run_precheck_pipeline."""
 
     @pytest.mark.asyncio
-    async def test_disabled_when_max_subskill_zero(self, config) -> None:
-        judge = _make_judge(config)
-        result = await judge._run_precheck_context(42, "criteria", "diff")
-        assert result == "Low-tier precheck disabled."
-
-    @pytest.mark.asyncio
-    async def test_success_no_escalation(self, tmp_path) -> None:
-        cfg = ConfigFactory.create(
-            max_subskill_attempts=1,
-            subskill_confidence_threshold=0.7,
-            debug_escalation_enabled=False,
-            repo_root=tmp_path / "repo",
-        )
-        judge = _make_judge(cfg)
-
-        valid_transcript = (
-            "PRECHECK_RISK: low\n"
-            "PRECHECK_CONFIDENCE: 0.95\n"
-            "PRECHECK_ESCALATE: no\n"
-            "PRECHECK_SUMMARY: All clear.\n"
-        )
-        mock_execute = AsyncMock(return_value=valid_transcript)
-        with patch.object(judge, "_execute", mock_execute):
-            result = await judge._run_precheck_context(42, "criteria", "diff")
-
-        assert "Precheck risk: low" in result
-        assert "Precheck confidence: 0.95" in result
-        assert "Precheck summary: All clear." in result
-        assert "Debug escalation: no" in result
-        mock_execute.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_retries_on_parse_failure(self, tmp_path) -> None:
-        cfg = ConfigFactory.create(
-            max_subskill_attempts=3,
-            debug_escalation_enabled=False,
-            repo_root=tmp_path / "repo",
-        )
-        judge = _make_judge(cfg)
-
-        garbage = "No parseable fields here."
-        valid_transcript = (
-            "PRECHECK_RISK: low\n"
-            "PRECHECK_CONFIDENCE: 0.9\n"
-            "PRECHECK_ESCALATE: no\n"
-            "PRECHECK_SUMMARY: Finally parsed.\n"
-        )
-
-        mock_execute = AsyncMock(side_effect=[garbage, garbage, valid_transcript])
-        with patch.object(judge, "_execute", mock_execute):
-            result = await judge._run_precheck_context(42, "criteria", "diff")
-
-        assert mock_execute.call_count == 3
-        assert "Precheck risk: low" in result
-        assert "Precheck summary: Finally parsed." in result
-
-    @pytest.mark.asyncio
-    async def test_escalates_to_debug(self, tmp_path) -> None:
-        cfg = ConfigFactory.create(
-            max_subskill_attempts=1,
-            debug_escalation_enabled=True,
-            max_debug_attempts=1,
-            subskill_confidence_threshold=0.7,
-            repo_root=tmp_path / "repo",
-        )
-        judge = _make_judge(cfg)
-
-        high_risk_transcript = (
-            "PRECHECK_RISK: high\n"
-            "PRECHECK_CONFIDENCE: 0.3\n"
-            "PRECHECK_ESCALATE: yes\n"
-            "PRECHECK_SUMMARY: Risky change.\n"
-        )
-        debug_transcript = "Debug: found critical issues."
-
-        mock_execute = AsyncMock(side_effect=[high_risk_transcript, debug_transcript])
-        with patch.object(judge, "_execute", mock_execute):
-            result = await judge._run_precheck_context(42, "criteria", "diff")
-
-        assert mock_execute.call_count == 2
-        assert "Precheck risk: high" in result
-        assert "Debug escalation: yes" in result
-        assert "Debug precheck transcript:" in result
-        assert "Debug: found critical issues." in result
-        assert "Escalation reasons:" in result
-
-    @pytest.mark.asyncio
-    async def test_no_debug_when_max_debug_zero(self, tmp_path) -> None:
-        cfg = ConfigFactory.create(
-            max_subskill_attempts=1,
-            debug_escalation_enabled=True,
-            max_debug_attempts=0,
-            subskill_confidence_threshold=0.7,
-            repo_root=tmp_path / "repo",
-        )
-        judge = _make_judge(cfg)
-
-        high_risk_transcript = (
-            "PRECHECK_RISK: high\n"
-            "PRECHECK_CONFIDENCE: 0.3\n"
-            "PRECHECK_ESCALATE: yes\n"
-            "PRECHECK_SUMMARY: Risky.\n"
-        )
-
-        mock_execute = AsyncMock(return_value=high_risk_transcript)
-        with patch.object(judge, "_execute", mock_execute):
-            result = await judge._run_precheck_context(42, "criteria", "diff")
-
-        assert mock_execute.call_count == 1
-        assert "Debug escalation: yes" in result
-        assert "Debug precheck transcript:" not in result
-
-    @pytest.mark.asyncio
-    async def test_exception_returns_fallback(self, tmp_path) -> None:
+    async def test_delegates_to_run_precheck_pipeline(self, tmp_path) -> None:
         cfg = ConfigFactory.create(
             max_subskill_attempts=1,
             repo_root=tmp_path / "repo",
         )
         judge = _make_judge(cfg)
 
-        mock_execute = AsyncMock(side_effect=RuntimeError("subprocess crashed"))
-        with patch.object(judge, "_execute", mock_execute):
-            result = await judge._run_precheck_context(42, "criteria", "diff")
+        with patch(
+            "verification_judge.run_precheck_pipeline",
+            new_callable=AsyncMock,
+            return_value="pipeline result",
+        ) as mock_pipeline:
+            result = await judge._run_precheck_context(42, "criteria text", "diff text")
 
-        assert (
-            result == "Low-tier precheck failed; continuing without precheck context."
-        )
+        assert result == "pipeline result"
+        mock_pipeline.assert_called_once()
+        args, kwargs = mock_pipeline.call_args
+        assert args[0] is cfg
+        assert "criteria text" in args[1]  # prompt contains criteria
+        assert args[2] == "diff text"
+        assert "DEBUG MODE" in kwargs["debug_suffix"]
 
     @pytest.mark.asyncio
-    async def test_debug_transcript_truncated_to_1000_chars(self, tmp_path) -> None:
+    async def test_execute_closure_calls_self_execute(self, tmp_path) -> None:
         cfg = ConfigFactory.create(
             max_subskill_attempts=1,
-            debug_escalation_enabled=True,
-            max_debug_attempts=1,
-            subskill_confidence_threshold=0.7,
             repo_root=tmp_path / "repo",
         )
         judge = _make_judge(cfg)
+        mock_execute = AsyncMock(return_value="transcript")
 
-        high_risk_transcript = (
-            "PRECHECK_RISK: high\n"
-            "PRECHECK_CONFIDENCE: 0.3\n"
-            "PRECHECK_ESCALATE: yes\n"
-            "PRECHECK_SUMMARY: Risky.\n"
-        )
-        long_debug = "D" * 2000
+        captured_execute = None
 
-        mock_execute = AsyncMock(side_effect=[high_risk_transcript, long_debug])
-        with patch.object(judge, "_execute", mock_execute):
-            result = await judge._run_precheck_context(42, "criteria", "diff")
+        async def capture_pipeline(config, prompt, diff, execute, debug_suffix):
+            nonlocal captured_execute
+            captured_execute = execute
+            return "ok"
 
-        assert "D" * 1000 in result
-        assert "D" * 1001 not in result
+        with (
+            patch(
+                "verification_judge.run_precheck_pipeline", side_effect=capture_pipeline
+            ),
+            patch.object(judge, "_execute", mock_execute),
+        ):
+            await judge._run_precheck_context(42, "criteria", "diff")
+            assert captured_execute is not None
+            await captured_execute(["cmd"], "prompt")
+
+        mock_execute.assert_called_once_with(["cmd"], "prompt", 42)

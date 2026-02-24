@@ -12,7 +12,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from base_runner import BaseRunner
-from escalation_gate import EscalationDecision
 from events import EventType
 from models import ReviewerStatus, ReviewVerdict
 from reviewer import ReviewRunner
@@ -1294,160 +1293,6 @@ async def test_has_changes_timeout_returns_false(config, event_bus, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-class TestParsePrecheckTranscript:
-    """Tests for ReviewRunner._parse_precheck_transcript."""
-
-    def test_all_fields_present(self) -> None:
-        transcript = (
-            "Some preamble.\n"
-            "PRECHECK_RISK: low\n"
-            "PRECHECK_CONFIDENCE: 0.95\n"
-            "PRECHECK_ESCALATE: no\n"
-            "PRECHECK_SUMMARY: All looks good.\n"
-        )
-        risk, confidence, escalate, summary, parse_failed = (
-            ReviewRunner._parse_precheck_transcript(transcript)
-        )
-        assert risk == "low"
-        assert confidence == 0.95
-        assert escalate is False
-        assert summary == "All looks good."
-        assert parse_failed is False
-
-    def test_missing_risk_defaults_to_medium(self) -> None:
-        transcript = (
-            "PRECHECK_CONFIDENCE: 0.8\nPRECHECK_ESCALATE: no\nPRECHECK_SUMMARY: Fine.\n"
-        )
-        risk, _, _, _, parse_failed = ReviewRunner._parse_precheck_transcript(
-            transcript
-        )
-        assert risk == "medium"
-        assert parse_failed is True
-
-    def test_missing_confidence_defaults_to_zero(self) -> None:
-        transcript = (
-            "PRECHECK_RISK: high\nPRECHECK_ESCALATE: yes\nPRECHECK_SUMMARY: Risky.\n"
-        )
-        _, confidence, _, _, parse_failed = ReviewRunner._parse_precheck_transcript(
-            transcript
-        )
-        assert confidence == 0.0
-        assert parse_failed is True
-
-    def test_escalate_yes(self) -> None:
-        transcript = (
-            "PRECHECK_RISK: high\n"
-            "PRECHECK_CONFIDENCE: 0.3\n"
-            "PRECHECK_ESCALATE: yes\n"
-            "PRECHECK_SUMMARY: Needs debug.\n"
-        )
-        _, _, escalate, _, _ = ReviewRunner._parse_precheck_transcript(transcript)
-        assert escalate is True
-
-    def test_escalate_no(self) -> None:
-        transcript = (
-            "PRECHECK_RISK: low\n"
-            "PRECHECK_CONFIDENCE: 0.9\n"
-            "PRECHECK_ESCALATE: no\n"
-            "PRECHECK_SUMMARY: OK.\n"
-        )
-        _, _, escalate, _, _ = ReviewRunner._parse_precheck_transcript(transcript)
-        assert escalate is False
-
-    def test_case_insensitive_parsing(self) -> None:
-        transcript = (
-            "precheck_risk: HIGH\n"
-            "precheck_confidence: 0.42\n"
-            "precheck_escalate: YES\n"
-            "precheck_summary: Mixed case test.\n"
-        )
-        risk, confidence, escalate, summary, parse_failed = (
-            ReviewRunner._parse_precheck_transcript(transcript)
-        )
-        assert risk == "high"
-        assert confidence == 0.42
-        assert escalate is True
-        assert summary == "Mixed case test."
-        assert parse_failed is False
-
-    def test_empty_string_returns_defaults(self) -> None:
-        risk, confidence, escalate, summary, parse_failed = (
-            ReviewRunner._parse_precheck_transcript("")
-        )
-        assert risk == "medium"
-        assert confidence == 0.0
-        assert escalate is False
-        assert summary == ""
-        assert parse_failed is True
-
-    def test_missing_summary_only(self) -> None:
-        transcript = (
-            "PRECHECK_RISK: low\nPRECHECK_CONFIDENCE: 0.8\nPRECHECK_ESCALATE: no\n"
-        )
-        risk, confidence, escalate, summary, parse_failed = (
-            ReviewRunner._parse_precheck_transcript(transcript)
-        )
-        assert risk == "low"
-        assert confidence == 0.8
-        assert escalate is False
-        assert summary == ""
-        assert parse_failed is True
-
-    def test_missing_escalate_only(self) -> None:
-        transcript = (
-            "PRECHECK_RISK: medium\n"
-            "PRECHECK_CONFIDENCE: 0.5\n"
-            "PRECHECK_SUMMARY: Partial.\n"
-        )
-        _, _, escalate, _, parse_failed = ReviewRunner._parse_precheck_transcript(
-            transcript
-        )
-        assert escalate is False
-        assert parse_failed is True
-
-
-# ---------------------------------------------------------------------------
-# _build_subskill_command / _build_debug_command
-# ---------------------------------------------------------------------------
-
-
-class TestBuildSubskillAndDebugCommands:
-    """Tests for ReviewRunner._build_subskill_command and _build_debug_command."""
-
-    def test_subskill_command_uses_config_tool_and_model(
-        self, config, event_bus
-    ) -> None:
-        runner = _make_runner(config, event_bus)
-        cmd = runner._build_subskill_command()
-        assert "claude" in cmd
-        assert "--model" in cmd
-        idx = cmd.index("--model")
-        assert cmd[idx + 1] == "haiku"
-
-    def test_subskill_command_codex_backend(self, event_bus) -> None:
-        cfg = ConfigFactory.create(subskill_tool="codex", subskill_model="gpt-4")
-        runner = _make_runner(cfg, event_bus)
-        cmd = runner._build_subskill_command()
-        assert cmd[:3] == ["codex", "exec", "--json"]
-        assert "--model" in cmd
-        assert cmd[cmd.index("--model") + 1] == "gpt-4"
-
-    def test_debug_command_uses_config_tool_and_model(self, config, event_bus) -> None:
-        runner = _make_runner(config, event_bus)
-        cmd = runner._build_debug_command()
-        assert "claude" in cmd
-        assert "--model" in cmd
-        idx = cmd.index("--model")
-        assert cmd[idx + 1] == "opus"
-
-    def test_debug_command_codex_backend(self, event_bus) -> None:
-        cfg = ConfigFactory.create(debug_tool="codex", debug_model="gpt-5")
-        runner = _make_runner(cfg, event_bus)
-        cmd = runner._build_debug_command()
-        assert cmd[:3] == ["codex", "exec", "--json"]
-        assert cmd[cmd.index("--model") + 1] == "gpt-5"
-
-
 # ---------------------------------------------------------------------------
 # _build_precheck_prompt
 # ---------------------------------------------------------------------------
@@ -1489,158 +1334,12 @@ class TestBuildPrecheckPrompt:
 
 
 class TestRunPrecheckContext:
-    """Tests for ReviewRunner._run_precheck_context."""
+    """Tests that _run_precheck_context delegates to run_precheck_pipeline."""
 
     @pytest.mark.asyncio
-    async def test_disabled_when_max_subskill_zero(
-        self, config, event_bus, pr_info, issue, tmp_path
-    ) -> None:
-        """max_subskill_attempts=0 should return disabled message without subprocess calls."""
-        runner = _make_runner(config, event_bus)
-        mock_execute = AsyncMock()
-        with patch.object(runner, "_execute", mock_execute):
-            result = await runner._run_precheck_context(
-                pr_info, issue, "diff", tmp_path
-            )
-        assert result == "Low-tier precheck disabled."
-        mock_execute.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_success_no_escalation(
+    async def test_delegates_to_run_precheck_pipeline(
         self, event_bus, pr_info, issue, tmp_path
     ) -> None:
-        """Successful precheck with high confidence should not escalate when disabled."""
-        cfg = ConfigFactory.create(
-            max_subskill_attempts=1,
-            subskill_confidence_threshold=0.7,
-            debug_escalation_enabled=False,
-            repo_root=tmp_path / "repo",
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        runner = _make_runner(cfg, event_bus)
-        valid_transcript = (
-            "PRECHECK_RISK: low\n"
-            "PRECHECK_CONFIDENCE: 0.95\n"
-            "PRECHECK_ESCALATE: no\n"
-            "PRECHECK_SUMMARY: All clear.\n"
-        )
-        mock_execute = AsyncMock(return_value=valid_transcript)
-        with patch.object(runner, "_execute", mock_execute):
-            result = await runner._run_precheck_context(
-                pr_info, issue, "safe diff", tmp_path
-            )
-        assert "Precheck risk: low" in result
-        assert "Precheck confidence: 0.95" in result
-        assert "Precheck summary: All clear." in result
-        assert "Debug escalation: no" in result
-        mock_execute.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_retries_on_parse_failure(
-        self, event_bus, pr_info, issue, tmp_path
-    ) -> None:
-        """Should retry on parse failure and succeed on final attempt."""
-        cfg = ConfigFactory.create(
-            max_subskill_attempts=3,
-            debug_escalation_enabled=False,
-            repo_root=tmp_path / "repo",
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        runner = _make_runner(cfg, event_bus)
-
-        garbage = "No parseable fields here."
-        valid_transcript = (
-            "PRECHECK_RISK: low\n"
-            "PRECHECK_CONFIDENCE: 0.9\n"
-            "PRECHECK_ESCALATE: no\n"
-            "PRECHECK_SUMMARY: Finally parsed.\n"
-        )
-
-        mock_execute = AsyncMock(side_effect=[garbage, garbage, valid_transcript])
-        with patch.object(runner, "_execute", mock_execute):
-            result = await runner._run_precheck_context(
-                pr_info, issue, "diff", tmp_path
-            )
-        assert mock_execute.call_count == 3
-        assert "Precheck risk: low" in result
-        assert "Precheck summary: Finally parsed." in result
-
-    @pytest.mark.asyncio
-    async def test_escalates_to_debug(
-        self, event_bus, pr_info, issue, tmp_path
-    ) -> None:
-        """High risk + low confidence should trigger debug escalation."""
-        cfg = ConfigFactory.create(
-            max_subskill_attempts=1,
-            debug_escalation_enabled=True,
-            max_debug_attempts=1,
-            subskill_confidence_threshold=0.7,
-            repo_root=tmp_path / "repo",
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        runner = _make_runner(cfg, event_bus)
-
-        high_risk_transcript = (
-            "PRECHECK_RISK: high\n"
-            "PRECHECK_CONFIDENCE: 0.3\n"
-            "PRECHECK_ESCALATE: yes\n"
-            "PRECHECK_SUMMARY: Risky change.\n"
-        )
-        debug_transcript = "Debug analysis: found critical issues in auth module."
-
-        mock_execute = AsyncMock(side_effect=[high_risk_transcript, debug_transcript])
-        with patch.object(runner, "_execute", mock_execute):
-            result = await runner._run_precheck_context(
-                pr_info, issue, "diff /auth/login.py", tmp_path
-            )
-        assert mock_execute.call_count == 2
-        assert "Precheck risk: high" in result
-        assert "Debug escalation: yes" in result
-        assert "Debug precheck transcript:" in result
-        assert "Debug analysis: found critical" in result
-        assert "Escalation reasons:" in result
-
-    @pytest.mark.asyncio
-    async def test_no_debug_when_max_debug_zero(
-        self, event_bus, pr_info, issue, tmp_path
-    ) -> None:
-        """Escalation decision may say yes but max_debug_attempts=0 prevents debug call."""
-        cfg = ConfigFactory.create(
-            max_subskill_attempts=1,
-            debug_escalation_enabled=True,
-            max_debug_attempts=0,
-            subskill_confidence_threshold=0.7,
-            repo_root=tmp_path / "repo",
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        runner = _make_runner(cfg, event_bus)
-
-        high_risk_transcript = (
-            "PRECHECK_RISK: high\n"
-            "PRECHECK_CONFIDENCE: 0.3\n"
-            "PRECHECK_ESCALATE: yes\n"
-            "PRECHECK_SUMMARY: Risky.\n"
-        )
-        mock_execute = AsyncMock(return_value=high_risk_transcript)
-        with patch.object(runner, "_execute", mock_execute):
-            result = await runner._run_precheck_context(
-                pr_info, issue, "diff /auth/login.py", tmp_path
-            )
-        # Only 1 call (subskill), no debug call
-        assert mock_execute.call_count == 1
-        assert "Debug escalation: yes" in result
-        # No debug transcript appended
-        assert "Debug precheck transcript:" not in result
-
-    @pytest.mark.asyncio
-    async def test_exception_returns_fallback(
-        self, event_bus, pr_info, issue, tmp_path
-    ) -> None:
-        """RuntimeError during execution should return fallback message."""
         cfg = ConfigFactory.create(
             max_subskill_attempts=1,
             repo_root=tmp_path / "repo",
@@ -1649,108 +1348,54 @@ class TestRunPrecheckContext:
         )
         runner = _make_runner(cfg, event_bus)
 
-        mock_execute = AsyncMock(side_effect=RuntimeError("subprocess crashed"))
-        with patch.object(runner, "_execute", mock_execute):
+        with patch(
+            "reviewer.run_precheck_pipeline",
+            new_callable=AsyncMock,
+            return_value="pipeline result",
+        ) as mock_pipeline:
             result = await runner._run_precheck_context(
-                pr_info, issue, "diff", tmp_path
+                pr_info, issue, "diff text", tmp_path
             )
-        assert (
-            result == "Low-tier precheck failed; continuing without precheck context."
-        )
+
+        assert result == "pipeline result"
+        mock_pipeline.assert_called_once()
+        args, kwargs = mock_pipeline.call_args
+        assert args[0] is cfg
+        assert f"#{pr_info.number}" in args[1]  # prompt contains PR number
+        assert args[2] == "diff text"
+        assert "DEBUG MODE" in kwargs["debug_suffix"]
 
     @pytest.mark.asyncio
-    async def test_debug_transcript_truncated_to_1000_chars(
+    async def test_execute_closure_calls_self_execute(
         self, event_bus, pr_info, issue, tmp_path
     ) -> None:
-        """Debug transcript should be truncated to 1000 chars in context output."""
         cfg = ConfigFactory.create(
             max_subskill_attempts=1,
-            debug_escalation_enabled=True,
-            max_debug_attempts=1,
-            subskill_confidence_threshold=0.7,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "wt",
             state_file=tmp_path / "s.json",
         )
         runner = _make_runner(cfg, event_bus)
+        mock_execute = AsyncMock(return_value="transcript")
 
-        high_risk_transcript = (
-            "PRECHECK_RISK: high\n"
-            "PRECHECK_CONFIDENCE: 0.3\n"
-            "PRECHECK_ESCALATE: yes\n"
-            "PRECHECK_SUMMARY: Risky.\n"
+        captured_execute = None
+
+        async def capture_pipeline(config, prompt, diff, execute, debug_suffix):
+            nonlocal captured_execute
+            captured_execute = execute
+            return "ok"
+
+        with (
+            patch("reviewer.run_precheck_pipeline", side_effect=capture_pipeline),
+            patch.object(runner, "_execute", mock_execute),
+        ):
+            await runner._run_precheck_context(pr_info, issue, "diff", tmp_path)
+            assert captured_execute is not None
+            await captured_execute(["cmd"], "prompt")
+
+        mock_execute.assert_called_once_with(
+            ["cmd"], "prompt", tmp_path, {"pr": pr_info.number, "source": "reviewer"}
         )
-        long_debug = "D" * 2000
-
-        mock_execute = AsyncMock(side_effect=[high_risk_transcript, long_debug])
-        with patch.object(runner, "_execute", mock_execute):
-            result = await runner._run_precheck_context(
-                pr_info, issue, "diff /auth/login.py", tmp_path
-            )
-        # The debug transcript in the output should be truncated to 1000 chars
-        assert "D" * 1000 in result
-        assert "D" * 1001 not in result
-
-
-# ---------------------------------------------------------------------------
-# _run_precheck_context — high-risk files
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_precheck_passes_high_risk_true_for_auth_diff(
-    event_bus, pr_info, issue, tmp_path
-):
-    cfg = ConfigFactory.create(max_subskill_attempts=1)
-    runner = _make_runner(cfg, event_bus)
-
-    precheck_transcript = (
-        "PRECHECK_RISK: high\n"
-        "PRECHECK_CONFIDENCE: 0.5\n"
-        "PRECHECK_ESCALATE: no\n"
-        "PRECHECK_SUMMARY: auth change\n"
-    )
-    auth_diff = "diff --git a/src/auth/login.py b/src/auth/login.py\n+pass"
-
-    with (
-        patch.object(runner, "_execute", AsyncMock(return_value=precheck_transcript)),
-        patch(
-            "reviewer.should_escalate_debug",
-            return_value=EscalationDecision(escalate=False, reasons=[]),
-        ) as mock_escalate,
-    ):
-        await runner._run_precheck_context(pr_info, issue, auth_diff, tmp_path)
-
-    mock_escalate.assert_called_once()
-    assert mock_escalate.call_args[1]["high_risk_files_touched"] is True
-
-
-@pytest.mark.asyncio
-async def test_precheck_passes_high_risk_false_for_safe_diff(
-    event_bus, pr_info, issue, tmp_path
-):
-    cfg = ConfigFactory.create(max_subskill_attempts=1)
-    runner = _make_runner(cfg, event_bus)
-
-    precheck_transcript = (
-        "PRECHECK_RISK: low\n"
-        "PRECHECK_CONFIDENCE: 0.9\n"
-        "PRECHECK_ESCALATE: no\n"
-        "PRECHECK_SUMMARY: safe change\n"
-    )
-    safe_diff = "diff --git a/src/utils.py b/src/utils.py\n+def helper(): pass"
-
-    with (
-        patch.object(runner, "_execute", AsyncMock(return_value=precheck_transcript)),
-        patch(
-            "reviewer.should_escalate_debug",
-            return_value=EscalationDecision(escalate=False, reasons=[]),
-        ) as mock_escalate,
-    ):
-        await runner._run_precheck_context(pr_info, issue, safe_diff, tmp_path)
-
-    mock_escalate.assert_called_once()
-    assert mock_escalate.call_args[1]["high_risk_files_touched"] is False
 
 
 # _build_ci_fix_prompt — CI log injection
