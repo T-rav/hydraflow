@@ -76,7 +76,6 @@ def create_router(
     router = APIRouter()
 
     class RepoAddRequest(BaseModel):
-        path: str | None = None
         slug: str | None = None
 
     try:
@@ -860,29 +859,41 @@ def create_router(
 
     @router.post("/api/repos")
     async def ensure_repo(req: RepoAddRequest) -> JSONResponse:
+        error_payload: tuple[str, int] | None = None
         if supervisor_client is None:
-            return JSONResponse({"error": "supervisor unavailable"}, status_code=503)
-        slug = req.slug
-        path = req.path
-        if not path:
+            error_payload = ("supervisor unavailable", 503)
+        elif not req.slug:
+            error_payload = ("slug required", 400)
+        else:
             try:
                 repos = await _call_supervisor(supervisor_client.list_repos)
             except Exception as exc:  # noqa: BLE001
-                return JSONResponse({"error": str(exc)}, status_code=503)
-            if slug:
-                match = next((r for r in repos if r.get("slug") == slug), None)
-                if match:
+                error_payload = (str(exc), 503)
+            else:
+                match = next((r for r in repos if r.get("slug") == req.slug), None)
+                if not match:
+                    error_payload = (f"slug '{req.slug}' not registered", 404)
+                else:
                     path = match.get("path")
-        if not path:
-            return JSONResponse({"error": "path required"}, status_code=400)
-        try:
-            info = await _call_supervisor(
-                supervisor_client.add_repo, Path(path).expanduser(), slug
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Supervisor add_repo failed: %s", exc)
-            return JSONResponse({"error": str(exc)}, status_code=500)
-        return JSONResponse(info)
+                    if not path:
+                        error_payload = (f"slug '{req.slug}' missing path", 500)
+                    else:
+                        try:
+                            info = await _call_supervisor(
+                                supervisor_client.add_repo,
+                                Path(path).expanduser(),
+                                req.slug,
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning("Supervisor add_repo failed: %s", exc)
+                            error_payload = (str(exc), 500)
+                        else:
+                            return JSONResponse(info)
+
+        if error_payload:
+            message, status_code = error_payload
+            return JSONResponse({"error": message}, status_code=status_code)
+        return JSONResponse({"status": "ok"})
 
     @router.delete("/api/repos/{slug}")
     async def remove_repo(slug: str) -> JSONResponse:
