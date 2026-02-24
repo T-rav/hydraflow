@@ -10,6 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from models import PrecheckResult
 from precheck_pipeline import (
     build_debug_command,
     build_subskill_command,
@@ -33,30 +34,29 @@ class TestParsePrecheckTranscript:
             "PRECHECK_ESCALATE: no\n"
             "PRECHECK_SUMMARY: All looks good.\n"
         )
-        risk, confidence, escalate, summary, parse_failed = parse_precheck_transcript(
-            transcript
-        )
-        assert risk == "low"
-        assert confidence == 0.95
-        assert escalate is False
-        assert summary == "All looks good."
-        assert parse_failed is False
+        result = parse_precheck_transcript(transcript)
+        assert isinstance(result, PrecheckResult)
+        assert result.risk == "low"
+        assert result.confidence == 0.95
+        assert result.escalate is False
+        assert result.summary == "All looks good."
+        assert result.parse_failed is False
 
     def test_missing_risk_defaults_to_medium(self) -> None:
         transcript = (
             "PRECHECK_CONFIDENCE: 0.8\nPRECHECK_ESCALATE: no\nPRECHECK_SUMMARY: Fine.\n"
         )
-        risk, _, _, _, parse_failed = parse_precheck_transcript(transcript)
-        assert risk == "medium"
-        assert parse_failed is True
+        result = parse_precheck_transcript(transcript)
+        assert result.risk == "medium"
+        assert result.parse_failed is True
 
     def test_missing_confidence_defaults_to_zero(self) -> None:
         transcript = (
             "PRECHECK_RISK: high\nPRECHECK_ESCALATE: yes\nPRECHECK_SUMMARY: Risky.\n"
         )
-        _, confidence, _, _, parse_failed = parse_precheck_transcript(transcript)
-        assert confidence == 0.0
-        assert parse_failed is True
+        result = parse_precheck_transcript(transcript)
+        assert result.confidence == 0.0
+        assert result.parse_failed is True
 
     def test_escalate_yes(self) -> None:
         transcript = (
@@ -65,8 +65,8 @@ class TestParsePrecheckTranscript:
             "PRECHECK_ESCALATE: yes\n"
             "PRECHECK_SUMMARY: Needs debug.\n"
         )
-        _, _, escalate, _, _ = parse_precheck_transcript(transcript)
-        assert escalate is True
+        result = parse_precheck_transcript(transcript)
+        assert result.escalate is True
 
     def test_escalate_no(self) -> None:
         transcript = (
@@ -75,8 +75,8 @@ class TestParsePrecheckTranscript:
             "PRECHECK_ESCALATE: no\n"
             "PRECHECK_SUMMARY: OK.\n"
         )
-        _, _, escalate, _, _ = parse_precheck_transcript(transcript)
-        assert escalate is False
+        result = parse_precheck_transcript(transcript)
+        assert result.escalate is False
 
     def test_case_insensitive_parsing(self) -> None:
         transcript = (
@@ -85,37 +85,31 @@ class TestParsePrecheckTranscript:
             "precheck_escalate: YES\n"
             "precheck_summary: Mixed case.\n"
         )
-        risk, confidence, escalate, summary, parse_failed = parse_precheck_transcript(
-            transcript
-        )
-        assert risk == "high"
-        assert confidence == 0.42
-        assert escalate is True
-        assert summary == "Mixed case."
-        assert parse_failed is False
+        result = parse_precheck_transcript(transcript)
+        assert result.risk == "high"
+        assert result.confidence == 0.42
+        assert result.escalate is True
+        assert result.summary == "Mixed case."
+        assert result.parse_failed is False
 
     def test_empty_string_returns_defaults(self) -> None:
-        risk, confidence, escalate, summary, parse_failed = parse_precheck_transcript(
-            ""
-        )
-        assert risk == "medium"
-        assert confidence == 0.0
-        assert escalate is False
-        assert summary == ""
-        assert parse_failed is True
+        result = parse_precheck_transcript("")
+        assert result.risk == "medium"
+        assert result.confidence == 0.0
+        assert result.escalate is False
+        assert result.summary == ""
+        assert result.parse_failed is True
 
     def test_missing_summary_only(self) -> None:
         transcript = (
             "PRECHECK_RISK: low\nPRECHECK_CONFIDENCE: 0.8\nPRECHECK_ESCALATE: no\n"
         )
-        risk, confidence, escalate, summary, parse_failed = parse_precheck_transcript(
-            transcript
-        )
-        assert risk == "low"
-        assert confidence == 0.8
-        assert escalate is False
-        assert summary == ""
-        assert parse_failed is True
+        result = parse_precheck_transcript(transcript)
+        assert result.risk == "low"
+        assert result.confidence == 0.8
+        assert result.escalate is False
+        assert result.summary == ""
+        assert result.parse_failed is True
 
     def test_missing_escalate_only(self) -> None:
         transcript = (
@@ -123,9 +117,9 @@ class TestParsePrecheckTranscript:
             "PRECHECK_CONFIDENCE: 0.5\n"
             "PRECHECK_SUMMARY: Partial.\n"
         )
-        _, _, escalate, _, parse_failed = parse_precheck_transcript(transcript)
-        assert escalate is False
-        assert parse_failed is True
+        result = parse_precheck_transcript(transcript)
+        assert result.escalate is False
+        assert result.parse_failed is True
 
     def test_preamble_before_fields(self) -> None:
         transcript = (
@@ -135,14 +129,12 @@ class TestParsePrecheckTranscript:
             "PRECHECK_ESCALATE: no\n"
             "PRECHECK_SUMMARY: All looks good.\n"
         )
-        risk, confidence, escalate, summary, parse_failed = parse_precheck_transcript(
-            transcript
-        )
-        assert risk == "low"
-        assert confidence == 0.95
-        assert escalate is False
-        assert summary == "All looks good."
-        assert parse_failed is False
+        result = parse_precheck_transcript(transcript)
+        assert result.risk == "low"
+        assert result.confidence == 0.95
+        assert result.escalate is False
+        assert result.summary == "All looks good."
+        assert result.parse_failed is False
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +263,14 @@ class TestRunPrecheckPipeline:
             cfg, "prompt", "diff", execute, debug_suffix="\nDEBUG"
         )
         assert execute.call_count == 2
+        # Verify first call used subskill command with the original prompt
+        first_cmd, first_prompt = execute.call_args_list[0][0]
+        assert first_cmd == build_subskill_command(cfg)
+        assert first_prompt == "prompt"
+        # Verify second call used debug command with the suffixed prompt
+        second_cmd, second_prompt = execute.call_args_list[1][0]
+        assert second_cmd == build_debug_command(cfg)
+        assert second_prompt == "prompt\nDEBUG"
         assert "Precheck risk: high" in result
         assert "Debug escalation: yes" in result
         assert "Debug precheck transcript:" in result

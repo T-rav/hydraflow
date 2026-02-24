@@ -8,15 +8,13 @@ from collections.abc import Awaitable, Callable
 from agent_cli import build_agent_command
 from config import HydraFlowConfig
 from escalation_gate import high_risk_diff_touched, should_escalate_debug
+from models import PrecheckResult
 
 
 def parse_precheck_transcript(
     transcript: str,
-) -> tuple[str, float, bool, str, bool]:
-    """Extract PRECHECK_* fields from a precheck transcript.
-
-    Returns ``(risk, confidence, escalate, summary, parse_failed)``.
-    """
+) -> PrecheckResult:
+    """Extract PRECHECK_* fields from a precheck transcript."""
     risk_match = re.search(
         r"PRECHECK_RISK:\s*(low|medium|high)",
         transcript,
@@ -44,7 +42,13 @@ def parse_precheck_transcript(
     confidence = float(confidence_match.group(1)) if confidence_match else 0.0
     escalate = bool(escalate_match and escalate_match.group(1).lower() == "yes")
     summary = summary_match.group(1).strip() if summary_match else ""
-    return risk, confidence, escalate, summary, parse_failed
+    return PrecheckResult(
+        risk=risk,
+        confidence=confidence,
+        escalate=escalate,
+        summary=summary,
+        parse_failed=parse_failed,
+    )
 
 
 def build_subskill_command(config: HydraFlowConfig) -> list[str]:
@@ -69,6 +73,7 @@ async def run_precheck_pipeline(
     diff: str,
     execute: Callable[[list[str], str], Awaitable[str]],
     debug_suffix: str,
+    execute_debug: Callable[[list[str], str], Awaitable[str]] | None = None,
 ) -> str:
     """Run the shared precheck pipeline: subskill retry loop + optional debug escalation.
 
@@ -84,6 +89,10 @@ async def run_precheck_pipeline(
         Async callback ``(cmd, prompt) -> transcript`` that runs a subprocess.
     debug_suffix:
         Text appended to *prompt* when running the debug escalation call.
+    execute_debug:
+        Optional separate callback for the debug escalation call.  When
+        omitted, *execute* is reused.  Pass a distinct callback when the
+        caller wants a different event source or routing for debug runs.
 
     Returns
     -------
@@ -101,9 +110,11 @@ async def run_precheck_pipeline(
     try:
         for _attempt in range(config.max_subskill_attempts):
             transcript = await execute(build_subskill_command(config), prompt)
-            risk, confidence, _escalate, summary, parse_failed = (
-                parse_precheck_transcript(transcript)
-            )
+            precheck = parse_precheck_transcript(transcript)
+            risk = precheck.risk
+            confidence = precheck.confidence
+            summary = precheck.summary
+            parse_failed = precheck.parse_failed
             if not parse_failed:
                 break
     except Exception:  # noqa: BLE001
@@ -128,7 +139,8 @@ async def run_precheck_pipeline(
     ]
 
     if decision.escalate and config.max_debug_attempts > 0:
-        debug_transcript = await execute(
+        _execute_debug = execute_debug or execute
+        debug_transcript = await _execute_debug(
             build_debug_command(config),
             prompt + debug_suffix,
         )
