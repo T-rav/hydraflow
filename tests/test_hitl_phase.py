@@ -278,6 +278,10 @@ class TestHITLPhaseProcessing:
 
         # The key assertion: no pending tasks remain after process_corrections returns
         # If gather was not called, cancelled tasks would still be pending
+        assert first_task_started.is_set(), "First task should have started"
+        current = asyncio.current_task()
+        pending = [t for t in asyncio.all_tasks() if t is not current and not t.done()]
+        assert not pending, f"Leaked tasks after process_corrections: {pending}"
 
     @pytest.mark.asyncio
     async def test_clears_active_issues(self, config: HydraFlowConfig) -> None:

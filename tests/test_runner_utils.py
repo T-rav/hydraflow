@@ -363,10 +363,17 @@ class TestStreamClaudeProcessLifecycle:
         # After the timeout, give the event loop a tick to process cancellation
         await asyncio.sleep(0)
 
-        # The key assertion: no pending tasks should remain for stderr
-        # If stderr_task was not cancelled, we'd see "Task was destroyed" warnings
-        # We verify indirectly that the function completed without warnings
-        # by checking that the process was killed and cleaned up
+        # Verify the stderr task actually started (so we know we exercised the leak path)
+        assert stderr_read_started.is_set(), (
+            "stderr task should have started before timeout"
+        )
+
+        # The key assertion: no pending tasks should remain after the function returns
+        # If stderr_task was not cancelled+awaited, it would still be pending here
+        current = asyncio.current_task()
+        pending = [t for t in asyncio.all_tasks() if t is not current and not t.done()]
+        assert not pending, f"stderr_task was not cleaned up: {pending}"
+
         mock_proc.kill.assert_called()
 
     @pytest.mark.asyncio
@@ -406,6 +413,19 @@ class TestStreamClaudeProcessLifecycle:
 
         # Give the event loop a tick to process cancellation
         await asyncio.sleep(0)
+
+        # Verify the stderr task actually started before the CancelledError fired
+        assert stderr_read_started.is_set(), (
+            "stderr task should have started before cancellation"
+        )
+
+        # The key assertion: no pending tasks should remain after the function raises
+        # If stderr_task was not cancelled+awaited, it would still be pending here
+        current = asyncio.current_task()
+        pending = [t for t in asyncio.all_tasks() if t is not current and not t.done()]
+        assert not pending, (
+            f"stderr_task was not cleaned up on CancelledError: {pending}"
+        )
 
         mock_proc.kill.assert_called_once()
 
