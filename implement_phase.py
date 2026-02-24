@@ -45,6 +45,7 @@ class ImplementPhase:
         self._run_recorder = run_recorder
         self._harness_insights = harness_insights
         self._active_issues: set[int] = set()
+        self._active_issues_lock = asyncio.Lock()
 
     async def _close_as_already_satisfied(self, issue: GitHubIssue) -> None:
         """Close an issue as already satisfied (no changes needed)."""
@@ -100,8 +101,9 @@ class ImplementPhase:
                     )
 
                 branch = f"agent/issue-{issue.number}"
-                self._active_issues.add(issue.number)
-                self._state.set_active_issue_numbers(list(self._active_issues))
+                async with self._active_issues_lock:
+                    self._active_issues.add(issue.number)
+                    self._state.set_active_issue_numbers(list(self._active_issues))
                 async with store_lifecycle(self._store, issue.number, "implement"):
                     self._state.mark_issue(issue.number, "in_progress")
                     self._state.set_branch(issue.number, branch)
@@ -122,8 +124,11 @@ class ImplementPhase:
                             error=f"Worker exception for issue #{issue.number}",
                         )
                     finally:
-                        self._active_issues.discard(issue.number)
-                        self._state.set_active_issue_numbers(list(self._active_issues))
+                        async with self._active_issues_lock:
+                            self._active_issues.discard(issue.number)
+                            self._state.set_active_issue_numbers(
+                                list(self._active_issues)
+                            )
 
         all_results = await run_concurrent_batch(issues, _worker, self._stop_event)
         return all_results, issues

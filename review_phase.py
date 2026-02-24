@@ -84,6 +84,7 @@ class ReviewPhase:
         self._harness_insights = harness_insights
         self._insights = ReviewInsightStore(config.memory_dir)
         self._active_issues: set[int] = set()
+        self._active_issues_lock = asyncio.Lock()
         self._conflict_resolver = MergeConflictResolver(
             config=config,
             worktrees=worktrees,
@@ -130,8 +131,9 @@ class ReviewPhase:
                         issue_number=pr.issue_number,
                         summary="stopped",
                     )
-                self._active_issues.add(pr.issue_number)
-                self._state.set_active_issue_numbers(list(self._active_issues))
+                async with self._active_issues_lock:
+                    self._active_issues.add(pr.issue_number)
+                    self._state.set_active_issue_numbers(list(self._active_issues))
                 async with store_lifecycle(self._store, pr.issue_number, "review"):
                     try:
                         return await self._review_one_inner(idx, pr, issue_map)
@@ -148,8 +150,11 @@ class ReviewPhase:
                         )
                     finally:
                         await self._publish_review_status(pr, idx, "done")
-                        self._active_issues.discard(pr.issue_number)
-                        self._state.set_active_issue_numbers(list(self._active_issues))
+                        async with self._active_issues_lock:
+                            self._active_issues.discard(pr.issue_number)
+                            self._state.set_active_issue_numbers(
+                                list(self._active_issues)
+                            )
 
         return await run_concurrent_batch(prs, _review_one, self._stop_event)
 
