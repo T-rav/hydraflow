@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
-from models import PlanAccuracyResult
+from models import IsoTimestamp, PlanAccuracyResult
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -27,7 +27,7 @@ class RetrospectiveEntry(BaseModel):
 
     issue_number: int
     pr_number: int
-    timestamp: str
+    timestamp: IsoTimestamp
     plan_accuracy_pct: float = 0.0
     planned_files: list[str] = Field(default_factory=list)
     actual_files: list[str] = Field(default_factory=list)

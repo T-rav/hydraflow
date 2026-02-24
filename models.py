@@ -3,11 +3,44 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
-from typing import Any, NamedTuple, NotRequired
+from typing import Annotated, Any, NamedTuple, NotRequired
 
-from pydantic import AliasChoices, BaseModel, Field, field_validator
+from pydantic import (
+    AfterValidator,
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+)
 from typing_extensions import TypedDict
+
+# --- Shared validated types ---
+
+
+def _check_url(v: str) -> str:
+    """Accept empty strings or valid http(s):// URLs."""
+    if v and not v.startswith(("http://", "https://")):
+        msg = f"URL must be empty or start with http(s)://, got: {v!r}"
+        raise ValueError(msg)
+    return v
+
+
+def _check_iso_timestamp(v: str) -> str:
+    """Accept empty strings or valid ISO 8601 timestamps."""
+    if v:
+        try:
+            datetime.fromisoformat(v)
+        except (ValueError, TypeError) as exc:
+            msg = f"Invalid ISO 8601 timestamp: {v!r}"
+            raise ValueError(msg) from exc
+    return v
+
+
+HttpUrl = Annotated[str, AfterValidator(_check_url)]
+IsoTimestamp = Annotated[str, AfterValidator(_check_iso_timestamp)]
 
 # --- GitHub ---
 
@@ -20,7 +53,7 @@ class GitHubIssue(BaseModel):
     body: str = ""
     labels: list[str] = Field(default_factory=list)
     comments: list[str] = Field(default_factory=list)
-    url: str = ""
+    url: HttpUrl = ""
     created_at: str = Field(
         default="",
         validation_alias=AliasChoices("createdAt", "created_at"),
@@ -224,7 +257,7 @@ class PRInfo(BaseModel):
     number: int
     issue_number: int
     branch: str
-    url: str = ""
+    url: HttpUrl = ""
     draft: bool = False
 
 
@@ -251,7 +284,7 @@ class VerificationCriteria(BaseModel):
     pr_number: int
     acceptance_criteria: str
     verification_instructions: str
-    timestamp: str
+    timestamp: IsoTimestamp
 
 
 class ReviewerStatus(StrEnum):
@@ -468,9 +501,11 @@ class StateData(BaseModel):
 class PipelineIssue(BaseModel):
     """A single issue in a pipeline stage snapshot."""
 
+    model_config = ConfigDict(frozen=True)
+
     issue_number: int
     title: str = ""
-    url: str = ""
+    url: HttpUrl = ""
     status: str = "queued"  # "queued" | "active" | "hitl"
 
 
@@ -491,7 +526,7 @@ class IntentResponse(BaseModel):
 
     issue_number: int
     title: str
-    url: str = ""
+    url: HttpUrl = ""
     status: str = "created"
 
 
@@ -501,7 +536,7 @@ class PRListItem(BaseModel):
     pr: int
     issue: int = 0
     branch: str = ""
-    url: str = ""
+    url: HttpUrl = ""
     draft: bool = False
     title: str = ""
 
@@ -511,9 +546,9 @@ class HITLItem(BaseModel):
 
     issue: int
     title: str = ""
-    issueUrl: str = ""  # camelCase to match existing frontend contract
+    issueUrl: HttpUrl = ""  # camelCase to match existing frontend contract
     pr: int = 0
-    prUrl: str = ""  # camelCase to match existing frontend contract
+    prUrl: HttpUrl = ""  # camelCase to match existing frontend contract
     branch: str = ""
     cause: str = ""  # escalation reason (populated by #113)
     status: str = "pending"  # pending | processing | resolved
@@ -708,6 +743,8 @@ class ParsedCriteria(NamedTuple):
 class BackgroundWorkerStatus(BaseModel):
     """Status of a single background worker."""
 
+    model_config = ConfigDict(frozen=True)
+
     name: str
     label: str
     status: str = "disabled"  # ok | error | disabled
@@ -736,7 +773,7 @@ class MetricsResponse(BaseModel):
 class MetricsSnapshot(BaseModel):
     """A single timestamped metrics snapshot for historical tracking."""
 
-    timestamp: str
+    timestamp: IsoTimestamp
     # Core counters (from LifetimeStats)
     issues_completed: int = 0
     prs_merged: int = 0
@@ -752,11 +789,11 @@ class MetricsSnapshot(BaseModel):
     total_implementation_seconds: float = 0.0
     total_review_seconds: float = 0.0
     # Derived rates (computed at snapshot time)
-    merge_rate: float = 0.0
-    quality_fix_rate: float = 0.0
-    hitl_escalation_rate: float = 0.0
-    first_pass_approval_rate: float = 0.0
-    avg_implementation_seconds: float = 0.0
+    merge_rate: float = Field(default=0.0, ge=0.0)
+    quality_fix_rate: float = Field(default=0.0, ge=0.0)
+    hitl_escalation_rate: float = Field(default=0.0, ge=0.0)
+    first_pass_approval_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    avg_implementation_seconds: float = Field(default=0.0, ge=0.0)
     # Queue snapshot
     queue_depth: dict[str, int] = Field(default_factory=dict)
     # GitHub label counts
@@ -796,7 +833,7 @@ class IssueTimeline(BaseModel):
     stages: list[TimelineStage] = Field(default_factory=list)
     total_duration_seconds: float | None = None
     pr_number: int | None = None
-    pr_url: str = ""
+    pr_url: HttpUrl = ""
     branch: str = ""
 
 

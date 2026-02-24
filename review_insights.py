@@ -6,7 +6,9 @@ import json
 import logging
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from models import IsoTimestamp
 
 logger = logging.getLogger("hydraflow.review_insights")
 
@@ -46,11 +48,13 @@ class ReviewRecord(BaseModel):
 
     pr_number: int
     issue_number: int
-    timestamp: str
-    verdict: str
-    summary: str
-    fixes_made: bool
-    categories: list[str]
+    timestamp: IsoTimestamp
+    verdict: str = Field(
+        description="Review verdict (approve, request-changes, comment)"
+    )
+    summary: str = Field(description="Brief summary of the review feedback")
+    fixes_made: bool = Field(description="Whether the reviewer made direct code fixes")
+    categories: list[str] = Field(description="Extracted feedback categories")
 
 
 # ---------------------------------------------------------------------------
