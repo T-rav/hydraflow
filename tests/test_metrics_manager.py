@@ -454,6 +454,24 @@ class TestFetchHistory:
         assert result[0].issues_completed == 7
 
     @pytest.mark.asyncio
+    async def test_skips_comment_with_valid_json_but_invalid_schema(
+        self, state, event_bus
+    ) -> None:
+        """Skips comments with valid JSON that fails Pydantic validation."""
+        mgr, state, _, _ = make_manager(state, event_bus)
+        state.set_metrics_issue_number(42)
+
+        # Valid JSON but missing required MetricsSnapshot fields
+        comments = ['```json\n{"unexpected_field": true}\n```']
+
+        with patch("issue_fetcher.IssueFetcher") as MockFetcher:
+            mock_fetcher = MockFetcher.return_value
+            mock_fetcher.fetch_issue_comments = AsyncMock(return_value=comments)
+            result = await mgr.fetch_history_from_issue()
+
+        assert result == []
+
+    @pytest.mark.asyncio
     async def test_falls_back_to_local_cache_when_no_issue(
         self, state, event_bus, tmp_path
     ) -> None:

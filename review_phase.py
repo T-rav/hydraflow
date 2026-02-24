@@ -15,7 +15,7 @@ from agent import AgentRunner
 from config import HydraFlowConfig
 from epic import EpicCompletionChecker
 from events import EventBus, EventType, HydraFlowEvent
-from harness_insights import FailureCategory, FailureRecord, HarnessInsightStore
+from harness_insights import FailureCategory, HarnessInsightStore
 from issue_store import IssueStore
 from merge_conflict_resolver import MergeConflictResolver
 from models import (
@@ -25,7 +25,7 @@ from models import (
     ReviewResult,
     ReviewVerdict,
 )
-from phase_utils import run_concurrent_batch, store_lifecycle
+from phase_utils import record_harness_failure, run_concurrent_batch, store_lifecycle
 from post_merge_handler import PostMergeHandler
 from pr_manager import PRManager, SelfReviewError
 from retrospective import RetrospectiveCollector
@@ -85,6 +85,7 @@ class ReviewPhase:
         self._harness_insights = harness_insights
         self._insights = ReviewInsightStore(config.memory_dir)
         self._active_issues: set[int] = set()
+        self._active_issues_lock = asyncio.Lock()
         self._conflict_resolver = MergeConflictResolver(
             config=config,
             worktrees=worktrees,
@@ -131,8 +132,9 @@ class ReviewPhase:
                         issue_number=pr.issue_number,
                         summary="stopped",
                     )
-                self._active_issues.add(pr.issue_number)
-                self._state.set_active_issue_numbers(list(self._active_issues))
+                async with self._active_issues_lock:
+                    self._active_issues.add(pr.issue_number)
+                    self._state.set_active_issue_numbers(list(self._active_issues))
                 async with store_lifecycle(self._store, pr.issue_number, "review"):
                     try:
                         return await self._review_one_inner(idx, pr, issue_map)
@@ -151,8 +153,11 @@ class ReviewPhase:
                         )
                     finally:
                         await self._publish_review_status(pr, idx, "done")
-                        self._active_issues.discard(pr.issue_number)
-                        self._state.set_active_issue_numbers(list(self._active_issues))
+                        async with self._active_issues_lock:
+                            self._active_issues.discard(pr.issue_number)
+                            self._state.set_active_issue_numbers(
+                                list(self._active_issues)
+                            )
 
         return await run_concurrent_batch(prs, _review_one, self._stop_event)
 
@@ -233,10 +238,12 @@ class ReviewPhase:
             self._state.record_review_duration(result.duration_seconds)
         await self._record_review_insight(result)
         if result.verdict != ReviewVerdict.APPROVE:
-            self._record_harness_failure(
+            record_harness_failure(
+                self._harness_insights,
                 pr.issue_number,
                 FailureCategory.REVIEW_REJECTION,
                 f"Review verdict: {result.verdict.value}. {result.summary[:200]}",
+                stage="review",
                 pr_number=pr.number,
             )
 
@@ -505,10 +512,12 @@ class ReviewPhase:
         # CI failed after all attempts — escalate to human
         result.ci_passed = False
         self._state.record_ci_fix_rounds(result.ci_fix_attempts)
-        self._record_harness_failure(
+        record_harness_failure(
+            self._harness_insights,
             issue.number,
             FailureCategory.CI_FAILURE,
             f"CI failed after {result.ci_fix_attempts} fix attempt(s): {summary[:200]}",
+            stage="review",
             pr_number=pr.number,
         )
         await self._publish_review_status(pr, worker_id, "escalating")
@@ -751,10 +760,12 @@ class ReviewPhase:
                 max_attempts,
                 pr.issue_number,
             )
-            self._record_harness_failure(
+            record_harness_failure(
+                self._harness_insights,
                 pr.issue_number,
                 FailureCategory.HITL_ESCALATION,
                 f"Review fix cap exceeded after {max_attempts} attempt(s)",
+                stage="review",
                 pr_number=pr.number,
             )
             await self._publish_review_status(pr, worker_id, "escalating")
@@ -771,36 +782,6 @@ class ReviewPhase:
                 event_cause="review_fix_cap_exceeded",
             )
             return False  # Destroy worktree
-
-    def _record_harness_failure(
-        self,
-        issue_number: int,
-        category: FailureCategory,
-        details: str,
-        *,
-        pr_number: int = 0,
-    ) -> None:
-        """Record a failure to the harness insight store (non-blocking)."""
-        if self._harness_insights is None:
-            return
-        try:
-            from harness_insights import extract_subcategories
-
-            record = FailureRecord(
-                issue_number=issue_number,
-                pr_number=pr_number,
-                category=category,
-                subcategories=extract_subcategories(details),
-                details=details,
-                stage="review",
-            )
-            self._harness_insights.append_failure(record)
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "Failed to record harness failure for issue #%d",
-                issue_number,
-                exc_info=True,
-            )
 
     # Delegate properties for backward compatibility in tests
     @property

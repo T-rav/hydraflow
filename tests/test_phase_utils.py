@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from phase_utils import (
     escalate_to_hitl,
+    record_harness_failure,
     run_concurrent_batch,
     safe_file_memory_suggestion,
     store_lifecycle,
@@ -256,3 +257,108 @@ class TestStoreLifecycle:
 
         store.mark_active.assert_called_once_with(42, "implement")
         store.mark_complete.assert_called_once_with(42)
+
+
+# ---------------------------------------------------------------------------
+# record_harness_failure
+# ---------------------------------------------------------------------------
+
+
+class TestRecordHarnessFailure:
+    """Tests for record_harness_failure."""
+
+    def test_appends_failure_record_to_store(self, tmp_path: Path) -> None:
+        """Should append a FailureRecord with correct fields to the store."""
+        from harness_insights import FailureCategory, HarnessInsightStore
+
+        memory_dir = tmp_path / "memory"
+        memory_dir.mkdir()
+        store = HarnessInsightStore(memory_dir)
+
+        record_harness_failure(
+            store,
+            42,
+            FailureCategory.PLAN_VALIDATION,
+            "Missing required sections",
+            stage="plan",
+        )
+
+        records = store.load_recent()
+        assert len(records) == 1
+        assert records[0].issue_number == 42
+        assert records[0].category == FailureCategory.PLAN_VALIDATION
+        assert records[0].stage == "plan"
+        assert records[0].pr_number == 0
+
+    def test_noop_when_store_is_none(self) -> None:
+        """Should not raise when harness_insights is None."""
+        from harness_insights import FailureCategory
+
+        record_harness_failure(
+            None,
+            42,
+            FailureCategory.PLAN_VALIDATION,
+            "Some error",
+            stage="plan",
+        )
+
+    def test_catches_exception_from_store(self) -> None:
+        """Should catch and log exceptions from the store without propagating."""
+        from harness_insights import FailureCategory
+
+        mock_store = MagicMock()
+        mock_store.append_failure.side_effect = RuntimeError("disk full")
+
+        with patch("phase_utils.logger") as mock_logger:
+            record_harness_failure(
+                mock_store,
+                42,
+                FailureCategory.PLAN_VALIDATION,
+                "Some error",
+                stage="plan",
+            )
+
+            mock_logger.warning.assert_called_once()
+            assert "42" in str(mock_logger.warning.call_args)
+
+    def test_passes_pr_number_to_record(self, tmp_path: Path) -> None:
+        """Should set pr_number on the FailureRecord when provided."""
+        from harness_insights import FailureCategory, HarnessInsightStore
+
+        memory_dir = tmp_path / "memory"
+        memory_dir.mkdir()
+        store = HarnessInsightStore(memory_dir)
+
+        record_harness_failure(
+            store,
+            66,
+            FailureCategory.REVIEW_REJECTION,
+            "Review verdict: request_changes",
+            stage="review",
+            pr_number=200,
+        )
+
+        records = store.load_recent()
+        assert len(records) == 1
+        assert records[0].pr_number == 200
+        assert records[0].stage == "review"
+
+    def test_extracts_subcategories(self, tmp_path: Path) -> None:
+        """Should extract subcategories from the details string."""
+        from harness_insights import FailureCategory, HarnessInsightStore
+
+        memory_dir = tmp_path / "memory"
+        memory_dir.mkdir()
+        store = HarnessInsightStore(memory_dir)
+
+        record_harness_failure(
+            store,
+            42,
+            FailureCategory.QUALITY_GATE,
+            "ruff lint error: missing import",
+            stage="implement",
+        )
+
+        records = store.load_recent()
+        assert len(records) == 1
+        assert "lint_error" in records[0].subcategories

@@ -1065,6 +1065,7 @@ def _detect_repo_slug(repo_root: Path) -> str:
             capture_output=True,
             text=True,
             check=False,
+            timeout=10,
         )
         url = result.stdout.strip()
         if not url:
@@ -1077,7 +1078,7 @@ def _detect_repo_slug(repo_root: Path) -> str:
         if "github.com:" in url:
             return url.split("github.com:")[-1]
         return ""
-    except (FileNotFoundError, OSError):
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
         return ""
 
 
