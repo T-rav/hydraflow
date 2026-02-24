@@ -35,3 +35,14 @@ def add_repo(path: str, dashboard_url: str) -> None:
             return
     repos.append({"path": path, "dashboard_url": dashboard_url})
     _save_state(state)
+
+
+def remove_repo(path: str) -> bool:
+    state = _load_state()
+    repos = state.setdefault("repos", [])
+    for idx, repo in enumerate(repos):
+        if repo.get("path") == path:
+            repos.pop(idx)
+            _save_state(state)
+            return True
+    return False

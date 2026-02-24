@@ -53,3 +53,14 @@ def add_repo(path: Path, dashboard_url: str) -> str:
     if resp.get("status") != "ok":
         raise RuntimeError(resp.get("error", "unknown error"))
     return resp.get("dashboard_url", dashboard_url)
+
+
+def remove_repo(path: Path) -> None:
+    resp = _send(
+        {
+            "action": "remove_repo",
+            "path": str(path.resolve()),
+        }
+    )
+    if resp.get("status") != "ok":
+        raise RuntimeError(resp.get("error", "unknown error"))

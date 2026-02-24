@@ -9,7 +9,7 @@ from pathlib import Path
 from cli import main as hydraflow_main
 
 from .init_cmd import run_init
-from .supervisor_client import add_repo, list_repos
+from .supervisor_client import add_repo, list_repos, remove_repo
 from .supervisor_manager import ensure_running
 
 _FLAG_COMMANDS = {
@@ -45,6 +45,12 @@ def _handle_view() -> None:
         print(f"- {repo['path']} -> {repo.get('dashboard_url', _DASHBOARD_URL)}")
 
 
+def _handle_stop() -> None:
+    repo_path = Path.cwd()
+    remove_repo(repo_path)
+    print(f"Removed repo {repo_path} from hf supervisor")
+
+
 def entrypoint(argv: Sequence[str] | None = None) -> None:
     args = list(argv) if argv is not None else []
     if not args:
@@ -59,20 +65,19 @@ def entrypoint(argv: Sequence[str] | None = None) -> None:
     if cmd == "init":
         raise SystemExit(run_init(rest))
 
-    if cmd == "view":
-        _handle_view()
-        return
-
-    if cmd == "run":
-        _handle_run(rest)
+    command_map = {
+        "view": _handle_view,
+        "status": _handle_view,
+        "stop": _handle_stop,
+        "run": lambda: _handle_run(rest),
+        "start": lambda: hydraflow_main(rest),
+    }
+    if cmd in command_map:
+        command_map[cmd]()
         return
 
     if cmd in _FLAG_COMMANDS:
         _dispatch_flag_command(_FLAG_COMMANDS[cmd], rest)
-        return
-
-    if cmd == "start":
-        hydraflow_main(rest)
         return
 
     hydraflow_main(args)

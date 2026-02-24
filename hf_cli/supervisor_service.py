@@ -30,6 +30,14 @@ async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) ->
             else:
                 supervisor_state.add_repo(path, dashboard_url)
                 response = {"status": "ok", "dashboard_url": dashboard_url}
+        elif action == "remove_repo":
+            path = request.get("path")
+            if not path:
+                response = {"status": "error", "error": "Missing path"}
+            elif supervisor_state.remove_repo(path):
+                response = {"status": "ok"}
+            else:
+                response = {"status": "error", "error": "Repo not found"}
         else:
             response = {"status": "error", "error": "unknown action"}
     except Exception as exc:  # noqa: BLE001
