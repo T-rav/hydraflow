@@ -46,4 +46,3 @@ def load_git_submodule_roots(repo_root: Path) -> tuple[Path, ...]:
     except OSError:
         return ()
     return tuple(roots)
-

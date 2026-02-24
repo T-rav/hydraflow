@@ -185,6 +185,8 @@ _PROJECT_MARKERS: tuple[str, ...] = (
     "Gemfile",
     "CMakeLists.txt",
 )
+
+
 def discover_project_paths(repo_root: Path) -> list[Path]:
     """Discover project directories that should get Makefile scaffolding."""
     paths: set[Path] = set()
@@ -193,7 +195,9 @@ def discover_project_paths(repo_root: Path) -> list[Path]:
         if any(part in PREP_IGNORED_DIRS for part in path.parts):
             continue
         resolved = path.resolve()
-        if any(root == resolved or root in resolved.parents for root in submodule_roots):
+        if any(
+            root == resolved or root in resolved.parents for root in submodule_roots
+        ):
             continue
         if not path.is_file():
             continue

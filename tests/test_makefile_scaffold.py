@@ -390,7 +390,9 @@ class TestScaffoldMakefiles:
         assert "backend" in rels
         assert "hydraflow" not in rels
 
-    def test_ignores_hydra_named_folder_without_gitmodules(self, tmp_path: Path) -> None:
+    def test_ignores_hydra_named_folder_without_gitmodules(
+        self, tmp_path: Path
+    ) -> None:
         (tmp_path / "backend").mkdir()
         (tmp_path / "backend" / "pyproject.toml").touch()
         (tmp_path / "hydra").mkdir()
