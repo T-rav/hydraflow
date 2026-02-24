@@ -4237,3 +4237,80 @@ class TestUnstickConfigFields:
             state_file=tmp_path / "s.json",
         )
         assert cfg.unstick_all_causes is False
+
+
+# --- all_pipeline_labels ---
+
+
+class TestAllPipelineLabels:
+    """Tests for HydraFlowConfig.all_pipeline_labels property."""
+
+    def test_returns_all_label_fields(self, tmp_path: Path) -> None:
+        from tests.helpers import ConfigFactory
+
+        cfg = ConfigFactory.create(repo_root=tmp_path / "repo")
+        labels = cfg.all_pipeline_labels
+        # Should include labels from all pipeline stages
+        assert cfg.ready_label[0] in labels
+        assert cfg.review_label[0] in labels
+        assert cfg.hitl_label[0] in labels
+        assert cfg.planner_label[0] in labels
+        assert cfg.find_label[0] in labels
+        assert cfg.hitl_active_label[0] in labels
+        assert cfg.fixed_label[0] in labels
+        assert cfg.improve_label[0] in labels
+
+    def test_returns_flat_list(self, tmp_path: Path) -> None:
+        from tests.helpers import ConfigFactory
+
+        cfg = ConfigFactory.create(repo_root=tmp_path / "repo")
+        labels = cfg.all_pipeline_labels
+        assert isinstance(labels, list)
+        for label in labels:
+            assert isinstance(label, str)
+
+    def test_custom_labels_included(self, tmp_path: Path) -> None:
+        from tests.helpers import ConfigFactory
+
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path / "repo",
+            ready_label=["custom-ready"],
+            review_label=["custom-review"],
+        )
+        labels = cfg.all_pipeline_labels
+        assert "custom-ready" in labels
+        assert "custom-review" in labels
+
+
+# --- labels_must_not_be_empty ---
+
+
+class TestLabelsMustNotBeEmpty:
+    """Tests for the labels_must_not_be_empty validator."""
+
+    def test_rejects_empty_ready_label(self, tmp_path: Path) -> None:
+        from pydantic import ValidationError
+
+        from tests.helpers import ConfigFactory
+
+        with pytest.raises(ValidationError):
+            ConfigFactory.create(repo_root=tmp_path / "repo", ready_label=[])
+
+    def test_rejects_empty_review_label(self, tmp_path: Path) -> None:
+        from pydantic import ValidationError
+
+        from tests.helpers import ConfigFactory
+
+        with pytest.raises(ValidationError):
+            ConfigFactory.create(repo_root=tmp_path / "repo", review_label=[])
+
+    def test_accepts_non_empty_labels(self, tmp_path: Path) -> None:
+        from tests.helpers import ConfigFactory
+
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path / "repo",
+            ready_label=["valid"],
+            review_label=["valid"],
+        )
+        assert cfg.ready_label == ["valid"]
+        assert cfg.review_label == ["valid"]

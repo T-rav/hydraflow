@@ -134,6 +134,13 @@ class TestBuildRebuildPrompt:
         assert ISSUE_URL in prompt
         assert PR_URL in prompt
 
+    def test_includes_fresh_branch_instructions(self) -> None:
+        prompt = build_rebuild_prompt(
+            ISSUE_URL, PR_URL, issue_number=42, pr_diff=PR_DIFF
+        )
+        assert "fresh branch" in prompt.lower()
+        assert "re-applying" in prompt.lower()
+
     def test_includes_pr_diff(self) -> None:
         prompt = build_rebuild_prompt(
             ISSUE_URL, PR_URL, issue_number=42, pr_diff=PR_DIFF
