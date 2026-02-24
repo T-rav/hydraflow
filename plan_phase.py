@@ -79,7 +79,7 @@ class PlanPhase:
                     status="success",
                     issue_title=issue.title,
                     duration_seconds=result.duration_seconds,
-                    log_file=f".hydraflow/logs/plan-issue-{issue.id}.txt",
+                    log_file=self._plan_log_reference(issue.id),
                 )
             except Exception:
                 logger.exception(
@@ -175,12 +175,17 @@ class PlanPhase:
                     status=status,
                     issue_title=issue.title,
                     duration_seconds=result.duration_seconds,
-                    log_file=f".hydraflow/logs/plan-issue-{issue.id}.txt",
+                    log_file=self._plan_log_reference(issue.id),
                 )
             except Exception:
                 logger.exception(
                     "Failed to post transcript summary for issue #%d", issue.id
                 )
+
+    def _plan_log_reference(self, issue_id: int) -> str:
+        """Return a display-friendly log path for planner transcripts."""
+        log_path = self._config.log_dir / f"plan-issue-{issue_id}.txt"
+        return self._config.format_path_for_display(log_path)
 
     async def plan_issues(self) -> list[PlanResult]:
         """Run planning agents on issues from the plan queue."""

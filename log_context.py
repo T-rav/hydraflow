@@ -34,7 +34,7 @@ def load_runtime_logs(config: HydraFlowConfig) -> str:
     if not config.inject_runtime_logs:
         return ""
 
-    log_path = config.repo_root / ".hydraflow" / "logs" / "hydraflow.log"
+    log_path = config.data_path("logs", "hydraflow.log")
     if not log_path.is_file():
         return ""
 

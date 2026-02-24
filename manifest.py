@@ -356,7 +356,7 @@ class ProjectManifestManager:
     @property
     def manifest_path(self) -> Path:
         """Return the path to the persisted manifest file."""
-        return self._config.repo_root / ".hydraflow" / "memory" / "manifest.md"
+        return self._config.data_path("memory", "manifest.md")
 
     def scan(self) -> str:
         """Scan the repo and return the manifest markdown content."""
@@ -399,7 +399,7 @@ def load_project_manifest(config: HydraFlowConfig) -> str:
     Returns an empty string if the file is missing or empty.
     Content is capped at ``config.max_manifest_prompt_chars``.
     """
-    manifest_path = config.repo_root / ".hydraflow" / "memory" / "manifest.md"
+    manifest_path = config.data_path("memory", "manifest.md")
     if not manifest_path.is_file():
         return ""
     try:

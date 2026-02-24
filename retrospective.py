@@ -52,12 +52,8 @@ class RetrospectiveCollector:
         self._config = config
         self._state = state
         self._prs = prs
-        self._retro_path = (
-            config.repo_root / ".hydraflow" / "memory" / "retrospectives.jsonl"
-        )
-        self._filed_patterns_path = (
-            config.repo_root / ".hydraflow" / "memory" / "filed_patterns.json"
-        )
+        self._retro_path = config.data_path("memory", "retrospectives.jsonl")
+        self._filed_patterns_path = config.data_path("memory", "filed_patterns.json")
 
     async def record(
         self,
@@ -118,9 +114,7 @@ class RetrospectiveCollector:
 
     def _read_plan_file(self, issue_number: int) -> str:
         """Read the plan file for *issue_number*, returning empty string on failure."""
-        plan_path = (
-            self._config.repo_root / ".hydraflow" / "plans" / f"issue-{issue_number}.md"
-        )
+        plan_path = self._config.data_path("plans", f"issue-{issue_number}.md")
         try:
             return plan_path.read_text()
         except OSError:

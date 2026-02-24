@@ -100,7 +100,7 @@ def load_memory_digest(config: HydraFlowConfig) -> str:
     Returns an empty string if the file is missing or empty.
     Content is capped at ``config.max_memory_prompt_chars``.
     """
-    digest_path = config.repo_root / ".hydraflow" / "memory" / "digest.md"
+    digest_path = config.data_path("memory", "digest.md")
     if not digest_path.is_file():
         return ""
     try:
@@ -217,7 +217,7 @@ class MemorySyncWorker:
         if current_ids == sorted(prev_ids):
             # No change — just update timestamp
             self._state.update_memory_state(current_ids, prev_hash)
-            digest_path = self._config.repo_root / ".hydraflow" / "memory" / "digest.md"
+            digest_path = self._config.data_path("memory", "digest.md")
             digest_chars = len(digest_path.read_text()) if digest_path.is_file() else 0
             return {
                 "action": "synced",
@@ -248,7 +248,7 @@ class MemorySyncWorker:
             compacted = True
 
         # Write individual items
-        items_dir = self._config.repo_root / ".hydraflow" / "memory" / "items"
+        items_dir = self._config.data_path("memory", "items")
         items_dir.mkdir(parents=True, exist_ok=True)
         for num, learning, _, _ in learnings:
             item_path = items_dir / f"{num}.md"
@@ -450,7 +450,7 @@ class MemorySyncWorker:
 
     def _write_digest(self, content: str) -> None:
         """Write digest to disk atomically."""
-        digest_path = self._config.repo_root / ".hydraflow" / "memory" / "digest.md"
+        digest_path = self._config.data_path("memory", "digest.md")
         atomic_write(digest_path, content)
 
     async def publish_sync_event(self, stats: MemorySyncResult) -> None:

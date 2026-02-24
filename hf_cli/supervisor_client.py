@@ -42,17 +42,16 @@ def list_repos() -> list[dict[str, Any]]:
     raise RuntimeError(resp.get("error", "unknown error"))
 
 
-def add_repo(path: Path, dashboard_url: str) -> str:
+def add_repo(path: Path) -> dict[str, Any]:
     resp = _send(
         {
             "action": "add_repo",
             "path": str(path.resolve()),
-            "dashboard_url": dashboard_url,
         }
     )
     if resp.get("status") != "ok":
         raise RuntimeError(resp.get("error", "unknown error"))
-    return resp.get("dashboard_url", dashboard_url)
+    return resp
 
 
 def remove_repo(path: Path) -> None:

@@ -34,7 +34,29 @@ _SEEDED_DIGEST_PLACEHOLDER = (
     "HydraFlow will update this digest after the first memory sync.\n"
 )
 _PREP_COVERAGE_STEP = 10.0
-_PREP_COVERAGE_STATE_PATH = ".hydraflow/prep/coverage-floor.json"
+_PREP_COVERAGE_STATE_PATH = Path("prep/coverage-floor.json")
+
+
+def _default_data_root_path() -> Path:
+    """Return the default data root based on HYDRAFLOW_HOME or local .hydraflow."""
+    env_home = os.environ.get("HYDRAFLOW_HOME", "").strip()
+    if env_home:
+        return Path(env_home).expanduser()
+    return Path(".hydraflow")
+
+
+def _default_config_file() -> str:
+    """Return the default config file path under the data root."""
+    return str(_default_data_root_path() / "config.json")
+
+
+def _default_log_file() -> str:
+    """Return the default structured log file path under the data root."""
+    return str(_default_data_root_path() / "logs" / "hydraflow.log")
+
+
+_DEFAULT_CONFIG_PATH = _default_config_file()
+_DEFAULT_LOG_FILE = _default_log_file()
 
 
 def _supports_color_output() -> bool:
@@ -100,7 +122,7 @@ async def _await_with_prep_heartbeat(
 
 def _make_prep_output_tracker(
     *,
-    repo_root: Path,
+    data_root: Path,
     task_slug: str,
     stream_label: str,
     color: bool,
@@ -109,7 +131,7 @@ def _make_prep_output_tracker(
     """Return (on_output callback, tail getter) for rolling prep task output."""
     from pre_issue_tracker import ensure_pre_dirs  # noqa: PLC0415
 
-    _pre_dir, runs_dir = ensure_pre_dirs(repo_root)
+    _pre_dir, runs_dir = ensure_pre_dirs(data_root)
     ts = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
     safe_slug = re.sub(r"[^a-z0-9]+", "-", task_slug.lower()).strip("-") or "task"
     live_log_path = runs_dir / f"{ts}-{safe_slug}-live.log"
@@ -197,7 +219,7 @@ def _make_prep_output_tracker(
 
 def _write_prep_task_transcript(
     *,
-    repo_root: Path,
+    data_root: Path,
     task_slug: str,
     transcript: str,
 ) -> Path | None:
@@ -206,7 +228,7 @@ def _write_prep_task_transcript(
 
     if not transcript.strip():
         return None
-    _pre_dir, runs_dir = ensure_pre_dirs(repo_root)
+    _pre_dir, runs_dir = ensure_pre_dirs(data_root)
     ts = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
     safe_slug = re.sub(r"[^a-z0-9]+", "-", task_slug.lower()).strip("-") or "task"
     path = runs_dir / f"{ts}-{safe_slug}.log"
@@ -214,11 +236,11 @@ def _write_prep_task_transcript(
     return path
 
 
-def _append_full_run_log_line(repo_root: Path, line: str) -> Path:
+def _append_full_run_log_line(data_root: Path, line: str) -> Path:
     """Append one line to `.hydraflow/prep/runs/<run-id>/full-run.log` and return its path."""
     from pre_issue_tracker import ensure_pre_dirs  # noqa: PLC0415
 
-    _pre_dir, runs_dir = ensure_pre_dirs(repo_root)
+    _pre_dir, runs_dir = ensure_pre_dirs(data_root)
     path = runs_dir / "full-run.log"
     with path.open("a", encoding="utf-8") as fh:
         fh.write(f"{line}\n")
@@ -288,12 +310,6 @@ def _seed_context_assets(config: HydraFlowConfig) -> list[str]:
 
     log_lines: list[str] = []
 
-    def _rel(path: Path) -> str:
-        try:
-            return str(path.relative_to(config.repo_root))
-        except ValueError:
-            return str(path)
-
     if config.dry_run:
         print("Context seed: skipped (dry-run)")  # noqa: T201
         log_lines.append("- Context seed skipped: dry-run mode")
@@ -301,7 +317,7 @@ def _seed_context_assets(config: HydraFlowConfig) -> list[str]:
 
     manifest_manager = ProjectManifestManager(config)
     manifest_result = manifest_manager.refresh()
-    manifest_rel = _rel(manifest_manager.manifest_path)
+    manifest_rel = config.format_path_for_display(manifest_manager.manifest_path)
     print(  # noqa: T201
         f"Manifest seed: wrote {manifest_rel} "
         f"(hash={manifest_result.digest_hash}, chars={len(manifest_result.content)})"
@@ -311,8 +327,8 @@ def _seed_context_assets(config: HydraFlowConfig) -> list[str]:
         f"(hash={manifest_result.digest_hash}, chars={len(manifest_result.content)})"
     )
 
-    digest_path = config.repo_root / ".hydraflow" / "memory" / "digest.md"
-    digest_rel = _rel(digest_path)
+    digest_path = config.data_path("memory", "digest.md")
+    digest_rel = config.format_path_for_display(digest_path)
     if digest_path.exists():
         print(f"Memory digest already exists: {digest_rel}")  # noqa: T201
         log_lines.append(f"- Memory digest already existed: {digest_rel}")
@@ -324,7 +340,7 @@ def _seed_context_assets(config: HydraFlowConfig) -> list[str]:
     cache_dir = get_metrics_cache_dir(config)
     snapshots_file = cache_dir / "snapshots.jsonl"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    snapshots_rel = _rel(snapshots_file)
+    snapshots_rel = config.format_path_for_display(snapshots_file)
     if snapshots_file.exists():
         print(f"Metrics cache already exists: {snapshots_rel}")  # noqa: T201
         log_lines.append(f"- Metrics cache already existed: {snapshots_rel}")
@@ -655,8 +671,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--config-file",
-        default=None,
-        help="Path to JSON config file for persisting runtime changes (default: .hydraflow/config.json)",
+        default=_DEFAULT_CONFIG_PATH,
+        help=f"Path to JSON config file for persisting runtime changes (default: {_DEFAULT_CONFIG_PATH})",
     )
     parser.add_argument(
         "--audit",
@@ -670,8 +686,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--log-file",
-        default=".hydraflow/logs/hydraflow.log",
-        help="Path to log file for structured JSON logging (default: .hydraflow/logs/hydraflow.log)",
+        default=_DEFAULT_LOG_FILE,
+        help=f"Path to log file for structured JSON logging (default: {_DEFAULT_LOG_FILE})",
     )
     parser.add_argument(
         "--clean",
@@ -719,7 +735,7 @@ def build_config(args: argparse.Namespace) -> HydraFlowConfig:
     # 0) Load config file values (lowest priority after defaults)
     from pathlib import Path  # noqa: PLC0415
 
-    config_file_path = getattr(args, "config_file", None) or ".hydraflow/config.json"
+    config_file_path = getattr(args, "config_file", None) or _DEFAULT_CONFIG_PATH
     file_kwargs = load_config_file(Path(config_file_path))
 
     kwargs: dict[str, Any] = {}
@@ -1146,9 +1162,9 @@ def _prep_coverage_has_measurement(detail: str) -> bool:
     return bool(re.search(r"\d+(?:\.\d+)?% from ", detail))
 
 
-def _load_prep_coverage_floor(repo_root: Path) -> float:
+def _load_prep_coverage_floor(data_root: Path) -> float:
     """Load persisted prep coverage minimum floor for ratcheting."""
-    state_path = repo_root / _PREP_COVERAGE_STATE_PATH
+    state_path = data_root / _PREP_COVERAGE_STATE_PATH
     if not state_path.is_file():
         return _PREP_COVERAGE_MIN_REQUIRED
     try:
@@ -1163,12 +1179,12 @@ def _load_prep_coverage_floor(repo_root: Path) -> float:
     return _PREP_COVERAGE_MIN_REQUIRED
 
 
-def _save_prep_coverage_floor(repo_root: Path, min_required: float) -> None:
+def _save_prep_coverage_floor(data_root: Path, min_required: float) -> None:
     """Persist prep coverage minimum floor for future runs."""
     value = float(
         max(_PREP_COVERAGE_MIN_REQUIRED, min(_PREP_COVERAGE_TARGET, min_required))
     )
-    state_path = repo_root / _PREP_COVERAGE_STATE_PATH
+    state_path = data_root / _PREP_COVERAGE_STATE_PATH
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text(
         json.dumps({"min_required": value}, indent=2) + "\n", encoding="utf-8"
@@ -1414,15 +1430,15 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
     use_color = _supports_color_output()
     run_id = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S-%f")
     os.environ["HYDRAFLOW_PREP_RUN_ID"] = run_id
-    ensure_pre_dirs(config.repo_root)
-    local_issues = load_open_issues(config.repo_root)
+    ensure_pre_dirs(config.data_root)
+    local_issues = load_open_issues(config.data_root)
     selected_tool, selection_mode = _choose_prep_tool(config.subskill_tool)
     if selected_tool is None:
         print("Prep aborted: neither Claude nor Codex is installed.")  # noqa: T201
         return False
     selected_model = _best_model_for_tool(selected_tool)
     full_run_log_path = _append_full_run_log_line(
-        config.repo_root,
+        config.data_root,
         f"=== prep run start ({datetime.now(tz=UTC).isoformat()}) ===",
     )
 
@@ -1523,11 +1539,13 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
         print("- Hardening: skipped (dry-run)")  # noqa: T201
         print(f"- Local issues open: {len(local_issues)}")  # noqa: T201
         run_log = write_run_log(
-            config.repo_root,
+            config.data_root,
             title="Prep Workflow Run",
             lines=run_log_lines,
         )
-        print(f"Prep run log: {run_log.relative_to(config.repo_root)}")  # noqa: T201
+        print(  # noqa: T201
+            f"Prep run log: {config.format_path_for_display(run_log)}"
+        )
         return True
 
     hardening_ok = True
@@ -1564,14 +1582,14 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
         use_color,
     )
     print(stage_line)  # noqa: T201
-    _append_full_run_log_line(config.repo_root, stage_line)
+    _append_full_run_log_line(config.data_root, stage_line)
     for attempt in range(1, max_attempts + 1):
         attempts_used = attempt
         attempt_failures: list[tuple[str, list[str], str]] = []
         run_log_lines.append(f"- Hardening attempt {attempt}/{max_attempts}")
         plain_line = f"Hardening attempt {attempt}/{max_attempts}"
         print(plain_line)  # noqa: T201
-        _append_full_run_log_line(config.repo_root, plain_line)
+        _append_full_run_log_line(config.data_root, plain_line)
         stage_line = _prep_stage_line(
             "hardening",
             f"attempt {attempt}/{max_attempts}: collecting open .hydraflow/prep issues",
@@ -1579,9 +1597,9 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
             use_color,
         )
         print(stage_line)  # noqa: T201
-        _append_full_run_log_line(config.repo_root, stage_line)
+        _append_full_run_log_line(config.data_root, stage_line)
 
-        issue_names = [issue.path.name for issue in load_open_issues(repo_root)]
+        issue_names = [issue.path.name for issue in load_open_issues(config.data_root)]
         issue_preview = ", ".join(issue_names[:3]) if issue_names else "none"
         if len(issue_names) > 3:
             issue_preview = f"{issue_preview}, +{len(issue_names) - 3} more"
@@ -1592,7 +1610,7 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
             use_color,
         )
         print(stage_line)  # noqa: T201
-        _append_full_run_log_line(config.repo_root, stage_line)
+        _append_full_run_log_line(config.data_root, stage_line)
         agent_runs += 1
         stage_line = _prep_stage_line(
             "hardening",
@@ -1604,16 +1622,16 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
             use_color,
         )
         print(stage_line)  # noqa: T201
-        _append_full_run_log_line(config.repo_root, stage_line)
+        _append_full_run_log_line(config.data_root, stage_line)
         workflow_on_output, workflow_tail, workflow_live_log = (
             _make_prep_output_tracker(
-                repo_root=repo_root,
+                data_root=config.data_root,
                 task_slug=f"attempt-{attempt}-prep-workflow-agent",
                 stream_label=f"attempt {attempt}/{max_attempts}: prep workflow agent",
                 color=use_color,
             )
         )
-        workflow_live_log_ref = workflow_live_log.relative_to(repo_root)
+        workflow_live_log_ref = config.format_path_for_display(workflow_live_log)
         stage_line = _prep_stage_line(
             "hardening",
             f"attempt {attempt}/{max_attempts}: live log {workflow_live_log_ref}",
@@ -1621,7 +1639,7 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
             use_color,
         )
         print(stage_line)  # noqa: T201
-        _append_full_run_log_line(config.repo_root, stage_line)
+        _append_full_run_log_line(config.data_root, stage_line)
         run_log_lines.append(f"- Workflow live log: `{workflow_live_log_ref}`")
         agent_ok, transcript = await _await_with_prep_heartbeat(
             _run_prep_agent_workflow(
@@ -1673,7 +1691,7 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
                         use_color,
                     )
                     print(stage_line)  # noqa: T201
-                    _append_full_run_log_line(config.repo_root, stage_line)
+                    _append_full_run_log_line(config.data_root, stage_line)
                 stage_line = _prep_stage_line(
                     "hardening",
                     (
@@ -1684,7 +1702,7 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
                     use_color,
                 )
                 print(stage_line)  # noqa: T201
-                _append_full_run_log_line(config.repo_root, stage_line)
+                _append_full_run_log_line(config.data_root, stage_line)
                 if (
                     _prep_coverage_has_measurement(coverage_detail)
                     and coverage_min_required < _PREP_COVERAGE_TARGET
@@ -1710,7 +1728,7 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
                             use_color,
                         )
                         print(stage_line)  # noqa: T201
-                        _append_full_run_log_line(config.repo_root, stage_line)
+                        _append_full_run_log_line(config.data_root, stage_line)
                         coverage_min_required = bumped_floor
                 break
 
@@ -1727,7 +1745,7 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
                     use_color,
                 )
                 print(stage_line)  # noqa: T201
-                _append_full_run_log_line(config.repo_root, stage_line)
+                _append_full_run_log_line(config.data_root, stage_line)
             stage_line = _prep_stage_line(
                 "hardening",
                 (
@@ -1738,17 +1756,17 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
                 use_color,
             )
             print(stage_line)  # noqa: T201
-            _append_full_run_log_line(config.repo_root, stage_line)
+            _append_full_run_log_line(config.data_root, stage_line)
         else:
             hardening_ok = False
             failure_count += 1
             transcript_path = _write_prep_task_transcript(
-                repo_root=repo_root,
+                data_root=config.data_root,
                 task_slug=f"attempt-{attempt}-prep-workflow-agent",
                 transcript=transcript,
             )
             transcript_ref = (
-                str(transcript_path.relative_to(repo_root))
+                config.format_path_for_display(transcript_path)
                 if transcript_path is not None
                 else "unavailable"
             )
@@ -1775,7 +1793,7 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
                 use_color,
             )
             print(stage_line)  # noqa: T201
-            _append_full_run_log_line(config.repo_root, stage_line)
+            _append_full_run_log_line(config.data_root, stage_line)
 
         attempt_issue_names: list[str] = []
         for step_name, cmd, error_msg in attempt_failures:
@@ -1811,7 +1829,7 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
                 use_color,
             )
             print(stage_line)  # noqa: T201
-            _append_full_run_log_line(config.repo_root, stage_line)
+            _append_full_run_log_line(config.data_root, stage_line)
 
         if attempt < max_attempts:
             stage_line = _prep_stage_line(
@@ -1821,16 +1839,18 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
                 use_color,
             )
             print(stage_line)  # noqa: T201
-            _append_full_run_log_line(config.repo_root, stage_line)
+            _append_full_run_log_line(config.data_root, stage_line)
             correction_on_output, correction_tail, correction_live_log = (
                 _make_prep_output_tracker(
-                    repo_root=repo_root,
+                    data_root=config.data_root,
                     task_slug=f"attempt-{attempt}-correction-agent",
                     stream_label=f"attempt {attempt}/{max_attempts}: correction agent",
                     color=use_color,
                 )
             )
-            correction_live_log_ref = correction_live_log.relative_to(repo_root)
+            correction_live_log_ref = config.format_path_for_display(
+                correction_live_log
+            )
             stage_line = _prep_stage_line(
                 "hardening",
                 f"attempt {attempt}/{max_attempts}: correction live log {correction_live_log_ref}",
@@ -1838,7 +1858,7 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
                 use_color,
             )
             print(stage_line)  # noqa: T201
-            _append_full_run_log_line(config.repo_root, stage_line)
+            _append_full_run_log_line(config.data_root, stage_line)
             run_log_lines.append(f"- Correction live log: `{correction_live_log_ref}`")
             agent_ok = await _await_with_prep_heartbeat(
                 _run_prep_agent_correction(
@@ -1865,7 +1885,7 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
                     use_color,
                 )
                 print(stage_line)  # noqa: T201
-                _append_full_run_log_line(config.repo_root, stage_line)
+                _append_full_run_log_line(config.data_root, stage_line)
             else:
                 stage_line = _prep_stage_line(
                     "hardening",
@@ -1874,7 +1894,7 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
                     use_color,
                 )
                 print(stage_line)  # noqa: T201
-                _append_full_run_log_line(config.repo_root, stage_line)
+                _append_full_run_log_line(config.data_root, stage_line)
             run_log_lines.append(
                 f"- Prep agent run {attempt}: {'ok' if agent_ok else 'failed'}"
             )
@@ -1888,7 +1908,7 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
                 use_color,
             )
             print(stage_line)  # noqa: T201
-            _append_full_run_log_line(config.repo_root, stage_line)
+            _append_full_run_log_line(config.data_root, stage_line)
 
     issues_to_close = list(local_issues) + auto_issues
     if hardening_ok and issues_to_close:
@@ -1902,7 +1922,7 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
             use_color,
         )
         print(stage_line)  # noqa: T201
-        _append_full_run_log_line(config.repo_root, stage_line)
+        _append_full_run_log_line(config.data_root, stage_line)
     elif issues_to_close:
         run_log_lines.append("- Local issues remain open due to hardening failures")
         stage_line = _prep_stage_line(
@@ -1912,7 +1932,7 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
             use_color,
         )
         print(stage_line)  # noqa: T201
-        _append_full_run_log_line(config.repo_root, stage_line)
+        _append_full_run_log_line(config.data_root, stage_line)
 
     print("Prep summary:")  # noqa: T201
     print(f"- Stack: {stack}")  # noqa: T201
@@ -1940,19 +1960,23 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
         use_color,
     )
     print(stage_line)  # noqa: T201
-    _append_full_run_log_line(config.repo_root, stage_line)
+    _append_full_run_log_line(config.data_root, stage_line)
     _append_full_run_log_line(
         config.repo_root, f"=== prep run end ({datetime.now(tz=UTC).isoformat()}) ==="
     )
     run_log_lines.append("- Summary printed to console")
 
     run_log = write_run_log(
-        config.repo_root,
+        config.data_root,
         title="Prep Workflow Run",
         lines=run_log_lines,
     )
-    print(f"Prep run log: {run_log.relative_to(config.repo_root)}")  # noqa: T201
-    print(f"Prep full-run log: {full_run_log_path.relative_to(config.repo_root)}")  # noqa: T201
+    print(  # noqa: T201
+        f"Prep run log: {config.format_path_for_display(run_log)}"
+    )
+    print(  # noqa: T201
+        f"Prep full-run log: {config.format_path_for_display(full_run_log_path)}"
+    )
     return hardening_ok
 
 

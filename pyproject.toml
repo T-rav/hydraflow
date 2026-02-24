@@ -104,7 +104,6 @@ asyncio_mode = "auto"
 addopts = [
     "-q",
     "--tb=short",
-    "-n=auto",
 ]
 markers = [
     "integration: marks tests as integration tests",

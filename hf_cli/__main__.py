@@ -20,8 +20,6 @@ _FLAG_COMMANDS = {
     "dry-run": "--dry-run",
 }
 
-_DASHBOARD_URL = "http://localhost:5556"
-
 
 def _dispatch_flag_command(flag: str, rest: Iterable[str]) -> None:
     hydraflow_main([flag, *rest])
@@ -30,9 +28,13 @@ def _dispatch_flag_command(flag: str, rest: Iterable[str]) -> None:
 def _handle_run(rest: Iterable[str]) -> None:
     ensure_running()
     repo_path = Path.cwd()
-    url = add_repo(repo_path, _DASHBOARD_URL)
+    info = add_repo(repo_path)
+    url = info.get("dashboard_url")
     print(f"Registered repo {repo_path} with hf supervisor")
-    print(f"Dashboard: {url}")
+    if url:
+        print(f"Dashboard: {url}")
+    if info.get("log_file"):
+        print(f"Logs: {info['log_file']}")
 
 
 def _handle_view() -> None:
@@ -42,13 +44,30 @@ def _handle_view() -> None:
         return
     print("Registered repos:")
     for repo in repos:
-        print(f"- {repo['path']} -> {repo.get('dashboard_url', _DASHBOARD_URL)}")
+        path = repo.get("path")
+        url = repo.get("dashboard_url")
+        port = repo.get("port")
+        slug = repo.get("slug")
+        log_file = repo.get("log_file")
+        line = f"- {path}"
+        if slug:
+            line += f" [{slug}]"
+        if port:
+            line += f" port={port}"
+        if url:
+            line += f" -> {url}"
+        print(line)
+        if log_file:
+            print(f"    logs: {log_file}")
 
 
 def _handle_stop() -> None:
     repo_path = Path.cwd()
-    remove_repo(repo_path)
-    print(f"Removed repo {repo_path} from hf supervisor")
+    try:
+        remove_repo(repo_path)
+        print(f"Removed repo {repo_path} from hf supervisor")
+    except RuntimeError as exc:
+        print(f"{exc}")
 
 
 def entrypoint(argv: Sequence[str] | None = None) -> None:

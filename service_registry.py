@@ -129,7 +129,7 @@ def build_services(
     store = IssueStore(config, GitHubTaskFetcher(fetcher), event_bus)
 
     # Harness insight store (shared across phases)
-    harness_insights = HarnessInsightStore(config.repo_root / ".hydraflow" / "memory")
+    harness_insights = HarnessInsightStore(config.data_path("memory"))
 
     # Phase coordinators
     triager = TriagePhase(config, state, store, triage, prs, event_bus, stop_event)

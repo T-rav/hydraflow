@@ -104,7 +104,7 @@ class RunRecorder:
     """Records per-issue run artifacts under ``.hydraflow/runs/``."""
 
     def __init__(self, config: HydraFlowConfig) -> None:
-        self._runs_dir = config.repo_root / ".hydraflow" / "runs"
+        self._runs_dir = config.data_path("runs")
 
     @property
     def runs_dir(self) -> Path:

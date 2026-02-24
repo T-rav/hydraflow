@@ -777,7 +777,7 @@ def create_router(
             generate_suggestions,
         )
 
-        memory_dir = config.repo_root / ".hydraflow" / "memory"
+        memory_dir = config.data_path("memory")
         store = HarnessInsightStore(memory_dir)
         records = store.load_recent(config.harness_insight_window)
         proposed = store.get_proposed_patterns()
@@ -807,7 +807,7 @@ def create_router(
         """Return raw failure records for historical analysis."""
         from harness_insights import HarnessInsightStore
 
-        memory_dir = config.repo_root / ".hydraflow" / "memory"
+        memory_dir = config.data_path("memory")
         store = HarnessInsightStore(memory_dir)
         records = store.load_recent(config.harness_insight_window)
         return JSONResponse([r.model_dump() for r in records])

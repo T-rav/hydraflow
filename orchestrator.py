@@ -743,6 +743,11 @@ class HydraFlowOrchestrator:
                     issue_number,
                 )
 
+    def _log_reference(self, filename: str) -> str:
+        """Return a repo- or data-relative log reference for display."""
+        path = self._config.log_dir / filename
+        return self._config.format_path_for_display(path)
+
     async def _do_implement_work(self) -> None:
         """Work function for the implement loop."""
         # After one poll cycle, release crash-recovered issues
@@ -769,7 +774,7 @@ class HydraFlowOrchestrator:
                     phase="implement",
                     status="success" if result.success else "failed",
                     duration_seconds=result.duration_seconds,
-                    log_file=f".hydraflow/logs/issue-{result.issue_number}.txt",
+                    log_file=self._log_reference(f"issue-{result.issue_number}.txt"),
                 )
 
     async def _do_review_work(self) -> None:
@@ -803,7 +808,7 @@ class HydraFlowOrchestrator:
                     phase="review",
                     status=review_status,
                     duration_seconds=result.duration_seconds,
-                    log_file=f".hydraflow/logs/review-pr-{result.pr_number}.txt",
+                    log_file=self._log_reference(f"review-pr-{result.pr_number}.txt"),
                 )
         if any(r.merged for r in review_results):
             await asyncio.sleep(_POST_MERGE_DELAY)

@@ -25,15 +25,31 @@ def list_repos() -> list[dict[str, Any]]:
     return list(_load_state().get("repos", []))
 
 
-def add_repo(path: str, dashboard_url: str) -> None:
+def upsert_repo(path: str, slug: str, port: int, log_file: str) -> None:
     state = _load_state()
     repos = state.setdefault("repos", [])
+    dashboard_url = f"http://localhost:{port}"
     for repo in repos:
         if repo.get("path") == path:
-            repo["dashboard_url"] = dashboard_url
+            repo.update(
+                {
+                    "slug": slug,
+                    "port": port,
+                    "dashboard_url": dashboard_url,
+                    "log_file": log_file,
+                }
+            )
             _save_state(state)
             return
-    repos.append({"path": path, "dashboard_url": dashboard_url})
+    repos.append(
+        {
+            "path": path,
+            "slug": slug,
+            "port": port,
+            "dashboard_url": dashboard_url,
+            "log_file": log_file,
+        }
+    )
     _save_state(state)
 
 

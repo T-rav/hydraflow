@@ -66,7 +66,7 @@ def _start_repo(path: str) -> int:
         env=env,
     )
     RUNNERS[slug] = RepoProcess(slug, proc, port, repo_path)
-    time.sleep(0.5)
+    _wait_for_port(port)
     return port
 
 
@@ -83,6 +83,19 @@ def _stop_repo(path: str) -> bool:
     return True
 
 
+def _wait_for_port(port: int, timeout: float = 15.0) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            try:
+                s.connect(("127.0.0.1", port))
+                return
+            except OSError:
+                time.sleep(0.2)
+    raise RuntimeError(f"Timed out waiting for repo dashboard on port {port}")
+
+
 async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
     try:
         raw = await reader.readline()
@@ -96,20 +109,29 @@ async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) ->
             response = {"status": "ok", "repos": supervisor_state.list_repos()}
         elif action == "add_repo":
             path = request.get("path")
-            dashboard_url = request.get("dashboard_url", "http://localhost:5556")
             if not path:
                 response = {"status": "error", "error": "Missing path"}
             else:
-                supervisor_state.add_repo(path, dashboard_url)
-                response = {"status": "ok", "dashboard_url": dashboard_url}
+                port = _start_repo(path)
+                slug = _slug_for_repo(Path(path))
+                log_file = str((STATE_DIR / "logs" / f"{slug}-{port}.log").resolve())
+                supervisor_state.upsert_repo(path, slug, port, log_file)
+                response = {
+                    "status": "ok",
+                    "slug": slug,
+                    "port": port,
+                    "dashboard_url": f"http://localhost:{port}",
+                    "log_file": log_file,
+                }
         elif action == "remove_repo":
             path = request.get("path")
             if not path:
                 response = {"status": "error", "error": "Missing path"}
-            elif supervisor_state.remove_repo(path):
-                response = {"status": "ok"}
-            else:
+            elif not supervisor_state.remove_repo(path):
                 response = {"status": "error", "error": "Repo not found"}
+            else:
+                _stop_repo(path)
+                response = {"status": "ok"}
         else:
             response = {"status": "error", "error": "unknown action"}
     except Exception as exc:  # noqa: BLE001
