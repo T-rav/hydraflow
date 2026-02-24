@@ -1487,9 +1487,27 @@ class TestRecordReviewInsight:
         mock_insights.get_proposed_categories.return_value = set()
         phase._insights = mock_insights
 
+        from review_insights import ReviewRecord
+
         evidence = [
-            MagicMock(pr_number=1, issue_number=10, summary="pr1"),
-            MagicMock(pr_number=2, issue_number=20, summary="pr2"),
+            ReviewRecord(
+                pr_number=101,
+                issue_number=42,
+                timestamp="2026-01-01T00:00:00",
+                verdict="request_changes",
+                summary="Missing tests",
+                fixes_made=False,
+                categories=["test_coverage"],
+            ),
+            ReviewRecord(
+                pr_number=102,
+                issue_number=43,
+                timestamp="2026-01-02T00:00:00",
+                verdict="request_changes",
+                summary="Missing tests again",
+                fixes_made=False,
+                categories=["test_coverage"],
+            ),
         ]
         with patch(
             "review_phase.analyze_patterns",
@@ -1542,7 +1560,19 @@ class TestRecordReviewInsight:
         mock_insights.get_proposed_categories.return_value = set()
         phase._insights = mock_insights
 
-        evidence = [MagicMock(pr_number=10, issue_number=42, summary="pr10")]
+        from review_insights import ReviewRecord
+
+        evidence = [
+            ReviewRecord(
+                pr_number=10,
+                issue_number=42,
+                timestamp="2026-01-01T00:00:00",
+                verdict="request_changes",
+                summary="Type errors found",
+                fixes_made=False,
+                categories=["type_errors"],
+            ),
+        ]
         with patch(
             "review_phase.analyze_patterns",
             return_value=[("type_errors", 3, evidence)],
