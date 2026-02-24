@@ -41,6 +41,15 @@ _event_counter = _Counter()
 logger = logging.getLogger("hydraflow.events")
 
 
+def _log_persist_failure(task: asyncio.Task[None]) -> None:
+    """Log unhandled exceptions from fire-and-forget persist tasks."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning("Event persist task failed: %s", exc, exc_info=exc)
+
+
 class EventType(StrEnum):
     """Categories of events published by the orchestrator."""
 
@@ -243,14 +252,15 @@ class EventBus:
                 queue.put_nowait(event)
 
         if self._event_log is not None:
-            asyncio.ensure_future(self._persist_event(event))
+            task = asyncio.create_task(self._persist_event(event))
+            task.add_done_callback(_log_persist_failure)
 
     async def _persist_event(self, event: HydraFlowEvent) -> None:
         """Write event to disk, logging any errors without crashing."""
         try:
             assert self._event_log is not None  # noqa: S101
             await self._event_log.append(event)
-        except OSError:
+        except Exception:
             logger.warning("Failed to persist event to disk", exc_info=True)
 
     async def load_history_from_disk(self) -> None:
