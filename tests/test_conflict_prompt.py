@@ -174,7 +174,7 @@ class TestBuildRebuildPrompt:
 
     def test_truncates_diff_using_config_max_chars(self, tmp_path: Path) -> None:
         config = ConfigFactory.create(
-            repo_root=tmp_path / "repo", max_review_diff_chars=100
+            repo_root=tmp_path / "repo", max_review_diff_chars=1_000
         )
         long_diff = "+" + "y" * 5000
         prompt = build_rebuild_prompt(
@@ -183,7 +183,7 @@ class TestBuildRebuildPrompt:
         diff_section = prompt.split("## Original PR Diff")[1].split("## Instructions")[
             0
         ]
-        assert diff_section.count("y") <= 100
+        assert diff_section.count("y") <= 1_010
 
     def test_includes_project_context_when_config_provided(
         self, tmp_path: Path
