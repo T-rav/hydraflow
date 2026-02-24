@@ -39,6 +39,7 @@ from review_insights import (
 )
 from reviewer import ReviewRunner
 from state import StateTracker
+from subprocess_util import AuthenticationError, CreditExhaustedError
 from transcript_summarizer import TranscriptSummarizer
 from verification_judge import VerificationJudge
 from worktree import WorktreeManager
@@ -135,6 +136,8 @@ class ReviewPhase:
                 async with store_lifecycle(self._store, pr.issue_number, "review"):
                     try:
                         return await self._review_one_inner(idx, pr, issue_map)
+                    except (AuthenticationError, CreditExhaustedError, MemoryError):
+                        raise
                     except Exception:
                         logger.exception(
                             "Review failed for PR #%d (issue #%d)",
@@ -362,6 +365,8 @@ class ReviewPhase:
                 re_result.verdict.value,
             )
             return result, updated_diff
+        except (AuthenticationError, CreditExhaustedError, MemoryError):
+            raise
         except Exception:
             logger.warning(
                 "PR #%d: self-fix re-review failed — falling back to original rejection",

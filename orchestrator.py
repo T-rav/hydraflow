@@ -586,7 +586,7 @@ class HydraFlowOrchestrator:
                 continue
             try:
                 await work_fn()
-            except (AuthenticationError, CreditExhaustedError):
+            except (AuthenticationError, CreditExhaustedError, MemoryError):
                 raise
             except Exception:
                 display = name.replace("_", " ").capitalize()
