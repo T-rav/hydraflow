@@ -29,6 +29,7 @@ from models import (
     MetricsSnapshot,
     PipelineIssue,
     PipelineSnapshot,
+    PipelineSnapshotEntry,
     QueueStats,
 )
 from pr_manager import PRManager
@@ -180,15 +181,12 @@ def create_router(
         orch = get_orchestrator()
         if orch:
             raw = orch.issue_store.get_pipeline_snapshot()
-            mapped: dict[str, list[dict[str, object]]] = {}
+            mapped: dict[str, list[PipelineSnapshotEntry]] = {}
             for backend_stage, issues in raw.items():
                 frontend_stage = _STAGE_NAME_MAP.get(backend_stage, backend_stage)
                 mapped[frontend_stage] = issues
             snapshot = PipelineSnapshot(
-                stages={
-                    k: [PipelineIssue(**i) for i in v]  # type: ignore[arg-type]
-                    for k, v in mapped.items()
-                }
+                stages={k: [PipelineIssue(**i) for i in v] for k, v in mapped.items()}
             )
             return JSONResponse(snapshot.model_dump())
         return JSONResponse(PipelineSnapshot().model_dump())

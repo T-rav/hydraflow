@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from events import EventBus, EventType, HydraFlowEvent
-from models import IssueTimeline, TimelineStage
+from models import IssueTimeline, TimelineStage, TimelineStageMetadata
 
 STAGE_ORDER = ["triage", "plan", "implement", "review", "merge"]
 
@@ -165,7 +165,7 @@ class TimelineBuilder:
         started_at = events[0].timestamp
         completed_at: str | None = None
         status = "in_progress"
-        metadata: dict[str, object] = {}
+        metadata: TimelineStageMetadata = {}
 
         # Find terminal status and extract metadata
         for event in events:
