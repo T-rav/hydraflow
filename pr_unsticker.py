@@ -383,6 +383,11 @@ class PRUnsticker:
                 self._resolver.save_conflict_transcript(
                     pr_number, issue_number, 1, transcript, source="unsticker"
                 )
+            else:
+                logger.warning(
+                    "No resolver configured; CI fix transcript for issue #%d not saved",
+                    issue_number,
+                )
 
             await safe_file_memory_suggestion(
                 transcript,

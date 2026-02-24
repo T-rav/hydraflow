@@ -842,6 +842,40 @@ class TestFreshBranchRebuild:
         prs.swap_pipeline_labels.assert_any_call(42, "hydraflow-hitl")
 
 
+class TestResolverNoneEdgeCases:
+    """Tests for edge cases when the resolver is not configured (resolver=None)."""
+
+    @pytest.mark.asyncio
+    async def test_merge_conflict_without_resolver_fails_and_releases_to_hitl(
+        self, tmp_path: Path
+    ) -> None:
+        """When resolver is None and cause is MERGE_CONFLICT, return failure and release to HITL."""
+        issue = GitHubIssue(
+            number=42,
+            title="Test issue",
+            body="body",
+            labels=["hydraflow-hitl"],
+        )
+        unsticker, state, prs, agents, wt, fetcher, bus, _, _ = _make_unsticker(
+            tmp_path, unstick_all_causes=False, unstick_auto_merge=False
+        )
+        # Explicitly remove the resolver to test the None path
+        unsticker._resolver = None
+
+        state.set_hitl_cause(42, "Merge conflict with main")
+        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+
+        (tmp_path / "worktrees" / "issue-42").mkdir(parents=True)
+
+        stats = await unsticker.unstick([_make_hitl_item(42)])
+
+        assert stats["failed"] == 1
+        assert stats["resolved"] == 0
+        # Should release back to HITL
+        prs.swap_pipeline_labels.assert_any_call(42, "hydraflow-hitl")
+
+
 def _setup_ci_fix_memory_test(tmp_path: Path, *, transcript: str = "transcript"):
     """Set up shared fixtures for memory suggestion tests on the CI fix path."""
     issue = GitHubIssue(
