@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { reducer } from '../HydraFlowContext'
 
@@ -43,6 +43,28 @@ const initialState = {
   currentSessionId: null,
   selectedSessionId: null,
 }
+
+const originalFetch = global.fetch
+
+beforeEach(() => {
+  vi.spyOn(global, 'fetch').mockImplementation((input) => {
+    if (typeof input === 'string' && input.includes('/api/repos')) {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ repos: [] }),
+      })
+    }
+    return Promise.resolve({
+      ok: true,
+      json: async () => ({}),
+    })
+  })
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
+  global.fetch = originalFetch
+})
 
 describe('HydraFlowContext reducer', () => {
   it('GITHUB_METRICS action sets githubMetrics state', () => {
