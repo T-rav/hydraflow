@@ -1301,9 +1301,8 @@ class TestWebSocketEndpoint:
         with client.websocket_connect("/ws") as ws:
             ws.receive_text()
 
-        # Poll briefly for async cleanup
-        deadline = time.monotonic() + 1.0
-        while time.monotonic() < deadline:
+        # Poll briefly for async cleanup (bounded retry count, not wall-clock)
+        for _ in range(1000):
             if len(event_bus._subscribers) == 0:
                 break
             time.sleep(0)
