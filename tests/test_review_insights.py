@@ -421,3 +421,56 @@ class TestAppendReviewOSError:
             store.append_review(record)  # should not raise
 
         assert "Could not append review" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# ReviewRecord timestamp validation (issue #1048)
+# ---------------------------------------------------------------------------
+
+
+class TestReviewRecordTimestamp:
+    """Tests for ReviewRecord IsoTimestamp validation."""
+
+    def test_invalid_timestamp_rejected(self) -> None:
+        import pytest
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="Invalid ISO 8601 timestamp"):
+            ReviewRecord(
+                pr_number=1,
+                issue_number=42,
+                timestamp="not-a-timestamp",
+                verdict="approve",
+                summary="ok",
+                fixes_made=False,
+                categories=[],
+            )
+
+    def test_valid_iso_timestamp_accepted(self) -> None:
+        record = ReviewRecord(
+            pr_number=1,
+            issue_number=42,
+            timestamp="2026-02-20T10:30:00+00:00",
+            verdict="approve",
+            summary="ok",
+            fixes_made=False,
+            categories=[],
+        )
+        assert record.timestamp == "2026-02-20T10:30:00+00:00"
+
+
+# ---------------------------------------------------------------------------
+# ReviewRecord field descriptions (issue #1048)
+# ---------------------------------------------------------------------------
+
+
+class TestReviewRecordFieldDescriptions:
+    """Tests that field descriptions are present in ReviewRecord schema."""
+
+    def test_review_record_has_field_descriptions(self) -> None:
+        schema = ReviewRecord.model_json_schema()
+        props = schema["properties"]
+        assert "description" in props["verdict"]
+        assert "description" in props["summary"]
+        assert "description" in props["fixes_made"]
+        assert "description" in props["categories"]

@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
+from models import IsoTimestamp
+
 if TYPE_CHECKING:
     from pr_manager import PRManager
     from state import StateTracker
@@ -72,24 +74,34 @@ class FailureRecord(BaseModel):
 
     issue_number: int
     pr_number: int = 0
-    timestamp: str = Field(
+    timestamp: IsoTimestamp = Field(
         default_factory=lambda: datetime.now(UTC).isoformat(),
     )
-    category: str
+    category: str = Field(
+        description="Pipeline failure category (e.g. quality_gate, ci_failure)"
+    )
     subcategories: list[str] = Field(default_factory=list)
-    details: str = ""
-    stage: str = ""
+    details: str = Field(default="", description="Human-readable failure description")
+    stage: str = Field(
+        default="", description="Pipeline stage where the failure occurred"
+    )
 
 
 class ImprovementSuggestion(BaseModel):
     """An auto-generated improvement suggestion based on recurring patterns."""
 
-    category: str
-    subcategory: str = ""
-    occurrence_count: int
-    window_size: int
-    description: str
-    suggestion: str
+    category: str = Field(
+        description="Primary failure category this suggestion addresses"
+    )
+    subcategory: str = Field(
+        default="", description="Specific sub-pattern (e.g. lint_error)"
+    )
+    occurrence_count: int = Field(
+        description="Number of times this pattern was detected"
+    )
+    window_size: int = Field(description="Total records in the analysis window")
+    description: str = Field(description="Human-readable description of the pattern")
+    suggestion: str = Field(description="Suggested improvement action")
     evidence: list[FailureRecord] = Field(default_factory=list)
 
 
