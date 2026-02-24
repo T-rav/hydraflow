@@ -2295,6 +2295,23 @@ class TestRecordReviewOutcome:
             mock_record.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_records_harness_failure_on_comment_verdict(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Should record harness failure when verdict is COMMENT (also non-APPROVE)."""
+        from unittest.mock import MagicMock, patch
+
+        phase = make_review_phase(config)
+        pr = PRInfoFactory.create()
+        result = ReviewResultFactory.create(verdict=ReviewVerdict.COMMENT)
+        phase._prs.get_pr_head_sha = AsyncMock(return_value="sha")
+        phase._harness_insights = MagicMock()
+
+        with patch("review_phase.record_harness_failure") as mock_record:
+            await phase._record_review_outcome(pr, result)
+            mock_record.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_skips_harness_failure_on_approve(
         self, config: HydraFlowConfig
     ) -> None:

@@ -233,7 +233,10 @@ class ReviewPhase:
         return None
 
     async def _record_review_outcome(self, pr: PRInfo, result: ReviewResult) -> None:
-        """Record all post-review state: verdicts, SHA, duration, insights."""
+        """Record all post-review state: verdicts, SHA, duration, insights.
+
+        Also records a harness failure for any non-APPROVE verdict.
+        """
         self._state.mark_pr(pr.number, result.verdict.value)
         self._state.mark_issue(pr.issue_number, "reviewed")
         self._state.record_review_verdict(result.verdict.value, result.fixes_made)
