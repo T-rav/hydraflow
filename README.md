@@ -8,7 +8,7 @@
   Intent in. Software out.
 </p>
 
-Log an issue. Agents handle the rest - triaging, planning, implementing, reviewing, and merging every change to HydraFlow.
+Log an issue. Agents handle the rest - triaging, planning, implementing, reviewing, and merging every change.
 
 HydraFlow is built for quality-first scaling: agents execute the work, but guardrails decide what ships.
 
