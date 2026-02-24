@@ -223,6 +223,23 @@ Diff summary:
                 runner=self._runner,
             )
 
+        async def execute_debug(cmd: list[str], p: str) -> str:
+            return await stream_claude_process(
+                cmd=cmd,
+                prompt=p,
+                cwd=self._config.repo_root,
+                active_procs=self._active_procs,
+                event_bus=self._bus,
+                event_data={
+                    "issue": issue_number,
+                    "pr": pr_number,
+                    "source": "ac_precheck_debug",
+                },
+                logger=logger,
+                timeout=self._config.agent_timeout,
+                runner=self._runner,
+            )
+
         return await run_precheck_context(
             config=self._config,
             prompt=prompt,
@@ -230,6 +247,7 @@ Diff summary:
             execute=execute,
             debug_message="DEBUG MODE: focus on ambiguity and failure modes.",
             logger=logger,
+            execute_debug=execute_debug,
         )
 
     def _read_plan_file(self, issue_number: int) -> str:

@@ -745,3 +745,42 @@ class TestRunPrecheckContext:
         assert call_kwargs["cmd"] == ["cmd"]
         assert call_kwargs["prompt"] == "prompt"
         assert call_kwargs["event_data"]["source"] == "ac_precheck"
+
+    @pytest.mark.asyncio
+    async def test_execute_debug_closure_uses_ac_precheck_debug_source(
+        self, event_bus, tmp_path
+    ) -> None:
+        """Verify the execute_debug closure uses source='ac_precheck_debug'."""
+        cfg = ConfigFactory.create(
+            max_subskill_attempts=1,
+            debug_escalation_enabled=False,
+            repo_root=tmp_path / "repo",
+            worktree_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        gen, _ = _make_generator(cfg, event_bus)
+        issue = IssueFactory.create()
+
+        captured_debug = {}
+
+        async def capture_rpc(**kwargs):
+            captured_debug["fn"] = kwargs.get("execute_debug")
+            return "Precheck risk: low"
+
+        with patch(
+            "acceptance_criteria.run_precheck_context",
+            side_effect=capture_rpc,
+        ):
+            await gen._run_precheck_context(issue, 42, 101, "diff", "")
+
+        assert captured_debug["fn"] is not None, "execute_debug must be passed"
+
+        with patch(
+            "acceptance_criteria.stream_claude_process",
+            new_callable=AsyncMock,
+            return_value="debug transcript",
+        ) as mock_stream:
+            await captured_debug["fn"](["cmd"], "prompt")
+
+        mock_stream.assert_called_once()
+        assert mock_stream.call_args[1]["event_data"]["source"] == "ac_precheck_debug"

@@ -98,6 +98,7 @@ async def run_precheck_context(
     execute: ExecuteCallback,
     debug_message: str,
     logger: logging.Logger,
+    execute_debug: ExecuteCallback | None = None,
 ) -> str:
     """Run the shared precheck orchestration loop.
 
@@ -149,7 +150,8 @@ async def run_precheck_context(
     ]
 
     if decision.escalate and config.max_debug_attempts > 0:
-        debug_transcript = await execute(
+        _debug_execute = execute_debug if execute_debug is not None else execute
+        debug_transcript = await _debug_execute(
             build_debug_command(config),
             prompt + f"\n\n{debug_message}",
         )
