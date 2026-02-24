@@ -782,6 +782,11 @@ class HydraFlowConfig(BaseModel):
         """Return the directory for memory / review-insight files."""
         return self.repo_root / ".hydraflow" / "memory"
 
+    @property
+    def runs_dir(self) -> Path:
+        """Return the directory for per-issue run recordings."""
+        return self.repo_root / ".hydraflow" / "runs"
+
     def branch_for_issue(self, issue_number: int) -> str:
         """Return the canonical branch name for a given issue number."""
         return f"agent/issue-{issue_number}"

@@ -3903,6 +3903,17 @@ class TestDirectoryProperties:
         )
         assert cfg.memory_dir == tmp_path / ".hydraflow" / "memory"
 
+    def test_runs_dir_returns_hydraflow_runs_under_repo_root(
+        self, tmp_path: Path
+    ) -> None:
+        """runs_dir should return repo_root / .hydraflow / runs."""
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert cfg.runs_dir == tmp_path / ".hydraflow" / "runs"
+
     def test_directory_properties_follow_repo_root(self, tmp_path: Path) -> None:
         """All directory properties should be anchored to whatever repo_root is."""
         custom_root = tmp_path / "custom" / "root"
@@ -3915,6 +3926,7 @@ class TestDirectoryProperties:
         assert cfg.log_dir.parent.parent == custom_root
         assert cfg.plans_dir.parent.parent == custom_root
         assert cfg.memory_dir.parent.parent == custom_root
+        assert cfg.runs_dir.parent.parent == custom_root
 
 
 # ---------------------------------------------------------------------------
