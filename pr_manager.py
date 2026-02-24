@@ -288,9 +288,9 @@ class PRManager:
                     exc,
                 )
 
-    async def post_comment(self, issue_number: int, body: str) -> None:
+    async def post_comment(self, task_id: int, body: str) -> None:
         """Post a comment on a GitHub issue."""
-        await self._comment("issue", issue_number, body)
+        await self._comment("issue", task_id, body)
 
     async def post_pr_comment(self, pr_number: int, body: str) -> None:
         """Post a comment on a GitHub pull request."""
@@ -1160,13 +1160,22 @@ class PRManager:
 
     # ------------------------------------------------------------------
     # TaskTransitioner protocol implementation
+    # (transition, post_comment, close_task, create_task)
     # ------------------------------------------------------------------
 
     async def transition(
         self, task_id: int, new_stage: str, *, pr_number: int | None = None
     ) -> None:
         """Implement :class:`task_source.TaskTransitioner` — swap pipeline labels."""
-        await self.swap_pipeline_labels(task_id, new_stage, pr_number=pr_number)
+        _STAGE_LABEL = {
+            "find": (self._config.find_label or ["hydraflow-find"])[0],
+            "plan": (self._config.planner_label or ["hydraflow-plan"])[0],
+            "ready": (self._config.ready_label or ["hydraflow-ready"])[0],
+            "review": (self._config.review_label or ["hydraflow-review"])[0],
+            "hitl": (self._config.hitl_label or ["hydraflow-hitl"])[0],
+        }
+        label = _STAGE_LABEL.get(new_stage, new_stage)
+        await self.swap_pipeline_labels(task_id, label, pr_number=pr_number)
 
     async def close_task(self, task_id: int) -> None:
         """Implement :class:`task_source.TaskTransitioner` — close the issue."""

@@ -10,6 +10,13 @@ from models import Task
 
 
 @runtime_checkable
+class TaskFetcher(Protocol):
+    """Returns all tasks currently in the pipeline."""
+
+    async def fetch_all(self) -> list[Task]: ...
+
+
+@runtime_checkable
 class TaskSource(Protocol):
     """Read-only interface for fetching tasks from a backend."""
 

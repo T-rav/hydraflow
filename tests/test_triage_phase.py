@@ -74,7 +74,7 @@ class TestTriagePhase:
         await phase.triage_issues()
 
         triage.evaluate.assert_awaited_once_with(issue)
-        prs.swap_pipeline_labels.assert_called_once_with(1, config.planner_label[0])
+        prs.transition.assert_called_once_with(1, "plan")
         prs.post_comment.assert_not_called()
 
     @pytest.mark.asyncio

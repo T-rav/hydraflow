@@ -537,7 +537,7 @@ class TestReviewInsightIntegration:
         phase._reviewers.review = AsyncMock(return_value=review_result)
         phase._prs.get_pr_diff = AsyncMock(return_value="diff text")
         phase._prs.push_branch = AsyncMock(return_value=True)
-        phase._prs.create_issue = AsyncMock(return_value=999)
+        phase._prs.create_task = AsyncMock(return_value=999)
         phase._prs.submit_review = AsyncMock(return_value=True)
 
         wt = config.worktree_base / "issue-42"
@@ -546,8 +546,8 @@ class TestReviewInsightIntegration:
         await phase.review_prs([pr], [issue])
 
         # Should have filed an improvement issue
-        phase._prs.create_issue.assert_awaited_once()
-        call_args = phase._prs.create_issue.call_args
+        phase._prs.create_task.assert_awaited_once()
+        call_args = phase._prs.create_task.call_args
         assert "[Review Insight]" in call_args.args[0]
         assert "hydraflow-improve" in call_args.args[2]
         assert "hydraflow-hitl" in call_args.args[2]
@@ -589,7 +589,7 @@ class TestReviewInsightIntegration:
         phase._reviewers.review = AsyncMock(return_value=review_result)
         phase._prs.get_pr_diff = AsyncMock(return_value="diff text")
         phase._prs.push_branch = AsyncMock(return_value=True)
-        phase._prs.create_issue = AsyncMock(return_value=999)
+        phase._prs.create_task = AsyncMock(return_value=999)
         phase._prs.submit_review = AsyncMock(return_value=True)
 
         wt = config.worktree_base / "issue-42"
@@ -598,7 +598,7 @@ class TestReviewInsightIntegration:
         await phase.review_prs([pr], [issue])
 
         # Should NOT have filed an improvement issue
-        phase._prs.create_issue.assert_not_awaited()
+        phase._prs.create_task.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_review_insight_failure_does_not_crash_review(
@@ -1101,8 +1101,8 @@ class TestSelfFixReReview:
         assert phase._reviewers.review.await_count == 2
         phase._prs.merge_pr.assert_not_awaited()
         # Should swap labels to ready (re-queue)
-        phase._prs.swap_pipeline_labels.assert_any_await(
-            pr.issue_number, config.ready_label[0], pr_number=pr.number
+        phase._prs.transition.assert_any_await(
+            pr.issue_number, "ready", pr_number=pr.number
         )
         assert phase._state.get_review_attempts(42) == 1
 
@@ -1120,8 +1120,8 @@ class TestSelfFixReReview:
         await phase.review_prs([pr], [issue])
 
         assert phase._reviewers.review.await_count == 1
-        phase._prs.swap_pipeline_labels.assert_any_await(
-            pr.issue_number, config.ready_label[0], pr_number=pr.number
+        phase._prs.transition.assert_any_await(
+            pr.issue_number, "ready", pr_number=pr.number
         )
 
     @pytest.mark.asyncio
@@ -1213,8 +1213,8 @@ class TestSelfFixReReview:
         # Exception falls back to original rejection — no merge
         phase._prs.merge_pr.assert_not_awaited()
         # Label swapped to ready (re-queue as original REQUEST_CHANGES)
-        phase._prs.swap_pipeline_labels.assert_any_await(
-            pr.issue_number, config.ready_label[0], pr_number=pr.number
+        phase._prs.transition.assert_any_await(
+            pr.issue_number, "ready", pr_number=pr.number
         )
         assert phase._state.get_review_attempts(pr.issue_number) == 1
 

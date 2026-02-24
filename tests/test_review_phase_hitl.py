@@ -280,9 +280,7 @@ class TestRequestChangesRetry:
 
         await phase.review_prs([pr], [issue])
 
-        phase._prs.swap_pipeline_labels.assert_any_await(
-            42, config.ready_label[0], pr_number=101
-        )
+        phase._prs.transition.assert_any_await(42, "ready", pr_number=101)
 
     @pytest.mark.asyncio
     async def test_request_changes_under_cap_preserves_worktree(
@@ -331,9 +329,7 @@ class TestRequestChangesRetry:
 
         await phase.review_prs([pr], [issue])
 
-        phase._prs.swap_pipeline_labels.assert_any_await(
-            42, "hydraflow-hitl", pr_number=101
-        )
+        phase._prs.transition.assert_any_await(42, "hitl", pr_number=101)
 
     @pytest.mark.asyncio
     async def test_request_changes_at_cap_posts_escalation_comment(
@@ -378,9 +374,7 @@ class TestRequestChangesRetry:
         await phase.review_prs([pr], [issue])
 
         # Should swap to ready label (same as REQUEST_CHANGES)
-        phase._prs.swap_pipeline_labels.assert_any_await(
-            42, config.ready_label[0], pr_number=101
-        )
+        phase._prs.transition.assert_any_await(42, "ready", pr_number=101)
         # Worktree should be preserved
         phase._worktrees.destroy.assert_not_awaited()
 
@@ -622,9 +616,7 @@ class TestEscalateToHitl:
             comment="comment",
         )
 
-        phase._prs.swap_pipeline_labels.assert_awaited_once_with(
-            42, "hydraflow-hitl", pr_number=101
-        )
+        phase._prs.transition.assert_awaited_once_with(42, "hitl", pr_number=101)
 
     @pytest.mark.asyncio
     async def test_posts_comment_on_pr_by_default(

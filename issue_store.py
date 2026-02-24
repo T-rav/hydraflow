@@ -9,9 +9,9 @@ from datetime import UTC, datetime
 
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
-from issue_fetcher import IssueFetcher
-from models import GitHubIssue, QueueStats, Task
+from models import QueueStats, Task
 from subprocess_util import AuthenticationError
+from task_source import TaskFetcher
 
 logger = logging.getLogger("hydraflow.issue_store")
 
@@ -45,7 +45,7 @@ class IssueStore:
     def __init__(
         self,
         config: HydraFlowConfig,
-        fetcher: IssueFetcher,
+        fetcher: TaskFetcher,
         event_bus: EventBus,
     ) -> None:
         self._config = config
@@ -53,13 +53,13 @@ class IssueStore:
         self._bus = event_bus
 
         # Per-stage queues (FIFO)
-        self._queues: dict[str, deque[GitHubIssue]] = {
+        self._queues: dict[str, deque[Task]] = {
             STAGE_FIND: deque(),
             STAGE_PLAN: deque(),
             STAGE_READY: deque(),
             STAGE_REVIEW: deque(),
         }
-        # Companion sets for O(1) membership checks (issue numbers in each queue)
+        # Companion sets for O(1) membership checks (task ids in each queue)
         self._queue_members: dict[str, set[int]] = {
             STAGE_FIND: set(),
             STAGE_PLAN: set(),
@@ -69,8 +69,8 @@ class IssueStore:
         # HITL issues are tracked as a set (display only, not consumed)
         self._hitl_numbers: set[int] = set()
 
-        # Issue cache: retains title/url for issues seen during routing
-        self._issue_cache: dict[int, GitHubIssue] = {}
+        # Task cache: retains title/url for tasks seen during routing
+        self._issue_cache: dict[int, Task] = {}
 
         # Active issue tracking: issue_number → stage
         self._active: dict[int, str] = {}
@@ -114,9 +114,9 @@ class IssueStore:
     # ------------------------------------------------------------------
 
     async def refresh(self) -> None:
-        """Fetch all HydraFlow-labeled issues and re-route into queues."""
+        """Fetch all HydraFlow-labeled tasks and re-route into queues."""
         try:
-            issues = await self._fetcher.fetch_all_hydraflow_issues()
+            issues = await self._fetcher.fetch_all()
         except AuthenticationError:
             raise
         except Exception:
@@ -137,75 +137,75 @@ class IssueStore:
             )
         )
 
-    def _route_issues(self, issues: list[GitHubIssue]) -> None:
-        """Route fetched issues into the correct queues.
+    def _route_issues(self, tasks: list[Task]) -> None:
+        """Route fetched tasks into the correct queues.
 
-        - Each issue goes to the most advanced stage matching its labels.
-        - Issues already active are not re-queued.
-        - Issues that changed labels are moved between queues.
-        - Issues no longer returned by GitHub are removed from queues.
+        - Each task goes to the most advanced stage matching its tags.
+        - Tasks already active are not re-queued.
+        - Tasks that changed tags are moved between queues.
+        - Tasks no longer returned by the fetcher are removed from queues.
         """
-        # Build a mapping of issue_number → (best_stage, issue)
+        # Build a mapping of task_id → (best_stage, task)
         label_to_stage = self._build_label_map()
-        incoming: dict[int, tuple[str, GitHubIssue]] = {}
+        incoming: dict[int, tuple[str, Task]] = {}
 
-        for issue in issues:
-            # Cache every issue for pipeline snapshot lookups
-            self._issue_cache[issue.number] = issue
+        for task in tasks:
+            # Cache every task for pipeline snapshot lookups
+            self._issue_cache[task.id] = task
 
             best_stage: str | None = None
             best_priority = -1
-            for label in issue.labels:
-                stage = label_to_stage.get(label)
+            for tag in task.tags:
+                stage = label_to_stage.get(tag)
                 if stage is not None:
                     prio = _STAGE_PRIORITY.get(stage, -1)
                     if prio > best_priority:
                         best_priority = prio
                         best_stage = stage
             if best_stage is not None:
-                incoming[issue.number] = (best_stage, issue)
+                incoming[task.id] = (best_stage, task)
 
-        # Determine which issue numbers are still present
+        # Determine which task ids are still present
         incoming_numbers = set(incoming.keys())
 
-        # Remove stale issues (no longer returned by GitHub)
+        # Remove stale tasks (no longer returned by the fetcher)
         for stage, q in self._queues.items():
             members = self._queue_members[stage]
             stale = members - incoming_numbers - set(self._active.keys())
             if stale:
-                self._queues[stage] = deque(i for i in q if i.number not in stale)
+                self._queues[stage] = deque(t for t in q if t.id not in stale)
                 members -= stale
 
-        # Remove stale HITL issues
+        # Remove stale HITL tasks
         self._hitl_numbers &= incoming_numbers | set(self._active.keys())
 
-        # Route incoming issues
-        for issue_num, (stage, issue) in incoming.items():
-            # Skip issues currently being processed
-            if issue_num in self._active:
+        # Route incoming tasks
+        for task_id, (stage, task) in incoming.items():
+            # Skip tasks currently being processed
+            if task_id in self._active:
                 continue
 
             if stage == STAGE_HITL:
-                self._hitl_numbers.add(issue_num)
+                self._hitl_numbers.add(task_id)
                 # Remove from any regular queue if it was there before
-                self._remove_from_all_queues(issue_num)
+                self._remove_from_all_queues(task_id)
                 continue
 
-            # Check if issue is already in the correct queue
-            current_stage = self._find_queue_stage(issue_num)
+            # Check if task is already in the correct queue
+            current_stage = self._find_queue_stage(task_id)
             if current_stage == stage:
                 continue  # Already in the right queue
 
             # Remove from old queue if it moved stages
             if current_stage is not None:
-                self._remove_from_queue(current_stage, issue_num)
+                self._remove_from_queue(current_stage, task_id)
 
             # Also remove from HITL if it was there
-            self._hitl_numbers.discard(issue_num)
+            self._hitl_numbers.discard(task_id)
 
             # Add to the target queue
-            self._queues[stage].append(issue)
-            self._queue_members[stage].add(issue_num)
+            self._queues[stage].append(task)
+            self._queue_members[stage].add(task_id)
 
     def _build_label_map(self) -> dict[str, str]:
         """Build a mapping from label name → pipeline stage."""
@@ -232,10 +232,10 @@ class IssueStore:
         return None
 
     def _remove_from_queue(self, stage: str, issue_number: int) -> None:
-        """Remove an issue from a specific queue."""
+        """Remove a task from a specific queue."""
         if issue_number in self._queue_members[stage]:
             self._queues[stage] = deque(
-                i for i in self._queues[stage] if i.number != issue_number
+                t for t in self._queues[stage] if t.id != issue_number
             )
             self._queue_members[stage].discard(issue_number)
 
@@ -269,23 +269,23 @@ class IssueStore:
         return set(self._hitl_numbers)
 
     def _take_from_queue(self, stage: str, max_count: int) -> list[Task]:
-        """Pop up to *max_count* issues from *stage* queue, skipping active."""
+        """Pop up to *max_count* tasks from *stage* queue, skipping active."""
         result: list[Task] = []
-        skipped: list[GitHubIssue] = []
+        skipped: list[Task] = []
         q = self._queues[stage]
 
         while q and len(result) < max_count:
-            issue = q.popleft()
-            self._queue_members[stage].discard(issue.number)
-            if issue.number in self._active:
-                skipped.append(issue)
+            task = q.popleft()
+            self._queue_members[stage].discard(task.id)
+            if task.id in self._active:
+                skipped.append(task)
             else:
-                result.append(issue.to_task())
+                result.append(task)
 
-        # Put skipped issues back at the front
-        for issue in reversed(skipped):
-            q.appendleft(issue)
-            self._queue_members[stage].add(issue.number)
+        # Put skipped tasks back at the front
+        for task in reversed(skipped):
+            q.appendleft(task)
+            self._queue_members[stage].add(task.id)
 
         return result
 
@@ -327,27 +327,27 @@ class IssueStore:
         """
         snapshot: dict[str, list[dict[str, object]]] = {}
 
-        # Queued issues from stage queues
+        # Queued tasks from stage queues
         for stage, q in self._queues.items():
             stage_issues: list[dict[str, object]] = []
-            for issue in q:
+            for task in q:
                 stage_issues.append(
                     {
-                        "issue_number": issue.number,
-                        "title": issue.title,
-                        "url": issue.url,
+                        "issue_number": task.id,
+                        "title": task.title,
+                        "url": task.source_url,
                         "status": "queued",
                     }
                 )
             snapshot[stage] = stage_issues
 
-        # Active issues (look up details from cache)
+        # Active tasks (look up details from cache)
         for issue_number, stage in self._active.items():
             cached = self._issue_cache.get(issue_number)
             entry: dict[str, object] = {
                 "issue_number": issue_number,
                 "title": cached.title if cached else f"Issue #{issue_number}",
-                "url": cached.url if cached else "",
+                "url": cached.source_url if cached else "",
                 "status": "active",
             }
             if stage in snapshot:
@@ -355,7 +355,7 @@ class IssueStore:
             else:
                 snapshot[stage] = [entry]
 
-        # HITL issues
+        # HITL tasks
         hitl_list: list[dict[str, object]] = []
         for issue_number in self._hitl_numbers:
             cached = self._issue_cache.get(issue_number)
@@ -363,7 +363,7 @@ class IssueStore:
                 {
                     "issue_number": issue_number,
                     "title": cached.title if cached else f"Issue #{issue_number}",
-                    "url": cached.url if cached else "",
+                    "url": cached.source_url if cached else "",
                     "status": "hitl",
                 }
             )

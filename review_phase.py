@@ -39,6 +39,7 @@ from review_insights import (
 )
 from reviewer import ReviewRunner
 from state import StateTracker
+from task_source import TaskTransitioner
 from transcript_summarizer import TranscriptSummarizer
 from verification_judge import VerificationJudge
 from worktree import WorktreeManager
@@ -72,6 +73,7 @@ class ReviewPhase:
         self._worktrees = worktrees
         self._reviewers = reviewers
         self._prs = prs
+        self._transitioner: TaskTransitioner = prs
         self._stop_event = stop_event
         self._store = store
         self._agents = agents
@@ -551,7 +553,7 @@ class ReviewPhase:
                 desc = CATEGORY_DESCRIPTIONS.get(category, category)
                 title = f"[Review Insight] Recurring feedback: {desc}"
                 labels = self._config.improve_label[:1] + self._config.hitl_label[:1]
-                issue_num = await self._prs.create_issue(title, body, labels)
+                issue_num = await self._transitioner.create_task(title, body, labels)
                 if issue_num:
                     self._state.set_hitl_origin(
                         issue_num, self._config.improve_label[0]
@@ -601,11 +603,7 @@ class ReviewPhase:
         self._state.set_hitl_cause(issue_number, cause)
         self._state.record_hitl_escalation()
 
-        await self._prs.swap_pipeline_labels(
-            issue_number,
-            self._config.hitl_label[0],
-            pr_number=pr_number,
-        )
+        await self._transitioner.transition(issue_number, "hitl", pr_number=pr_number)
 
         if post_on_pr:
             await self._prs.post_pr_comment(pr_number, comment)
@@ -717,13 +715,11 @@ class ReviewPhase:
             self._state.set_review_feedback(pr.issue_number, result.summary)
 
             # Swap labels: review → ready (issue and PR)
-            await self._prs.swap_pipeline_labels(
-                pr.issue_number,
-                self._config.ready_label[0],
-                pr_number=pr.number,
+            await self._transitioner.transition(
+                pr.issue_number, "ready", pr_number=pr.number
             )
 
-            await self._prs.post_comment(
+            await self._transitioner.post_comment(
                 pr.issue_number,
                 f"**Review requested changes** (attempt {new_count}/{max_attempts}). "
                 f"Re-queuing for implementation with feedback.",

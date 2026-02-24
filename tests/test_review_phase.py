@@ -260,10 +260,8 @@ class TestReviewPRs:
         assert "conflicts" in results[0].summary.lower()
         # Review should NOT have been called
         phase._reviewers.review.assert_not_awaited()
-        # Should escalate to HITL via swap_pipeline_labels
-        phase._prs.swap_pipeline_labels.assert_awaited_once_with(
-            42, "hydraflow-hitl", pr_number=101
-        )
+        # Should escalate to HITL via transition
+        phase._prs.transition.assert_awaited_once_with(42, "hitl", pr_number=101)
 
     @pytest.mark.asyncio
     async def test_review_conflict_escalation_records_hitl_origin(
@@ -375,9 +373,7 @@ class TestReviewPRs:
 
         assert results[0].merged is False
         assert "conflicts" in results[0].summary.lower()
-        phase._prs.swap_pipeline_labels.assert_awaited_once_with(
-            42, "hydraflow-hitl", pr_number=101
-        )
+        phase._prs.transition.assert_awaited_once_with(42, "hitl", pr_number=101)
 
     @pytest.mark.asyncio
     async def test_review_merge_failure_escalates_to_hitl(
@@ -411,9 +407,7 @@ class TestReviewPRs:
             if "Merge failed" in str(c)
         ]
         assert len(hitl_calls) == 1
-        phase._prs.swap_pipeline_labels.assert_any_await(
-            42, "hydraflow-hitl", pr_number=101
-        )
+        phase._prs.transition.assert_any_await(42, "hitl", pr_number=101)
 
     @pytest.mark.asyncio
     async def test_review_merge_failure_records_hitl_origin(
@@ -1164,9 +1158,7 @@ class TestWaitAndFixCI:
         assert "Failed checks: ci" in ci_comments[0][1]
 
         # Should swap label to hydraflow-hitl on both issue and PR
-        phase._prs.swap_pipeline_labels.assert_any_call(
-            42, "hydraflow-hitl", pr_number=101
-        )
+        phase._prs.transition.assert_any_await(42, "hitl", pr_number=101)
 
     @pytest.mark.asyncio
     async def test_ci_failure_sets_hitl_cause(self, config: HydraFlowConfig) -> None:
@@ -2392,7 +2384,7 @@ class TestReviewInsightIntegration:
         phase._reviewers.review = AsyncMock(return_value=review_result)
         phase._prs.get_pr_diff = AsyncMock(return_value="diff text")
         phase._prs.push_branch = AsyncMock(return_value=True)
-        phase._prs.create_issue = AsyncMock(return_value=999)
+        phase._prs.create_task = AsyncMock(return_value=999)
         phase._prs.submit_review = AsyncMock(return_value=True)
 
         wt = config.worktree_base / "issue-42"
@@ -2401,8 +2393,8 @@ class TestReviewInsightIntegration:
         await phase.review_prs([pr], [issue])
 
         # Should have filed an improvement issue
-        phase._prs.create_issue.assert_awaited_once()
-        call_args = phase._prs.create_issue.call_args
+        phase._prs.create_task.assert_awaited_once()
+        call_args = phase._prs.create_task.call_args
         assert "[Review Insight]" in call_args.args[0]
         assert "hydraflow-improve" in call_args.args[2]
         assert "hydraflow-hitl" in call_args.args[2]
@@ -2444,7 +2436,7 @@ class TestReviewInsightIntegration:
         phase._reviewers.review = AsyncMock(return_value=review_result)
         phase._prs.get_pr_diff = AsyncMock(return_value="diff text")
         phase._prs.push_branch = AsyncMock(return_value=True)
-        phase._prs.create_issue = AsyncMock(return_value=999)
+        phase._prs.create_task = AsyncMock(return_value=999)
         phase._prs.submit_review = AsyncMock(return_value=True)
 
         wt = config.worktree_base / "issue-42"
@@ -2453,7 +2445,7 @@ class TestReviewInsightIntegration:
         await phase.review_prs([pr], [issue])
 
         # Should NOT have filed an improvement issue
-        phase._prs.create_issue.assert_not_awaited()
+        phase._prs.create_task.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_review_insight_failure_does_not_crash_review(
@@ -3088,9 +3080,7 @@ class TestRequestChangesRetry:
 
         await phase.review_prs([pr], [issue])
 
-        phase._prs.swap_pipeline_labels.assert_any_await(
-            42, config.ready_label[0], pr_number=101
-        )
+        phase._prs.transition.assert_any_await(42, "ready", pr_number=101)
 
     @pytest.mark.asyncio
     async def test_request_changes_under_cap_preserves_worktree(
@@ -3139,9 +3129,7 @@ class TestRequestChangesRetry:
 
         await phase.review_prs([pr], [issue])
 
-        phase._prs.swap_pipeline_labels.assert_any_await(
-            42, "hydraflow-hitl", pr_number=101
-        )
+        phase._prs.transition.assert_any_await(42, "hitl", pr_number=101)
 
     @pytest.mark.asyncio
     async def test_request_changes_at_cap_posts_escalation_comment(
@@ -3186,9 +3174,7 @@ class TestRequestChangesRetry:
         await phase.review_prs([pr], [issue])
 
         # Should swap to ready label (same as REQUEST_CHANGES)
-        phase._prs.swap_pipeline_labels.assert_any_await(
-            42, config.ready_label[0], pr_number=101
-        )
+        phase._prs.transition.assert_any_await(42, "ready", pr_number=101)
         # Worktree should be preserved
         phase._worktrees.destroy.assert_not_awaited()
 
@@ -3477,8 +3463,8 @@ class TestSelfFixReReview:
         assert phase._reviewers.review.await_count == 2
         phase._prs.merge_pr.assert_not_awaited()
         # Should swap labels to ready (re-queue)
-        phase._prs.swap_pipeline_labels.assert_any_await(
-            pr.issue_number, config.ready_label[0], pr_number=pr.number
+        phase._prs.transition.assert_any_await(
+            pr.issue_number, "ready", pr_number=pr.number
         )
         assert phase._state.get_review_attempts(42) == 1
 
@@ -3496,8 +3482,8 @@ class TestSelfFixReReview:
         await phase.review_prs([pr], [issue])
 
         assert phase._reviewers.review.await_count == 1
-        phase._prs.swap_pipeline_labels.assert_any_await(
-            pr.issue_number, config.ready_label[0], pr_number=pr.number
+        phase._prs.transition.assert_any_await(
+            pr.issue_number, "ready", pr_number=pr.number
         )
 
     @pytest.mark.asyncio
@@ -3589,8 +3575,8 @@ class TestSelfFixReReview:
         # Exception falls back to original rejection — no merge
         phase._prs.merge_pr.assert_not_awaited()
         # Label swapped to ready (re-queue as original REQUEST_CHANGES)
-        phase._prs.swap_pipeline_labels.assert_any_await(
-            pr.issue_number, config.ready_label[0], pr_number=pr.number
+        phase._prs.transition.assert_any_await(
+            pr.issue_number, "ready", pr_number=pr.number
         )
         assert phase._state.get_review_attempts(pr.issue_number) == 1
 
@@ -3991,9 +3977,7 @@ class TestEscalateToHitl:
             comment="comment",
         )
 
-        phase._prs.swap_pipeline_labels.assert_awaited_once_with(
-            42, "hydraflow-hitl", pr_number=101
-        )
+        phase._prs.transition.assert_awaited_once_with(42, "hitl", pr_number=101)
 
     @pytest.mark.asyncio
     async def test_posts_comment_on_pr_by_default(
@@ -4643,9 +4627,7 @@ class TestHandleRejectedReview:
 
         await phase._handle_rejected_review(pr, result, 0)
 
-        phase._prs.swap_pipeline_labels.assert_awaited_once_with(
-            42, config.ready_label[0], pr_number=101
-        )
+        phase._prs.transition.assert_awaited_once_with(42, "ready", pr_number=101)
 
     @pytest.mark.asyncio
     async def test_under_cap_increments_review_attempts(
@@ -4726,9 +4708,7 @@ class TestHandleRejectedReview:
         await phase._handle_rejected_review(pr, result, 0)
 
         assert phase._state.get_hitl_origin(42) == "hydraflow-review"
-        phase._prs.swap_pipeline_labels.assert_any_await(
-            42, "hydraflow-hitl", pr_number=101
-        )
+        phase._prs.transition.assert_any_await(42, "hitl", pr_number=101)
 
     @pytest.mark.asyncio
     async def test_cap_exceeded_posts_comment_on_issue(self, tmp_path: Path) -> None:

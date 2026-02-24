@@ -48,8 +48,9 @@ def _make_phase(
     prs.remove_label = AsyncMock()
     prs.add_labels = AsyncMock()
     prs.swap_pipeline_labels = AsyncMock()
-    prs.create_issue = AsyncMock(return_value=99)
-    prs.close_issue = AsyncMock()
+    prs.transition = AsyncMock()
+    prs.create_task = AsyncMock(return_value=99)
+    prs.close_task = AsyncMock()
     stop_event = asyncio.Event()
     phase = PlanPhase(
         config,
@@ -117,7 +118,7 @@ class TestPlanPhase:
 
         await phase.plan_issues()
 
-        prs.swap_pipeline_labels.assert_awaited_once_with(42, config.ready_label[0])
+        prs.transition.assert_awaited_once_with(42, "ready")
 
     @pytest.mark.asyncio
     async def test_plan_issues_skips_label_swap_on_failure(
@@ -218,7 +219,7 @@ class TestPlanPhase:
 
         await phase.plan_issues()
 
-        prs.create_issue.assert_awaited_once_with(
+        prs.create_task.assert_awaited_once_with(
             "Tech debt",
             "The auth module has accumulated significant tech debt "
             "that needs cleanup and refactoring.",
@@ -333,7 +334,7 @@ class TestPlanPhase:
 
         await phase.plan_issues()
 
-        prs.create_issue.assert_awaited_once_with(
+        prs.create_task.assert_awaited_once_with(
             "Discovered issue",
             "This issue was discovered during planning — the config "
             "parser does not handle nested environment variables.",
@@ -364,7 +365,7 @@ class TestPlanPhase:
 
         await phase.plan_issues()
 
-        prs.create_issue.assert_not_awaited()
+        prs.create_task.assert_not_awaited()
         assert state.get_lifetime_stats().issues_created == 0
 
     @pytest.mark.asyncio
@@ -428,7 +429,7 @@ class TestPlanPhase:
         assert "Plan Validation Failed" in comment
         assert "Testing Strategy" in comment
 
-        # Planner label removed, HITL label added via swap
+        # Planner label removed, HITL label added via swap (escalate_to_hitl still uses swap_pipeline_labels)
         prs.swap_pipeline_labels.assert_awaited_once_with(42, config.hitl_label[0])
 
         # HITL origin and cause tracked in state
@@ -524,7 +525,7 @@ class TestPlanPhase:
             await phase.plan_issues()
 
         # Should swap to ready label
-        prs.swap_pipeline_labels.assert_awaited_once_with(42, config.ready_label[0])
+        prs.transition.assert_awaited_once_with(42, "ready")
 
     @pytest.mark.asyncio
     async def test_plan_issues_proceeds_on_analysis_warn(
@@ -561,7 +562,7 @@ class TestPlanPhase:
             await phase.plan_issues()
 
         # Should swap to ready label (warn doesn't block)
-        prs.swap_pipeline_labels.assert_awaited_once_with(42, config.ready_label[0])
+        prs.transition.assert_awaited_once_with(42, "ready")
 
 
 # ---------------------------------------------------------------------------
@@ -601,7 +602,7 @@ class TestPlanPhaseAlreadySatisfied:
         assert "HydraFlow Planner" in comment
 
         # Issue should be closed
-        prs.close_issue.assert_awaited_once_with(42)
+        prs.close_task.assert_awaited_once_with(42)
 
     @pytest.mark.asyncio
     async def test_plan_already_satisfied_does_not_swap_to_ready(

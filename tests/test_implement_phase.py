@@ -95,7 +95,9 @@ def _make_phase(
     mock_prs.add_labels = AsyncMock()
     mock_prs.remove_label = AsyncMock()
     mock_prs.swap_pipeline_labels = AsyncMock()
+    mock_prs.transition = AsyncMock()
     mock_prs.post_comment = AsyncMock()
+    mock_prs.close_task = AsyncMock()
     mock_prs.add_pr_labels = AsyncMock()
 
     phase = ImplementPhase(
@@ -989,7 +991,7 @@ class TestAlreadySatisfiedZeroCommit:
             )
 
         phase, _, mock_prs = _make_phase(config, [issue], agent_run=zero_commit_agent)
-        mock_prs.close_issue = AsyncMock()
+        mock_prs.close_task = AsyncMock()
 
         results, _ = await phase.run_batch()
 
@@ -1002,7 +1004,7 @@ class TestAlreadySatisfiedZeroCommit:
         assert any("Already Satisfied" in c[1] for c in comment_calls)
 
         # Issue should be closed
-        mock_prs.close_issue.assert_awaited_once_with(42)
+        mock_prs.close_task.assert_awaited_once_with(42)
 
     @pytest.mark.asyncio
     async def test_zero_commit_marks_issue_already_satisfied(
@@ -1028,7 +1030,7 @@ class TestAlreadySatisfiedZeroCommit:
             )
 
         phase, _, mock_prs = _make_phase(config, [issue], agent_run=zero_commit_agent)
-        mock_prs.close_issue = AsyncMock()
+        mock_prs.close_task = AsyncMock()
 
         await phase.run_batch()
 
@@ -1061,7 +1063,7 @@ class TestAlreadySatisfiedZeroCommit:
             )
 
         phase, _, mock_prs = _make_phase(config, [issue], agent_run=zero_commit_agent)
-        mock_prs.close_issue = AsyncMock()
+        mock_prs.close_task = AsyncMock()
 
         await phase.run_batch()
 
@@ -1095,12 +1097,12 @@ class TestAlreadySatisfiedZeroCommit:
         phase, _, mock_prs = _make_phase(
             config, [issue], agent_run=failing_with_commits
         )
-        mock_prs.close_issue = AsyncMock()
+        mock_prs.close_task = AsyncMock()
 
         await phase.run_batch()
 
         # Should NOT close the issue
-        mock_prs.close_issue.assert_not_awaited()
+        mock_prs.close_task.assert_not_awaited()
         assert phase._state.to_dict()["processed_issues"].get(str(42)) == "failed"
 
 
@@ -1511,7 +1513,7 @@ class TestHandleImplementationResult:
         )
 
         phase, _, mock_prs = _make_phase(config, [issue])
-        mock_prs.close_issue = AsyncMock()
+        mock_prs.close_task = AsyncMock()
 
         returned = await phase._handle_implementation_result(issue, result, False)
 
@@ -1519,7 +1521,7 @@ class TestHandleImplementationResult:
             phase._state.to_dict()["processed_issues"].get(str(42))
             == "already_satisfied"
         )
-        mock_prs.close_issue.assert_awaited_once_with(42)
+        mock_prs.close_task.assert_awaited_once_with(42)
         assert returned is result
 
     @pytest.mark.asyncio
@@ -1544,9 +1546,7 @@ class TestHandleImplementationResult:
         assert returned.pr_info.number == 101
         assert phase._state.to_dict()["processed_issues"].get(str(42)) == "success"
 
-        mock_prs.swap_pipeline_labels.assert_awaited_once_with(
-            42, config.review_label[0], pr_number=101
-        )
+        mock_prs.transition.assert_awaited_once_with(42, "review", pr_number=101)
 
     @pytest.mark.asyncio
     async def test_retry_skips_pr_creation(self, config: HydraFlowConfig) -> None:
