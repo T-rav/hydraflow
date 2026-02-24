@@ -8,16 +8,17 @@ set -euo pipefail
 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 MARKER_DIR="/tmp/claude-code-markers/$(echo -n "$PROJECT_DIR" | md5)"
-mkdir -p "$MARKER_DIR"
 
 REINDEX_MARKER="$MARKER_DIR/needs-reindex"
 INDEXED_MARKER="$MARKER_DIR/last-indexed"
 WARNED_MARKER="$MARKER_DIR/reindex-warned"
 
-# Don't warn more than once per hour
+# Don't warn more than once per hour (fast exit before mkdir)
 if [ -f "$WARNED_MARKER" ] && [ -n "$(find "$WARNED_MARKER" -mmin -60 2>/dev/null)" ]; then
   exit 0
 fi
+
+mkdir -p "$MARKER_DIR"
 
 SHOULD_WARN=false
 REASON=""

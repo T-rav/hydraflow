@@ -8,6 +8,7 @@ set -euo pipefail
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
+[ -z "$CWD" ] && CWD="$(pwd)"
 
 # Only intercept git commit commands
 if ! echo "$COMMAND" | grep -qE '(^|\s|&&\s*|;\s*)git commit'; then
