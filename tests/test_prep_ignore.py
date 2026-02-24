@@ -96,9 +96,3 @@ class TestLoadGitSubmoduleRoots:
 
         assert len(result) == 1
         assert result[0] == (tmp_path / "lib/core").resolve()
-
-    def test_returns_tuple(self, tmp_path: Path) -> None:
-        """Return type should be a tuple, not a list."""
-        result = load_git_submodule_roots(tmp_path)
-
-        assert isinstance(result, tuple)

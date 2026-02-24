@@ -633,7 +633,7 @@ class TestAdversarialReview:
         # Should call review exactly twice (initial + one re-review), then accept
         assert phase._reviewers.review.await_count == 2
         # PR should still be merged (accepted anyway)
-        phase._prs.merge_pr.assert_awaited()
+        assert phase._prs.merge_pr.await_count >= 1
 
     @pytest.mark.asyncio
     async def test_re_review_pushes_fixes(self, config: HydraFlowConfig) -> None:
@@ -673,7 +673,7 @@ class TestAdversarialReview:
         await phase.review_prs([pr], [issue])
 
         # push_branch should be called for the re-review fixes
-        phase._prs.push_branch.assert_awaited()
+        assert phase._prs.push_branch.await_count >= 1
 
 
 # ---------------------------------------------------------------------------
