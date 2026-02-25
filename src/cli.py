@@ -181,7 +181,7 @@ def _make_prep_output_tracker(
             elapsed = int(now - state["start_time"])
             lines_to_render = [
                 _prep_stage_line(
-                    "hardening",
+                    "scaffold",
                     f"{stream_label}: live output (rolling 3 lines, {elapsed}s)",
                     "start",
                     color,
@@ -939,7 +939,7 @@ def _makefile_has_target(repo_root: Path, target: str) -> bool:
 async def _run_hardening_step(
     step: str, cmd: list[str], cwd: Path
 ) -> tuple[bool, str | None]:
-    """Run one prep hardening command and print a concise status line."""
+    """Run one prep/scaffold command and print a concise status line."""
     from subprocess_util import run_subprocess  # noqa: PLC0415
 
     try:
