@@ -254,6 +254,16 @@ export function MetricsPanel() {
           value={formatTokens(inferenceLifetime.inference_calls || 0)}
           subtle
         />
+        <StatCard
+          label="Session Pruned Chars"
+          value={formatTokens(inferenceSession.pruned_chars_total || 0)}
+          subtle
+        />
+        <StatCard
+          label="Lifetime Pruned Chars"
+          value={formatTokens(inferenceLifetime.pruned_chars_total || 0)}
+          subtle
+        />
       </div>
 
       <SnapshotTimeline snapshots={snapshots} />

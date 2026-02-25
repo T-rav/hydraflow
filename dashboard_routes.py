@@ -78,6 +78,7 @@ _INFERENCE_COUNTER_KEYS: tuple[str, ...] = (
     "cache_read_input_tokens",
     "history_chars_saved",
     "context_chars_saved",
+    "pruned_chars_total",
     "cache_hits",
     "cache_misses",
 )

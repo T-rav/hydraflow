@@ -42,27 +42,28 @@ class PromptTelemetry:
         transcript_chars: int,
         duration_seconds: float,
         success: bool,
-        stats: dict[str, int] | None = None,
+        stats: dict[str, object] | None = None,
     ) -> None:
         """Append one inference record and update aggregate per-PR stats."""
         st = stats or {}
 
-        history_before = max(0, int(st.get("history_chars_before", 0)))
-        history_after = max(0, int(st.get("history_chars_after", 0)))
-        context_before = max(0, int(st.get("context_chars_before", 0)))
-        context_after = max(0, int(st.get("context_chars_after", 0)))
-        cache_hits = max(0, int(st.get("cache_hits", 0)))
-        cache_misses = max(0, int(st.get("cache_misses", 0)))
-        actual_input_tokens = max(0, int(st.get("input_tokens", 0)))
-        actual_output_tokens = max(0, int(st.get("output_tokens", 0)))
+        history_before = max(0, _as_int(st.get("history_chars_before", 0)))
+        history_after = max(0, _as_int(st.get("history_chars_after", 0)))
+        context_before = max(0, _as_int(st.get("context_chars_before", 0)))
+        context_after = max(0, _as_int(st.get("context_chars_after", 0)))
+        cache_hits = max(0, _as_int(st.get("cache_hits", 0)))
+        cache_misses = max(0, _as_int(st.get("cache_misses", 0)))
+        actual_input_tokens = max(0, _as_int(st.get("input_tokens", 0)))
+        actual_output_tokens = max(0, _as_int(st.get("output_tokens", 0)))
         actual_cache_creation_tokens = max(
-            0, int(st.get("cache_creation_input_tokens", 0))
+            0, _as_int(st.get("cache_creation_input_tokens", 0))
         )
-        actual_cache_read_tokens = max(0, int(st.get("cache_read_input_tokens", 0)))
-        actual_total_tokens = max(0, int(st.get("total_tokens", 0)))
+        actual_cache_read_tokens = max(0, _as_int(st.get("cache_read_input_tokens", 0)))
+        actual_total_tokens = max(0, _as_int(st.get("total_tokens", 0)))
 
         history_saved = max(0, history_before - history_after)
         context_saved = max(0, context_before - context_after)
+        explicit_pruned = max(0, _as_int(st.get("pruned_chars_total", 0)))
 
         prompt_tokens = _estimate_tokens(prompt_chars)
         transcript_tokens = _estimate_tokens(transcript_chars)
@@ -118,7 +119,20 @@ class PromptTelemetry:
                 if (cache_hits + cache_misses)
                 else 0.0
             ),
+            "pruned_chars_total": max(
+                0, history_saved + context_saved + explicit_pruned
+            ),
         }
+        section_chars = st.get("section_chars")
+        if isinstance(section_chars, dict):
+            clean_sections: dict[str, int] = {}
+            for k, v in section_chars.items():
+                key = str(k).strip()
+                if not key:
+                    continue
+                clean_sections[key] = max(0, _as_int(v))
+            if clean_sections:
+                record["section_chars"] = clean_sections
 
         try:
             self._dir.mkdir(parents=True, exist_ok=True)
@@ -248,6 +262,9 @@ class PromptTelemetry:
         target["actual_usage_calls"] = _as_int(target.get("actual_usage_calls", 0))
         if record.get("token_source") == "actual":
             target["actual_usage_calls"] = _as_int(target["actual_usage_calls"]) + 1
+        target["pruned_chars_total"] = _as_int(
+            target.get("pruned_chars_total", 0)
+        ) + _as_int(record.get("pruned_chars_total", 0))
         target["last_updated"] = str(record.get("timestamp", ""))
 
     def get_pr_totals(self, pr_number: int) -> dict[str, int] | None:
@@ -306,6 +323,7 @@ def _new_counter() -> dict[str, object]:
         "cache_hits": 0,
         "cache_misses": 0,
         "actual_usage_calls": 0,
+        "pruned_chars_total": 0,
         "last_updated": "",
     }
 

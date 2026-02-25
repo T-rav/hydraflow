@@ -329,6 +329,33 @@ class TestBuildPrompt:
         assert "## Instructions" in prompt
         assert "## Rules" in prompt
 
+    def test_prompt_truncates_long_discussion_comments(
+        self, config, event_bus: EventBus
+    ) -> None:
+        issue = Task(
+            id=11,
+            title="Fix long comment token blowup",
+            body="Normal issue body",
+            comments=["A" * 5000],
+        )
+        runner = AgentRunner(config, event_bus)
+        prompt, stats = runner._build_prompt_with_stats(issue)
+        assert "[Comment truncated from" in prompt
+        assert int(stats["pruned_chars_total"]) > 0
+
+    def test_prompt_truncates_common_feedback_section(
+        self, config, event_bus: EventBus, issue
+    ) -> None:
+        runner = AgentRunner(config, event_bus)
+        with patch.object(
+            runner,
+            "_get_review_feedback_section",
+            return_value="B" * 10000,
+        ):
+            prompt, stats = runner._build_prompt_with_stats(issue)
+        assert "Common review feedback summarized" in prompt
+        assert int(stats["pruned_chars_total"]) > 0
+
     def test_prompt_includes_review_feedback_when_provided(
         self, config, event_bus: EventBus, issue
     ) -> None:

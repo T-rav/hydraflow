@@ -31,6 +31,10 @@ class AgentRunner(BaseRunner):
     """
 
     _log = logger
+    _MAX_DISCUSSION_COMMENT_CHARS = 500
+    _MAX_COMMON_FEEDBACK_CHARS = 2_000
+    _MAX_IMPL_PLAN_CHARS = 6_000
+    _MAX_REVIEW_FEEDBACK_CHARS = 2_000
 
     def __init__(
         self,
@@ -233,8 +237,18 @@ class AgentRunner(BaseRunner):
         Returns an empty string if no data is available or on any error.
         """
         try:
-            recent = self._insights.load_recent(self._config.review_insight_window)
-            return get_common_feedback_section(recent)
+            reviews_path = self._config.memory_dir / "reviews.jsonl"
+
+            def _load_feedback(_cfg: HydraFlowConfig) -> str:
+                recent = self._insights.load_recent(self._config.review_insight_window)
+                return get_common_feedback_section(recent)
+
+            feedback, _hit = self._context_cache.get_or_load(
+                key="common_review_feedback",
+                source_path=reviews_path,
+                loader=_load_feedback,
+            )
+            return feedback
         except Exception:  # noqa: BLE001
             return ""
 
@@ -256,6 +270,16 @@ class AgentRunner(BaseRunner):
             f"[{label} summarized from {len(text):,} chars to reduce prompt size]"
         )
 
+    def _truncate_comment_for_prompt(self, text: str) -> str:
+        """Return one discussion comment compacted for prompt efficiency."""
+        raw = (text or "").strip()
+        if len(raw) <= self._MAX_DISCUSSION_COMMENT_CHARS:
+            return raw
+        return (
+            raw[: self._MAX_DISCUSSION_COMMENT_CHARS]
+            + f"\n[Comment truncated from {len(raw):,} chars]"
+        )
+
     def _build_prompt(self, issue: Task, review_feedback: str = "") -> str:
         """Build the implementation prompt for the agent."""
         prompt, _stats = self._build_prompt_with_stats(
@@ -265,7 +289,7 @@ class AgentRunner(BaseRunner):
 
     def _build_prompt_with_stats(
         self, issue: Task, review_feedback: str = ""
-    ) -> tuple[str, dict[str, int]]:
+    ) -> tuple[str, dict[str, object]]:
         """Build the implementation prompt and pruning stats."""
         plan_comment, other_comments = self._extract_plan_comment(issue.comments)
         history_before = len(plan_comment) + sum(len(c) for c in other_comments)
@@ -285,7 +309,9 @@ class AgentRunner(BaseRunner):
         plan_section = ""
         if plan_comment:
             plan_comment = self._summarize_for_prompt(
-                plan_comment, max_chars=6_000, label="Implementation plan"
+                plan_comment,
+                max_chars=self._MAX_IMPL_PLAN_CHARS,
+                label="Implementation plan",
             )
             history_after += len(plan_comment)
             plan_section = (
@@ -299,7 +325,9 @@ class AgentRunner(BaseRunner):
         if review_feedback:
             history_before += len(review_feedback)
             review_feedback = self._summarize_for_prompt(
-                review_feedback, max_chars=2_000, label="Review feedback"
+                review_feedback,
+                max_chars=self._MAX_REVIEW_FEEDBACK_CHARS,
+                label="Review feedback",
             )
             history_after += len(review_feedback)
             review_feedback_section = (
@@ -313,13 +341,26 @@ class AgentRunner(BaseRunner):
         if other_comments:
             max_comments = 6
             selected_comments = other_comments[:max_comments]
-            formatted = "\n".join(f"- {c}" for c in selected_comments)
+            compact_comments = [
+                self._truncate_comment_for_prompt(c) for c in selected_comments
+            ]
+            formatted = "\n".join(f"- {c}" for c in compact_comments)
             history_after += len(formatted)
             comments_section = f"\n\n## Discussion\n{formatted}"
             if len(other_comments) > max_comments:
                 comments_section += f"\n- ... ({len(other_comments) - max_comments} more comments omitted)"
 
-        feedback_section = self._get_review_feedback_section()
+        raw_feedback_section = self._get_review_feedback_section()
+        feedback_section = ""
+        if raw_feedback_section:
+            history_before += len(raw_feedback_section)
+            compact_feedback = self._summarize_for_prompt(
+                raw_feedback_section,
+                max_chars=self._MAX_COMMON_FEEDBACK_CHARS,
+                label="Common review feedback",
+            )
+            history_after += len(compact_feedback)
+            feedback_section = compact_feedback
 
         manifest_section, memory_section = self._inject_manifest_and_memory()
 
@@ -381,6 +422,14 @@ class AgentRunner(BaseRunner):
             "history_chars_after": history_after,
             "context_chars_before": body_before,
             "context_chars_after": body_after,
+            "pruned_chars_total": max(0, history_before - history_after)
+            + max(0, body_before - body_after),
+            "section_chars": {
+                "issue_body_before": body_before,
+                "issue_body_after": body_after,
+                "history_before": history_before,
+                "history_after": history_after,
+            },
         }
         return prompt, stats
 

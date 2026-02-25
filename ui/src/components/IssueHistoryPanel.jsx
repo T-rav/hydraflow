@@ -259,6 +259,7 @@ export function IssueHistoryPanel() {
                     <span>
                       {formatNumber(item.inference?.inference_calls || 0)} calls · {formatNumber(item.inference?.total_tokens || 0)} tokens
                       {' · '}in: {formatNumber(item.inference?.input_tokens || 0)} / out: {formatNumber(item.inference?.output_tokens || 0)}
+                      {' · '}pruned chars: {formatNumber(item.inference?.pruned_chars_total || 0)}
                     </span>
                   </div>
                   <div style={styles.expRow}>

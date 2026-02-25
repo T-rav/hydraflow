@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
@@ -61,7 +61,7 @@ class BaseRunner:
         event_data: TranscriptEventData,
         *,
         on_output: Callable[[str], bool] | None = None,
-        telemetry_stats: dict[str, int] | None = None,
+        telemetry_stats: Mapping[str, object] | None = None,
     ) -> str:
         """Run a claude subprocess and stream its output."""
         start = time.monotonic()

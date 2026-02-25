@@ -178,15 +178,9 @@ class PlannerRunner(BaseRunner):
                         len(all_errors),
                     )
                     await self._emit_status(task.id, worker_id, PlannerStatus.RETRYING)
-                    retry_prompt = self._build_retry_prompt(
+                    retry_prompt, retry_stats = self._build_retry_prompt(
                         task, result.plan, all_errors, scale=scale
                     )
-                    retry_stats = {
-                        "context_chars_before": len(task.body or "")
-                        + len(result.plan)
-                        + sum(len(e) for e in all_errors),
-                        "context_chars_after": len(retry_prompt),
-                    }
                     retry_transcript = await self._execute(
                         cmd,
                         retry_prompt,
@@ -337,7 +331,7 @@ class PlannerRunner(BaseRunner):
 
     def _build_prompt_with_stats(
         self, issue: Task, *, scale: PlanScale = "full"
-    ) -> tuple[str, dict[str, int]]:
+    ) -> tuple[str, dict[str, object]]:
         """Build the planning prompt and pruning stats.
 
         *scale* is ``"lite"`` or ``"full"``.  The prompt adjusts which
@@ -499,6 +493,14 @@ This closes the issue automatically. Use only when you are certain.
             "history_chars_after": history_after,
             "context_chars_before": len(body_raw),
             "context_chars_after": len(body),
+            "pruned_chars_total": max(0, history_before - history_after)
+            + max(0, len(body_raw) - len(body)),
+            "section_chars": {
+                "issue_body_before": len(body_raw),
+                "issue_body_after": len(body),
+                "discussion_before": history_before,
+                "discussion_after": history_after,
+            },
         }
         return prompt, stats
 
@@ -853,20 +855,27 @@ This closes the issue automatically. Use only when you are certain.
         validation_errors: list[str],
         *,
         scale: PlanScale = "full",
-    ) -> str:
+    ) -> tuple[str, dict[str, int | dict[str, int]]]:
         """Build a retry prompt that includes the original issue, the failed plan, and validation feedback."""
-        error_list = "\n".join(f"- {e}" for e in validation_errors)
+        error_list = "\n".join(f"- {e}" for e in validation_errors[:12])
         sections_list = self._format_sections_list(scale)
+        raw_body = issue.body or ""
+        compact_body = self._truncate_text(
+            raw_body, self._config.max_issue_body_chars, self._MAX_LINE_CHARS
+        )
+        compact_failed_plan = self._truncate_text(
+            failed_plan, 4_000, self._MAX_LINE_CHARS
+        )
 
-        return f"""You previously generated a plan for GitHub issue #{issue.id} but it failed validation.
+        prompt = f"""You previously generated a plan for GitHub issue #{issue.id} but it failed validation.
 
 ## Issue: {issue.title}
 
-{issue.body or ""}
+{compact_body}
 
 ## Previous Plan (FAILED VALIDATION)
 
-{failed_plan}
+{compact_failed_plan}
 
 ## Validation Errors
 
@@ -891,6 +900,23 @@ PLAN_END
 Then provide a one-line summary:
 SUMMARY: <brief one-line description of the plan>
 """
+        before = (
+            len(raw_body) + len(failed_plan) + sum(len(e) for e in validation_errors)
+        )
+        after = len(compact_body) + len(compact_failed_plan) + len(error_list)
+        stats: dict[str, int | dict[str, int]] = {
+            "context_chars_before": before,
+            "context_chars_after": after,
+            "pruned_chars_total": max(0, before - after),
+            "section_chars": {
+                "retry_issue_body_before": len(raw_body),
+                "retry_issue_body_after": len(compact_body),
+                "retry_failed_plan_before": len(failed_plan),
+                "retry_failed_plan_after": len(compact_failed_plan),
+                "retry_validation_errors_after": len(error_list),
+            },
+        }
+        return prompt, stats
 
     async def _emit_status(
         self, issue_number: int, worker_id: int, status: PlannerStatus

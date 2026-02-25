@@ -45,6 +45,7 @@ class ReviewRunner(BaseRunner):
     """
 
     _log = logger
+    _MAX_CI_LOG_PROMPT_CHARS = 6_000
 
     async def review(
         self,
@@ -182,13 +183,9 @@ class ReviewRunner(BaseRunner):
 
         try:
             cmd = self._build_command(worktree_path)
-            prompt = self._build_ci_fix_prompt(
+            prompt, prompt_stats = self._build_ci_fix_prompt(
                 pr, issue, failure_summary, attempt, ci_logs=ci_logs
             )
-            prompt_stats = {
-                "context_chars_before": len(failure_summary) + len(ci_logs),
-                "context_chars_after": len(prompt),
-            }
             before_sha = await self._get_head_sha(worktree_path)
             transcript = await self._execute(
                 cmd,
@@ -233,14 +230,24 @@ class ReviewRunner(BaseRunner):
         failure_summary: str,
         attempt: int,
         ci_logs: str = "",
-    ) -> str:
+    ) -> tuple[str, dict[str, int | dict[str, int]]]:
         """Build a focused prompt for fixing CI failures."""
+        raw_ci_logs = ci_logs or ""
+        compact_ci_logs = raw_ci_logs
+        if len(compact_ci_logs) > self._MAX_CI_LOG_PROMPT_CHARS:
+            compact_ci_logs = (
+                compact_ci_logs[: self._MAX_CI_LOG_PROMPT_CHARS]
+                + f"\n\n[CI logs truncated from {len(raw_ci_logs):,} chars]"
+            )
+
         ci_logs_section = ""
-        if ci_logs:
-            ci_logs_section = f"\n\n## Full CI Failure Logs\n\n```\n{ci_logs}\n```"
+        if compact_ci_logs:
+            ci_logs_section = (
+                f"\n\n## Full CI Failure Logs\n\n```\n{compact_ci_logs}\n```"
+            )
 
         test_cmd = self._config.test_command
-        return f"""You are fixing CI failures on PR #{pr.number} (issue #{issue.id}: {issue.title}).
+        prompt = f"""You are fixing CI failures on PR #{pr.number} (issue #{issue.id}: {issue.title}).
 
 ## CI Failure Summary
 
@@ -261,6 +268,19 @@ End your response with EXACTLY one of these verdict lines:
 
 Then a brief summary on the next line starting with "SUMMARY: ".
 """
+        before = len(failure_summary) + len(raw_ci_logs)
+        after = len(failure_summary) + len(compact_ci_logs)
+        stats: dict[str, int | dict[str, int]] = {
+            "context_chars_before": before,
+            "context_chars_after": after,
+            "pruned_chars_total": max(0, before - after),
+            "section_chars": {
+                "ci_failure_summary": len(failure_summary),
+                "ci_logs_before": len(raw_ci_logs),
+                "ci_logs_after": len(compact_ci_logs),
+            },
+        }
+        return prompt, stats
 
     def _build_command(self, _worktree_path: Path | None = None) -> list[str]:
         """Construct the review CLI invocation.
@@ -419,7 +439,7 @@ Then a brief summary on the next line starting with "SUMMARY: ".
         issue: Task,
         diff: str,
         precheck_context: str = "",
-    ) -> tuple[str, dict[str, int]]:
+    ) -> tuple[str, dict[str, object]]:
         """Build the review prompt and pruning stats."""
         ci_enabled = self._config.max_ci_fix_attempts > 0
         test_cmd = self._config.test_command
@@ -525,6 +545,17 @@ SUMMARY: Implementation looks good, tests are comprehensive, all checks pass.
         stats = {
             "context_chars_before": len(issue.body or "") + len(diff),
             "context_chars_after": len(issue_body) + len(diff_context),
+            "pruned_chars_total": max(
+                0,
+                (len(issue.body or "") + len(diff))
+                - (len(issue_body) + len(diff_context)),
+            ),
+            "section_chars": {
+                "issue_body_before": len(issue.body or ""),
+                "issue_body_after": len(issue_body),
+                "diff_before": len(diff),
+                "diff_after": len(diff_context),
+            },
         }
         return prompt, stats
 
@@ -572,6 +603,9 @@ Diff snippet:
             telemetry_stats = {
                 "context_chars_before": len(issue.body or "") + len(diff),
                 "context_chars_after": len(p),
+                "pruned_chars_total": max(
+                    0, (len(issue.body or "") + len(diff)) - len(p)
+                ),
             }
             return await self._execute(
                 cmd,

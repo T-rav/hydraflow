@@ -958,7 +958,9 @@ async def test_execute_uses_large_stream_limit(config, event_bus, pr_info, tmp_p
 
 def test_build_ci_fix_prompt_includes_failure_summary(config, event_bus, pr_info, task):
     runner = _make_runner(config, event_bus)
-    prompt = runner._build_ci_fix_prompt(pr_info, task, "Failed checks: ci, lint", 1)
+    prompt, _stats = runner._build_ci_fix_prompt(
+        pr_info, task, "Failed checks: ci, lint", 1
+    )
 
     assert "Failed checks: ci, lint" in prompt
 
@@ -967,7 +969,7 @@ def test_build_ci_fix_prompt_includes_pr_and_issue_context(
     config, event_bus, pr_info, task
 ):
     runner = _make_runner(config, event_bus)
-    prompt = runner._build_ci_fix_prompt(pr_info, task, "CI failed", 2)
+    prompt, _stats = runner._build_ci_fix_prompt(pr_info, task, "CI failed", 2)
 
     assert f"#{pr_info.number}" in prompt
     assert f"#{task.id}" in prompt
@@ -979,7 +981,7 @@ def test_build_ci_fix_prompt_uses_configured_test_command(event_bus, pr_info, ta
     """CI fix prompt should use the configured test_command."""
     cfg = ConfigFactory.create(test_command="npm test")
     runner = _make_runner(cfg, event_bus)
-    prompt = runner._build_ci_fix_prompt(pr_info, task, "CI failed", 1)
+    prompt, _stats = runner._build_ci_fix_prompt(pr_info, task, "CI failed", 1)
 
     assert "`npm test`" in prompt
     assert "make test-fast" not in prompt
@@ -1399,6 +1401,9 @@ class TestRunPrecheckContext:
             telemetry_stats={
                 "context_chars_before": len(task.body or "") + len("diff"),
                 "context_chars_after": len("prompt"),
+                "pruned_chars_total": len(task.body or "")
+                + len("diff")
+                - len("prompt"),
             },
         )
 
@@ -1416,7 +1421,7 @@ def test_build_ci_fix_prompt_includes_ci_logs_when_provided(config, event_bus):
     pr = PRInfoFactory.create()
     issue = TaskFactory.create()
 
-    prompt = runner._build_ci_fix_prompt(
+    prompt, _stats = runner._build_ci_fix_prompt(
         pr, issue, "Failed checks: Build", attempt=1, ci_logs="Error in main.py:42"
     )
 
@@ -1432,9 +1437,28 @@ def test_build_ci_fix_prompt_excludes_ci_logs_when_empty(config, event_bus):
     pr = PRInfoFactory.create()
     issue = TaskFactory.create()
 
-    prompt = runner._build_ci_fix_prompt(pr, issue, "Failed checks: Build", attempt=1)
+    prompt, _stats = runner._build_ci_fix_prompt(
+        pr, issue, "Failed checks: Build", attempt=1
+    )
 
     assert "## Full CI Failure Logs" not in prompt
+
+
+def test_build_ci_fix_prompt_truncates_large_ci_logs(config, event_bus):
+    """Large CI logs are truncated and counted in pruning stats."""
+    from tests.conftest import PRInfoFactory, TaskFactory
+
+    runner = _make_runner(config, event_bus)
+    pr = PRInfoFactory.create()
+    issue = TaskFactory.create()
+    logs = "E" * (runner._MAX_CI_LOG_PROMPT_CHARS + 200)
+
+    prompt, stats = runner._build_ci_fix_prompt(
+        pr, issue, "Failed checks: Build", attempt=1, ci_logs=logs
+    )
+
+    assert "truncated from" in prompt
+    assert int(stats["pruned_chars_total"]) > 0
 
 
 # ---------------------------------------------------------------------------
