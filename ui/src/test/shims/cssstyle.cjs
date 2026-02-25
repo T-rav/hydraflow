@@ -30436,6 +30436,20 @@ var require_data = __commonJS({
     var mdnSyntaxes = require_syntaxes();
     var hasOwn = Object.hasOwn || ((object, property) => Object.prototype.hasOwnProperty.call(object, property));
     var extendSyntax = /^\s*\|\s*/;
+    function stripBraceBlock(source) {
+      if (typeof source !== "string") {
+        return "";
+      }
+      const open = source.indexOf("{");
+      if (open === -1) {
+        return source;
+      }
+      const close = source.lastIndexOf("}");
+      if (close === -1 || close <= open) {
+        return source.slice(0, open);
+      }
+      return source.slice(0, open) + source.slice(close + 1);
+    }
     function preprocessAtrules(dict) {
       const result = /* @__PURE__ */ Object.create(null);
       for (const [atruleName, atrule] of Object.entries(dict)) {
@@ -30446,8 +30460,10 @@ var require_data = __commonJS({
             descriptors[name] = descriptor.syntax;
           }
         }
+        const strippedSyntax = stripBraceBlock(atrule.syntax.trim());
+        const match = strippedSyntax.match(/^@\S+\s+([^;\{]*)/);
         result[atruleName.substr(1)] = {
-          prelude: atrule.syntax.trim().replace(/\{(.|\s)+\}/, "").match(/^@\S+\s+([^;\{]*)/)[1].trim() || null,
+          prelude: match && match[1] ? match[1].trim() : null,
           descriptors
         };
       }
