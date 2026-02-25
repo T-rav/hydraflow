@@ -281,7 +281,7 @@ Then a brief summary on the next line starting with "SUMMARY: ".
             if compacted
             else "[Body summarized for prompt efficiency]"
         )
-        return (f"Issue body summarized for token efficiency:\n{compact}\n\n", note)
+        return f"Issue body summarized for token efficiency:\n{compact}\n\n{note}"
 
     def _summarize_diff(self, pr_number: int, diff: str) -> str:
         """Return compact diff context with file/change summary and excerpts."""
