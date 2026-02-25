@@ -1533,18 +1533,53 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
     print(f"- CI scaffold: {'skipped' if ci_result.skipped else action}")  # noqa: T201
     print(f"- Test scaffold: {'skipped' if tests_result.skipped else action}")  # noqa: T201
     if coverage_pct is None:
-        print("- Coverage: no report artifact found yet.")  # noqa: T201
-        print("- Next: run `make cover` (70% unit coverage) and `make smoke`.")  # noqa: T201
+        print(  # noqa: T201
+            _prep_stage_line(
+                "scaffold", "Coverage: no report artifact found yet.", "warn", use_color
+            )
+        )
+        print(  # noqa: T201
+            _prep_stage_line(
+                "scaffold",
+                "Next: run `make cover` (70% unit coverage) and `make smoke`.",
+                "warn",
+                use_color,
+            )
+        )
     elif coverage_pct < _PREP_COVERAGE_TARGET:
         print(  # noqa: T201
-            f"- Coverage: {coverage_pct:.1f}% from {coverage_source} (below 70%)."
+            _prep_stage_line(
+                "scaffold",
+                f"Coverage: {coverage_pct:.1f}% from {coverage_source} (below 70%).",
+                "warn",
+                use_color,
+            )
         )
-        print("- Warning: run `make cover` (70% unit coverage) and `make smoke`.")  # noqa: T201
+        print(  # noqa: T201
+            _prep_stage_line(
+                "scaffold",
+                "Next: run `make cover` (70% unit coverage) and `make smoke`.",
+                "warn",
+                use_color,
+            )
+        )
     else:
         print(  # noqa: T201
-            f"- Coverage: {coverage_pct:.1f}% from {coverage_source} (>= 70%)."
+            _prep_stage_line(
+                "scaffold",
+                f"Coverage: {coverage_pct:.1f}% from {coverage_source} (>= 70%).",
+                "ok",
+                use_color,
+            )
         )
-        print("- Well done: coverage is already healthy.")  # noqa: T201
+        print(  # noqa: T201
+            _prep_stage_line(
+                "scaffold",
+                "Well done: coverage is already healthy.",
+                "ok",
+                use_color,
+            )
+        )
 
     return True
 

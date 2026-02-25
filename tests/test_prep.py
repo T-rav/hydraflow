@@ -1344,6 +1344,20 @@ def test_run_scaffold_has_quick_success_and_coverage_guidance() -> None:
     assert "make smoke" in content
 
 
+def test_run_scaffold_coverage_guidance_uses_scaffold_stage_label() -> None:
+    """Coverage and cover/smoke guidance should emit scaffold stage labels."""
+    from pathlib import Path
+
+    cli_file = Path(__file__).resolve().parent.parent / "src" / "cli.py"
+    content = cli_file.read_text()
+    assert "_prep_stage_line(" in content
+    assert '"scaffold"' in content
+    assert "Next: run `make cover` (70% unit coverage) and `make smoke`." in content
+    assert (
+        "Coverage: {coverage_pct:.1f}% from {coverage_source} (below 70%)." in content
+    )
+
+
 def test_run_scaffold_messages_do_not_use_hardening_term() -> None:
     """Scaffold path messaging should use prep/scaffold wording, not hardening."""
     from pathlib import Path
