@@ -220,7 +220,7 @@ or
         cmd = self._build_command()
         prompt = self._build_prompt(
             issue,
-            max_body=max(1000, min(self._config.max_issue_body_chars, 5000)),
+            max_body=max(1000, min(self._config.max_issue_body_chars, 3000)),
         )
 
         transcript = await self._execute(

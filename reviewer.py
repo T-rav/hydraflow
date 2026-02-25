@@ -299,13 +299,15 @@ Then a brief summary on the next line starting with "SUMMARY: ".
             truncated = True
 
         files: list[str] = []
+        file_stats: dict[str, dict[str, int]] = {}
         current_file = ""
         added = 0
         removed = 0
         excerpt_lines: list[str] = []
         excerpt_chars = 0
         hunk_changes = 0
-        excerpt_limit = min(2200, max_diff)
+        excerpt_limit = min(1600, max_diff)
+        max_files_in_summary = 10
 
         for line in source.splitlines():
             if line.startswith("diff --git "):
@@ -313,6 +315,7 @@ Then a brief summary on the next line starting with "SUMMARY: ".
                 current_file = m.group(1) if m else ""
                 if current_file and current_file not in files:
                     files.append(current_file)
+                    file_stats[current_file] = {"added": 0, "removed": 0}
                 hunk_changes = 0
                 if excerpt_chars < excerpt_limit:
                     excerpt_lines.append(line)
@@ -331,6 +334,10 @@ Then a brief summary on the next line starting with "SUMMARY: ".
 
             if line.startswith("+"):
                 added += 1
+                if current_file:
+                    file_stats.setdefault(current_file, {"added": 0, "removed": 0})[
+                        "added"
+                    ] += 1
                 if hunk_changes < 4 and excerpt_chars < excerpt_limit:
                     excerpt_lines.append(line)
                     excerpt_chars += len(line) + 1
@@ -339,12 +346,27 @@ Then a brief summary on the next line starting with "SUMMARY: ".
 
             if line.startswith("-"):
                 removed += 1
+                if current_file:
+                    file_stats.setdefault(current_file, {"added": 0, "removed": 0})[
+                        "removed"
+                    ] += 1
                 if hunk_changes < 4 and excerpt_chars < excerpt_limit:
                     excerpt_lines.append(line)
                     excerpt_chars += len(line) + 1
                 hunk_changes += 1
 
-        file_preview = ", ".join(files[:8]) if files else "(could not detect files)"
+        top_files: list[tuple[str, dict[str, int]]] = sorted(
+            file_stats.items(),
+            key=lambda item: item[1]["added"] + item[1]["removed"],
+            reverse=True,
+        )[:max_files_in_summary]
+        if top_files:
+            file_lines = "\n".join(
+                f"- {path}: +{stats['added']} / -{stats['removed']}"
+                for path, stats in top_files
+            )
+        else:
+            file_lines = "- (could not detect files)"
         truncated_note = ""
         if truncated:
             truncated_note = f"\n[Diff truncated at {max_diff:,} chars — review may be incomplete for large PRs]"
@@ -359,7 +381,8 @@ Then a brief summary on the next line starting with "SUMMARY: ".
             f"- Files changed (detected): {len(files)}\n"
             f"- Added lines (detected): {added}\n"
             f"- Removed lines (detected): {removed}\n"
-            f"- File sample: {file_preview}\n\n"
+            "- Top changed files:\n"
+            f"{file_lines}\n\n"
             "### Diff Excerpts\n"
             f"```diff\n{excerpt_block}\n```"
             f"{truncated_note}"
@@ -453,6 +476,12 @@ If you find issues that you can fix:
 1. Make the fixes directly.
 {fix_verify}
 3. Commit with message: "review: fix <description> (PR #{pr.number})"
+
+## Findings Format
+
+List findings in this compact schema:
+`[SEVERITY] file[:line] - issue - expected fix`
+Use `HIGH|MEDIUM|LOW`.
 
 ## Required Output
 
