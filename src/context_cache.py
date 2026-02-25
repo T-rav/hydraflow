@@ -6,6 +6,7 @@ import json
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 
 from config import HydraFlowConfig
@@ -17,7 +18,7 @@ logger = logging.getLogger("hydraflow.context_cache")
 class ContextSectionCache:
     """Caches expensive prompt context sections on disk.
 
-    Cache key validity is based on source file existence, size, and mtime_ns.
+    Cache key validity is based on source file metadata and content fingerprint.
     """
 
     def __init__(self, config: HydraFlowConfig) -> None:
@@ -41,6 +42,7 @@ class ContextSectionCache:
         ctime_ns = stat_result.st_ctime_ns if stat_result is not None else 0
         inode = stat_result.st_ino if stat_result is not None else 0
         size = stat_result.st_size if stat_result is not None else 0
+        source_digest = self._source_digest(source_path, exists)
 
         data = self._load_cache_data()
         entry = data.get(key, {})
@@ -51,6 +53,7 @@ class ContextSectionCache:
             and entry.get("ctime_ns") == ctime_ns
             and entry.get("inode") == inode
             and entry.get("size") == size
+            and entry.get("source_digest") == source_digest
         ):
             content = entry.get("content")
             if isinstance(content, str):
@@ -63,6 +66,7 @@ class ContextSectionCache:
             "ctime_ns": ctime_ns,
             "inode": inode,
             "size": size,
+            "source_digest": source_digest,
             "content": content,
             "updated_at": datetime.now(UTC).isoformat(),
         }
@@ -94,3 +98,11 @@ class ContextSectionCache:
                 self._path,
                 exc_info=True,
             )
+
+    def _source_digest(self, source_path: Path, exists: bool) -> str:
+        if not exists:
+            return ""
+        try:
+            return sha256(source_path.read_bytes()).hexdigest()
+        except OSError:
+            return ""
