@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict, cast
 
 from config import HydraFlowConfig
 from file_util import atomic_write
@@ -232,10 +232,19 @@ class CuratedManifestStore:
     def _coerce_payload(self, raw: dict[str, object]) -> CuratedPayload:
         payload = self._empty_payload()
         payload["overview"] = str(raw.get("overview") or "")
-        payload["key_services"] = [str(item) for item in raw.get("key_services") or []]
-        payload["standards"] = [str(item) for item in raw.get("standards") or []]
-        payload["architecture"] = [str(item) for item in raw.get("architecture") or []]
-        payload["source_count"] = int(raw.get("source_count") or 0)
+        payload["key_services"] = [
+            str(item) for item in cast(Sequence[Any], raw.get("key_services") or [])
+        ]
+        payload["standards"] = [
+            str(item) for item in cast(Sequence[Any], raw.get("standards") or [])
+        ]
+        payload["architecture"] = [
+            str(item) for item in cast(Sequence[Any], raw.get("architecture") or [])
+        ]
+        source_count = raw.get("source_count")
+        payload["source_count"] = (
+            int(source_count) if isinstance(source_count, (int, str)) else 0
+        )
         updated = raw.get("updated_at")
         payload["updated_at"] = str(updated) if updated else None
         return payload
