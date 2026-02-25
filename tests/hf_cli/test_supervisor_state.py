@@ -32,6 +32,18 @@ def test_upsert_and_lookup_by_slug(tmp_path, monkeypatch):
     assert stored["port"] == 5555
 
 
+def test_get_repo_by_path(tmp_path, monkeypatch):
+    supervisor_state = _load_state_module(tmp_path, monkeypatch)
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+
+    supervisor_state.upsert_repo(repo_path, "repo-slug", 5555, "/logs/repo.log")
+
+    stored = supervisor_state.get_repo(path=repo_path)
+    assert stored is not None
+    assert stored["slug"] == "repo-slug"
+
+
 def test_remove_by_slug_and_path(tmp_path, monkeypatch):
     supervisor_state = _load_state_module(tmp_path, monkeypatch)
     repo_path = tmp_path / "repo"
