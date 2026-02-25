@@ -2,7 +2,7 @@
 
 Creates test directory structures and framework config for Python (pytest)
 and JS/TS (vitest) repos. Skips if test infrastructure already exists.
-Scaffolds baseline test harness plus one smoke test per supported stack.
+Scaffolds baseline test harness plus a small smoke-test suite per stack.
 """
 
 from __future__ import annotations
@@ -49,6 +49,7 @@ _IGNORED_SOURCE_DIRS = {
     ".hydraflow",
 }
 _DUMMY_TEST_LIMIT = 6
+_SMOKE_TEST_TARGET = 8
 
 # --- Templates ---
 
@@ -88,6 +89,22 @@ describe('prep smoke', () => {
   });
 });
 """
+
+
+def _python_smoke_test_paths(tests_dir: Path) -> list[Path]:
+    names = ["test_prep_smoke.py"]
+    names.extend(
+        f"test_prep_smoke_{idx}.py" for idx in range(2, _SMOKE_TEST_TARGET + 1)
+    )
+    return [tests_dir / name for name in names]
+
+
+def _js_smoke_test_paths(tests_dir: Path) -> list[Path]:
+    names = ["prep.smoke.test.js"]
+    names.extend(
+        f"prep.smoke.{idx}.test.js" for idx in range(2, _SMOKE_TEST_TARGET + 1)
+    )
+    return [tests_dir / name for name in names]
 
 
 def _is_ignored_source_path(path: Path) -> bool:
@@ -303,7 +320,7 @@ def has_test_infrastructure(repo_root: Path, language: str) -> tuple[bool, list[
 def _scaffold_python_tests(
     repo_root: Path, *, include_baseline: bool = True
 ) -> TestScaffoldResult:
-    """Create Python test baseline: tests/, conftest, pytest config, smoke test."""
+    """Create Python test baseline: tests/, conftest, pytest config, smoke suite."""
     result = TestScaffoldResult(language="python")
     tests_dir = repo_root / "tests"
 
@@ -324,10 +341,12 @@ def _scaffold_python_tests(
         conftest.write_text(_CONFTEST_TEMPLATE)
         result.created_files.append("tests/conftest.py")
 
-    smoke_test = tests_dir / "test_prep_smoke.py"
-    if include_baseline and not smoke_test.exists():
-        smoke_test.write_text(_PYTHON_SMOKE_TEST_TEMPLATE)
-        result.created_files.append("tests/test_prep_smoke.py")
+    if include_baseline or tests_dir.is_dir():
+        for smoke_test in _python_smoke_test_paths(tests_dir):
+            if smoke_test.exists():
+                continue
+            smoke_test.write_text(_PYTHON_SMOKE_TEST_TEMPLATE)
+            result.created_files.append(f"tests/{smoke_test.name}")
 
     sources = _discover_python_sources(repo_root)
     pending_before = 0
@@ -372,7 +391,7 @@ def _scaffold_python_tests(
 def _scaffold_js_tests(
     repo_root: Path, *, include_baseline: bool = True
 ) -> TestScaffoldResult:
-    """Create JS/TS baseline: __tests__/, vitest config, deps, smoke test."""
+    """Create JS/TS baseline: __tests__/, vitest config, deps, smoke suite."""
     result = TestScaffoldResult(language="javascript")
     tests_dir = repo_root / "__tests__"
 
@@ -388,10 +407,12 @@ def _scaffold_js_tests(
         vitest_config.write_text(_VITEST_CONFIG_TEMPLATE)
         result.created_files.append("vitest.config.js")
 
-    smoke_test = tests_dir / "prep.smoke.test.js"
-    if include_baseline and not smoke_test.exists():
-        smoke_test.write_text(_JS_SMOKE_TEST_TEMPLATE)
-        result.created_files.append("__tests__/prep.smoke.test.js")
+    if include_baseline or tests_dir.is_dir():
+        for smoke_test in _js_smoke_test_paths(tests_dir):
+            if smoke_test.exists():
+                continue
+            smoke_test.write_text(_JS_SMOKE_TEST_TEMPLATE)
+            result.created_files.append(f"__tests__/{smoke_test.name}")
 
     sources = _discover_js_sources(repo_root)
     pending_before = 0
@@ -522,8 +543,9 @@ def _dry_run_scaffold(repo_root: Path, language: str) -> TestScaffoldResult:
             result.created_files.append("tests/__init__.py")
         if not (tests_dir / "conftest.py").exists():
             result.created_files.append("tests/conftest.py")
-        if not (tests_dir / "test_prep_smoke.py").exists():
-            result.created_files.append("tests/test_prep_smoke.py")
+        for smoke_test in _python_smoke_test_paths(tests_dir):
+            if not smoke_test.exists():
+                result.created_files.append(f"tests/{smoke_test.name}")
         for src in _discover_python_sources(repo_root):
             rel = src.relative_to(repo_root).as_posix()
             test_name = _sanitize_test_name(rel)
@@ -541,8 +563,10 @@ def _dry_run_scaffold(repo_root: Path, language: str) -> TestScaffoldResult:
             result.created_dirs.append("__tests__")
         if not _has_js_test_config(repo_root):
             result.created_files.append("vitest.config.js")
-        if not (repo_root / "__tests__" / "prep.smoke.test.js").exists():
-            result.created_files.append("__tests__/prep.smoke.test.js")
+        tests_dir = repo_root / "__tests__"
+        for smoke_test in _js_smoke_test_paths(tests_dir):
+            if not smoke_test.exists():
+                result.created_files.append(f"__tests__/{smoke_test.name}")
         for src in _discover_js_sources(repo_root):
             rel = src.relative_to(repo_root).as_posix()
             test_name = _sanitize_test_name(rel)

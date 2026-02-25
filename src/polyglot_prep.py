@@ -21,6 +21,64 @@ _IGNORED_DIR_NAMES = {
     ".hydraflow",
 }
 _PLACEHOLDER_LIMIT = 12
+_SMOKE_TEST_TARGET = 8
+
+
+def _smoke_file_names(base_name: str, suffix: str, target: int) -> list[str]:
+    names = [f"{base_name}{suffix}"]
+    names.extend(f"{base_name}_{idx}{suffix}" for idx in range(2, target + 1))
+    return names
+
+
+def _java_smoke_content(class_name: str) -> str:
+    return (
+        f"class {class_name} {{\n"
+        "    public static void main(String[] args) {\n"
+        '        System.out.println("prep smoke");\n'
+        "    }\n"
+        "}\n"
+    )
+
+
+def _csharp_smoke_content(class_name: str) -> str:
+    return (
+        "using Xunit;\n\n"
+        f"public class {class_name} {{\n"
+        "    [Fact]\n"
+        "    public void Smoke() {\n"
+        "        Assert.True(true);\n"
+        "    }\n"
+        "}\n"
+    )
+
+
+def _go_smoke_content(package_name: str, func_name: str) -> str:
+    return (
+        f"package {package_name}\n\n"
+        'import "testing"\n\n'
+        f"func {func_name}(t *testing.T) {{\n"
+        "}\n"
+    )
+
+
+def _rust_smoke_content(func_name: str) -> str:
+    return f"#[test]\nfn {func_name}() {{ assert!(true); }}\n"
+
+
+def _cpp_smoke_content(func_name: str) -> str:
+    return f"#include <cassert>\n\nvoid {func_name}() {{\n  assert(true);\n}}\n"
+
+
+def _ruby_smoke_content(class_name: str, *, rails: bool) -> str:
+    require_line = 'require "test_helper"' if rails else 'require "minitest/autorun"'
+    return (
+        f"{require_line}\n\n"
+        f"class {class_name} < Minitest::Test\n"
+        "  def test_smoke\n"
+        "    assert true\n"
+        "  end\n"
+        "end\n"
+    )
 
 
 def _is_ignored_rel_path(path: Path) -> bool:
@@ -110,22 +168,21 @@ def detect_prep_stack(repo_root: Path) -> str:
 def _scaffold_java_tests(repo_root: Path, dry_run: bool) -> TestScaffoldResult:
     result = TestScaffoldResult(language="java")
     test_dir = repo_root / "src" / "test" / "java"
-    smoke = test_dir / "PrepSmokeTest.java"
-    smoke_content = (
-        "class PrepSmokeTest {\n"
-        "    public static void main(String[] args) {\n"
-        '        System.out.println("prep smoke");\n'
-        "    }\n"
-        "}\n"
-    )
     if not test_dir.is_dir():
         result.created_dirs.append("src/test/java")
         if not dry_run:
             test_dir.mkdir(parents=True, exist_ok=True)
-    if not smoke.is_file():
-        result.created_files.append("src/test/java/PrepSmokeTest.java")
+    for idx, file_name in enumerate(
+        _smoke_file_names("PrepSmokeTest", ".java", _SMOKE_TEST_TARGET),
+        start=1,
+    ):
+        smoke = test_dir / file_name
+        class_name = "PrepSmokeTest" if idx == 1 else f"PrepSmokeTest{idx}"
+        if smoke.is_file():
+            continue
+        result.created_files.append(f"src/test/java/{file_name}")
         if not dry_run:
-            smoke.write_text(smoke_content, encoding="utf-8")
+            smoke.write_text(_java_smoke_content(class_name), encoding="utf-8")
     if not result.created_dirs and not result.created_files:
         result.skipped = True
         result.skip_reason = "Java test infrastructure already exists"
@@ -152,6 +209,18 @@ def _scaffold_ruby_tests(
         result.created_files.append("test/test_helper.rb")
         if not dry_run:
             helper.write_text(helper_content, encoding="utf-8")
+    for idx, file_name in enumerate(
+        _smoke_file_names("prep_smoke_test", ".rb", _SMOKE_TEST_TARGET), start=1
+    ):
+        smoke = test_dir / file_name
+        class_name = "PrepSmokeTest" if idx == 1 else f"PrepSmokeTest{idx}"
+        if smoke.is_file():
+            continue
+        result.created_files.append(f"test/{file_name}")
+        if not dry_run:
+            smoke.write_text(
+                _ruby_smoke_content(class_name, rails=rails), encoding="utf-8"
+            )
     if rails:
         model_dir = test_dir / "models"
         keep_file = model_dir / ".keep"
@@ -172,24 +241,21 @@ def _scaffold_ruby_tests(
 def _scaffold_csharp_tests(repo_root: Path, dry_run: bool) -> TestScaffoldResult:
     result = TestScaffoldResult(language="csharp")
     test_dir = repo_root / "tests"
-    smoke = test_dir / "PrepSmokeTests.cs"
-    content = (
-        "using Xunit;\n\n"
-        "public class PrepSmokeTests {\n"
-        "    [Fact]\n"
-        "    public void Smoke() {\n"
-        "        Assert.True(true);\n"
-        "    }\n"
-        "}\n"
-    )
     if not test_dir.is_dir():
         result.created_dirs.append("tests")
         if not dry_run:
             test_dir.mkdir(parents=True, exist_ok=True)
-    if not smoke.is_file():
-        result.created_files.append("tests/PrepSmokeTests.cs")
+    for idx, file_name in enumerate(
+        _smoke_file_names("PrepSmokeTests", ".cs", _SMOKE_TEST_TARGET),
+        start=1,
+    ):
+        smoke = test_dir / file_name
+        class_name = "PrepSmokeTests" if idx == 1 else f"PrepSmokeTests{idx}"
+        if smoke.is_file():
+            continue
+        result.created_files.append(f"tests/{file_name}")
         if not dry_run:
-            smoke.write_text(content, encoding="utf-8")
+            smoke.write_text(_csharp_smoke_content(class_name), encoding="utf-8")
     if not result.created_dirs and not result.created_files:
         result.skipped = True
         result.skip_reason = "C# test infrastructure already exists"
@@ -276,15 +342,20 @@ def _scaffold_go_tests(repo_root: Path, dry_run: bool) -> TestScaffoldResult:
             test_path.write_text(content, encoding="utf-8")
         created_batch += 1
 
-    if not sources:
-        smoke = repo_root / "prep_smoke_test.go"
-        content = (
-            'package main\n\nimport "testing"\n\nfunc TestPrepSmoke(t *testing.T) {}\n'
-        )
-        if not smoke.is_file():
-            result.created_files.append("prep_smoke_test.go")
-            if not dry_run:
-                smoke.write_text(content, encoding="utf-8")
+    smoke_dir = sources[0].parent if sources else repo_root
+    smoke_package = _go_package_name(sources[0]) if sources else "main"
+    smoke_names = _smoke_file_names("prep_smoke", "_test.go", _SMOKE_TEST_TARGET)
+    for idx, file_name in enumerate(smoke_names, start=1):
+        smoke = smoke_dir / file_name
+        func_name = "TestPrepSmoke" if idx == 1 else f"TestPrepSmoke{idx}"
+        if smoke.is_file():
+            continue
+        rel_smoke = smoke.relative_to(repo_root).as_posix()
+        result.created_files.append(rel_smoke)
+        if not dry_run:
+            smoke.write_text(
+                _go_smoke_content(smoke_package, func_name), encoding="utf-8"
+            )
 
     result.progress = (
         "go placeholder batching: "
@@ -359,13 +430,16 @@ def _scaffold_rust_tests(repo_root: Path, dry_run: bool) -> TestScaffoldResult:
             test_file.write_text(content, encoding="utf-8")
         created_batch += 1
 
-    if not sources:
-        smoke = tests_dir / "prep_smoke.rs"
-        content = "#[test]\nfn prep_smoke() { assert!(true); }\n"
-        if not smoke.is_file():
-            result.created_files.append("tests/prep_smoke.rs")
-            if not dry_run:
-                smoke.write_text(content, encoding="utf-8")
+    for idx, file_name in enumerate(
+        _smoke_file_names("prep_smoke", ".rs", _SMOKE_TEST_TARGET), start=1
+    ):
+        smoke = tests_dir / file_name
+        func_name = "prep_smoke" if idx == 1 else f"prep_smoke_{idx}"
+        if smoke.is_file():
+            continue
+        result.created_files.append(f"tests/{file_name}")
+        if not dry_run:
+            smoke.write_text(_rust_smoke_content(func_name), encoding="utf-8")
     result.progress = (
         "rust placeholder batching: "
         f"created {created_batch} file(s) this run; "
@@ -381,16 +455,20 @@ def _scaffold_rust_tests(repo_root: Path, dry_run: bool) -> TestScaffoldResult:
 def _scaffold_cpp_tests(repo_root: Path, dry_run: bool) -> TestScaffoldResult:
     result = TestScaffoldResult(language="cpp")
     tests_dir = repo_root / "tests"
-    smoke = tests_dir / "prep_smoke.cpp"
-    content = "#include <cassert>\n\nint main() {\n  assert(true);\n  return 0;\n}\n"
     if not tests_dir.is_dir():
         result.created_dirs.append("tests")
         if not dry_run:
             tests_dir.mkdir(parents=True, exist_ok=True)
-    if not smoke.is_file():
-        result.created_files.append("tests/prep_smoke.cpp")
+    for idx, file_name in enumerate(
+        _smoke_file_names("prep_smoke", ".cpp", _SMOKE_TEST_TARGET), start=1
+    ):
+        smoke = tests_dir / file_name
+        func_name = "prep_smoke" if idx == 1 else f"prep_smoke_{idx}"
+        if smoke.is_file():
+            continue
+        result.created_files.append(f"tests/{file_name}")
         if not dry_run:
-            smoke.write_text(content, encoding="utf-8")
+            smoke.write_text(_cpp_smoke_content(func_name), encoding="utf-8")
     if not result.created_dirs and not result.created_files:
         result.skipped = True
         result.skip_reason = "C++ test infrastructure already exists"
