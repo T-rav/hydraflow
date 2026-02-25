@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import base64
 import tarfile
 from pathlib import Path
 
-from hf_cli import init_cmd
+from hf_cli import embedded_assets, init_cmd
 
 
 def _write_asset_tree(root: Path) -> None:
@@ -13,6 +14,10 @@ def _write_asset_tree(root: Path) -> None:
     (root / ".claude" / "settings.json").write_text('{"ok": true}')
     (root / ".codex" / "README.md").write_text("codex")
     (root / ".githooks" / "pre-commit").write_text("#!/bin/sh\necho ok\n")
+
+
+def _clear_embedded(monkeypatch) -> None:
+    monkeypatch.setattr(embedded_assets, "ASSET_ARCHIVE_B64", "", raising=False)
 
 
 def test_run_init_falls_back_to_source_tree_when_archive_missing(
@@ -34,6 +39,7 @@ def test_run_init_falls_back_to_source_tree_when_archive_missing(
     pkg_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(init_cmd.resources, "files", lambda _pkg: pkg_dir)
 
+    _clear_embedded(monkeypatch)
     rc = init_cmd.run_init(["--target", str(target)])
     assert rc == 0
     assert (target / ".claude" / "settings.json").exists()
@@ -72,3 +78,26 @@ def test_run_init_prefers_archive_when_available(tmp_path: Path, monkeypatch) ->
     assert rc == 0
     # Archive source should win when available.
     assert (target / ".claude" / "settings.json").read_text() == '{"from":"archive"}'
+
+
+def test_run_init_uses_embedded_archive(tmp_path: Path, monkeypatch) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    data_root = tmp_path / "embedded-src"
+    _write_asset_tree(data_root)
+    archive = tmp_path / "embedded.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        tar.add(
+            data_root / ".codex" / "README.md",
+            arcname=".codex/README.md",
+        )
+    monkeypatch.setattr(
+        embedded_assets,
+        "ASSET_ARCHIVE_B64",
+        base64.b64encode(archive.read_bytes()).decode(),
+        raising=False,
+    )
+    monkeypatch.setattr(init_cmd.resources, "files", lambda _pkg: Path("/missing"))
+    rc = init_cmd.run_init(["--target", str(target)])
+    assert rc == 0
+    assert (target / ".codex" / "README.md").exists()

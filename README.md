@@ -119,6 +119,19 @@ If you modify `.claude`, `.codex`, or `.githooks`, run `make bundle-assets` to g
 `dist/hf_cli-assets.tar.gz` for release/build artifact workflows.
 The repository no longer tracks a committed `src/hf_cli/assets.tar.gz`.
 
+### Publishing the hf CLI
+
+When you're ready to publish `hydraflow` to PyPI:
+
+1. `make embed-assets` – regenerates `src/hf_cli/embedded_assets.py` from the
+   latest `.claude/.codex/.githooks`.
+2. `make test` (or `make quality`) – be sure the tree is clean.
+3. `uv build` – produces the wheel/sdist under `dist/`.
+4. `uv publish` (or your release automation) – uploads the artifacts.
+
+This flow guarantees the pip-installed CLI has a fresh copy of the asset bundle
+and includes all runtime dependencies by default.
+
 ## Issue Flow Labels
 
 - `hydraflow-find`
