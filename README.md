@@ -10,8 +10,6 @@
 
 Log an issue. Agents handle the rest - triaging, planning, implementing, reviewing, and merging every change.
 
-HydraFlow is built for quality-first scaling: agents execute the work, but guardrails decide what ships.
-
 HydraFlow is a delivery kernel for GitHub repositories: it accepts intent, compiles it through a staged pipeline, enforces quality gates, and produces merged software changes.
 
 ## What Makes It Different
@@ -119,7 +117,7 @@ hf stop /path/to/repo
 
 If you modify `.claude`, `.codex`, or `.githooks`, run `make bundle-assets` to generate
 `dist/hf_cli-assets.tar.gz` for release/build artifact workflows.
-The repository no longer tracks a committed `hf_cli/assets.tar.gz`.
+The repository no longer tracks a committed `src/hf_cli/assets.tar.gz`.
 
 ## Issue Flow Labels
 

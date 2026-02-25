@@ -279,7 +279,7 @@ class TestBuildPrompt:
         runner = AgentRunner(config, event_bus)
         prompt = runner._build_prompt(issue)
         assert "UI Guidelines" in prompt
-        assert "ui/src/components/" in prompt
+        assert "src/ui/src/components/" in prompt
         assert "never duplicate" in prompt.lower()
         assert "minWidth" in prompt
         assert "theme" in prompt.lower()

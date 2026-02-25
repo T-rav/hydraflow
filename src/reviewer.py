@@ -450,7 +450,7 @@ Then a brief summary on the next line starting with "SUMMARY: ".
    - DRY: No duplicated constants, types, or styles — import from `constants.js`, `types.js`, `theme.js`.
    - Responsive: Layout containers set `minWidth`; flex items handle shrinking (`minWidth: 0` or `overflow: hidden`).
    - Style consistency: Spacing uses 4px grid multiples; colors come from `theme.js`, not hardcoded values.
-   - Component reuse: No new component that duplicates an existing one in `ui/src/components/`.
+   - Component reuse: No new component that duplicates an existing one in `src/ui/src/components/`.
    - Shared code: New constants/types belong in centralized files, not inline.
 """
 

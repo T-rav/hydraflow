@@ -21,9 +21,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hydraflow.dashboard")
 
 # React build output or fallback HTML template
-_UI_DIST_DIR = Path(__file__).parent / "ui" / "dist"
-_TEMPLATE_DIR = Path(__file__).parent / "templates"
-_STATIC_DIR = Path(__file__).parent / "static"
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_UI_DIST_DIR = _REPO_ROOT / "src" / "ui" / "dist"
+_TEMPLATE_DIR = _REPO_ROOT / "templates"
+_STATIC_DIR = _REPO_ROOT / "static"
 
 
 class HydraFlowDashboard:

@@ -402,8 +402,8 @@ class AgentRunner(BaseRunner):
 {feedback_section}
 ## UI Guidelines
 
-- Before creating UI components, search `ui/src/components/` for existing patterns to reuse.
-- Import constants, types, and shared styles from centralized modules (e.g. `ui/src/constants.js`, `ui/src/theme.js`) — never duplicate.
+- Before creating UI components, search `src/ui/src/components/` for existing patterns to reuse.
+- Import constants, types, and shared styles from centralized modules (e.g. `src/ui/src/constants.js`, `src/ui/src/theme.js`) — never duplicate.
 - Apply responsive design: set `minWidth` on layout containers, use `flexShrink: 0` on fixed-width panels.
 - Match existing spacing (4px grid), colors (CSS variables from `theme.js`), and component conventions.
 

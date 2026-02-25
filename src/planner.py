@@ -426,8 +426,8 @@ Use semantic tools first (before grep):
 
 ### UI Exploration (when the issue involves UI changes)
 
-- Search `ui/src/components/` to inventory existing components and their patterns
-- Check `ui/src/constants.js`, `ui/src/types.js`, and `ui/src/theme.js` for shared definitions
+- Search `src/ui/src/components/` to inventory existing components and their patterns
+- Check `src/ui/src/constants.js`, `src/ui/src/types.js`, and `src/ui/src/theme.js` for shared definitions
 - Examine existing component styles for spacing, color palette (theme tokens), and layout approach
 - Note whether existing components handle responsive behavior
 

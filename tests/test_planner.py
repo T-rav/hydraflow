@@ -333,7 +333,7 @@ def test_build_prompt_includes_ui_exploration_guidance(config, event_bus, issue)
     task = issue.to_task()
     prompt = runner._build_prompt(task)
 
-    assert "ui/src/components/" in prompt
+    assert "src/ui/src/components/" in prompt
     assert "constants.js" in prompt
     assert "theme.js" in prompt
     assert "types.js" in prompt

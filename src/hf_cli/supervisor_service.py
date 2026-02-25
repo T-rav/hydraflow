@@ -71,10 +71,21 @@ def _start_repo(path: str, *, slug: str | None = None) -> tuple[int, str, str, s
     log_file = (log_dir / f"{slug}-{port}.log").resolve()
     env = os.environ.copy()
     env.setdefault("HYDRAFLOW_HOME", str(state_root))
-    env.setdefault("PYTHONPATH", os.getcwd())
+    src_path = str((repo_path / "src").resolve())
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (
+        f"{src_path}{os.pathsep}{existing_pythonpath}"
+        if existing_pythonpath
+        else src_path
+    )
     env.setdefault("HF_SUPERVISOR_PORT_FILE", str(SUPERVISOR_PORT_FILE))
     proc = subprocess.Popen(  # noqa: S603
-        [sys.executable, str(repo_path / "cli.py"), "--dashboard-port", str(port)],
+        [
+            sys.executable,
+            str(repo_path / "src" / "cli.py"),
+            "--dashboard-port",
+            str(port),
+        ],
         cwd=str(repo_path),
         stdout=log_file.open("a"),
         stderr=subprocess.STDOUT,
