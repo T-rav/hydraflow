@@ -123,11 +123,8 @@ The repository no longer tracks a committed `src/hf_cli/assets.tar.gz`.
 
 When you're ready to publish `hydraflow` to PyPI:
 
-1. `make embed-assets` – regenerates `src/hf_cli/embedded_assets.py` from the
-   latest `.claude/.codex/.githooks`.
-2. `make test` (or `make quality`) – be sure the tree is clean.
-3. `uv build` – produces the wheel/sdist under `dist/`.
-4. `uv publish` (or your release automation) – uploads the artifacts.
+1. `make cli-release` – runs `embed-assets`, the test suite, and `uv build`.
+2. `uv publish` (or your release automation) – uploads the artifacts in `dist/`.
 
 This flow guarantees the pip-installed CLI has a fresh copy of the asset bundle
 and includes all runtime dependencies by default.

@@ -37,7 +37,7 @@ RESET := \033[0m
 # Docker agent image
 DOCKER_IMAGE ?= ghcr.io/t-rav/hydraflow-agent:latest
 
-.PHONY: help run dev dry-run clean coverage cover test test-fast test-cov lint lint-check lint-fix typecheck security quality quality-lite install setup status ui ui-dev ui-clean ensure-labels prep hot docker-build docker-test deps bundle-assets embed-assets
+.PHONY: help run dev dry-run clean coverage cover test test-fast test-cov lint lint-check lint-fix typecheck security quality quality-lite install setup status ui ui-dev ui-clean ensure-labels prep hot docker-build docker-test deps bundle-assets embed-assets cli-release
 
 help:
 	@echo "$(BLUE)HydraFlow — Intent in. Software out.$(RESET)"
@@ -134,6 +134,13 @@ embed-assets: bundle-assets
 	@echo "$(BLUE)Embedding HydraFlow assets into src/hf_cli/embedded_assets.py...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && $(UV) python scripts/embed_assets.py --root $(PROJECT_ROOT)
 	@echo "$(GREEN)Embedded assets module refreshed$(RESET)"
+
+cli-release: deps
+	@echo "$(BLUE)Preparing CLI release artifacts...$(RESET)"
+	@$(MAKE) embed-assets
+	@$(MAKE) test
+	@cd $(HYDRAFLOW_DIR) && uv build
+	@echo "$(GREEN)Built CLI artifacts under dist/$(RESET)"
 
 $(DEPS_STAMP): pyproject.toml
 	@echo "$(BLUE)Syncing dependencies...$(RESET)"
