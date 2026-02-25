@@ -15,6 +15,8 @@ from .supervisor_manager import ensure_running
 _FLAG_COMMANDS = {
     "prep": "--prep",
     "scaffold": "--scaffold",
+    "labels": "--ensure-labels",
+    "ensure-labels": "--ensure-labels",
     "audit": "--audit",
     "clean": "--clean",
     "dry-run": "--dry-run",

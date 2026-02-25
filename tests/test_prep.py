@@ -1223,12 +1223,12 @@ class TestCliPrep:
         assert args.prep is False
 
     def test_main_prep_exits_zero_on_success(self) -> None:
-        """main() should exit 0 when all labels are created successfully."""
+        """main() should exit 0 when scaffold run succeeds."""
         from cli import main
 
         with (
             patch(
-                "cli._run_prep", new_callable=AsyncMock, return_value=True
+                "cli._run_scaffold", new_callable=AsyncMock, return_value=True
             ) as mock_run,
             pytest.raises(SystemExit) as exc_info,
         ):
@@ -1237,12 +1237,12 @@ class TestCliPrep:
         mock_run.assert_called_once()
         assert exc_info.value.code == 0
 
-    def test_main_prep_exits_one_on_partial_failure(self) -> None:
-        """main() should exit 1 when any labels fail to create."""
+    def test_main_prep_exits_one_on_failure(self) -> None:
+        """main() should exit 1 when scaffold run fails."""
         from cli import main
 
         with (
-            patch("cli._run_prep", new_callable=AsyncMock, return_value=False),
+            patch("cli._run_scaffold", new_callable=AsyncMock, return_value=False),
             pytest.raises(SystemExit) as exc_info,
         ):
             main(["--prep"])
@@ -1286,7 +1286,7 @@ class TestCliScaffold:
         assert args.scaffold is False
 
     def test_main_scaffold_exits_zero_on_success(self) -> None:
-        """main() should exit 0 when scaffold run succeeds."""
+        """main() should exit 0 when scaffold alias run succeeds."""
         from cli import main
 
         with (
@@ -1301,7 +1301,7 @@ class TestCliScaffold:
         assert exc_info.value.code == 0
 
     def test_main_scaffold_exits_one_on_failure(self) -> None:
-        """main() should exit 1 when scaffold run fails."""
+        """main() should exit 1 when scaffold alias run fails."""
         from cli import main
 
         with (
@@ -1313,13 +1313,39 @@ class TestCliScaffold:
         assert exc_info.value.code == 1
 
 
-def test_run_scaffold_uses_makefile_scaffold() -> None:
-    """_run_scaffold should call scaffold_makefile for root Makefile support."""
+class TestCliEnsureLabels:
+    """Tests for the --ensure-labels CLI flag integration."""
+
+    def test_ensure_labels_flag_parsed(self) -> None:
+        from cli import parse_args
+
+        args = parse_args(["--ensure-labels"])
+        assert args.ensure_labels is True
+
+    def test_main_ensure_labels_exits_zero_on_success(self) -> None:
+        from cli import main
+
+        with (
+            patch(
+                "cli._run_prep", new_callable=AsyncMock, return_value=True
+            ) as mock_run,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main(["--ensure-labels"])
+
+        mock_run.assert_called_once()
+        assert exc_info.value.code == 0
+
+
+def test_run_scaffold_focuses_on_ci_and_test_scaffolds() -> None:
+    """_run_scaffold should only scaffold CI + tests for quick prep."""
     from pathlib import Path
 
     cli_file = Path(__file__).resolve().parent.parent / "src" / "cli.py"
     content = cli_file.read_text()
-    assert "scaffold_makefile" in content
+    assert "scaffold_ci(" in content
+    assert "scaffold_tests_polyglot(" in content
+    assert "scaffold_makefiles(" not in content
 
 
 def test_run_scaffold_prints_summary_block() -> None:
@@ -1331,13 +1357,50 @@ def test_run_scaffold_prints_summary_block() -> None:
     assert "Prep summary:" in content
 
 
-def test_run_scaffold_uses_prep_agent_correction() -> None:
-    """_run_scaffold should invoke prep agent correction between retries."""
+def test_run_scaffold_has_quick_success_and_coverage_guidance() -> None:
+    """_run_scaffold should support early success and coverage follow-up guidance."""
     from pathlib import Path
 
     cli_file = Path(__file__).resolve().parent.parent / "src" / "cli.py"
     content = cli_file.read_text()
-    assert "_run_prep_agent_correction(" in content
+    assert "Well done: CI and baseline tests already exist" in content
+    assert "make cover" in content
+    assert "make smoke" in content
+
+
+def test_run_scaffold_coverage_guidance_uses_scaffold_stage_label() -> None:
+    """Coverage and cover/smoke guidance should emit scaffold stage labels."""
+    from pathlib import Path
+
+    cli_file = Path(__file__).resolve().parent.parent / "src" / "cli.py"
+    content = cli_file.read_text()
+    assert "_prep_stage_line(" in content
+    assert '"scaffold"' in content
+    assert "Next: run `make cover` (70% unit coverage) and `make smoke`." in content
+    assert (
+        "Coverage: {coverage_pct:.1f}% from {coverage_source} (below 70%)." in content
+    )
+
+
+def test_run_scaffold_messages_do_not_use_hardening_term() -> None:
+    """Scaffold path messaging should use prep/scaffold wording, not hardening."""
+    from pathlib import Path
+
+    cli_file = Path(__file__).resolve().parent.parent / "src" / "cli.py"
+    content = cli_file.read_text()
+    start = content.index("async def _run_scaffold")
+    end = content.index("async def _run_clean")
+    scaffold_body = content[start:end].lower()
+    assert "hardening" not in scaffold_body
+
+
+def test_prep_output_tracker_uses_scaffold_stage_label() -> None:
+    """Streaming prep output should be labeled as scaffold, not hardening."""
+    from pathlib import Path
+
+    cli_file = Path(__file__).resolve().parent.parent / "src" / "cli.py"
+    content = cli_file.read_text()
+    assert '_prep_stage_line(\n                    "scaffold"' in content
 
 
 class TestContextSeed:

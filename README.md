@@ -92,8 +92,14 @@ hf --help
 # copy hf assets (.claude, .codex, .githooks) into the current repo
 hf init
 
-# run the standard prep flow without invoking make
+# run the standard quick prep/scaffold flow without invoking make
 hf prep
+
+# ensure lifecycle labels exist (equivalent to make ensure-labels)
+hf ensure-labels
+
+# optional explicit alias for quick prep/scaffold
+hf scaffold
 
 # register the current repo (or an explicit path) with the background supervisor
 hf run              # uses cwd

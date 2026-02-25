@@ -181,7 +181,7 @@ def _make_prep_output_tracker(
             elapsed = int(now - state["start_time"])
             lines_to_render = [
                 _prep_stage_line(
-                    "hardening",
+                    "scaffold",
                     f"{stream_label}: live output (rolling 3 lines, {elapsed}s)",
                     "start",
                     color,
@@ -741,12 +741,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--prep",
         action="store_true",
-        help="Create HydraFlow lifecycle labels on the target repo, then exit",
+        help="Run quick prep/scaffold (CI + baseline tests + coverage guidance), then exit",
     )
     parser.add_argument(
         "--scaffold",
         action="store_true",
-        help="Scan and scaffold GitHub CI + test infrastructure, then exit",
+        help="Alias for --prep (quick prep/scaffold), then exit",
+    )
+    parser.add_argument(
+        "--ensure-labels",
+        action="store_true",
+        help="Create HydraFlow lifecycle labels on the target repo, then exit",
     )
     parser.add_argument(
         "--replay",
@@ -939,7 +944,7 @@ def _makefile_has_target(repo_root: Path, target: str) -> bool:
 async def _run_hardening_step(
     step: str, cmd: list[str], cwd: Path
 ) -> tuple[bool, str | None]:
-    """Run one prep hardening command and print a concise status line."""
+    """Run one prep/scaffold command and print a concise status line."""
     from subprocess_util import run_subprocess  # noqa: PLC0415
 
     try:
@@ -1463,581 +1468,125 @@ async def _run_prep_agent_workflow(
 
 
 async def _run_scaffold(config: HydraFlowConfig) -> bool:
-    """Scan and scaffold core repo essentials (CI + test infrastructure)."""
+    """Fast prep: scaffold CI/tests only when missing, then report coverage posture."""
     from ci_scaffold import scaffold_ci  # noqa: PLC0415
-    from makefile_scaffold import scaffold_makefiles  # noqa: PLC0415
     from polyglot_prep import (  # noqa: PLC0415
         detect_prep_stack,
         scaffold_tests_polyglot,
     )
-    from pre_issue_tracker import (  # noqa: PLC0415
-        ensure_pre_dirs,
-        load_open_issues,
-        mark_done,
-        upsert_issue,
-        write_run_log,
-    )
-    from prep import RepoAuditor  # noqa: PLC0415
 
     use_color = _supports_color_output()
-    run_id = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S-%f")
-    os.environ["HYDRAFLOW_PREP_RUN_ID"] = run_id
-    ensure_pre_dirs(config.data_root)
-    local_issues = load_open_issues(config.data_root)
-    selected_tool, selection_mode = _choose_prep_tool(config.subskill_tool)
-    if selected_tool is None:
-        print("Prep aborted: neither Claude nor Codex is installed.")  # noqa: T201
-        return False
-    selected_model = _best_model_for_tool(selected_tool)
-    full_run_log_path = _append_full_run_log_line(
-        config.data_root,
-        f"=== prep run start ({datetime.now(tz=UTC).isoformat()}) ===",
-    )
+    repo_root = config.repo_root
+    stack = detect_prep_stack(repo_root)
+    print(
+        _prep_stage_line("prep", f"quick prep for stack '{stack}'", "start", use_color)
+    )  # noqa: T201
 
-    run_log_lines: list[str] = []
-    run_log_lines.append(f"- Repo: `{config.repo}`")
-    run_log_lines.append(f"- Dry run: `{config.dry_run}`")
-    run_log_lines.append(
-        f"- Prep driver: `{selected_tool}` (`{selected_model}` via {selection_mode})"
-    )
-    run_log_lines.append(f"- Local issue count: `{len(local_issues)}`")
-    if local_issues:
-        run_log_lines.append("- Local issues:")
-        for issue in local_issues:
-            run_log_lines.append(f"  - `{issue.path.name}`: {issue.title}")
+    ci_probe = scaffold_ci(repo_root, dry_run=True)
+    tests_probe = scaffold_tests_polyglot(repo_root, dry_run=True)
+    coverage_pct, coverage_source = _extract_coverage_percent(repo_root)
 
-    audit = await RepoAuditor(config).run_audit()
-    print(audit.format_report(color=_supports_color_output()))  # noqa: T201
-    run_log_lines.append("- Audit completed")
-
-    makefile_results = scaffold_makefiles(config.repo_root, dry_run=config.dry_run)
-    ci_result = scaffold_ci(config.repo_root, dry_run=config.dry_run)
-    tests_result = scaffold_tests_polyglot(config.repo_root, dry_run=config.dry_run)
-    stack = detect_prep_stack(config.repo_root)
-    run_log_lines.append(f"- Detected prep stack: `{stack}`")
-
-    action = "Would create" if config.dry_run else "Created"
-    makefile_action = "would add" if config.dry_run else "added"
-    if makefile_results.results:
-        total_added = 0
-        for rel_path, makefile_result in sorted(makefile_results.results.items()):
-            if makefile_result.targets_added:
-                targets = ", ".join(makefile_result.targets_added)
-                print(  # noqa: T201
-                    f"Makefile scaffold [{rel_path}]: {makefile_action} targets [{targets}]"
-                )
-                run_log_lines.append(
-                    f"- Makefile scaffold [{rel_path}] {makefile_action}: targets [{targets}]"
-                )
-                total_added += len(makefile_result.targets_added)
-            else:
-                print(  # noqa: T201
-                    f"Makefile scaffold [{rel_path}]: skipped (targets already present)"
-                )
-                run_log_lines.append(
-                    f"- Makefile scaffold [{rel_path}] skipped: targets already present"
-                )
-            if makefile_result.warnings:
-                for warning in makefile_result.warnings:
-                    print(  # noqa: T201
-                        f"Makefile scaffold warning [{rel_path}]: {warning}"
-                    )
-                    run_log_lines.append(
-                        f"- Makefile scaffold warning [{rel_path}]: {warning}"
-                    )
-        run_log_lines.append(
-            f"- Makefile scaffold project count: {len(makefile_results.results)}"
+    if (
+        ci_probe.skipped
+        and tests_probe.skipped
+        and coverage_pct is not None
+        and coverage_pct >= _PREP_COVERAGE_TARGET
+    ):
+        print(  # noqa: T201
+            _prep_stage_line(
+                "prep",
+                (
+                    "Well done: CI and baseline tests already exist, and "
+                    f"coverage is {coverage_pct:.1f}% ({coverage_source})"
+                ),
+                "ok",
+                use_color,
+            )
         )
-        run_log_lines.append(f"- Makefile scaffold total targets added: {total_added}")
-    else:
-        print("Makefile scaffold: no supported project paths discovered")  # noqa: T201
-        run_log_lines.append("- Makefile scaffold skipped: no supported project paths")
+        return True
+
+    action = "would create" if config.dry_run else "created"
+    ci_result = scaffold_ci(repo_root, dry_run=config.dry_run)
+    tests_result = scaffold_tests_polyglot(repo_root, dry_run=config.dry_run)
 
     if ci_result.skipped:
         print(f"CI scaffold: skipped ({ci_result.skip_reason})")  # noqa: T201
-        run_log_lines.append(f"- CI scaffold skipped: {ci_result.skip_reason}")
     else:
         print(  # noqa: T201
             f"CI scaffold: {action} {ci_result.workflow_path} ({ci_result.language})"
         )
-        run_log_lines.append(
-            f"- CI scaffold {action.lower()}: {ci_result.workflow_path} ({ci_result.language})"
-        )
 
     if tests_result.skipped:
         print(f"Test scaffold: skipped ({tests_result.skip_reason})")  # noqa: T201
-        run_log_lines.append(f"- Test scaffold skipped: {tests_result.skip_reason}")
-        if getattr(tests_result, "progress", ""):
+        if tests_result.progress:
             print(f"Test scaffold progress: {tests_result.progress}")  # noqa: T201
-            run_log_lines.append(f"- Test scaffold progress: {tests_result.progress}")
     else:
         created_dirs = ", ".join(tests_result.created_dirs) or "-"
         created_files = ", ".join(tests_result.created_files) or "-"
         modified_files = ", ".join(tests_result.modified_files) or "-"
         print(  # noqa: T201
             "Test scaffold: "
-            f"{action.lower()} dirs [{created_dirs}] files [{created_files}] "
+            f"{action} dirs [{created_dirs}] files [{created_files}] "
             f"modified [{modified_files}] ({tests_result.language})"
         )
-        run_log_lines.append(
-            f"- Test scaffold {action.lower()}: dirs [{created_dirs}] "
-            f"files [{created_files}] modified [{modified_files}]"
-        )
-        if getattr(tests_result, "progress", ""):
+        if tests_result.progress:
             print(f"Test scaffold progress: {tests_result.progress}")  # noqa: T201
-            run_log_lines.append(f"- Test scaffold progress: {tests_result.progress}")
 
-    run_log_lines.extend(_seed_context_assets(config))
-
-    run_log_lines.extend(_seed_context_assets(config))
-
-    if config.dry_run:
-        print("Hardening pass: skipped in dry-run mode")  # noqa: T201
-        run_log_lines.append("- Hardening skipped in dry-run mode")
-        print("Prep summary:")  # noqa: T201
-        print(f"- Stack: {stack}")  # noqa: T201
-        print("- Hardening: skipped (dry-run)")  # noqa: T201
-        print(f"- Local issues open: {len(local_issues)}")  # noqa: T201
-        run_log = write_run_log(
-            config.data_root,
-            title="Prep Workflow Run",
-            lines=run_log_lines,
-        )
-        print(  # noqa: T201
-            f"Prep run log: {config.format_path_for_display(run_log)}"
-        )
-        return True
-
-    hardening_ok = True
-    repo_root = config.repo_root
-    workflow_project_paths = sorted(makefile_results.results.keys()) or ["."]
-    coverage_roots = _coverage_validation_roots(
-        repo_root, list(makefile_results.results.keys())
-    )
-    coverage_min_required = _load_prep_coverage_floor(repo_root)
-    coverage_scope = (
-        ", ".join(
-            "." if p == repo_root else str(p.relative_to(repo_root))
-            for p in coverage_roots
-        )
-        or "none"
-    )
-    run_log_lines.append(f"- Coverage validation scope: {coverage_scope}")
-    run_log_lines.append(
-        f"- Coverage validation minimum floor: {coverage_min_required:.0f}% "
-        f"(ratchets +{_PREP_COVERAGE_STEP:.0f} to max {_PREP_COVERAGE_TARGET:.0f}%)"
-    )
-
-    max_attempts = 3
-    attempts_used = 0
-    auto_issues: list[Any] = []
-    failure_count = 0
-    agent_runs = 0
-    agent_successes = 0
-    coverage_below_target = False
-    stage_line = _prep_stage_line(
-        "hardening",
-        f"starting hardening loop ({max_attempts} max attempts)",
-        "start",
-        use_color,
-    )
-    print(stage_line)  # noqa: T201
-    _append_full_run_log_line(config.data_root, stage_line)
-    for attempt in range(1, max_attempts + 1):
-        attempts_used = attempt
-        attempt_failures: list[tuple[str, list[str], str]] = []
-        run_log_lines.append(f"- Hardening attempt {attempt}/{max_attempts}")
-        plain_line = f"Hardening attempt {attempt}/{max_attempts}"
-        print(plain_line)  # noqa: T201
-        _append_full_run_log_line(config.data_root, plain_line)
-        stage_line = _prep_stage_line(
-            "hardening",
-            f"attempt {attempt}/{max_attempts}: collecting open .hydraflow/prep issues",
-            "start",
-            use_color,
-        )
-        print(stage_line)  # noqa: T201
-        _append_full_run_log_line(config.data_root, stage_line)
-
-        issue_names = [issue.path.name for issue in load_open_issues(config.data_root)]
-        issue_preview = ", ".join(issue_names[:3]) if issue_names else "none"
-        if len(issue_names) > 3:
-            issue_preview = f"{issue_preview}, +{len(issue_names) - 3} more"
-        stage_line = _prep_stage_line(
-            "hardening",
-            f"attempt {attempt}/{max_attempts}: active issues [{issue_preview}]",
-            "start",
-            use_color,
-        )
-        print(stage_line)  # noqa: T201
-        _append_full_run_log_line(config.data_root, stage_line)
-        agent_runs += 1
-        stage_line = _prep_stage_line(
-            "hardening",
-            (
-                f"attempt {attempt}/{max_attempts}: running prep workflow agent "
-                f"via {selected_tool} ({selected_model}) with {len(issue_names)} issue(s)"
-            ),
-            "start",
-            use_color,
-        )
-        print(stage_line)  # noqa: T201
-        _append_full_run_log_line(config.data_root, stage_line)
-        workflow_on_output, workflow_tail, workflow_live_log = (
-            _make_prep_output_tracker(
-                data_root=config.data_root,
-                task_slug=f"attempt-{attempt}-prep-workflow-agent",
-                stream_label=f"attempt {attempt}/{max_attempts}: prep workflow agent",
-                color=use_color,
-            )
-        )
-        workflow_live_log_ref = config.format_path_for_display(workflow_live_log)
-        stage_line = _prep_stage_line(
-            "hardening",
-            f"attempt {attempt}/{max_attempts}: live log {workflow_live_log_ref}",
-            "start",
-            use_color,
-        )
-        print(stage_line)  # noqa: T201
-        _append_full_run_log_line(config.data_root, stage_line)
-        run_log_lines.append(f"- Workflow live log: `{workflow_live_log_ref}`")
-        agent_ok, transcript = await _await_with_prep_heartbeat(
-            _run_prep_agent_workflow(
-                tool=selected_tool,
-                model=selected_model,
-                config=config,
-                stack=stack,
-                local_issue_names=issue_names,
-                project_paths=workflow_project_paths,
-                on_output=workflow_on_output,
-            ),
-            stage="hardening",
-            detail=f"attempt {attempt}/{max_attempts}: prep workflow agent",
-            color=use_color,
-            tail_provider=workflow_tail,
-        )
-        if agent_ok:
-            agent_successes += 1
-            run_log_lines.append("- Prep workflow agent: success")
-            coverage_ok, coverage_warn, coverage_detail = (
-                _evaluate_coverage_validation_projects(
-                    repo_root,
-                    coverage_roots,
-                    min_required=coverage_min_required,
-                    target=_PREP_COVERAGE_TARGET,
-                    allow_missing_artifact=_PREP_COVERAGE_ALLOW_MISSING,
-                )
-            )
-            if _coverage_below_target_from_detail(
-                coverage_detail, _PREP_COVERAGE_TARGET
-            ):
-                coverage_below_target = True
-            coverage_lines = [
-                line.strip() for line in coverage_detail.split(" | ") if line.strip()
-            ]
-            if coverage_lines:
-                run_log_lines.append("- Coverage validation details:")
-                for line in coverage_lines:
-                    run_log_lines.append(f"  - {line}")
-            else:
-                run_log_lines.append(f"- {coverage_detail}")
-            if coverage_ok:
-                hardening_ok = True
-                for line in coverage_lines:
-                    stage_line = _prep_stage_line(
-                        "coverage",
-                        f"attempt {attempt}/{max_attempts}: {line}",
-                        "warn" if coverage_warn else "ok",
-                        use_color,
-                    )
-                    print(stage_line)  # noqa: T201
-                    _append_full_run_log_line(config.data_root, stage_line)
-                stage_line = _prep_stage_line(
-                    "hardening",
-                    (
-                        f"attempt {attempt}/{max_attempts}: prep workflow agent "
-                        f"reported success ({coverage_detail})"
-                    ),
-                    "warn" if coverage_warn else "ok",
-                    use_color,
-                )
-                print(stage_line)  # noqa: T201
-                _append_full_run_log_line(config.data_root, stage_line)
-                if (
-                    _prep_coverage_has_measurement(coverage_detail)
-                    and coverage_min_required < _PREP_COVERAGE_TARGET
-                ):
-                    bumped_floor = min(
-                        _PREP_COVERAGE_TARGET,
-                        coverage_min_required + _PREP_COVERAGE_STEP,
-                    )
-                    if bumped_floor > coverage_min_required:
-                        _save_prep_coverage_floor(repo_root, bumped_floor)
-                        run_log_lines.append(
-                            f"- Coverage minimum floor ratcheted: "
-                            f"{coverage_min_required:.0f}% -> {bumped_floor:.0f}%"
-                        )
-                        stage_line = _prep_stage_line(
-                            "coverage",
-                            (
-                                "ratcheted prep coverage floor to "
-                                f"{bumped_floor:.0f}% "
-                                f"(max {_PREP_COVERAGE_TARGET:.0f}%)"
-                            ),
-                            "ok",
-                            use_color,
-                        )
-                        print(stage_line)  # noqa: T201
-                        _append_full_run_log_line(config.data_root, stage_line)
-                        coverage_min_required = bumped_floor
-                break
-
-            hardening_ok = False
-            failure_count += 1
-            attempt_failures.append(
-                ("coverage-validation", ["coverage-analyzer"], coverage_detail)
-            )
-            for line in coverage_lines:
-                stage_line = _prep_stage_line(
-                    "coverage",
-                    f"attempt {attempt}/{max_attempts}: {line}",
-                    "warn",
-                    use_color,
-                )
-                print(stage_line)  # noqa: T201
-                _append_full_run_log_line(config.data_root, stage_line)
-            stage_line = _prep_stage_line(
-                "hardening",
-                (
-                    f"attempt {attempt}/{max_attempts}: coverage validation failed "
-                    f"after workflow success ({coverage_detail})"
-                ),
-                "warn",
-                use_color,
-            )
-            print(stage_line)  # noqa: T201
-            _append_full_run_log_line(config.data_root, stage_line)
-        else:
-            hardening_ok = False
-            failure_count += 1
-            transcript_path = _write_prep_task_transcript(
-                data_root=config.data_root,
-                task_slug=f"attempt-{attempt}-prep-workflow-agent",
-                transcript=transcript,
-            )
-            transcript_ref = (
-                config.format_path_for_display(transcript_path)
-                if transcript_path is not None
-                else "unavailable"
-            )
-            error_message = _build_prep_failure_error_message(
-                transcript, transcript_ref
-            )
-            attempt_failures.append(
-                (
-                    "prep-workflow-agent",
-                    [selected_tool, selected_model],
-                    error_message,
-                )
-            )
-            run_log_lines.append("- Prep workflow agent: failed")
-            run_log_lines.append(f"- Agent transcript size: {len(transcript)} chars")
-            run_log_lines.append(f"- Agent transcript path: `{transcript_ref}`")
-            stage_line = _prep_stage_line(
-                "hardening",
-                (
-                    f"attempt {attempt}/{max_attempts}: prep workflow agent failed "
-                    f"(transcript {len(transcript)} chars, path {transcript_ref})"
-                ),
-                "warn",
-                use_color,
-            )
-            print(stage_line)  # noqa: T201
-            _append_full_run_log_line(config.data_root, stage_line)
-
-        attempt_issue_names: list[str] = []
-        for step_name, cmd, error_msg in attempt_failures:
-            slug = _slugify_issue_name(step_name)
-            sig = _prep_failure_signature(error_msg)
-            issue = upsert_issue(
-                repo_root,
-                filename=f"auto-fix-{slug}-{sig}.md",
-                title=f"[prep] Resolve {step_name} failure",
-                body_lines=[
-                    "## Failure",
-                    f"- Step: `{step_name}`",
-                    f"- Command: `{' '.join(cmd)}`",
-                    "",
-                    "## Last Error",
-                    "```",
-                    error_msg,
-                    "```",
-                    "",
-                    "## Resolution Checklist",
-                    "- [ ] identify root cause",
-                    "- [ ] apply code/config fix",
-                    "- [ ] rerun prep successfully",
-                ],
-            )
-            auto_issues.append(issue)
-            attempt_issue_names.append(issue.path.name)
-            run_log_lines.append(f"- Opened/updated local issue: `{issue.path.name}`")
-            stage_line = _prep_stage_line(
-                "hardening",
-                f"attempt {attempt}/{max_attempts}: opened/updated {issue.path.name}",
-                "warn",
-                use_color,
-            )
-            print(stage_line)  # noqa: T201
-            _append_full_run_log_line(config.data_root, stage_line)
-
-        if attempt < max_attempts:
-            stage_line = _prep_stage_line(
-                "hardening",
-                f"attempt {attempt}/{max_attempts}: running correction agent",
-                "start",
-                use_color,
-            )
-            print(stage_line)  # noqa: T201
-            _append_full_run_log_line(config.data_root, stage_line)
-            correction_on_output, correction_tail, correction_live_log = (
-                _make_prep_output_tracker(
-                    data_root=config.data_root,
-                    task_slug=f"attempt-{attempt}-correction-agent",
-                    stream_label=f"attempt {attempt}/{max_attempts}: correction agent",
-                    color=use_color,
-                )
-            )
-            correction_live_log_ref = config.format_path_for_display(
-                correction_live_log
-            )
-            stage_line = _prep_stage_line(
-                "hardening",
-                f"attempt {attempt}/{max_attempts}: correction live log {correction_live_log_ref}",
-                "start",
-                use_color,
-            )
-            print(stage_line)  # noqa: T201
-            _append_full_run_log_line(config.data_root, stage_line)
-            run_log_lines.append(f"- Correction live log: `{correction_live_log_ref}`")
-            agent_ok = await _await_with_prep_heartbeat(
-                _run_prep_agent_correction(
-                    config=config,
-                    tool=selected_tool,
-                    model=selected_model,
-                    repo_root=repo_root,
-                    stack=stack,
-                    failures=attempt_failures,
-                    issue_filenames=attempt_issue_names,
-                    on_output=correction_on_output,
-                ),
-                stage="hardening",
-                detail=f"attempt {attempt}/{max_attempts}: correction agent",
-                color=use_color,
-                tail_provider=correction_tail,
-            )
-            if agent_ok:
-                agent_successes += 1
-                stage_line = _prep_stage_line(
-                    "hardening",
-                    f"attempt {attempt}/{max_attempts}: correction agent completed",
-                    "ok",
-                    use_color,
-                )
-                print(stage_line)  # noqa: T201
-                _append_full_run_log_line(config.data_root, stage_line)
-            else:
-                stage_line = _prep_stage_line(
-                    "hardening",
-                    f"attempt {attempt}/{max_attempts}: correction agent failed",
-                    "warn",
-                    use_color,
-                )
-                print(stage_line)  # noqa: T201
-                _append_full_run_log_line(config.data_root, stage_line)
-            run_log_lines.append(
-                f"- Prep agent run {attempt}: {'ok' if agent_ok else 'failed'}"
-            )
-            run_log_lines.append(
-                "- Correction loop: rerunning hardening with updated local issues"
-            )
-            stage_line = _prep_stage_line(
-                "hardening",
-                f"attempt {attempt}/{max_attempts}: retrying hardening after correction",
-                "start",
-                use_color,
-            )
-            print(stage_line)  # noqa: T201
-            _append_full_run_log_line(config.data_root, stage_line)
-
-    issues_to_close = list(local_issues) + auto_issues
-    if hardening_ok and issues_to_close:
-        for issue in issues_to_close:
-            mark_done(issue)
-        run_log_lines.append(f"- Marked {len(issues_to_close)} local issue(s) done")
-        stage_line = _prep_stage_line(
-            "hardening",
-            f"marked {len(issues_to_close)} local issue(s) done",
-            "ok",
-            use_color,
-        )
-        print(stage_line)  # noqa: T201
-        _append_full_run_log_line(config.data_root, stage_line)
-    elif issues_to_close:
-        run_log_lines.append("- Local issues remain open due to hardening failures")
-        stage_line = _prep_stage_line(
-            "hardening",
-            f"{len(issues_to_close)} local issue(s) remain open",
-            "warn",
-            use_color,
-        )
-        print(stage_line)  # noqa: T201
-        _append_full_run_log_line(config.data_root, stage_line)
-
+    coverage_pct, coverage_source = _extract_coverage_percent(repo_root)
     print("Prep summary:")  # noqa: T201
     print(f"- Stack: {stack}")  # noqa: T201
-    print(f"- Hardening success: {hardening_ok}")  # noqa: T201
-    print(f"- Hardening attempts: {attempts_used}/{max_attempts}")  # noqa: T201
-    print(f"- Hardening failures observed: {failure_count}")  # noqa: T201
-    print(f"- Prep agent runs: {agent_runs} (successful: {agent_successes})")  # noqa: T201
-    print(f"- Auto issues opened/updated: {len(auto_issues)}")  # noqa: T201
-    print(f"- Local issues initially open: {len(local_issues)}")  # noqa: T201
-    print(  # noqa: T201
-        f"- Local issues closed this run: {len(issues_to_close) if hardening_ok else 0}"
-    )
-    if coverage_below_target:
+    print(f"- CI scaffold: {'skipped' if ci_result.skipped else action}")  # noqa: T201
+    print(f"- Test scaffold: {'skipped' if tests_result.skipped else action}")  # noqa: T201
+    if coverage_pct is None:
         print(  # noqa: T201
-            "- Coverage is below 70% for one or more projects. "
-            "Run `make cover` (or `make cover 70`) to increase and verify coverage."
+            _prep_stage_line(
+                "scaffold", "Coverage: no report artifact found yet.", "warn", use_color
+            )
         )
-        run_log_lines.append(
-            "- Coverage follow-up: below 70%; run `make cover` or `make cover 70` to improve coverage."
+        print(  # noqa: T201
+            _prep_stage_line(
+                "scaffold",
+                "Next: run `make cover` (70% unit coverage) and `make smoke`.",
+                "warn",
+                use_color,
+            )
         )
-    stage_line = _prep_stage_line(
-        "hardening",
-        "hardening loop complete" if hardening_ok else "hardening loop failed",
-        "ok" if hardening_ok else "fail",
-        use_color,
-    )
-    print(stage_line)  # noqa: T201
-    _append_full_run_log_line(config.data_root, stage_line)
-    _append_full_run_log_line(
-        config.repo_root, f"=== prep run end ({datetime.now(tz=UTC).isoformat()}) ==="
-    )
-    run_log_lines.append("- Summary printed to console")
+    elif coverage_pct < _PREP_COVERAGE_TARGET:
+        print(  # noqa: T201
+            _prep_stage_line(
+                "scaffold",
+                f"Coverage: {coverage_pct:.1f}% from {coverage_source} (below 70%).",
+                "warn",
+                use_color,
+            )
+        )
+        print(  # noqa: T201
+            _prep_stage_line(
+                "scaffold",
+                "Next: run `make cover` (70% unit coverage) and `make smoke`.",
+                "warn",
+                use_color,
+            )
+        )
+    else:
+        print(  # noqa: T201
+            _prep_stage_line(
+                "scaffold",
+                f"Coverage: {coverage_pct:.1f}% from {coverage_source} (>= 70%).",
+                "ok",
+                use_color,
+            )
+        )
+        print(  # noqa: T201
+            _prep_stage_line(
+                "scaffold",
+                "Well done: coverage is already healthy.",
+                "ok",
+                use_color,
+            )
+        )
 
-    run_log = write_run_log(
-        config.data_root,
-        title="Prep Workflow Run",
-        lines=run_log_lines,
-    )
-    print(  # noqa: T201
-        f"Prep run log: {config.format_path_for_display(run_log)}"
-    )
-    print(  # noqa: T201
-        f"Prep full-run log: {config.format_path_for_display(full_run_log_path)}"
-    )
-    return hardening_ok
+    return True
 
 
 async def _run_clean(config: HydraFlowConfig) -> None:
@@ -2168,17 +1717,17 @@ def main(argv: list[str] | None = None) -> None:
 
     config = build_config(args)
 
-    if args.prep:
+    if args.ensure_labels:
         success = asyncio.run(_run_prep(config))
+        sys.exit(0 if success else 1)
+
+    if args.prep or args.scaffold:
+        success = asyncio.run(_run_scaffold(config))
         sys.exit(0 if success else 1)
 
     if args.audit:
         has_gaps = asyncio.run(_run_audit(config))
         sys.exit(1 if has_gaps else 0)
-
-    if args.scaffold:
-        success = asyncio.run(_run_scaffold(config))
-        sys.exit(0 if success else 1)
 
     if args.clean:
         asyncio.run(_run_clean(config))
