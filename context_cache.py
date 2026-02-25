@@ -36,8 +36,11 @@ class ContextSectionCache:
         Returns ``(content, cache_hit)``.
         """
         exists = source_path.is_file()
-        mtime_ns = source_path.stat().st_mtime_ns if exists else 0
-        size = source_path.stat().st_size if exists else 0
+        stat_result = source_path.stat() if exists else None
+        mtime_ns = stat_result.st_mtime_ns if stat_result is not None else 0
+        ctime_ns = stat_result.st_ctime_ns if stat_result is not None else 0
+        inode = stat_result.st_ino if stat_result is not None else 0
+        size = stat_result.st_size if stat_result is not None else 0
 
         data = self._load_cache_data()
         entry = data.get(key, {})
@@ -45,6 +48,8 @@ class ContextSectionCache:
         if (
             entry.get("exists") == exists
             and entry.get("mtime_ns") == mtime_ns
+            and entry.get("ctime_ns") == ctime_ns
+            and entry.get("inode") == inode
             and entry.get("size") == size
         ):
             content = entry.get("content")
@@ -55,6 +60,8 @@ class ContextSectionCache:
         data[key] = {
             "exists": exists,
             "mtime_ns": mtime_ns,
+            "ctime_ns": ctime_ns,
+            "inode": inode,
             "size": size,
             "content": content,
             "updated_at": datetime.now(UTC).isoformat(),
