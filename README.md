@@ -98,6 +98,9 @@ hf prep
 # ensure lifecycle labels exist (equivalent to make ensure-labels)
 hf ensure-labels
 
+# optional explicit alias for quick prep/scaffold
+hf scaffold
+
 # register the current repo (or an explicit path) with the background supervisor
 hf run              # uses cwd
 hf run /path/to/repo

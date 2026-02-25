@@ -741,12 +741,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--prep",
         action="store_true",
-        help="Create HydraFlow lifecycle labels on the target repo, then exit",
+        help="Run quick prep/scaffold (CI + baseline tests + coverage guidance), then exit",
     )
     parser.add_argument(
         "--scaffold",
         action="store_true",
-        help="Run quick prep/scaffold for GitHub CI + baseline test infrastructure, then exit",
+        help="Alias for --prep (quick prep/scaffold), then exit",
+    )
+    parser.add_argument(
+        "--ensure-labels",
+        action="store_true",
+        help="Create HydraFlow lifecycle labels on the target repo, then exit",
     )
     parser.add_argument(
         "--replay",
@@ -1712,17 +1717,17 @@ def main(argv: list[str] | None = None) -> None:
 
     config = build_config(args)
 
-    if args.prep:
+    if args.ensure_labels:
         success = asyncio.run(_run_prep(config))
+        sys.exit(0 if success else 1)
+
+    if args.prep or args.scaffold:
+        success = asyncio.run(_run_scaffold(config))
         sys.exit(0 if success else 1)
 
     if args.audit:
         has_gaps = asyncio.run(_run_audit(config))
         sys.exit(1 if has_gaps else 0)
-
-    if args.scaffold:
-        success = asyncio.run(_run_scaffold(config))
-        sys.exit(0 if success else 1)
 
     if args.clean:
         asyncio.run(_run_clean(config))

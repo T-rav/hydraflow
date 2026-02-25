@@ -273,7 +273,7 @@ setup: deps
 	fi
 	@echo "$(BLUE)Ensuring HydraFlow lifecycle labels...$(RESET)"
 	@echo "  target repo: $(TARGET_REPO_ROOT)"
-	@cd $(TARGET_REPO_ROOT) && $(UV) python "$(HYDRAFLOW_CLI)" --prep
+	@cd $(TARGET_REPO_ROOT) && $(UV) python "$(HYDRAFLOW_CLI)" --ensure-labels
 	@echo "$(BLUE)Detecting local agent assets (Claude/Codex)...$(RESET)"
 	@if [ -d "$(PROJECT_ROOT)/.claude/hooks" ]; then \
 		for HOOK in "$(PROJECT_ROOT)"/.claude/hooks/*.sh; do \
@@ -315,13 +315,13 @@ REPO_SLUG := $(shell git remote get-url origin 2>/dev/null | sed 's|.*github\.co
 prep: deps
 	@echo "$(BLUE)Scanning repo and scaffolding CI/tests...$(RESET)"
 	@echo "  target repo: $(TARGET_REPO_ROOT)"
-	@cd $(TARGET_REPO_ROOT) && $(UV) python "$(HYDRAFLOW_CLI)" --scaffold
+	@cd $(TARGET_REPO_ROOT) && $(UV) python "$(HYDRAFLOW_CLI)" --prep
 	@echo "$(GREEN)Prep complete$(RESET)"
 
 ensure-labels: deps
 	@echo "$(BLUE)Creating HydraFlow lifecycle labels...$(RESET)"
 	@echo "  target repo: $(TARGET_REPO_ROOT)"
-	@cd $(TARGET_REPO_ROOT) && $(UV) python "$(HYDRAFLOW_CLI)" --prep
+	@cd $(TARGET_REPO_ROOT) && $(UV) python "$(HYDRAFLOW_CLI)" --ensure-labels
 	@echo "$(GREEN)Labels ensured$(RESET)"
 
 hot:

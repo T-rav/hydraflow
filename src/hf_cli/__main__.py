@@ -13,10 +13,10 @@ from .supervisor_client import add_repo, list_repos, remove_repo
 from .supervisor_manager import ensure_running
 
 _FLAG_COMMANDS = {
-    "prep": "--scaffold",
+    "prep": "--prep",
     "scaffold": "--scaffold",
-    "labels": "--prep",
-    "ensure-labels": "--prep",
+    "labels": "--ensure-labels",
+    "ensure-labels": "--ensure-labels",
     "audit": "--audit",
     "clean": "--clean",
     "dry-run": "--dry-run",

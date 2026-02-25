@@ -1548,7 +1548,7 @@ async def test_ensure_labels_exist_handles_individual_failures(event_bus, tmp_pa
 
 
 def test_makefile_ensure_labels_runs_cli_prep() -> None:
-    """Makefile ensure-labels target should call ``cli.py --prep`` directly."""
+    """Makefile ensure-labels target should call ``cli.py --ensure-labels`` directly."""
     from pathlib import Path
 
     makefile = Path(__file__).resolve().parent.parent / "Makefile"
@@ -1558,11 +1558,13 @@ def test_makefile_ensure_labels_runs_cli_prep() -> None:
 
     match = re.search(r"^ensure-labels:[^\n]*\n((?:\t.*\n)+)", content, re.MULTILINE)
     assert match is not None, "ensure-labels target block not found in Makefile"
-    assert "--prep" in match.group(1), "ensure-labels target must call cli.py --prep"
+    assert "--ensure-labels" in match.group(1), (
+        "ensure-labels target must call cli.py --ensure-labels"
+    )
 
 
 def test_makefile_prep_runs_cli_scaffold() -> None:
-    """Makefile prep target should call ``cli.py --scaffold``."""
+    """Makefile prep target should call ``cli.py --prep``."""
     from pathlib import Path
 
     makefile = Path(__file__).resolve().parent.parent / "Makefile"
@@ -1572,11 +1574,11 @@ def test_makefile_prep_runs_cli_scaffold() -> None:
 
     match = re.search(r"^prep:[^\n]*\n((?:\t.*\n)+)", content, re.MULTILINE)
     assert match is not None, "prep target block not found in Makefile"
-    assert "--scaffold" in match.group(1), "prep target must call cli.py --scaffold"
+    assert "--prep" in match.group(1), "prep target must call cli.py --prep"
 
 
 def test_makefile_setup_runs_label_bootstrap() -> None:
-    """Makefile setup target should run ``cli.py --prep`` to ensure labels."""
+    """Makefile setup target should run ``cli.py --ensure-labels`` to ensure labels."""
     from pathlib import Path
 
     makefile = Path(__file__).resolve().parent.parent / "Makefile"
@@ -1586,8 +1588,8 @@ def test_makefile_setup_runs_label_bootstrap() -> None:
 
     match = re.search(r"^setup:[^\n]*\n((?:\t.*\n)+)", content, re.MULTILINE)
     assert match is not None, "setup target block not found in Makefile"
-    assert "--prep" in match.group(1), (
-        "setup target must ensure labels via cli.py --prep"
+    assert "--ensure-labels" in match.group(1), (
+        "setup target must ensure labels via cli.py --ensure-labels"
     )
 
 

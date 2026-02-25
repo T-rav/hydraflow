@@ -1223,12 +1223,12 @@ class TestCliPrep:
         assert args.prep is False
 
     def test_main_prep_exits_zero_on_success(self) -> None:
-        """main() should exit 0 when all labels are created successfully."""
+        """main() should exit 0 when scaffold run succeeds."""
         from cli import main
 
         with (
             patch(
-                "cli._run_prep", new_callable=AsyncMock, return_value=True
+                "cli._run_scaffold", new_callable=AsyncMock, return_value=True
             ) as mock_run,
             pytest.raises(SystemExit) as exc_info,
         ):
@@ -1237,12 +1237,12 @@ class TestCliPrep:
         mock_run.assert_called_once()
         assert exc_info.value.code == 0
 
-    def test_main_prep_exits_one_on_partial_failure(self) -> None:
-        """main() should exit 1 when any labels fail to create."""
+    def test_main_prep_exits_one_on_failure(self) -> None:
+        """main() should exit 1 when scaffold run fails."""
         from cli import main
 
         with (
-            patch("cli._run_prep", new_callable=AsyncMock, return_value=False),
+            patch("cli._run_scaffold", new_callable=AsyncMock, return_value=False),
             pytest.raises(SystemExit) as exc_info,
         ):
             main(["--prep"])
@@ -1286,7 +1286,7 @@ class TestCliScaffold:
         assert args.scaffold is False
 
     def test_main_scaffold_exits_zero_on_success(self) -> None:
-        """main() should exit 0 when scaffold run succeeds."""
+        """main() should exit 0 when scaffold alias run succeeds."""
         from cli import main
 
         with (
@@ -1301,7 +1301,7 @@ class TestCliScaffold:
         assert exc_info.value.code == 0
 
     def test_main_scaffold_exits_one_on_failure(self) -> None:
-        """main() should exit 1 when scaffold run fails."""
+        """main() should exit 1 when scaffold alias run fails."""
         from cli import main
 
         with (
@@ -1311,6 +1311,30 @@ class TestCliScaffold:
             main(["--scaffold"])
 
         assert exc_info.value.code == 1
+
+
+class TestCliEnsureLabels:
+    """Tests for the --ensure-labels CLI flag integration."""
+
+    def test_ensure_labels_flag_parsed(self) -> None:
+        from cli import parse_args
+
+        args = parse_args(["--ensure-labels"])
+        assert args.ensure_labels is True
+
+    def test_main_ensure_labels_exits_zero_on_success(self) -> None:
+        from cli import main
+
+        with (
+            patch(
+                "cli._run_prep", new_callable=AsyncMock, return_value=True
+            ) as mock_run,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main(["--ensure-labels"])
+
+        mock_run.assert_called_once()
+        assert exc_info.value.code == 0
 
 
 def test_run_scaffold_focuses_on_ci_and_test_scaffolds() -> None:
