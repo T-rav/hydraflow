@@ -1,10 +1,10 @@
-"""Agent CLI command builders for Claude and Codex backends."""
+"""Agent CLI command builders for Claude, Codex, and Pi backends."""
 
 from __future__ import annotations
 
 from typing import Literal
 
-AgentTool = Literal["claude", "codex"]
+AgentTool = Literal["claude", "codex", "pi"]
 
 
 def build_agent_command(
@@ -17,6 +17,8 @@ def build_agent_command(
     """Build a non-interactive command for an agent stage."""
     if tool == "codex":
         return _build_codex_command(model=model)
+    if tool == "pi":
+        return _build_pi_command(model=model)
 
     cmd = [
         "claude",
@@ -48,4 +50,16 @@ def _build_codex_command(*, model: str) -> list[str]:
         "danger-full-access",
         "--dangerously-bypass-approvals-and-sandbox",
         "--skip-git-repo-check",
+    ]
+
+
+def _build_pi_command(*, model: str) -> list[str]:
+    """Build a Pi headless command that emits machine-readable output."""
+    return [
+        "pi",
+        "-p",
+        "--mode",
+        "json",
+        "--model",
+        model,
     ]

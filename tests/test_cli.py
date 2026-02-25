@@ -133,6 +133,9 @@ class TestPrepModelSelection:
     def test_codex_default_model(self) -> None:
         assert _best_model_for_tool("codex") == "gpt-5-codex"
 
+    def test_pi_default_model_uses_non_claude_fallback(self) -> None:
+        assert _best_model_for_tool("pi") == "gpt-5-codex"
+
 
 class TestPrepCoverageRatcheting:
     """Tests for persisted prep coverage floor ratcheting helpers."""
@@ -582,6 +585,43 @@ class TestBuildConfig:
         assert cfg.transcript_summary_model == "gpt-5-codex"
         assert cfg.ac_tool == "codex"
         assert cfg.verification_judge_tool == "codex"
+
+    def test_tool_fields_support_pi(self) -> None:
+        args = parse_args(
+            [
+                "--system-tool",
+                "pi",
+                "--background-tool",
+                "pi",
+                "--implementation-tool",
+                "pi",
+                "--review-tool",
+                "pi",
+                "--triage-tool",
+                "pi",
+                "--planner-tool",
+                "pi",
+                "--memory-compaction-tool",
+                "pi",
+                "--transcript-summary-tool",
+                "pi",
+                "--ac-tool",
+                "pi",
+                "--verification-judge-tool",
+                "pi",
+            ]
+        )
+        cfg = build_config(args)
+        assert cfg.system_tool == "pi"
+        assert cfg.background_tool == "pi"
+        assert cfg.implementation_tool == "pi"
+        assert cfg.review_tool == "pi"
+        assert cfg.triage_tool == "pi"
+        assert cfg.planner_tool == "pi"
+        assert cfg.memory_compaction_tool == "pi"
+        assert cfg.transcript_summary_tool == "pi"
+        assert cfg.ac_tool == "pi"
+        assert cfg.verification_judge_tool == "pi"
 
     def test_ci_fields_passed_through(self) -> None:
         args = parse_args(

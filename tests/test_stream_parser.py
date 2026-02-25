@@ -401,3 +401,71 @@ class TestStreamParserDelta:
         usage = parser.usage_totals
         assert usage["input_tokens"] == 0
         assert usage["total_tokens"] == 0
+
+    def test_pi_message_update_text_delta(self):
+        parser = StreamParser()
+        event = {
+            "type": "message_update",
+            "assistantMessageEvent": {"type": "text_delta", "delta": "Hello from pi"},
+        }
+        display, result = parser.parse(json.dumps(event))
+        assert display == "Hello from pi"
+        assert result is None
+
+    def test_pi_tool_execution_start_and_end(self):
+        parser = StreamParser()
+        start = {
+            "type": "tool_execution_start",
+            "toolName": "read",
+            "args": {"file_path": "src/main.py"},
+        }
+        end = {
+            "type": "tool_execution_end",
+            "toolName": "read",
+            "result": "file contents",
+            "isError": False,
+        }
+        start_display, _ = parser.parse(json.dumps(start))
+        end_display, _ = parser.parse(json.dumps(end))
+        assert "read" in start_display
+        assert "file contents" in end_display
+
+    def test_pi_agent_end_returns_last_result_text(self):
+        parser = StreamParser()
+        parser.parse(
+            json.dumps(
+                {
+                    "type": "message_update",
+                    "assistantMessageEvent": {"type": "text_delta", "delta": "Final"},
+                }
+            )
+        )
+        display, result = parser.parse(
+            json.dumps({"type": "agent_end", "messages": []})
+        )
+        assert display == ""
+        assert result == "Final"
+
+    def test_pi_usage_keys_are_mapped_to_canonical_totals(self):
+        parser = StreamParser()
+        event = {
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "HI"}],
+                "usage": {
+                    "input": 100,
+                    "output": 7,
+                    "cacheRead": 5,
+                    "cacheWrite": 3,
+                    "totalTokens": 115,
+                },
+            },
+        }
+        parser.parse(json.dumps(event))
+        usage = parser.usage_totals
+        assert usage["input_tokens"] == 100
+        assert usage["output_tokens"] == 7
+        assert usage["cache_read_input_tokens"] == 5
+        assert usage["cache_creation_input_tokens"] == 3
+        assert usage["total_tokens"] == 115

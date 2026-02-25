@@ -405,7 +405,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--system-tool",
         default=None,
-        choices=["inherit", "claude", "codex"],
+        choices=["inherit", "claude", "codex", "pi"],
         help="Global default tool for system agents; per-agent explicit settings still win (default: inherit)",
     )
     parser.add_argument(
@@ -416,7 +416,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--background-tool",
         default=None,
-        choices=["inherit", "claude", "codex"],
+        choices=["inherit", "claude", "codex", "pi"],
         help="Global default tool for background workers; per-worker explicit settings still win (default: inherit)",
     )
     parser.add_argument(
@@ -427,7 +427,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--implementation-tool",
         default=None,
-        choices=["claude", "codex"],
+        choices=["claude", "codex", "pi"],
         help="CLI backend for implementation agents (default: claude)",
     )
     parser.add_argument(
@@ -438,7 +438,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--review-tool",
         default=None,
-        choices=["claude", "codex"],
+        choices=["claude", "codex", "pi"],
         help="CLI backend for review agents (default: claude)",
     )
     parser.add_argument(
@@ -543,7 +543,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--memory-compaction-tool",
         default=None,
-        choices=["claude", "codex"],
+        choices=["claude", "codex", "pi"],
         help="CLI backend for memory digest compaction (default: claude)",
     )
     parser.add_argument(
@@ -575,13 +575,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--planner-tool",
         default=None,
-        choices=["claude", "codex"],
+        choices=["claude", "codex", "pi"],
         help="CLI backend for planning agents (default: claude)",
     )
     parser.add_argument(
         "--triage-tool",
         default=None,
-        choices=["claude", "codex"],
+        choices=["claude", "codex", "pi"],
         help="CLI backend for triage agents (default: claude)",
     )
     parser.add_argument(
@@ -613,19 +613,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--ac-tool",
         default=None,
-        choices=["claude", "codex"],
+        choices=["claude", "codex", "pi"],
         help="CLI backend for acceptance criteria generation (default: claude)",
     )
     parser.add_argument(
         "--verification-judge-tool",
         default=None,
-        choices=["claude", "codex"],
+        choices=["claude", "codex", "pi"],
         help="CLI backend for verification judge (default: claude)",
     )
     parser.add_argument(
         "--transcript-summary-tool",
         default=None,
-        choices=["claude", "codex"],
+        choices=["claude", "codex", "pi"],
         help="CLI backend for transcript summarization (default: claude)",
     )
     parser.add_argument(

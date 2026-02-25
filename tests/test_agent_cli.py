@@ -1,4 +1,4 @@
-"""Tests for agent_cli.py — CLI command builders for Claude and Codex backends."""
+"""Tests for agent_cli.py — CLI command builders for Claude, Codex, and Pi."""
 
 from __future__ import annotations
 
@@ -86,6 +86,31 @@ class TestBuildAgentCommand:
             model="o4-mini",
             disallowed_tools="Edit",
             max_turns=5,
+        )
+
+        assert cmd_plain == cmd_with_opts
+        assert "--disallowedTools" not in cmd_with_opts
+        assert "--max-turns" not in cmd_with_opts
+
+    def test_pi_command_structure(self) -> None:
+        """Pi command should run headless with JSON output and model selection."""
+        cmd = build_agent_command(tool="pi", model="pi-max")
+
+        assert cmd[0] == "pi"
+        assert "-p" in cmd
+        assert "--mode" in cmd
+        assert cmd[cmd.index("--mode") + 1] == "json"
+        assert "--model" in cmd
+        assert cmd[cmd.index("--model") + 1] == "pi-max"
+
+    def test_pi_ignores_disallowed_tools_and_max_turns(self) -> None:
+        """Pi command currently ignores disallowed_tools and max_turns knobs."""
+        cmd_plain = build_agent_command(tool="pi", model="pi-max")
+        cmd_with_opts = build_agent_command(
+            tool="pi",
+            model="pi-max",
+            disallowed_tools="Edit",
+            max_turns=3,
         )
 
         assert cmd_plain == cmd_with_opts

@@ -62,6 +62,30 @@ class StreamParser:
             display = self._parse_codex_item(event)
         elif event_type == "turn.completed":
             result = self._last_result_text
+        elif event_type == "message_update":
+            display = self._parse_pi_message_update(event)
+        elif event_type == "message_end":
+            self._capture_pi_message_end(event)
+        elif event_type == "tool_execution_start":
+            display = self._parse_pi_tool_start(event)
+        elif event_type == "tool_execution_end":
+            display = self._parse_pi_tool_end(event)
+        elif event_type in {
+            "session",
+            "agent_start",
+            "agent_end",
+            "turn_start",
+            "turn_end",
+            "message_start",
+            "tool_execution_update",
+            "auto_compaction_start",
+            "auto_compaction_end",
+            "auto_retry_start",
+            "auto_retry_end",
+        }:
+            if event_type in {"agent_end", "turn_end"}:
+                result = self._last_result_text
+            display = ""
         elif event_type == "error":
             display = event.get("message", "")
         else:
@@ -147,6 +171,56 @@ class StreamParser:
             return f"  → {item_type}"
         return ""
 
+    def _parse_pi_message_update(self, event: dict[str, Any]) -> str:
+        """Extract text deltas from Pi JSON `message_update` events."""
+        update = event.get("assistantMessageEvent", {})
+        if not isinstance(update, dict):
+            return ""
+        if update.get("type") == "text_delta":
+            delta = str(update.get("delta", "")).strip()
+            if delta:
+                self._last_result_text += delta
+            return delta
+        return ""
+
+    def _capture_pi_message_end(self, event: dict[str, Any]) -> None:
+        """Capture final assistant text from Pi `message_end` events."""
+        message = event.get("message", {})
+        if not isinstance(message, dict):
+            return
+        if message.get("role") != "assistant":
+            return
+        content = message.get("content", [])
+        if not isinstance(content, list):
+            return
+        text_parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                text = str(item.get("text", "")).strip()
+                if text:
+                    text_parts.append(text)
+        if text_parts:
+            self._last_result_text = "\n".join(text_parts)
+
+    def _parse_pi_tool_start(self, event: dict[str, Any]) -> str:
+        """Summarize Pi tool start events in transcript format."""
+        name = str(event.get("toolName", "")).strip()
+        args = event.get("args", {})
+        if not name:
+            return ""
+        return f"  → {name}: {_summarize_input(name, args if isinstance(args, dict) else {})}"
+
+    def _parse_pi_tool_end(self, event: dict[str, Any]) -> str:
+        """Summarize Pi tool completion events."""
+        name = str(event.get("toolName", "")).strip()
+        if not name:
+            return ""
+        result = event.get("result", "")
+        if isinstance(result, str) and result.strip():
+            preview = result.strip().replace("\n", " ")[:80]
+            return f"    ← {preview}{'…' if len(result.strip()) > 80 else ''}"
+        return "    ← (done)"
+
     def _capture_usage(self, event: dict[str, Any]) -> None:
         """Extract token usage fields from arbitrary event payloads.
 
@@ -177,6 +251,10 @@ def _iter_usage_numeric_fields(event: dict[str, Any]) -> list[tuple[str, int]]:
         usage_obj = event.get(usage_key)
         out.extend(_iter_numeric_fields(usage_obj))
 
+    # Backend-specific nested containers.
+    out.extend(_iter_numeric_fields(event.get("message")))
+    out.extend(_iter_numeric_fields(event.get("assistantMessageEvent")))
+
     return out
 
 
@@ -198,14 +276,15 @@ def _iter_numeric_fields(obj: Any) -> list[tuple[str, int]]:
 def _canonical_usage_key(raw_key: str) -> str:
     """Map backend-specific usage keys to canonical names."""
     key = raw_key.lower()
-    if key in {"input_tokens", "prompt_tokens", "inputtokencount"}:
+    if key in {"input_tokens", "prompt_tokens", "inputtokencount", "input"}:
         return "input_tokens"
-    if key in {"output_tokens", "completion_tokens", "outputtokencount"}:
+    if key in {"output_tokens", "completion_tokens", "outputtokencount", "output"}:
         return "output_tokens"
     if key in {
         "cache_creation_input_tokens",
         "cache_creation_tokens",
         "cachewriteinputtokens",
+        "cachewrite",
     }:
         return "cache_creation_input_tokens"
     if key in {
@@ -214,9 +293,10 @@ def _canonical_usage_key(raw_key: str) -> str:
         "cached_tokens",
         "cached_input_tokens",
         "cachereadinputtokens",
+        "cacheread",
     }:
         return "cache_read_input_tokens"
-    if key in {"total_tokens", "totaltokencount"}:
+    if key in {"total_tokens", "totaltokencount", "totaltokens"}:
         return "total_tokens"
     return ""
 
