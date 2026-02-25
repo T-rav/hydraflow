@@ -10,6 +10,8 @@ export function Header({
   const workload = stageStatus.workload
   const hasActiveWorkers = workload.active > 0
   const appVersion = config?.app_version || ''
+  const latestVersion = config?.latest_version || ''
+  const updateAvailable = Boolean(config?.update_available && latestVersion)
 
   // Track minimum stopping duration to prevent flicker
   const [stoppingHeld, setStoppingHeld] = useState(false)
@@ -52,6 +54,11 @@ export function Header({
           <span style={styles.subtitle}>Intent in.</span>
           <span style={styles.subtitle}>Software out.</span>
           {appVersion && <span style={styles.version}>v{appVersion}</span>}
+          {updateAvailable && (
+            <span style={styles.updateNotice}>
+              Update available: v{latestVersion} (`hf check-update`)
+            </span>
+          )}
         </div>
         <span style={connected ? dotConnected : dotDisconnected} />
       </div>
@@ -118,6 +125,7 @@ const styles = {
   logo: { fontSize: 18, fontWeight: 700, color: theme.accent },
   subtitle: { color: theme.textMuted, fontWeight: 400, fontSize: 12 },
   version: { color: theme.textMuted, fontWeight: 500, fontSize: 11 },
+  updateNotice: { color: theme.accent, fontWeight: 600, fontSize: 11 },
   dot: { width: 8, height: 8, borderRadius: '50%', display: 'inline-block' },
   center: {
     display: 'flex',

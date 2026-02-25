@@ -18,6 +18,7 @@ from pydantic import BaseModel, ValidationError
 from app_version import get_app_version
 from config import HydraFlowConfig, save_config_file
 from events import EventBus, EventType, HydraFlowEvent
+from hf_cli.update_check import load_cached_update_result
 from issue_fetcher import IssueFetcher
 from issue_store import IssueStoreStage
 from metrics_manager import get_metrics_cache_dir
@@ -627,13 +628,21 @@ def create_router(
         orch = get_orchestrator()
         status = "idle"
         current_session = None
+        latest_version = ""
+        update_available = False
         if orch:
             status = orch.run_status
             current_session = orch.current_session_id
+        update_result = load_cached_update_result(current_version=get_app_version())
+        if update_result is not None:
+            latest_version = update_result.latest_version or ""
+            update_available = update_result.update_available
         response = ControlStatusResponse(
             status=status,
             config=ControlStatusConfig(
                 app_version=get_app_version(),
+                latest_version=latest_version,
+                update_available=update_available,
                 repo=config.repo,
                 ready_label=config.ready_label,
                 find_label=config.find_label,

@@ -12,7 +12,7 @@ from cli import main as hydraflow_main
 from .init_cmd import run_init
 from .supervisor_client import add_repo, list_repos, remove_repo
 from .supervisor_manager import ensure_running
-from .update_check import check_for_updates, check_for_updates_cached
+from .update_check import check_for_updates_cached
 
 _FLAG_COMMANDS = {
     "prep": "--prep",
@@ -73,7 +73,7 @@ def _handle_version() -> None:
 
 
 def _handle_check_update() -> None:
-    result = check_for_updates()
+    result = check_for_updates_cached(max_age_seconds=0)
     if result.error:
         print(f"Update check failed: {result.error}")
         return

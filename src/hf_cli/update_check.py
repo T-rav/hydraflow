@@ -54,6 +54,26 @@ def _read_cache(path: Path = _CACHE_PATH) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
+def load_cached_update_result(
+    current_version: str | None = None,
+    path: Path = _CACHE_PATH,
+) -> UpdateCheckResult | None:
+    """Return cached update result without making any network requests."""
+    cached = _read_cache(path)
+    if cached is None:
+        return None
+    cached_current = str(cached.get("current_version", "")).strip()
+    effective_current = (current_version or cached_current).strip()
+    cached_latest = cached.get("latest_version")
+    if not effective_current or not isinstance(cached_latest, str) or not cached_latest:
+        return None
+    return UpdateCheckResult(
+        current_version=effective_current,
+        latest_version=cached_latest,
+        update_available=_is_newer(cached_latest, effective_current),
+    )
+
+
 def _write_cache(payload: dict[str, Any], path: Path = _CACHE_PATH) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

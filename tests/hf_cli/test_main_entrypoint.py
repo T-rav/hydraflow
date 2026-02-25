@@ -18,8 +18,8 @@ def test_entrypoint_version_prints_current_version(monkeypatch, capsys) -> None:
 def test_entrypoint_check_update_prints_available(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         cli_main,
-        "check_for_updates",
-        lambda: UpdateCheckResult(
+        "check_for_updates_cached",
+        lambda **_kwargs: UpdateCheckResult(
             current_version="0.9.0",
             latest_version="0.9.1",
             update_available=True,
@@ -36,8 +36,8 @@ def test_entrypoint_check_update_prints_available(monkeypatch, capsys) -> None:
 def test_entrypoint_check_update_prints_error(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         cli_main,
-        "check_for_updates",
-        lambda: UpdateCheckResult(
+        "check_for_updates_cached",
+        lambda **_kwargs: UpdateCheckResult(
             current_version="0.9.0",
             latest_version=None,
             update_available=False,
@@ -65,7 +65,7 @@ def test_run_prints_update_notice_when_available(
     monkeypatch.setattr(
         cli_main,
         "check_for_updates_cached",
-        lambda: UpdateCheckResult(
+        lambda **_kwargs: UpdateCheckResult(
             current_version="0.9.0",
             latest_version="0.9.1",
             update_available=True,
@@ -93,7 +93,9 @@ def test_run_skips_update_check_when_flag_present(
     monkeypatch.setattr(
         cli_main,
         "check_for_updates_cached",
-        lambda: (_ for _ in ()).throw(AssertionError("unexpected update check")),
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("unexpected update check")
+        ),
     )
 
     cli_main.entrypoint(["run", str(repo), "--no-update-check"])

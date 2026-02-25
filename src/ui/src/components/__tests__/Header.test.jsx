@@ -145,6 +145,19 @@ describe('Header component', () => {
     expect(screen.getByText('v0.9.0')).toBeInTheDocument()
   })
 
+  it('renders update notice with command when update is available', () => {
+    mockUseHydraFlow.mockReturnValue({
+      stageStatus: mockStageStatus(),
+      config: {
+        app_version: '0.9.0',
+        latest_version: '0.9.2',
+        update_available: true,
+      },
+    })
+    render(<Header {...defaultProps} />)
+    expect(screen.getByText('Update available: v0.9.2 (`hf check-update`)')).toBeInTheDocument()
+  })
+
   it('controls section has marginLeft for spacing from center content', () => {
     render(<Header {...defaultProps} />)
     const startBtn = screen.getByText('Start')
