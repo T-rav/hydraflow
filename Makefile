@@ -37,7 +37,7 @@ RESET := \033[0m
 # Docker agent image
 DOCKER_IMAGE ?= ghcr.io/t-rav/hydraflow-agent:latest
 
-.PHONY: help run dev dry-run clean coverage cover test test-fast test-cov lint lint-check lint-fix typecheck security quality quality-lite install setup status ui ui-dev ui-clean ensure-labels prep hot docker-build docker-test deps bundle-assets
+.PHONY: help run dev dry-run clean coverage cover test test-fast test-cov lint lint-check lint-fix typecheck security quality quality-lite install setup status ui ui-dev ui-clean ensure-labels prep hot docker-build docker-test deps bundle-assets embed-assets cli-release
 
 help:
 	@echo "$(BLUE)HydraFlow — Intent in. Software out.$(RESET)"
@@ -56,7 +56,7 @@ help:
 	@echo "  make lint-fix       Auto-repair formatting/lint issues"
 	@echo "  make typecheck      Run Pyright type checks"
 	@echo "  make security       Run Bandit security scan"
-	@echo "  make bundle-assets  Generate hf init asset bundle for release/build artifacts"
+	@echo "  make bundle-assets  Generate hf init asset bundle (dist/hf_cli-assets.tar.gz)"
 	@echo "  make quality-lite   Lint + typecheck + security (parallel)"
 	@echo "  make quality        quality-lite + test (parallel)"
 	@echo "  make ensure-labels  Create HydraFlow labels in GitHub repo"
@@ -129,6 +129,18 @@ bundle-assets:
 	@echo "$(BLUE)Bundling HydraFlow assets for hf init...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && mkdir -p dist && $(UV) python scripts/bundle_assets.py --output dist/hf_cli-assets.tar.gz --root $(PROJECT_ROOT)
 	@echo "$(GREEN)Generated dist/hf_cli-assets.tar.gz$(RESET)"
+
+embed-assets: bundle-assets
+	@echo "$(BLUE)Embedding HydraFlow assets into src/hf_cli/embedded_assets.py...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && $(UV) python scripts/embed_assets.py --root $(PROJECT_ROOT)
+	@echo "$(GREEN)Embedded assets module refreshed$(RESET)"
+
+cli-release: deps
+	@echo "$(BLUE)Preparing CLI release artifacts...$(RESET)"
+	@$(MAKE) embed-assets
+	@$(MAKE) test
+	@cd $(HYDRAFLOW_DIR) && uv build
+	@echo "$(GREEN)Built CLI artifacts under dist/$(RESET)"
 
 $(DEPS_STAMP): pyproject.toml
 	@echo "$(BLUE)Syncing dependencies...$(RESET)"

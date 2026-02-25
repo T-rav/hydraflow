@@ -12,6 +12,8 @@ Log an issue. Agents handle the rest - triaging, planning, implementing, reviewi
 
 HydraFlow is a delivery kernel for GitHub repositories: it accepts intent, compiles it through a staged pipeline, enforces quality gates, and produces merged software changes.
 
+It scales your workflow, not just your output, turning your repository into a programmable delivery engine powered by your hooks and skills. This is __Harness Engineering__ in practice.
+
 ## What Makes It Different
 
 - Quality-gated pipeline, not "one-shot" agent code generation
@@ -124,6 +126,16 @@ hf stop /path/to/repo
 If you modify `.claude`, `.codex`, or `.githooks`, run `make bundle-assets` to generate
 `dist/hf_cli-assets.tar.gz` for release/build artifact workflows.
 The repository no longer tracks a committed `src/hf_cli/assets.tar.gz`.
+
+### Publishing the hf CLI
+
+When you're ready to publish `hydraflow` to PyPI:
+
+1. `make cli-release` – runs `embed-assets`, the test suite, and `uv build`.
+2. `uv publish` (or your release automation) – uploads the artifacts in `dist/`.
+
+This flow guarantees the pip-installed CLI has a fresh copy of the asset bundle
+and includes all runtime dependencies by default.
 
 ## Issue Flow Labels
 
