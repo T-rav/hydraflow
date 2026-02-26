@@ -49,7 +49,7 @@ export function EventLog({ events }) {
   const filtered = events.filter(e => e.type !== 'transcript_line')
 
   return (
-    <div style={styles.panel}>
+    <div style={styles.panel} data-testid="event-log-panel">
       <div style={styles.title}>Event Log</div>
       <div style={styles.log}>
         {filtered.length === 0 && (
@@ -78,6 +78,8 @@ const styles = {
     background: theme.surface,
     display: 'flex',
     flexDirection: 'column',
+    flex: 1,
+    minHeight: 0,
   },
   title: {
     padding: '12px 16px 8px',

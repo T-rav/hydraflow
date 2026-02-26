@@ -5,11 +5,13 @@ import { useHydraFlow } from '../context/HydraFlowContext'
 import { Livestream } from './Livestream'
 import { PipelineControlPanel } from './PipelineControlPanel'
 import { WorkerLogStream } from './WorkerLogStream'
+import { EventLog } from './EventLog'
 
 const SUB_TABS = [
   { key: 'workers', label: 'Workers' },
   { key: 'pipeline', label: 'Pipeline' },
   { key: 'livestream', label: 'Livestream' },
+  { key: 'event_log', label: 'Event Log' },
 ]
 
 function relativeTime(isoString) {
@@ -392,6 +394,11 @@ export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onUpdateInter
           <PipelineControlPanel onToggleBgWorker={onToggleBgWorker} />
         )}
         {activeSubTab === 'livestream' && <Livestream events={events} />}
+        {activeSubTab === 'event_log' && (
+          <div style={styles.eventLogWrapper}>
+            <EventLog events={events} />
+          </div>
+        )}
       </div>
     </div>
   )
@@ -435,6 +442,11 @@ const styles = {
     flex: 1,
     overflowY: 'auto',
     padding: 20,
+  },
+  eventLogWrapper: {
+    flex: 1,
+    display: 'flex',
+    minHeight: 0,
   },
   heading: {
     fontSize: 16,
