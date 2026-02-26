@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -912,6 +913,36 @@ class TestFetchIssuesByLabels:
             issues = await fetcher.fetch_issues_by_labels(["some-label"], limit=10)
 
         assert issues == []
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_sets_backoff_and_skips_followup_calls(
+        self, config: HydraFlowConfig
+    ) -> None:
+        fetcher = IssueFetcher(config)
+        reset_epoch = int((datetime.now(UTC) + timedelta(minutes=10)).timestamp())
+        calls: list[tuple[Any, ...]] = []
+
+        async def fake_run_subprocess(*cmd, **_kwargs):
+            calls.append(cmd)
+            if len(cmd) >= 3 and cmd[2] == "rate_limit":
+                return str(reset_epoch)
+            raise RuntimeError("gh: API rate limit exceeded (HTTP 403)")
+
+        with patch("issue_fetcher.run_subprocess", side_effect=fake_run_subprocess):
+            first = await fetcher.fetch_issues_by_labels(["a", "b"], limit=10)
+            second = await fetcher.fetch_issues_by_labels(["a"], limit=10)
+
+        assert first == []
+        assert second == []
+        rate_limit_calls = [
+            cmd for cmd in calls if len(cmd) >= 3 and cmd[2] == "rate_limit"
+        ]
+        assert len(rate_limit_calls) >= 1
+        issue_calls = [
+            cmd for cmd in calls if len(cmd) >= 3 and "/issues" in str(cmd[2])
+        ]
+        # Second fetch should be skipped while backoff is active.
+        assert len(issue_calls) <= 2
 
 
 # ---------------------------------------------------------------------------

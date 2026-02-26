@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import UTC, datetime, timedelta
 
 from config import HydraFlowConfig
 from models import GitHubIssue, PRInfo, Task
@@ -19,6 +20,8 @@ class IssueFetcher:
     def __init__(self, config: HydraFlowConfig) -> None:
         self._config = config
         self._repo_owner = config.repo.split("/", 1)[0] if "/" in config.repo else ""
+        self._rate_limited_until: datetime | None = None
+        self._rate_limit_lock = asyncio.Lock()
 
     @staticmethod
     def _normalize_issue_payload(item: dict) -> dict:
@@ -57,6 +60,8 @@ class IssueFetcher:
         seen: dict[int, dict] = {}
 
         async def _query_label(label: str | None) -> None:
+            if self._is_rate_limited_now():
+                return
             cmd = [
                 "gh",
                 "api",
@@ -86,6 +91,9 @@ class IssueFetcher:
                     if isinstance(number, int):
                         seen.setdefault(number, normalized)
             except (RuntimeError, json.JSONDecodeError, FileNotFoundError) as exc:
+                if isinstance(exc, RuntimeError) and self._is_rate_limit_error(exc):
+                    await self._set_rate_limit_backoff(exc)
+                    return
                 logger.error("gh issue list failed for label=%r: %s", label, exc)
 
         if labels:
@@ -109,6 +117,50 @@ class IssueFetcher:
 
         issues = [GitHubIssue.model_validate(raw) for raw in seen.values()]
         return issues[:limit]
+
+    def _is_rate_limited_now(self) -> bool:
+        until = self._rate_limited_until
+        if until is None:
+            return False
+        return datetime.now(UTC) < until
+
+    @staticmethod
+    def _is_rate_limit_error(exc: RuntimeError) -> bool:
+        return "rate limit" in str(exc).lower()
+
+    async def _set_rate_limit_backoff(self, exc: RuntimeError) -> None:
+        async with self._rate_limit_lock:
+            if self._is_rate_limited_now():
+                return
+
+            fallback = datetime.now(UTC) + timedelta(minutes=5)
+            until = await self._fetch_rate_limit_reset_time()
+            if until is None or until <= datetime.now(UTC):
+                until = fallback
+
+            self._rate_limited_until = until
+            seconds = max(1, int((until - datetime.now(UTC)).total_seconds()))
+            logger.error(
+                "GitHub API rate limit hit; pausing issue fetches for ~%ds (until %s). Cause: %s",
+                seconds,
+                until.isoformat(),
+                exc,
+            )
+
+    async def _fetch_rate_limit_reset_time(self) -> datetime | None:
+        try:
+            raw = await run_subprocess(
+                "gh",
+                "api",
+                "rate_limit",
+                "--jq",
+                ".resources.core.reset",
+                gh_token=self._config.gh_token,
+            )
+            reset_epoch = int(raw.strip())
+            return datetime.fromtimestamp(reset_epoch, tz=UTC)
+        except (RuntimeError, ValueError, OSError):
+            return None
 
     async def fetch_all_hydraflow_issues(self) -> list[GitHubIssue]:
         """Fetch all open issues with any HydraFlow pipeline label in one batch.
