@@ -202,7 +202,7 @@ class ConfigFactory:
         max_debug_attempts: int = 1,
         subskill_confidence_threshold: float = 0.7,
         poll_interval: int = 5,
-        data_poll_interval: int = 60,
+        data_poll_interval: int = 300,
         gh_max_retries: int = 3,
         ac_model: str = "sonnet",
         ac_tool: Literal["claude", "codex", "pi"] = "claude",
