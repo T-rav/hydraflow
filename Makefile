@@ -38,7 +38,7 @@ RESET := \033[0m
 # Docker agent image
 DOCKER_IMAGE ?= ghcr.io/t-rav/hydraflow-agent:latest
 
-.PHONY: help run dev dry-run clean coverage cover test test-fast test-cov lint lint-check lint-fix typecheck security quality quality-lite install setup status ui ui-dev ui-clean ensure-labels prep hot docker-build docker-test deps bundle-assets embed-assets cli-release
+.PHONY: help run dev dry-run clean coverage cover smoke test test-fast test-cov lint lint-check lint-fix typecheck security quality quality-lite install setup status ui ui-dev ui-clean ensure-labels prep hot docker-build docker-test deps bundle-assets embed-assets cli-release
 
 help:
 	@echo "$(BLUE)HydraFlow — Intent in. Software out.$(RESET)"
@@ -51,6 +51,7 @@ help:
 	@echo "  make status         Show current HydraFlow state"
 	@echo "  make coverage [MIN] Run coverage-focused test command (default 70)"
 	@echo "  make cover [MIN]    Short alias for make coverage [MIN]"
+	@echo "  make smoke          Run critical cross-system smoke tests"
 	@echo "  make test-cov       Run tests with coverage report"
 	@echo "  make lint           Auto-fix linting"
 	@echo "  make lint-check     Check linting (no fix)"
@@ -179,6 +180,24 @@ test: deps
 	@echo "$(BLUE)Running HydraFlow unit tests...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ -x -q
 	@echo "$(GREEN)All tests passed$(RESET)"
+
+smoke: deps
+	@echo "$(BLUE)Running HydraFlow smoke tests...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest \
+		tests/hf_cli/test_main_entrypoint.py \
+		tests/hf_cli/test_supervisor_client.py \
+		tests/hf_cli/test_supervisor_manager.py \
+		tests/test_dashboard.py \
+		tests/test_dashboard_routes.py \
+		tests/test_runner_utils.py \
+		tests/test_stream_parser.py -q
+	@if command -v npm >/dev/null 2>&1; then \
+		echo "$(BLUE)Running UI smoke tests...$(RESET)"; \
+		cd $(HYDRAFLOW_DIR)src/ui && npm install --silent && npm test -- src/components/__tests__/App.test.jsx src/hooks/__tests__/useHydraFlowSocket.test.js; \
+	else \
+		echo "$(YELLOW)Skipping UI smoke tests (npm not found)$(RESET)"; \
+	fi
+	@echo "$(GREEN)Smoke tests passed$(RESET)"
 
 test-fast: deps
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ -x --tb=short

@@ -132,7 +132,7 @@ describe('App pre-computed tab styles', () => {
       fontWeight: 600,
       color: 'var(--accent)',
       cursor: 'pointer',
-      borderBottomColor: 'var(--accent)',
+      borderBottom: '2px solid var(--accent)',
     })
   })
 

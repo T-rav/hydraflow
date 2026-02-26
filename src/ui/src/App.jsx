@@ -198,7 +198,7 @@ const styles = {
   },
   tabActive: {
     color: theme.accent,
-    borderBottomColor: theme.accent,
+    borderBottom: `2px solid ${theme.accent}`,
   },
   contentRow: {
     flex: 1,

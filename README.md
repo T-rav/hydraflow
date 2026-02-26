@@ -76,6 +76,7 @@ make setup        # bootstrap .env, hooks, labels, local assets
 make prep         # repo audit + scaffold + hardening loop
 make run          # start backend + dashboard
 make dry-run      # print actions without executing
+make smoke        # critical cross-system smoke tests
 make quality-lite # lint + typecheck + security
 make quality      # quality-lite + tests
 ```
