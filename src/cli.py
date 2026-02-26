@@ -1292,22 +1292,26 @@ def _choose_prep_tool(configured: str) -> tuple[str | None, str]:
     if len(available) == 1:
         return available[0], "single"
 
+    selected = available[0]
+    mode = "fallback"
+
     # Multiple tools installed.
     if sys.stdin.isatty():
+        default_idx = available.index(configured) if configured in available else 0
         print(f"Prep tools available: {', '.join(available)}")  # noqa: T201
         options = "  ".join(f"[{i + 1}] {name}" for i, name in enumerate(available))
         print(f"Choose prep driver: {options}")  # noqa: T201
-        choice = input("Selection (default 1): ").strip()  # noqa: T201
+        choice = input(f"Selection (default {default_idx + 1}): ").strip()  # noqa: T201
+        selected = available[default_idx]
+        mode = "prompt"
         if choice.isdigit():
             idx = int(choice) - 1
             if 0 <= idx < len(available):
-                return available[idx], "prompt"
-        return available[0], "prompt"
-
-    # Non-interactive fallback.
-    if configured in available:
-        return configured, "configured"
-    return available[0], "fallback"
+                selected = available[idx]
+    elif configured in available:
+        selected = configured
+        mode = "configured"
+    return selected, mode
 
 
 def _build_prep_agent_prompt(

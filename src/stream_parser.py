@@ -251,9 +251,13 @@ def _iter_usage_numeric_fields(event: dict[str, Any]) -> list[tuple[str, int]]:
         usage_obj = event.get(usage_key)
         out.extend(_iter_numeric_fields(usage_obj))
 
-    # Backend-specific nested containers.
-    out.extend(_iter_numeric_fields(event.get("message")))
-    out.extend(_iter_numeric_fields(event.get("assistantMessageEvent")))
+    # Backend-specific nested containers: inspect only explicit usage blocks.
+    for parent_key in ("message", "assistantMessageEvent"):
+        parent = event.get(parent_key)
+        if not isinstance(parent, dict):
+            continue
+        for usage_key in ("usage", "token_usage", "usage_metadata"):
+            out.extend(_iter_numeric_fields(parent.get(usage_key)))
 
     return out
 

@@ -103,17 +103,25 @@ class TestBuildAgentCommand:
         assert "--model" in cmd
         assert cmd[cmd.index("--model") + 1] == "pi-max"
 
-    def test_pi_ignores_disallowed_tools(self) -> None:
-        """Pi command currently ignores disallowed_tools."""
-        cmd_plain = build_agent_command(tool="pi", model="pi-max")
-        cmd_with_opts = build_agent_command(
+    def test_pi_disallowed_tools_adds_system_guidance(self) -> None:
+        """Pi receives disallowed-tools policy via appended system guidance."""
+        cmd = build_agent_command(
             tool="pi",
             model="pi-max",
-            disallowed_tools="Edit",
+            disallowed_tools="Edit, Write",
         )
 
-        assert cmd_plain == cmd_with_opts
-        assert "--disallowedTools" not in cmd_with_opts
+        assert "--append-system-prompt" in cmd
+        prompts = [
+            cmd[i + 1]
+            for i, val in enumerate(cmd[:-1])
+            if val == "--append-system-prompt"
+        ]
+        assert any(
+            "Do not invoke these tools under any circumstances: Edit,Write" in p
+            for p in prompts
+        )
+        assert "--disallowedTools" not in cmd
 
     def test_pi_max_turns_adds_stop_guidance(self) -> None:
         """Pi has no native --max-turns flag; we pass stop guidance via system prompt."""
@@ -123,6 +131,22 @@ class TestBuildAgentCommand:
         guidance = cmd[cmd.index("--append-system-prompt") + 1]
         assert "at most 3 assistant turn(s)" in guidance
         assert "--max-turns" not in cmd
+
+    def test_pi_combines_max_turns_and_disallowed_guidance(self) -> None:
+        """Pi should include both max-turns and disallowed-tools guidance when set."""
+        cmd = build_agent_command(
+            tool="pi",
+            model="pi-max",
+            max_turns=3,
+            disallowed_tools="Edit",
+        )
+        prompts = [
+            cmd[i + 1]
+            for i, val in enumerate(cmd[:-1])
+            if val == "--append-system-prompt"
+        ]
+        assert any("at most 3 assistant turn(s)" in p for p in prompts)
+        assert any("Do not invoke these tools" in p for p in prompts)
 
     def test_claude_max_turns_converted_to_string(self) -> None:
         """max_turns integer should be converted to a string in the command."""

@@ -167,6 +167,26 @@ class TestPrepToolSelection:
         monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
         assert _choose_prep_tool("unknown") == ("pi", "fallback")
 
+    def test_choose_prep_tool_tty_blank_uses_configured_default(
+        self, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(
+            cli_module, "_detect_available_prep_tools", lambda: ["claude", "pi"]
+        )
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+        monkeypatch.setattr("builtins.input", lambda _prompt: "")
+        assert _choose_prep_tool("pi") == ("pi", "prompt")
+
+    def test_choose_prep_tool_tty_invalid_uses_configured_default(
+        self, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(
+            cli_module, "_detect_available_prep_tools", lambda: ["claude", "pi"]
+        )
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+        monkeypatch.setattr("builtins.input", lambda _prompt: "bad")
+        assert _choose_prep_tool("pi") == ("pi", "prompt")
+
 
 class TestPrepCoverageRatcheting:
     """Tests for persisted prep coverage floor ratcheting helpers."""
