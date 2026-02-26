@@ -386,7 +386,7 @@ const styles = {
     borderRadius: '50%',
     background: theme.green,
     flexShrink: 0,
-    animation: 'pulse 2s infinite',
+    animation: 'stream-pulse 2s infinite',
   },
   dotCompleted: {
     width: 8,

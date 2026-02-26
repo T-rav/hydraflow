@@ -2,7 +2,7 @@ import React, { useMemo, useCallback } from 'react'
 import { theme } from '../theme'
 import { useHydraFlow } from '../context/HydraFlowContext'
 import { StreamCard } from './StreamCard'
-import { PIPELINE_STAGES } from '../constants'
+import { PIPELINE_STAGES, PULSE_ANIMATION } from '../constants'
 import { STAGE_KEYS } from '../hooks/useTimeline'
 import { sectionHeaderStyles, sectionLabelStyles, sectionCountStyles, sectionLabelBase } from '../styles/sectionStyles'
 
@@ -323,7 +323,6 @@ const dotBase = {
 
 const flowDotBase = { ...dotBase, transition: 'all 0.3s ease' }
 
-const PULSE_ANIMATION = 'stream-pulse 1.5s ease-in-out infinite'
 
 const flowLabelStyles = Object.fromEntries(
   PIPELINE_STAGES.map(s => [s.key, { ...flowLabelBase, color: s.color }])

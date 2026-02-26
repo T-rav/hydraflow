@@ -26,6 +26,9 @@ export const PIPELINE_STAGES = [
   { key: 'merged',    label: 'Merged',    color: theme.green,       subtleColor: theme.greenSubtle,  role: null,           configKey: null },
 ]
 
+/** Shared CSS animation value for the stream-pulse keyframe. */
+export const PULSE_ANIMATION = 'stream-pulse 1.5s ease-in-out infinite'
+
 /** Valid overall statuses for stream cards. */
 export const STREAM_CARD_STATUSES = ['active', 'queued', 'done', 'failed', 'hitl']
 

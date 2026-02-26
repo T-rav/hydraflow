@@ -47,16 +47,18 @@ def setup_test_environment():
         "HOME": "/tmp/hydraflow-test",
         "GH_TOKEN": "test-token",
     }
-    hydraflow_env = {
-        key: os.environ.pop(key)
+    hydra_keys = {
+        key: os.environ[key]
         for key in list(os.environ)
-        if key.startswith("HYDRAFLOW_")
+        if key.startswith(("HYDRAFLOW_", "HYDRA_"))
     }
+    for key in hydra_keys:
+        os.environ.pop(key, None)
     try:
         with patch.dict(os.environ, test_env, clear=False):
             yield
     finally:
-        os.environ.update(hydraflow_env)
+        os.environ.update(hydra_keys)
 
 
 # --- Config Fixtures ---
