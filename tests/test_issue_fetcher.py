@@ -250,6 +250,8 @@ class TestFetchReadyIssues:
         assert any(
             token.startswith("repos/") and token.endswith("/issues") for token in cmd
         )
+        assert "--method" in cmd
+        assert "GET" in cmd
         assert "sort=created" in cmd
         assert "direction=asc" in cmd
 
@@ -338,6 +340,37 @@ class TestFetchReviewablePrs:
         assert prs[0].draft is False
         assert len(issues) == 1
         assert issues[0].number == 42
+
+    @pytest.mark.asyncio
+    async def test_fetch_reviewable_prs_uses_get_for_pr_lookup(
+        self, config: HydraFlowConfig
+    ) -> None:
+        fetcher = IssueFetcher(config)
+        captured: list[tuple[str, ...]] = []
+
+        async def fake_run(*args: str, **kwargs: Any) -> str:
+            captured.append(args)
+            if any("issues" in arg for arg in args):
+                return RAW_ISSUE_JSON
+            return json.dumps(
+                [
+                    {
+                        "number": 200,
+                        "url": "https://github.com/o/r/pull/200",
+                        "isDraft": False,
+                    }
+                ]
+            )
+
+        with patch("issue_fetcher.run_subprocess", side_effect=fake_run):
+            prs, _issues = await fetcher.fetch_reviewable_prs(set())
+
+        assert len(prs) == 1
+        pr_lookup_cmd = next(
+            cmd for cmd in captured if any("/pulls" in part for part in cmd)
+        )
+        assert "--method" in pr_lookup_cmd
+        assert "GET" in pr_lookup_cmd
 
     @pytest.mark.asyncio
     async def test_gh_cli_failure_skips_pr_for_that_issue(

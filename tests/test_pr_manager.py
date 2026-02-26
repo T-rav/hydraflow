@@ -1994,6 +1994,28 @@ class TestListHitlItems:
         assert result[0].branch == "agent/issue-42"
 
     @pytest.mark.asyncio
+    async def test_fetch_hitl_raw_issues_uses_get_method(self, event_bus, tmp_path):
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+        )
+        mgr = _make_manager(cfg, event_bus)
+        captured: list[tuple[str, ...]] = []
+
+        async def mock_run_gh(*cmd, cwd=None):
+            captured.append(cmd)
+            return "[]"
+
+        mgr._run_gh = mock_run_gh
+        await mgr._fetch_hitl_raw_issues(["hydraflow-hitl"])
+
+        assert len(captured) == 1
+        cmd = captured[0]
+        assert "--method" in cmd
+        assert "GET" in cmd
+
+    @pytest.mark.asyncio
     async def test_returns_zero_pr_when_no_pr_found(self, event_bus, tmp_path):
         import json
 
