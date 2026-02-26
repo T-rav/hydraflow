@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from events import EventBus, EventType
 from models import (
     BackgroundWorkersResponse,
+    BackgroundWorkerState,
     BackgroundWorkerStatus,
     BGWorkerHealth,
     MetricsResponse,
@@ -279,6 +280,30 @@ class TestSystemWorkersEndpoint:
         # Others should still be disabled
         retro = next(w for w in data["workers"] if w["name"] == "retrospective")
         assert retro["status"] == "disabled"
+
+    @pytest.mark.asyncio
+    async def test_returns_persisted_state_without_orchestrator(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        state.set_bg_worker_state(
+            "memory_sync",
+            BackgroundWorkerState(
+                name="memory_sync",
+                status="ok",
+                last_run="2026-02-20T10:00:00Z",
+                details={"count": 7},
+            ),
+        )
+
+        router = self._make_router(config, event_bus, state, tmp_path, orch=None)
+        endpoint = self._find_endpoint(router, "/api/system/workers")
+        response = await endpoint()
+        data = json.loads(response.body)
+
+        ms = next(w for w in data["workers"] if w["name"] == "memory_sync")
+        assert ms["status"] == "ok"
+        assert ms["last_run"] == "2026-02-20T10:00:00Z"
+        assert ms["details"]["count"] == 7
 
 
 class TestMetricsEndpoint:

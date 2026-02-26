@@ -24,6 +24,7 @@ from issue_store import IssueStoreStage
 from metrics_manager import get_metrics_cache_dir
 from models import (
     BackgroundWorkersResponse,
+    BackgroundWorkerState,
     BackgroundWorkerStatus,
     BGWorkerHealth,
     ControlStatusConfig,
@@ -811,6 +812,12 @@ def create_router(
         """Return last known status of each background worker."""
         orch = get_orchestrator()
         bg_states = orch.get_bg_worker_states() if orch else {}
+        persisted_states: dict[str, BackgroundWorkerState] = {}
+        if hasattr(state, "get_bg_worker_states"):
+            try:
+                persisted_states = state.get_bg_worker_states()
+            except Exception:  # pragma: no cover - defensive guard
+                logger.exception("Failed to load persisted bg worker states")
         inference_by_worker = _build_system_worker_inference_stats()
         workers = []
         for name, label in _bg_worker_defs:
@@ -832,8 +839,8 @@ def create_router(
             elif name in _PIPELINE_WORKERS:
                 interval = config.poll_interval
 
-            if name in bg_states:
-                entry = bg_states[name]
+            entry = bg_states.get(name) or persisted_states.get(name)
+            if entry:
                 last_run = entry.get("last_run")
                 raw_details = entry.get("details", {})
                 details: dict[str, Any] = (

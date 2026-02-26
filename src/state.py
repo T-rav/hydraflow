@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from file_util import atomic_write
 from models import (
+    BackgroundWorkerState,
     LifetimeStats,
     SessionLog,
     SessionStatus,
@@ -383,6 +384,40 @@ class StateTracker:
         """Persist worker interval overrides."""
         self._data.worker_intervals = intervals
         self.save()
+
+    # --- background worker states ---
+
+    def get_bg_worker_states(self) -> dict[str, BackgroundWorkerState]:
+        """Return persisted background worker heartbeat states."""
+        result: dict[str, BackgroundWorkerState] = {}
+        for name, state in self._data.bg_worker_states.items():
+            details = state.get("details", {}) or {}
+            result[name] = BackgroundWorkerState(
+                name=state.get("name", name),
+                status=state.get("status", "disabled"),
+                last_run=state.get("last_run"),
+                details=dict(details)
+                if isinstance(details, dict)
+                else {"raw": details},
+            )
+        return result
+
+    def set_bg_worker_state(self, name: str, state: BackgroundWorkerState) -> None:
+        """Persist a single background worker heartbeat entry."""
+        stored: dict[str, Any] = dict(state)
+        stored.pop("enabled", None)  # enabled is runtime-only
+        stored.setdefault("name", name)
+        details = stored.get("details")
+        if not isinstance(details, dict):
+            stored["details"] = {}
+        self._data.bg_worker_states[name] = stored  # type: ignore[assignment]
+        self.save()
+
+    def remove_bg_worker_state(self, name: str) -> None:
+        """Remove persisted heartbeat entry for *name*."""
+        if name in self._data.bg_worker_states:
+            self._data.bg_worker_states.pop(name, None)
+            self.save()
 
     # --- metrics state ---
 

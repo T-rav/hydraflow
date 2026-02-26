@@ -19,6 +19,7 @@ from state import StateTracker
 if TYPE_CHECKING:
     from config import HydraFlowConfig
 from models import (
+    BackgroundWorkerState,
     GitHubIssue,
     PlanResult,
     PRInfo,
@@ -3003,6 +3004,32 @@ class TestUpdateBgWorkerStatus:
         orch.update_bg_worker_status("memory_sync", "idle")
         state = orch._bg_worker_states["memory_sync"]
         assert state["details"] == {}
+
+    def test_update_bg_worker_status_persists_to_state(
+        self, config: HydraFlowConfig
+    ) -> None:
+        orch = HydraFlowOrchestrator(config)
+        orch.update_bg_worker_status("memory_sync", "ok")
+        persisted = orch._state.get_bg_worker_states()
+        assert "memory_sync" in persisted
+        assert persisted["memory_sync"]["status"] == "ok"
+
+    def test_restore_bg_worker_states(self, config: HydraFlowConfig) -> None:
+        tracker = StateTracker(config.state_file)
+        tracker.set_bg_worker_state(
+            "memory_sync",
+            BackgroundWorkerState(
+                name="memory_sync",
+                status="ok",
+                last_run="2026-02-20T10:30:00Z",
+                details={"count": 2},
+            ),
+        )
+        orch = HydraFlowOrchestrator(config, state=tracker)
+        orch._restore_state()
+        states = orch.get_bg_worker_states()
+        assert states["memory_sync"]["last_run"] == "2026-02-20T10:30:00Z"
+        assert states["memory_sync"]["details"]["count"] == 2
 
 
 # --- Orchestrator Property Accessors ---

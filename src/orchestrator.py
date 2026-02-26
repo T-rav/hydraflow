@@ -319,6 +319,7 @@ class HydraFlowOrchestrator:
             last_run=datetime.now(UTC).isoformat(),
             details=dict(details) if details else {},
         )
+        self._state.set_bg_worker_state(name, self._bg_worker_states[name])
 
     def set_bg_worker_enabled(self, name: str, enabled: bool) -> None:
         """Enable or disable a background worker by name."""
@@ -404,10 +405,22 @@ class HydraFlowOrchestrator:
             self._state.clear_interrupted_issues()
 
     def _restore_state(self) -> None:
-        """Restore interval overrides, crash-recovered issues, and interrupted issues."""
+        """Restore persisted orchestrator state needed for dashboard accuracy."""
         self._restore_worker_intervals()
         self._restore_crash_recovered_issues()
         self._restore_interrupted_issues()
+        self._restore_bg_worker_states()
+
+    def _restore_bg_worker_states(self) -> None:
+        """Hydrate background worker heartbeat cache from persisted state."""
+        persisted = self._state.get_bg_worker_states()
+        if persisted:
+            self._bg_worker_states.update(persisted)
+            logger.info(
+                "Restored %d background worker heartbeat entr%s from state",
+                len(persisted),
+                "ies" if len(persisted) != 1 else "y",
+            )
 
     async def _start_session(self) -> None:
         """Create a new session log and publish SESSION_START."""

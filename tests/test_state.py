@@ -10,7 +10,13 @@ from unittest.mock import patch
 import pytest
 from pydantic import ValidationError
 
-from models import LifetimeStats, SessionLog, SessionStatus, StateData
+from models import (
+    BackgroundWorkerState,
+    LifetimeStats,
+    SessionLog,
+    SessionStatus,
+    StateData,
+)
 from state import StateTracker
 
 # ---------------------------------------------------------------------------
@@ -45,6 +51,7 @@ class TestInitialization:
         assert "active_branches" in d
         assert "reviewed_prs" in d
         assert "last_updated" in d
+        assert "bg_worker_states" in d
         assert "current_batch" not in d
 
     def test_loads_legacy_file_with_current_batch_field(self, tmp_path: Path) -> None:
@@ -94,6 +101,39 @@ class TestLoadSave:
         assert not state_file.exists()
         tracker.save()
         assert state_file.exists()
+
+
+class TestBackgroundWorkerStatePersistence:
+    def test_defaults_empty_states(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        assert tracker.get_bg_worker_states() == {}
+
+    def test_set_and_get_worker_state(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        tracker.set_bg_worker_state(
+            "memory_sync",
+            BackgroundWorkerState(
+                name="memory_sync",
+                status="ok",
+                last_run="2026-02-20T10:30:00Z",
+                details={"count": 5},
+            ),
+        )
+        states = tracker.get_bg_worker_states()
+        assert "memory_sync" in states
+        assert states["memory_sync"]["status"] == "ok"
+        assert states["memory_sync"]["details"]["count"] == 5
+
+    def test_remove_worker_state(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        tracker.set_bg_worker_state(
+            "metrics",
+            BackgroundWorkerState(
+                name="metrics", status="error", last_run=None, details={}
+            ),
+        )
+        tracker.remove_bg_worker_state("metrics")
+        assert tracker.get_bg_worker_states() == {}
 
     def test_save_writes_valid_json(self, tmp_path: Path) -> None:
         tracker = make_tracker(tmp_path)
