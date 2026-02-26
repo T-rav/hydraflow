@@ -1600,6 +1600,9 @@ def test_makefile_setup_runs_label_bootstrap() -> None:
     assert "python -m hf_cli init --target" in match.group(1), (
         "setup target must bootstrap .claude/.codex/.pi/.githooks via hf init"
     )
+    assert ".hydraflow-managed" in match.group(1), (
+        "setup target should mark managed Codex skills to enable safe stale-skill pruning"
+    )
 
 
 def test_makefile_setup_bootstraps_env_from_sample() -> None:
