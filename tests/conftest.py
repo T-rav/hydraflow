@@ -42,12 +42,21 @@ if TYPE_CHECKING:
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_environment():
-    """Set minimal env vars and prevent real subprocess calls."""
+    """Normalize env vars for deterministic tests."""
     test_env = {
         "HOME": "/tmp/hydraflow-test",
         "GH_TOKEN": "test-token",
     }
-    with patch.dict(os.environ, test_env, clear=False):
+    # Retain the existing environment except for HydraFlow-specific vars,
+    # which would otherwise leak user defaults (e.g., selected agent tool)
+    # into the test suite and cause nondeterministic failures.
+    sanitized_env = {
+        key: value
+        for key, value in os.environ.items()
+        if not (key.startswith("HYDRAFLOW_") or key.startswith("HYDRA_"))
+    }
+    sanitized_env.update(test_env)
+    with patch.dict(os.environ, sanitized_env, clear=True):
         yield
 
 
