@@ -47,8 +47,16 @@ def setup_test_environment():
         "HOME": "/tmp/hydraflow-test",
         "GH_TOKEN": "test-token",
     }
-    with patch.dict(os.environ, test_env, clear=False):
-        yield
+    hydraflow_env = {
+        key: os.environ.pop(key)
+        for key in list(os.environ)
+        if key.startswith("HYDRAFLOW_")
+    }
+    try:
+        with patch.dict(os.environ, test_env, clear=False):
+            yield
+    finally:
+        os.environ.update(hydraflow_env)
 
 
 # --- Config Fixtures ---

@@ -277,7 +277,7 @@ class TestBuildCodeValidationPrompt:
         assert "AC-1: Button renders" in prompt
         assert "AC-2: API returns 200" in prompt
 
-    def test_includes_diff(self, config):
+    def test_build_code_validation_prompt_includes_diff(self, config):
         judge = _make_judge(config)
         diff = "diff --git a/foo.py\n+added line"
         prompt = judge._build_code_validation_prompt(["criterion"], diff, 42)
@@ -411,7 +411,7 @@ class TestParseCriteriaResults:
 
 
 class TestParseInstructionsQuality:
-    def test_parses_ready(self):
+    def test_parse_instructions_quality_detects_ready_status(self):
         judge = _make_judge()
         quality, feedback = judge._parse_instructions_quality(
             SAMPLE_INSTRUCTIONS_READY_TRANSCRIPT
@@ -542,7 +542,7 @@ class TestSaveJudgeReport:
         assert "Steps are vague" in content
         assert "refined" in content.lower()
 
-    def test_handles_oserror(self, tmp_path):
+    def test_save_judge_report_handles_oserror_gracefully(self, tmp_path):
         cfg = ConfigFactory.create(repo_root=tmp_path)
         judge = _make_judge(cfg)
         verdict = JudgeVerdict(issue_number=42, summary="All good")
@@ -557,7 +557,7 @@ class TestSaveJudgeReport:
 
 
 class TestFormatJudgeReport:
-    def test_empty_criteria(self):
+    def test_format_judge_report_handles_no_criteria(self):
         judge = _make_judge()
         verdict = JudgeVerdict(issue_number=1)
         report = judge._format_judge_report(verdict)
@@ -867,7 +867,7 @@ class TestJudgeIntegration:
         assert result.refined is False
 
     @pytest.mark.asyncio
-    async def test_saves_report(self, tmp_path, event_bus):
+    async def test_judge_saves_verification_report_to_disk(self, tmp_path, event_bus):
         cfg = ConfigFactory.create(repo_root=tmp_path)
         judge = VerificationJudge(cfg, event_bus)
 
@@ -897,7 +897,9 @@ class TestJudgeIntegration:
         assert "ready" in content
 
     @pytest.mark.asyncio
-    async def test_publishes_event(self, tmp_path, event_bus):
+    async def test_judge_publishes_verification_complete_event(
+        self, tmp_path, event_bus
+    ):
         cfg = ConfigFactory.create(repo_root=tmp_path)
         judge = VerificationJudge(cfg, event_bus)
 
@@ -939,7 +941,7 @@ class TestJudgeIntegration:
         assert result.all_criteria_pass is False
 
     @pytest.mark.asyncio
-    async def test_summary_format(self, tmp_path, event_bus):
+    async def test_judge_summary_includes_pass_fail_counts(self, tmp_path, event_bus):
         """verdict.summary should follow the expected format."""
         cfg = ConfigFactory.create(repo_root=tmp_path)
         judge = VerificationJudge(cfg, event_bus)

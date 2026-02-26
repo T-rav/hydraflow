@@ -245,7 +245,7 @@ class TestAnalyzePatterns:
         cats = {p[0] for p in patterns}
         assert cats == {"missing_tests", "security"}
 
-    def test_empty_records(self) -> None:
+    def test_detect_patterns_returns_empty_for_no_records(self) -> None:
         assert analyze_patterns([], threshold=1) == []
 
     def test_sorted_by_frequency(self) -> None:
@@ -329,7 +329,7 @@ class TestGetCommonFeedbackSection:
     def test_returns_empty_for_no_records(self) -> None:
         assert get_common_feedback_section([]) == ""
 
-    def test_caps_at_top_n(self) -> None:
+    def test_build_feedback_section_limits_to_top_n_patterns(self) -> None:
         records = [
             _make_record(
                 pr_number=i,

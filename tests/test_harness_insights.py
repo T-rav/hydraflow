@@ -109,7 +109,7 @@ class TestExtractSubcategories:
         subs = extract_subcategories("No test file found for new module")
         assert "missing_tests" in subs
 
-    def test_extracts_naming(self) -> None:
+    def test_extracts_naming_violations(self) -> None:
         subs = extract_subcategories(
             "Naming convention violation: rename to snake_case"
         )
@@ -132,7 +132,7 @@ class TestExtractSubcategories:
         subs = extract_subcategories("Everything looks good")
         assert subs == []
 
-    def test_empty_details(self) -> None:
+    def test_returns_empty_for_empty_input(self) -> None:
         subs = extract_subcategories("")
         assert subs == []
 
