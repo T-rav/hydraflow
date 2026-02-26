@@ -185,6 +185,21 @@ jobs:
           fi
           echo "Missing Makefile in ${{ matrix.project_dir }}. Run 'make prep' to scaffold make targets." >&2
           exit 1
+      - name: Smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${{ matrix.project_dir }}"
+          if [ -f Makefile ] || [ -f makefile ] || [ -f GNUmakefile ]; then
+            if make -n smoke >/dev/null 2>&1; then
+              make smoke
+            else
+              echo "Smoke target not found in ${{ matrix.project_dir }}; skipping."
+            fi
+            exit 0
+          fi
+          echo "Missing Makefile in ${{ matrix.project_dir }}. Run 'make prep' to scaffold make targets." >&2
+          exit 1
 """
 
 _UNIVERSAL_WORKFLOW = _UNIVERSAL_WORKFLOW_TEMPLATE.replace(

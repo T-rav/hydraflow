@@ -192,6 +192,7 @@ _COVERAGE_CHECK_RECIPE = (
 
 # quality targets are prerequisite-only targets
 _QUALITY_LITE_LINE = "quality-lite: lint-check typecheck security\n"
+_SMOKE_LINE = "smoke: test\n"
 _QUALITY_LINE = "quality: quality-lite test coverage-check\n"
 _DEFAULT_GOAL_LINE = ".DEFAULT_GOAL := help"
 _COVERAGE_MIN_LINE = "COVERAGE_MIN ?= 70"
@@ -207,6 +208,7 @@ _HELP_RECIPE = (
     '\t@echo "  test         Run tests"\n'
     '\t@echo "  coverage-check Enforce coverage floor from reports"\n'
     '\t@echo "  coverage vars COVERAGE_MIN=70 COVERAGE_TARGET=70"\n'
+    '\t@echo "  smoke        Run smoke tests"\n'
     '\t@echo "  quality-lite Run lint/type/security"\n'
     '\t@echo "  quality      Run quality-lite + tests"\n'
 )
@@ -220,6 +222,7 @@ _ALL_TARGET_NAMES = [
     "security",
     "test",
     "coverage-check",
+    "smoke",
     "quality-lite",
     "quality",
 ]
@@ -381,6 +384,7 @@ def generate_makefile(language: str) -> str:
         lines.append(recipe)
 
     lines.append(_QUALITY_LITE_LINE)
+    lines.append(_SMOKE_LINE)
     lines.append(_QUALITY_LINE)
 
     return "\n".join(lines)
@@ -399,6 +403,7 @@ def merge_makefile(existing_content: str, language: str) -> tuple[str, list[str]
     # Include prerequisite-only quality targets in the full set to check.
     all_template: dict[str, str | None] = dict(template_targets)
     all_template["help"] = _HELP_RECIPE
+    all_template["smoke"] = None
     all_template["quality-lite"] = None
     all_template["quality"] = None  # prerequisite-only, no recipe body
 
@@ -459,6 +464,21 @@ def merge_makefile(existing_content: str, language: str) -> tuple[str, list[str]
                     f"found '{existing_deps}', expected '{expected_deps}'"
                 )
 
+    if "smoke" in existing_targets:
+        smoke_match = re.search(
+            r"^smoke\s*:(?![=:])\s*(.*)",
+            existing_content,
+            re.MULTILINE,
+        )
+        if smoke_match:
+            existing_deps = smoke_match.group(1).strip()
+            expected_deps = "test"
+            if existing_deps != expected_deps:
+                warnings.append(
+                    f"Target 'smoke' exists with different prerequisites: "
+                    f"found '{existing_deps}', expected '{expected_deps}'"
+                )
+
     if not targets_to_add:
         return existing_content, warnings
 
@@ -469,13 +489,15 @@ def merge_makefile(existing_content: str, language: str) -> tuple[str, list[str]
     new_lines += "\n"
 
     for name in targets_to_add:
-        if name in ("quality-lite", "quality"):
+        if name in ("smoke", "quality-lite", "quality"):
             continue  # Add prerequisite-only targets last.
         if name == "help":
             new_lines += f"\nhelp:\n{_HELP_RECIPE}"
             continue
         new_lines += f"\n{name}:\n{template_targets[name]}"
 
+    if "smoke" in targets_to_add:
+        new_lines += f"\n{_SMOKE_LINE}"
     if "quality-lite" in targets_to_add:
         new_lines += f"\n{_QUALITY_LITE_LINE}"
     if "quality" in targets_to_add:
@@ -557,7 +579,13 @@ def scaffold_makefile(repo_root: Path, dry_run: bool = False) -> ScaffoldResult:
 
         # Determine which targets were added
         template_targets = _targets_for_language(language)
-        all_names = ["help", *template_targets.keys(), "quality-lite", "quality"]
+        all_names = [
+            "help",
+            *template_targets.keys(),
+            "smoke",
+            "quality-lite",
+            "quality",
+        ]
         result.targets_added = [n for n in all_names if n not in existing_targets]
         result.skipped = [n for n in all_names if n in existing_targets]
 
