@@ -213,3 +213,49 @@ class TestTriagePhase:
 
         assert was_active_during_evaluate, "Issue should be marked active during triage"
         assert not store.is_active(1), "Issue should be released after triage"
+
+    @pytest.mark.asyncio
+    async def test_adr_issue_routes_directly_to_review_when_shape_is_valid(
+        self, config: HydraFlowConfig
+    ) -> None:
+        phase, _state, triage, prs, store, _stop = _make_phase(config)
+        issue = TaskFactory.create(
+            id=77,
+            title="[ADR] Adopt event-sourced state snapshots",
+            body=(
+                "## Context\n"
+                "Current pipeline state persistence causes replay costs and stale views.\n\n"
+                "## Decision\n"
+                "Adopt periodic event-sourced snapshots with compaction to reduce replay.\n\n"
+                "## Consequences\n"
+                "Adds compaction complexity but improves startup and dashboard freshness."
+            ),
+        )
+        store.get_triageable = lambda _max_count: [issue]  # type: ignore[method-assign]
+
+        await phase.triage_issues()
+
+        triage.evaluate.assert_not_awaited()
+        prs.transition.assert_called_once_with(77, "review")
+        prs.post_comment.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_adr_issue_escalates_to_hitl_when_shape_invalid(
+        self, config: HydraFlowConfig
+    ) -> None:
+        phase, _state, triage, prs, store, _stop = _make_phase(config)
+        issue = TaskFactory.create(
+            id=78,
+            title="[ADR] Simplify build graph",
+            body="Need to simplify this soon.",
+        )
+        store.get_triageable = lambda _max_count: [issue]  # type: ignore[method-assign]
+
+        await phase.triage_issues()
+
+        triage.evaluate.assert_not_awaited()
+        prs.swap_pipeline_labels.assert_called_once_with(78, config.hitl_label[0])
+        prs.post_comment.assert_called_once()
+        comment = prs.post_comment.call_args.args[1]
+        assert "Needs More Information" in comment
+        assert "Missing required ADR sections" in comment
