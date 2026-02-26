@@ -26,6 +26,7 @@ from state import StateTracker
 from subprocess_util import make_clean_env
 
 if TYPE_CHECKING:
+    from ports import PRPort
     from pr_manager import PRManager
 
 logger = logging.getLogger("hydraflow.memory")
@@ -187,6 +188,7 @@ class MemorySyncWorker:
         state: StateTracker,
         event_bus: EventBus,
         runner: SubprocessRunner | None = None,
+        prs: PRPort | None = None,
         *,
         manifest_store: CuratedManifestStore | None = None,
         manifest_manager: ProjectManifestManager | None = None,
@@ -196,6 +198,7 @@ class MemorySyncWorker:
         self._state = state
         self._bus = event_bus
         self._runner = runner or get_default_runner()
+        self._prs = prs
         self._manifest_store = manifest_store or CuratedManifestStore(config)
         self._manifest_manager = manifest_manager or ProjectManifestManager(
             config, curator=self._manifest_store
@@ -288,6 +291,7 @@ class MemorySyncWorker:
         self._state.update_memory_state(current_ids, digest_hash)
         self._manifest_store.update_from_learnings(learnings)
         await self._refresh_manifest("memory-sync")
+        await self._close_synced_issues(issues)
 
         return {
             "action": "synced",
@@ -295,6 +299,43 @@ class MemorySyncWorker:
             "compacted": compacted,
             "digest_chars": len(digest),
         }
+
+    def _should_auto_close_issue(self, issue: MemoryIssueData) -> bool:
+        """Return True only for canonical memory suggestion issues."""
+        title = str(issue.get("title", "")).strip()
+        labels = issue.get("labels", [])
+        if not isinstance(labels, list):
+            return False
+        has_memory_label = any(lbl in self._config.memory_label for lbl in labels)
+        return title.startswith("[Memory]") and has_memory_label
+
+    async def _close_synced_issues(self, issues: list[MemoryIssueData]) -> None:
+        """Close synced memory issues when a PR port is available."""
+        if self._prs is None:
+            return
+        closed = 0
+        failed = 0
+        for issue in issues:
+            if not self._should_auto_close_issue(issue):
+                continue
+            issue_number = int(issue.get("number", 0))
+            if issue_number <= 0:
+                continue
+            try:
+                await self._prs.close_issue(issue_number)
+                closed += 1
+            except Exception as exc:  # noqa: BLE001
+                failed += 1
+                logger.warning(
+                    "Could not close synced memory issue #%d: %s",
+                    issue_number,
+                    exc,
+                )
+        logger.info(
+            "Memory sync auto-close summary: closed=%d failed=%d",
+            closed,
+            failed,
+        )
 
     async def _refresh_manifest(self, source: str) -> None:
         """Regenerate the manifest and optionally sync it upstream."""

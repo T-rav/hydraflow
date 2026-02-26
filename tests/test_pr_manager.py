@@ -2732,6 +2732,28 @@ class TestRemoveLabelHelper:
             # Should not raise even on subprocess failure
             await mgr._remove_label("issue", 42, "missing-label")
 
+    @pytest.mark.asyncio
+    async def test_remove_label_missing_label_404_is_noop(
+        self, config, event_bus, caplog
+    ):
+        """Missing-label 404 should be treated as expected no-op (not warning)."""
+        mgr = _make_manager(config, event_bus)
+        mock_create = (
+            SubprocessMockBuilder()
+            .with_returncode(1)
+            .with_stderr("gh: Label does not exist (HTTP 404)")
+            .build()
+        )
+
+        with (
+            patch("asyncio.create_subprocess_exec", mock_create),
+            caplog.at_level(logging.DEBUG, logger="hydraflow.pr_manager"),
+        ):
+            await mgr._remove_label("issue", 42, "missing-label")
+
+        assert "Could not remove label" not in caplog.text
+        assert "skipping remove" in caplog.text
+
 
 # ---------------------------------------------------------------------------
 # Decomposed get_label_counts helpers

@@ -960,6 +960,7 @@ class MemoryIssueData(TypedDict):
     title: str
     body: str
     createdAt: str
+    labels: NotRequired[list[str]]
 
 
 class MemorySyncResult(TypedDict):

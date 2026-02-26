@@ -725,6 +725,99 @@ class TestMemorySyncWorkerSync:
         assert isinstance(call_args[1], str)  # digest hash
 
     @pytest.mark.asyncio
+    async def test_sync_auto_closes_processed_memory_issues(
+        self, tmp_path: Path
+    ) -> None:
+        config = ConfigFactory.create(repo_root=tmp_path)
+        state = MagicMock()
+        state.get_memory_state.return_value = ([], "", None)
+        bus = MagicMock()
+        prs = MagicMock()
+        prs.close_issue = AsyncMock()
+
+        worker = MemorySyncWorker(config, state, bus, prs=prs)
+        issues = [
+            {
+                "number": 5,
+                "title": "[Memory] T",
+                "body": "**Learning:** Something",
+                "createdAt": "",
+                "labels": ["hydraflow-memory"],
+            },
+            {
+                "number": 6,
+                "title": "[Memory] U",
+                "body": "**Learning:** Else",
+                "createdAt": "",
+                "labels": ["hydraflow-memory"],
+            },
+        ]
+        await worker.sync(issues)
+
+        assert prs.close_issue.await_count == 2
+        prs.close_issue.assert_any_await(5)
+        prs.close_issue.assert_any_await(6)
+
+    @pytest.mark.asyncio
+    async def test_sync_close_issue_failure_does_not_fail_sync(
+        self, tmp_path: Path
+    ) -> None:
+        config = ConfigFactory.create(repo_root=tmp_path)
+        state = MagicMock()
+        state.get_memory_state.return_value = ([], "", None)
+        bus = MagicMock()
+        prs = MagicMock()
+        prs.close_issue = AsyncMock(side_effect=RuntimeError("close failed"))
+
+        worker = MemorySyncWorker(config, state, bus, prs=prs)
+        issues = [
+            {
+                "number": 5,
+                "title": "[Memory] T",
+                "body": "**Learning:** Something",
+                "createdAt": "",
+                "labels": ["hydraflow-memory"],
+            },
+        ]
+        stats = await worker.sync(issues)
+
+        assert stats["item_count"] == 1
+        prs.close_issue.assert_awaited_once_with(5)
+
+    @pytest.mark.asyncio
+    async def test_sync_does_not_close_non_memory_style_issues(
+        self, tmp_path: Path
+    ) -> None:
+        config = ConfigFactory.create(repo_root=tmp_path)
+        state = MagicMock()
+        state.get_memory_state.return_value = ([], "", None)
+        bus = MagicMock()
+        prs = MagicMock()
+        prs.close_issue = AsyncMock()
+
+        worker = MemorySyncWorker(config, state, bus, prs=prs)
+        issues = [
+            {
+                "number": 5,
+                "title": "Feature issue that mentions memory",
+                "body": "**Learning:** Something",
+                "createdAt": "",
+                "labels": ["hydraflow-memory"],
+            },
+            {
+                "number": 6,
+                "title": "[Memory] Missing memory label",
+                "body": "**Learning:** Else",
+                "createdAt": "",
+                "labels": ["hydraflow-plan"],
+            },
+        ]
+        stats = await worker.sync(issues)
+
+        assert stats["item_count"] == 2
+        prs.close_issue.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_sync_refreshes_manifest_and_syncer(self, tmp_path: Path) -> None:
         config = ConfigFactory.create(repo_root=tmp_path)
         state = MagicMock()

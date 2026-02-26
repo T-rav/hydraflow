@@ -32,6 +32,12 @@ logger = logging.getLogger("hydraflow.pr_manager")
 _LABEL_CACHE_TTL: int = 30
 
 
+def _is_missing_label_404(exc: RuntimeError) -> bool:
+    """Return True when gh reports a missing label during label removal."""
+    msg = str(exc).lower()
+    return "label does not exist" in msg and "http 404" in msg
+
+
 class SelfReviewError(RuntimeError):
     """Raised when a formal review fails due to the 'own pull request' restriction."""
 
@@ -452,6 +458,14 @@ class PRManager:
                 "DELETE",
             )
         except RuntimeError as exc:
+            if _is_missing_label_404(exc):
+                logger.debug(
+                    "Label %r not present on %s #%d; skipping remove",
+                    label,
+                    target,
+                    number,
+                )
+                return
             logger.warning(
                 "Could not remove label %r from %s #%d: %s",
                 label,

@@ -58,6 +58,7 @@ class MemorySyncLoop(BaseBackgroundLoop):
                 title=i.title,
                 body=i.body,
                 createdAt=i.created_at,
+                labels=list(i.labels),
             )
             for i in issues
         ]

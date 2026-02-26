@@ -201,6 +201,7 @@ def build_services(
         state,
         event_bus,
         runner=subprocess_runner,
+        prs=prs,
         manifest_syncer=manifest_syncer,
     )
     retrospective = RetrospectiveCollector(config, state, prs)
