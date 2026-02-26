@@ -7,7 +7,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import delta_verifier
 from delta_verifier import parse_file_delta, verify_delta
+
+
+class TestLoggerNamespace:
+    def test_logger_prefers_hydraflow_namespace(self) -> None:
+        assert delta_verifier.logger.name == "hydraflow.delta_verifier"
+
 
 # ---------------------------------------------------------------------------
 # parse_file_delta
