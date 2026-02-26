@@ -5,21 +5,19 @@ import { TranscriptView } from './components/TranscriptView'
 import { HumanInputBanner } from './components/HumanInputBanner'
 import { HITLTable } from './components/HITLTable'
 import { SystemPanel } from './components/SystemPanel'
-import { MetricsPanel } from './components/MetricsPanel'
 import { IssueHistoryPanel } from './components/IssueHistoryPanel'
 import { StreamView } from './components/StreamView'
 import { SessionSidebar } from './components/SessionSidebar'
 import { theme } from './theme'
 import { ACTIVE_STATUSES } from './constants'
 
-const TABS = ['issues', 'history', 'transcript', 'hitl', 'metrics', 'system']
+const TABS = ['issues', 'history', 'transcript', 'hitl', 'system']
 
 const TAB_LABELS = {
   issues: 'Work Stream',
   history: 'History',
   transcript: 'Transcript',
   hitl: 'HITL',
-  metrics: 'Metrics',
   system: 'System',
 }
 
@@ -145,8 +143,13 @@ function AppContent() {
               <TranscriptView workers={workers} selectedWorker={selectedWorker} />
             )}
             {activeTab === 'hitl' && <HITLTable items={hitlItems} onRefresh={refreshHitl} />}
-            {activeTab === 'system' && <SystemPanel backgroundWorkers={backgroundWorkers} onToggleBgWorker={toggleBgWorker} onUpdateInterval={updateBgWorkerInterval} />}
-            {activeTab === 'metrics' && <MetricsPanel />}
+            {activeTab === 'system' && (
+              <SystemPanel
+                backgroundWorkers={backgroundWorkers}
+                onToggleBgWorker={toggleBgWorker}
+                onUpdateInterval={updateBgWorkerInterval}
+              />
+            )}
           </div>
         </div>
       </div>

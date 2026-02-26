@@ -5,10 +5,12 @@ import { useHydraFlow } from '../context/HydraFlowContext'
 import { Livestream } from './Livestream'
 import { PipelineControlPanel } from './PipelineControlPanel'
 import { WorkerLogStream } from './WorkerLogStream'
+import { MetricsPanel } from './MetricsPanel'
 
 const SUB_TABS = [
   { key: 'workers', label: 'Workers' },
   { key: 'pipeline', label: 'Pipeline' },
+  { key: 'metrics', label: 'Metrics' },
   { key: 'livestream', label: 'Livestream' },
 ]
 
@@ -391,6 +393,11 @@ export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onUpdateInter
         {activeSubTab === 'pipeline' && (
           <PipelineControlPanel onToggleBgWorker={onToggleBgWorker} />
         )}
+        {activeSubTab === 'metrics' && (
+          <div style={styles.metricsContent}>
+            <MetricsPanel />
+          </div>
+        )}
         {activeSubTab === 'livestream' && <Livestream events={events} />}
       </div>
     </div>
@@ -435,6 +442,11 @@ const styles = {
     flex: 1,
     overflowY: 'auto',
     padding: 20,
+  },
+  metricsContent: {
+    flex: 1,
+    height: '100%',
+    overflow: 'hidden',
   },
   heading: {
     fontSize: 16,

@@ -21,6 +21,9 @@ function defaultMockContext(overrides = {}) {
     orchestratorStatus: 'idle',
     stageStatus: deriveStageStatus(pipelineIssues, workers, backgroundWorkers, {}),
     events: [],
+    metrics: null,
+    metricsHistory: null,
+    githubMetrics: null,
     ...overrides,
   }
 }
@@ -41,6 +44,24 @@ const mockBgWorkers = [
 ]
 
 describe('SystemPanel', () => {
+  describe('Sub-tabs', () => {
+    it('includes Metrics sub-tab when viewing system panel', () => {
+      render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
+      expect(screen.getByText('Metrics')).toBeInTheDocument()
+    })
+
+    it('renders MetricsPanel content when Metrics sub-tab selected', () => {
+      mockUseHydraFlow.mockReturnValue(defaultMockContext({
+        metrics: {
+          lifetime: { issues_completed: 2, prs_merged: 1 },
+        },
+      }))
+      render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
+      fireEvent.click(screen.getByText('Metrics'))
+      expect(screen.getByText('Lifetime')).toBeInTheDocument()
+    })
+  })
+
   describe('Background Workers', () => {
     it('renders all background worker cards (including system workers)', () => {
       render(<SystemPanel backgroundWorkers={mockBgWorkers} />)

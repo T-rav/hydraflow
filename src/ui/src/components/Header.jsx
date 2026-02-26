@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { theme } from '../theme'
 import { useHydraFlow } from '../context/HydraFlowContext'
+import { PIPELINE_STAGES } from '../constants'
 
 export function Header({
   connected, orchestratorStatus,
@@ -45,6 +46,18 @@ export function Header({
   const isRunning = orchestratorStatus === 'running'
   const isCreditsPaused = orchestratorStatus === 'credits_paused'
 
+  const sessionStages = PIPELINE_STAGES.map((stage) => ({
+    key: stage.key,
+    label: stage.label,
+    color: stage.color,
+    count: stageStatus?.[stage.key]?.sessionCount || 0,
+  }))
+
+  const abbreviateStage = (label) => {
+    if (label.length <= 4) return label.toUpperCase()
+    return label.slice(0, 3).toUpperCase()
+  }
+
   return (
     <header style={styles.header}>
       <div style={styles.left}>
@@ -73,6 +86,24 @@ export function Header({
             <span style={styles.workloadFailed}>{workload.failed} failed</span>
             <span style={styles.workloadSep}>|</span>
             <span>{workload.total} total</span>
+          </div>
+          <div style={styles.pipelineRow} data-testid="session-pipeline">
+            {sessionStages.map((stage, index) => (
+              <React.Fragment key={stage.key}>
+                <div
+                  style={{ ...styles.pipelineStage, borderColor: stage.color }}
+                  data-testid={`session-stage-${stage.key}`}
+                >
+                  <span style={{ ...styles.pipelineLabel, color: stage.color }}>
+                    {abbreviateStage(stage.label)}
+                  </span>
+                  <span style={styles.pipelineValue}>{stage.count}</span>
+                </div>
+                {index < sessionStages.length - 1 && (
+                  <span style={styles.pipelineArrow}>→</span>
+                )}
+              </React.Fragment>
+            ))}
           </div>
         </div>
       </div>
@@ -136,13 +167,13 @@ const styles = {
   },
   sessionBox: {
     display: 'flex',
-    alignItems: 'center',
-    gap: 12,
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 6,
     border: `1px solid ${theme.border}`,
     borderRadius: 8,
-    padding: '6px 14px',
+    padding: '8px 14px',
     background: theme.bg,
-    flexWrap: 'wrap',
   },
   sessionLabel: {
     color: theme.textMuted,
@@ -157,6 +188,38 @@ const styles = {
     gap: 6,
     fontSize: 12,
     color: theme.textMuted,
+    flexWrap: 'wrap',
+  },
+  pipelineRow: {
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  pipelineStage: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 999,
+    padding: '2px 8px',
+    border: `1px solid ${theme.border}`,
+    background: theme.surface,
+  },
+  pipelineLabel: {
+    fontSize: 10,
+    fontWeight: 600,
+    letterSpacing: '0.5px',
+    color: theme.textMuted,
+  },
+  pipelineValue: {
+    fontSize: 13,
+    fontWeight: 700,
+    color: theme.textBright,
+  },
+  pipelineArrow: {
+    color: theme.textMuted,
+    fontSize: 12,
+    fontWeight: 600,
   },
   workloadSep: { color: theme.border },
   workloadActive: { color: theme.accent },
