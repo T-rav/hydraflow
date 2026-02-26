@@ -657,10 +657,10 @@ class TestCreditExhaustionPauseResume:
 class TestConfigCreditPauseBuffer:
     """Tests for the credit_pause_buffer_minutes config field."""
 
-    def test_default_value(self) -> None:
+    def test_credit_pause_buffer_default_is_one_minute(self) -> None:
         config = ConfigFactory.create()
         assert config.credit_pause_buffer_minutes == 1
 
-    def test_custom_value(self) -> None:
+    def test_credit_pause_buffer_accepts_custom_minutes(self) -> None:
         config = ConfigFactory.create(credit_pause_buffer_minutes=5)
         assert config.credit_pause_buffer_minutes == 5

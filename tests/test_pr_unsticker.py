@@ -90,14 +90,14 @@ def _make_hitl_item(issue: int = 42, **kwargs) -> HITLItem:
 class TestCauseClassification:
     """Test _classify_cause() with various cause strings."""
 
-    def test_merge_conflict(self) -> None:
+    def test_classify_cause_merge_conflict_returns_merge_conflict(self) -> None:
         assert (
             _classify_cause("Merge conflict with main") == FailureCause.MERGE_CONFLICT
         )
         assert _classify_cause("merge conflict") == FailureCause.MERGE_CONFLICT
         assert _classify_cause("Has CONFLICT markers") == FailureCause.MERGE_CONFLICT
 
-    def test_ci_failure(self) -> None:
+    def test_classify_cause_ci_failure_returns_ci_failure(self) -> None:
         assert (
             _classify_cause("CI failed after 2 fix attempts") == FailureCause.CI_FAILURE
         )
@@ -107,14 +107,14 @@ class TestCauseClassification:
         assert _classify_cause("lint failure") == FailureCause.CI_FAILURE
         assert _classify_cause("type errors in module") == FailureCause.CI_FAILURE
 
-    def test_review_fix_cap(self) -> None:
+    def test_classify_cause_review_fix_cap_returns_review_fix_cap(self) -> None:
         assert _classify_cause("Review fix cap exceeded") == FailureCause.REVIEW_FIX_CAP
         assert (
             _classify_cause("fix attempt limit reached") == FailureCause.REVIEW_FIX_CAP
         )
         assert _classify_cause("review cap hit") == FailureCause.REVIEW_FIX_CAP
 
-    def test_generic(self) -> None:
+    def test_classify_cause_unknown_input_returns_generic(self) -> None:
         assert _classify_cause("Unknown issue") == FailureCause.GENERIC
         assert _classify_cause("") == FailureCause.GENERIC
         assert _classify_cause("Manual escalation") == FailureCause.GENERIC

@@ -35,7 +35,9 @@ def _event(
 
 
 class TestGroupEventsByIssue:
-    def test_single_issue(self, event_bus: EventBus) -> None:
+    def test_group_events_creates_one_group_for_single_issue(
+        self, event_bus: EventBus
+    ) -> None:
         builder = TimelineBuilder(event_bus)
         events = [
             _event(EventType.TRIAGE_UPDATE, 0, issue=42, status="evaluating"),
