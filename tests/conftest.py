@@ -42,13 +42,24 @@ if TYPE_CHECKING:
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_environment():
-    """Set minimal env vars and prevent real subprocess calls."""
+    """Set minimal env vars and prevent host HYDRAFLOW_* overrides from leaking into tests."""
+
+    # Strip any HYDRAFLOW_* env values from the host so defaults remain deterministic.
+    hydraflow_env = {
+        key: os.environ[key] for key in list(os.environ) if key.startswith("HYDRAFLOW_")
+    }
+    for key in hydraflow_env:
+        os.environ.pop(key, None)
+
     test_env = {
         "HOME": "/tmp/hydraflow-test",
         "GH_TOKEN": "test-token",
     }
     with patch.dict(os.environ, test_env, clear=False):
         yield
+
+    # Restore the developer's HYDRAFLOW_* env vars after the test session finishes.
+    os.environ.update(hydraflow_env)
 
 
 # --- Config Fixtures ---
