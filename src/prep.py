@@ -770,12 +770,21 @@ class RepoAuditor:
         See: AGENTS.md in the HydraFlow repo.
         """
         agents_md = self._root / "AGENTS.md"
+
+        if agents_md.is_dir():
+            return AuditCheck(
+                name="AGENTS.md",
+                status=AuditCheckStatus.PARTIAL,
+                detail="AGENTS.md exists as a directory, not a file — remove it and run `hf init`",
+            )
+
         if agents_md.is_file():
             return AuditCheck(
                 name="AGENTS.md",
                 status=AuditCheckStatus.PRESENT,
                 detail="agent prompt contracts documented",
             )
+
         return AuditCheck(
             name="AGENTS.md",
             status=AuditCheckStatus.MISSING,

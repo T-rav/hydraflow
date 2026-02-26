@@ -1,15 +1,18 @@
 """Structural conformance tests for hexagonal port interfaces.
 
 These tests assert that the concrete infrastructure adapters satisfy their
-respective port protocols via runtime_checkable isinstance checks.
+respective port protocols via runtime_checkable isinstance checks AND via
+inspect.signature comparison.
 
-They do NOT test behaviour — that lives in the per-class test modules.
-Their purpose is to catch regressions where a refactor silently removes a
-method that the domain relies on through the port interface.
+isinstance() with runtime_checkable only verifies that methods *exist* on the
+class — it does NOT verify that parameter names, types, or counts match.
+The signature tests in TestPRPortSignatures / TestWorktreePortSignatures catch
+those mismatches before they cause runtime errors.
 """
 
 from __future__ import annotations
 
+import inspect
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -133,3 +136,82 @@ class TestWorktreePortMethods:
         assert hasattr(WorktreeManager, method), (
             f"WorktreeManager is missing '{method}' which is declared in WorktreePort"
         )
+
+
+# ---------------------------------------------------------------------------
+# Signature validation — isinstance() is not enough
+# ---------------------------------------------------------------------------
+#
+# runtime_checkable isinstance() only checks that methods exist, NOT that their
+# parameter names / counts / types match.  These tests compare
+# inspect.signature() between the port and the concrete implementation so that
+# signature drift is caught before it causes runtime errors.
+
+
+def _port_params(port_cls: type, method: str) -> dict[str, inspect.Parameter]:
+    """Return the non-self parameters of *method* on *port_cls*."""
+    sig = inspect.signature(getattr(port_cls, method))
+    return {k: v for k, v in sig.parameters.items() if k != "self"}
+
+
+def _impl_params(impl_cls: type, method: str) -> dict[str, inspect.Parameter]:
+    """Return the non-self parameters of *method* on *impl_cls*."""
+    sig = inspect.signature(getattr(impl_cls, method))
+    return {k: v for k, v in sig.parameters.items() if k != "self"}
+
+
+def _assert_param_names_match(port_cls: type, impl_cls: type, method: str) -> None:
+    """Raise AssertionError if parameter names differ between port and impl."""
+    port_p = _port_params(port_cls, method)
+    impl_p = _impl_params(impl_cls, method)
+    assert set(port_p) == set(impl_p), (
+        f"{impl_cls.__name__}.{method} parameter mismatch with {port_cls.__name__}.\n"
+        f"  Port params:  {list(port_p)}\n"
+        f"  Impl params:  {list(impl_p)}\n"
+        f"Update ports.py to match the concrete implementation."
+    )
+
+
+class TestPRPortSignatures:
+    """PRPort method signatures must exactly match PRManager's implementations."""
+
+    _SIGNED_METHODS = [
+        "push_branch",
+        "create_pr",
+        "merge_pr",
+        "get_pr_diff",
+        "wait_for_ci",
+        "add_labels",
+        "remove_label",
+        "swap_pipeline_labels",
+        "post_comment",
+        "submit_review",
+        "fetch_ci_failure_logs",
+        "close_issue",
+        "create_issue",
+        "list_hitl_items",
+    ]
+
+    @pytest.mark.parametrize("method", _SIGNED_METHODS)
+    def test_signature_matches_pr_manager(self, method: str) -> None:
+        from pr_manager import PRManager
+
+        _assert_param_names_match(PRPort, PRManager, method)
+
+
+class TestWorktreePortSignatures:
+    """WorktreePort method signatures must exactly match WorktreeManager's."""
+
+    _SIGNED_METHODS = [
+        "create",
+        "destroy",
+        "destroy_all",
+        "merge_main",
+        "get_conflicting_files",
+    ]
+
+    @pytest.mark.parametrize("method", _SIGNED_METHODS)
+    def test_signature_matches_worktree_manager(self, method: str) -> None:
+        from worktree import WorktreeManager
+
+        _assert_param_names_match(WorktreePort, WorktreeManager, method)

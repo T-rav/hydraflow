@@ -246,6 +246,59 @@ class TestNoDualLabelBug:
             assert label_a not in pipeline_on_issue
 
 
+class TestNonPipelineLabelPreservation:
+    """Non-pipeline labels (e.g. 'bug', 'priority:high') survive swap_pipeline_labels.
+
+    swap_pipeline_labels must only touch pipeline labels.  User-defined labels
+    such as 'bug', 'good first issue', or 'priority:high' must be left intact
+    throughout the entire pipeline lifecycle.
+    """
+
+    # Strategy: arbitrary label strings that are NOT pipeline labels
+    _st_user_label = st.text(
+        alphabet=st.characters(
+            whitelist_categories=("Ll", "Lu", "Nd"), whitelist_characters="-: "
+        ),
+        min_size=1,
+        max_size=40,
+    ).filter(lambda lbl: lbl not in ALL_PIPELINE_LABELS)
+
+    @given(
+        new_label=st.sampled_from(ALL_PIPELINE_LABELS),
+        user_labels=st.lists(_st_user_label, min_size=1, max_size=5),
+    )
+    def test_non_pipeline_labels_survive_swap(
+        self, new_label: str, user_labels: list[str]
+    ) -> None:
+        """All non-pipeline labels present before swap are still present after."""
+        # Start with the user labels and one pipeline label
+        starting = user_labels + [ALL_PIPELINE_LABELS[0]]
+        result = _issue_labels_after_swap(new_label, starting)
+        for lbl in user_labels:
+            assert lbl in result, (
+                f"Non-pipeline label '{lbl}' was removed by swap to '{new_label}'. "
+                f"swap_pipeline_labels must only remove pipeline labels."
+            )
+
+    @given(
+        stages=st_stage_sequence,
+        user_labels=st.lists(_st_user_label, min_size=1, max_size=3),
+    )
+    def test_non_pipeline_labels_survive_full_sequence(
+        self, stages: list[str], user_labels: list[str]
+    ) -> None:
+        """User-defined labels survive an arbitrary sequence of pipeline transitions."""
+        current_labels: list[str] = list(user_labels)
+        for stage in stages:
+            new_label = _stage_to_label(stage)
+            current_labels = list(_issue_labels_after_swap(new_label, current_labels))
+
+        for lbl in user_labels:
+            assert lbl in current_labels, (
+                f"Non-pipeline label '{lbl}' was lost after stages {stages}."
+            )
+
+
 # ---------------------------------------------------------------------------
 # Async integration tests (PRManager with mocked gh CLI calls)
 # ---------------------------------------------------------------------------

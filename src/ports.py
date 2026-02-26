@@ -27,16 +27,21 @@ Usage in tests — replace concrete classes with AsyncMock / stub::
     from ports import PRPort
 
     prs: PRPort = AsyncMock(spec=PRPort)  # type: ignore[assignment]
+
+IMPORTANT: All method signatures here are kept in sync with the concrete
+implementations.  If a signature drifts, ``tests/test_ports.py`` will catch
+it via ``inspect.signature`` comparison.
 """
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
-from typing import Any, runtime_checkable
+from typing import runtime_checkable
 
 from typing_extensions import Protocol
 
-from models import HITLItem, PRInfo
+from models import GitHubIssue, HITLItem, PRInfo, ReviewVerdict
 
 __all__ = ["PRPort", "WorktreePort"]
 
@@ -46,6 +51,8 @@ class PRPort(Protocol):
     """Port for GitHub PR, label, and CI operations.
 
     Implemented by: ``pr_manager.PRManager``
+    Signatures are kept identical to the concrete class to enable
+    structural subtype checks in ``tests/test_ports.py``.
     """
 
     # --- Branch / PR lifecycle ---
@@ -56,15 +63,14 @@ class PRPort(Protocol):
 
     async def create_pr(
         self,
-        issue_number: int,
+        issue: GitHubIssue,
         branch: str,
-        worktree_path: Path,
-        *args: Any,
-        **kwargs: Any,
-    ) -> PRInfo | None:
-        """Create a pull request for *issue_number* on *branch*.
+        *,
+        draft: bool = False,
+    ) -> PRInfo:
+        """Create a PR for *branch* linked to *issue*.
 
-        Returns the created :class:`~models.PRInfo` or ``None`` on failure.
+        Matches ``pr_manager.PRManager.create_pr`` exactly.
         """
         ...
 
@@ -79,12 +85,14 @@ class PRPort(Protocol):
     async def wait_for_ci(
         self,
         pr_number: int,
-        *args: Any,
-        **kwargs: Any,
+        timeout: int,
+        poll_interval: int,
+        stop_event: asyncio.Event,
     ) -> tuple[bool, str]:
-        """Poll CI checks for *pr_number* until done or timeout.
+        """Poll CI checks until all complete or *timeout* seconds elapse.
 
         Returns ``(passed, summary_message)``.
+        Matches ``pr_manager.PRManager.wait_for_ci`` exactly.
         """
         ...
 
@@ -102,10 +110,13 @@ class PRPort(Protocol):
         self,
         issue_number: int,
         new_label: str,
-        *args: Any,
-        **kwargs: Any,
+        *,
+        pr_number: int | None = None,
     ) -> None:
-        """Atomically replace the current pipeline label with *new_label*."""
+        """Atomically replace the current pipeline label with *new_label*.
+
+        Matches ``pr_manager.PRManager.swap_pipeline_labels`` exactly.
+        """
         ...
 
     # --- Comments / review ---
@@ -117,10 +128,14 @@ class PRPort(Protocol):
     async def submit_review(
         self,
         pr_number: int,
-        *args: Any,
-        **kwargs: Any,
-    ) -> None:
-        """Submit a formal PR review (approve / request changes / comment)."""
+        verdict: ReviewVerdict,
+        body: str,
+    ) -> bool:
+        """Submit a formal GitHub PR review.
+
+        Returns True on success.
+        Matches ``pr_manager.PRManager.submit_review`` exactly.
+        """
         ...
 
     # --- CI / checks ---
@@ -139,10 +154,9 @@ class PRPort(Protocol):
         self,
         title: str,
         body: str,
-        *args: Any,
-        **kwargs: Any,
+        labels: list[str] | None = None,
     ) -> int:
-        """Create a new GitHub issue. Returns the new issue number."""
+        """Create a new GitHub issue. Returns the new issue number (0 on failure)."""
         ...
 
     # --- HITL ---

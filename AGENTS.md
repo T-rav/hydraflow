@@ -225,12 +225,49 @@ completeness / quality, optionally applies fixes, and returns a verdict.
 
 ### Precheck sub-agent
 
-Before the main review, a lightweight precheck agent runs on a diff snippet (≤3 000 chars) to:
-- Estimate risk (`low|medium|high`) and confidence (0.0–1.0)
-- Recommend debug escalation (`yes|no`)
-- Surface top 5 findings
+Before the main review, a lightweight precheck agent runs on a diff snippet
+(≤3 000 chars, further capped by `max_review_diff_chars`) to provide a fast
+triage signal that shapes the main review prompt.
 
-Precheck output is injected into the main review prompt as context.
+#### Prompt structure
+
+```
+Run a compact review precheck for PR #N (issue #M).
+
+Goal:
+- estimate risk and confidence
+- list top findings (max 5)
+- recommend whether debug escalation is needed
+
+Return EXACTLY:
+PRECHECK_RISK: low|medium|high
+PRECHECK_CONFIDENCE: <0.0-1.0>
+PRECHECK_ESCALATE: yes|no
+PRECHECK_SUMMARY: <one line>
+
+Issue title: <title>
+Diff snippet: <≤3 000 chars>
+```
+
+#### Output contract
+
+The precheck agent **must** emit all four markers on their own lines, in order:
+
+| Marker | Values | Description |
+|--------|--------|-------------|
+| `PRECHECK_RISK:` | `low` \| `medium` \| `high` | Overall change risk |
+| `PRECHECK_CONFIDENCE:` | `0.0`–`1.0` | Confidence in the risk estimate |
+| `PRECHECK_ESCALATE:` | `yes` \| `no` | Whether debug-mode escalation is recommended |
+| `PRECHECK_SUMMARY:` | one-line free text | Human-readable summary of top concern |
+
+Parsed by `reviewer.py:_run_precheck_context` via `precheck.run_precheck_context`.
+
+#### Integration
+
+The four-line precheck result is injected verbatim into the **main review
+prompt** under the "Precheck context" heading (step 5 of the review prompt
+structure). If the precheck call fails or returns no output, the fallback text
+`"No low-tier precheck context provided."` is used — the main review still runs.
 
 ### CI-fix prompt structure
 

@@ -1563,3 +1563,46 @@ class TestCheckAgentsMd:
         # Verify the check name matches what run_audit() would include
         assert check.name == "AGENTS.md"
         assert check.status == AuditCheckStatus.PRESENT
+
+    def test_empty_file_is_still_present(self, tmp_path: Path) -> None:
+        """An empty AGENTS.md is reported as PRESENT — audit checks existence, not content."""
+        (tmp_path / "AGENTS.md").write_text("")
+        config = ConfigFactory.create(repo_root=tmp_path)
+        from prep import RepoAuditor
+
+        auditor = RepoAuditor(config)
+        check = auditor._check_agents_md()
+        assert check.status == AuditCheckStatus.PRESENT
+
+    def test_directory_named_agents_md_is_partial(self, tmp_path: Path) -> None:
+        """A directory named AGENTS.md returns PARTIAL, not PRESENT."""
+        (tmp_path / "AGENTS.md").mkdir()
+        config = ConfigFactory.create(repo_root=tmp_path)
+        from prep import RepoAuditor
+
+        auditor = RepoAuditor(config)
+        check = auditor._check_agents_md()
+        assert check.status == AuditCheckStatus.PARTIAL
+        assert "directory" in check.detail
+
+    def test_symlink_to_valid_file_is_present(self, tmp_path: Path) -> None:
+        """A symlink pointing to a valid AGENTS.md file is reported as PRESENT."""
+        target = tmp_path / "AGENTS-template.md"
+        target.write_text("# AGENTS\n")
+        (tmp_path / "AGENTS.md").symlink_to(target)
+        config = ConfigFactory.create(repo_root=tmp_path)
+        from prep import RepoAuditor
+
+        auditor = RepoAuditor(config)
+        check = auditor._check_agents_md()
+        assert check.status == AuditCheckStatus.PRESENT
+
+    def test_broken_symlink_is_missing(self, tmp_path: Path) -> None:
+        """A symlink pointing to a non-existent file is reported as MISSING."""
+        (tmp_path / "AGENTS.md").symlink_to(tmp_path / "nonexistent.md")
+        config = ConfigFactory.create(repo_root=tmp_path)
+        from prep import RepoAuditor
+
+        auditor = RepoAuditor(config)
+        check = auditor._check_agents_md()
+        assert check.status == AuditCheckStatus.MISSING
