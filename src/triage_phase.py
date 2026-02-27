@@ -79,6 +79,7 @@ class TriagePhase:
                         )
                     else:
                         await self._transitioner.transition(issue.id, "review")
+                        self._store.enqueue_transition(issue, "review")
                         logger.info(
                             "Issue #%d ADR triage → %s (validated ADR shape)",
                             issue.id,
@@ -93,6 +94,7 @@ class TriagePhase:
 
                 if result.ready:
                     await self._transitioner.transition(issue.id, "plan")
+                    self._store.enqueue_transition(issue, "plan")
                     logger.info(
                         "Issue #%d triaged → %s (ready for planning)",
                         issue.id,
@@ -100,6 +102,7 @@ class TriagePhase:
                     )
                 else:
                     await self._escalate_triage_issue(issue.id, result.reasons)
+                    self._store.enqueue_transition(issue, "hitl")
                     await self._bus.publish(
                         HydraFlowEvent(
                             type=EventType.HITL_UPDATE,

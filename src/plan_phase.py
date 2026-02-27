@@ -102,6 +102,7 @@ class PlanPhase:
         analysis = analyzer.analyze(result.plan, issue.id)
         await self._transitioner.post_comment(issue.id, analysis.format_comment())
         await self._transitioner.transition(issue.id, "ready")
+        self._store.enqueue_transition(issue, "ready")
 
         for new_issue in result.new_issues:
             if len(new_issue.body) < _MIN_ISSUE_BODY_CHARS:
@@ -141,6 +142,7 @@ class PlanPhase:
             origin_label=self._config.planner_label[0],
             hitl_label=self._config.hitl_label[0],
         )
+        self._store.enqueue_transition(issue, "hitl")
         record_harness_failure(
             self._harness_insights,
             issue.id,

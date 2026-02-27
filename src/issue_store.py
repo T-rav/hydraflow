@@ -249,6 +249,35 @@ class IssueStore:
         for stage in self._queues:
             self._remove_from_queue(stage, issue_number)
 
+    def enqueue_transition(self, task: Task, next_stage: str) -> None:
+        """Immediately route *task* into *next_stage* in-memory.
+
+        This provides an eager handoff between phases so downstream workers
+        can pick up transitioned issues without waiting for the next GitHub
+        polling cycle.
+        """
+        stage_alias: dict[str, IssueStoreStage] = {
+            "find": STAGE_FIND,
+            "plan": STAGE_PLAN,
+            "ready": STAGE_READY,
+            "review": STAGE_REVIEW,
+            "hitl": STAGE_HITL,
+        }
+        stage = stage_alias.get(next_stage)
+        if stage is None:
+            return
+
+        self._issue_cache[task.id] = task
+        self._remove_from_all_queues(task.id)
+        self._hitl_numbers.discard(task.id)
+
+        if stage == STAGE_HITL:
+            self._hitl_numbers.add(task.id)
+            return
+
+        self._queues[stage].append(task)
+        self._queue_members[stage].add(task.id)
+
     # ------------------------------------------------------------------
     # Queue accessors (non-blocking, return available issues)
     # ------------------------------------------------------------------

@@ -165,6 +165,29 @@ class TestRouting:
 
         assert 50 in store._hitl_numbers
 
+    def test_enqueue_transition_moves_issue_to_next_stage_immediately(self) -> None:
+        store = _make_store()
+        issue = TaskFactory.create(id=60, tags=["hydraflow-find"])
+        store._route_issues([issue])
+        assert 60 in store._queue_members[STAGE_FIND]
+
+        store.enqueue_transition(issue, "plan")
+
+        assert 60 not in store._queue_members[STAGE_FIND]
+        assert 60 in store._queue_members[STAGE_PLAN]
+        assert 60 not in store._hitl_numbers
+
+    def test_enqueue_transition_routes_to_hitl_set(self) -> None:
+        store = _make_store()
+        issue = TaskFactory.create(id=61, tags=["hydraflow-plan"])
+        store._route_issues([issue])
+        assert 61 in store._queue_members[STAGE_PLAN]
+
+        store.enqueue_transition(issue, "hitl")
+
+        assert 61 not in store._queue_members[STAGE_PLAN]
+        assert 61 in store._hitl_numbers
+
 
 # ── Queue Accessors ──────────────────────────────────────────────────
 
