@@ -3,6 +3,7 @@ import { theme } from '../theme'
 import { PIPELINE_STAGES, PULSE_ANIMATION } from '../constants'
 import { formatDuration, STAGE_META, STAGE_KEYS } from '../hooks/useTimeline'
 import { TranscriptPreview } from './TranscriptPreview'
+import { WORKSTREAM_SIDE_INSET_PX } from '../styles/sectionStyles'
 
 export function StatusDot({ status, stageKey }) {
   if (status === 'active') {
@@ -117,7 +118,10 @@ export function StreamCard({ issue, intent, defaultExpanded, onRequestChanges, t
     : null
 
   return (
-    <div style={{ ...styles.card, ...(cardStageStyle || {}) }}>
+    <div
+      style={{ ...styles.card, ...(cardStageStyle || {}) }}
+      data-testid={`stream-card-${issue.issueNumber}`}
+    >
       <div style={styles.header} onClick={toggle}>
         <div style={styles.headerLeft}>
           {issue.issueUrl ? (
@@ -336,7 +340,7 @@ const styles = {
   card: {
     background: theme.surface,
     borderRadius: 8,
-    margin: '0 8px 8px',
+    margin: `0 ${WORKSTREAM_SIDE_INSET_PX}px 8px`,
     overflow: 'hidden',
     border: `1px solid ${theme.border}`,
   },

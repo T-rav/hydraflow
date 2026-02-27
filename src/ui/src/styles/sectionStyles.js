@@ -1,11 +1,13 @@
 import { PIPELINE_STAGES } from '../constants'
 
+export const WORKSTREAM_SIDE_INSET_PX = 8
+
 const sectionHeaderBase = {
   display: 'flex',
   alignItems: 'center',
   gap: 8,
   padding: '8px 12px',
-  margin: '8px 8px 4px',
+  margin: `8px ${WORKSTREAM_SIDE_INSET_PX}px 4px`,
   cursor: 'pointer',
   userSelect: 'none',
   borderRadius: 6,
