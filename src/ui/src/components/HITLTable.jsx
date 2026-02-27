@@ -7,7 +7,10 @@ export function HITLTable({ items, onRefresh }) {
   const [expandedIssue, setExpandedIssue] = useState(null)
   const [corrections, setCorrections] = useState({})
   const [actionLoading, setActionLoading] = useState(null)
+  const [closedIssues, setClosedIssues] = useState(() => new Set())
   const { submitCorrection, skipIssue, closeIssue, approveAsMemory } = useHITLCorrection()
+
+  const visibleItems = items.filter(item => !closedIssues.has(item.issue))
 
   const toggleExpand = (issueNum) => {
     setExpandedIssue(prev => prev === issueNum ? null : issueNum)
@@ -36,9 +39,15 @@ export function HITLTable({ items, onRefresh }) {
   }
 
   const handleClose = async (issueNum) => {
-    if (!window.confirm(`Close issue #${issueNum}? This cannot be undone from the dashboard.`)) return
     setActionLoading({ issue: issueNum, action: 'close' })
-    await closeIssue(issueNum)
+    const ok = await closeIssue(issueNum)
+    if (ok) {
+      setClosedIssues(prev => {
+        const next = new Set(prev)
+        next.add(issueNum)
+        return next
+      })
+    }
     setActionLoading(null)
     setExpandedIssue(null)
     onRefresh()
@@ -61,16 +70,16 @@ export function HITLTable({ items, onRefresh }) {
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <span style={items.length === 0
+        <span style={visibleItems.length === 0
           ? { ...styles.headerText, color: theme.textMuted }
           : styles.headerText}>
-          {items.length === 0
+          {visibleItems.length === 0
             ? 'HITL'
-            : `${items.length} item${items.length !== 1 ? 's' : ''} awaiting action`}
+            : `${visibleItems.length} item${visibleItems.length !== 1 ? 's' : ''} awaiting action`}
         </span>
         <button onClick={onRefresh} style={styles.refresh}>Refresh</button>
       </div>
-      {items.length === 0 ? (
+      {visibleItems.length === 0 ? (
         <div style={styles.empty}>No stuck PRs</div>
       ) : (
       <table style={styles.table}>
@@ -85,7 +94,7 @@ export function HITLTable({ items, onRefresh }) {
           </tr>
         </thead>
         <tbody>
-          {items.map((item) => {
+          {visibleItems.map((item) => {
             const isExpanded = expandedIssue === item.issue
             const status = item.status || 'pending'
             return (
