@@ -64,40 +64,54 @@ class IssueFetcher:
         async def _query_label(label: str | None) -> None:
             if self._is_rate_limited_now():
                 return
-            cmd = [
-                "gh",
-                "api",
-                f"repos/{self._config.repo}/issues",
-                "--method",
-                "GET",
-                "--field",
-                "state=open",
-                "--field",
-                "sort=created",
-                "--field",
-                "direction=asc",
-                "--field",
-                f"per_page={limit}",
-            ]
-            if label is not None:
-                cmd += ["--field", f"labels={label}"]
-            try:
-                raw = await run_subprocess(*cmd, gh_token=self._config.gh_token)
-                self._note_success_after_rate_limit()
-                for item in json.loads(raw):
-                    if not isinstance(item, dict):
-                        continue
-                    if "pull_request" in item:
-                        continue
-                    normalized = self._normalize_issue_payload(item)
-                    number = normalized.get("number")
-                    if isinstance(number, int):
-                        seen.setdefault(number, normalized)
-            except (RuntimeError, json.JSONDecodeError, FileNotFoundError) as exc:
-                if isinstance(exc, RuntimeError) and self._is_rate_limit_error(exc):
-                    await self._set_rate_limit_backoff(exc)
+            page = 1
+            remaining = max(0, limit)
+            while remaining > 0:
+                per_page = min(100, remaining)
+                cmd = [
+                    "gh",
+                    "api",
+                    f"repos/{self._config.repo}/issues",
+                    "--method",
+                    "GET",
+                    "--field",
+                    "state=open",
+                    "--field",
+                    "sort=created",
+                    "--field",
+                    "direction=asc",
+                    "--field",
+                    f"per_page={per_page}",
+                    "--field",
+                    f"page={page}",
+                ]
+                if label is not None:
+                    cmd += ["--field", f"labels={label}"]
+                try:
+                    raw = await run_subprocess(*cmd, gh_token=self._config.gh_token)
+                    self._note_success_after_rate_limit()
+                    items = json.loads(raw)
+                    if not isinstance(items, list):
+                        break
+                    for item in items:
+                        if not isinstance(item, dict):
+                            continue
+                        if "pull_request" in item:
+                            continue
+                        normalized = self._normalize_issue_payload(item)
+                        number = normalized.get("number")
+                        if isinstance(number, int):
+                            seen.setdefault(number, normalized)
+                    if len(items) < per_page:
+                        break
+                    page += 1
+                    remaining -= per_page
+                except (RuntimeError, json.JSONDecodeError, FileNotFoundError) as exc:
+                    if isinstance(exc, RuntimeError) and self._is_rate_limit_error(exc):
+                        await self._set_rate_limit_backoff(exc)
+                        return
+                    logger.error("gh issue list failed for label=%r: %s", label, exc)
                     return
-                logger.error("gh issue list failed for label=%r: %s", label, exc)
 
         if labels:
             await asyncio.gather(*[_query_label(lbl) for lbl in labels])

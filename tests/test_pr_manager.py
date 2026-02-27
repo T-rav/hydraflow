@@ -17,7 +17,7 @@ import pytest
 from events import EventType
 from models import ReviewVerdict
 from pr_manager import PRManager
-from tests.conftest import SubprocessMockBuilder
+from tests.conftest import PRInfoFactory, SubprocessMockBuilder
 from tests.helpers import ConfigFactory
 
 # ---------------------------------------------------------------------------
@@ -799,6 +799,52 @@ async def test_create_pr_failure_returns_pr_info_with_number_zero(
 
 
 @pytest.mark.asyncio
+async def test_create_pr_failure_recovers_existing_open_pr(config, event_bus, issue):
+    manager = _make_manager(config, event_bus)
+    manager.find_open_pr_for_branch = AsyncMock(
+        return_value=PRInfoFactory.create(
+            number=222,
+            issue_number=issue.number,
+            branch="agent/issue-42",
+            url="https://github.com/test-org/test-repo/pull/222",
+        )
+    )
+    mock_create = (
+        SubprocessMockBuilder().with_returncode(1).with_stderr("gh: error").build()
+    )
+
+    with patch("asyncio.create_subprocess_exec", mock_create):
+        pr_info = await manager.create_pr(issue, "agent/issue-42")
+
+    assert pr_info.number == 222
+    manager.find_open_pr_for_branch.assert_awaited_once_with(
+        "agent/issue-42", issue_number=issue.number
+    )
+
+
+@pytest.mark.asyncio
+async def test_branch_has_diff_from_main_false_when_not_ahead(config, event_bus):
+    manager = _make_manager(config, event_bus)
+    mock_create = SubprocessMockBuilder().with_stdout('{"ahead_by":0}').build()
+
+    with patch("asyncio.create_subprocess_exec", mock_create):
+        has_diff = await manager.branch_has_diff_from_main("agent/issue-42")
+
+    assert has_diff is False
+
+
+@pytest.mark.asyncio
+async def test_branch_has_diff_from_main_true_when_ahead(config, event_bus):
+    manager = _make_manager(config, event_bus)
+    mock_create = SubprocessMockBuilder().with_stdout('{"ahead_by":3}').build()
+
+    with patch("asyncio.create_subprocess_exec", mock_create):
+        has_diff = await manager.branch_has_diff_from_main("agent/issue-42")
+
+    assert has_diff is True
+
+
+@pytest.mark.asyncio
 async def test_create_pr_publishes_pr_created_event(config, event_bus, issue):
     manager = _make_manager(config, event_bus)
     pr_url = "https://github.com/test-org/test-repo/pull/55"
@@ -1444,6 +1490,7 @@ async def test_ensure_labels_exist_uses_config_label_names(config, event_bus, tm
         fixed_label=["custom-fixed"],
         improve_label=["custom-improve"],
         memory_label=["custom-memory"],
+        transcript_label=["custom-transcript"],
         manifest_label=["custom-manifest"],
         metrics_label=["custom-metrics"],
         dup_label=["custom-dup"],
@@ -1489,6 +1536,7 @@ async def test_ensure_labels_exist_uses_config_label_names(config, event_bus, tm
         "custom-fixed",
         "custom-improve",
         "custom-memory",
+        "custom-transcript",
         "custom-manifest",
         "custom-metrics",
         "custom-dup",
@@ -1597,6 +1645,9 @@ def test_makefile_setup_runs_label_bootstrap() -> None:
     )
     assert "python -m hf_cli init --target" in match.group(1), (
         "setup target must bootstrap .claude/.codex/.pi/.githooks via hf init"
+    )
+    assert ".hydraflow-managed" in match.group(1), (
+        "setup target should mark managed Codex skills to enable safe stale-skill pruning"
     )
 
 

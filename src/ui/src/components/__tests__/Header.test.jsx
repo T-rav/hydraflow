@@ -142,10 +142,11 @@ describe('Header component', () => {
     }
     mockUseHydraFlow.mockReturnValue({ stageStatus: mockStageStatus(workers, { mergedCount: 1 }) })
     render(<Header {...defaultProps} />)
-    expect(screen.getByText('5 total')).toBeInTheDocument()
+    // Total is pipeline-centric (open pipeline issues + mergedCount).
+    expect(screen.getByText('1 total')).toBeInTheDocument()
     expect(screen.getByText('2 active')).toBeInTheDocument()
-    expect(screen.getByText('1 done')).toBeInTheDocument()  // mergedCount, not workers with 'done' status
-    expect(screen.getByText('1 failed')).toBeInTheDocument()
+    expect(screen.getByText('1 done')).toBeInTheDocument()  // mergedCount
+    expect(screen.getByText('0 failed')).toBeInTheDocument()
   })
 
   it('renders stats in correct order: active, done, failed, total', () => {
@@ -166,7 +167,7 @@ describe('Header component', () => {
     }
     mockUseHydraFlow.mockReturnValue({ stageStatus: mockStageStatus(workers) })
     render(<Header {...defaultProps} />)
-    expect(screen.getByText('2 total')).toBeInTheDocument()
+    expect(screen.getByText('0 total')).toBeInTheDocument()
     expect(screen.getByText('1 active')).toBeInTheDocument()
   })
 

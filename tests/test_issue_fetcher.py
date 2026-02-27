@@ -978,6 +978,53 @@ class TestFetchIssuesByLabels:
         assert first_delay <= 3.0
         assert second_delay >= 3.0
 
+    @pytest.mark.asyncio
+    async def test_paginates_when_limit_exceeds_100(
+        self, config: HydraFlowConfig
+    ) -> None:
+        fetcher = IssueFetcher(config)
+        page1 = json.dumps(
+            [
+                {
+                    "number": i,
+                    "title": f"Issue {i}",
+                    "body": "",
+                    "labels": [{"name": "memory"}],
+                    "comments": [],
+                    "url": "",
+                }
+                for i in range(1, 101)
+            ]
+        )
+        page2 = json.dumps(
+            [
+                {
+                    "number": i,
+                    "title": f"Issue {i}",
+                    "body": "",
+                    "labels": [{"name": "memory"}],
+                    "comments": [],
+                    "url": "",
+                }
+                for i in range(101, 151)
+            ]
+        )
+
+        async def fake_run_subprocess(*cmd, **_kwargs):
+            joined = " ".join(str(c) for c in cmd)
+            if "page=1" in joined:
+                return page1
+            if "page=2" in joined:
+                return page2
+            return "[]"
+
+        with patch("issue_fetcher.run_subprocess", side_effect=fake_run_subprocess):
+            issues = await fetcher.fetch_issues_by_labels(["memory"], limit=150)
+
+        assert len(issues) == 150
+        assert issues[0].number == 1
+        assert issues[-1].number == 150
+
 
 # ---------------------------------------------------------------------------
 # fetch_all_hydraflow_issues

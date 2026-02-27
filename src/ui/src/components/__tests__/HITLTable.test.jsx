@@ -182,8 +182,8 @@ describe('HITLTable component', () => {
     })
   })
 
-  it('calls correct API on close click with confirmation', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
+  it('calls correct API on close click without confirmation prompt', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm')
     const fetchMock = vi.fn().mockResolvedValue({ ok: true })
     global.fetch = fetchMock
     const onRefresh = vi.fn()
@@ -200,17 +200,24 @@ describe('HITLTable component', () => {
     await waitFor(() => {
       expect(onRefresh).toHaveBeenCalled()
     })
+    expect(confirmSpy).not.toHaveBeenCalled()
   })
 
-  it('does not call close API when confirmation is cancelled', () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false)
-    const fetchMock = vi.fn()
+  it('removes item from UI immediately after successful close', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true })
     global.fetch = fetchMock
 
     render(<HITLTable items={mockItems} onRefresh={() => {}} />)
+    expect(screen.getByText('#42')).toBeInTheDocument()
+    expect(screen.getByText('3 items awaiting action')).toBeInTheDocument()
+
     fireEvent.click(screen.getByTestId('hitl-row-42'))
     fireEvent.click(screen.getByTestId('hitl-close-42'))
-    expect(fetchMock).not.toHaveBeenCalled()
+
+    await waitFor(() => {
+      expect(screen.queryByText('#42')).not.toBeInTheDocument()
+      expect(screen.getByText('2 items awaiting action')).toBeInTheDocument()
+    })
   })
 
   it('shows item count in header', () => {
@@ -245,6 +252,7 @@ describe('HITLTable component', () => {
   })
 
   it('does not fetch data on mount (no side effects)', () => {
+    if (typeof globalThis.fetch?.mockClear === 'function') globalThis.fetch.mockClear()
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
     render(<HITLTable items={[]} onRefresh={() => {}} />)
     expect(fetchSpy).not.toHaveBeenCalled()

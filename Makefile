@@ -327,19 +327,34 @@ setup: deps
 		DEST="$$CODEX_HOME_DIR/skills"; \
 		mkdir -p "$$DEST"; \
 		INSTALLED=0; \
+		PRUNED=0; \
 		for SKILL_DIR in "$(PROJECT_ROOT)"/.codex/skills/*; do \
 			[ -d "$$SKILL_DIR" ] || continue; \
 			[ -f "$$SKILL_DIR/SKILL.md" ] || continue; \
 			SKILL_NAME="$$(basename "$$SKILL_DIR")"; \
 			rm -rf "$$DEST/$$SKILL_NAME"; \
 			cp -R "$$SKILL_DIR" "$$DEST/$$SKILL_NAME"; \
+			printf '%s\n' "$(PROJECT_ROOT)" > "$$DEST/$$SKILL_NAME/.hydraflow-managed"; \
 			INSTALLED=$$((INSTALLED + 1)); \
 			echo "  Codex skill installed: $$SKILL_NAME"; \
+		done; \
+		for INSTALLED_DIR in "$$DEST"/*; do \
+			[ -d "$$INSTALLED_DIR" ] || continue; \
+			MARKER="$$INSTALLED_DIR/.hydraflow-managed"; \
+			[ -f "$$MARKER" ] || continue; \
+			MARKED_SOURCE="$$(cat "$$MARKER" 2>/dev/null || true)"; \
+			[ "$$MARKED_SOURCE" = "$(PROJECT_ROOT)" ] || continue; \
+			SKILL_NAME="$$(basename "$$INSTALLED_DIR")"; \
+			[ -f "$(PROJECT_ROOT)/.codex/skills/$$SKILL_NAME/SKILL.md" ] && continue; \
+			rm -rf "$$INSTALLED_DIR"; \
+			PRUNED=$$((PRUNED + 1)); \
+			echo "  Codex stale skill pruned: $$SKILL_NAME"; \
 		done; \
 		if [ "$$INSTALLED" -eq 0 ]; then \
 			echo "  Codex skills: no SKILL.md packages found under .codex/skills"; \
 		else \
 			echo "  Codex skills destination: $$DEST"; \
+			echo "  Codex stale skills pruned: $$PRUNED"; \
 			echo "  Restart Codex to load updated skills"; \
 		fi; \
 	fi
