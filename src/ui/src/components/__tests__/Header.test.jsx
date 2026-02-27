@@ -124,7 +124,7 @@ describe('Header component', () => {
     expect(screen.getByText('Stop')).toBeInTheDocument()
   })
 
-  it('does not render workload counters in session box', () => {
+  it('does not render workload counters', () => {
     mockUseHydraFlow.mockReturnValue({
       stageStatus: { ...mockStageStatus(), workload: { active: 3, done: 2, failed: 1, total: 6 } },
       config: null,
