@@ -77,10 +77,19 @@ describe('Livestream component', () => {
     ]
     render(<Livestream events={events} />)
 
-    expect(screen.getByText('implement')).toBeInTheDocument()
+    expect(screen.getByText('issue: n/a line implement')).toBeInTheDocument()
     expect(screen.getByText('issue: 5 line → running')).toBeInTheDocument()
-    expect(screen.getByText('PR #20 → approved')).toBeInTheDocument()
-    expect(screen.getByText('PR #20 merged')).toBeInTheDocument()
+    expect(screen.getByText('issue: n/a line PR #20 → approved')).toBeInTheDocument()
+    expect(screen.getByText('issue: n/a line PR #20 merged')).toBeInTheDocument()
+  })
+
+  it('deduplicates issue numbers for hitl_escalation events', () => {
+    const events = [
+      { type: 'hitl_escalation', timestamp: '2026-01-15T10:34:00Z', data: { issue: 99, cause: 'Needs HITL review' } },
+    ]
+    render(<Livestream events={events} />)
+
+    expect(screen.getByText('issue: 99 line escalated to HITL')).toBeInTheDocument()
   })
 
   it('does not show resume button when auto-scroll is active (at top)', () => {
