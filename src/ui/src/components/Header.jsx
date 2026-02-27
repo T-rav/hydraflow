@@ -8,8 +8,7 @@ export function Header({
   onStart, onStop,
 }) {
   const { stageStatus, config } = useHydraFlow()
-  const workload = stageStatus.workload
-  const hasActiveWorkers = workload.active > 0
+  const hasActiveWorkers = stageStatus.workload.active > 0
   const appVersion = config?.app_version || ''
   const latestVersion = config?.latest_version || ''
   const updateAvailable = Boolean(config?.update_available && latestVersion)

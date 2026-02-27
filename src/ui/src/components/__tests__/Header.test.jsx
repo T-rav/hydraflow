@@ -125,9 +125,10 @@ describe('Header component', () => {
   })
 
   it('does not render workload counters in session box', () => {
-    const stageStatus = mockStageStatus()
-    stageStatus.workload = { active: 3, done: 2, failed: 1, total: 6 }
-    mockUseHydraFlow.mockReturnValue({ stageStatus })
+    mockUseHydraFlow.mockReturnValue({
+      stageStatus: { ...mockStageStatus(), workload: { active: 3, done: 2, failed: 1, total: 6 } },
+      config: null,
+    })
     render(<Header {...defaultProps} />)
     expect(screen.queryByText(/\d+\s+active/i)).toBeNull()
     expect(screen.queryByText(/\d+\s+done/i)).toBeNull()
