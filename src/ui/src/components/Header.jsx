@@ -71,15 +71,6 @@ export function Header({
       <div style={styles.center}>
         <div style={styles.sessionBox}>
           <span style={styles.sessionLabel}>Session</span>
-          <div style={styles.workload}>
-            <span style={styles.workloadActive}>{workload.active} active</span>
-            <span style={styles.workloadSep}>|</span>
-            <span style={styles.workloadDone}>{workload.done} done</span>
-            <span style={styles.workloadSep}>|</span>
-            <span style={styles.workloadFailed}>{workload.failed} failed</span>
-            <span style={styles.workloadSep}>|</span>
-            <span>{workload.total} total</span>
-          </div>
           <div style={styles.pipelineRow} data-testid="session-pipeline">
             {sessionStages.map((stage, index) => (
               <React.Fragment key={stage.key}>
@@ -175,14 +166,6 @@ const styles = {
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
   },
-  workload: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 6,
-    fontSize: 12,
-    color: theme.textMuted,
-    flexWrap: 'wrap',
-  },
   pipelineRow: {
     display: 'flex',
     alignItems: 'center',
@@ -214,10 +197,6 @@ const styles = {
     fontSize: 12,
     fontWeight: 600,
   },
-  workloadSep: { color: theme.border },
-  workloadActive: { color: theme.accent },
-  workloadDone: { color: theme.green },
-  workloadFailed: { color: theme.red },
   controls: { display: 'flex', alignItems: 'center', gap: 10, marginLeft: 10, flexShrink: 0 },
   startBtn: {
     padding: '4px 14px',

@@ -124,51 +124,15 @@ describe('Header component', () => {
     expect(screen.getByText('Stop')).toBeInTheDocument()
   })
 
-  it('renders workload summary with empty workers', () => {
+  it('does not render workload counters in session box', () => {
+    const stageStatus = mockStageStatus()
+    stageStatus.workload = { active: 3, done: 2, failed: 1, total: 6 }
+    mockUseHydraFlow.mockReturnValue({ stageStatus })
     render(<Header {...defaultProps} />)
-    expect(screen.getByText('0 total')).toBeInTheDocument()
-    expect(screen.getByText('0 active')).toBeInTheDocument()
-    expect(screen.getByText('0 done')).toBeInTheDocument()
-    expect(screen.getByText('0 failed')).toBeInTheDocument()
-  })
-
-  it('renders workload summary with workers in various statuses', () => {
-    const workers = {
-      1: { status: 'running', worker: 1, role: 'implementer', title: 'Issue #1', branch: '', transcript: [], pr: null },
-      2: { status: 'running', worker: 2, role: 'implementer', title: 'Issue #2', branch: '', transcript: [], pr: null },
-      3: { status: 'done', worker: 3, role: 'implementer', title: 'Issue #3', branch: '', transcript: [], pr: null },
-      4: { status: 'done', worker: 4, role: 'planner', title: 'Plan #4', branch: '', transcript: [], pr: null },
-      5: { status: 'failed', worker: 5, role: 'implementer', title: 'Issue #5', branch: '', transcript: [], pr: null },
-    }
-    mockUseHydraFlow.mockReturnValue({ stageStatus: mockStageStatus(workers, { mergedCount: 1 }) })
-    render(<Header {...defaultProps} />)
-    // Total is pipeline-centric (open pipeline issues + mergedCount).
-    expect(screen.getByText('1 total')).toBeInTheDocument()
-    expect(screen.getByText('2 active')).toBeInTheDocument()
-    expect(screen.getByText('1 done')).toBeInTheDocument()  // mergedCount
-    expect(screen.getByText('0 failed')).toBeInTheDocument()
-  })
-
-  it('renders stats in correct order: active, done, failed, total', () => {
-    const workers = {
-      1: { status: 'running', worker: 1, role: 'implementer', title: 'Issue #1', branch: '', transcript: [], pr: null },
-    }
-    mockUseHydraFlow.mockReturnValue({ stageStatus: mockStageStatus(workers, { mergedCount: 1 }) })
-    render(<Header {...defaultProps} />)
-    const workloadDiv = screen.getByText('1 active').parentElement
-    const statSpans = Array.from(workloadDiv.children).filter(el => el.textContent !== '|')
-    expect(statSpans.map(s => s.textContent)).toEqual(['1 active', '1 done', '0 failed', '1 total'])
-  })
-
-  it('counts quality_fix workers as active in workload summary', () => {
-    const workers = {
-      1: { status: 'quality_fix', worker: 1, role: 'implementer', title: 'Fix #1', branch: '', transcript: [], pr: null },
-      2: { status: 'queued', worker: 2, role: 'implementer', title: 'Issue #2', branch: '', transcript: [], pr: null },
-    }
-    mockUseHydraFlow.mockReturnValue({ stageStatus: mockStageStatus(workers) })
-    render(<Header {...defaultProps} />)
-    expect(screen.getByText('0 total')).toBeInTheDocument()
-    expect(screen.getByText('1 active')).toBeInTheDocument()
+    expect(screen.queryByText(/\d+\s+active/i)).toBeNull()
+    expect(screen.queryByText(/\d+\s+done/i)).toBeNull()
+    expect(screen.queryByText(/\d+\s+failed/i)).toBeNull()
+    expect(screen.queryByText(/\d+\s+total/i)).toBeNull()
   })
 
   it('renders Session label', () => {
