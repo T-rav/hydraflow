@@ -19,7 +19,7 @@ describe('Livestream component', () => {
     expect(screen.getByText('batch start')).toBeInTheDocument()
     expect(screen.getByText('Batch 3 started')).toBeInTheDocument()
     expect(screen.getByText('pr created')).toBeInTheDocument()
-    expect(screen.getByText('PR #42 for #10')).toBeInTheDocument()
+    expect(screen.getByText('#10 PR #42 for #10')).toBeInTheDocument()
   })
 
   it('shows transcript_line events (no filter)', () => {
@@ -32,6 +32,7 @@ describe('Livestream component', () => {
     expect(screen.getByText('transcript line')).toBeInTheDocument()
     expect(screen.getByText('error')).toBeInTheDocument()
     expect(screen.getByText('something broke')).toBeInTheDocument()
+    expect(screen.getByText('#1 #1')).toBeInTheDocument()
   })
 
   it('applies typeSpanStyles for known event types', () => {
@@ -78,7 +79,7 @@ describe('Livestream component', () => {
     render(<Livestream events={events} />)
 
     expect(screen.getByText('implement')).toBeInTheDocument()
-    expect(screen.getByText('#5 → running')).toBeInTheDocument()
+    expect(screen.getByText('#5 #5 → running')).toBeInTheDocument()
     expect(screen.getByText('PR #20 → approved')).toBeInTheDocument()
     expect(screen.getByText('PR #20 merged')).toBeInTheDocument()
     expect(screen.getByText('2 merged, 3 implemented')).toBeInTheDocument()
