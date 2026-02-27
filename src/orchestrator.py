@@ -655,7 +655,7 @@ class HydraFlowOrchestrator:
                 await self._sleep_or_stop(interval)
                 continue
             try:
-                await work_fn()
+                did_work = bool(await work_fn())
             except (AuthenticationError, CreditExhaustedError, MemoryError):
                 raise
             except Exception:
@@ -673,6 +673,10 @@ class HydraFlowOrchestrator:
                         },
                     )
                 )
+                await self._sleep_or_stop(interval)
+                continue
+            if did_work:
+                continue
             await self._sleep_or_stop(interval)
 
     async def _triage_loop(self) -> None:
@@ -772,8 +776,9 @@ class HydraFlowOrchestrator:
         path = self._config.log_dir / filename
         return self._config.format_path_for_display(path)
 
-    async def _do_implement_work(self) -> None:
+    async def _do_implement_work(self) -> bool:
         """Work function for the implement loop."""
+        did_work = False
         # After one poll cycle, release crash-recovered issues
         if self._recovered_issues:
             async with self._active_issues_lock:
@@ -786,57 +791,79 @@ class HydraFlowOrchestrator:
                         | self._active_hitl_issues
                     )
                 )
-        results, _ = await self._implementer.run_batch()
-        for result in results:
-            self._session_issue_results[result.issue_number] = result.success
-            if result.transcript:
-                await self._post_run_hooks(
-                    transcript=result.transcript,
-                    source="implementer",
-                    reference=f"issue #{result.issue_number}",
-                    issue_number=result.issue_number,
-                    phase="implement",
-                    status="success" if result.success else "failed",
-                    duration_seconds=result.duration_seconds,
-                    log_file=self._log_reference(f"issue-{result.issue_number}.txt"),
-                )
+        while not self._stop_event.is_set():
+            results, issues = await self._implementer.run_batch()
+            if not issues:
+                break
+            did_work = True
+            for result in results:
+                self._session_issue_results[result.issue_number] = result.success
+                if result.transcript:
+                    await self._post_run_hooks(
+                        transcript=result.transcript,
+                        source="implementer",
+                        reference=f"issue #{result.issue_number}",
+                        issue_number=result.issue_number,
+                        phase="implement",
+                        status="success" if result.success else "failed",
+                        duration_seconds=result.duration_seconds,
+                        log_file=self._log_reference(
+                            f"issue-{result.issue_number}.txt"
+                        ),
+                    )
+        return did_work
 
-    async def _do_review_work(self) -> None:
+    async def _do_review_work(self) -> bool:
         """Work function for the review loop."""
-        review_issues = self._store.get_reviewable(self._config.batch_size)
-        if not review_issues:
-            return
-        active_in_store = set(self._store.get_active_issues().keys())
-        gh_review_issues = [GitHubIssue.from_task(t) for t in review_issues]
-        prs, gh_issues = await self._fetcher.fetch_reviewable_prs(
-            active_in_store, prefetched_issues=gh_review_issues
-        )
-        if not prs:
-            return
-        review_results = await self._reviewer.review_prs(
-            prs, [i.to_task() for i in gh_issues]
-        )
-        for result in review_results:
-            if result.transcript:
-                if result.merged:
-                    review_status = "success"
-                elif result.ci_passed is False:
-                    review_status = "failed"
-                else:
-                    review_status = "completed"
-                await self._post_run_hooks(
-                    transcript=result.transcript,
-                    source="reviewer",
-                    reference=f"PR #{result.pr_number}",
-                    issue_number=result.issue_number,
-                    phase="review",
-                    status=review_status,
-                    duration_seconds=result.duration_seconds,
-                    log_file=self._log_reference(f"review-pr-{result.pr_number}.txt"),
-                )
-        if any(r.merged for r in review_results):
-            await asyncio.sleep(_POST_MERGE_DELAY)
-            await self._prs.pull_main()
+        did_work = False
+        while not self._stop_event.is_set():
+            review_issues = self._store.get_reviewable(self._config.batch_size)
+            if not review_issues:
+                break
+            did_work = True
+            active_in_store = set(self._store.get_active_issues().keys())
+            gh_review_issues = [GitHubIssue.from_task(t) for t in review_issues]
+            prs, gh_issues = await self._fetcher.fetch_reviewable_prs(
+                active_in_store, prefetched_issues=gh_review_issues
+            )
+            if not prs:
+                # Keep review tasks in queue memory when PR visibility lags labels.
+                for issue in review_issues:
+                    self._store.enqueue_transition(issue, "review")
+                # Treat as idle so the polling loop applies its normal backoff.
+                did_work = False
+                break
+            review_results = await self._reviewer.review_prs(
+                prs, [i.to_task() for i in gh_issues]
+            )
+            reviewed_issue_numbers = {pr.issue_number for pr in prs}
+            for issue in review_issues:
+                if issue.id not in reviewed_issue_numbers:
+                    self._store.enqueue_transition(issue, "review")
+            for result in review_results:
+                if result.transcript:
+                    if result.merged:
+                        review_status = "success"
+                    elif result.ci_passed is False:
+                        review_status = "failed"
+                    else:
+                        review_status = "completed"
+                    await self._post_run_hooks(
+                        transcript=result.transcript,
+                        source="reviewer",
+                        reference=f"PR #{result.pr_number}",
+                        issue_number=result.issue_number,
+                        phase="review",
+                        status=review_status,
+                        duration_seconds=result.duration_seconds,
+                        log_file=self._log_reference(
+                            f"review-pr-{result.pr_number}.txt"
+                        ),
+                    )
+            if any(r.merged for r in review_results):
+                await asyncio.sleep(_POST_MERGE_DELAY)
+                await self._prs.pull_main()
+        return did_work
 
     async def _sleep_or_stop(self, seconds: int | float) -> None:
         """Sleep for *seconds*, waking early if stop is requested."""

@@ -95,6 +95,12 @@ class IssueStore:
             STAGE_REVIEW: 0,
             STAGE_HITL: 0,
         }
+        # Dedup diagnostics counters (cumulative for current process lifetime)
+        self._dedup_stats: dict[str, int] = {
+            "incoming_tasks": 0,
+            "queued_entries": 0,
+            "snapshot_entries": 0,
+        }
 
         self._last_poll_ts: str | None = None
         self._lock = asyncio.Lock()
@@ -154,8 +160,9 @@ class IssueStore:
     ) -> dict[int, tuple[IssueStoreStage, Task]]:
         """Return {task_id: (best_stage, task)} for all incoming tasks."""
         label_to_stage = self._build_label_map()
+        unique_tasks = self._dedupe_tasks(tasks)
         incoming: dict[int, tuple[IssueStoreStage, Task]] = {}
-        for task in tasks:
+        for task in unique_tasks:
             self._issue_cache[task.id] = task
             best_stage: IssueStoreStage | None = None
             best_priority = -1
@@ -169,6 +176,25 @@ class IssueStore:
             if best_stage is not None:
                 incoming[task.id] = (best_stage, task)
         return incoming
+
+    def _dedupe_tasks(self, tasks: list[Task]) -> list[Task]:
+        """Return tasks deduplicated by issue id, preserving first-seen order."""
+        seen: set[int] = set()
+        unique: list[Task] = []
+        duplicate_count = 0
+        for task in tasks:
+            if task.id in seen:
+                duplicate_count += 1
+                continue
+            seen.add(task.id)
+            unique.append(task)
+        if duplicate_count:
+            self._dedup_stats["incoming_tasks"] += duplicate_count
+            logger.warning(
+                "IssueStore dropped %d duplicate incoming task(s) in refresh",
+                duplicate_count,
+            )
+        return unique
 
     def _evict_stale_tasks(self, incoming_ids: set[int]) -> None:
         """Remove tasks no longer present in the pipeline from all queues."""
@@ -273,10 +299,16 @@ class IssueStore:
 
         if stage == STAGE_HITL:
             self._hitl_numbers.add(task.id)
+            self._publish_queue_update_nowait()
             return
 
+        if task.id in self._queue_members[stage]:
+            self._dedup_stats["queued_entries"] += 1
+            self._publish_queue_update_nowait()
+            return
         self._queues[stage].append(task)
         self._queue_members[stage].add(task.id)
+        self._publish_queue_update_nowait()
 
     # ------------------------------------------------------------------
     # Queue accessors (non-blocking, return available issues)
@@ -329,6 +361,8 @@ class IssueStore:
             q.appendleft(task)
             self._queue_members[stage].add(task.id)
 
+        if result:
+            self._publish_queue_update_nowait()
         return result
 
     # ------------------------------------------------------------------
@@ -338,12 +372,14 @@ class IssueStore:
     def mark_active(self, task_id: int, stage: str) -> None:
         """Mark a task as actively being processed in *stage*."""
         self._active[task_id] = stage
+        self._publish_queue_update_nowait()
 
     def mark_complete(self, task_id: int) -> None:
         """Mark a task as done processing; increment throughput counter."""
         stage = self._active.pop(task_id, None)
         if stage and stage in self._processed_count:
             self._processed_count[stage] += 1
+        self._publish_queue_update_nowait()
 
     def is_active(self, task_id: int) -> bool:
         """Return True if the task is currently being processed."""
@@ -356,6 +392,23 @@ class IssueStore:
     def clear_active(self) -> None:
         """Clear all active issue tracking (used during reset)."""
         self._active.clear()
+        self._publish_queue_update_nowait()
+
+    def _publish_queue_update_nowait(self) -> None:
+        """Publish a queue update event without requiring an async caller."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        stats = self.get_queue_stats()
+        loop.create_task(
+            self._bus.publish(
+                HydraFlowEvent(
+                    type=EventType.QUEUE_UPDATE,
+                    data=stats.model_dump(),
+                )
+            )
+        )
 
     # ------------------------------------------------------------------
     # Stats
@@ -365,15 +418,31 @@ class IssueStore:
         """Return queued tasks grouped by stage."""
         snapshot: dict[str, list[PipelineSnapshotEntry]] = {}
         for stage, q in self._queues.items():
-            snapshot[stage] = [
-                PipelineSnapshotEntry(
-                    issue_number=task.id,
-                    title=task.title,
-                    url=task.source_url,
-                    status="queued",
+            stage_seen: set[int] = set()
+            entries: list[PipelineSnapshotEntry] = []
+            duplicate_count = 0
+            for task in q:
+                if task.id in stage_seen:
+                    duplicate_count += 1
+                    continue
+                stage_seen.add(task.id)
+                entries.append(
+                    PipelineSnapshotEntry(
+                        issue_number=task.id,
+                        title=task.title,
+                        url=task.source_url,
+                        status="queued",
+                    )
                 )
-                for task in q
-            ]
+            if duplicate_count:
+                self._dedup_stats["snapshot_entries"] += duplicate_count
+                logger.warning(
+                    "IssueStore snapshot dropped %d duplicate queued %s for stage %s",
+                    duplicate_count,
+                    "entry" if duplicate_count == 1 else "entries",
+                    stage,
+                )
+            snapshot[stage] = entries
         return snapshot
 
     def _snapshot_active(self) -> dict[str, list[PipelineSnapshotEntry]]:
@@ -421,7 +490,7 @@ class IssueStore:
         """Return a snapshot of queue depths, active counts, and throughput."""
         queue_depth: dict[str, int] = {}
         for stage, q in self._queues.items():
-            queue_depth[stage] = len(q)
+            queue_depth[stage] = len({task.id for task in q})
         queue_depth[STAGE_HITL] = len(self._hitl_numbers)
 
         active_count: dict[str, int] = {}
@@ -433,4 +502,5 @@ class IssueStore:
             active_count=active_count,
             total_processed=dict(self._processed_count),
             last_poll_timestamp=self._last_poll_ts,
+            dedup_stats=dict(self._dedup_stats),
         )

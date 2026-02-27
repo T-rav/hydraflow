@@ -44,7 +44,7 @@ class TriagePhase:
         self._bus = event_bus
         self._stop_event = stop_event
 
-    async def triage_issues(self) -> None:
+    async def triage_issues(self) -> int:
         """Evaluate ``find_label`` issues and route them.
 
         Issues with enough context go to ``planner_label`` (planning).
@@ -54,18 +54,20 @@ class TriagePhase:
         """
         issues = self._store.get_triageable(self._config.batch_size)
         if not issues:
-            return
+            return 0
 
         logger.info("Triaging %d found issues", len(issues))
+        processed = 0
         for issue in issues:
             if self._stop_event.is_set():
                 logger.info("Stop requested — aborting triage loop")
-                return
+                return processed
 
             async with store_lifecycle(self._store, issue.id, "find"):
                 # ADR draft issues are already scoped/planned; validate shape and
                 # route directly to review, bypassing plan/implement.
                 if self._is_adr_issue(issue.title):
+                    processed += 1
                     if self._config.dry_run:
                         continue
                     reasons = self._adr_validation_reasons(issue.body)
@@ -88,6 +90,7 @@ class TriagePhase:
                     continue
 
                 result = await self._triage.evaluate(issue)
+                processed += 1
 
                 if self._config.dry_run:
                     continue
@@ -118,6 +121,7 @@ class TriagePhase:
                         self._config.hitl_label[0],
                         "; ".join(result.reasons),
                     )
+        return processed
 
     @staticmethod
     def _is_adr_issue(title: str) -> bool:

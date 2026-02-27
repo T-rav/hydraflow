@@ -188,6 +188,15 @@ class TestRouting:
         assert 61 not in store._queue_members[STAGE_PLAN]
         assert 61 in store._hitl_numbers
 
+    def test_enqueue_transition_does_not_duplicate_existing_target_entry(self) -> None:
+        store = _make_store()
+        issue = TaskFactory.create(id=62, tags=["hydraflow-plan"])
+        store._route_issues([issue])
+        store.enqueue_transition(issue, "plan")
+        store.enqueue_transition(issue, "plan")
+
+        assert len([t for t in store._queues[STAGE_PLAN] if t.id == 62]) == 1
+
 
 # ── Queue Accessors ──────────────────────────────────────────────────
 
@@ -461,6 +470,23 @@ class TestRefresh:
         await store.refresh()
         assert store._last_poll_ts is not None
 
+    @pytest.mark.asyncio
+    async def test_refresh_deduplicates_incoming_duplicate_issue_ids(self) -> None:
+        fetcher = AsyncMock()
+        fetcher.fetch_all = AsyncMock(
+            return_value=[
+                TaskFactory.create(id=70, tags=["hydraflow-find"]),
+                TaskFactory.create(id=70, tags=["hydraflow-find"]),
+            ]
+        )
+        store = _make_store(fetcher=fetcher)
+
+        await store.refresh()
+
+        assert len(store._queues[STAGE_FIND]) == 1
+        stats = store.get_queue_stats()
+        assert stats.dedup_stats["incoming_tasks"] == 1
+
 
 # ── Stats ────────────────────────────────────────────────────────────
 
@@ -528,6 +554,16 @@ class TestStats:
         stats = store.get_queue_stats()
         assert stats.queue_depth[STAGE_HITL] == 2
 
+    def test_get_queue_stats_deduplicates_queue_depth_from_ids(self) -> None:
+        store = _make_store()
+        duplicate = TaskFactory.create(id=80, tags=["hydraflow-find"])
+        store._queues[STAGE_FIND].append(duplicate)
+        store._queues[STAGE_FIND].append(duplicate)
+        store._queue_members[STAGE_FIND].add(80)
+
+        stats = store.get_queue_stats()
+        assert stats.queue_depth[STAGE_FIND] == 1
+
 
 # ── Event Publishing ─────────────────────────────────────────────────
 
@@ -558,6 +594,26 @@ class TestEventPublishing:
         events = event_bus.get_history()
         queue_event = [e for e in events if e.type == EventType.QUEUE_UPDATE][0]
         assert queue_event.data["queue_depth"]["find"] == 1
+
+    @pytest.mark.asyncio
+    async def test_enqueue_transition_publishes_queue_update_in_realtime(
+        self, event_bus
+    ) -> None:
+        store = _make_store(event_bus=event_bus)
+        issue = TaskFactory.create(id=101, tags=["hydraflow-find"])
+        store._route_issues([issue])
+
+        before = len(
+            [e for e in event_bus.get_history() if e.type == EventType.QUEUE_UPDATE]
+        )
+        store.enqueue_transition(issue, "plan")
+        await asyncio.sleep(0)
+
+        after_events = [
+            e for e in event_bus.get_history() if e.type == EventType.QUEUE_UPDATE
+        ]
+        assert len(after_events) >= before + 1
+        assert after_events[-1].data["queue_depth"]["plan"] == 1
 
 
 # ── Lifecycle ────────────────────────────────────────────────────────
