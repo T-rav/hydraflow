@@ -1174,6 +1174,116 @@ class TestHITLEndpointCause:
         assert len(items) == 1
         assert items[0]["cause"] == "CI failed after 2 fix attempt(s)"
 
+    @pytest.mark.asyncio
+    async def test_hitl_filters_memory_suggestions_when_auto_approve_enabled(
+        self, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """With memory_auto_approve=True, memory items excluded from response."""
+        from tests.helpers import ConfigFactory
+
+        from dashboard_routes import create_router
+        from pr_manager import PRManager
+        from state import StateTracker
+
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path / "repo",
+            state_file=tmp_path / "state.json",
+            memory_auto_approve=True,
+        )
+        st = StateTracker(cfg.state_file)
+        pr_mgr = PRManager(cfg, event_bus)
+
+        router = create_router(
+            config=cfg,
+            event_bus=event_bus,
+            state=st,
+            pr_manager=pr_mgr,
+            get_orchestrator=lambda: None,
+            set_orchestrator=lambda o: None,
+            set_run_task=lambda t: None,
+            ui_dist_dir=tmp_path / "no-dist",
+            template_dir=tmp_path / "no-templates",
+        )
+
+        # Mark issue 42 as a memory suggestion (origin = improve label)
+        st.set_hitl_origin(42, "hydraflow-improve")
+        st.set_hitl_cause(42, "Actionable memory suggestion (config)")
+
+        # Also add a non-memory HITL item
+        st.set_hitl_origin(43, "hydraflow-review")
+        st.set_hitl_cause(43, "CI failed after 2 fix attempt(s)")
+
+        hitl_items = [
+            HITLItem(issue=42, title="Memory suggestion", pr=101),
+            HITLItem(issue=43, title="CI failure", pr=102),
+        ]
+        pr_mgr.list_hitl_items = AsyncMock(return_value=hitl_items)  # type: ignore[method-assign]
+
+        get_hitl = None
+        for route in router.routes:
+            if (
+                hasattr(route, "path")
+                and route.path == "/api/hitl"
+                and hasattr(route, "endpoint")
+            ):
+                get_hitl = route.endpoint  # type: ignore[union-attr]
+                break
+
+        assert get_hitl is not None
+        response = await get_hitl()
+        import json
+
+        items = json.loads(response.body)
+        # Only the non-memory item should remain
+        assert len(items) == 1
+        assert items[0]["issue"] == 43
+
+    @pytest.mark.asyncio
+    async def test_hitl_keeps_memory_suggestions_when_auto_approve_disabled(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """With memory_auto_approve=False (default), memory items included."""
+        from dashboard_routes import create_router
+        from pr_manager import PRManager
+
+        pr_mgr = PRManager(config, event_bus)
+
+        router = create_router(
+            config=config,
+            event_bus=event_bus,
+            state=state,
+            pr_manager=pr_mgr,
+            get_orchestrator=lambda: None,
+            set_orchestrator=lambda o: None,
+            set_run_task=lambda t: None,
+            ui_dist_dir=tmp_path / "no-dist",
+            template_dir=tmp_path / "no-templates",
+        )
+
+        state.set_hitl_origin(42, "hydraflow-improve")
+        state.set_hitl_cause(42, "Actionable memory suggestion (config)")
+
+        hitl_item = HITLItem(issue=42, title="Memory suggestion", pr=101)
+        pr_mgr.list_hitl_items = AsyncMock(return_value=[hitl_item])  # type: ignore[method-assign]
+
+        get_hitl = None
+        for route in router.routes:
+            if (
+                hasattr(route, "path")
+                and route.path == "/api/hitl"
+                and hasattr(route, "endpoint")
+            ):
+                get_hitl = route.endpoint  # type: ignore[union-attr]
+                break
+
+        assert get_hitl is not None
+        response = await get_hitl()
+        import json
+
+        items = json.loads(response.body)
+        assert len(items) == 1
+        assert items[0]["isMemorySuggestion"] is True
+
 
 # ---------------------------------------------------------------------------
 # /api/metrics endpoint

@@ -465,6 +465,12 @@ def create_router(
             if origin and origin in config.improve_label:
                 data["isMemorySuggestion"] = True
             enriched.append(data)
+
+        # When memory auto-approve is on, filter out memory suggestions that
+        # were queued before the setting was enabled.
+        if config.memory_auto_approve:
+            enriched = [d for d in enriched if not d.get("isMemorySuggestion")]
+
         return JSONResponse(enriched)
 
     @router.post("/api/hitl/{issue_number}/correct")

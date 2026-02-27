@@ -1986,6 +1986,68 @@ class TestFileMemorySuggestionAutoApprove:
         # No state should be set when issue creation fails
         assert state.get_hitl_origin(0) is None
 
+    @pytest.mark.asyncio
+    async def test_file_memory_suggestion__auto_approve__actionable_uses_memory_label(
+        self, tmp_path: Path
+    ) -> None:
+        """Actionable type (config) with auto_approve=True gets memory_label only."""
+        config = ConfigFactory.create(
+            repo_root=tmp_path / "repo",
+            state_file=tmp_path / "state.json",
+            memory_auto_approve=True,
+        )
+        state = StateTracker(config.state_file)
+        mock_prs = AsyncMock()
+        mock_prs.create_issue = AsyncMock(return_value=90)
+
+        transcript = (
+            "MEMORY_SUGGESTION_START\n"
+            "title: Increase CI timeout\n"
+            "type: config\n"
+            "learning: CI timeout too low\n"
+            "context: During implementation\n"
+            "MEMORY_SUGGESTION_END\n"
+        )
+
+        await file_memory_suggestion(
+            transcript, "implementer", "issue #5", config, mock_prs, state
+        )
+
+        call_labels = mock_prs.create_issue.call_args.args[2]
+        assert config.memory_label[0] in call_labels
+        assert config.improve_label[0] not in call_labels
+        assert config.hitl_label[0] not in call_labels
+
+    @pytest.mark.asyncio
+    async def test_file_memory_suggestion__auto_approve__actionable_skips_hitl_state(
+        self, tmp_path: Path
+    ) -> None:
+        """Instruction type with auto_approve=True sets no HITL state."""
+        config = ConfigFactory.create(
+            repo_root=tmp_path / "repo",
+            state_file=tmp_path / "state.json",
+            memory_auto_approve=True,
+        )
+        state = StateTracker(config.state_file)
+        mock_prs = AsyncMock()
+        mock_prs.create_issue = AsyncMock(return_value=91)
+
+        transcript = (
+            "MEMORY_SUGGESTION_START\n"
+            "title: Always run lint before push\n"
+            "type: instruction\n"
+            "learning: Lint catches issues early\n"
+            "context: During review\n"
+            "MEMORY_SUGGESTION_END\n"
+        )
+
+        await file_memory_suggestion(
+            transcript, "reviewer", "PR #8", config, mock_prs, state
+        )
+
+        assert state.get_hitl_origin(91) is None
+        assert state.get_hitl_cause(91) is None
+
 
 class TestSyncWithTypedIssues:
     """Tests for MemorySyncWorker.sync with typed issue bodies."""
