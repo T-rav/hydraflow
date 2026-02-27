@@ -52,6 +52,21 @@ const basePipeIssue = {
 }
 
 describe('StreamView stage indicators', () => {
+  it('keeps stream card horizontal inset aligned with its stage header', () => {
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      pipelineIssues: {
+        review: [{ issue_number: 42, title: 'Review card', status: 'queued' }],
+      },
+    }))
+    render(<StreamView {...defaultProps} />)
+
+    const header = screen.getByTestId('stage-header-review')
+    const card = screen.getByTestId('stream-card-42')
+
+    expect(header.style.margin).toBe('8px 8px 4px')
+    expect(card.style.margin).toBe('0px 8px 8px')
+  })
+
   describe('Status dot colors', () => {
     it('shows green dot when stage has active workers', () => {
       mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({

@@ -4,7 +4,13 @@ import { useHydraFlow } from '../context/HydraFlowContext'
 import { StreamCard } from './StreamCard'
 import { PIPELINE_STAGES, PULSE_ANIMATION } from '../constants'
 import { STAGE_KEYS } from '../hooks/useTimeline'
-import { sectionHeaderStyles, sectionLabelStyles, sectionCountStyles, sectionLabelBase } from '../styles/sectionStyles'
+import {
+  sectionHeaderStyles,
+  sectionLabelStyles,
+  sectionCountStyles,
+  sectionLabelBase,
+  WORKSTREAM_SIDE_INSET_PX,
+} from '../styles/sectionStyles'
 
 function PendingIntentCard({ intent }) {
   return (
@@ -83,6 +89,7 @@ function StageSection({ stage, issues, workerCount, intentMap, onRequestChanges,
       <div
         style={sectionHeaderStyles[stage.key]}
         onClick={onToggle}
+        data-testid={`stage-header-${stage.key}`}
       >
         <span style={{ fontSize: 10 }}>{open ? '▾' : '▸'}</span>
         <span style={sectionLabelStyles[stage.key]}>{stage.label}</span>
@@ -368,7 +375,7 @@ const styles = {
     alignItems: 'center',
     gap: 12,
     padding: '8px 12px',
-    margin: '0 8px 8px',
+    margin: `0 ${WORKSTREAM_SIDE_INSET_PX}px 8px`,
     background: theme.surfaceInset,
     borderRadius: 8,
     border: `1px solid ${theme.border}`,
@@ -450,7 +457,7 @@ const styles = {
     background: theme.intentBg,
     border: `1px solid ${theme.border}`,
     borderRadius: 8,
-    marginBottom: 8,
+    margin: `0 ${WORKSTREAM_SIDE_INSET_PX}px 8px`,
   },
   pendingDot: {
     ...dotBase,
