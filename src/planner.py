@@ -44,7 +44,7 @@ _PLAN_SECTION_DESCRIPTIONS: tuple[tuple[str, str], ...] = (
     ),
     (
         "## Implementation Steps",
-        "ordered numbered list of steps (must have at least 3 steps)",
+        "implementation checklist/steps in numbered, bulleted, or checkbox format",
     ),
     (
         "## Testing Strategy",
@@ -641,7 +641,7 @@ This closes the issue automatically. Use only when you are certain.
                     "## Testing Strategy must reference at least one test file or pattern"
                 )
 
-        # --- Implementation Steps must have at least 3 numbered steps ---
+        # --- Implementation Steps must contain at least one actionable step ---
         is_match = re.search(
             r"## Implementation Steps\s*\n(.*?)(?=\n## |\Z)",
             plan,
@@ -649,10 +649,14 @@ This closes the issue automatically. Use only when you are certain.
         )
         if is_match:
             is_body = is_match.group(1)
-            numbered_steps = re.findall(r"^\s*\d+[\.\)]\s+\S", is_body, re.MULTILINE)
-            if len(numbered_steps) < 3:
+            list_steps = re.findall(
+                r"^\s*(?:\d+[\.\)]|[-*+]|\[[ xX]\])\s+\S",
+                is_body,
+                re.MULTILINE,
+            )
+            if not list_steps:
                 errors.append(
-                    "## Implementation Steps must have at least 3 numbered steps"
+                    "## Implementation Steps must include at least one actionable step"
                 )
 
         # --- Minimum word count (full plans only) ---

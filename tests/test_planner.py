@@ -614,8 +614,10 @@ def test_validate_plan_testing_strategy_requires_test_reference(config, event_bu
     assert any("test file" in e for e in errors)
 
 
-def test_validate_plan_implementation_steps_requires_three(config, event_bus):
-    """Less than 3 numbered steps fails."""
+def test_validate_plan_implementation_steps_requires_at_least_one_step(
+    config, event_bus
+):
+    """Implementation Steps must include at least one actionable list item."""
     runner = _make_runner(config, event_bus)
     task = Task(id=1, title="Fix it")
     plan = _valid_plan().replace(
@@ -623,10 +625,42 @@ def test_validate_plan_implementation_steps_requires_three(config, event_bus):
         "2. Add configuration field to config.py\n"
         "3. Wire up the new model in the orchestrator\n"
         "4. Add validation logic",
-        "1. Do the thing\n2. Done",
+        "Do the thing and then verify",
     )
     errors = runner._validate_plan(task, plan)
-    assert any("3 numbered steps" in e for e in errors)
+    assert any("at least one actionable step" in e for e in errors)
+
+
+def test_validate_plan_implementation_steps_allows_slim_numbered_plan(
+    config, event_bus
+):
+    """A concise numbered plan should pass without a 3-step minimum."""
+    runner = _make_runner(config, event_bus)
+    task = Task(id=1, title="Fix it")
+    plan = _valid_plan().replace(
+        "1. Add the new model class to models.py\n"
+        "2. Add configuration field to config.py\n"
+        "3. Wire up the new model in the orchestrator\n"
+        "4. Add validation logic",
+        "1. Do the thing\n2. Verify the thing",
+    )
+    errors = runner._validate_plan(task, plan)
+    assert not any("Implementation Steps" in e for e in errors)
+
+
+def test_validate_plan_implementation_steps_allows_bulleted_plan(config, event_bus):
+    """Bulleted implementation steps are valid."""
+    runner = _make_runner(config, event_bus)
+    task = Task(id=1, title="Fix it")
+    plan = _valid_plan().replace(
+        "1. Add the new model class to models.py\n"
+        "2. Add configuration field to config.py\n"
+        "3. Wire up the new model in the orchestrator\n"
+        "4. Add validation logic",
+        "- Update planner validation rule\n- Add regression test",
+    )
+    errors = runner._validate_plan(task, plan)
+    assert not any("Implementation Steps" in e for e in errors)
 
 
 def test_validate_plan_minimum_word_count(config, event_bus):
