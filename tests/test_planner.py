@@ -642,7 +642,7 @@ def test_validate_plan_implementation_steps_allows_slim_numbered_plan(
         "2. Add configuration field to config.py\n"
         "3. Wire up the new model in the orchestrator\n"
         "4. Add validation logic",
-        "1. Do the thing\n2. Verify the thing",
+        "1. Update src/models.py model wiring\n2. Validate orchestrator.load_models() behavior",
     )
     errors = runner._validate_plan(task, plan)
     assert not any("Implementation Steps" in e for e in errors)
@@ -657,7 +657,7 @@ def test_validate_plan_implementation_steps_allows_bulleted_plan(config, event_b
         "2. Add configuration field to config.py\n"
         "3. Wire up the new model in the orchestrator\n"
         "4. Add validation logic",
-        "- Update planner validation rule\n- Add regression test",
+        "- Update src/planner.py validation rule\n- Add tests/test_planner.py regression case",
     )
     errors = runner._validate_plan(task, plan)
     assert not any("Implementation Steps" in e for e in errors)
@@ -674,12 +674,43 @@ def test_validate_plan_implementation_steps_allows_markdown_heading_steps(
         "2. Add configuration field to config.py\n"
         "3. Wire up the new model in the orchestrator\n"
         "4. Add validation logic",
-        "### Step 1: Update worker metadata\n"
-        "### 2. Wire status callbacks\n"
-        "### Step 3: Add regression tests",
+        "### Step 1: Update src/dashboard_routes.py worker metadata\n"
+        "### 2. Wire ReviewPhase._record_review_insight() callbacks\n"
+        "### Step 3: Add tests/test_review_phase.py regression tests",
     )
     errors = runner._validate_plan(task, plan)
     assert not any("Implementation Steps" in e for e in errors)
+
+
+def test_validate_plan_implementation_steps_requires_two_for_full(config, event_bus):
+    """Full plans need at least two implementation steps."""
+    runner = _make_runner(config, event_bus)
+    task = Task(id=1, title="Fix it")
+    plan = _valid_plan().replace(
+        "1. Add the new model class to models.py\n"
+        "2. Add configuration field to config.py\n"
+        "3. Wire up the new model in the orchestrator\n"
+        "4. Add validation logic",
+        "1. Update src/models.py and validate behavior",
+    )
+    errors = runner._validate_plan(task, plan, scale="full")
+    assert any("at least 2 steps for full plans" in e for e in errors)
+
+
+def test_validate_plan_implementation_steps_require_concrete_target(config, event_bus):
+    """Full plans should reference concrete code targets in implementation steps."""
+    runner = _make_runner(config, event_bus)
+    task = Task(id=1, title="Fix it")
+    plan = _valid_plan().replace(
+        "1. Add the new model class to models.py\n"
+        "2. Add configuration field to config.py\n"
+        "3. Wire up the new model in the orchestrator\n"
+        "4. Add validation logic",
+        "1. Improve architecture and verify outcomes\n"
+        "2. Refine behavior and validate assumptions",
+    )
+    errors = runner._validate_plan(task, plan, scale="full")
+    assert any("concrete code target" in e for e in errors)
 
 
 def test_validate_plan_minimum_word_count(config, event_bus):

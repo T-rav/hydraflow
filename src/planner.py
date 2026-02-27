@@ -44,7 +44,8 @@ _PLAN_SECTION_DESCRIPTIONS: tuple[tuple[str, str], ...] = (
     ),
     (
         "## Implementation Steps",
-        "implementation checklist/steps in numbered, bulleted, or checkbox format",
+        "actionable implementation checklist/steps (numbered, bulleted, checkbox, or heading-style) "
+        "with concrete code targets and at least one verification step",
     ),
     (
         "## Testing Strategy",
@@ -650,19 +651,47 @@ This closes the issue automatically. Use only when you are certain.
         if is_match:
             is_body = is_match.group(1)
             list_steps = re.findall(
-                r"^\s*(?:\d+[\.\)]|[-*+]|\[[ xX]\])\s+\S",
+                r"^\s*(?:\d+[\.\)]|[-*+]|\[[ xX]\])\s+(.+)$",
                 is_body,
                 re.MULTILINE,
             )
             heading_steps = re.findall(
-                r"^\s*#{2,6}\s*(?:Step\s*\d+[:\.\-]?\s+\S|\d+[\.\)]\s+\S)",
+                r"^\s*#{2,6}\s*(?:Step\s*\d+[:\.\-]?\s+(.+)|\d+[\.\)]\s+(.+))$",
                 is_body,
                 re.MULTILINE | re.IGNORECASE,
             )
-            if not list_steps and not heading_steps:
+            step_texts = [s.strip() for s in list_steps]
+            step_texts.extend((s1 or s2).strip() for s1, s2 in heading_steps)
+            if not step_texts:
                 errors.append(
                     "## Implementation Steps must include at least one actionable step"
                 )
+            else:
+                if scale != "lite" and len(step_texts) < 2:
+                    errors.append(
+                        "## Implementation Steps must include at least 2 steps for full plans"
+                    )
+                shallow_steps = [
+                    s for s in step_texts if len(re.findall(r"\b\w+\b", s)) < 3
+                ]
+                if shallow_steps:
+                    errors.append(
+                        "## Implementation Steps must include enough detail per step "
+                        "(at least 3 words each)"
+                    )
+                if scale != "lite":
+                    has_concrete_target = any(
+                        re.search(
+                            r"[\w\-]+(?:/[\w\-]+)+|[\w\-]+\.[\w]+|`[^`]+`|\w+\(",
+                            s,
+                        )
+                        for s in step_texts
+                    )
+                    if not has_concrete_target:
+                        errors.append(
+                            "## Implementation Steps must reference at least one concrete code target "
+                            "(file path, symbol, or callable)"
+                        )
 
         # --- Minimum word count (full plans only) ---
         if scale != "lite":
