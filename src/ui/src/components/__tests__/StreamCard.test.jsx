@@ -1,6 +1,14 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { StreamCard, StatusDot, dotStyles, badgeStyleMap } from '../StreamCard'
+import {
+  StreamCard,
+  StatusDot,
+  dotStyles,
+  badgeStyleMap,
+  cardActiveStyleMap,
+  cardInactiveStyleMap,
+  activeDotStyleMap,
+} from '../StreamCard'
 import { theme } from '../../theme'
 import { STAGE_KEYS, STAGE_META } from '../../hooks/useTimeline'
 
@@ -32,6 +40,13 @@ describe('StatusDot component', () => {
     expect(el.tagName).toBe('SPAN')
     expect(el.style.animation).toContain('stream-pulse')
     expect(el.style.background).toBe(theme.accent)
+  })
+
+  it('uses phase color for active status when stageKey is provided', () => {
+    const { container } = render(<StatusDot status="active" stageKey="implement" />)
+    const el = container.firstChild
+    expect(el.style.background).toBe(STAGE_META.implement.color)
+    expect(el.style.animation).toContain('stream-pulse')
   })
 
   it('renders a checkmark for done status', () => {
@@ -141,6 +156,67 @@ describe('StageRow queued presentation', () => {
     expect(node.style.borderColor).toBe(STAGE_META.plan.color)
     expect(badge.style.background).toBe(STAGE_META.plan.subtleColor)
     expect(badge.style.color).toBe(STAGE_META.plan.color)
+  })
+})
+
+describe('StreamCard phase-aware styling', () => {
+  it('aligns border and accent to stage color when collapsed', () => {
+    const issue = makeIssue({ overallStatus: 'active', currentStage: 'review' })
+    const { container } = render(<StreamCard issue={issue} />)
+    const card = container.firstChild
+    expect(card.style.margin).toBe('0px 8px 8px')
+    expect(card.getAttribute('style') || '').toContain(`border-left: 3px solid ${STAGE_META.review.color}`)
+  })
+
+  it('falls back to subtle border for inactive cards', () => {
+    const issue = makeIssue({ overallStatus: 'queued', currentStage: 'plan' })
+    issue.stages.plan = { ...issue.stages.plan, status: 'queued' }
+    const { container } = render(<StreamCard issue={issue} />)
+    const card = container.firstChild
+    expect(card.getAttribute('style') || '').toContain(`border-left: 3px solid ${STAGE_META.plan.color}`)
+  })
+
+  it('uses cardInactiveStyleMap for done status', () => {
+    const issue = makeIssue({ overallStatus: 'done', currentStage: 'implement' })
+    const { container } = render(<StreamCard issue={issue} />)
+    const card = container.firstChild
+    expect(card.getAttribute('style') || '').toContain(`border-left: 3px solid ${STAGE_META.implement.color}`)
+  })
+
+  it('uses cardInactiveStyleMap for failed status', () => {
+    const issue = makeIssue({ overallStatus: 'failed', currentStage: 'review' })
+    const { container } = render(<StreamCard issue={issue} />)
+    const card = container.firstChild
+    expect(card.getAttribute('style') || '').toContain(`border-left: 3px solid ${STAGE_META.review.color}`)
+  })
+
+  it('uses cardInactiveStyleMap for hitl status', () => {
+    const issue = makeIssue({ overallStatus: 'hitl', currentStage: 'review' })
+    const { container } = render(<StreamCard issue={issue} />)
+    const card = container.firstChild
+    expect(card.getAttribute('style') || '').toContain(`border-left: 3px solid ${STAGE_META.review.color}`)
+  })
+
+  it('falls back to neutral border when currentStage is null', () => {
+    const issue = makeIssue({ overallStatus: 'queued', currentStage: null })
+    const { container } = render(<StreamCard issue={issue} />)
+    const card = container.firstChild
+    // No phase-specific left border — base styles.card border only
+    expect(card.getAttribute('style') || '').not.toContain('border-left')
+  })
+})
+
+describe('phase-specific style maps', () => {
+  it('exports per-stage card and dot styles', () => {
+    for (const key of STAGE_KEYS) {
+      const meta = STAGE_META[key]
+      expect(cardActiveStyleMap[key].border).toBe(`1px solid ${meta.color}`)
+      expect(cardActiveStyleMap[key].borderLeft).toBe(`3px solid ${meta.color}`)
+      expect(cardInactiveStyleMap[key].border).toBe(`1px solid ${meta.color}33`)
+      expect(cardInactiveStyleMap[key].borderLeft).toBe(`3px solid ${meta.color}`)
+      expect(activeDotStyleMap[key].background).toBe(meta.color)
+      expect(activeDotStyleMap[key].animation).toContain('stream-pulse')
+    }
   })
 })
 

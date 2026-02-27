@@ -5,7 +5,12 @@ import { formatDuration, STAGE_META, STAGE_KEYS } from '../hooks/useTimeline'
 import { TranscriptPreview } from './TranscriptPreview'
 
 export function StatusDot({ status, stageKey }) {
-  if (status === 'active') return <span style={dotStyles.active} />
+  if (status === 'active') {
+    const activeStyle = stageKey && activeDotStyleMap[stageKey]
+      ? activeDotStyleMap[stageKey]
+      : dotStyles.active
+    return <span style={activeStyle} />
+  }
   if (status === 'done') return <span style={dotStyles.done}>&#10003;</span>
   if (status === 'failed') return <span style={dotStyles.failed}>&#10007;</span>
   if (status === 'hitl') return <span style={dotStyles.hitl}>!</span>
@@ -106,12 +111,13 @@ export function StreamCard({ issue, intent, defaultExpanded, onRequestChanges, t
       )
     : null
 
-  const cardBorder = isActive
-    ? `1px solid ${theme.cardActiveBorder}`
-    : `1px solid ${theme.border}`
+  const stageKey = issue.currentStage
+  const cardStageStyle = stageKey
+    ? (isActive ? cardActiveStyleMap[stageKey] : cardInactiveStyleMap[stageKey])
+    : null
 
   return (
-    <div style={{ ...styles.card, border: cardBorder }}>
+    <div style={{ ...styles.card, ...(cardStageStyle || {}) }}>
       <div style={styles.header} onClick={toggle}>
         <div style={styles.headerLeft}>
           {issue.issueUrl ? (
@@ -141,7 +147,7 @@ export function StreamCard({ issue, intent, defaultExpanded, onRequestChanges, t
             </span>
           )}
           {totalDuration && <span style={styles.duration}>{totalDuration}</span>}
-          <StatusDot status={issue.overallStatus} stageKey={issue.currentStage} />
+          <StatusDot status={issue.overallStatus} stageKey={stageKey} />
           {issue.pr && (
             <a
               style={styles.prLink}
@@ -305,12 +311,36 @@ const queuedBadgeStyleMap = Object.fromEntries(
   PIPELINE_STAGES.map(s => [s.key, { ...badgeBase, background: s.subtleColor, color: s.color }])
 )
 
+// Phase-aware card and dot styling — exported for test assertions.
+export const cardActiveStyleMap = Object.fromEntries(
+  PIPELINE_STAGES.map(s => [s.key, {
+    border: `1px solid ${s.color}`,
+    borderLeft: `3px solid ${s.color}`,
+  }])
+)
+
+// Note: `${s.color}33` appends a hex alpha suffix to the CSS variable reference string
+// (e.g. `var(--orange)33`). This produces a valid 8-digit hex color after CSS variable
+// substitution only because all stage color variables in index.html use 6-digit hex values.
+// If any variable is changed to rgb()/hsl() format this border will silently break.
+export const cardInactiveStyleMap = Object.fromEntries(
+  PIPELINE_STAGES.map(s => [s.key, {
+    border: `1px solid ${s.color}33`,
+    borderLeft: `3px solid ${s.color}`,
+  }])
+)
+
+export const activeDotStyleMap = Object.fromEntries(
+  PIPELINE_STAGES.map(s => [s.key, { ...dotStyles.active, background: s.color }])
+)
+
 const styles = {
   card: {
     background: theme.surface,
     borderRadius: 8,
-    marginBottom: 8,
+    margin: '0 8px 8px',
     overflow: 'hidden',
+    border: `1px solid ${theme.border}`,
   },
   header: {
     display: 'flex',
