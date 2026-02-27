@@ -786,6 +786,80 @@ class TestHITLEndpointCause:
         items = json.loads(data)
         assert len(items) == 1
         assert items[0]["cause"] == "CI failed after 2 fix attempt(s)"
+        called_labels = pr_mgr.list_hitl_items.await_args.args[0]  # type: ignore[union-attr]
+        assert set(called_labels) == {
+            *config.hitl_label,
+            *config.hitl_active_label,
+        }
+
+    @pytest.mark.asyncio
+    async def test_hitl_endpoint_includes_items_from_hitl_active_label(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """`/api/hitl` should return items tagged with either HITL label."""
+        from dashboard_routes import create_router
+        from pr_manager import PRManager
+
+        pr_mgr = PRManager(config, event_bus)
+
+        async def fake_run_gh(*args: str, **_kwargs: object) -> str:
+            # list_hitl_items -> _fetch_hitl_raw_issues
+            if args[0] == "gh" and args[1] == "api" and "issues" in args[2]:
+                label_arg = next(
+                    (
+                        arg
+                        for arg in args
+                        if isinstance(arg, str) and arg.startswith("labels=")
+                    ),
+                    "",
+                )
+                if label_arg == f"labels={config.hitl_label[0]}":
+                    return (
+                        '[{"number": 42, "title": "Issue from hitl", '
+                        '"url": "https://github.com/T-rav/hyrda/issues/42"}]'
+                    )
+                if label_arg == f"labels={config.hitl_active_label[0]}":
+                    return (
+                        '[{"number": 77, "title": "Issue from hitl-active", '
+                        '"url": "https://github.com/T-rav/hyrda/issues/77"}]'
+                    )
+                return "[]"
+            # list_hitl_items -> _build_hitl_item PR lookup
+            if args[0] == "gh" and args[1] == "api" and "/pulls" in args[2]:
+                return "[]"
+            raise AssertionError(f"Unexpected gh invocation: {args}")
+
+        pr_mgr._run_gh = fake_run_gh  # type: ignore[method-assign]
+
+        router = create_router(
+            config=config,
+            event_bus=event_bus,
+            state=state,
+            pr_manager=pr_mgr,
+            get_orchestrator=lambda: None,
+            set_orchestrator=lambda o: None,
+            set_run_task=lambda t: None,
+            ui_dist_dir=tmp_path / "no-dist",
+            template_dir=tmp_path / "no-templates",
+        )
+
+        get_hitl = None
+        for route in router.routes:
+            if (
+                hasattr(route, "path")
+                and route.path == "/api/hitl"
+                and hasattr(route, "endpoint")
+            ):
+                get_hitl = route.endpoint  # type: ignore[union-attr]
+                break
+
+        assert get_hitl is not None
+        response = await get_hitl()
+        import json
+
+        items = json.loads(response.body)
+        issue_numbers = {item["issue"] for item in items}
+        assert {42, 77}.issubset(issue_numbers)
 
     @pytest.mark.asyncio
     async def test_hitl_endpoint_omits_cause_when_not_set(
@@ -2098,6 +2172,7 @@ class TestRequestChangesEndpoint:
         pr_mgr = PRManager(config, event_bus)
         pr_mgr.remove_label = AsyncMock()
         pr_mgr.add_labels = AsyncMock()
+        pr_mgr.swap_pipeline_labels = AsyncMock()
         return (
             create_router(
                 config=config,
@@ -2147,7 +2222,7 @@ class TestRequestChangesEndpoint:
     async def test_request_changes_swaps_labels(
         self, config, event_bus, state, tmp_path
     ) -> None:
-        """Stage labels are removed and HITL labels are added."""
+        """Request changes transitions issue into HITL via pipeline label swap."""
         router, pr_mgr = self._make_router(config, event_bus, state, tmp_path)
         endpoint = self._find_endpoint(router, "/api/request-changes")
         assert endpoint is not None
@@ -2156,13 +2231,7 @@ class TestRequestChangesEndpoint:
             {"issue_number": 42, "feedback": "Fix the tests", "stage": "review"}
         )
 
-        # Verify review label removed
-        remove_calls = [c.args for c in pr_mgr.remove_label.call_args_list]
-        assert (42, config.review_label[0]) in remove_calls
-
-        # Verify HITL label added
-        add_calls = [c.args for c in pr_mgr.add_labels.call_args_list]
-        assert (42, config.hitl_label) in add_calls
+        pr_mgr.swap_pipeline_labels.assert_awaited_once_with(42, config.hitl_label[0])
 
     @pytest.mark.asyncio
     async def test_request_changes_emits_escalation_event(
@@ -2285,7 +2354,7 @@ class TestRequestChangesEndpoint:
     async def test_request_changes_triage_stage(
         self, config, event_bus, state, tmp_path
     ) -> None:
-        """Triage stage removes find_label and records origin from find_label."""
+        """Triage stage records origin from find_label and routes to HITL."""
         import json
 
         router, pr_mgr = self._make_router(config, event_bus, state, tmp_path)
@@ -2301,14 +2370,13 @@ class TestRequestChangesEndpoint:
         assert state.get_hitl_cause(10) == "Not the right issue"
         assert state.get_hitl_origin(10) == config.find_label[0]
 
-        remove_calls = [c.args for c in pr_mgr.remove_label.call_args_list]
-        assert (10, config.find_label[0]) in remove_calls
+        pr_mgr.swap_pipeline_labels.assert_awaited_once_with(10, config.hitl_label[0])
 
     @pytest.mark.asyncio
     async def test_request_changes_plan_stage(
         self, config, event_bus, state, tmp_path
     ) -> None:
-        """Plan stage removes planner_label and records origin from planner_label."""
+        """Plan stage records origin from planner_label and routes to HITL."""
         import json
 
         router, pr_mgr = self._make_router(config, event_bus, state, tmp_path)
@@ -2324,11 +2392,7 @@ class TestRequestChangesEndpoint:
         assert state.get_hitl_cause(7) == "Plan is incomplete"
         assert state.get_hitl_origin(7) == config.planner_label[0]
 
-        remove_calls = [c.args for c in pr_mgr.remove_label.call_args_list]
-        assert (7, config.planner_label[0]) in remove_calls
-
-        add_calls = [c.args for c in pr_mgr.add_labels.call_args_list]
-        assert (7, config.hitl_label) in add_calls
+        pr_mgr.swap_pipeline_labels.assert_awaited_once_with(7, config.hitl_label[0])
 
 
 class TestDeleteSessionEndpoint:

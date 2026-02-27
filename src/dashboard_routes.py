@@ -365,9 +365,7 @@ def create_router(
         stage_labels: list[str] = getattr(config, label_field, [])
         origin_label: str = stage_labels[0]
 
-        for lbl in stage_labels:
-            await pr_manager.remove_label(issue_number, lbl)
-        await pr_manager.add_labels(issue_number, config.hitl_label)
+        await pr_manager.swap_pipeline_labels(issue_number, config.hitl_label[0])
 
         state.set_hitl_cause(issue_number, feedback)
         state.set_hitl_origin(issue_number, origin_label)
@@ -441,7 +439,10 @@ def create_router(
     @router.get("/api/hitl")
     async def get_hitl() -> JSONResponse:
         """Fetch issues/PRs labeled for human-in-the-loop (stuck on CI)."""
-        items = await pr_manager.list_hitl_items(config.hitl_label)
+        hitl_labels = list(
+            dict.fromkeys([*config.hitl_label, *config.hitl_active_label])
+        )
+        items = await pr_manager.list_hitl_items(hitl_labels)
         orch = get_orchestrator()
         enriched = []
         for item in items:
