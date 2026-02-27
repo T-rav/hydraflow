@@ -213,6 +213,7 @@ class ImplementPhase:
             origin_label=self._config.ready_label[0],
             hitl_label=self._config.hitl_label[0],
         )
+        self._store.enqueue_transition(issue, "hitl")
         record_harness_failure(
             self._harness_insights,
             issue.id,
@@ -367,6 +368,7 @@ class ImplementPhase:
                         "review",
                         pr_number=pr.number if pr and pr.number > 0 else None,
                     )
+                    self._store.enqueue_transition(issue, "review")
 
         status = "success" if result.success else "failed"
         self._state.mark_issue(issue.id, status)
