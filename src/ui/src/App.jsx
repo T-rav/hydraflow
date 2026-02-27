@@ -101,6 +101,18 @@ function AppContent() {
     return ok
   }, [requestChanges])
 
+  const selectedSessionLiveStats = useMemo(() => {
+    if (!selectedSession || selectedSession.status !== 'active') return null
+    if (selectedSession.id !== currentSessionId) return null
+    const done = stageStatus?.workload?.done ?? 0
+    const failed = stageStatus?.workload?.failed ?? 0
+    return {
+      issues_processed_count: done + failed,
+      issues_succeeded: done,
+      issues_failed: failed,
+    }
+  }, [selectedSession, currentSessionId, stageStatus])
+
   return (
     <div style={styles.layout}>
       <Header
@@ -305,14 +317,3 @@ const styles = {
 export const tabInactiveStyle = styles.tab
 export const tabActiveStyle = { ...styles.tab, ...styles.tabActive }
 export const hitlBadgeStyle = styles.hitlBadge
-  const selectedSessionLiveStats = useMemo(() => {
-    if (!selectedSession || selectedSession.status !== 'active') return null
-    if (selectedSession.id !== currentSessionId) return null
-    const done = stageStatus?.workload?.done ?? 0
-    const failed = stageStatus?.workload?.failed ?? 0
-    return {
-      issues_processed_count: done + failed,
-      issues_succeeded: done,
-      issues_failed: failed,
-    }
-  }, [selectedSession, currentSessionId, stageStatus])
