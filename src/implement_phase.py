@@ -15,6 +15,7 @@ from phase_utils import (
     escalate_to_hitl,
     is_adr_issue_title,
     record_harness_failure,
+    release_batch_in_flight,
     run_concurrent_batch,
     store_lifecycle,
 )
@@ -143,7 +144,10 @@ class ImplementPhase:
                                 list(self._active_issues)
                             )
 
-        all_results = await run_concurrent_batch(issues, _worker, self._stop_event)
+        try:
+            all_results = await run_concurrent_batch(issues, _worker, self._stop_event)
+        finally:
+            release_batch_in_flight(self._store, {i.id for i in issues})
         return all_results, issues
 
     async def _worker_inner(self, idx: int, issue: Task, branch: str) -> WorkerResult:

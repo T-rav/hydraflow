@@ -87,6 +87,17 @@ class IssueStore:
         # Active issue tracking: issue_number → stage
         self._active: dict[int, str] = {}
 
+        # In-flight protection: items between _take_from_queue and mark_active.
+        # Prevents refresh() from re-queuing or evicting items that a phase
+        # has dequeued but hasn't yet marked active (semaphore wait gap).
+        self._in_flight: set[int] = set()
+
+        # Eager transition protection: items placed by enqueue_transition
+        # before GitHub labels have caught up.  Keyed by target stage so
+        # _route_incoming_tasks can detect when labels match or exceed the
+        # target and clear protection automatically.
+        self._eagerly_transitioned: dict[int, IssueStoreStage] = {}
+
         # Session throughput counters
         self._processed_count: dict[str, int] = {
             STAGE_FIND: 0,
@@ -197,22 +208,48 @@ class IssueStore:
         return unique
 
     def _evict_stale_tasks(self, incoming_ids: set[int]) -> None:
-        """Remove tasks no longer present in the pipeline from all queues."""
+        """Remove tasks no longer present in the pipeline from all queues.
+
+        Items that are in-flight (taken from queue, not yet marked active)
+        or eagerly transitioned (label swap pending) are protected from
+        eviction.
+        """
+        protected = (
+            set(self._active.keys()) | self._in_flight | set(self._eagerly_transitioned)
+        )
         for stage, q in self._queues.items():
             members = self._queue_members[stage]
-            stale = members - incoming_ids - set(self._active.keys())
+            stale = members - incoming_ids - protected
             if stale:
                 self._queues[stage] = deque(t for t in q if t.id not in stale)
                 members -= stale
-        self._hitl_numbers &= incoming_ids | set(self._active.keys())
+        self._hitl_numbers &= incoming_ids | protected
 
     def _route_incoming_tasks(
         self, stage_map: dict[int, tuple[IssueStoreStage, Task]]
     ) -> None:
-        """Move each task to its target queue if it isn't already there."""
+        """Move each task to its target queue if it isn't already there.
+
+        Items that are in-flight or eagerly transitioned are protected:
+        - In-flight items are never re-routed.
+        - Eagerly-transitioned items have their protection cleared once
+          incoming labels match or exceed the target stage (labels caught up).
+          Until then, stale labels are ignored to prevent backward movement.
+        """
         for task_id, (stage, task) in stage_map.items():
-            if task_id in self._active:
+            if task_id in self._active or task_id in self._in_flight:
                 continue
+
+            # Handle eagerly-transitioned items
+            eager_stage = self._eagerly_transitioned.get(task_id)
+            if eager_stage is not None:
+                if _STAGE_PRIORITY.get(stage, -1) >= _STAGE_PRIORITY.get(
+                    eager_stage, -1
+                ):
+                    del self._eagerly_transitioned[task_id]  # labels caught up
+                else:
+                    continue  # stale labels, skip
+
             if stage == STAGE_HITL:
                 self._hitl_numbers.add(task_id)
                 self._remove_from_all_queues(task_id)
@@ -235,8 +272,20 @@ class IssueStore:
         - Tasks no longer returned by the fetcher are removed from queues.
         """
         stage_map = self._compute_stage_map(tasks)
-        self._evict_stale_tasks(set(stage_map.keys()))
+        incoming_ids = set(stage_map.keys())
+        self._evict_stale_tasks(incoming_ids)
         self._route_incoming_tasks(stage_map)
+
+        # Prune eagerly-transitioned entries for issues that vanished
+        # entirely (e.g. closed issues no longer returned by the fetcher).
+        vanished = (
+            set(self._eagerly_transitioned)
+            - incoming_ids
+            - set(self._active.keys())
+            - self._in_flight
+        )
+        for tid in vanished:
+            del self._eagerly_transitioned[tid]
 
     def _build_label_map(self) -> dict[str, IssueStoreStage]:
         """Build a mapping from label name → pipeline stage."""
@@ -280,7 +329,8 @@ class IssueStore:
 
         This provides an eager handoff between phases so downstream workers
         can pick up transitioned issues without waiting for the next GitHub
-        polling cycle.
+        polling cycle.  The item is protected from ``refresh()`` eviction /
+        re-routing until GitHub labels catch up to the target stage.
         """
         stage_alias: dict[str, IssueStoreStage] = {
             "find": STAGE_FIND,
@@ -293,21 +343,25 @@ class IssueStore:
         if stage is None:
             return
 
+        self._in_flight.discard(task.id)
         self._issue_cache[task.id] = task
         self._remove_from_all_queues(task.id)
         self._hitl_numbers.discard(task.id)
 
         if stage == STAGE_HITL:
             self._hitl_numbers.add(task.id)
+            self._eagerly_transitioned[task.id] = stage
             self._publish_queue_update_nowait()
             return
 
         if task.id in self._queue_members[stage]:
             self._dedup_stats["queued_entries"] += 1
+            self._eagerly_transitioned[task.id] = stage
             self._publish_queue_update_nowait()
             return
         self._queues[stage].append(task)
         self._queue_members[stage].add(task.id)
+        self._eagerly_transitioned[task.id] = stage
         self._publish_queue_update_nowait()
 
     # ------------------------------------------------------------------
@@ -362,6 +416,7 @@ class IssueStore:
             self._queue_members[stage].add(task.id)
 
         if result:
+            self._in_flight.update(t.id for t in result)
             self._publish_queue_update_nowait()
         return result
 
@@ -371,11 +426,13 @@ class IssueStore:
 
     def mark_active(self, task_id: int, stage: str) -> None:
         """Mark a task as actively being processed in *stage*."""
+        self._in_flight.discard(task_id)
         self._active[task_id] = stage
         self._publish_queue_update_nowait()
 
     def mark_complete(self, task_id: int) -> None:
         """Mark a task as done processing; increment throughput counter."""
+        self._in_flight.discard(task_id)
         stage = self._active.pop(task_id, None)
         if stage and stage in self._processed_count:
             self._processed_count[stage] += 1
@@ -389,9 +446,20 @@ class IssueStore:
         """Return a copy of the active issue tracking dict."""
         return dict(self._active)
 
+    def release_in_flight(self, task_ids: set[int]) -> None:
+        """Remove *task_ids* from the in-flight protection set.
+
+        Called after a batch completes (in a ``finally`` block) to ensure
+        no orphaned in-flight entries survive if a worker exits without
+        reaching ``mark_active`` or ``mark_complete``.
+        """
+        self._in_flight -= task_ids
+
     def clear_active(self) -> None:
         """Clear all active issue tracking (used during reset)."""
         self._active.clear()
+        self._in_flight.clear()
+        self._eagerly_transitioned.clear()
         self._publish_queue_update_nowait()
 
     def _publish_queue_update_nowait(self) -> None:
@@ -503,4 +571,5 @@ class IssueStore:
             total_processed=dict(self._processed_count),
             last_poll_timestamp=self._last_poll_ts,
             dedup_stats=dict(self._dedup_stats),
+            in_flight_count=len(self._in_flight),
         )

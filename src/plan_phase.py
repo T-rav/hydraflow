@@ -14,6 +14,7 @@ from models import PipelineStage, PlanResult, Task
 from phase_utils import (
     escalate_to_hitl,
     record_harness_failure,
+    release_batch_in_flight,
     run_concurrent_batch,
     safe_file_memory_suggestion,
     store_lifecycle,
@@ -242,7 +243,10 @@ class PlanPhase:
                     await self._post_plan_transcript(issue, result, status=ts_status)
                     return result
 
-        return await run_concurrent_batch(issues, _plan_one, self._stop_event)
+        try:
+            return await run_concurrent_batch(issues, _plan_one, self._stop_event)
+        finally:
+            release_batch_in_flight(self._store, {i.id for i in issues})
 
     def _record_harness_failure(
         self,

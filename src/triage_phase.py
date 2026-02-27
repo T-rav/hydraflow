@@ -12,6 +12,7 @@ from phase_utils import (
     adr_validation_reasons,
     escalate_to_hitl,
     is_adr_issue_title,
+    release_batch_in_flight,
     store_lifecycle,
 )
 from pr_manager import PRManager
@@ -58,69 +59,72 @@ class TriagePhase:
 
         logger.info("Triaging %d found issues", len(issues))
         processed = 0
-        for issue in issues:
-            if self._stop_event.is_set():
-                logger.info("Stop requested — aborting triage loop")
-                return processed
+        try:
+            for issue in issues:
+                if self._stop_event.is_set():
+                    logger.info("Stop requested — aborting triage loop")
+                    return processed
 
-            async with store_lifecycle(self._store, issue.id, "find"):
-                # ADR draft issues are already scoped/planned; validate shape and
-                # route directly to implementation (ready queue).
-                if is_adr_issue_title(issue.title):
+                async with store_lifecycle(self._store, issue.id, "find"):
+                    # ADR draft issues are already scoped/planned; validate shape and
+                    # route directly to implementation (ready queue).
+                    if is_adr_issue_title(issue.title):
+                        processed += 1
+                        if self._config.dry_run:
+                            continue
+                        reasons = adr_validation_reasons(issue.body)
+                        if reasons:
+                            await self._escalate_triage_issue(issue.id, reasons)
+                            logger.info(
+                                "Issue #%d ADR triage → %s (invalid ADR shape: %s)",
+                                issue.id,
+                                self._config.hitl_label[0],
+                                "; ".join(reasons),
+                            )
+                        else:
+                            await self._transitioner.transition(issue.id, "ready")
+                            self._store.enqueue_transition(issue, "ready")
+                            logger.info(
+                                "Issue #%d ADR triage → %s (validated ADR shape)",
+                                issue.id,
+                                self._config.ready_label[0],
+                            )
+                        continue
+
+                    result = await self._triage.evaluate(issue)
                     processed += 1
+
                     if self._config.dry_run:
                         continue
-                    reasons = adr_validation_reasons(issue.body)
-                    if reasons:
-                        await self._escalate_triage_issue(issue.id, reasons)
+
+                    if result.ready:
+                        await self._transitioner.transition(issue.id, "plan")
+                        self._store.enqueue_transition(issue, "plan")
                         logger.info(
-                            "Issue #%d ADR triage → %s (invalid ADR shape: %s)",
+                            "Issue #%d triaged → %s (ready for planning)",
                             issue.id,
-                            self._config.hitl_label[0],
-                            "; ".join(reasons),
+                            self._config.planner_label[0],
                         )
                     else:
-                        await self._transitioner.transition(issue.id, "ready")
-                        self._store.enqueue_transition(issue, "ready")
+                        await self._escalate_triage_issue(issue.id, result.reasons)
+                        self._store.enqueue_transition(issue, "hitl")
+                        await self._bus.publish(
+                            HydraFlowEvent(
+                                type=EventType.HITL_UPDATE,
+                                data={
+                                    "issue": issue.id,
+                                    "action": "escalated",
+                                },
+                            )
+                        )
                         logger.info(
-                            "Issue #%d ADR triage → %s (validated ADR shape)",
+                            "Issue #%d triaged → %s (needs attention: %s)",
                             issue.id,
-                            self._config.ready_label[0],
+                            self._config.hitl_label[0],
+                            "; ".join(result.reasons),
                         )
-                    continue
-
-                result = await self._triage.evaluate(issue)
-                processed += 1
-
-                if self._config.dry_run:
-                    continue
-
-                if result.ready:
-                    await self._transitioner.transition(issue.id, "plan")
-                    self._store.enqueue_transition(issue, "plan")
-                    logger.info(
-                        "Issue #%d triaged → %s (ready for planning)",
-                        issue.id,
-                        self._config.planner_label[0],
-                    )
-                else:
-                    await self._escalate_triage_issue(issue.id, result.reasons)
-                    self._store.enqueue_transition(issue, "hitl")
-                    await self._bus.publish(
-                        HydraFlowEvent(
-                            type=EventType.HITL_UPDATE,
-                            data={
-                                "issue": issue.id,
-                                "action": "escalated",
-                            },
-                        )
-                    )
-                    logger.info(
-                        "Issue #%d triaged → %s (needs attention: %s)",
-                        issue.id,
-                        self._config.hitl_label[0],
-                        "; ".join(result.reasons),
-                    )
+        finally:
+            release_batch_in_flight(self._store, {i.id for i in issues})
         return processed
 
     async def _escalate_triage_issue(self, issue_id: int, reasons: list[str]) -> None:

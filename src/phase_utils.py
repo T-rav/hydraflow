@@ -56,6 +56,16 @@ async def run_concurrent_batch(
     return results
 
 
+def release_batch_in_flight(store: IssueStore, task_ids: set[int]) -> None:
+    """Release in-flight protection for a batch of issues.
+
+    Should be called in a ``finally`` block after ``run_concurrent_batch``
+    to ensure no orphaned in-flight entries survive if a worker exits
+    without reaching ``mark_active`` / ``mark_complete``.
+    """
+    store.release_in_flight(task_ids)
+
+
 async def escalate_to_hitl(
     state: StateTracker,
     prs: PRManager,

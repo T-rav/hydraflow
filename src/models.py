@@ -539,6 +539,7 @@ class QueueStats(BaseModel):
     total_processed: dict[str, int] = Field(default_factory=dict)
     last_poll_timestamp: str | None = None
     dedup_stats: dict[str, int] = Field(default_factory=dict)
+    in_flight_count: int = 0
 
 
 class SessionStatus(StrEnum):

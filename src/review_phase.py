@@ -30,6 +30,7 @@ from phase_utils import (
     is_adr_issue_title,
     publish_review_status,
     record_harness_failure,
+    release_batch_in_flight,
     run_concurrent_batch,
     store_lifecycle,
 )
@@ -157,7 +158,10 @@ class ReviewPhase:
                                 list(self._active_issues)
                             )
 
-        return await run_concurrent_batch(prs, _review_one, self._stop_event)
+        try:
+            return await run_concurrent_batch(prs, _review_one, self._stop_event)
+        finally:
+            release_batch_in_flight(self._store, {pr.issue_number for pr in prs})
 
     async def review_adrs(self, issues: list[Task]) -> list[ReviewResult]:
         """Review ADR issues that intentionally have no PR."""
