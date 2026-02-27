@@ -1174,6 +1174,8 @@ class TestHITLItem:
             "cause": "test failure",
             "status": "processing",
             "isMemorySuggestion": False,
+            "llmSummary": "",
+            "llmSummaryUpdatedAt": None,
         }
 
     def test_serialization_defaults_include_new_fields(self) -> None:
@@ -1183,6 +1185,8 @@ class TestHITLItem:
         assert data["cause"] == ""
         assert data["status"] == "pending"
         assert data["isMemorySuggestion"] is False
+        assert data["llmSummary"] == ""
+        assert data["llmSummaryUpdatedAt"] is None
 
 
 # ---------------------------------------------------------------------------
