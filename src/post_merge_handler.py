@@ -179,6 +179,7 @@ class PostMergeHandler:
                     "Escalating to human review."
                 ),
                 event_cause="merge_failed",
+                task=issue,
             )
 
     async def _post_inference_totals_comment(self, pr: PRInfo, issue: Task) -> None:

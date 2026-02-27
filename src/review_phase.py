@@ -242,7 +242,9 @@ class ReviewPhase:
             ReviewVerdict.REQUEST_CHANGES,
             ReviewVerdict.COMMENT,
         ):
-            skip_worktree_cleanup = await self._handle_rejected_review(pr, result, idx)
+            skip_worktree_cleanup = await self._handle_rejected_review(
+                pr, task, result, idx
+            )
 
         await self._cleanup_worktree(pr, result, skip_worktree_cleanup)
 
@@ -550,6 +552,7 @@ class ReviewPhase:
             ),
             event_cause="ci_failed",
             extra_event_data={"ci_fix_attempts": ci_fix_attempts},
+            task=issue,
         )
 
     async def wait_and_fix_ci(
@@ -666,6 +669,7 @@ class ReviewPhase:
         post_on_pr: bool = True,
         event_cause: str = "",
         extra_event_data: dict[str, object] | None = None,
+        task: Task | None = None,
     ) -> None:
         """Record HITL escalation state, swap labels, post comment, publish event."""
         self._state.set_hitl_origin(issue_number, origin_label)
@@ -673,6 +677,8 @@ class ReviewPhase:
         self._state.record_hitl_escalation()
 
         await self._transitioner.transition(issue_number, "hitl", pr_number=pr_number)
+        if task is not None:
+            self._store.enqueue_transition(task, "hitl")
 
         if post_on_pr:
             await self._prs.post_pr_comment(pr_number, comment)
@@ -767,6 +773,7 @@ class ReviewPhase:
     async def _handle_rejected_review(
         self,
         pr: PRInfo,
+        task: Task,
         result: ReviewResult,
         worker_id: int,
     ) -> bool:
@@ -787,6 +794,7 @@ class ReviewPhase:
             await self._transitioner.transition(
                 pr.issue_number, "ready", pr_number=pr.number
             )
+            self._store.enqueue_transition(task, "ready")
 
             await self._transitioner.post_comment(
                 pr.issue_number,
@@ -831,6 +839,7 @@ class ReviewPhase:
                 ),
                 post_on_pr=False,
                 event_cause="review_fix_cap_exceeded",
+                task=task,
             )
             return False  # Destroy worktree
 

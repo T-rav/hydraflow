@@ -1334,6 +1334,7 @@ class EscalateFn(Protocol):
         post_on_pr: bool = ...,
         event_cause: str = ...,
         extra_event_data: dict[str, object] | None = ...,
+        task: Task | None = ...,
     ) -> None: ...
 
 

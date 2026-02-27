@@ -516,7 +516,7 @@ def make_review_phase(
     mock_reviewers = AsyncMock()
     mock_prs = AsyncMock()
 
-    mock_store = AsyncMock(spec=IssueStore)
+    mock_store = MagicMock(spec=IssueStore)
     mock_store.mark_active = lambda _num, _stage: None
     mock_store.mark_complete = lambda _num: None
     mock_store.is_active = lambda _num: False

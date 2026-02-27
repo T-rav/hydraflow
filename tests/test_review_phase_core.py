@@ -1364,6 +1364,7 @@ class TestHandleRejectedReview:
         """When under the review fix cap, should return True (preserve worktree)."""
         phase = make_review_phase(config)
         pr = PRInfoFactory.create()
+        task = TaskFactory.create(id=pr.issue_number)
         result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
 
         phase._prs.remove_label = AsyncMock()
@@ -1373,7 +1374,7 @@ class TestHandleRejectedReview:
         phase._prs.post_comment = AsyncMock()
 
         # 0 attempts < max_review_fix_attempts (2 default)
-        returned = await phase._handle_rejected_review(pr, result, 0)
+        returned = await phase._handle_rejected_review(pr, task, result, 0)
 
         assert returned is True
 
@@ -1390,6 +1391,7 @@ class TestHandleRejectedReview:
             verdict=ReviewVerdict.REQUEST_CHANGES,
             summary="Fix the error handling logic",
         )
+        task = TaskFactory.create(id=pr.issue_number)
 
         phase._prs.remove_label = AsyncMock()
         phase._prs.remove_pr_label = AsyncMock()
@@ -1397,7 +1399,7 @@ class TestHandleRejectedReview:
         phase._prs.add_pr_labels = AsyncMock()
         phase._prs.post_comment = AsyncMock()
 
-        await phase._handle_rejected_review(pr, result, 0)
+        await phase._handle_rejected_review(pr, task, result, 0)
 
         assert phase._state.get_review_feedback(42) == "Fix the error handling logic"
 
@@ -1408,6 +1410,7 @@ class TestHandleRejectedReview:
         """When under cap, should swap labels from review→ready on both issue and PR."""
         phase = make_review_phase(config)
         pr = PRInfoFactory.create()
+        task = TaskFactory.create(id=pr.issue_number)
         result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
 
         phase._prs.remove_label = AsyncMock()
@@ -1416,7 +1419,7 @@ class TestHandleRejectedReview:
         phase._prs.add_pr_labels = AsyncMock()
         phase._prs.post_comment = AsyncMock()
 
-        await phase._handle_rejected_review(pr, result, 0)
+        await phase._handle_rejected_review(pr, task, result, 0)
 
         phase._prs.transition.assert_awaited_once_with(42, "ready", pr_number=101)
 
@@ -1427,6 +1430,7 @@ class TestHandleRejectedReview:
         """When under cap, should increment the review attempt counter."""
         phase = make_review_phase(config)
         pr = PRInfoFactory.create()
+        task = TaskFactory.create(id=pr.issue_number)
         result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
 
         phase._prs.remove_label = AsyncMock()
@@ -1435,9 +1439,29 @@ class TestHandleRejectedReview:
         phase._prs.add_pr_labels = AsyncMock()
         phase._prs.post_comment = AsyncMock()
 
-        await phase._handle_rejected_review(pr, result, 0)
+        await phase._handle_rejected_review(pr, task, result, 0)
 
         assert phase._state.get_review_attempts(42) == 1
+
+    @pytest.mark.asyncio
+    async def test_under_cap_enqueues_ready_transition(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """When under cap, should enqueue ready transition for immediate implement wakeup."""
+        phase = make_review_phase(config)
+        pr = PRInfoFactory.create()
+        task = TaskFactory.create(id=pr.issue_number)
+        result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
+
+        phase._prs.remove_label = AsyncMock()
+        phase._prs.remove_pr_label = AsyncMock()
+        phase._prs.add_labels = AsyncMock()
+        phase._prs.add_pr_labels = AsyncMock()
+        phase._prs.post_comment = AsyncMock()
+
+        await phase._handle_rejected_review(pr, task, result, 0)
+
+        phase._store.enqueue_transition.assert_called_once_with(task, "ready")
 
     @pytest.mark.asyncio
     async def test_cap_exceeded_returns_false(self, tmp_path: Path) -> None:
@@ -1452,6 +1476,7 @@ class TestHandleRejectedReview:
         )
         phase = make_review_phase(config)
         pr = PRInfoFactory.create()
+        task = TaskFactory.create(id=pr.issue_number)
         result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
 
         phase._prs.remove_label = AsyncMock()
@@ -1465,7 +1490,7 @@ class TestHandleRejectedReview:
         phase._state.increment_review_attempts(42)
         phase._state.increment_review_attempts(42)
 
-        returned = await phase._handle_rejected_review(pr, result, 0)
+        returned = await phase._handle_rejected_review(pr, task, result, 0)
 
         assert returned is False
 
@@ -1484,6 +1509,7 @@ class TestHandleRejectedReview:
         )
         phase = make_review_phase(config, event_bus=event_bus)
         pr = PRInfoFactory.create()
+        task = TaskFactory.create(id=pr.issue_number)
         result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
 
         phase._prs.remove_label = AsyncMock()
@@ -1496,7 +1522,7 @@ class TestHandleRejectedReview:
         phase._state.increment_review_attempts(42)
         phase._state.increment_review_attempts(42)
 
-        await phase._handle_rejected_review(pr, result, 0)
+        await phase._handle_rejected_review(pr, task, result, 0)
 
         assert phase._state.get_hitl_origin(42) == "hydraflow-review"
         phase._prs.transition.assert_any_await(42, "hitl", pr_number=101)
@@ -1514,6 +1540,7 @@ class TestHandleRejectedReview:
         )
         phase = make_review_phase(config)
         pr = PRInfoFactory.create()
+        task = TaskFactory.create(id=pr.issue_number)
         result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
 
         phase._prs.remove_label = AsyncMock()
@@ -1526,7 +1553,7 @@ class TestHandleRejectedReview:
         # Exhaust cap
         phase._state.increment_review_attempts(42)
 
-        await phase._handle_rejected_review(pr, result, 0)
+        await phase._handle_rejected_review(pr, task, result, 0)
 
         # post_on_pr=False, so comment goes to the issue
         comment_calls = [c.args for c in phase._prs.post_comment.call_args_list]
@@ -1540,6 +1567,7 @@ class TestHandleRejectedReview:
         """When under cap, should post a re-queue notification on the issue."""
         phase = make_review_phase(config)
         pr = PRInfoFactory.create()
+        task = TaskFactory.create(id=pr.issue_number)
         result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
 
         phase._prs.remove_label = AsyncMock()
@@ -1548,7 +1576,7 @@ class TestHandleRejectedReview:
         phase._prs.add_pr_labels = AsyncMock()
         phase._prs.post_comment = AsyncMock()
 
-        await phase._handle_rejected_review(pr, result, 0)
+        await phase._handle_rejected_review(pr, task, result, 0)
 
         comment_calls = [c.args for c in phase._prs.post_comment.call_args_list]
         assert any("Re-queuing for implementation" in c[1] for c in comment_calls)
