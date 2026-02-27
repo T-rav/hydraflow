@@ -654,7 +654,12 @@ This closes the issue automatically. Use only when you are certain.
                 is_body,
                 re.MULTILINE,
             )
-            if not list_steps:
+            heading_steps = re.findall(
+                r"^\s*#{2,6}\s*(?:Step\s*\d+[:\.\-]?\s+\S|\d+[\.\)]\s+\S)",
+                is_body,
+                re.MULTILINE | re.IGNORECASE,
+            )
+            if not list_steps and not heading_steps:
                 errors.append(
                     "## Implementation Steps must include at least one actionable step"
                 )

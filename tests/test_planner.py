@@ -663,6 +663,25 @@ def test_validate_plan_implementation_steps_allows_bulleted_plan(config, event_b
     assert not any("Implementation Steps" in e for e in errors)
 
 
+def test_validate_plan_implementation_steps_allows_markdown_heading_steps(
+    config, event_bus
+):
+    """Markdown heading-style steps (### Step 1 / ### 1.) are valid."""
+    runner = _make_runner(config, event_bus)
+    task = Task(id=1, title="Fix it")
+    plan = _valid_plan().replace(
+        "1. Add the new model class to models.py\n"
+        "2. Add configuration field to config.py\n"
+        "3. Wire up the new model in the orchestrator\n"
+        "4. Add validation logic",
+        "### Step 1: Update worker metadata\n"
+        "### 2. Wire status callbacks\n"
+        "### Step 3: Add regression tests",
+    )
+    errors = runner._validate_plan(task, plan)
+    assert not any("Implementation Steps" in e for e in errors)
+
+
 def test_validate_plan_minimum_word_count(config, event_bus):
     """Plan below min_plan_words fails."""
     runner = _make_runner(config, event_bus)
