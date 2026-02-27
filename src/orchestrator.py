@@ -820,6 +820,7 @@ class HydraFlowOrchestrator:
             review_issues = self._store.get_reviewable(self._config.batch_size)
             if not review_issues:
                 break
+            cycle_did_work = False
             adr_issues = [
                 issue for issue in review_issues if is_adr_issue_title(issue.title)
             ]
@@ -830,13 +831,13 @@ class HydraFlowOrchestrator:
             ]
 
             if adr_issues:
-                did_work = True
+                cycle_did_work = True
                 await self._reviewer.review_adrs(adr_issues)
 
             if not normal_review_issues:
+                did_work = did_work or cycle_did_work
                 continue
 
-            did_work = True
             active_in_store = set(self._store.get_active_issues().keys())
             gh_review_issues = [GitHubIssue.from_task(t) for t in normal_review_issues]
             prs, gh_issues = await self._fetcher.fetch_reviewable_prs(
@@ -847,8 +848,9 @@ class HydraFlowOrchestrator:
                 for issue in normal_review_issues:
                     self._store.enqueue_transition(issue, "review")
                 # Treat as idle so the polling loop applies its normal backoff.
-                did_work = False
+                did_work = did_work or cycle_did_work
                 break
+            cycle_did_work = True
             review_results = await self._reviewer.review_prs(
                 prs, [i.to_task() for i in gh_issues]
             )
@@ -879,6 +881,7 @@ class HydraFlowOrchestrator:
             if any(r.merged for r in review_results):
                 await asyncio.sleep(_POST_MERGE_DELAY)
                 await self._prs.pull_main()
+            did_work = did_work or cycle_did_work
         return did_work
 
     async def _sleep_or_stop(self, seconds: int | float) -> None:

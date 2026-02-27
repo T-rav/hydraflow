@@ -2220,4 +2220,4 @@ class TestADRReviewPath:
 
         assert len(results) == 1
         assert results[0].verdict == ReviewVerdict.REQUEST_CHANGES
-        phase._prs.transition.assert_awaited_once_with(711, "hitl", pr_number=0)
+        phase._prs.transition.assert_awaited_once_with(711, "hitl", pr_number=None)

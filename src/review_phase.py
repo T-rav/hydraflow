@@ -185,7 +185,7 @@ class ReviewPhase:
         if reasons:
             await self._escalate_to_hitl(
                 issue.id,
-                0,
+                None,
                 cause="ADR review failed validation",
                 origin_label=self._config.review_label[0],
                 comment=(
@@ -756,7 +756,7 @@ class ReviewPhase:
     async def _escalate_to_hitl(
         self,
         issue_number: int,
-        pr_number: int,
+        pr_number: int | None,
         cause: str,
         origin_label: str,
         *,
@@ -775,18 +775,19 @@ class ReviewPhase:
         if task is not None:
             self._store.enqueue_transition(task, "hitl")
 
-        if post_on_pr:
+        if post_on_pr and pr_number and pr_number > 0:
             await self._prs.post_pr_comment(pr_number, comment)
         else:
             await self._prs.post_comment(issue_number, comment)
 
         event_data: dict[str, object] = {
             "issue": issue_number,
-            "pr": pr_number,
             "status": "escalated",
             "role": "reviewer",
             "cause": event_cause or cause,
         }
+        if pr_number and pr_number > 0:
+            event_data["pr"] = pr_number
         if extra_event_data:
             event_data.update(extra_event_data)
         await self._bus.publish(
