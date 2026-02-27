@@ -197,6 +197,12 @@ def _status_sort_key(status: str, timestamp: str | None) -> tuple[datetime, int]
     return (parsed, _status_rank(status))
 
 
+def _is_expected_supervisor_unavailable(exc: Exception) -> bool:
+    """Return True for the expected local-dev supervisor-down condition."""
+    text = str(exc).lower()
+    return "hf supervisor is not running" in text
+
+
 def create_router(
     config: HydraFlowConfig,
     event_bus: EventBus,
@@ -1642,7 +1648,8 @@ def create_router(
         try:
             repos = await _call_supervisor(supervisor_client.list_repos)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Supervisor list_repos failed: %s", exc)
+            if not _is_expected_supervisor_unavailable(exc):
+                logger.warning("Supervisor list_repos failed: %s", exc)
             return JSONResponse({"error": str(exc)}, status_code=503)
         return JSONResponse({"repos": repos})
 
