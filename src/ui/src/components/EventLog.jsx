@@ -45,7 +45,6 @@ const ISSUE_WORD_PREFIX_PATTERN = /^Issue #\d+\s*/
 
 export function eventMessage(type, data) {
   const summary = eventSummary(type, data)
-  if (typeof summary !== 'string') return summary
   if (summary.startsWith('#')) return summary.replace(ISSUE_PREFIX_PATTERN, '')
   if (summary.startsWith('Issue #')) return summary.replace(ISSUE_WORD_PREFIX_PATTERN, '')
   return summary
