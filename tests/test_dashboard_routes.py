@@ -3373,6 +3373,103 @@ class TestGetPRsEndpoint:
 
 
 # ---------------------------------------------------------------------------
+# GET /api/repos
+# ---------------------------------------------------------------------------
+
+
+class TestListSupervisedReposEndpoint:
+    """Tests for GET /api/repos supervisor error logging behavior."""
+
+    def _make_router(self, config, event_bus, state, tmp_path, supervisor_module):
+        from dashboard_routes import create_router
+        from pr_manager import PRManager
+
+        pr_mgr = PRManager(config, event_bus)
+        with patch(
+            "dashboard_routes.importlib.import_module", return_value=supervisor_module
+        ):
+            return create_router(
+                config=config,
+                event_bus=event_bus,
+                state=state,
+                pr_manager=pr_mgr,
+                get_orchestrator=lambda: None,
+                set_orchestrator=lambda o: None,
+                set_run_task=lambda t: None,
+                ui_dist_dir=tmp_path / "no-dist",
+                template_dir=tmp_path / "no-templates",
+            )
+
+    def _find_endpoint(self, router, path):
+        for route in router.routes:
+            if (
+                hasattr(route, "path")
+                and route.path == path
+                and hasattr(route, "endpoint")
+            ):
+                return route.endpoint
+        return None
+
+    @pytest.mark.asyncio
+    async def test_expected_supervisor_down_error_not_warned(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        import json
+        from types import SimpleNamespace
+
+        def _raise_down():
+            raise RuntimeError(
+                "hf supervisor is not running. Run `hf run` inside a repo to start it."
+            )
+
+        router = self._make_router(
+            config,
+            event_bus,
+            state,
+            tmp_path,
+            SimpleNamespace(list_repos=_raise_down),
+        )
+        endpoint = self._find_endpoint(router, "/api/repos")
+        assert endpoint is not None
+
+        with patch("dashboard_routes.logger") as mock_logger:
+            response = await endpoint()
+
+        data = json.loads(response.body)
+        assert response.status_code == 503
+        assert "hf supervisor is not running" in data["error"]
+        mock_logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_unexpected_supervisor_error_is_warned(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        import json
+        from types import SimpleNamespace
+
+        def _raise_other():
+            raise RuntimeError("Supervisor connection failed: [Errno 61] refused")
+
+        router = self._make_router(
+            config,
+            event_bus,
+            state,
+            tmp_path,
+            SimpleNamespace(list_repos=_raise_other),
+        )
+        endpoint = self._find_endpoint(router, "/api/repos")
+        assert endpoint is not None
+
+        with patch("dashboard_routes.logger") as mock_logger:
+            response = await endpoint()
+
+        data = json.loads(response.body)
+        assert response.status_code == 503
+        assert "Supervisor connection failed" in data["error"]
+        mock_logger.warning.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
 # GET /api/sessions and /api/sessions/{session_id}
 # ---------------------------------------------------------------------------
 

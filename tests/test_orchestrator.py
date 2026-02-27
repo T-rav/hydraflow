@@ -2072,6 +2072,79 @@ class TestMemorySuggestionFiling:
         orch._store.enqueue_transition.assert_called_once_with(review_task, "review")
 
     @pytest.mark.asyncio
+    async def test_do_review_work_processes_adr_without_pr(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """ADR review issues should use the no-PR ADR review path."""
+        orch = HydraFlowOrchestrator(config)
+        adr_task = TaskFactory.create(
+            id=420,
+            title="[ADR] Event rendering architecture",
+            body=(
+                "## Context\nA\n\n## Decision\nConcrete choice with enough "
+                "detail for review and finalization.\n\n## Consequences\nB"
+            ),
+        )
+
+        call_count = 0
+
+        def get_reviewable_once(_max_count: int) -> list[Task]:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return [adr_task]
+            return []
+
+        orch._store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
+        orch._reviewer.review_adrs = AsyncMock(return_value=[])  # type: ignore[method-assign]
+        orch._fetcher.fetch_reviewable_prs = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
+
+        did_work = await orch._do_review_work()
+
+        assert did_work is True
+        orch._reviewer.review_adrs.assert_awaited_once_with([adr_task])
+        orch._fetcher.fetch_reviewable_prs.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_do_review_work_keeps_work_true_when_adr_processed_and_no_prs(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """If ADR work ran, no-PR normal review should not reset did_work to idle."""
+        orch = HydraFlowOrchestrator(config)
+        adr_task = TaskFactory.create(
+            id=500,
+            title="[ADR] Queue architecture",
+            body=(
+                "## Context\nA\n\n## Decision\nConcrete decision detail that is long "
+                "enough to pass ADR checks.\n\n## Consequences\nB"
+            ),
+        )
+        normal_review_task = TaskFactory.create(id=501, title="Regular review issue")
+
+        call_count = 0
+
+        def get_reviewable_once(_max_count: int) -> list[Task]:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return [adr_task, normal_review_task]
+            return []
+
+        orch._store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
+        orch._store.get_active_issues = lambda: {}  # type: ignore[method-assign]
+        orch._store.enqueue_transition = MagicMock()  # type: ignore[method-assign]
+        orch._reviewer.review_adrs = AsyncMock(return_value=[])  # type: ignore[method-assign]
+        orch._fetcher.fetch_reviewable_prs = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
+
+        did_work = await orch._do_review_work()
+
+        assert did_work is True
+        orch._reviewer.review_adrs.assert_awaited_once_with([adr_task])
+        orch._store.enqueue_transition.assert_called_once_with(
+            normal_review_task, "review"
+        )
+
+    @pytest.mark.asyncio
     async def test_review_loop_multiple_results_files_each(
         self, config: HydraFlowConfig
     ) -> None:

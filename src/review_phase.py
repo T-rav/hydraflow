@@ -26,6 +26,8 @@ from models import (
     Task,
 )
 from phase_utils import (
+    adr_validation_reasons,
+    is_adr_issue_title,
     publish_review_status,
     record_harness_failure,
     run_concurrent_batch,
@@ -156,6 +158,79 @@ class ReviewPhase:
                             )
 
         return await run_concurrent_batch(prs, _review_one, self._stop_event)
+
+    async def review_adrs(self, issues: list[Task]) -> list[ReviewResult]:
+        """Review ADR issues that intentionally have no PR."""
+        adr_issues = [issue for issue in issues if is_adr_issue_title(issue.title)]
+        if not adr_issues:
+            return []
+
+        results: list[ReviewResult] = []
+        for issue in adr_issues:
+            if self._stop_event.is_set():
+                break
+            async with store_lifecycle(self._store, issue.id, "review"):
+                results.append(await self._review_single_adr(issue))
+        return results
+
+    async def _review_single_adr(self, issue: Task) -> ReviewResult:
+        """Validate ADR quality and either finalize or escalate to HITL."""
+        reasons = adr_validation_reasons(issue.body)
+        decision_detail = self._extract_adr_section(issue.body, "decision")
+        if len(decision_detail.strip()) < 60:
+            reasons.append(
+                "Decision section lacks actionable detail (minimum 60 chars)"
+            )
+
+        if reasons:
+            await self._escalate_to_hitl(
+                issue.id,
+                None,
+                cause="ADR review failed validation",
+                origin_label=self._config.review_label[0],
+                comment=(
+                    "## ADR Review Failed\n\n"
+                    "The ADR draft is not ready for finalization.\n\n"
+                    "**Required fixes:**\n"
+                    + "\n".join(f"- {reason}" for reason in reasons)
+                ),
+                post_on_pr=False,
+                event_cause="adr_review_failed",
+                task=issue,
+            )
+            return ReviewResult(
+                pr_number=0,
+                issue_number=issue.id,
+                verdict=ReviewVerdict.REQUEST_CHANGES,
+                summary="ADR review failed validation",
+            )
+
+        await self._transitioner.post_comment(
+            issue.id,
+            "## ADR Review Approved\n\n"
+            "ADR draft validated and finalized by the review phase.\n\n"
+            "Closing issue as complete.",
+        )
+        await self._prs.swap_pipeline_labels(issue.id, self._config.fixed_label[0])
+        await self._transitioner.close_task(issue.id)
+        self._state.mark_issue(issue.id, "completed")
+        self._state.record_issue_completed()
+        return ReviewResult(
+            pr_number=0,
+            issue_number=issue.id,
+            verdict=ReviewVerdict.APPROVE,
+            summary="ADR review approved",
+            merged=True,
+        )
+
+    @staticmethod
+    def _extract_adr_section(body: str, heading: str) -> str:
+        """Extract a markdown section body by heading name (case-insensitive)."""
+        pattern = (
+            r"(?ims)^##\s+" + re.escape(heading) + r"\s*\n(?P<section>.*?)(?=^##\s+|\Z)"
+        )
+        match = re.search(pattern, body)
+        return match.group("section").strip() if match else ""
 
     async def _should_skip_review(self, pr: PRInfo, last_sha: str | None) -> bool:
         """Return True if the PR HEAD SHA is unchanged since last review."""
@@ -681,7 +756,7 @@ class ReviewPhase:
     async def _escalate_to_hitl(
         self,
         issue_number: int,
-        pr_number: int,
+        pr_number: int | None,
         cause: str,
         origin_label: str,
         *,
@@ -700,18 +775,19 @@ class ReviewPhase:
         if task is not None:
             self._store.enqueue_transition(task, "hitl")
 
-        if post_on_pr:
+        if post_on_pr and pr_number and pr_number > 0:
             await self._prs.post_pr_comment(pr_number, comment)
         else:
             await self._prs.post_comment(issue_number, comment)
 
         event_data: dict[str, object] = {
             "issue": issue_number,
-            "pr": pr_number,
             "status": "escalated",
             "role": "reviewer",
             "cause": event_cause or cause,
         }
+        if pr_number and pr_number > 0:
+            event_data["pr"] = pr_number
         if extra_event_data:
             event_data.update(extra_event_data)
         await self._bus.publish(
