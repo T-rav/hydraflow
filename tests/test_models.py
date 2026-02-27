@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
 # conftest.py already inserts the hydraflow package directory into sys.path
@@ -1266,13 +1268,25 @@ class TestControlStatusResponse:
             model="sonnet",
         )
         resp = ControlStatusResponse(status="running", config=cfg)
-        data = resp.model_dump()
+        data = resp.model_dump(mode="json")
         assert data["status"] == "running"
         assert data["config"]["repo"] == "org/repo"
         assert data["config"]["ready_label"] == ["hydraflow-ready"]
         assert data["config"]["max_workers"] == 2
         assert data["config"]["batch_size"] == 15
         assert data["config"]["model"] == "sonnet"
+
+    def test_credit_resume_at_serializes_to_iso(self) -> None:
+        resume_at = datetime.now(UTC)
+        resp = ControlStatusResponse(
+            status="credits_paused",
+            credit_resume_at=resume_at,
+        )
+        data = resp.model_dump(mode="json")
+        serialized = data["credit_resume_at"]
+        assert isinstance(serialized, str)
+        parsed = datetime.fromisoformat(serialized.replace("Z", "+00:00"))
+        assert parsed == resume_at
 
 
 # ---------------------------------------------------------------------------

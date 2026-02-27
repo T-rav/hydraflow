@@ -23,8 +23,17 @@ function mockStageStatus(workers = {}, sessionCounters = {}) {
   return deriveStageStatus({}, workers, [], sessionCounters)
 }
 
+function createMockContext(overrides = {}) {
+  return {
+    stageStatus: mockStageStatus(),
+    config: null,
+    creditResumeAt: null,
+    ...overrides,
+  }
+}
+
 beforeEach(() => {
-  mockUseHydraFlow.mockReturnValue({ stageStatus: mockStageStatus(), config: null })
+  mockUseHydraFlow.mockReturnValue(createMockContext())
 })
 
 describe('Header pre-computed styles', () => {
@@ -140,7 +149,7 @@ describe('Header component', () => {
       4: { status: 'done', worker: 4, role: 'planner', title: 'Plan #4', branch: '', transcript: [], pr: null },
       5: { status: 'failed', worker: 5, role: 'implementer', title: 'Issue #5', branch: '', transcript: [], pr: null },
     }
-    mockUseHydraFlow.mockReturnValue({ stageStatus: mockStageStatus(workers, { mergedCount: 1 }) })
+    mockUseHydraFlow.mockReturnValue(createMockContext({ stageStatus: mockStageStatus(workers, { mergedCount: 1 }) }))
     render(<Header {...defaultProps} />)
     expect(screen.getByText('5 total')).toBeInTheDocument()
     expect(screen.getByText('2 active')).toBeInTheDocument()
@@ -152,7 +161,7 @@ describe('Header component', () => {
     const workers = {
       1: { status: 'running', worker: 1, role: 'implementer', title: 'Issue #1', branch: '', transcript: [], pr: null },
     }
-    mockUseHydraFlow.mockReturnValue({ stageStatus: mockStageStatus(workers, { mergedCount: 1 }) })
+    mockUseHydraFlow.mockReturnValue(createMockContext({ stageStatus: mockStageStatus(workers, { mergedCount: 1 }) }))
     render(<Header {...defaultProps} />)
     const workloadDiv = screen.getByText('1 active').parentElement
     const statSpans = Array.from(workloadDiv.children).filter(el => el.textContent !== '|')
@@ -164,7 +173,7 @@ describe('Header component', () => {
       1: { status: 'quality_fix', worker: 1, role: 'implementer', title: 'Fix #1', branch: '', transcript: [], pr: null },
       2: { status: 'queued', worker: 2, role: 'implementer', title: 'Issue #2', branch: '', transcript: [], pr: null },
     }
-    mockUseHydraFlow.mockReturnValue({ stageStatus: mockStageStatus(workers) })
+    mockUseHydraFlow.mockReturnValue(createMockContext({ stageStatus: mockStageStatus(workers) }))
     render(<Header {...defaultProps} />)
     expect(screen.getByText('2 total')).toBeInTheDocument()
     expect(screen.getByText('1 active')).toBeInTheDocument()
@@ -182,23 +191,21 @@ describe('Header component', () => {
   })
 
   it('renders app version when available in config', () => {
-    mockUseHydraFlow.mockReturnValue({
-      stageStatus: mockStageStatus(),
+    mockUseHydraFlow.mockReturnValue(createMockContext({
       config: { app_version: '0.9.0' },
-    })
+    }))
     render(<Header {...defaultProps} />)
     expect(screen.getByText('v0.9.0')).toBeInTheDocument()
   })
 
   it('renders update notice with command when update is available', () => {
-    mockUseHydraFlow.mockReturnValue({
-      stageStatus: mockStageStatus(),
+    mockUseHydraFlow.mockReturnValue(createMockContext({
       config: {
         app_version: '0.9.0',
         latest_version: '0.9.2',
         update_available: true,
       },
-    })
+    }))
     render(<Header {...defaultProps} />)
     expect(screen.getByText('Update available: v0.9.2 (`hf check-update`)')).toBeInTheDocument()
   })
@@ -243,10 +250,9 @@ describe('Header component', () => {
     }
 
     beforeEach(() => {
-      mockUseHydraFlow.mockReturnValue({
+      mockUseHydraFlow.mockReturnValue(createMockContext({
         stageStatus: mockStageStatus({}, counterFixture),
-        config: null,
-      })
+      }))
     })
 
     it('renders compact stage pills with arrows separating each stage', () => {
@@ -302,14 +308,14 @@ describe('Header component', () => {
     }
 
     it('shows Start when orchestratorStatus is idle even with stale active workers', () => {
-      mockUseHydraFlow.mockReturnValue({ stageStatus: mockStageStatus(activeWorkers) })
+      mockUseHydraFlow.mockReturnValue(createMockContext({ stageStatus: mockStageStatus(activeWorkers) }))
       render(<Header {...defaultProps} orchestratorStatus="idle" />)
       expect(screen.getByText('Start')).toBeInTheDocument()
       expect(screen.queryByText('Stopping\u2026')).toBeNull()
     })
 
     it('shows Start when idle and all workers are done', () => {
-      mockUseHydraFlow.mockReturnValue({ stageStatus: mockStageStatus(allDoneWorkers) })
+      mockUseHydraFlow.mockReturnValue(createMockContext({ stageStatus: mockStageStatus(allDoneWorkers) }))
       render(<Header {...defaultProps} orchestratorStatus="idle" />)
       expect(screen.getByText('Start')).toBeInTheDocument()
       expect(screen.queryByText('Stopping\u2026')).toBeNull()
@@ -323,20 +329,20 @@ describe('Header component', () => {
     })
 
     it('shows Start when orchestratorStatus is idle even with stale planning workers', () => {
-      mockUseHydraFlow.mockReturnValue({ stageStatus: mockStageStatus(planningWorkers) })
+      mockUseHydraFlow.mockReturnValue(createMockContext({ stageStatus: mockStageStatus(planningWorkers) }))
       render(<Header {...defaultProps} orchestratorStatus="idle" />)
       expect(screen.getByText('Start')).toBeInTheDocument()
       expect(screen.queryByText('Stopping\u2026')).toBeNull()
     })
 
     it('shows Start when orchestratorStatus is done and no active workers', () => {
-      mockUseHydraFlow.mockReturnValue({ stageStatus: mockStageStatus(allDoneWorkers) })
+      mockUseHydraFlow.mockReturnValue(createMockContext({ stageStatus: mockStageStatus(allDoneWorkers) }))
       render(<Header {...defaultProps} orchestratorStatus="done" />)
       expect(screen.getByText('Start')).toBeInTheDocument()
     })
 
     it('shows Start when orchestratorStatus is done even with stale active workers', () => {
-      mockUseHydraFlow.mockReturnValue({ stageStatus: mockStageStatus(activeWorkers) })
+      mockUseHydraFlow.mockReturnValue(createMockContext({ stageStatus: mockStageStatus(activeWorkers) }))
       render(<Header {...defaultProps} orchestratorStatus="done" />)
       expect(screen.getByText('Start')).toBeInTheDocument()
       expect(screen.queryByText('Stopping\u2026')).toBeNull()
@@ -347,6 +353,23 @@ describe('Header component', () => {
       expect(screen.getByText('Credits Paused')).toBeInTheDocument()
       expect(screen.getByText('Stop')).toBeInTheDocument()
       expect(screen.queryByText('Start')).toBeNull()
+    })
+
+    it('renders localized resume time when creditResumeAt is available', () => {
+      const resumeAt = '2024-01-02T03:04:05.000Z'
+      mockUseHydraFlow.mockReturnValue(createMockContext({ creditResumeAt: resumeAt }))
+      render(<Header {...defaultProps} orchestratorStatus="credits_paused" />)
+      const badge = screen.getAllByText(/Credits Paused/)[0]
+      expect(badge.textContent).toMatch(/resumes/i)
+      expect(badge.getAttribute('title')).toMatch(/Resumes/)
+    })
+
+    it('handles missing resume time gracefully', () => {
+      mockUseHydraFlow.mockReturnValue(createMockContext({ creditResumeAt: null }))
+      render(<Header {...defaultProps} orchestratorStatus="credits_paused" />)
+      const badge = screen.getByText('Credits Paused')
+      expect(badge.textContent).toBe('Credits Paused')
+      expect(badge.getAttribute('title')).toBeNull()
     })
   })
 
@@ -375,7 +398,7 @@ describe('Header component', () => {
         1: { status: 'running', worker: 1, role: 'implementer', title: 'Issue #1', branch: '', transcript: [], pr: null },
       }
 
-      mockUseHydraFlow.mockReturnValue({ stageStatus: mockStageStatus(activeWorkers) })
+      mockUseHydraFlow.mockReturnValue(createMockContext({ stageStatus: mockStageStatus(activeWorkers) }))
       const { rerender } = render(
         <Header {...defaultProps} orchestratorStatus="stopping" />
       )
@@ -389,7 +412,7 @@ describe('Header component', () => {
       expect(screen.queryByText('Start')).toBeNull()
 
       // Workers finish
-      mockUseHydraFlow.mockReturnValue({ stageStatus: mockStageStatus({}) })
+      mockUseHydraFlow.mockReturnValue(createMockContext({ stageStatus: mockStageStatus({}) }))
       rerender(<Header {...defaultProps} orchestratorStatus="idle" />)
 
       // Now Start should appear

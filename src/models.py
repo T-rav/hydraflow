@@ -716,6 +716,7 @@ class ControlStatusResponse(BaseModel):
     """Response for GET /api/control/status."""
 
     status: str = "idle"
+    credit_resume_at: datetime | None = None
     config: ControlStatusConfig = Field(default_factory=ControlStatusConfig)
 
 
@@ -863,6 +864,7 @@ class OrchestratorStatusPayload(TypedDict, total=False):
 
     status: str
     reset: bool
+    credit_resume_at: str | None
 
 
 class SessionStartPayload(TypedDict):

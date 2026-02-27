@@ -17,6 +17,7 @@ export const initialState = {
   batchNum: 0,
   phase: 'idle',
   orchestratorStatus: 'idle',
+  creditResumeAt: null,
   workers: {},
   prs: [],
   reviews: [],
@@ -102,9 +103,11 @@ export function reducer(state, action) {
       const newStatus = action.data.status
       const isStopped = newStatus === 'idle' || newStatus === 'done' || newStatus === 'stopping'
       const isSessionStart = newStatus === 'running' && action.data.reset === true
+      const resumeAt = action.data.credit_resume_at ?? null
       return {
         ...addEvent(state, action),
         orchestratorStatus: newStatus,
+        creditResumeAt: resumeAt,
         ...(isStopped ? {
           workers: {},
           sessionTriaged: 0,
@@ -837,7 +840,7 @@ export function HydraFlowProvider({ children }) {
         .then(data => {
           dispatch({
             type: 'orchestrator_status',
-            data: { status: data.status },
+            data: { status: data.status, credit_resume_at: data.credit_resume_at ?? null },
             timestamp: new Date().toISOString(),
           })
           if (data.config) {

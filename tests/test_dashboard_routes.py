@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -523,6 +524,55 @@ class TestControlStatusAppVersion:
         response = await get_control_status()
         data = json.loads(response.body)
         assert data["config"]["app_version"] == get_app_version()
+
+
+class TestControlStatusCreditResume:
+    """Tests that /api/control/status exposes credit resume time."""
+
+    @pytest.mark.asyncio
+    async def test_control_status_includes_credit_resume_at(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        import json
+
+        from dashboard_routes import create_router
+        from pr_manager import PRManager
+
+        resume_at = datetime.now(UTC) + timedelta(hours=2)
+        orch = MagicMock()
+        orch.run_status = "credits_paused"
+        orch.running = False
+        orch.current_session_id = "sess-123"
+        orch.credit_resume_at = resume_at
+
+        pr_mgr = PRManager(config, event_bus)
+        router = create_router(
+            config=config,
+            event_bus=event_bus,
+            state=state,
+            pr_manager=pr_mgr,
+            get_orchestrator=lambda: orch,
+            set_orchestrator=lambda o: None,
+            set_run_task=lambda t: None,
+            ui_dist_dir=tmp_path / "no-dist",
+            template_dir=tmp_path / "no-templates",
+        )
+
+        get_control_status = None
+        for route in router.routes:
+            if (
+                hasattr(route, "path")
+                and route.path == "/api/control/status"
+                and hasattr(route, "endpoint")
+            ):
+                get_control_status = route.endpoint  # type: ignore[union-attr]
+                break
+
+        assert get_control_status is not None
+        response = await get_control_status()
+        data = json.loads(response.body)
+        assert data["status"] == "credits_paused"
+        assert data["credit_resume_at"] == resume_at.isoformat()
 
     @pytest.mark.asyncio
     async def test_control_status_includes_cached_update_details(

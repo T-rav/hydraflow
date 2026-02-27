@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-
-import contextlib
-from typing import TYPE_CHECKING
 
 from events import EventBus, EventType, HydraFlowEvent
 from models import HITLItem, PRListItem
@@ -1104,6 +1104,26 @@ class TestControlStatusEndpoint:
         assert response.status_code == 200
         body = response.json()
         assert body["config"]["app_version"] == get_app_version()
+
+    def test_status_includes_credit_resume_time(
+        self, config: HydraFlowConfig, event_bus: EventBus, state
+    ) -> None:
+        from fastapi.testclient import TestClient
+
+        from dashboard import HydraFlowDashboard
+
+        resume_at = datetime.now(UTC) + timedelta(hours=1)
+        orch = make_orchestrator_mock(running=False, run_status="credits_paused")
+        orch.credit_resume_at = resume_at
+        dashboard = HydraFlowDashboard(config, event_bus, state, orchestrator=orch)
+        app = dashboard.create_app()
+
+        client = TestClient(app)
+        response = client.get("/api/control/status")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["credit_resume_at"] == resume_at.isoformat()
 
     _STATUS_CONFIG_FIELDS = [
         "repo",

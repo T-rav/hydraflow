@@ -637,8 +637,10 @@ def create_router(
         if update_result is not None:
             latest_version = update_result.latest_version or ""
             update_available = update_result.update_available
+        resume_at = orch.credit_resume_at if orch else None
         response = ControlStatusResponse(
             status=status,
+            credit_resume_at=resume_at,
             config=ControlStatusConfig(
                 app_version=get_app_version(),
                 latest_version=latest_version,
@@ -665,6 +667,8 @@ def create_router(
         )
         data = response.model_dump()
         data["current_session_id"] = current_session
+        if data.get("credit_resume_at"):
+            data["credit_resume_at"] = data["credit_resume_at"].isoformat()
         return JSONResponse(data)
 
     # Mutable fields that can be changed at runtime via PATCH

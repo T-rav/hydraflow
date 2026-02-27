@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useMemo } from 'react'
 import { theme } from '../theme'
 import { useHydraFlow } from '../context/HydraFlowContext'
 import { PIPELINE_STAGES } from '../constants'
@@ -7,7 +7,7 @@ export function Header({
   connected, orchestratorStatus,
   onStart, onStop,
 }) {
-  const { stageStatus, config } = useHydraFlow()
+  const { stageStatus, config, creditResumeAt } = useHydraFlow()
   const workload = stageStatus.workload
   const hasActiveWorkers = workload.active > 0
   const appVersion = config?.app_version || ''
@@ -45,6 +45,24 @@ export function Header({
     !stoppingHeld
   const isRunning = orchestratorStatus === 'running'
   const isCreditsPaused = orchestratorStatus === 'credits_paused'
+
+  const resumeTimes = useMemo(() => {
+    if (!creditResumeAt) return null
+    const date = new Date(creditResumeAt)
+    if (Number.isNaN(date.getTime())) return null
+    const shortFormatter = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' })
+    const fullFormatter = new Intl.DateTimeFormat(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'short',
+    })
+    return {
+      short: shortFormatter.format(date),
+      full: fullFormatter.format(date),
+    }
+  }, [creditResumeAt])
 
   const sessionStages = PIPELINE_STAGES.map((stage) => ({
     key: stage.key,
@@ -117,7 +135,14 @@ export function Header({
         )}
         {isCreditsPaused && (
           <>
-            <span style={styles.creditsPausedBadge}>Credits Paused</span>
+            <span
+              style={styles.creditsPausedBadge}
+              title={resumeTimes ? `Resumes ${resumeTimes.full}` : undefined}
+            >
+              {resumeTimes
+                ? `Credits Paused · resumes ${resumeTimes.short} (local)`
+                : 'Credits Paused'}
+            </span>
             <button style={styles.stopBtn} onClick={onStop}>
               Stop
             </button>

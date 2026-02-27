@@ -16,7 +16,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from events import EventType
+from events import EventBus, EventType
 from models import PlanResult
 from orchestrator import HydraFlowOrchestrator
 from subprocess_util import (
@@ -396,6 +396,36 @@ class TestRunStatusCreditsPaused:
         orch._stop_event.set()
         orch.reset()
         assert orch._credits_paused_until is None
+
+
+class TestCreditResumeMetadata:
+    """Tests for exposing credit resume timestamps."""
+
+    def test_credit_resume_property_returns_future_time(
+        self, config: HydraFlowConfig
+    ) -> None:
+        orch = HydraFlowOrchestrator(config)
+        future = datetime.now(UTC) + timedelta(minutes=10)
+        orch._credits_paused_until = future
+        assert orch.credit_resume_at == future
+
+    def test_credit_resume_property_returns_none_when_past(
+        self, config: HydraFlowConfig
+    ) -> None:
+        orch = HydraFlowOrchestrator(config)
+        orch._credits_paused_until = datetime.now(UTC) - timedelta(minutes=1)
+        assert orch.credit_resume_at is None
+
+    @pytest.mark.asyncio
+    async def test_publish_status_includes_credit_resume_at(
+        self, config: HydraFlowConfig, event_bus: EventBus
+    ) -> None:
+        orch = HydraFlowOrchestrator(config, event_bus=event_bus)
+        future = datetime.now(UTC) + timedelta(minutes=5)
+        orch._credits_paused_until = future
+        await orch._publish_status()
+        event = event_bus.get_history()[-1]
+        assert event.data["credit_resume_at"] == future.isoformat()
 
 
 # ===========================================================================

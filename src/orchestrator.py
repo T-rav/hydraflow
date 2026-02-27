@@ -163,6 +163,16 @@ class HydraFlowOrchestrator:
         """Return the active session ID, or None."""
         return self._current_session.id if self._current_session else None
 
+    @property
+    def credit_resume_at(self) -> datetime | None:
+        """Return the next credit resume time if a pause is active."""
+        resume_at = self._credits_paused_until
+        if resume_at is None:
+            return None
+        if resume_at <= datetime.now(UTC):
+            return None
+        return resume_at
+
     def _has_active_processes(self) -> bool:
         """Return True if any runner pool still has live subprocesses."""
         return bool(
@@ -358,10 +368,14 @@ class HydraFlowOrchestrator:
 
     async def _publish_status(self) -> None:
         """Broadcast the current orchestrator status to all subscribers."""
+        resume_at = self.credit_resume_at
         await self._bus.publish(
             HydraFlowEvent(
                 type=EventType.ORCHESTRATOR_STATUS,
-                data={"status": self.run_status},
+                data={
+                    "status": self.run_status,
+                    "credit_resume_at": resume_at.isoformat() if resume_at else None,
+                },
             )
         )
 
@@ -914,12 +928,15 @@ class HydraFlowOrchestrator:
                 )
             )
 
+            await self._publish_status()
+
             await self._cancel_all_loops_and_runners(tasks)
 
         await self._sleep_until_resume(resume_at)
 
         if self._stop_event.is_set():
             self._credits_paused_until = None
+            await self._publish_status()
             return
 
         await self._resume_loops_after_credit_pause(tasks, loop_factories, source)
@@ -933,6 +950,7 @@ class HydraFlowOrchestrator:
         """Clear pause state and restart all loops after credit pause."""
         self._credits_paused_until = None
         logger.info("Credit pause ended — restarting all loops")
+        await self._publish_status()
         await self._bus.publish(
             HydraFlowEvent(
                 type=EventType.SYSTEM_ALERT,
