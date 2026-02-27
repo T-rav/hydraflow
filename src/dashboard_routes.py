@@ -439,7 +439,10 @@ def create_router(
     @router.get("/api/hitl")
     async def get_hitl() -> JSONResponse:
         """Fetch issues/PRs labeled for human-in-the-loop (stuck on CI)."""
-        items = await pr_manager.list_hitl_items(config.hitl_label)
+        hitl_labels = list(
+            dict.fromkeys([*config.hitl_label, *config.hitl_active_label])
+        )
+        items = await pr_manager.list_hitl_items(hitl_labels)
         orch = get_orchestrator()
         enriched = []
         for item in items:
