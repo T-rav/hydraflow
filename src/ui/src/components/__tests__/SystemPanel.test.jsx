@@ -62,11 +62,7 @@ describe('SystemPanel', () => {
     })
 
     it('mounts MetricsPanel as the direct scroll container to allow overflow', () => {
-      mockUseHydraFlow.mockReturnValue(defaultMockContext({
-        metrics: {
-          lifetime: { issues_completed: 10, prs_merged: 4 },
-        },
-      }))
+      mockUseHydraFlow.mockReturnValue(defaultMockContext())
       render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
       fireEvent.click(screen.getByText('Metrics'))
       const subTabContent = screen.getByTestId('system-subtab-content')
