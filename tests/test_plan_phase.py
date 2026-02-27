@@ -85,6 +85,8 @@ class TestPlanPhase:
             success=True,
             plan="Step 1: Do the thing",
             summary="Plan done",
+            actionability_score=87,
+            actionability_rank="high",
         )
 
         planners.plan = AsyncMock(return_value=plan_result)
@@ -98,6 +100,7 @@ class TestPlanPhase:
         assert plan_call.args[0] == 42
         assert "Step 1: Do the thing" in plan_call.args[1]
         assert "agent/issue-42" in plan_call.args[1]
+        assert "Actionability score:** 87/100 (high)" in plan_call.args[1]
 
     @pytest.mark.asyncio
     async def test_plan_issues_swaps_labels_on_success(
