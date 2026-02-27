@@ -196,6 +196,14 @@ describe('StreamCard phase-aware styling', () => {
     const card = container.firstChild
     expect(card.getAttribute('style') || '').toContain(`border-left: 3px solid ${STAGE_META.review.color}`)
   })
+
+  it('falls back to neutral border when currentStage is null', () => {
+    const issue = makeIssue({ overallStatus: 'queued', currentStage: null })
+    const { container } = render(<StreamCard issue={issue} />)
+    const card = container.firstChild
+    // No phase-specific left border — base styles.card border only
+    expect(card.getAttribute('style') || '').not.toContain('border-left')
+  })
 })
 
 describe('phase-specific style maps', () => {
