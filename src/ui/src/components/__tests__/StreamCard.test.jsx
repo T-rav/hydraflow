@@ -175,6 +175,27 @@ describe('StreamCard phase-aware styling', () => {
     const card = container.firstChild
     expect(card.getAttribute('style') || '').toContain(`border-left: 3px solid ${STAGE_META.plan.color}`)
   })
+
+  it('uses cardInactiveStyleMap for done status', () => {
+    const issue = makeIssue({ overallStatus: 'done', currentStage: 'implement' })
+    const { container } = render(<StreamCard issue={issue} />)
+    const card = container.firstChild
+    expect(card.getAttribute('style') || '').toContain(`border-left: 3px solid ${STAGE_META.implement.color}`)
+  })
+
+  it('uses cardInactiveStyleMap for failed status', () => {
+    const issue = makeIssue({ overallStatus: 'failed', currentStage: 'review' })
+    const { container } = render(<StreamCard issue={issue} />)
+    const card = container.firstChild
+    expect(card.getAttribute('style') || '').toContain(`border-left: 3px solid ${STAGE_META.review.color}`)
+  })
+
+  it('uses cardInactiveStyleMap for hitl status', () => {
+    const issue = makeIssue({ overallStatus: 'hitl', currentStage: 'review' })
+    const { container } = render(<StreamCard issue={issue} />)
+    const card = container.firstChild
+    expect(card.getAttribute('style') || '').toContain(`border-left: 3px solid ${STAGE_META.review.color}`)
+  })
 })
 
 describe('phase-specific style maps', () => {

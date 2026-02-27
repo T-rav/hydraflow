@@ -147,7 +147,7 @@ export function StreamCard({ issue, intent, defaultExpanded, onRequestChanges, t
             </span>
           )}
           {totalDuration && <span style={styles.duration}>{totalDuration}</span>}
-          <StatusDot status={issue.overallStatus} stageKey={issue.currentStage} />
+          <StatusDot status={issue.overallStatus} stageKey={stageKey} />
           {issue.pr && (
             <a
               style={styles.prLink}
