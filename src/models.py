@@ -1085,6 +1085,7 @@ class BackgroundWorkerStatus(BaseModel):
 
     name: str
     label: str
+    description: str = ""
     status: BGWorkerHealth = BGWorkerHealth.DISABLED
     enabled: bool = True
     last_run: str | None = None

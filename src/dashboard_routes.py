@@ -738,16 +738,56 @@ def create_router(
 
     # Known workers with human-friendly labels (pipeline loops + background)
     _bg_worker_defs = [
-        ("triage", "Triage"),
-        ("plan", "Plan"),
-        ("implement", "Implement"),
-        ("review", "Review"),
-        ("memory_sync", "Memory Manager"),
-        ("retrospective", "Retrospective"),
-        ("metrics", "Metrics"),
-        ("review_insights", "Review Insights"),
-        ("pipeline_poller", "Pipeline Poller"),
-        ("pr_unsticker", "PR Unsticker"),
+        (
+            "triage",
+            "Triage",
+            "Classifies freshly discovered issues and routes them into the pipeline.",
+        ),
+        (
+            "plan",
+            "Plan",
+            "Builds implementation plans for triaged issues that are ready to execute.",
+        ),
+        (
+            "implement",
+            "Implement",
+            "Runs coding agents to implement planned issues and open pull requests.",
+        ),
+        (
+            "review",
+            "Review",
+            "Reviews PRs, applies fixes, and merges approved work when checks pass.",
+        ),
+        (
+            "memory_sync",
+            "Memory Manager",
+            "Ingests memory and transcript issues into durable learnings and proposals.",
+        ),
+        (
+            "retrospective",
+            "Retrospective",
+            "Captures post-merge outcomes and identifies recurring delivery patterns.",
+        ),
+        (
+            "metrics",
+            "Metrics",
+            "Refreshes operational metrics and dashboards from state and GitHub data.",
+        ),
+        (
+            "review_insights",
+            "Review Insights",
+            "Aggregates recurring review feedback into improvement opportunities.",
+        ),
+        (
+            "pipeline_poller",
+            "Pipeline Poller",
+            "Refreshes live pipeline snapshots for dashboard queue/status rendering.",
+        ),
+        (
+            "pr_unsticker",
+            "PR Unsticker",
+            "Requeues stalled HITL PRs by validating requirements and reopening flow.",
+        ),
     ]
 
     # Workers that have independent configurable intervals
@@ -765,7 +805,7 @@ def create_router(
         source_totals = telemetry.get_source_totals()
 
         worker_totals: dict[str, dict[str, int]] = {}
-        for worker_name, _label in _bg_worker_defs:
+        for worker_name, _label, _description in _bg_worker_defs:
             sources = (worker_name, *_WORKER_SOURCE_ALIASES.get(worker_name, ()))
             totals = {
                 "inference_calls": 0,
@@ -814,7 +854,7 @@ def create_router(
         bg_states = orch.get_bg_worker_states() if orch else {}
         inference_by_worker = _build_system_worker_inference_stats()
         workers = []
-        for name, label in _bg_worker_defs:
+        for name, label, description in _bg_worker_defs:
             enabled = orch.is_bg_worker_enabled(name) if orch else True
 
             # Determine interval for this worker
@@ -847,6 +887,7 @@ def create_router(
                     BackgroundWorkerStatus(
                         name=name,
                         label=label,
+                        description=description,
                         status=BGWorkerHealth(
                             entry.get("status", BGWorkerHealth.DISABLED)
                         ),
@@ -862,6 +903,7 @@ def create_router(
                     BackgroundWorkerStatus(
                         name=name,
                         label=label,
+                        description=description,
                         enabled=enabled,
                         interval_seconds=interval,
                         details=inference_by_worker.get(name, {}),

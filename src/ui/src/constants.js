@@ -94,10 +94,10 @@ export const SESSION_STATUSES = ['active', 'completed']
  * Workers with `system: true` are internal services shown with a "system" badge.
  */
 export const BACKGROUND_WORKERS = [
-  { key: 'retrospective',   label: 'Retrospective',   color: theme.purple },
-  { key: 'review_insights', label: 'Review Insights',  color: theme.orange },
-  { key: 'pipeline_poller', label: 'Pipeline Poller',  color: theme.textMuted, system: true },
-  { key: 'memory_sync',     label: 'Memory Manager',    color: theme.accent,    system: true },
-  { key: 'metrics',         label: 'Metrics Munger',     color: theme.yellow,    system: true },
-  { key: 'pr_unsticker',   label: 'PR Unsticker',       color: theme.orange,    system: true },
+  { key: 'retrospective',   label: 'Retrospective',  description: 'Captures post-merge outcomes and recurring delivery patterns.', color: theme.purple },
+  { key: 'review_insights', label: 'Review Insights', description: 'Aggregates recurring review feedback into improvement opportunities.', color: theme.orange },
+  { key: 'pipeline_poller', label: 'Pipeline Poller', description: 'Refreshes live pipeline snapshots for queue and status visibility.', color: theme.textMuted, system: true },
+  { key: 'memory_sync',     label: 'Memory Manager', description: 'Ingests memory and transcript issues into durable learnings.', color: theme.accent, system: true },
+  { key: 'metrics',         label: 'Metrics Munger', description: 'Updates operational and GitHub metrics used by the dashboard.', color: theme.yellow, system: true },
+  { key: 'pr_unsticker',    label: 'PR Unsticker',   description: 'Requeues stalled HITL PRs once requirements are actionable.', color: theme.orange, system: true },
 ]

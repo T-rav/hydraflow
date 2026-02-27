@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -34,6 +34,7 @@ def _make_handler(
     retrospective=None,
     verification_judge=None,
     epic_checker=None,
+    update_bg_worker_status=None,
 ) -> PostMergeHandler:
     """Build a PostMergeHandler with standard mock dependencies."""
     state = StateTracker(config.state_file)
@@ -46,6 +47,7 @@ def _make_handler(
         retrospective=retrospective,
         verification_judge=verification_judge,
         epic_checker=epic_checker,
+        update_bg_worker_status=update_bg_worker_status,
     )
 
 
@@ -213,6 +215,41 @@ class TestPostMergeHandler:
         )
 
         mock_retro.record.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_updates_retrospective_bg_status_after_merge(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Retrospective runs should publish a background worker status update."""
+        mock_retro = AsyncMock()
+        status_cb = MagicMock()
+        handler = _make_handler(
+            config,
+            retrospective=mock_retro,
+            update_bg_worker_status=status_cb,
+        )
+        pr = PRInfoFactory.create(number=55, issue_number=66)
+        issue = TaskFactory.create(id=66)
+        result = ReviewResultFactory.create()
+
+        handler._prs.merge_pr = AsyncMock(return_value=True)
+
+        await handler.handle_approved(
+            pr,
+            issue,
+            result,
+            "diff",
+            0,
+            ci_gate_fn=AsyncMock(return_value=True),
+            escalate_fn=AsyncMock(),
+            publish_fn=AsyncMock(),
+        )
+
+        status_cb.assert_called_with(
+            "retrospective",
+            "ok",
+            {"issue_number": 66, "pr_number": 55},
+        )
 
     @pytest.mark.asyncio
     async def test_verification_issue_created_when_judge_returns_verdict(

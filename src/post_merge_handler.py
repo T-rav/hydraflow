@@ -22,6 +22,7 @@ from models import (
     PRInfo,
     PublishFn,
     ReviewResult,
+    StatusCallback,
     Task,
     VerificationCriterion,
 )
@@ -82,6 +83,7 @@ class PostMergeHandler:
         retrospective: RetrospectiveCollector | None,
         verification_judge: VerificationJudge | None,
         epic_checker: EpicCompletionChecker | None,
+        update_bg_worker_status: StatusCallback | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -91,6 +93,7 @@ class PostMergeHandler:
         self._retrospective = retrospective
         self._verification_judge = verification_judge
         self._epic_checker = epic_checker
+        self._update_bg_worker_status = update_bg_worker_status
         self._prompt_telemetry = PromptTelemetry(config)
 
     async def handle_approved(
@@ -248,15 +251,26 @@ class PostMergeHandler:
                 pr.issue_number,
             )
         if self._retrospective:
-            await self._safe_hook(
-                "retrospective",
-                self._retrospective.record(
+            retro_status = "ok"
+            try:
+                await self._retrospective.record(
                     issue_number=pr.issue_number,
                     pr_number=pr.number,
                     review_result=result,
-                ),
-                pr.issue_number,
-            )
+                )
+            except Exception:  # noqa: BLE001
+                retro_status = "error"
+                logger.warning(
+                    "retrospective failed for issue #%d",
+                    pr.issue_number,
+                    exc_info=True,
+                )
+            if self._update_bg_worker_status:
+                self._update_bg_worker_status(
+                    "retrospective",
+                    retro_status,
+                    {"issue_number": pr.issue_number, "pr_number": pr.number},
+                )
 
         verdict: JudgeVerdict | None = None
         if self._verification_judge:

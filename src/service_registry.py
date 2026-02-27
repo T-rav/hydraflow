@@ -219,6 +219,7 @@ def build_services(
         retrospective=retrospective,
         verification_judge=verification_judge,
         epic_checker=epic_checker,
+        update_bg_worker_status=callbacks.update_bg_worker_status,
     )
     reviewer = ReviewPhase(
         config,
@@ -232,6 +233,7 @@ def build_services(
         harness_insights=harness_insights,
         conflict_resolver=conflict_resolver,
         post_merge=post_merge_handler,
+        update_bg_worker_status=callbacks.update_bg_worker_status,
     )
 
     # Background loops

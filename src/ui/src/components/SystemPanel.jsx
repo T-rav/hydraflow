@@ -149,6 +149,7 @@ function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssue
   const showToggle = onToggleBgWorker && !isSystem
   const isError = statusText === 'error' || statusText === 'stopped'
   const hasDetails = Object.keys(details).length > 0
+  const description = state?.description || def.description || ''
   return (
     <div style={styles.card} data-testid={`worker-card-${def.key}`}>
       <div style={styles.cardHeader}>
@@ -178,6 +179,11 @@ function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssue
           </button>
         )}
       </div>
+      {description && (
+        <div style={styles.description} data-testid={`desc-${def.key}`}>
+          {description}
+        </div>
+      )}
       <div style={styles.lastRun}>
         Last run: {relativeTime(lastRun)}
       </div>
@@ -496,6 +502,12 @@ const styles = {
     fontWeight: 600,
     color: theme.textMuted,
     textTransform: 'uppercase',
+  },
+  description: {
+    fontSize: 12,
+    color: theme.textMuted,
+    lineHeight: 1.35,
+    marginBottom: 6,
   },
   lastRun: {
     fontSize: 12,

@@ -22,6 +22,7 @@ from models import (
     PRInfo,
     ReviewResult,
     ReviewVerdict,
+    StatusCallback,
     Task,
 )
 from phase_utils import (
@@ -65,6 +66,7 @@ class ReviewPhase:
         harness_insights: HarnessInsightStore | None = None,
         conflict_resolver: MergeConflictResolver | None = None,
         post_merge: PostMergeHandler | None = None,
+        update_bg_worker_status: StatusCallback | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -75,6 +77,7 @@ class ReviewPhase:
         self._stop_event = stop_event
         self._store = store
         self._bus = event_bus or EventBus()
+        self._update_bg_worker_status = update_bg_worker_status
         self._harness_insights = harness_insights
         self._insights = ReviewInsightStore(config.memory_dir)
         self._active_issues: set[int] = set()
@@ -613,6 +616,11 @@ class ReviewPhase:
 
         Wrapped in try/except so insight failures never interrupt the review flow.
         """
+        status = "ok"
+        details: dict[str, object] = {
+            "issue_number": result.issue_number,
+            "pr_number": result.pr_number,
+        }
         try:
             record = ReviewRecord(
                 pr_number=result.pr_number,
@@ -646,11 +654,16 @@ class ReviewPhase:
                     )
                 self._insights.mark_category_proposed(category)
         except Exception:  # noqa: BLE001
+            status = "error"
+            details["error"] = "review insight recording failed"
             logger.warning(
                 "Review insight recording failed for PR #%d",
                 result.pr_number,
                 exc_info=True,
             )
+        finally:
+            if self._update_bg_worker_status:
+                self._update_bg_worker_status("review_insights", status, details)
 
     async def _publish_review_status(
         self, pr: PRInfo, worker_id: int, status: str

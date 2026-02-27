@@ -149,6 +149,13 @@ describe('SystemPanel', () => {
       expect(neverTexts.length).toBeGreaterThanOrEqual(BACKGROUND_WORKERS.length)
     })
 
+    it('renders worker descriptions', () => {
+      render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
+      for (const def of BACKGROUND_WORKERS) {
+        expect(screen.getByTestId(`desc-${def.key}`)).toHaveTextContent(def.description)
+      }
+    })
+
     it('shows detail key-value pairs', () => {
       render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
       expect(screen.getByText('item count')).toBeInTheDocument()

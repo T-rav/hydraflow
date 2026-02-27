@@ -40,6 +40,7 @@ class TestBackgroundWorkerStatusModel:
     def test_default_status_is_disabled(self) -> None:
         status = BackgroundWorkerStatus(name="test", label="Test")
         assert status.status == "disabled"
+        assert status.description == ""
         assert status.last_run is None
         assert status.details == {}
 
@@ -54,6 +55,7 @@ class TestBackgroundWorkerStatusModel:
         data = status.model_dump()
         assert data["name"] == "memory_sync"
         assert data["label"] == "Memory Manager"
+        assert data["description"] == ""
         assert data["status"] == "ok"
         assert data["last_run"] == "2026-02-20T10:30:00Z"
         assert data["details"]["item_count"] == 12
@@ -238,6 +240,10 @@ class TestSystemWorkersEndpoint:
             "pipeline_poller",
             "pr_unsticker",
         ]
+        assert all(
+            isinstance(w["description"], str) and w["description"]
+            for w in data["workers"]
+        )
 
     @pytest.mark.asyncio
     async def test_returns_disabled_when_no_orchestrator(
