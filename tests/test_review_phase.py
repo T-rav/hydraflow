@@ -4149,6 +4149,7 @@ class TestMergeWithMain:
 
         assert result is False
         assert phase._state.get_hitl_origin(42) == "hydraflow-review"
+        phase._store.enqueue_transition.assert_called_once_with(issue, "hitl")
 
 
 class TestRunAndPostReview:
