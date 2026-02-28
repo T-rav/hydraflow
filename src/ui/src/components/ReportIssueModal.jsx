@@ -1,8 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { theme } from '../theme'
-import { ANNOTATION_COLORS } from '../constants'
-
-const PENCIL_CURSOR = "url('data:image/svg+xml,%3Csvg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"%23ffffff\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"%3E%3Cpath d=\"M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z\"/%3E%3Cpath d=\"m15 5 4 4\"/%3E%3C/svg%3E') 2 22, crosshair"
+import { ANNOTATION_COLORS, ANNOTATION_PENCIL_CURSOR } from '../constants'
 
 /** Resolve a CSS variable reference like `var(--yellow)` to its computed value. */
 function resolveColor(cssVar) {
@@ -333,7 +331,7 @@ const styles = {
   canvas: {
     width: '100%',
     height: 'auto',
-    cursor: PENCIL_CURSOR,
+    cursor: ANNOTATION_PENCIL_CURSOR,
     display: 'block',
   },
   textarea: {
