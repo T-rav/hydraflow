@@ -14,6 +14,9 @@ from file_util import atomic_write
 from models import (
     HITLSummaryCacheEntry,
     HITLSummaryFailureEntry,
+    HookFailureRecord,
+    IssueOutcome,
+    IssueOutcomeType,
     LifetimeStats,
     PendingReport,
     SessionLog,
@@ -310,6 +313,70 @@ class StateTracker:
     def get_worker_result_meta(self, issue_number: int) -> WorkerResultMeta:
         """Return worker result metadata for *issue_number*, or empty dict."""
         return self._data.worker_result_meta.get(str(issue_number), {})
+
+    # --- issue outcome tracking ---
+
+    def record_outcome(
+        self,
+        issue_number: int,
+        outcome: IssueOutcomeType,
+        reason: str,
+        pr_number: int | None = None,
+        phase: str = "",
+    ) -> None:
+        """Store an :class:`IssueOutcome` and increment the matching lifetime counter."""
+        self._data.issue_outcomes[str(issue_number)] = IssueOutcome(
+            outcome=outcome,
+            reason=reason,
+            closed_at=datetime.now(UTC).isoformat(),
+            pr_number=pr_number,
+            phase=phase,
+        )
+        counter_map = {
+            IssueOutcomeType.MERGED: "total_outcomes_merged",
+            IssueOutcomeType.ALREADY_SATISFIED: "total_outcomes_already_satisfied",
+            IssueOutcomeType.HITL_CLOSED: "total_outcomes_hitl_closed",
+            IssueOutcomeType.HITL_SKIPPED: "total_outcomes_hitl_skipped",
+            IssueOutcomeType.FAILED: "total_outcomes_failed",
+        }
+        attr = counter_map.get(outcome)
+        if attr:
+            setattr(
+                self._data.lifetime_stats,
+                attr,
+                getattr(self._data.lifetime_stats, attr) + 1,
+            )
+        self.save()
+
+    def get_outcome(self, issue_number: int) -> IssueOutcome | None:
+        """Return the recorded outcome for *issue_number*, or ``None``."""
+        return self._data.issue_outcomes.get(str(issue_number))
+
+    def get_all_outcomes(self) -> dict[str, IssueOutcome]:
+        """Return all recorded issue outcomes."""
+        return dict(self._data.issue_outcomes)
+
+    # --- hook failure tracking ---
+
+    def record_hook_failure(
+        self, issue_number: int, hook_name: str, error: str
+    ) -> None:
+        """Append a :class:`HookFailureRecord` for *issue_number*."""
+        key = str(issue_number)
+        if key not in self._data.hook_failures:
+            self._data.hook_failures[key] = []
+        self._data.hook_failures[key].append(
+            HookFailureRecord(
+                hook_name=hook_name,
+                error=error[:500],
+                timestamp=datetime.now(UTC).isoformat(),
+            )
+        )
+        self.save()
+
+    def get_hook_failures(self, issue_number: int) -> list[HookFailureRecord]:
+        """Return hook failure records for *issue_number*."""
+        return list(self._data.hook_failures.get(str(issue_number), []))
 
     # --- reset ---
 

@@ -920,6 +920,36 @@ This closes the issue automatically. False positives waste significant human tim
         return lines[-1][:200] if lines else "No summary provided"
 
     @staticmethod
+    def validate_already_satisfied_evidence(summary: str) -> list[str]:
+        """Validate that an already-satisfied summary contains required evidence.
+
+        Returns a list of error strings.  An empty list means the evidence is valid.
+        """
+        errors: list[str] = []
+        if not summary or not summary.strip():
+            errors.append("Evidence is empty")
+            return errors
+
+        # Check for required fields
+        feature_match = re.search(r"Feature:\s*(.+)", summary)
+        tests_match = re.search(r"Tests:\s*(.+)", summary)
+        criteria_match = re.search(r"Criteria:\s*(.+)", summary)
+
+        if not feature_match or not feature_match.group(1).strip():
+            errors.append("Missing or empty 'Feature:' field")
+        elif ":" not in feature_match.group(1):
+            # Must contain file:line reference
+            errors.append("'Feature:' field must include a file:line reference")
+
+        if not tests_match or not tests_match.group(1).strip():
+            errors.append("Missing or empty 'Tests:' field")
+
+        if not criteria_match or not criteria_match.group(1).strip():
+            errors.append("Missing or empty 'Criteria:' field")
+
+        return errors
+
+    @staticmethod
     def _extract_already_satisfied(transcript: str) -> str:
         """Extract the already-satisfied explanation from the transcript.
 

@@ -587,7 +587,12 @@ class TestPlanPhaseAlreadySatisfied:
             issue_number=42,
             success=True,
             already_satisfied=True,
-            summary="The feature is already implemented in src/models.py",
+            summary=(
+                "Evidence:\n"
+                "- Feature: MyClass at src/models.py:42\n"
+                "- Tests: test_my_class in tests/test_models.py\n"
+                "- Criteria: All acceptance criteria met"
+            ),
         )
 
         planners.plan = AsyncMock(return_value=plan_result)
@@ -618,7 +623,12 @@ class TestPlanPhaseAlreadySatisfied:
             issue_number=42,
             success=True,
             already_satisfied=True,
-            summary="Already met",
+            summary=(
+                "Evidence:\n"
+                "- Feature: MyClass at src/models.py:42\n"
+                "- Tests: test_my_class in tests/test_models.py\n"
+                "- Criteria: All acceptance criteria met"
+            ),
         )
 
         planners.plan = AsyncMock(return_value=plan_result)
@@ -796,7 +806,12 @@ class TestPlanPhaseTranscriptSummary:
             issue_number=42,
             success=True,
             already_satisfied=True,
-            summary="Already implemented.",
+            summary=(
+                "Evidence:\n"
+                "- Feature: MyClass at src/models.py:42\n"
+                "- Tests: test_my_class in tests/test_models.py\n"
+                "- Criteria: All acceptance criteria met"
+            ),
             transcript="x" * 1000,
             duration_seconds=10.0,
         )
@@ -830,3 +845,94 @@ class TestPlanPhaseTranscriptSummary:
 
         # Should not raise
         await phase.plan_issues()
+
+
+# ---------------------------------------------------------------------------
+# Plan phase — evidence validation for already_satisfied
+# ---------------------------------------------------------------------------
+
+
+class TestPlanPhaseEvidenceValidation:
+    """Tests for already_satisfied evidence validation and outcome recording."""
+
+    @pytest.mark.asyncio
+    async def test_valid_evidence_closes_issue(self, config: HydraFlowConfig) -> None:
+        """Valid evidence should close the issue normally."""
+        phase, state, planners, prs, store, _stop = _make_phase(config)
+        issue = TaskFactory.create(id=42)
+        plan_result = PlanResult(
+            issue_number=42,
+            success=True,
+            already_satisfied=True,
+            summary=(
+                "Evidence:\n"
+                "- Feature: MyClass at src/models.py:42\n"
+                "- Tests: test_my_class in tests/test_models.py\n"
+                "- Criteria: All acceptance criteria met"
+            ),
+        )
+
+        planners.plan = AsyncMock(return_value=plan_result)
+        store.get_plannable = lambda _max_count: [issue]  # type: ignore[method-assign]
+
+        await phase.plan_issues()
+
+        prs.close_task.assert_awaited_once_with(42)
+        prs.swap_pipeline_labels.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_invalid_evidence_rejects_and_does_not_close(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Invalid evidence should reject the claim and NOT close the issue."""
+        phase, _state, planners, prs, store, _stop = _make_phase(config)
+        issue = TaskFactory.create(id=42)
+        plan_result = PlanResult(
+            issue_number=42,
+            success=True,
+            already_satisfied=True,
+            summary="The feature already exists.",  # No Feature/Tests/Criteria
+        )
+
+        planners.plan = AsyncMock(return_value=plan_result)
+        store.get_plannable = lambda _max_count: [issue]  # type: ignore[method-assign]
+
+        await phase.plan_issues()
+
+        # Should NOT close the issue
+        prs.close_task.assert_not_awaited()
+        # Should post a rejection comment
+        assert prs.post_comment.await_count >= 1
+        rejection_comment = prs.post_comment.call_args_list[0].args[1]
+        assert "Evidence Rejected" in rejection_comment
+
+    @pytest.mark.asyncio
+    async def test_valid_evidence_records_outcome(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Valid close should record an ALREADY_SATISFIED outcome."""
+        from models import IssueOutcomeType
+
+        phase, state, planners, prs, store, _stop = _make_phase(config)
+        issue = TaskFactory.create(id=42)
+        plan_result = PlanResult(
+            issue_number=42,
+            success=True,
+            already_satisfied=True,
+            summary=(
+                "Evidence:\n"
+                "- Feature: MyClass at src/models.py:42\n"
+                "- Tests: test_my_class in tests/test_models.py\n"
+                "- Criteria: All acceptance criteria met"
+            ),
+        )
+
+        planners.plan = AsyncMock(return_value=plan_result)
+        store.get_plannable = lambda _max_count: [issue]  # type: ignore[method-assign]
+
+        await phase.plan_issues()
+
+        outcome = state.get_outcome(42)
+        assert outcome is not None
+        assert outcome.outcome == IssueOutcomeType.ALREADY_SATISFIED
+        assert outcome.phase == "plan"

@@ -1918,3 +1918,61 @@ def test_format_sections_list_lite_has_only_three_sections():
     )
     for header in full_only:
         assert header not in result, f"{header} should not be in lite sections list"
+
+
+# ---------------------------------------------------------------------------
+# validate_already_satisfied_evidence
+# ---------------------------------------------------------------------------
+
+
+class TestValidateAlreadySatisfiedEvidence:
+    """Tests for PlannerRunner.validate_already_satisfied_evidence()."""
+
+    def test_valid_evidence_returns_empty_errors(self) -> None:
+        summary = (
+            "Evidence:\n"
+            "- Feature: MyClass at src/models.py:42 implements this\n"
+            "- Tests: test_my_class verifies the behavior\n"
+            "- Criteria: All acceptance criteria are met"
+        )
+        errors = PlannerRunner.validate_already_satisfied_evidence(summary)
+        assert errors == []
+
+    def test_empty_input_returns_error(self) -> None:
+        errors = PlannerRunner.validate_already_satisfied_evidence("")
+        assert len(errors) == 1
+        assert "empty" in errors[0].lower()
+
+    def test_whitespace_only_input_returns_error(self) -> None:
+        errors = PlannerRunner.validate_already_satisfied_evidence("   \n  ")
+        assert len(errors) == 1
+        assert "empty" in errors[0].lower()
+
+    def test_missing_feature_field(self) -> None:
+        summary = "Tests: test_my_class\nCriteria: All criteria met"
+        errors = PlannerRunner.validate_already_satisfied_evidence(summary)
+        assert any("Feature" in e for e in errors)
+
+    def test_missing_tests_field(self) -> None:
+        summary = "Feature: MyClass at src/models.py:42\nCriteria: All criteria met"
+        errors = PlannerRunner.validate_already_satisfied_evidence(summary)
+        assert any("Tests" in e for e in errors)
+
+    def test_missing_criteria_field(self) -> None:
+        summary = "Feature: MyClass at src/models.py:42\nTests: test_my_class"
+        errors = PlannerRunner.validate_already_satisfied_evidence(summary)
+        assert any("Criteria" in e for e in errors)
+
+    def test_feature_without_file_line_ref(self) -> None:
+        summary = (
+            "Feature: MyClass implements this\n"
+            "Tests: test_my_class\n"
+            "Criteria: All criteria met"
+        )
+        errors = PlannerRunner.validate_already_satisfied_evidence(summary)
+        assert any("file:line" in e.lower() for e in errors)
+
+    def test_all_fields_missing(self) -> None:
+        summary = "The feature already exists and is working."
+        errors = PlannerRunner.validate_already_satisfied_evidence(summary)
+        assert len(errors) >= 3  # Feature, Tests, Criteria all missing

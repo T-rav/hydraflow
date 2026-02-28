@@ -2174,3 +2174,164 @@ class TestPendingReports:
         reports = tracker2.get_pending_reports()
         assert len(reports) == 1
         assert reports[0].description == "Persist test"
+
+
+# ---------------------------------------------------------------------------
+# Issue Outcome Tracking
+# ---------------------------------------------------------------------------
+
+
+class TestIssueOutcomeTracking:
+    """Tests for record_outcome/get_outcome/get_all_outcomes."""
+
+    def test_record_and_get_outcome(self, tmp_path: Path) -> None:
+        from models import IssueOutcomeType
+
+        tracker = make_tracker(tmp_path)
+        tracker.record_outcome(
+            42, IssueOutcomeType.MERGED, "PR merged", pr_number=10, phase="review"
+        )
+        outcome = tracker.get_outcome(42)
+        assert outcome is not None
+        assert outcome.outcome == IssueOutcomeType.MERGED
+        assert outcome.reason == "PR merged"
+        assert outcome.pr_number == 10
+        assert outcome.phase == "review"
+        assert outcome.closed_at  # should be an ISO timestamp
+
+    def test_get_outcome_returns_none_for_unknown(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        assert tracker.get_outcome(999) is None
+
+    def test_get_all_outcomes(self, tmp_path: Path) -> None:
+        from models import IssueOutcomeType
+
+        tracker = make_tracker(tmp_path)
+        tracker.record_outcome(1, IssueOutcomeType.MERGED, "merged", phase="review")
+        tracker.record_outcome(2, IssueOutcomeType.FAILED, "failed", phase="plan")
+        outcomes = tracker.get_all_outcomes()
+        assert len(outcomes) == 2
+        assert "1" in outcomes
+        assert "2" in outcomes
+
+    def test_record_outcome_increments_lifetime_counter_merged(
+        self, tmp_path: Path
+    ) -> None:
+        from models import IssueOutcomeType
+
+        tracker = make_tracker(tmp_path)
+        tracker.record_outcome(1, IssueOutcomeType.MERGED, "merged", phase="review")
+        stats = tracker.get_lifetime_stats()
+        assert stats.total_outcomes_merged == 1
+
+    def test_record_outcome_increments_lifetime_counter_already_satisfied(
+        self, tmp_path: Path
+    ) -> None:
+        from models import IssueOutcomeType
+
+        tracker = make_tracker(tmp_path)
+        tracker.record_outcome(
+            1, IssueOutcomeType.ALREADY_SATISFIED, "already done", phase="plan"
+        )
+        stats = tracker.get_lifetime_stats()
+        assert stats.total_outcomes_already_satisfied == 1
+
+    def test_record_outcome_increments_lifetime_counter_hitl_closed(
+        self, tmp_path: Path
+    ) -> None:
+        from models import IssueOutcomeType
+
+        tracker = make_tracker(tmp_path)
+        tracker.record_outcome(1, IssueOutcomeType.HITL_CLOSED, "dup", phase="hitl")
+        stats = tracker.get_lifetime_stats()
+        assert stats.total_outcomes_hitl_closed == 1
+
+    def test_record_outcome_increments_lifetime_counter_hitl_skipped(
+        self, tmp_path: Path
+    ) -> None:
+        from models import IssueOutcomeType
+
+        tracker = make_tracker(tmp_path)
+        tracker.record_outcome(
+            1, IssueOutcomeType.HITL_SKIPPED, "not needed", phase="hitl"
+        )
+        stats = tracker.get_lifetime_stats()
+        assert stats.total_outcomes_hitl_skipped == 1
+
+    def test_record_outcome_increments_lifetime_counter_failed(
+        self, tmp_path: Path
+    ) -> None:
+        from models import IssueOutcomeType
+
+        tracker = make_tracker(tmp_path)
+        tracker.record_outcome(1, IssueOutcomeType.FAILED, "error", phase="plan")
+        stats = tracker.get_lifetime_stats()
+        assert stats.total_outcomes_failed == 1
+
+    def test_record_outcome_manual_close_no_counter(self, tmp_path: Path) -> None:
+        """MANUAL_CLOSE has no dedicated counter — should not crash."""
+        from models import IssueOutcomeType
+
+        tracker = make_tracker(tmp_path)
+        tracker.record_outcome(1, IssueOutcomeType.MANUAL_CLOSE, "manual", phase="hitl")
+        # Should not raise; no counter incremented
+        stats = tracker.get_lifetime_stats()
+        assert stats.total_outcomes_merged == 0
+
+    def test_outcome_persists_across_reload(self, tmp_path: Path) -> None:
+        from models import IssueOutcomeType
+
+        tracker = make_tracker(tmp_path)
+        tracker.record_outcome(
+            42, IssueOutcomeType.MERGED, "merged", pr_number=5, phase="review"
+        )
+
+        tracker2 = make_tracker(tmp_path)
+        outcome = tracker2.get_outcome(42)
+        assert outcome is not None
+        assert outcome.outcome == IssueOutcomeType.MERGED
+        assert outcome.pr_number == 5
+
+
+# ---------------------------------------------------------------------------
+# Hook Failure Tracking
+# ---------------------------------------------------------------------------
+
+
+class TestHookFailureTracking:
+    """Tests for record_hook_failure/get_hook_failures."""
+
+    def test_record_and_get_hook_failure(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        tracker.record_hook_failure(42, "AC generation", "Connection timeout")
+        failures = tracker.get_hook_failures(42)
+        assert len(failures) == 1
+        assert failures[0].hook_name == "AC generation"
+        assert failures[0].error == "Connection timeout"
+        assert failures[0].timestamp  # should be an ISO timestamp
+
+    def test_multiple_failures_for_same_issue(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        tracker.record_hook_failure(42, "AC generation", "timeout")
+        tracker.record_hook_failure(42, "retrospective", "network error")
+        failures = tracker.get_hook_failures(42)
+        assert len(failures) == 2
+
+    def test_get_hook_failures_returns_empty_for_unknown(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        assert tracker.get_hook_failures(999) == []
+
+    def test_hook_failure_error_truncated(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        long_error = "x" * 1000
+        tracker.record_hook_failure(42, "hook", long_error)
+        failures = tracker.get_hook_failures(42)
+        assert len(failures[0].error) <= 500
+
+    def test_hook_failures_persist_across_reload(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        tracker.record_hook_failure(42, "hook", "error")
+
+        tracker2 = make_tracker(tmp_path)
+        failures = tracker2.get_hook_failures(42)
+        assert len(failures) == 1

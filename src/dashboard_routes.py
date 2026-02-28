@@ -28,11 +28,14 @@ from models import (
     BGWorkerHealth,
     ControlStatusConfig,
     ControlStatusResponse,
+    HITLCloseRequest,
+    HITLSkipRequest,
     IntentRequest,
     IntentResponse,
     IssueHistoryEntry,
     IssueHistoryPR,
     IssueHistoryResponse,
+    IssueOutcomeType,
     MetricsHistoryResponse,
     MetricsResponse,
     MetricsSnapshot,
@@ -292,6 +295,7 @@ def create_router(
             "first_seen": None,
             "last_seen": None,
             "status_updated_at": None,
+            "outcome": None,
         }
 
     def _touch_issue_timestamps(row: dict[str, Any], timestamp: str | None) -> None:
@@ -635,11 +639,19 @@ def create_router(
         return JSONResponse({"status": "ok"})
 
     @router.post("/api/hitl/{issue_number}/skip")
-    async def hitl_skip(issue_number: int) -> JSONResponse:
-        """Remove a HITL issue from the queue without action."""
+    async def hitl_skip(issue_number: int, body: HITLSkipRequest) -> JSONResponse:
+        """Remove a HITL issue from the queue without action (reason required)."""
         orch = get_orchestrator()
         if not orch:
             return JSONResponse({"status": "no orchestrator"}, status_code=400)
+
+        # Post reason as comment before skipping
+        await pr_manager.post_comment(
+            issue_number,
+            f"**HITL Skip** — Operator skipped this issue.\n\n"
+            f"**Reason:** {body.reason}\n\n"
+            f"---\n*HydraFlow Dashboard*",
+        )
 
         # Read origin before clearing state
         origin = state.get_hitl_origin(issue_number)
@@ -648,6 +660,12 @@ def create_router(
         state.remove_hitl_origin(issue_number)
         state.remove_hitl_cause(issue_number)
         state.remove_hitl_summary(issue_number)
+        state.record_outcome(
+            issue_number,
+            IssueOutcomeType.HITL_SKIPPED,
+            reason=body.reason,
+            phase="hitl",
+        )
 
         # If this was an improve issue, transition to triage for implementation
         if origin and origin in config.improve_label and config.find_label:
@@ -664,21 +682,37 @@ def create_router(
                     "issue": issue_number,
                     "status": "resolved",
                     "action": "skip",
+                    "reason": body.reason,
                 },
             )
         )
         return JSONResponse({"status": "ok"})
 
     @router.post("/api/hitl/{issue_number}/close")
-    async def hitl_close(issue_number: int) -> JSONResponse:
-        """Close a HITL issue on GitHub."""
+    async def hitl_close(issue_number: int, body: HITLCloseRequest) -> JSONResponse:
+        """Close a HITL issue on GitHub (reason required)."""
         orch = get_orchestrator()
         if not orch:
             return JSONResponse({"status": "no orchestrator"}, status_code=400)
+
+        # Post reason as comment before closing
+        await pr_manager.post_comment(
+            issue_number,
+            f"**HITL Close** — Operator closed this issue.\n\n"
+            f"**Reason:** {body.reason}\n\n"
+            f"---\n*HydraFlow Dashboard*",
+        )
+
         orch.skip_hitl_issue(issue_number)
         state.remove_hitl_origin(issue_number)
         state.remove_hitl_cause(issue_number)
         state.remove_hitl_summary(issue_number)
+        state.record_outcome(
+            issue_number,
+            IssueOutcomeType.HITL_CLOSED,
+            reason=body.reason,
+            phase="hitl",
+        )
         await pr_manager.close_issue(issue_number)
         await event_bus.publish(
             HydraFlowEvent(
@@ -687,6 +721,7 @@ def create_router(
                     "issue": issue_number,
                     "status": "resolved",
                     "action": "close",
+                    "reason": body.reason,
                 },
             )
         )
@@ -1125,6 +1160,12 @@ def create_router(
             {"status": "ok", "name": name, "interval_seconds": interval}
         )
 
+    @router.get("/api/issues/outcomes")
+    async def get_issue_outcomes() -> JSONResponse:
+        """Return all recorded issue outcomes."""
+        outcomes = state.get_all_outcomes()
+        return JSONResponse({k: v.model_dump() for k, v in outcomes.items()})
+
     @router.get("/api/issues/history")
     async def get_issue_history(
         since: str | None = None,
@@ -1376,6 +1417,7 @@ def create_router(
                     },
                     first_seen=row.get("first_seen"),
                     last_seen=row.get("last_seen"),
+                    outcome=state.get_outcome(issue_number),
                 )
             )
 
@@ -1451,6 +1493,7 @@ def create_router(
                         },
                         first_seen=row.get("first_seen"),
                         last_seen=row.get("last_seen"),
+                        outcome=state.get_outcome(issue_number),
                     )
                 )
 

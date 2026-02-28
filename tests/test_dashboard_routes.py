@@ -2381,6 +2381,8 @@ class TestHITLSkipImproveTransition:
         self, config, event_bus, state, tmp_path
     ) -> None:
         """Skipping an improve-origin HITL item should remove improve and add find label."""
+        from models import HITLSkipRequest
+
         state.set_hitl_origin(42, "hydraflow-improve")
         state.set_hitl_cause(42, "Memory suggestion")
 
@@ -2389,11 +2391,12 @@ class TestHITLSkipImproveTransition:
         router, pr_mgr = self._make_router(
             config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
         )
+        pr_mgr.post_comment = AsyncMock()
 
         skip = self._find_endpoint(router, "/api/hitl/{issue_number}/skip")
         assert skip is not None
 
-        response = await skip(42)
+        response = await skip(42, HITLSkipRequest(reason="Not actionable"))
         assert response.status_code == 200
 
         # Verify find/triage label was set via swap
@@ -2408,6 +2411,8 @@ class TestHITLSkipImproveTransition:
         self, config, event_bus, state, tmp_path
     ) -> None:
         """Non-improve HITL items should not get triage label on skip."""
+        from models import HITLSkipRequest
+
         state.set_hitl_origin(42, "hydraflow-review")
 
         mock_orch = MagicMock()
@@ -2415,10 +2420,11 @@ class TestHITLSkipImproveTransition:
         router, pr_mgr = self._make_router(
             config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
         )
+        pr_mgr.post_comment = AsyncMock()
 
         skip = self._find_endpoint(router, "/api/hitl/{issue_number}/skip")
         assert skip is not None
-        await skip(42)
+        await skip(42, HITLSkipRequest(reason="Not needed"))
 
         # Should NOT add find label for non-improve origins
         add_calls = [c.args for c in pr_mgr.add_labels.call_args_list]
@@ -2430,16 +2436,18 @@ class TestHITLSkipImproveTransition:
         self, config, event_bus, state, tmp_path
     ) -> None:
         """When no origin is set, skip should not add find label."""
+        from models import HITLSkipRequest
 
         mock_orch = MagicMock()
         mock_orch.skip_hitl_issue = MagicMock()
         router, pr_mgr = self._make_router(
             config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
         )
+        pr_mgr.post_comment = AsyncMock()
 
         skip = self._find_endpoint(router, "/api/hitl/{issue_number}/skip")
         assert skip is not None
-        await skip(42)
+        await skip(42, HITLSkipRequest(reason="Skipping"))
 
         # Should NOT add find label when no origin
         add_calls = [c.args for c in pr_mgr.add_labels.call_args_list]
@@ -2451,6 +2459,8 @@ class TestHITLSkipImproveTransition:
         self, config, event_bus, state, tmp_path
     ) -> None:
         """Skip should clean up hitl_cause in addition to hitl_origin."""
+        from models import HITLSkipRequest
+
         state.set_hitl_origin(42, "hydraflow-review")
         state.set_hitl_cause(42, "CI failed after 2 fix attempt(s)")
         state.set_hitl_summary(42, "cached summary")
@@ -2460,14 +2470,38 @@ class TestHITLSkipImproveTransition:
         router, _ = self._make_router(
             config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
         )
+        _.post_comment = AsyncMock()
 
         skip = self._find_endpoint(router, "/api/hitl/{issue_number}/skip")
         assert skip is not None
-        await skip(42)
+        await skip(42, HITLSkipRequest(reason="No longer needed"))
 
         assert state.get_hitl_origin(42) is None
         assert state.get_hitl_cause(42) is None
         assert state.get_hitl_summary(42) is None
+
+    @pytest.mark.asyncio
+    async def test_hitl_skip_records_outcome(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        """Skip should record an HITL_SKIPPED outcome."""
+        from models import HITLSkipRequest
+
+        mock_orch = MagicMock()
+        mock_orch.skip_hitl_issue = MagicMock()
+        router, pr_mgr = self._make_router(
+            config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
+        )
+        pr_mgr.post_comment = AsyncMock()
+
+        skip = self._find_endpoint(router, "/api/hitl/{issue_number}/skip")
+        assert skip is not None
+        await skip(42, HITLSkipRequest(reason="Not actionable"))
+
+        outcome = state.get_outcome(42)
+        assert outcome is not None
+        assert outcome.outcome.value == "hitl_skipped"
+        assert outcome.reason == "Not actionable"
 
 
 # ---------------------------------------------------------------------------
@@ -4038,9 +4072,11 @@ class TestHITLCloseEndpoint:
     async def test_returns_error_without_orchestrator(
         self, config, event_bus, state, tmp_path
     ) -> None:
+        from models import HITLCloseRequest
+
         router, _ = self._make_router(config, event_bus, state, tmp_path)
         endpoint = self._find_endpoint(router, "/api/hitl/{issue_number}/close")
-        response = await endpoint(42)
+        response = await endpoint(42, HITLCloseRequest(reason="test"))
         assert response.status_code == 400
 
     @pytest.mark.asyncio
@@ -4049,17 +4085,20 @@ class TestHITLCloseEndpoint:
     ) -> None:
         import json
 
+        from models import HITLCloseRequest
+
         mock_orch = MagicMock()
         mock_orch.skip_hitl_issue = MagicMock()
         router, pr_mgr = self._make_router(
             config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
         )
         pr_mgr.close_issue = AsyncMock()  # type: ignore[method-assign]
+        pr_mgr.post_comment = AsyncMock()  # type: ignore[method-assign]
         state.set_hitl_origin(42, "hydraflow-review")
         state.set_hitl_cause(42, "CI failure")
         state.set_hitl_summary(42, "cached summary")
         endpoint = self._find_endpoint(router, "/api/hitl/{issue_number}/close")
-        response = await endpoint(42)
+        response = await endpoint(42, HITLCloseRequest(reason="Duplicate of #123"))
         data = json.loads(response.body)
         assert data["status"] == "ok"
         mock_orch.skip_hitl_issue.assert_called_once_with(42)
@@ -4067,6 +4106,15 @@ class TestHITLCloseEndpoint:
         assert state.get_hitl_origin(42) is None
         assert state.get_hitl_cause(42) is None
         assert state.get_hitl_summary(42) is None
+        # Verify reason posted as comment
+        pr_mgr.post_comment.assert_awaited()
+        comment = pr_mgr.post_comment.call_args.args[1]
+        assert "Duplicate of #123" in comment
+        # Verify outcome recorded
+        outcome = state.get_outcome(42)
+        assert outcome is not None
+        assert outcome.outcome.value == "hitl_closed"
+        assert outcome.reason == "Duplicate of #123"
 
 
 # ---------------------------------------------------------------------------

@@ -1720,8 +1720,11 @@ class TestHITLSkipEndpoint:
         app = dashboard.create_app()
 
         client = TestClient(app)
-        with patch("pr_manager.PRManager.remove_label", new_callable=AsyncMock):
-            response = client.post("/api/hitl/42/skip")
+        with (
+            patch("pr_manager.PRManager.remove_label", new_callable=AsyncMock),
+            patch("pr_manager.PRManager.post_comment", new_callable=AsyncMock),
+        ):
+            response = client.post("/api/hitl/42/skip", json={"reason": "not needed"})
 
         assert response.status_code == 200
         assert response.json() == {"status": "ok"}
@@ -1739,8 +1742,11 @@ class TestHITLSkipEndpoint:
         app = dashboard.create_app()
 
         client = TestClient(app)
-        with patch("pr_manager.PRManager.remove_label", new_callable=AsyncMock):
-            client.post("/api/hitl/42/skip")
+        with (
+            patch("pr_manager.PRManager.remove_label", new_callable=AsyncMock),
+            patch("pr_manager.PRManager.post_comment", new_callable=AsyncMock),
+        ):
+            client.post("/api/hitl/42/skip", json={"reason": "not needed"})
 
         orch.skip_hitl_issue.assert_called_once_with(42)
 
@@ -1755,7 +1761,7 @@ class TestHITLSkipEndpoint:
         app = dashboard.create_app()
 
         client = TestClient(app)
-        response = client.post("/api/hitl/42/skip")
+        response = client.post("/api/hitl/42/skip", json={"reason": "not needed"})
 
         assert response.status_code == 400
         assert response.json() == {"status": "no orchestrator"}
@@ -1773,8 +1779,11 @@ class TestHITLSkipEndpoint:
         app = dashboard.create_app()
 
         client = TestClient(app)
-        with patch("pr_manager.PRManager.remove_label", new_callable=AsyncMock):
-            client.post("/api/hitl/42/skip")
+        with (
+            patch("pr_manager.PRManager.remove_label", new_callable=AsyncMock),
+            patch("pr_manager.PRManager.post_comment", new_callable=AsyncMock),
+        ):
+            client.post("/api/hitl/42/skip", json={"reason": "not needed"})
 
         history = event_bus.get_history()
         hitl_events = [e for e in history if e.type.value == "hitl_update"]
@@ -1797,8 +1806,11 @@ class TestHITLSkipEndpoint:
         app = dashboard.create_app()
 
         client = TestClient(app)
-        with patch("pr_manager.PRManager.remove_label", new_callable=AsyncMock):
-            client.post("/api/hitl/42/skip")
+        with (
+            patch("pr_manager.PRManager.remove_label", new_callable=AsyncMock),
+            patch("pr_manager.PRManager.post_comment", new_callable=AsyncMock),
+        ):
+            client.post("/api/hitl/42/skip", json={"reason": "not needed"})
 
         assert state.get_hitl_origin(42) is None
 
@@ -1824,8 +1836,11 @@ class TestHITLCloseEndpoint:
         app = dashboard.create_app()
 
         client = TestClient(app)
-        with patch("pr_manager.PRManager.close_issue", new_callable=AsyncMock):
-            response = client.post("/api/hitl/42/close")
+        with (
+            patch("pr_manager.PRManager.close_issue", new_callable=AsyncMock),
+            patch("pr_manager.PRManager.post_comment", new_callable=AsyncMock),
+        ):
+            response = client.post("/api/hitl/42/close", json={"reason": "duplicate"})
 
         assert response.status_code == 200
         assert response.json() == {"status": "ok"}
@@ -1843,8 +1858,11 @@ class TestHITLCloseEndpoint:
         app = dashboard.create_app()
 
         client = TestClient(app)
-        with patch("pr_manager.PRManager.close_issue", new_callable=AsyncMock):
-            client.post("/api/hitl/42/close")
+        with (
+            patch("pr_manager.PRManager.close_issue", new_callable=AsyncMock),
+            patch("pr_manager.PRManager.post_comment", new_callable=AsyncMock),
+        ):
+            client.post("/api/hitl/42/close", json={"reason": "duplicate"})
 
         orch.skip_hitl_issue.assert_called_once_with(42)
 
@@ -1859,7 +1877,7 @@ class TestHITLCloseEndpoint:
         app = dashboard.create_app()
 
         client = TestClient(app)
-        response = client.post("/api/hitl/42/close")
+        response = client.post("/api/hitl/42/close", json={"reason": "duplicate"})
 
         assert response.status_code == 400
         assert response.json() == {"status": "no orchestrator"}
@@ -1877,8 +1895,11 @@ class TestHITLCloseEndpoint:
         app = dashboard.create_app()
 
         client = TestClient(app)
-        with patch("pr_manager.PRManager.close_issue", new_callable=AsyncMock):
-            client.post("/api/hitl/42/close")
+        with (
+            patch("pr_manager.PRManager.close_issue", new_callable=AsyncMock),
+            patch("pr_manager.PRManager.post_comment", new_callable=AsyncMock),
+        ):
+            client.post("/api/hitl/42/close", json={"reason": "duplicate"})
 
         history = event_bus.get_history()
         hitl_events = [e for e in history if e.type.value == "hitl_update"]
@@ -1901,8 +1922,11 @@ class TestHITLCloseEndpoint:
         app = dashboard.create_app()
 
         client = TestClient(app)
-        with patch("pr_manager.PRManager.close_issue", new_callable=AsyncMock):
-            client.post("/api/hitl/42/close")
+        with (
+            patch("pr_manager.PRManager.close_issue", new_callable=AsyncMock),
+            patch("pr_manager.PRManager.post_comment", new_callable=AsyncMock),
+        ):
+            client.post("/api/hitl/42/close", json={"reason": "duplicate"})
 
         assert state.get_hitl_origin(42) is None
 

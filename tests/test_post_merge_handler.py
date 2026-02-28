@@ -615,3 +615,141 @@ class TestPostMergeHandler:
         )
 
         mock_retro.record.assert_awaited_once()
+
+
+class TestSafeHookFailureVisibility:
+    """Tests for _safe_hook failure recording, alerting, and commenting."""
+
+    @pytest.mark.asyncio
+    async def test_safe_hook_records_failure_in_state(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """When a hook fails, failure should be recorded in state."""
+        state = StateTracker(config.state_file)
+        handler = PostMergeHandler(
+            config=config,
+            state=state,
+            prs=AsyncMock(),
+            event_bus=EventBus(),
+            ac_generator=None,
+            retrospective=None,
+            verification_judge=None,
+            epic_checker=None,
+        )
+
+        async def _failing_coro() -> None:
+            msg = "Connection timeout"
+            raise RuntimeError(msg)
+
+        await handler._safe_hook("AC generation", _failing_coro(), 42)
+
+        failures = state.get_hook_failures(42)
+        assert len(failures) == 1
+        assert failures[0].hook_name == "AC generation"
+        assert "Connection timeout" in failures[0].error
+
+    @pytest.mark.asyncio
+    async def test_safe_hook_publishes_system_alert(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """When a hook fails, a SYSTEM_ALERT event should be published."""
+        from events import EventType
+
+        bus = EventBus()
+        state = StateTracker(config.state_file)
+        handler = PostMergeHandler(
+            config=config,
+            state=state,
+            prs=AsyncMock(),
+            event_bus=bus,
+            ac_generator=None,
+            retrospective=None,
+            verification_judge=None,
+            epic_checker=None,
+        )
+
+        async def _failing_coro() -> None:
+            msg = "Test error"
+            raise RuntimeError(msg)
+
+        await handler._safe_hook("test_hook", _failing_coro(), 42)
+
+        alerts = [e for e in bus.get_history() if e.type == EventType.SYSTEM_ALERT]
+        assert len(alerts) == 1
+        assert "test_hook" in alerts[0].data["message"]
+        assert alerts[0].data["source"] == "post_merge_hook"
+
+    @pytest.mark.asyncio
+    async def test_safe_hook_posts_comment_on_failure(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """When a hook fails, a comment should be posted on the issue."""
+        prs = AsyncMock()
+        state = StateTracker(config.state_file)
+        handler = PostMergeHandler(
+            config=config,
+            state=state,
+            prs=prs,
+            event_bus=EventBus(),
+            ac_generator=None,
+            retrospective=None,
+            verification_judge=None,
+            epic_checker=None,
+        )
+
+        async def _failing_coro() -> None:
+            msg = "DB error"
+            raise RuntimeError(msg)
+
+        await handler._safe_hook("retrospective", _failing_coro(), 42)
+
+        prs.post_comment.assert_awaited_once()
+        comment = prs.post_comment.call_args.args[1]
+        assert "retrospective" in comment
+        assert "DB error" in comment
+
+
+class TestMergeOutcomeRecording:
+    """Tests for merge outcome recording in handle_approved."""
+
+    @pytest.mark.asyncio
+    async def test_merge_records_outcome(self, config: HydraFlowConfig) -> None:
+        """Successful merge should record a MERGED outcome in state."""
+        from models import IssueOutcomeType
+
+        state = StateTracker(config.state_file)
+        handler = PostMergeHandler(
+            config=config,
+            state=state,
+            prs=AsyncMock(),
+            event_bus=EventBus(),
+            ac_generator=None,
+            retrospective=None,
+            verification_judge=None,
+            epic_checker=None,
+        )
+        pr = PRInfoFactory.create(number=10, issue_number=42)
+        issue = TaskFactory.create(id=42)
+        result = ReviewResultFactory.create()
+
+        handler._prs.merge_pr = AsyncMock(return_value=True)
+        publish_fn = AsyncMock()
+        escalate_fn = AsyncMock()
+        ci_gate_fn = AsyncMock(return_value=True)
+
+        await handler.handle_approved(
+            pr,
+            issue,
+            result,
+            "diff",
+            0,
+            ci_gate_fn=ci_gate_fn,
+            escalate_fn=escalate_fn,
+            publish_fn=publish_fn,
+        )
+
+        outcome = state.get_outcome(42)
+        assert outcome is not None
+        assert outcome.outcome == IssueOutcomeType.MERGED
+        assert outcome.pr_number == 10
+        assert outcome.phase == "review"

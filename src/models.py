@@ -543,6 +543,47 @@ class QueueStats(BaseModel):
     in_flight_count: int = 0
 
 
+class IssueOutcomeType(StrEnum):
+    """How an issue was ultimately resolved."""
+
+    MERGED = "merged"
+    ALREADY_SATISFIED = "already_satisfied"
+    HITL_CLOSED = "hitl_closed"
+    HITL_SKIPPED = "hitl_skipped"
+    FAILED = "failed"
+    MANUAL_CLOSE = "manual_close"
+
+
+class IssueOutcome(BaseModel):
+    """Structured record of how and why an issue was closed."""
+
+    outcome: IssueOutcomeType
+    reason: str
+    closed_at: str
+    pr_number: int | None = None
+    phase: str
+
+
+class HookFailureRecord(BaseModel):
+    """Record of a post-merge hook failure."""
+
+    hook_name: str
+    error: str
+    timestamp: str
+
+
+class HITLCloseRequest(BaseModel):
+    """Request body for POST /api/hitl/{issue_number}/close."""
+
+    reason: str = Field(..., min_length=1)
+
+
+class HITLSkipRequest(BaseModel):
+    """Request body for POST /api/hitl/{issue_number}/skip."""
+
+    reason: str = Field(..., min_length=1)
+
+
 class SessionStatus(StrEnum):
     """Lifecycle status of an orchestrator session."""
 
@@ -584,6 +625,12 @@ class LifetimeStats(BaseModel):
     merge_durations: list[float] = Field(default_factory=list)
     # Retries per stage: {issue_number: {stage: count}}
     retries_per_stage: dict[str, dict[str, int]] = Field(default_factory=dict)
+    # Outcome counters
+    total_outcomes_merged: int = 0
+    total_outcomes_already_satisfied: int = 0
+    total_outcomes_hitl_closed: int = 0
+    total_outcomes_hitl_skipped: int = 0
+    total_outcomes_failed: int = 0
     # Threshold proposals already filed (avoid re-filing)
     fired_thresholds: list[str] = Field(default_factory=list)
 
@@ -636,6 +683,8 @@ class StateData(BaseModel):
     interrupted_issues: dict[str, str] = Field(default_factory=dict)
     last_reviewed_shas: dict[str, str] = Field(default_factory=dict)
     pending_reports: list[PendingReport] = Field(default_factory=list)
+    issue_outcomes: dict[str, IssueOutcome] = Field(default_factory=dict)
+    hook_failures: dict[str, list[HookFailureRecord]] = Field(default_factory=dict)
     last_updated: str | None = None
 
 
@@ -894,6 +943,7 @@ class HITLUpdatePayload(TypedDict, total=False):
     action: str
     worker: int
     duration: float
+    reason: str
 
 
 class ErrorPayload(TypedDict):
@@ -1186,6 +1236,7 @@ class IssueHistoryEntry(BaseModel):
     inference: dict[str, int] = Field(default_factory=dict)
     first_seen: str | None = None
     last_seen: str | None = None
+    outcome: IssueOutcome | None = None
 
 
 class IssueHistoryResponse(BaseModel):

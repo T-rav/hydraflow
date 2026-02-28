@@ -2565,3 +2565,116 @@ class TestJSONLDeserialization:
             '"categories":[]}'
         )
         assert record.verdict == ReviewVerdict.APPROVE
+
+
+# ---------------------------------------------------------------------------
+# IssueOutcomeType, IssueOutcome, HookFailureRecord
+# ---------------------------------------------------------------------------
+
+
+class TestIssueOutcomeModels:
+    """Tests for outcome tracking models."""
+
+    def test_issue_outcome_type_values(self) -> None:
+        from models import IssueOutcomeType
+
+        assert IssueOutcomeType.MERGED == "merged"
+        assert IssueOutcomeType.ALREADY_SATISFIED == "already_satisfied"
+        assert IssueOutcomeType.HITL_CLOSED == "hitl_closed"
+        assert IssueOutcomeType.HITL_SKIPPED == "hitl_skipped"
+        assert IssueOutcomeType.FAILED == "failed"
+        assert IssueOutcomeType.MANUAL_CLOSE == "manual_close"
+
+    def test_issue_outcome_creation(self) -> None:
+        from models import IssueOutcome, IssueOutcomeType
+
+        outcome = IssueOutcome(
+            outcome=IssueOutcomeType.MERGED,
+            reason="PR approved and merged",
+            closed_at="2024-01-15T10:00:00Z",
+            pr_number=42,
+            phase="review",
+        )
+        assert outcome.outcome == IssueOutcomeType.MERGED
+        assert outcome.reason == "PR approved and merged"
+        assert outcome.pr_number == 42
+        assert outcome.phase == "review"
+
+    def test_issue_outcome_without_pr_number(self) -> None:
+        from models import IssueOutcome, IssueOutcomeType
+
+        outcome = IssueOutcome(
+            outcome=IssueOutcomeType.HITL_CLOSED,
+            reason="Duplicate issue",
+            closed_at="2024-01-15T10:00:00Z",
+            phase="hitl",
+        )
+        assert outcome.pr_number is None
+
+    def test_hook_failure_record_creation(self) -> None:
+        from models import HookFailureRecord
+
+        record = HookFailureRecord(
+            hook_name="AC generation",
+            error="Connection timeout",
+            timestamp="2024-01-15T10:00:00Z",
+        )
+        assert record.hook_name == "AC generation"
+        assert record.error == "Connection timeout"
+
+    def test_hitl_close_request_requires_reason(self) -> None:
+        from models import HITLCloseRequest
+
+        with pytest.raises(ValidationError):
+            HITLCloseRequest(reason="")
+
+    def test_hitl_close_request_accepts_valid_reason(self) -> None:
+        from models import HITLCloseRequest
+
+        req = HITLCloseRequest(reason="Duplicate of #123")
+        assert req.reason == "Duplicate of #123"
+
+    def test_hitl_skip_request_requires_reason(self) -> None:
+        from models import HITLSkipRequest
+
+        with pytest.raises(ValidationError):
+            HITLSkipRequest(reason="")
+
+    def test_hitl_skip_request_accepts_valid_reason(self) -> None:
+        from models import HITLSkipRequest
+
+        req = HITLSkipRequest(reason="Not actionable")
+        assert req.reason == "Not actionable"
+
+    def test_issue_history_entry_outcome_defaults_to_none(self) -> None:
+        from models import IssueHistoryEntry
+
+        entry = IssueHistoryEntry(issue_number=42)
+        assert entry.outcome is None
+
+    def test_issue_history_entry_outcome_can_be_set(self) -> None:
+        from models import IssueHistoryEntry, IssueOutcome, IssueOutcomeType
+
+        outcome = IssueOutcome(
+            outcome=IssueOutcomeType.MERGED,
+            reason="merged",
+            closed_at="2024-01-15T10:00:00Z",
+            pr_number=1,
+            phase="review",
+        )
+        entry = IssueHistoryEntry(issue_number=42, outcome=outcome)
+        assert entry.outcome is not None
+        assert entry.outcome.outcome == IssueOutcomeType.MERGED
+
+    def test_state_data_new_fields_default(self) -> None:
+        data = StateData()
+        assert data.issue_outcomes == {}
+        assert data.hook_failures == {}
+
+    def test_lifetime_stats_outcome_counters_default_zero(self) -> None:
+        stats = LifetimeStats()
+        assert stats.total_outcomes_merged == 0
+        assert stats.total_outcomes_already_satisfied == 0
+        assert stats.total_outcomes_hitl_closed == 0
+        assert stats.total_outcomes_hitl_skipped == 0
+        assert stats.total_outcomes_failed == 0

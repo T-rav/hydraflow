@@ -17,6 +17,7 @@ from models import (
     CriterionVerdict,
     EscalateFn,
     GitHubIssue,
+    IssueOutcomeType,
     JudgeResult,
     JudgeVerdict,
     PRInfo,
@@ -161,6 +162,13 @@ class PostMergeHandler:
                         },
                     )
                 )
+            self._state.record_outcome(
+                pr.issue_number,
+                IssueOutcomeType.MERGED,
+                reason="PR approved and merged",
+                pr_number=pr.number,
+                phase="review",
+            )
             self._state.reset_review_attempts(pr.issue_number)
             self._state.reset_issue_attempts(pr.issue_number)
             self._state.clear_review_feedback(pr.issue_number)
@@ -213,22 +221,51 @@ class PostMergeHandler:
                 exc_info=True,
             )
 
-    @staticmethod
     async def _safe_hook(
+        self,
         name: str,
         coro: Coroutine[Any, Any, _T],
         issue_number: int,
     ) -> _T | None:
-        """Await a post-merge hook, logging and swallowing any exception."""
+        """Await a post-merge hook, recording failures for visibility."""
         try:
             return await coro
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            error_msg = str(exc)[:500]
             logger.warning(
                 "%s failed for issue #%d",
                 name,
                 issue_number,
                 exc_info=True,
             )
+            self._state.record_hook_failure(issue_number, name, error_msg)
+            await self._bus.publish(
+                HydraFlowEvent(
+                    type=EventType.SYSTEM_ALERT,
+                    data={
+                        "message": (
+                            f"Post-merge hook '{name}' failed for issue "
+                            f"#{issue_number}: {error_msg}"
+                        ),
+                        "source": "post_merge_hook",
+                        "hook_name": name,
+                        "issue": issue_number,
+                    },
+                )
+            )
+            try:
+                await self._prs.post_comment(
+                    issue_number,
+                    f"**Post-merge hook failure:** `{name}` failed.\n\n"
+                    f"Error: {error_msg}\n\n"
+                    f"---\n*HydraFlow PostMergeHandler*",
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Could not post hook-failure comment for issue #%d",
+                    issue_number,
+                    exc_info=True,
+                )
             return None
 
     async def _run_post_merge_hooks(
