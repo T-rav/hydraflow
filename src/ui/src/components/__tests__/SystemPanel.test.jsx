@@ -391,12 +391,13 @@ describe('SystemPanel', () => {
   })
 
   describe('Sub-tab Navigation', () => {
-    it('shows Workers, Pipeline, Livestream, and Event Log sub-tab labels', () => {
+    it('shows Workers, Pipeline, Metrics, and Livestream sub-tab labels', () => {
       render(<SystemPanel backgroundWorkers={[]} />)
       expect(screen.getByText('Workers')).toBeInTheDocument()
       expect(screen.getByText('Pipeline')).toBeInTheDocument()
+      expect(screen.getByText('Metrics')).toBeInTheDocument()
       expect(screen.getByText('Livestream')).toBeInTheDocument()
-      expect(screen.getByText('Event Log')).toBeInTheDocument()
+      expect(screen.queryByText('Event Log')).not.toBeInTheDocument()
     })
 
     it('Workers sub-tab is active by default showing background worker content', () => {
@@ -464,21 +465,6 @@ describe('SystemPanel', () => {
       expect(screen.getByText('worker update')).toBeInTheDocument()
     })
 
-    it('clicking Event Log sub-tab shows filtered event log panel', () => {
-      mockUseHydraFlow.mockReturnValue(defaultMockContext({
-        events: [
-          { timestamp: Date.now(), type: 'transcript_line', data: { issue: 9, line: 'noise' } },
-          { timestamp: Date.now(), type: 'worker_update', data: { issue: 1, status: 'running' } },
-        ],
-      }))
-      render(<SystemPanel backgroundWorkers={[]} />)
-      fireEvent.click(screen.getByText('Event Log'))
-      const panel = screen.getByTestId('event-log-panel')
-      expect(panel).toBeInTheDocument()
-      expect(within(panel).getByText('worker update')).toBeInTheDocument()
-      expect(within(panel).queryByText('transcript line')).not.toBeInTheDocument()
-      expect(screen.queryByText('Background Workers')).not.toBeInTheDocument()
-    })
   })
 
   describe('Worker Log Stream integration', () => {

@@ -80,12 +80,12 @@ export function EventLog({ events }) {
 const styles = {
   panel: {
     borderLeft: `1px solid ${theme.border}`,
-    overflowY: 'auto',
     background: theme.surface,
     display: 'flex',
     flexDirection: 'column',
     flex: 1,
     minHeight: 0,
+    overflow: 'hidden',
   },
   title: {
     padding: '12px 16px 8px',

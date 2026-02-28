@@ -225,6 +225,7 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     minHeight: 0,
+    overflow: 'hidden',
   },
   hitlBadge: {
     background: theme.red,
