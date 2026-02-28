@@ -1,13 +1,14 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { theme } from '../theme'
 import { useHydraFlow } from '../context/HydraFlowContext'
 import { PIPELINE_STAGES } from '../constants'
+import { ReportIssueModal } from './ReportIssueModal'
 
 export function Header({
   connected, orchestratorStatus,
   onStart, onStop,
 }) {
-  const { stageStatus, config } = useHydraFlow()
+  const { stageStatus, config, submitReport } = useHydraFlow()
   const hasActiveWorkers = stageStatus.workload.active > 0
   const appVersion = config?.app_version || ''
   const latestVersion = config?.latest_version || ''
@@ -44,6 +45,55 @@ export function Header({
     !stoppingHeld
   const isRunning = orchestratorStatus === 'running'
   const isCreditsPaused = orchestratorStatus === 'credits_paused'
+
+  const [reportModalOpen, setReportModalOpen] = useState(false)
+  const [screenshotDataUrl, setScreenshotDataUrl] = useState(null)
+
+  const handleReportClick = useCallback(async () => {
+    // Capture screenshot BEFORE opening the modal so the overlay isn't in the shot.
+    // html2canvas cannot resolve CSS custom properties (var(--xxx)), so we
+    // inline-resolve them on every element in the cloned DOM via onclone.
+    let dataUrl = null
+    try {
+      const mod = await import('html2canvas')
+      const html2canvas = mod.default || mod
+      const root = document.getElementById('root')
+      if (root) {
+        const canvas = await html2canvas(root, {
+          useCORS: true,
+          logging: false,
+          scale: window.devicePixelRatio || 1,
+          onclone: (_doc, clonedRoot) => {
+            // Walk every element and resolve CSS variable references
+            // so html2canvas can render them correctly.
+            const allElements = clonedRoot.querySelectorAll('*')
+            const resolveVars = (el) => {
+              const computed = window.getComputedStyle(el)
+              const inline = el.style
+              for (let i = 0; i < inline.length; i++) {
+                const prop = inline[i]
+                const val = inline.getPropertyValue(prop)
+                if (val && val.includes('var(')) {
+                  inline.setProperty(prop, computed.getPropertyValue(prop))
+                }
+              }
+            }
+            resolveVars(clonedRoot)
+            allElements.forEach(resolveVars)
+          },
+        })
+        dataUrl = canvas.toDataURL('image/png')
+      }
+    } catch (err) {
+      console.error('Screenshot capture failed:', err)
+    }
+    setScreenshotDataUrl(dataUrl)
+    setReportModalOpen(true)
+  }, [])
+
+  const handleReportSubmit = useCallback(async (data) => {
+    if (submitReport) await submitReport(data)
+  }, [submitReport])
 
   const sessionStages = PIPELINE_STAGES.map((stage) => ({
     key: stage.key,
@@ -118,7 +168,21 @@ export function Header({
             Stopping…
           </span>
         )}
+        <button
+          style={connected ? styles.reportBtn : reportBtnDisabled}
+          onClick={handleReportClick}
+          disabled={!connected}
+          data-testid="report-button"
+        >
+          Report
+        </button>
       </div>
+      <ReportIssueModal
+        isOpen={reportModalOpen}
+        screenshotDataUrl={screenshotDataUrl}
+        onSubmit={handleReportSubmit}
+        onClose={() => setReportModalOpen(false)}
+      />
     </header>
   )
 }
@@ -233,6 +297,16 @@ const styles = {
     fontSize: 12,
     fontWeight: 600,
   },
+  reportBtn: {
+    padding: '4px 14px',
+    borderRadius: 6,
+    border: `1px solid ${theme.border}`,
+    background: theme.surface,
+    color: theme.textMuted,
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: 'pointer',
+  },
 }
 
 // Pre-computed pipeline stage style maps (avoids object spread in render loops)
@@ -248,3 +322,6 @@ export const dotDisconnected = { ...styles.dot, background: theme.red }
 // Pre-computed start button variants
 export const startBtnEnabled = { ...styles.startBtn, opacity: 1, cursor: 'pointer' }
 export const startBtnDisabled = { ...styles.startBtn, opacity: 0.4, cursor: 'not-allowed' }
+
+// Pre-computed report button variant
+const reportBtnDisabled = { ...styles.reportBtn, opacity: 0.4, cursor: 'not-allowed' }

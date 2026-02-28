@@ -39,6 +39,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("max_manifest_prompt_chars", "HYDRAFLOW_MAX_MANIFEST_PROMPT_CHARS", 2000),
     ("max_transcript_summary_chars", "HYDRAFLOW_MAX_TRANSCRIPT_SUMMARY_CHARS", 50_000),
     ("pr_unstick_interval", "HYDRAFLOW_PR_UNSTICK_INTERVAL", 3600),
+    ("report_issue_interval", "HYDRAFLOW_REPORT_ISSUE_INTERVAL", 30),
     ("pr_unstick_batch_size", "HYDRAFLOW_PR_UNSTICK_BATCH_SIZE", 10),
     ("max_subskill_attempts", "HYDRAFLOW_MAX_SUBSKILL_ATTEMPTS", 0),
     ("max_debug_attempts", "HYDRAFLOW_MAX_DEBUG_ATTEMPTS", 1),
@@ -71,6 +72,7 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("triage_model", "HYDRAFLOW_TRIAGE_MODEL", "haiku"),
     ("subskill_model", "HYDRAFLOW_SUBSKILL_MODEL", "haiku"),
     ("debug_model", "HYDRAFLOW_DEBUG_MODEL", "opus"),
+    ("report_issue_model", "HYDRAFLOW_REPORT_ISSUE_MODEL", "haiku"),
 ]
 
 _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
@@ -122,6 +124,7 @@ _ENV_LITERAL_OVERRIDES: list[tuple[str, str]] = [
     ("verification_judge_tool", "HYDRAFLOW_VERIFICATION_JUDGE_TOOL"),
     ("subskill_tool", "HYDRAFLOW_SUBSKILL_TOOL"),
     ("debug_tool", "HYDRAFLOW_DEBUG_TOOL"),
+    ("report_issue_tool", "HYDRAFLOW_REPORT_ISSUE_TOOL"),
 ]
 
 # Deprecated env var aliases (HYDRA_ → HYDRAFLOW_).
@@ -580,6 +583,22 @@ class HydraFlowConfig(BaseModel):
         description="Also create standalone GitHub issues for transcript summaries (default: off)",
     )
 
+    # Report issue worker
+    report_issue_tool: Literal["claude", "codex", "pi"] = Field(
+        default="claude",
+        description="CLI backend for report-issue worker",
+    )
+    report_issue_model: str = Field(
+        default="haiku",
+        description="Model for report-issue worker (formatting task, cheap)",
+    )
+    report_issue_interval: int = Field(
+        default=30,
+        ge=10,
+        le=3600,
+        description="Seconds between report-issue worker polls",
+    )
+
     # Git configuration
     main_branch: str = Field(default="main", description="Base branch name")
     git_user_name: str = Field(
@@ -984,6 +1003,7 @@ def _apply_profile_overrides(config: HydraFlowConfig) -> None:
             "triage_tool",
             "transcript_summary_tool",
             "memory_compaction_tool",
+            "report_issue_tool",
         ):
             _apply_if_default(field, config.background_tool)
 
@@ -992,6 +1012,7 @@ def _apply_profile_overrides(config: HydraFlowConfig) -> None:
             "triage_model",
             "transcript_summary_model",
             "memory_compaction_model",
+            "report_issue_model",
         ):
             _apply_if_default(field, config.background_model)
 

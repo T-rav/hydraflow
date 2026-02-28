@@ -681,6 +681,55 @@ class PRManager:
             logger.error("Issue creation failed for %r: %s", title, exc)
             return 0
 
+    async def upload_screenshot_gist(self, png_base64: str) -> str:
+        """Upload a base64-encoded PNG as a GitHub gist and return the raw URL.
+
+        Returns an empty string on failure or in dry-run mode.
+        """
+        if self._config.dry_run:
+            logger.info("[dry-run] Would upload screenshot gist")
+            return ""
+
+        import base64
+
+        # Strip optional data URI prefix
+        if png_base64.startswith("data:"):
+            _, _, png_base64 = png_base64.partition(",")
+
+        fd, tmp_path = tempfile.mkstemp(suffix=".png", prefix="hydraflow-screenshot-")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(base64.b64decode(png_base64))
+
+            output = await self._run_gh(
+                "gh",
+                "gist",
+                "create",
+                "--public",
+                "--filename",
+                "screenshot.png",
+                tmp_path,
+            )
+            # gh gist create prints the gist URL, e.g.
+            # https://gist.github.com/user/abc123
+            gist_url = output.strip()
+            if "gist.github.com" not in gist_url:
+                logger.warning("Unexpected gist create output: %s", gist_url[:200])
+                return ""
+
+            # Convert to raw URL:
+            # https://gist.githubusercontent.com/user/abc123/raw/screenshot.png
+            raw_url = (
+                gist_url.replace("gist.github.com", "gist.githubusercontent.com")
+                + "/raw/screenshot.png"
+            )
+            return raw_url
+        except Exception:
+            logger.exception("Screenshot gist upload failed")
+            return ""
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
     async def get_pr_diff(self, pr_number: int) -> str:
         """Fetch the diff for *pr_number*."""
         try:

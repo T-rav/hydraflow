@@ -576,6 +576,103 @@ async def test_create_issue_no_labels(event_bus, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# upload_screenshot_gist
+# ---------------------------------------------------------------------------
+
+
+class TestUploadScreenshotGist:
+    """Tests for PRManager.upload_screenshot_gist."""
+
+    @pytest.mark.asyncio
+    async def test_dry_run_returns_empty_string(self, event_bus, tmp_path):
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+            dry_run=True,
+        )
+        mgr = _make_manager(cfg, event_bus)
+        result = await mgr.upload_screenshot_gist("aGVsbG8=")
+        assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_valid_base64_uploads_and_returns_raw_url(self, event_bus, tmp_path):
+        import base64
+
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+        )
+        mgr = _make_manager(cfg, event_bus)
+        gist_url = "https://gist.github.com/testuser/abc123"
+        mock_exec = SubprocessMockBuilder().with_stdout(gist_url).build()
+
+        png_b64 = base64.b64encode(b"\x89PNG fake data").decode()
+        with patch("asyncio.create_subprocess_exec", mock_exec):
+            result = await mgr.upload_screenshot_gist(png_b64)
+
+        expected = (
+            "https://gist.githubusercontent.com/testuser/abc123/raw/screenshot.png"
+        )
+        assert result == expected
+
+    @pytest.mark.asyncio
+    async def test_data_uri_prefix_stripped(self, event_bus, tmp_path):
+        import base64
+
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+        )
+        mgr = _make_manager(cfg, event_bus)
+        gist_url = "https://gist.github.com/user/def456"
+        mock_exec = SubprocessMockBuilder().with_stdout(gist_url).build()
+
+        raw_bytes = b"\x89PNG prefix test"
+        png_with_prefix = (
+            "data:image/png;base64," + base64.b64encode(raw_bytes).decode()
+        )
+        with patch("asyncio.create_subprocess_exec", mock_exec):
+            result = await mgr.upload_screenshot_gist(png_with_prefix)
+
+        assert result == (
+            "https://gist.githubusercontent.com/user/def456/raw/screenshot.png"
+        )
+
+    @pytest.mark.asyncio
+    async def test_failure_returns_empty_string(self, event_bus, tmp_path):
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+        )
+        mgr = _make_manager(cfg, event_bus)
+        mock_exec = SubprocessMockBuilder().with_returncode(1).build()
+
+        with patch("asyncio.create_subprocess_exec", mock_exec):
+            result = await mgr.upload_screenshot_gist("aGVsbG8=")
+
+        assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_unexpected_output_returns_empty_string(self, event_bus, tmp_path):
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+        )
+        mgr = _make_manager(cfg, event_bus)
+        mock_exec = SubprocessMockBuilder().with_stdout("unexpected output").build()
+
+        with patch("asyncio.create_subprocess_exec", mock_exec):
+            result = await mgr.upload_screenshot_gist("aGVsbG8=")
+
+        assert result == ""
+
+
+# ---------------------------------------------------------------------------
 # push_branch
 # ---------------------------------------------------------------------------
 

@@ -96,6 +96,7 @@ class TestCreateRouter:
             "/api/timeline",
             "/api/timeline/issue/{issue_num}",
             "/api/intent",
+            "/api/report",
             "/api/sessions",
             "/api/sessions/{session_id}",
             "/api/request-changes",
@@ -4123,6 +4124,79 @@ class TestSubmitIntentEndpoint:
         request = IntentRequest(text="Add something")
         response = await endpoint(request)
         assert response.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# POST /api/report
+# ---------------------------------------------------------------------------
+
+
+class TestSubmitReportEndpoint:
+    """Tests for POST /api/report."""
+
+    def _make_router(self, config, event_bus, state, tmp_path):
+        from dashboard_routes import create_router
+        from pr_manager import PRManager
+
+        pr_mgr = PRManager(config, event_bus)
+        return create_router(
+            config=config,
+            event_bus=event_bus,
+            state=state,
+            pr_manager=pr_mgr,
+            get_orchestrator=lambda: None,
+            set_orchestrator=lambda o: None,
+            set_run_task=lambda t: None,
+            ui_dist_dir=tmp_path / "no-dist",
+            template_dir=tmp_path / "no-templates",
+        ), pr_mgr
+
+    def _find_endpoint(self, router, path):
+        for route in router.routes:
+            if (
+                hasattr(route, "path")
+                and route.path == path
+                and hasattr(route, "endpoint")
+            ):
+                return route.endpoint
+        return None
+
+    @pytest.mark.asyncio
+    async def test_submit_report_queues_report(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        import json
+
+        from models import ReportIssueRequest
+
+        router, pr_mgr = self._make_router(config, event_bus, state, tmp_path)
+        endpoint = self._find_endpoint(router, "/api/report")
+        request = ReportIssueRequest(description="Button is broken")
+        response = await endpoint(request)
+        data = json.loads(response.body)
+        assert data["issue_number"] == 0
+        assert data["title"] == "[Bug Report] Button is broken"
+        assert data["status"] == "queued"
+
+    @pytest.mark.asyncio
+    async def test_submit_report_enqueues_in_state(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        from models import ReportIssueRequest
+
+        router, pr_mgr = self._make_router(config, event_bus, state, tmp_path)
+        endpoint = self._find_endpoint(router, "/api/report")
+        request = ReportIssueRequest(
+            description="UI glitch",
+            screenshot_base64="iVBORw0KGgo=",
+            environment={"source": "dashboard"},
+        )
+        await endpoint(request)
+        reports = state.get_pending_reports()
+        assert len(reports) == 1
+        assert reports[0].description == "UI glitch"
+        assert reports[0].screenshot_base64 == "iVBORw0KGgo="
+        assert reports[0].environment["source"] == "dashboard"
 
 
 # ---------------------------------------------------------------------------

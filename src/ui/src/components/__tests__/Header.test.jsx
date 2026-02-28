@@ -24,7 +24,7 @@ function mockStageStatus(workers = {}, sessionCounters = {}) {
 }
 
 beforeEach(() => {
-  mockUseHydraFlow.mockReturnValue({ stageStatus: mockStageStatus(), config: null })
+  mockUseHydraFlow.mockReturnValue({ stageStatus: mockStageStatus(), config: null, submitReport: vi.fn() })
 })
 
 describe('Header pre-computed styles', () => {
@@ -368,6 +368,40 @@ describe('Header component', () => {
       )
       expect(screen.getByText('Stopping\u2026')).toBeInTheDocument()
       expect(screen.queryByText('Start')).toBeNull()
+    })
+  })
+
+  describe('Report button', () => {
+    it('renders in idle state', () => {
+      render(<Header {...defaultProps} orchestratorStatus="idle" />)
+      expect(screen.getByTestId('report-button')).toBeInTheDocument()
+    })
+
+    it('renders in running state', () => {
+      render(<Header {...defaultProps} orchestratorStatus="running" />)
+      expect(screen.getByTestId('report-button')).toBeInTheDocument()
+    })
+
+    it('renders in stopping state', () => {
+      render(<Header {...defaultProps} orchestratorStatus="stopping" />)
+      expect(screen.getByTestId('report-button')).toBeInTheDocument()
+    })
+
+    it('renders in done state', () => {
+      render(<Header {...defaultProps} orchestratorStatus="done" />)
+      expect(screen.getByTestId('report-button')).toBeInTheDocument()
+    })
+
+    it('is disabled when disconnected', () => {
+      render(<Header {...defaultProps} connected={false} />)
+      const btn = screen.getByTestId('report-button')
+      expect(btn).toBeDisabled()
+    })
+
+    it('is enabled when connected', () => {
+      render(<Header {...defaultProps} connected={true} />)
+      const btn = screen.getByTestId('report-button')
+      expect(btn).not.toBeDisabled()
     })
   })
 })

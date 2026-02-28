@@ -33,6 +33,7 @@ from post_merge_handler import PostMergeHandler
 from pr_manager import PRManager
 from pr_unsticker import PRUnsticker
 from pr_unsticker_loop import PRUnstickerLoop
+from report_issue_loop import ReportIssueLoop
 from retrospective import RetrospectiveCollector
 from review_phase import ReviewPhase
 from reviewer import ReviewRunner
@@ -90,6 +91,7 @@ class ServiceRegistry:
     metrics_sync_bg: MetricsSyncLoop
     pr_unsticker_loop: PRUnstickerLoop
     manifest_refresh_loop: ManifestRefreshLoop
+    report_issue_loop: ReportIssueLoop
 
 
 @dataclass
@@ -288,6 +290,19 @@ def build_services(
         manifest_syncer=manifest_syncer,
     )
 
+    report_issue_loop = ReportIssueLoop(
+        config=config,
+        state=state,
+        pr_manager=prs,
+        event_bus=event_bus,
+        stop_event=stop_event,
+        status_cb=callbacks.update_bg_worker_status,
+        enabled_cb=callbacks.is_bg_worker_enabled,
+        sleep_fn=callbacks.sleep_or_stop,
+        interval_cb=callbacks.get_bg_worker_interval,
+        runner=subprocess_runner,
+    )
+
     return ServiceRegistry(
         worktrees=worktrees,
         subprocess_runner=subprocess_runner,
@@ -317,4 +332,5 @@ def build_services(
         metrics_sync_bg=metrics_sync_bg,
         pr_unsticker_loop=pr_unsticker_loop,
         manifest_refresh_loop=manifest_refresh_loop,
+        report_issue_loop=report_issue_loop,
     )

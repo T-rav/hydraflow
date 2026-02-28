@@ -15,6 +15,7 @@ from models import (
     HITLSummaryCacheEntry,
     HITLSummaryFailureEntry,
     LifetimeStats,
+    PendingReport,
     SessionLog,
     SessionStatus,
     StateData,
@@ -438,6 +439,25 @@ class StateTracker:
         """Persist worker interval overrides."""
         self._data.worker_intervals = intervals
         self.save()
+
+    # --- pending reports queue ---
+
+    def enqueue_report(self, report: PendingReport) -> None:
+        """Append a report to the pending queue and persist."""
+        self._data.pending_reports.append(report)
+        self.save()
+
+    def dequeue_report(self) -> PendingReport | None:
+        """Pop the first pending report (FIFO) and persist, or return None."""
+        if not self._data.pending_reports:
+            return None
+        report = self._data.pending_reports.pop(0)
+        self.save()
+        return report
+
+    def get_pending_reports(self) -> list[PendingReport]:
+        """Return a copy of the pending reports list."""
+        return list(self._data.pending_reports)
 
     # --- metrics state ---
 

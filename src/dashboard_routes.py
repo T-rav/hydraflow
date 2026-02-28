@@ -36,10 +36,13 @@ from models import (
     MetricsHistoryResponse,
     MetricsResponse,
     MetricsSnapshot,
+    PendingReport,
     PipelineIssue,
     PipelineSnapshot,
     PipelineSnapshotEntry,
     QueueStats,
+    ReportIssueRequest,
+    ReportIssueResponse,
     parse_task_links,
 )
 from pr_manager import PRManager
@@ -928,10 +931,21 @@ def create_router(
             "PR Unsticker",
             "Requeues stalled HITL PRs by validating requirements and reopening flow.",
         ),
+        (
+            "report_issue",
+            "Report Issue",
+            "Processes queued bug reports into GitHub issues via the configured agent.",
+        ),
     ]
 
     # Workers that have independent configurable intervals
-    _INTERVAL_WORKERS = {"memory_sync", "metrics", "pr_unsticker", "pipeline_poller"}
+    _INTERVAL_WORKERS = {
+        "memory_sync",
+        "metrics",
+        "pr_unsticker",
+        "pipeline_poller",
+        "report_issue",
+    }
     # Pipeline loops share poll_interval (read-only display)
     _PIPELINE_WORKERS = {"triage", "plan", "implement", "review"}
     _WORKER_SOURCE_ALIASES: dict[str, tuple[str, ...]] = {
@@ -1720,6 +1734,22 @@ def create_router(
 
         url = f"https://github.com/{config.repo}/issues/{issue_number}"
         response = IntentResponse(issue_number=issue_number, title=title, url=url)
+        return JSONResponse(response.model_dump())
+
+    @router.post("/api/report")
+    async def submit_report(request: ReportIssueRequest) -> JSONResponse:
+        """Queue a bug report for async processing by the report issue worker."""
+        report = PendingReport(
+            description=request.description,
+            screenshot_base64=request.screenshot_base64,
+            environment=request.environment,
+        )
+        state.enqueue_report(report)
+
+        title = f"[Bug Report] {request.description[:100]}"
+        response = ReportIssueResponse(
+            issue_number=0, title=title, url="", status="queued"
+        )
         return JSONResponse(response.model_dump())
 
     @router.get("/api/sessions")

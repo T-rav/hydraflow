@@ -26,6 +26,19 @@ export const PIPELINE_STAGES = [
   { key: 'merged',    label: 'Merged',    color: theme.green,       subtleColor: theme.greenSubtle,  role: null,           configKey: null },
 ]
 
+/**
+ * Annotation pen colors for the Report Issue modal.
+ * Maps to pipeline stage palette so operators can color-code annotations.
+ */
+export const ANNOTATION_COLORS = [
+  { key: 'triage',    label: 'Triage',    color: theme.yellow },
+  { key: 'plan',      label: 'Plan',      color: theme.purple },
+  { key: 'implement', label: 'Implement', color: theme.accent },
+  { key: 'review',    label: 'Review',    color: theme.orange },
+  { key: 'merged',    label: 'Merged',    color: theme.green },
+  { key: 'failed',    label: 'Failed',    color: theme.red },
+]
+
 /** Shared CSS animation value for the stream-pulse keyframe. */
 export const PULSE_ANIMATION = 'stream-pulse 1.5s ease-in-out infinite'
 
@@ -65,7 +78,7 @@ export const PIPELINE_POLLER_PRESETS = [
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'metrics', 'pr_unsticker', 'pipeline_poller'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'metrics', 'pr_unsticker', 'pipeline_poller', 'report_issue'])
 
 /**
  * Default intervals (in seconds) for system workers.
@@ -77,6 +90,7 @@ export const SYSTEM_WORKER_INTERVALS = {
   pr_unsticker: 3600,
   memory_sync: 3600,
   metrics: 7200,
+  report_issue: 30,
 }
 
 /**
@@ -100,4 +114,5 @@ export const BACKGROUND_WORKERS = [
   { key: 'memory_sync',     label: 'Memory Manager', description: 'Ingests memory and transcript issues into durable learnings.', color: theme.accent, system: true },
   { key: 'metrics',         label: 'Metrics Munger', description: 'Updates operational and GitHub metrics used by the dashboard.', color: theme.yellow, system: true },
   { key: 'pr_unsticker',    label: 'PR Unsticker',   description: 'Requeues stalled HITL PRs once requirements are actionable.', color: theme.orange, system: true },
+  { key: 'report_issue',   label: 'Report Issue',   description: 'Processes queued bug reports into GitHub issues.', color: theme.red },
 ]

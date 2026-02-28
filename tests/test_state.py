@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 from pydantic import ValidationError
 
-from models import LifetimeStats, SessionLog, SessionStatus, StateData
+from models import LifetimeStats, PendingReport, SessionLog, SessionStatus, StateData
 from state import StateTracker
 
 # ---------------------------------------------------------------------------
@@ -2125,3 +2125,52 @@ class TestInterruptedIssues:
         result = tracker.get_interrupted_issues()
         assert result == {99: "review"}
         assert 42 not in result
+
+
+class TestPendingReports:
+    """Tests for pending report queue operations."""
+
+    def test_enqueue_appends_report(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        report = PendingReport(description="Bug A")
+        tracker.enqueue_report(report)
+        reports = tracker.get_pending_reports()
+        assert len(reports) == 1
+        assert reports[0].description == "Bug A"
+
+    def test_dequeue_returns_fifo_order(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        r1 = PendingReport(description="First")
+        r2 = PendingReport(description="Second")
+        tracker.enqueue_report(r1)
+        tracker.enqueue_report(r2)
+
+        dequeued = tracker.dequeue_report()
+        assert dequeued is not None
+        assert dequeued.description == "First"
+
+        dequeued2 = tracker.dequeue_report()
+        assert dequeued2 is not None
+        assert dequeued2.description == "Second"
+
+    def test_dequeue_empty_returns_none(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        assert tracker.dequeue_report() is None
+
+    def test_get_pending_reports_returns_copy(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        report = PendingReport(description="Test")
+        tracker.enqueue_report(report)
+        copy = tracker.get_pending_reports()
+        copy.clear()
+        assert len(tracker.get_pending_reports()) == 1
+
+    def test_enqueue_persists_to_disk(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        report = PendingReport(description="Persist test")
+        tracker.enqueue_report(report)
+
+        tracker2 = make_tracker(tmp_path)
+        reports = tracker2.get_pending_reports()
+        assert len(reports) == 1
+        assert reports[0].description == "Persist test"

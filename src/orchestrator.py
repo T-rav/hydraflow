@@ -131,6 +131,7 @@ class HydraFlowOrchestrator:
         self._metrics_sync_bg = svc.metrics_sync_bg
         self._pr_unsticker_loop = svc.pr_unsticker_loop
         self._manifest_refresh_loop = svc.manifest_refresh_loop
+        self._report_issue_loop = svc.report_issue_loop
 
     @property
     def event_bus(self) -> EventBus:
@@ -357,6 +358,7 @@ class HydraFlowOrchestrator:
             "pipeline_poller": 5,
             "pr_unsticker": self._config.pr_unstick_interval,
             "manifest_refresh": self._config.manifest_refresh_interval,
+            "report_issue": self._config.report_issue_interval,
         }
         return defaults.get(name, self._config.poll_interval)
 
@@ -610,6 +612,7 @@ class HydraFlowOrchestrator:
             ("metrics", self._metrics_sync_loop),
             ("pr_unsticker", self._pr_unsticker_loop.run),
             ("manifest_refresh", self._manifest_refresh_bg_loop),
+            ("report_issue", self._report_issue_loop.run),
         ]
         tasks: dict[str, asyncio.Task[None]] = {}
         for name, factory in loop_factories:
