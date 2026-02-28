@@ -242,11 +242,16 @@ class EventBus:
         self._max_history = max_history
         self._event_log = event_log
         self._active_session_id: str | None = None
+        self._active_repo: str = ""
         self._pending_persists: set[asyncio.Task[None]] = set()
 
     def set_session_id(self, session_id: str | None) -> None:
         """Set the active session ID to auto-inject into published events."""
         self._active_session_id = session_id
+
+    def set_repo(self, repo: str) -> None:
+        """Set the active repo slug to auto-inject into published event data."""
+        self._active_repo = repo
 
     @property
     def current_session_id(self) -> str | None:
@@ -257,6 +262,12 @@ class EventBus:
         """Publish *event* to all subscribers and append to history."""
         if event.session_id is None and getattr(self, "_active_session_id", None):
             event.session_id = self._active_session_id
+        if (
+            self._active_repo
+            and isinstance(event.data, dict)
+            and "repo" not in event.data
+        ):
+            event.data["repo"] = self._active_repo
         self._history.append(event)
         if len(self._history) > self._max_history:
             self._history = self._history[-self._max_history :]

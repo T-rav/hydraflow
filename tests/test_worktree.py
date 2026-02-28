@@ -40,6 +40,9 @@ class TestCreate:
             patch(
                 "asyncio.create_subprocess_exec", return_value=success_proc
             ) as mock_exec,
+            patch.object(
+                manager, "_assert_origin_matches_repo", new_callable=AsyncMock
+            ),
             patch.object(manager, "_delete_local_branch", new_callable=AsyncMock),
             patch.object(manager, "_remote_branch_exists", return_value=False),
             patch.object(manager, "_setup_env"),
@@ -71,6 +74,9 @@ class TestCreate:
             patch(
                 "asyncio.create_subprocess_exec", return_value=success_proc
             ) as mock_exec,
+            patch.object(
+                manager, "_assert_origin_matches_repo", new_callable=AsyncMock
+            ),
             patch.object(manager, "_delete_local_branch", new_callable=AsyncMock),
             patch.object(
                 manager, "_remote_branch_exists", return_value=True
@@ -108,6 +114,9 @@ class TestCreate:
             patch(
                 "asyncio.create_subprocess_exec", return_value=success_proc
             ) as mock_exec,
+            patch.object(
+                manager, "_assert_origin_matches_repo", new_callable=AsyncMock
+            ),
             patch.object(manager, "_delete_local_branch", new_callable=AsyncMock),
             patch.object(manager, "_remote_branch_exists", return_value=False),
             patch.object(manager, "_setup_env"),
@@ -230,6 +239,9 @@ class TestCreate:
         with (
             patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
             patch("asyncio.sleep", new_callable=AsyncMock) as sleep_mock,
+            patch.object(
+                manager, "_assert_origin_matches_repo", new_callable=AsyncMock
+            ),
             patch.object(manager, "_delete_local_branch", new_callable=AsyncMock),
             patch.object(manager, "_remote_branch_exists", return_value=False),
             patch.object(manager, "_setup_env"),
@@ -384,6 +396,9 @@ class TestCreate:
 
         with (
             patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+            patch.object(
+                manager, "_assert_origin_matches_repo", new_callable=AsyncMock
+            ),
             patch.object(manager, "_delete_local_branch", delete_branch),
             patch.object(manager, "_remote_branch_exists", return_value=False),
             pytest.raises(RuntimeError, match="worktree add failed"),

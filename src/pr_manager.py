@@ -92,6 +92,8 @@ class PRManager:
     # Re-export from prep module for backward compatibility
     _HYDRAFLOW_LABELS = HYDRAFLOW_LABELS
 
+    _REPO_SLUG_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
+
     def __init__(self, config: HydraFlowConfig, event_bus: EventBus) -> None:
         self._config = config
         self._bus = event_bus
@@ -100,6 +102,12 @@ class PRManager:
         self._max_retries = config.gh_max_retries
         self._label_counts_cache: LabelCounts | None = None
         self._label_counts_ts: float = 0.0
+
+    def _assert_repo(self) -> None:
+        """Raise ``RuntimeError`` if ``self._repo`` is empty or malformed."""
+        if not self._repo or not self._REPO_SLUG_RE.fullmatch(self._repo):
+            msg = f"PRManager: repo is not configured or invalid ({self._repo!r}) — refusing to mutate GitHub"
+            raise RuntimeError(msg)
 
     async def _run_gh(self, *cmd: str, cwd: Path | None = None) -> str:
         """Run a gh/git command with retry logic."""
@@ -116,6 +124,7 @@ class PRManager:
         Delegates to :func:`prep.ensure_labels` which handles creation,
         reporting, and dry-run behaviour.
         """
+        self._assert_repo()
         from prep import ensure_labels  # noqa: PLC0415
 
         result = await ensure_labels(self._config)
@@ -126,6 +135,7 @@ class PRManager:
 
         Returns *True* on success.
         """
+        self._assert_repo()
         if self._config.dry_run:
             logger.info("[dry-run] Would push branch %s", branch)
             return True
@@ -153,6 +163,7 @@ class PRManager:
         Used after fresh-branch rebuilds where branch history is rewritten.
         Returns *True* on success.
         """
+        self._assert_repo()
         if self._config.dry_run:
             logger.info("[dry-run] Would force-push branch %s", branch)
             return True
@@ -185,6 +196,7 @@ class PRManager:
 
         Returns a :class:`PRInfo` with the PR number and URL.
         """
+        self._assert_repo()
         title = f"Fixes #{issue.number}: {issue.title}"
         if len(title) > 70:
             title = title[:67] + "..."
@@ -359,6 +371,7 @@ class PRManager:
 
         Returns *True* on success.
         """
+        self._assert_repo()
         if self._config.dry_run:
             logger.info("[dry-run] Would merge PR #%d", pr_number)
             return True
@@ -392,6 +405,7 @@ class PRManager:
         self, target: Literal["issue", "pr"], number: int, body: str
     ) -> None:
         """Post a comment on a GitHub issue or PR."""
+        self._assert_repo()
         if self._config.dry_run:
             logger.info("[dry-run] Would post comment on %s #%d", target, number)
             return
@@ -443,6 +457,7 @@ class PRManager:
             ReviewVerdict.COMMENT: "--comment",
         }
         flag = flag_map[verdict]
+        self._assert_repo()
 
         if self._config.dry_run:
             logger.info(
@@ -491,6 +506,7 @@ class PRManager:
         self, target: Literal["issue", "pr"], number: int, labels: list[str]
     ) -> None:
         """Add *labels* to a GitHub issue or PR."""
+        self._assert_repo()
         if self._config.dry_run or not labels:
             return
         for label in labels:
@@ -521,6 +537,7 @@ class PRManager:
         self, target: Literal["issue", "pr"], number: int, label: str
     ) -> None:
         """Remove *label* from a GitHub issue or PR."""
+        self._assert_repo()
         if self._config.dry_run:
             return
         try:
@@ -555,6 +572,7 @@ class PRManager:
 
     async def close_issue(self, issue_number: int) -> None:
         """Close a GitHub issue."""
+        self._assert_repo()
         if self._config.dry_run:
             return
         try:
@@ -575,6 +593,7 @@ class PRManager:
 
     async def update_issue_body(self, issue_number: int, body: str) -> None:
         """Update the body of a GitHub issue using ``--body-file``."""
+        self._assert_repo()
         if self._config.dry_run:
             return
         fd, tmp_path = tempfile.mkstemp(suffix=".md", prefix="hydraflow-body-")
@@ -621,6 +640,7 @@ class PRManager:
         leaves an issue with conflicting pipeline labels (e.g. hydraflow-ready +
         hydraflow-hitl simultaneously).
         """
+        self._assert_repo()
         all_labels = self._config.all_pipeline_labels
         for lbl in all_labels:
             if lbl != new_label:
@@ -638,6 +658,7 @@ class PRManager:
         labels: list[str] | None = None,
     ) -> int:
         """Create a new GitHub issue. Returns the issue number (0 on failure)."""
+        self._assert_repo()
         if self._config.dry_run:
             logger.info("[dry-run] Would create issue: %s", title)
             return 0
