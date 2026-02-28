@@ -41,6 +41,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("max_transcript_summary_chars", "HYDRAFLOW_MAX_TRANSCRIPT_SUMMARY_CHARS", 50_000),
     ("pr_unstick_interval", "HYDRAFLOW_PR_UNSTICK_INTERVAL", 3600),
     ("report_issue_interval", "HYDRAFLOW_REPORT_ISSUE_INTERVAL", 30),
+    ("epic_monitor_interval", "HYDRAFLOW_EPIC_MONITOR_INTERVAL", 1800),
     ("pr_unstick_batch_size", "HYDRAFLOW_PR_UNSTICK_BATCH_SIZE", 10),
     ("max_subskill_attempts", "HYDRAFLOW_MAX_SUBSKILL_ATTEMPTS", 0),
     ("max_debug_attempts", "HYDRAFLOW_MAX_DEBUG_ATTEMPTS", 1),
@@ -104,6 +105,8 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_ENABLE_FRESH_BRANCH_REBUILD",
         True,
     ),
+    ("auto_process_epics", "HYDRAFLOW_AUTO_PROCESS_EPICS", False),
+    ("auto_process_bug_reports", "HYDRAFLOW_AUTO_PROCESS_BUG_REPORTS", False),
 ]
 
 # Literal-typed env-var overrides.
@@ -343,6 +346,33 @@ class HydraFlowConfig(BaseModel):
         ge=0,
         le=5,
         description="Max gap review + re-plan iterations (0 disables gap review)",
+    )
+    epic_auto_decompose: bool = Field(
+        default=False,
+        description="Auto-decompose large issues into epics during triage",
+    )
+    epic_decompose_complexity_threshold: int = Field(
+        default=8,
+        ge=1,
+        le=10,
+        description="Minimum triage complexity score to trigger decomposition",
+    )
+    epic_monitor_interval: int = Field(
+        default=1800,
+        description="Epic monitor loop interval in seconds (default 30 min)",
+    )
+    epic_stale_days: int = Field(
+        default=7,
+        ge=1,
+        description="Days without activity before an epic is flagged as stale",
+    )
+    auto_process_epics: bool = Field(
+        default=False,
+        description="When True, detected epics auto-proceed. When False, route to HITL for review.",
+    )
+    auto_process_bug_reports: bool = Field(
+        default=False,
+        description="When True, detected bug reports auto-proceed. When False, route to HITL for review.",
     )
 
     # Discovery / planner configuration
