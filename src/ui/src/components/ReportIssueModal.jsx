@@ -100,33 +100,44 @@ export function ReportIssueModal({ isOpen, screenshotDataUrl, onSubmit, onClose 
         </div>
 
         {screenshotDataUrl && (
-          <div style={styles.canvasWrapper}>
-            <canvas
-              ref={canvasRef}
-              style={styles.canvas}
-              onMouseDown={startDrawing}
-              onMouseMove={draw}
-              onMouseUp={stopDrawing}
-              onMouseLeave={stopDrawing}
-              onTouchStart={startDrawing}
-              onTouchMove={draw}
-              onTouchEnd={stopDrawing}
-              data-testid="report-canvas"
-            />
-          </div>
-        )}
+          <>
+            <div style={styles.canvasWrapper}>
+              <canvas
+                ref={canvasRef}
+                style={styles.canvas}
+                onMouseDown={startDrawing}
+                onMouseMove={draw}
+                onMouseUp={stopDrawing}
+                onMouseLeave={stopDrawing}
+                onTouchStart={startDrawing}
+                onTouchMove={draw}
+                onTouchEnd={stopDrawing}
+                data-testid="report-canvas"
+              />
+            </div>
 
-        <div style={styles.colorRow} data-testid="color-picker">
-          {ANNOTATION_COLORS.map((c) => (
-            <button
-              key={c.key}
-              title={c.label}
-              style={selectedColor === c.color ? { ...styles.colorSwatch, background: c.color, ...styles.colorSwatchSelected } : { ...styles.colorSwatch, background: c.color }}
-              onClick={() => setSelectedColor(c.color)}
-              data-testid={`color-swatch-${c.key}`}
-            />
-          ))}
-        </div>
+            <div style={styles.toolRow}>
+              <div style={styles.penIndicator}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={selectedColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                  <path d="m15 5 4 4" />
+                </svg>
+                <span style={styles.toolLabel}>Draw on screenshot to annotate</span>
+              </div>
+              <div style={styles.colorRow} data-testid="color-picker">
+                {ANNOTATION_COLORS.map((c) => (
+                  <button
+                    key={c.key}
+                    title={c.label}
+                    style={selectedColor === c.color ? { ...styles.colorSwatch, background: c.color, ...styles.colorSwatchSelected } : { ...styles.colorSwatch, background: c.color }}
+                    onClick={() => setSelectedColor(c.color)}
+                    data-testid={`color-swatch-${c.key}`}
+                  />
+                ))}
+              </div>
+            </div>
+          </>
+        )}
 
         <textarea
           style={styles.textarea}
@@ -197,6 +208,22 @@ const styles = {
     height: 'auto',
     cursor: 'crosshair',
     display: 'block',
+  },
+  toolRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  penIndicator: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+  },
+  toolLabel: {
+    fontSize: 11,
+    color: theme.textMuted,
+    fontWeight: 500,
   },
   colorRow: {
     display: 'flex',

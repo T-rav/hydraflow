@@ -50,20 +50,25 @@ export function Header({
   const [screenshotDataUrl, setScreenshotDataUrl] = useState(null)
 
   const handleReportClick = useCallback(async () => {
+    // Capture screenshot BEFORE opening the modal so the overlay isn't in the shot
+    let dataUrl = null
     try {
       const mod = await import('html2canvas')
       const html2canvas = mod.default || mod
       const root = document.getElementById('root')
       if (root) {
-        const canvas = await html2canvas(root, { useCORS: true, logging: false })
-        setScreenshotDataUrl(canvas.toDataURL('image/png'))
-      } else {
-        setScreenshotDataUrl(null)
+        const canvas = await html2canvas(root, {
+          useCORS: true,
+          logging: false,
+          backgroundColor: null,
+          scale: window.devicePixelRatio || 1,
+        })
+        dataUrl = canvas.toDataURL('image/png')
       }
     } catch (err) {
       console.error('Screenshot capture failed:', err)
-      setScreenshotDataUrl(null)
     }
+    setScreenshotDataUrl(dataUrl)
     setReportModalOpen(true)
   }, [])
 

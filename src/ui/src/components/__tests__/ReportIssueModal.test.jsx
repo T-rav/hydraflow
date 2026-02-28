@@ -11,6 +11,9 @@ const defaultProps = {
   onClose: vi.fn(),
 }
 
+// Minimal valid data URL for tests that need a screenshot
+const fakeScreenshot = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+
 describe('ReportIssueModal', () => {
   it('renders nothing when isOpen is false', () => {
     render(<ReportIssueModal {...defaultProps} isOpen={false} />)
@@ -23,11 +26,28 @@ describe('ReportIssueModal', () => {
     expect(screen.getByTestId('report-modal-card')).toBeInTheDocument()
   })
 
-  it('renders 6 color swatches', () => {
-    render(<ReportIssueModal {...defaultProps} />)
+  it('hides color picker and canvas when no screenshot provided', () => {
+    render(<ReportIssueModal {...defaultProps} screenshotDataUrl={null} />)
+    expect(screen.queryByTestId('color-picker')).toBeNull()
+    expect(screen.queryByTestId('report-canvas')).toBeNull()
+  })
+
+  it('shows canvas and color picker when screenshot provided', () => {
+    render(<ReportIssueModal {...defaultProps} screenshotDataUrl={fakeScreenshot} />)
+    expect(screen.getByTestId('report-canvas')).toBeInTheDocument()
+    expect(screen.getByTestId('color-picker')).toBeInTheDocument()
+  })
+
+  it('renders 6 color swatches when screenshot provided', () => {
+    render(<ReportIssueModal {...defaultProps} screenshotDataUrl={fakeScreenshot} />)
     ANNOTATION_COLORS.forEach((c) => {
       expect(screen.getByTestId(`color-swatch-${c.key}`)).toBeInTheDocument()
     })
+  })
+
+  it('shows annotation instruction label when screenshot provided', () => {
+    render(<ReportIssueModal {...defaultProps} screenshotDataUrl={fakeScreenshot} />)
+    expect(screen.getByText('Draw on screenshot to annotate')).toBeInTheDocument()
   })
 
   it('submit button is disabled with empty description', () => {
