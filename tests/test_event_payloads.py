@@ -73,6 +73,17 @@ class TestEventPayloadTypes:
         final: CICheckPayload = {"pr": 5, "status": "passed", "total": 10}
         assert final["total"] == 10
 
+        # Verdict supplied
+        with_verdict: CICheckPayload = {
+            "pr": 5,
+            "issue": 42,
+            "status": "passed",
+            "worker": 1,
+            "attempt": 2,
+            "verdict": "approve",
+        }
+        assert with_verdict["verdict"] == "approve"
+
     def test_hitl_escalation_with_ci_fix_attempts(self) -> None:
         from models import HITLEscalationPayload
 

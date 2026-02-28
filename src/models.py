@@ -863,6 +863,7 @@ class CICheckPayload(TypedDict, total=False):
     failed: list[str]
     worker: int
     attempt: int
+    verdict: NotRequired[str]
 
 
 class HITLEscalationPayload(TypedDict, total=False):
