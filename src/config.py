@@ -1123,6 +1123,21 @@ def _resolve_paths(config: HydraFlowConfig) -> None:
         )
 
 
+_REPO_SLUG_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
+
+
+def _validate_repo_format(repo: str) -> None:
+    """Raise ``ValueError`` if *repo* is not a valid ``owner/repo`` slug."""
+    if not repo:
+        return  # empty repo is handled elsewhere
+    if ".." in repo:
+        msg = f"Invalid repo format {repo!r} — path traversal not allowed"
+        raise ValueError(msg)
+    if not _REPO_SLUG_RE.fullmatch(repo):
+        msg = f"Invalid repo format {repo!r} — expected 'owner/repo'"
+        raise ValueError(msg)
+
+
 def _resolve_repo_and_identity(config: HydraFlowConfig) -> None:
     """Resolve repo slug, GitHub token, and git identity from env vars."""
     # Repo slug: env var → git remote → empty
@@ -1130,6 +1145,9 @@ def _resolve_repo_and_identity(config: HydraFlowConfig) -> None:
         config.repo = os.environ.get("HYDRAFLOW_GITHUB_REPO", "") or _detect_repo_slug(
             config.repo_root
         )
+
+    if config.repo:
+        _validate_repo_format(config.repo)
 
     # GitHub token:
     # explicit value → HYDRAFLOW_GH_TOKEN env var → GH_TOKEN/GITHUB_TOKEN env vars

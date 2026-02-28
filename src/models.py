@@ -985,31 +985,34 @@ class TranscriptEventData(TypedDict, total=False):
     source: str
 
 
-class WorkerUpdatePayload(TypedDict):
+class WorkerUpdatePayload(TypedDict, total=False):
     """Payload for ``EventType.WORKER_UPDATE``."""
 
     issue: int
     worker: int
     status: str
     role: str
+    repo: str
 
 
-class PlannerUpdatePayload(TypedDict):
+class PlannerUpdatePayload(TypedDict, total=False):
     """Payload for ``EventType.PLANNER_UPDATE``."""
 
     issue: int
     worker: int
     status: str
     role: str
+    repo: str
 
 
-class TriageUpdatePayload(TypedDict):
+class TriageUpdatePayload(TypedDict, total=False):
     """Payload for ``EventType.TRIAGE_UPDATE``."""
 
     issue: int
     worker: int
     status: str
     role: str
+    repo: str
 
 
 class ReviewUpdatePayload(TypedDict, total=False):
@@ -1022,9 +1025,10 @@ class ReviewUpdatePayload(TypedDict, total=False):
     role: str
     verdict: str
     duration: float
+    repo: str
 
 
-class PRCreatedPayload(TypedDict):
+class PRCreatedPayload(TypedDict, total=False):
     """Payload for ``EventType.PR_CREATED``."""
 
     pr: int
@@ -1032,13 +1036,15 @@ class PRCreatedPayload(TypedDict):
     branch: str
     draft: bool
     url: str
+    repo: str
 
 
-class MergeUpdatePayload(TypedDict):
+class MergeUpdatePayload(TypedDict, total=False):
     """Payload for ``EventType.MERGE_UPDATE``."""
 
     pr: int
     status: str
+    repo: str
 
 
 class CICheckPayload(TypedDict, total=False):
@@ -1053,6 +1059,7 @@ class CICheckPayload(TypedDict, total=False):
     worker: int
     attempt: int
     verdict: str
+    repo: str
 
 
 class HITLEscalationPayload(TypedDict, total=False):
@@ -1065,6 +1072,7 @@ class HITLEscalationPayload(TypedDict, total=False):
     pr: int
     status: str
     role: str
+    repo: str
 
 
 class IssueCreatedPayload(TypedDict):
@@ -1084,13 +1092,15 @@ class HITLUpdatePayload(TypedDict, total=False):
     worker: int
     duration: float
     reason: str
+    repo: str
 
 
-class ErrorPayload(TypedDict):
+class ErrorPayload(TypedDict, total=False):
     """Payload for ``EventType.ERROR``."""
 
     message: str
     source: str
+    repo: str
 
 
 class BackgroundWorkerStatusPayload(TypedDict):

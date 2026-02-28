@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 import random
+import re
 import shutil
 import stat
 from pathlib import Path
@@ -76,6 +77,37 @@ class WorktreeManager:
             lock = asyncio.Lock()
             _WORKTREE_LOCKS[key] = lock
         return lock
+
+    _ORIGIN_HTTPS_RE = re.compile(r"github\.com[/:]([^/]+/[^/.]+?)(?:\.git)?$")
+    _ORIGIN_SSH_RE = re.compile(r"git@github\.com:([^/]+/[^/.]+?)(?:\.git)?$")
+
+    async def _assert_origin_matches_repo(self) -> None:
+        """Raise ``RuntimeError`` if origin remote doesn't match the configured repo."""
+        expected = self._config.repo
+        if not expected:
+            return
+        try:
+            output = await run_subprocess(
+                "git",
+                "remote",
+                "get-url",
+                "origin",
+                cwd=self._repo_root,
+                gh_token=self._config.gh_token,
+            )
+            url = output.strip()
+            match = self._ORIGIN_HTTPS_RE.search(url) or self._ORIGIN_SSH_RE.search(url)
+            if match:
+                actual = match.group(1)
+                if actual.lower() != expected.lower():
+                    msg = f"Origin remote {url!r} resolves to {actual!r}, expected {expected!r}"
+                    raise RuntimeError(msg)
+            else:
+                logger.warning("Could not parse origin URL %r for repo validation", url)
+        except RuntimeError:
+            raise
+        except Exception:
+            logger.warning("Could not validate origin remote", exc_info=True)
 
     def _is_main_ref_lock_error(self, message: str) -> bool:
         """Return True when *message* matches git remote-ref lock races."""
@@ -168,6 +200,9 @@ class WorktreeManager:
         if self._config.dry_run:
             logger.info("[dry-run] Would create worktree at %s", wt_path)
             return wt_path
+
+        # Validate origin remote matches configured repo before any mutations
+        await self._assert_origin_matches_repo()
 
         # Ensure repo-scoped base directory exists
         wt_path.parent.mkdir(parents=True, exist_ok=True)
