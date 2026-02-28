@@ -442,7 +442,11 @@ def event_bus():
 
 @pytest.fixture(autouse=True)
 def reset_event_bus(event_bus):
-    """Ensure each test sees a clean EventBus history/subscribers list."""
+    """Ensure each test sees a clean EventBus history/subscribers list.
+
+    Note: this only resets the shared module-scoped ``event_bus`` fixture.
+    Tests that construct their own local EventBus instances are unaffected.
+    """
     event_bus.clear()
     yield
 

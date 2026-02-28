@@ -507,9 +507,8 @@ def make_implement_phase(
     """
     from implement_phase import ImplementPhase
     from issue_store import IssueStore
-    from models import GitHubIssue, WorkerResult
+    from models import GitHubIssue, PRInfo, WorkerResult
     from state import StateTracker
-    from tests.conftest import PRInfoFactory, WorkerResultFactory
 
     state = StateTracker(config.state_file)
     stop_event = asyncio.Event()
@@ -523,9 +522,12 @@ def make_implement_phase(
             worker_id: int = 0,
             review_feedback: str = "",
         ) -> WorkerResult:
-            return WorkerResultFactory.create(
+            return WorkerResult(
                 issue_number=issue.number,
+                branch=branch,
                 success=success,
+                transcript="Implemented the feature.",
+                commits=1,
                 worktree_path=str(wt_path),
             )
 
@@ -551,7 +553,13 @@ def make_implement_phase(
     mock_prs.create_pr = AsyncMock(
         return_value=create_pr_return
         if create_pr_return is not None
-        else PRInfoFactory.create()
+        else PRInfo(
+            number=101,
+            issue_number=42,
+            branch="agent/issue-42",
+            url="https://github.com/test-org/test-repo/pull/101",
+            draft=False,
+        )
     )
     mock_prs.add_labels = AsyncMock()
     mock_prs.remove_label = AsyncMock()
@@ -588,8 +596,7 @@ def make_hitl_phase(config):
     state = StateTracker(config.state_file)
     bus = EventBus()
     fetcher_mock = AsyncMock()
-    fetcher_store = AsyncMock()
-    store = IssueStore(config, fetcher_store, bus)
+    store = IssueStore(config, AsyncMock(), bus)
     worktrees = AsyncMock()
     worktrees.create = AsyncMock(return_value=config.worktree_base / "issue-42")
     worktrees.destroy = AsyncMock()
