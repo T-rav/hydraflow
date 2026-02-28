@@ -95,6 +95,15 @@ class TestEventPayloadTypes:
         }
         assert with_request_changes["verdict"] == "request-changes"
 
+        # Verdict supplied — comment (default when _parse_verdict finds no pattern)
+        with_comment: CICheckPayload = {
+            "pr": 5,
+            "issue": 42,
+            "status": "fix_done",
+            "verdict": "comment",
+        }
+        assert with_comment["verdict"] == "comment"
+
     def test_hitl_escalation_with_ci_fix_attempts(self) -> None:
         from models import HITLEscalationPayload
 
