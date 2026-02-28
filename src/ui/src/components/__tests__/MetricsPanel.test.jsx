@@ -271,6 +271,9 @@ describe('MetricsPanel', () => {
 
     render(<MetricsPanel />)
 
+    const sectionWrapper = screen.getByTestId('metrics-sections')
+    expect(sectionWrapper.className).toContain('metrics-sections')
+
     const lifetimeGrid = screen.getByTestId('metrics-grid-lifetime')
     const ratesGrid = screen.getByTestId('metrics-grid-rates')
     const sessionGrid = screen.getByTestId('metrics-grid-session')
@@ -282,5 +285,9 @@ describe('MetricsPanel', () => {
     expect(sessionGrid.className).toContain('metrics-grid')
     expect(inferenceGrid.className).toContain('metrics-grid')
     expect(mergeTimeGrid.className).toContain('metrics-grid')
+
+    const sectionCards = sectionWrapper.getElementsByClassName('metrics-section-card')
+    expect(sectionCards.length).toBeGreaterThanOrEqual(5)
+    expect(sectionWrapper.querySelector('.metrics-section-card--full')).not.toBeNull()
   })
 })
