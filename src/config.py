@@ -943,13 +943,18 @@ class HydraFlowConfig(BaseModel):
                 return str(path.relative_to(base))
         return str(path)
 
+    @property
+    def repo_slug(self) -> str:
+        """Normalized repo identifier for path namespacing (e.g. ``org-repo``)."""
+        return self.repo.replace("/", "-") if self.repo else self.repo_root.name
+
     def branch_for_issue(self, issue_number: int) -> str:
         """Return the canonical branch name for a given issue number."""
         return f"agent/issue-{issue_number}"
 
     def worktree_path_for_issue(self, issue_number: int) -> Path:
-        """Return the worktree directory path for a given issue number."""
-        return self.worktree_base / f"issue-{issue_number}"
+        """Return the repo-scoped worktree directory path for a given issue number."""
+        return self.worktree_base / self.repo_slug / f"issue-{issue_number}"
 
     @model_validator(mode="after")
     def resolve_defaults(self) -> HydraFlowConfig:
