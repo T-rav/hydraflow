@@ -40,6 +40,7 @@ _EVENT_STRING_CASES: list[tuple[EventType, str]] = [
     (EventType.TRANSCRIPT_SUMMARY, "transcript_summary"),
     (EventType.SESSION_START, "session_start"),
     (EventType.SESSION_END, "session_end"),
+    (EventType.PIPELINE_STATS, "pipeline_stats"),
 ]
 
 
@@ -69,6 +70,7 @@ class TestEventTypeEnum:
             "TRANSCRIPT_SUMMARY",
             "SESSION_START",
             "SESSION_END",
+            "PIPELINE_STATS",
         }
         actual = {member.name for member in EventType}
         assert expected == actual

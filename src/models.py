@@ -553,6 +553,37 @@ class QueueStats(BaseModel):
     in_flight_count: int = 0
 
 
+class StageStats(BaseModel):
+    """Per-stage snapshot of queue depth, active count, and completions."""
+
+    queued: int = 0
+    active: int = 0
+    completed_session: int = 0
+    completed_lifetime: int = 0
+    worker_count: int = 0
+    worker_cap: int | None = None
+
+
+class ThroughputStats(BaseModel):
+    """Issues processed per hour, computed per stage."""
+
+    triage: float = 0.0
+    plan: float = 0.0
+    implement: float = 0.0
+    review: float = 0.0
+    hitl: float = 0.0
+
+
+class PipelineStats(BaseModel):
+    """Unified real-time pipeline state emitted periodically by the orchestrator."""
+
+    timestamp: str
+    stages: dict[str, StageStats] = Field(default_factory=dict)
+    queue: QueueStats = Field(default_factory=QueueStats)
+    throughput: ThroughputStats = Field(default_factory=ThroughputStats)
+    uptime_seconds: float = 0.0
+
+
 class IssueOutcomeType(StrEnum):
     """How an issue was ultimately resolved."""
 

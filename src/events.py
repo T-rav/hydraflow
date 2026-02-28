@@ -76,6 +76,7 @@ class EventType(StrEnum):
     TRANSCRIPT_SUMMARY = "transcript_summary"
     SESSION_START = "session_start"
     SESSION_END = "session_end"
+    PIPELINE_STATS = "pipeline_stats"
 
 
 class HydraFlowEvent(BaseModel):

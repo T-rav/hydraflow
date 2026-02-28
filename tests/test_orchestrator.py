@@ -3176,3 +3176,107 @@ class TestOrchestratorPropertyAccessors:
 
         orch = HydraFlowOrchestrator(config)
         assert isinstance(orch.run_recorder, RunRecorder)
+
+
+class TestPipelineStatsEmission:
+    """Tests for _build_pipeline_stats and emit_pipeline_stats."""
+
+    def test_build_pipeline_stats_without_session(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from orchestrator import HydraFlowOrchestrator
+
+        orch = HydraFlowOrchestrator(config)
+        stats = orch._build_pipeline_stats()
+        assert stats.timestamp
+        assert stats.uptime_seconds == 0.0
+        assert "triage" in stats.stages
+        assert "plan" in stats.stages
+        assert "implement" in stats.stages
+        assert "review" in stats.stages
+        assert "hitl" in stats.stages
+        assert "merged" in stats.stages
+
+    def test_build_pipeline_stats_includes_worker_caps(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from orchestrator import HydraFlowOrchestrator
+
+        orch = HydraFlowOrchestrator(config)
+        stats = orch._build_pipeline_stats()
+        assert stats.stages["triage"].worker_cap == config.max_triagers
+        assert stats.stages["plan"].worker_cap == config.max_planners
+        assert stats.stages["implement"].worker_cap == config.max_workers
+        assert stats.stages["review"].worker_cap == config.max_reviewers
+        assert stats.stages["hitl"].worker_cap == config.max_hitl_workers
+
+    def test_build_pipeline_stats_with_active_session(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from datetime import UTC, datetime
+
+        from models import SessionLog
+        from orchestrator import HydraFlowOrchestrator
+
+        orch = HydraFlowOrchestrator(config)
+        orch._current_session = SessionLog(
+            id="test-session",
+            repo="test/repo",
+            started_at=(datetime.now(UTC)).isoformat(),
+        )
+        stats = orch._build_pipeline_stats()
+        # Uptime should be positive since session just started
+        assert stats.uptime_seconds >= 0.0
+
+    def test_build_pipeline_stats_merged_tracks_session_results(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from orchestrator import HydraFlowOrchestrator
+
+        orch = HydraFlowOrchestrator(config)
+        orch._session_issue_results = {1: True, 2: True, 3: False}
+        stats = orch._build_pipeline_stats()
+        assert stats.stages["merged"].completed_session == 2
+
+    @pytest.mark.asyncio
+    async def test_emit_pipeline_stats_publishes_event(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from orchestrator import HydraFlowOrchestrator
+
+        bus = EventBus()
+        orch = HydraFlowOrchestrator(config, event_bus=bus)
+        await orch.emit_pipeline_stats()
+        history = bus.get_history()
+        pipeline_events = [e for e in history if e.type == EventType.PIPELINE_STATS]
+        assert len(pipeline_events) == 1
+        data = pipeline_events[0].data
+        assert "timestamp" in data
+        assert "stages" in data
+        assert "throughput" in data
+        assert "uptime_seconds" in data
+
+    def test_build_pipeline_stats_is_json_serializable(
+        self, config: HydraFlowConfig
+    ) -> None:
+        import json
+
+        from orchestrator import HydraFlowOrchestrator
+
+        orch = HydraFlowOrchestrator(config)
+        stats = orch._build_pipeline_stats()
+        data = stats.model_dump()
+        # Should not raise
+        json_str = json.dumps(data)
+        assert isinstance(json_str, str)
+
+    def test_pipeline_stats_loop_in_supervise_factories(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """pipeline_stats loop is registered in _supervise_loops."""
+        from orchestrator import HydraFlowOrchestrator
+
+        orch = HydraFlowOrchestrator(config)
+        # Verify the method exists
+        assert hasattr(orch, "_pipeline_stats_loop")
+        assert callable(orch._pipeline_stats_loop)

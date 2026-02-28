@@ -15,8 +15,11 @@ from models import (
     BackgroundWorkerState,
     GitHubIssue,
     Phase,
+    PipelineStats,
     SessionLog,
     SessionStatus,
+    StageStats,
+    ThroughputStats,
     WorkFn,
 )
 from phase_utils import (
@@ -372,6 +375,116 @@ class HydraFlowOrchestrator:
             )
         )
 
+    def _build_pipeline_stats(self) -> PipelineStats:
+        """Build a unified snapshot of the pipeline state."""
+        queue_stats = self._store.get_queue_stats()
+        lifetime = self._state.get_lifetime_stats()
+
+        # Compute uptime from session start
+        uptime = 0.0
+        if self._current_session and self._current_session.started_at:
+            try:
+                started = datetime.fromisoformat(self._current_session.started_at)
+                uptime = (datetime.now(UTC) - started).total_seconds()
+            except (ValueError, TypeError):
+                pass
+
+        # Map stage keys to config worker caps
+        stage_caps: dict[str, int] = {
+            "triage": self._config.max_triagers,
+            "plan": self._config.max_planners,
+            "implement": self._config.max_workers,
+            "review": self._config.max_reviewers,
+            "hitl": self._config.max_hitl_workers,
+        }
+
+        # Map stage keys to runner pools for active worker counts
+        stage_runners: dict[str, int] = {
+            "triage": len(self._triage._active_procs),
+            "plan": len(self._planners._active_procs),
+            "implement": len(self._agents._active_procs),
+            "review": len(self._reviewers._active_procs),
+            "hitl": len(self._hitl_runner._active_procs),
+        }
+
+        # Map IssueStore stage names to our stage keys
+        store_stage_map: dict[str, str] = {
+            "find": "triage",
+            "plan": "plan",
+            "ready": "implement",
+            "review": "review",
+            "hitl": "hitl",
+        }
+
+        # Session completions from _session_issue_results
+        session_succeeded = sum(1 for s in self._session_issue_results.values() if s)
+
+        stages: dict[str, StageStats] = {}
+        for stage_key in ("triage", "plan", "implement", "review", "hitl"):
+            # Find the IssueStore stage name for queue/active lookups
+            store_key = next(
+                (k for k, v in store_stage_map.items() if v == stage_key), stage_key
+            )
+            queued = queue_stats.queue_depth.get(store_key, 0)
+            active = queue_stats.active_count.get(store_key, 0)
+            session_processed = queue_stats.total_processed.get(store_key, 0)
+            completed_lt = queue_stats.total_processed.get(store_key, 0)
+
+            stages[stage_key] = StageStats(
+                queued=queued,
+                active=active,
+                completed_session=session_processed,
+                completed_lifetime=completed_lt,
+                worker_count=stage_runners.get(stage_key, 0),
+                worker_cap=stage_caps.get(stage_key),
+            )
+
+        # Add a merged pseudo-stage from lifetime stats
+        stages["merged"] = StageStats(
+            completed_session=session_succeeded,
+            completed_lifetime=lifetime.prs_merged,
+        )
+
+        # Compute throughput (issues/hour) from session processed / uptime
+        hours = uptime / 3600.0 if uptime > 0 else 0.0
+        throughput = ThroughputStats()
+        if hours > 0:
+            for stage_key in ("triage", "plan", "implement", "review", "hitl"):
+                store_key = next(
+                    (k for k, v in store_stage_map.items() if v == stage_key),
+                    stage_key,
+                )
+                processed = queue_stats.total_processed.get(store_key, 0)
+                setattr(throughput, stage_key, round(processed / hours, 2))
+
+        return PipelineStats(
+            timestamp=datetime.now(UTC).isoformat(),
+            stages=stages,
+            queue=queue_stats,
+            throughput=throughput,
+            uptime_seconds=round(uptime, 1),
+        )
+
+    async def emit_pipeline_stats(self) -> None:
+        """Build and publish a PIPELINE_STATS event."""
+        stats = self._build_pipeline_stats()
+        await self._bus.publish(
+            HydraFlowEvent(
+                type=EventType.PIPELINE_STATS,
+                data=stats.model_dump(),
+            )
+        )
+
+    async def _pipeline_stats_loop(self) -> None:
+        """Emit pipeline stats every ~10 seconds."""
+        interval = self.get_bg_worker_interval("pipeline_poller")
+        while not self._stop_event.is_set():
+            try:
+                await self.emit_pipeline_stats()
+            except Exception:
+                logger.exception("Pipeline stats emission failed")
+            await self._sleep_or_stop(interval)
+
     def _restore_worker_intervals(self) -> None:
         """Restore saved background-worker poll-interval overrides from state."""
         saved_intervals = self._state.get_worker_intervals()
@@ -665,6 +778,7 @@ class HydraFlowOrchestrator:
             ("pr_unsticker", self._pr_unsticker_loop.run),
             ("manifest_refresh", self._manifest_refresh_bg_loop),
             ("report_issue", self._report_issue_loop.run),
+            ("pipeline_stats", self._pipeline_stats_loop),
         ]
         tasks: dict[str, asyncio.Task[None]] = {}
         for name, factory in loop_factories:
