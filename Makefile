@@ -199,6 +199,16 @@ smoke: deps
 	fi
 	@echo "$(GREEN)Smoke tests passed$(RESET)"
 
+integration: deps
+	@echo "$(BLUE)Running multi-repo integration tests...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ -m integration -v
+	@echo "$(GREEN)Integration tests passed$(RESET)"
+
+soak: deps
+	@echo "$(BLUE)Running soak/load tests (this may take a while)...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ -m soak -v --timeout=7200
+	@echo "$(GREEN)Soak tests passed$(RESET)"
+
 test-fast: deps
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ -x --tb=short
 
