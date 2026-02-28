@@ -905,6 +905,10 @@ class TestPlanPhaseEvidenceValidation:
         assert prs.post_comment.await_count >= 1
         rejection_comment = prs.post_comment.call_args_list[0].args[1]
         assert "Evidence Rejected" in rejection_comment
+        # Result should be marked for HITL escalation
+        assert plan_result.retry_attempted is True
+        assert plan_result.success is False
+        assert len(plan_result.validation_errors) > 0
 
     @pytest.mark.asyncio
     async def test_valid_evidence_records_outcome(

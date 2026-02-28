@@ -2292,6 +2292,32 @@ class TestIssueOutcomeTracking:
         assert outcome.outcome == IssueOutcomeType.MERGED
         assert outcome.pr_number == 5
 
+    def test_overwrite_outcome_corrects_counters(self, tmp_path: Path) -> None:
+        """Recording a second outcome for the same issue should decrement the
+        old counter and increment the new one, keeping stats consistent."""
+        from models import IssueOutcomeType
+
+        tracker = make_tracker(tmp_path)
+        tracker.record_outcome(
+            42, IssueOutcomeType.ALREADY_SATISFIED, "thought done", phase="plan"
+        )
+        stats = tracker.get_lifetime_stats()
+        assert stats.total_outcomes_already_satisfied == 1
+        assert stats.total_outcomes_merged == 0
+
+        # Overwrite with a different outcome
+        tracker.record_outcome(
+            42, IssueOutcomeType.MERGED, "actually merged", pr_number=7, phase="review"
+        )
+        stats = tracker.get_lifetime_stats()
+        assert stats.total_outcomes_already_satisfied == 0
+        assert stats.total_outcomes_merged == 1
+
+        # Only latest outcome stored
+        outcome = tracker.get_outcome(42)
+        assert outcome is not None
+        assert outcome.outcome == IssueOutcomeType.MERGED
+
 
 # ---------------------------------------------------------------------------
 # Hook Failure Tracking

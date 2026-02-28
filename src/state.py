@@ -324,14 +324,12 @@ class StateTracker:
         pr_number: int | None = None,
         phase: str = "",
     ) -> None:
-        """Store an :class:`IssueOutcome` and increment the matching lifetime counter."""
-        self._data.issue_outcomes[str(issue_number)] = IssueOutcome(
-            outcome=outcome,
-            reason=reason,
-            closed_at=datetime.now(UTC).isoformat(),
-            pr_number=pr_number,
-            phase=phase,
-        )
+        """Store an :class:`IssueOutcome` and increment the matching lifetime counter.
+
+        If an outcome was already recorded for this issue, the previous
+        counter is decremented before the new one is incremented so that
+        aggregate stats stay consistent.
+        """
         counter_map = {
             IssueOutcomeType.MERGED: "total_outcomes_merged",
             IssueOutcomeType.ALREADY_SATISFIED: "total_outcomes_already_satisfied",
@@ -339,6 +337,22 @@ class StateTracker:
             IssueOutcomeType.HITL_SKIPPED: "total_outcomes_hitl_skipped",
             IssueOutcomeType.FAILED: "total_outcomes_failed",
         }
+
+        key = str(issue_number)
+        previous = self._data.issue_outcomes.get(key)
+        if previous is not None:
+            old_attr = counter_map.get(previous.outcome)
+            if old_attr:
+                cur = getattr(self._data.lifetime_stats, old_attr)
+                setattr(self._data.lifetime_stats, old_attr, max(cur - 1, 0))
+
+        self._data.issue_outcomes[key] = IssueOutcome(
+            outcome=outcome,
+            reason=reason,
+            closed_at=datetime.now(UTC).isoformat(),
+            pr_number=pr_number,
+            phase=phase,
+        )
         attr = counter_map.get(outcome)
         if attr:
             setattr(

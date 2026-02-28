@@ -93,6 +93,7 @@ class TestCreateRouter:
             "/api/hitl/{issue_number}/correct",
             "/api/hitl/{issue_number}/skip",
             "/api/hitl/{issue_number}/close",
+            "/api/issues/outcomes",
             "/api/timeline",
             "/api/timeline/issue/{issue_num}",
             "/api/intent",
@@ -2503,6 +2504,118 @@ class TestHITLSkipImproveTransition:
         assert outcome.outcome.value == "hitl_skipped"
         assert outcome.reason == "Not actionable"
 
+    @pytest.mark.asyncio
+    async def test_hitl_skip_rejects_empty_reason(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        """Skip with empty reason should raise a Pydantic validation error."""
+        from pydantic import ValidationError
+
+        from models import HITLSkipRequest
+
+        with pytest.raises(ValidationError):
+            HITLSkipRequest(reason="")
+
+    @pytest.mark.asyncio
+    async def test_hitl_skip_posts_reason_as_comment(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        """Skip should post the reason as a GitHub comment."""
+        from models import HITLSkipRequest
+
+        mock_orch = MagicMock()
+        mock_orch.skip_hitl_issue = MagicMock()
+        router, pr_mgr = self._make_router(
+            config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
+        )
+        pr_mgr.post_comment = AsyncMock()
+
+        skip = self._find_endpoint(router, "/api/hitl/{issue_number}/skip")
+        await skip(42, HITLSkipRequest(reason="Not actionable"))
+
+        pr_mgr.post_comment.assert_awaited()
+        comment = pr_mgr.post_comment.call_args.args[1]
+        assert "Not actionable" in comment
+
+
+# ---------------------------------------------------------------------------
+# GET /api/issues/outcomes endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestOutcomesEndpoint:
+    """Tests for GET /api/issues/outcomes."""
+
+    def _make_router(self, config, event_bus, state, tmp_path):
+        from dashboard_routes import create_router
+        from pr_manager import PRManager
+
+        pr_mgr = PRManager(config, event_bus)
+        return create_router(
+            config=config,
+            event_bus=event_bus,
+            state=state,
+            pr_manager=pr_mgr,
+            get_orchestrator=lambda: None,
+            set_orchestrator=lambda o: None,
+            set_run_task=lambda t: None,
+            ui_dist_dir=tmp_path / "no-dist",
+            template_dir=tmp_path / "no-templates",
+        )
+
+    def _find_endpoint(self, router, path):
+        for route in router.routes:
+            if (
+                hasattr(route, "path")
+                and route.path == path
+                and hasattr(route, "endpoint")
+            ):
+                return route.endpoint
+        return None
+
+    @pytest.mark.asyncio
+    async def test_outcomes_returns_empty_dict_by_default(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        router = self._make_router(config, event_bus, state, tmp_path)
+        endpoint = self._find_endpoint(router, "/api/issues/outcomes")
+        assert endpoint is not None
+        response = await endpoint()
+        assert response.status_code == 200
+        import json
+
+        data = json.loads(response.body)
+        assert data == {}
+
+    @pytest.mark.asyncio
+    async def test_outcomes_returns_recorded_outcomes(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        from models import IssueOutcomeType
+
+        state.record_outcome(
+            42,
+            IssueOutcomeType.MERGED,
+            reason="PR merged",
+            phase="review",
+            pr_number=99,
+        )
+        state.record_outcome(
+            43, IssueOutcomeType.HITL_CLOSED, reason="Duplicate", phase="hitl"
+        )
+
+        router = self._make_router(config, event_bus, state, tmp_path)
+        endpoint = self._find_endpoint(router, "/api/issues/outcomes")
+        response = await endpoint()
+        import json
+
+        data = json.loads(response.body)
+        assert "42" in data
+        assert data["42"]["outcome"] == "merged"
+        assert data["42"]["pr_number"] == 99
+        assert "43" in data
+        assert data["43"]["outcome"] == "hitl_closed"
+
 
 # ---------------------------------------------------------------------------
 # POST /api/request-changes endpoint
@@ -4115,6 +4228,18 @@ class TestHITLCloseEndpoint:
         assert outcome is not None
         assert outcome.outcome.value == "hitl_closed"
         assert outcome.reason == "Duplicate of #123"
+
+    @pytest.mark.asyncio
+    async def test_hitl_close_rejects_empty_reason(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        """Close with empty reason should raise a Pydantic validation error."""
+        from pydantic import ValidationError
+
+        from models import HITLCloseRequest
+
+        with pytest.raises(ValidationError):
+            HITLCloseRequest(reason="")
 
 
 # ---------------------------------------------------------------------------
