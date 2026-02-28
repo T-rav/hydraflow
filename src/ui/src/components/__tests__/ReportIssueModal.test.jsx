@@ -26,28 +26,42 @@ describe('ReportIssueModal', () => {
     expect(screen.getByTestId('report-modal-card')).toBeInTheDocument()
   })
 
-  it('hides color picker and canvas when no screenshot provided', () => {
+  it('hides thumbnail when no screenshot provided', () => {
     render(<ReportIssueModal {...defaultProps} screenshotDataUrl={null} />)
+    expect(screen.queryByTestId('screenshot-thumbnail')).toBeNull()
     expect(screen.queryByTestId('color-picker')).toBeNull()
-    expect(screen.queryByTestId('report-canvas')).toBeNull()
   })
 
-  it('shows canvas and color picker when screenshot provided', () => {
+  it('shows screenshot thumbnail when screenshot provided', () => {
     render(<ReportIssueModal {...defaultProps} screenshotDataUrl={fakeScreenshot} />)
+    expect(screen.getByTestId('screenshot-thumbnail')).toBeInTheDocument()
+    expect(screen.getByText('Click to annotate')).toBeInTheDocument()
+  })
+
+  it('clicking thumbnail expands to canvas with color picker', () => {
+    render(<ReportIssueModal {...defaultProps} screenshotDataUrl={fakeScreenshot} />)
+    fireEvent.click(screen.getByTestId('screenshot-thumbnail'))
     expect(screen.getByTestId('report-canvas')).toBeInTheDocument()
     expect(screen.getByTestId('color-picker')).toBeInTheDocument()
+    expect(screen.getByText('Draw to annotate')).toBeInTheDocument()
+    expect(screen.queryByTestId('screenshot-thumbnail')).toBeNull()
   })
 
-  it('renders 6 color swatches when screenshot provided', () => {
+  it('renders 6 color swatches when expanded', () => {
     render(<ReportIssueModal {...defaultProps} screenshotDataUrl={fakeScreenshot} />)
+    fireEvent.click(screen.getByTestId('screenshot-thumbnail'))
     ANNOTATION_COLORS.forEach((c) => {
       expect(screen.getByTestId(`color-swatch-${c.key}`)).toBeInTheDocument()
     })
   })
 
-  it('shows annotation instruction label when screenshot provided', () => {
+  it('collapse button returns to thumbnail view', () => {
     render(<ReportIssueModal {...defaultProps} screenshotDataUrl={fakeScreenshot} />)
-    expect(screen.getByText('Draw on screenshot to annotate')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('screenshot-thumbnail'))
+    expect(screen.getByTestId('report-canvas')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('collapse-canvas'))
+    expect(screen.getByTestId('screenshot-thumbnail')).toBeInTheDocument()
+    expect(screen.queryByTestId('report-canvas')).toBeNull()
   })
 
   it('submit button is disabled with empty description', () => {
