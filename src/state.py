@@ -15,6 +15,9 @@ from models import (
     BackgroundWorkerState,
     HITLSummaryCacheEntry,
     HITLSummaryFailureEntry,
+    HookFailureRecord,
+    IssueOutcome,
+    IssueOutcomeType,
     LifetimeStats,
     PendingReport,
     PersistedWorkerHeartbeat,
@@ -358,6 +361,97 @@ class StateTracker:
     def get_worker_result_meta(self, issue_number: int) -> WorkerResultMeta:
         """Return worker result metadata for *issue_number*, or empty dict."""
         return self._data.worker_result_meta.get(str(issue_number), {})
+
+    # --- issue outcome tracking ---
+
+    def record_outcome(
+        self,
+        issue_number: int,
+        outcome: IssueOutcomeType,
+        reason: str,
+        pr_number: int | None = None,
+        phase: str = "",
+    ) -> None:
+        """Store an :class:`IssueOutcome` and increment the matching lifetime counter.
+
+        If an outcome was already recorded for this issue, the previous
+        counter is decremented before the new one is incremented so that
+        aggregate stats stay consistent.
+        """
+        counter_map = {
+            IssueOutcomeType.MERGED: "total_outcomes_merged",
+            IssueOutcomeType.ALREADY_SATISFIED: "total_outcomes_already_satisfied",
+            IssueOutcomeType.HITL_CLOSED: "total_outcomes_hitl_closed",
+            IssueOutcomeType.HITL_SKIPPED: "total_outcomes_hitl_skipped",
+            IssueOutcomeType.FAILED: "total_outcomes_failed",
+            IssueOutcomeType.MANUAL_CLOSE: "total_outcomes_manual_close",
+        }
+
+        key = str(issue_number)
+        previous = self._data.issue_outcomes.get(key)
+        if previous is not None:
+            old_attr = counter_map.get(previous.outcome)
+            if old_attr:
+                cur = getattr(self._data.lifetime_stats, old_attr)
+                setattr(self._data.lifetime_stats, old_attr, max(cur - 1, 0))
+
+        self._data.issue_outcomes[key] = IssueOutcome(
+            outcome=outcome,
+            reason=reason,
+            closed_at=datetime.now(UTC).isoformat(),
+            pr_number=pr_number,
+            phase=phase,
+        )
+        attr = counter_map.get(outcome)
+        if attr:
+            setattr(
+                self._data.lifetime_stats,
+                attr,
+                getattr(self._data.lifetime_stats, attr) + 1,
+            )
+        self.save()
+
+    def get_outcome(self, issue_number: int) -> IssueOutcome | None:
+        """Return the recorded outcome for *issue_number*, or ``None``."""
+        return self._data.issue_outcomes.get(str(issue_number))
+
+    def get_all_outcomes(self) -> dict[str, IssueOutcome]:
+        """Return all recorded issue outcomes (deep copy)."""
+        return {
+            k: v.model_copy(deep=True) for k, v in self._data.issue_outcomes.items()
+        }
+
+    # --- hook failure tracking ---
+
+    _MAX_HOOK_FAILURES = 500
+
+    def record_hook_failure(
+        self, issue_number: int, hook_name: str, error: str
+    ) -> None:
+        """Append a :class:`HookFailureRecord` for *issue_number*."""
+        key = str(issue_number)
+        if key not in self._data.hook_failures:
+            self._data.hook_failures[key] = []
+        self._data.hook_failures[key].append(
+            HookFailureRecord(
+                hook_name=hook_name,
+                error=error[:500],
+                timestamp=datetime.now(UTC).isoformat(),
+            )
+        )
+        # Cap at _MAX_HOOK_FAILURES per issue, trimming oldest
+        if len(self._data.hook_failures[key]) > self._MAX_HOOK_FAILURES:
+            self._data.hook_failures[key] = self._data.hook_failures[key][
+                -self._MAX_HOOK_FAILURES :
+            ]
+        self.save()
+
+    def get_hook_failures(self, issue_number: int) -> list[HookFailureRecord]:
+        """Return hook failure records for *issue_number* (deep copy)."""
+        return [
+            f.model_copy(deep=True)
+            for f in self._data.hook_failures.get(str(issue_number), [])
+        ]
 
     # --- reset ---
 

@@ -40,14 +40,14 @@ if [ "${event_count}" -eq 0 ]; then
   exit 0
 fi
 
-eval $(jq -s '{
+eval "$(jq -rs '{
   write_count: [.[] | select(.tool == "Write")] | length,
   edit_count: [.[] | select(.tool == "Edit")] | length,
   read_count: [.[] | select(.tool == "Read")] | length,
   bash_count: [.[] | select(.tool == "Bash")] | length,
   task_count: [.[] | select(.tool == "TaskCreate")] | length,
   unique_files: [.[] | select(.file_path != "") | .file_path] | unique | length
-} | to_entries | .[] | "\(.key)=\(.value)"' "${SESSION_EVENTS_FILE}")
+} | to_entries | map("\(.key)=\(.value)") | join("; ")' "${SESSION_EVENTS_FILE}")"
 top_bash_verbs=$(jq -r 'select(.bash_verb != "n/a") | .bash_verb' "${SESSION_EVENTS_FILE}" | sort | uniq -c | sort -nr | head -n 5 || true)
 
 ts_slug=$(date -u +"%Y%m%dT%H%M%SZ")

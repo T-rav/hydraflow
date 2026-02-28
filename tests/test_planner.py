@@ -1918,3 +1918,111 @@ def test_format_sections_list_lite_has_only_three_sections():
     )
     for header in full_only:
         assert header not in result, f"{header} should not be in lite sections list"
+
+
+# ---------------------------------------------------------------------------
+# validate_already_satisfied_evidence
+# ---------------------------------------------------------------------------
+
+
+class TestValidateAlreadySatisfiedEvidence:
+    """Tests for PlannerRunner.validate_already_satisfied_evidence()."""
+
+    def test_valid_evidence_returns_empty_errors(self) -> None:
+        summary = (
+            "Evidence:\n"
+            "- Feature: MyClass at src/models.py:42 implements this\n"
+            "- Tests: test_my_class verifies the behavior\n"
+            "- Criteria: All acceptance criteria are met"
+        )
+        errors = PlannerRunner.validate_already_satisfied_evidence(summary)
+        assert errors == []
+
+    def test_empty_input_returns_error(self) -> None:
+        errors = PlannerRunner.validate_already_satisfied_evidence("")
+        assert len(errors) == 1
+        assert "empty" in errors[0].lower()
+
+    def test_whitespace_only_input_returns_error(self) -> None:
+        errors = PlannerRunner.validate_already_satisfied_evidence("   \n  ")
+        assert len(errors) == 1
+        assert "empty" in errors[0].lower()
+
+    def test_missing_feature_field(self) -> None:
+        summary = "Tests: test_my_class\nCriteria: All criteria met"
+        errors = PlannerRunner.validate_already_satisfied_evidence(summary)
+        assert any("Feature" in e for e in errors)
+
+    def test_missing_tests_field(self) -> None:
+        summary = "Feature: MyClass at src/models.py:42\nCriteria: All criteria met"
+        errors = PlannerRunner.validate_already_satisfied_evidence(summary)
+        assert any("Tests" in e for e in errors)
+
+    def test_missing_criteria_field(self) -> None:
+        summary = "Feature: MyClass at src/models.py:42\nTests: test_my_class"
+        errors = PlannerRunner.validate_already_satisfied_evidence(summary)
+        assert any("Criteria" in e for e in errors)
+
+    def test_feature_without_file_line_ref(self) -> None:
+        summary = (
+            "Feature: MyClass implements this\n"
+            "Tests: test_my_class\n"
+            "Criteria: All criteria met"
+        )
+        errors = PlannerRunner.validate_already_satisfied_evidence(summary)
+        assert any("file:line" in e.lower() for e in errors)
+
+    def test_all_fields_missing(self) -> None:
+        summary = "The feature already exists and is working."
+        errors = PlannerRunner.validate_already_satisfied_evidence(summary)
+        assert len(errors) >= 3  # Feature, Tests, Criteria all missing
+
+    def test_feature_field_with_description_colon_but_no_file_ref_fails(self) -> None:
+        """A Feature field with a colon but no file:line ref should fail."""
+        summary = (
+            "Feature: some description of the feature\n"
+            "Tests: test_my_class\n"
+            "Criteria: All criteria met"
+        )
+        errors = PlannerRunner.validate_already_satisfied_evidence(summary)
+        assert any("file:line" in e.lower() for e in errors)
+
+    def test_feature_field_with_valid_file_line_passes(self) -> None:
+        """A Feature field with a valid file:line reference should pass."""
+        summary = (
+            "Feature: MyClass at src/foo.py:42 handles this\n"
+            "Tests: test_foo verifies it\n"
+            "Criteria: All criteria met"
+        )
+        errors = PlannerRunner.validate_already_satisfied_evidence(summary)
+        assert errors == []
+
+    def test_feature_field_with_url_colon_fails(self) -> None:
+        """A Feature field with a URL (has colon but no file:line) should fail."""
+        summary = (
+            "Feature: see http://example.com for details\n"
+            "Tests: test_example\n"
+            "Criteria: All criteria met"
+        )
+        errors = PlannerRunner.validate_already_satisfied_evidence(summary)
+        assert any("file:line" in e.lower() for e in errors)
+
+    def test_feature_field_with_url_port_fails(self) -> None:
+        """A URL with a port (e.g. :8080) should NOT pass as a file:line ref."""
+        summary = (
+            "Feature: see http://example.com:8080 for details\n"
+            "Tests: test_example\n"
+            "Criteria: All criteria met"
+        )
+        errors = PlannerRunner.validate_already_satisfied_evidence(summary)
+        assert any("file:line" in e.lower() for e in errors)
+
+    def test_multiple_file_refs_all_valid(self) -> None:
+        """Multiple file:line references should all pass."""
+        summary = (
+            "Feature: implemented in src/models.py:10 and src/config.py:20\n"
+            "Tests: test_models and test_config\n"
+            "Criteria: All criteria met"
+        )
+        errors = PlannerRunner.validate_already_satisfied_evidence(summary)
+        assert errors == []
