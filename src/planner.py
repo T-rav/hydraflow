@@ -977,7 +977,7 @@ This closes the issue automatically. Use only when you are certain.
         validation_errors: list[str],
         *,
         scale: PlanScale = "full",
-    ) -> tuple[str, dict[str, int | dict[str, int]]]:
+    ) -> tuple[str, dict[str, object]]:
         """Build a retry prompt that includes the original issue, the failed plan, and validation feedback."""
         error_list = "\n".join(f"- {e}" for e in validation_errors[:12])
         sections_list = self._format_sections_list(scale)
@@ -1026,7 +1026,7 @@ SUMMARY: <brief one-line description of the plan>
             len(raw_body) + len(failed_plan) + sum(len(e) for e in validation_errors)
         )
         after = len(compact_body) + len(compact_failed_plan) + len(error_list)
-        stats: dict[str, int | dict[str, int]] = {
+        stats: dict[str, object] = {
             "context_chars_before": before,
             "context_chars_after": after,
             "pruned_chars_total": max(0, before - after),
