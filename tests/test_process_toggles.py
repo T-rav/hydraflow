@@ -284,3 +284,66 @@ class TestHITLEnrichment:
         cause = None
         # Should not crash or set the flag
         assert not (cause and "epic detected" in cause.lower())
+
+
+# ---------------------------------------------------------------------------
+# Edge-case tests
+# ---------------------------------------------------------------------------
+
+
+class TestProcessToggleEdgeCases:
+    """Edge cases for process toggle routing."""
+
+    @pytest.mark.asyncio
+    async def test_unready_epic_takes_normal_hitl_path(self, tmp_path: Path) -> None:
+        """ready=False + issue_type=epic uses the normal insufficient-detail path."""
+        config = ConfigFactory.create(
+            repo_root=tmp_path / "repo",
+            state_file=tmp_path / "state.json",
+            auto_process_epics=False,
+        )
+        phase, state, triage, prs, store, _stop = _make_phase(config)
+        issue = TaskFactory.create(id=50, title="Epic: vague idea", body="A" * 100)
+
+        triage.evaluate = AsyncMock(
+            return_value=TriageResult(
+                issue_number=50,
+                ready=False,
+                reasons=["Too vague"],
+                issue_type="epic",
+            )
+        )
+        store.get_triageable = lambda _max_count: [issue]
+
+        await phase.triage_issues()
+
+        # Should use the normal escalation (insufficient detail), not the type-review one
+        cause = state.get_hitl_cause(50)
+        assert cause == "Insufficient issue detail for triage"
+        prs.post_comment.assert_called_once()
+        comment = prs.post_comment.call_args.args[1]
+        assert "Needs More Information" in comment
+
+    @pytest.mark.asyncio
+    async def test_dry_run_skips_type_review_routing(self, tmp_path: Path) -> None:
+        """In dry_run mode, type review routing is not evaluated."""
+        config = ConfigFactory.create(
+            repo_root=tmp_path / "repo",
+            state_file=tmp_path / "state.json",
+            auto_process_epics=False,
+            dry_run=True,
+        )
+        phase, _state, triage, prs, store, _stop = _make_phase(config)
+        issue = TaskFactory.create(id=51, title="Epic: something big", body="A" * 100)
+
+        triage.evaluate = AsyncMock(
+            return_value=TriageResult(issue_number=51, ready=True, issue_type="epic")
+        )
+        store.get_triageable = lambda _max_count: [issue]
+
+        await phase.triage_issues()
+
+        # In dry_run, no label transitions or HITL routing happen
+        prs.swap_pipeline_labels.assert_not_called()
+        prs.transition.assert_not_called()
+        prs.post_comment.assert_not_called()

@@ -829,13 +829,20 @@ def create_router(
         if not orch:
             return JSONResponse({"status": "no orchestrator"}, status_code=400)
 
+        # Issue was already triaged as ready — send directly to planning
+        await pr_manager.swap_pipeline_labels(issue_number, config.planner_label[0])
+
+        # Clear HITL state after label swap succeeds
         orch.skip_hitl_issue(issue_number)
         state.remove_hitl_origin(issue_number)
         state.remove_hitl_cause(issue_number)
         state.remove_hitl_summary(issue_number)
-
-        # Issue was already triaged as ready — send directly to planning
-        await pr_manager.swap_pipeline_labels(issue_number, config.planner_label[0])
+        state.record_outcome(
+            issue_number,
+            IssueOutcomeType.HITL_APPROVED,
+            reason="Operator approved issue type for processing",
+            phase="hitl",
+        )
 
         try:
             await pr_manager.post_comment(

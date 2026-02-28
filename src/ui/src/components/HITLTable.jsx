@@ -460,6 +460,6 @@ const styles = {
   skipBtn: { ...btnBase, background: theme.surfaceInset, color: theme.text, border: `1px solid ${theme.border}` },
   closeBtn: { ...btnBase, background: theme.btnRed, color: theme.white },
   approveMemoryBtn: { ...btnBase, background: theme.purple, color: theme.white },
-  approveProcessBtn: { ...btnBase, background: theme.green, color: '#fff' },
+  approveProcessBtn: { ...btnBase, background: theme.btnGreen, color: theme.white },
   memoryCauseBadge: { ...badgeBase, background: theme.purpleSubtle, color: theme.purple },
 }

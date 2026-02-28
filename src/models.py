@@ -572,6 +572,7 @@ class IssueOutcomeType(StrEnum):
     ALREADY_SATISFIED = "already_satisfied"
     HITL_CLOSED = "hitl_closed"
     HITL_SKIPPED = "hitl_skipped"
+    HITL_APPROVED = "hitl_approved"
     FAILED = "failed"
     MANUAL_CLOSE = "manual_close"
 
