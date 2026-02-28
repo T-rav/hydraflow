@@ -2,6 +2,13 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { theme } from '../theme'
 import { ANNOTATION_COLORS } from '../constants'
 
+/** Resolve a CSS variable reference like `var(--yellow)` to its computed value. */
+function resolveColor(cssVar) {
+  if (!cssVar || !cssVar.startsWith('var(')) return cssVar
+  const prop = cssVar.slice(4, -1).trim()
+  return getComputedStyle(document.documentElement).getPropertyValue(prop).trim() || cssVar
+}
+
 const PencilIcon = ({ color, size = 16 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
@@ -71,7 +78,7 @@ export function ReportIssueModal({ isOpen, screenshotDataUrl, onSubmit, onClose 
     ctx.beginPath()
     ctx.moveTo(lastPoint.current.x, lastPoint.current.y)
     ctx.lineTo(point.x, point.y)
-    ctx.strokeStyle = selectedColor
+    ctx.strokeStyle = resolveColor(selectedColor)
     ctx.lineWidth = 3
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
