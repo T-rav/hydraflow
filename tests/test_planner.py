@@ -1976,3 +1976,53 @@ class TestValidateAlreadySatisfiedEvidence:
         summary = "The feature already exists and is working."
         errors = PlannerRunner.validate_already_satisfied_evidence(summary)
         assert len(errors) >= 3  # Feature, Tests, Criteria all missing
+
+    def test_feature_field_with_description_colon_but_no_file_ref_fails(self) -> None:
+        """A Feature field with a colon but no file:line ref should fail."""
+        summary = (
+            "Feature: some description of the feature\n"
+            "Tests: test_my_class\n"
+            "Criteria: All criteria met"
+        )
+        errors = PlannerRunner.validate_already_satisfied_evidence(summary)
+        assert any("file:line" in e.lower() for e in errors)
+
+    def test_feature_field_with_valid_file_line_passes(self) -> None:
+        """A Feature field with a valid file:line reference should pass."""
+        summary = (
+            "Feature: MyClass at src/foo.py:42 handles this\n"
+            "Tests: test_foo verifies it\n"
+            "Criteria: All criteria met"
+        )
+        errors = PlannerRunner.validate_already_satisfied_evidence(summary)
+        assert errors == []
+
+    def test_feature_field_with_url_colon_fails(self) -> None:
+        """A Feature field with a URL (has colon but no file:line) should fail."""
+        summary = (
+            "Feature: see http://example.com for details\n"
+            "Tests: test_example\n"
+            "Criteria: All criteria met"
+        )
+        errors = PlannerRunner.validate_already_satisfied_evidence(summary)
+        assert any("file:line" in e.lower() for e in errors)
+
+    def test_feature_field_with_url_port_fails(self) -> None:
+        """A URL with a port (e.g. :8080) should NOT pass as a file:line ref."""
+        summary = (
+            "Feature: see http://example.com:8080 for details\n"
+            "Tests: test_example\n"
+            "Criteria: All criteria met"
+        )
+        errors = PlannerRunner.validate_already_satisfied_evidence(summary)
+        assert any("file:line" in e.lower() for e in errors)
+
+    def test_multiple_file_refs_all_valid(self) -> None:
+        """Multiple file:line references should all pass."""
+        summary = (
+            "Feature: implemented in src/models.py:10 and src/config.py:20\n"
+            "Tests: test_models and test_config\n"
+            "Criteria: All criteria met"
+        )
+        errors = PlannerRunner.validate_already_satisfied_evidence(summary)
+        assert errors == []

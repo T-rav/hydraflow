@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 
 from analysis import PlanAnalyzer
 from config import HydraFlowConfig
 from events import EventBus
 from harness_insights import FailureCategory, HarnessInsightStore
 from issue_store import IssueStore
-from models import IssueOutcomeType, PipelineStage, PlanResult, Task
+from models import EpicGapReview, IssueOutcomeType, PipelineStage, PlanResult, Task
 from phase_utils import (
     escalate_to_hitl,
     record_harness_failure,
@@ -181,7 +182,7 @@ class PlanPhase:
         hitl_comment = (
             f"## Plan Validation Failed\n\n"
             f"The planner was unable to produce a valid plan "
-            f"after two attempts for issue #{issue.id}.\n\n"
+            f"after planning attempts for issue #{issue.id}.\n\n"
             f"{score_line}"
             f"**Validation errors:**\n{error_list}\n\n"
             f"---\n"
@@ -243,6 +244,320 @@ class PlanPhase:
         log_path = self._config.log_dir / f"plan-issue-{issue_id}.txt"
         return self._config.format_path_for_display(log_path)
 
+    # ------------------------------------------------------------------
+    # Epic group planning helpers
+    # ------------------------------------------------------------------
+
+    def _is_epic_child(self, issue: Task) -> bool:
+        """Return True if *issue* has an epic-child label."""
+        epic_child_labels = {lbl.lower() for lbl in self._config.epic_child_label}
+        return bool(epic_child_labels & {t.lower() for t in issue.tags})
+
+    def _resolve_epic_number(self, issue: Task) -> int | None:
+        """Extract the parent epic number from metadata or body text."""
+        epic_num = issue.metadata.get("epic_number")
+        if epic_num:
+            return int(epic_num)
+        match = re.search(r"[Pp]arent\s+[Ee]pic[:\s#]*(\d+)", issue.body)
+        if match:
+            return int(match.group(1))
+        return None
+
+    def _group_by_epic(
+        self, issues: list[Task]
+    ) -> tuple[dict[int, list[Task]], list[Task]]:
+        """Partition issues into ``{epic_number: [children]}`` and standalone.
+
+        Issues with an epic-child label whose parent cannot be resolved
+        are placed in the standalone list.
+        """
+        epic_groups: dict[int, list[Task]] = {}
+        standalone: list[Task] = []
+        for issue in issues:
+            if not self._is_epic_child(issue):
+                standalone.append(issue)
+                continue
+            epic_num = self._resolve_epic_number(issue)
+            if epic_num is None:
+                standalone.append(issue)
+                continue
+            epic_groups.setdefault(epic_num, []).append(issue)
+        return epic_groups, standalone
+
+    @staticmethod
+    def _parse_gap_review(transcript: str, epic_number: int) -> EpicGapReview:
+        """Parse an ``EpicGapReview`` from a gap-review transcript."""
+        review = EpicGapReview(epic_number=epic_number)
+
+        start_marker = "GAP_REVIEW_START"
+        end_marker = "GAP_REVIEW_END"
+        start_idx = transcript.find(start_marker)
+        end_idx = transcript.find(end_marker)
+        if start_idx == -1:
+            return review
+        body = transcript[
+            start_idx + len(start_marker) : end_idx if end_idx != -1 else None
+        ]
+
+        # Extract findings
+        findings_match = re.search(
+            r"##\s*Findings\s*\n(.*?)(?=\n##|\Z)", body, re.DOTALL
+        )
+        if findings_match:
+            review.findings = findings_match.group(1).strip()
+
+        # Extract re-plan issues
+        replan_match = re.search(
+            r"##\s*Re-plan Required\s*\n(.*?)(?=\n##|\Z)", body, re.DOTALL
+        )
+        if replan_match:
+            replan_text = replan_match.group(1).strip()
+            if replan_text.lower() != "none":
+                review.replan_issues = [
+                    int(m.group(1)) for m in re.finditer(r"#(\d+)", replan_text)
+                ]
+
+        # Extract guidance
+        guidance_match = re.search(
+            r"##\s*Guidance\s*\n(.*?)(?=\n##|\Z)", body, re.DOTALL
+        )
+        if guidance_match:
+            review.guidance = guidance_match.group(1).strip()
+
+        return review
+
+    async def _plan_one(
+        self, idx: int, issue: Task, semaphore: asyncio.Semaphore
+    ) -> PlanResult:
+        """Plan a single issue (shared by standalone and epic flows)."""
+        if self._stop_event.is_set():
+            return PlanResult(issue_number=issue.id, error="stopped")
+
+        async with semaphore:
+            if self._stop_event.is_set():
+                return PlanResult(issue_number=issue.id, error="stopped")
+
+            async with store_lifecycle(self._store, issue.id, "plan"):
+                result = await self._planners.plan(issue, worker_id=idx)
+
+                already_handled = False
+                ts_status = "failed"
+                if result.already_satisfied:
+                    # Guard: never auto-close epic children as "already
+                    # satisfied" — they were explicitly created as part
+                    # of a planned epic and should always get a plan.
+                    if self._is_epic_child(issue):
+                        logger.warning(
+                            "Issue #%d is an epic child — ignoring "
+                            "'already satisfied' claim from planner",
+                            issue.id,
+                        )
+                        result.already_satisfied = False
+                        result.success = False
+                        result.retry_attempted = True
+                        result.error = (
+                            "Planner claimed already satisfied but issue "
+                            "is an epic child — escalating to HITL"
+                        )
+                        await escalate_to_hitl(
+                            self._state,
+                            self._prs,
+                            issue.id,
+                            cause="Epic child falsely claimed already satisfied",
+                            origin_label=self._config.planner_label[0],
+                            hitl_label=self._config.hitl_label[0],
+                        )
+                        self._store.enqueue_transition(issue, "hitl")
+                        record_harness_failure(
+                            self._harness_insights,
+                            issue.id,
+                            FailureCategory.PLAN_VALIDATION,
+                            "Epic child claimed already satisfied",
+                            stage=PipelineStage.PLAN,
+                        )
+                        already_handled = True
+                        ts_status = "escalated"
+                    else:
+                        closed = await self._handle_already_satisfied(issue, result)
+                        if closed:
+                            return result
+                        # Evidence validation failed — escalate directly
+                        # to HITL (do NOT fall through to _handle_plan_failure
+                        # which would post a second misleading comment).
+                        await escalate_to_hitl(
+                            self._state,
+                            self._prs,
+                            issue.id,
+                            cause="Already-satisfied evidence rejected: "
+                            + "; ".join(result.validation_errors),
+                            origin_label=self._config.planner_label[0],
+                            hitl_label=self._config.hitl_label[0],
+                        )
+                        self._store.enqueue_transition(issue, "hitl")
+                        record_harness_failure(
+                            self._harness_insights,
+                            issue.id,
+                            FailureCategory.PLAN_VALIDATION,
+                            "; ".join(result.validation_errors),
+                            stage=PipelineStage.PLAN,
+                        )
+                        already_handled = True
+                        ts_status = "escalated"
+
+                if already_handled:
+                    pass
+                elif result.success and result.plan:
+                    await self._handle_plan_success(issue, result)
+                    ts_status = "success"
+                elif result.retry_attempted:
+                    await self._handle_plan_failure(issue, result)
+                    ts_status = "escalated"
+                else:
+                    logger.warning(
+                        "Planning failed for issue #%d — skipping label swap",
+                        issue.id,
+                    )
+                    ts_status = "failed"
+
+                await self._post_plan_transcript(issue, result, status=ts_status)
+                return result
+
+    def _plan_one_with_context(
+        self,
+        issue: Task,
+        gap_guidance: str,
+        sibling_plans: dict[int, str],
+    ) -> Task:
+        """Return a copy of *issue* with gap feedback appended to comments."""
+        sibling_summary = "\n\n".join(
+            f"### Sibling Issue #{num}\n{plan[:500]}"
+            for num, plan in sibling_plans.items()
+            if num != issue.id
+        )
+        extra_comment = (
+            f"## Epic Gap Review Feedback\n\n"
+            f"{gap_guidance}\n\n"
+            f"## Sibling Plan Summaries\n\n"
+            f"{sibling_summary}"
+        )
+        return issue.model_copy(update={"comments": [*issue.comments, extra_comment]})
+
+    async def _post_gap_review_comment(
+        self, epic_number: int, review: EpicGapReview, iteration: int
+    ) -> None:
+        """Post gap review findings as a comment on the epic issue."""
+        replan_list = (
+            ", ".join(f"#{n}" for n in review.replan_issues)
+            if review.replan_issues
+            else "None"
+        )
+        comment = (
+            f"## Epic Gap Review (Iteration {iteration})\n\n"
+            f"**Findings:**\n{review.findings}\n\n"
+            f"**Re-plan required:** {replan_list}\n\n"
+            f"**Guidance:**\n{review.guidance}\n\n"
+            f"---\n"
+            f"*Generated by HydraFlow Planner*"
+        )
+        await self._transitioner.post_comment(epic_number, comment)
+
+    async def _plan_epic_group(
+        self,
+        epic_number: int,
+        children: list[Task],
+        semaphore: asyncio.Semaphore,
+    ) -> list[PlanResult]:
+        """Plan all children of an epic with gap review and re-planning."""
+        logger.info(
+            "Planning epic #%d group (%d children)",
+            epic_number,
+            len(children),
+        )
+
+        # Phase 1: plan all children concurrently
+        results = await run_concurrent_batch(
+            children,
+            lambda idx, issue: self._plan_one(idx, issue, semaphore),
+            self._stop_event,
+        )
+
+        # Collect successful plans
+        plan_map: dict[int, str] = {}
+        title_map: dict[int, str] = {}
+        issue_map: dict[int, Task] = {c.id: c for c in children}
+        for r in results:
+            if r.success and r.plan:
+                plan_map[r.issue_number] = r.plan
+                issue = issue_map.get(r.issue_number)
+                title_map[r.issue_number] = issue.title if issue else ""
+                r.epic_number = epic_number
+
+        # Skip gap review if fewer than 2 successful plans
+        max_iterations = self._config.epic_gap_review_max_iterations
+        if len(plan_map) < 2 or max_iterations == 0:
+            logger.info(
+                "Epic #%d: skipping gap review (%d plans, max_iter=%d)",
+                epic_number,
+                len(plan_map),
+                max_iterations,
+            )
+            return results
+
+        # Phase 2: gap review loop
+        for iteration in range(1, max_iterations + 1):
+            if self._stop_event.is_set():
+                break
+
+            logger.info(
+                "Epic #%d: gap review iteration %d/%d",
+                epic_number,
+                iteration,
+                max_iterations,
+            )
+            transcript = await self._planners.run_gap_review(
+                epic_number, plan_map, title_map
+            )
+            review = self._parse_gap_review(transcript, epic_number)
+
+            if not review.replan_issues:
+                logger.info(
+                    "Epic #%d: plans are coherent after iteration %d",
+                    epic_number,
+                    iteration,
+                )
+                break
+
+            await self._post_gap_review_comment(epic_number, review, iteration)
+
+            # Re-plan flagged children with gap context
+            for issue_num in review.replan_issues:
+                if self._stop_event.is_set():
+                    break
+                issue = issue_map.get(issue_num)
+                if issue is None:
+                    logger.warning(
+                        "Epic #%d: gap review flagged #%d but not in group",
+                        epic_number,
+                        issue_num,
+                    )
+                    continue
+
+                enriched = self._plan_one_with_context(issue, review.guidance, plan_map)
+                replan_result = await self._plan_one(0, enriched, semaphore)
+                if replan_result.success and replan_result.plan:
+                    plan_map[issue_num] = replan_result.plan
+                    replan_result.epic_number = epic_number
+                # Update the results list
+                results = [
+                    replan_result if r.issue_number == issue_num else r for r in results
+                ]
+
+        return results
+
+    # ------------------------------------------------------------------
+    # Main entry point
+    # ------------------------------------------------------------------
+
     async def plan_issues(self) -> list[PlanResult]:
         """Run planning agents on issues from the plan queue."""
         issues = self._store.get_plannable(self._config.batch_size)
@@ -251,64 +566,37 @@ class PlanPhase:
 
         semaphore = asyncio.Semaphore(self._config.max_planners)
 
-        async def _plan_one(idx: int, issue: Task) -> PlanResult:
-            if self._stop_event.is_set():
-                return PlanResult(issue_number=issue.id, error="stopped")
+        # Group epic children if feature is enabled
+        if self._config.epic_group_planning:
+            epic_groups, standalone = self._group_by_epic(issues)
+        else:
+            epic_groups, standalone = {}, issues
 
-            async with semaphore:
-                if self._stop_event.is_set():
-                    return PlanResult(issue_number=issue.id, error="stopped")
-
-                async with store_lifecycle(self._store, issue.id, "plan"):
-                    result = await self._planners.plan(issue, worker_id=idx)
-
-                    if result.already_satisfied:
-                        # Guard: never auto-close epic children as "already
-                        # satisfied" — they were explicitly created as part
-                        # of a planned epic and should always get a plan.
-                        epic_child_labels = {
-                            lbl.lower() for lbl in self._config.epic_child_label
-                        }
-                        issue_labels = {t.lower() for t in issue.tags}
-                        if epic_child_labels & issue_labels:
-                            logger.warning(
-                                "Issue #%d is an epic child — ignoring "
-                                "'already satisfied' claim from planner",
-                                issue.id,
-                            )
-                            result.already_satisfied = False
-                            result.success = False
-                            result.error = (
-                                "Planner claimed already satisfied but issue "
-                                "is an epic child — forcing plan retry"
-                            )
-                        else:
-                            closed = await self._handle_already_satisfied(issue, result)
-                            if closed:
-                                return result
-                            # Evidence validation failed — fall through to
-                            # plan failure handling below.
-
-                    if result.success and result.plan:
-                        await self._handle_plan_success(issue, result)
-                        ts_status = "success"
-                    elif result.retry_attempted:
-                        await self._handle_plan_failure(issue, result)
-                        ts_status = "escalated"
-                    else:
-                        logger.warning(
-                            "Planning failed for issue #%d — skipping label swap",
-                            issue.id,
-                        )
-                        ts_status = "failed"
-
-                    await self._post_plan_transcript(issue, result, status=ts_status)
-                    return result
+        all_results: list[PlanResult] = []
+        all_issue_ids = {i.id for i in issues}
 
         try:
-            return await run_concurrent_batch(issues, _plan_one, self._stop_event)
+            # Plan standalone issues concurrently
+            if standalone:
+                standalone_results = await run_concurrent_batch(
+                    standalone,
+                    lambda idx, issue: self._plan_one(idx, issue, semaphore),
+                    self._stop_event,
+                )
+                all_results.extend(standalone_results)
+
+            # Plan each epic group (sequentially per epic, concurrent within)
+            for epic_number, children in epic_groups.items():
+                if self._stop_event.is_set():
+                    break
+                epic_results = await self._plan_epic_group(
+                    epic_number, children, semaphore
+                )
+                all_results.extend(epic_results)
+
+            return all_results
         finally:
-            release_batch_in_flight(self._store, {i.id for i in issues})
+            release_batch_in_flight(self._store, all_issue_ids)
 
     def _record_harness_failure(
         self,

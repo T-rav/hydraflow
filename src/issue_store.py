@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections import deque
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -482,6 +483,22 @@ class IssueStore:
     # Stats
     # ------------------------------------------------------------------
 
+    def _epic_metadata(self, task: Task) -> dict[str, int | bool]:
+        """Return epic metadata fields for a pipeline snapshot entry."""
+        epic_child_labels = {lbl.lower() for lbl in self._config.epic_child_label}
+        task_labels = {t.lower() for t in task.tags}
+        if not (epic_child_labels & task_labels):
+            return {}
+        result: dict[str, int | bool] = {"is_epic_child": True}
+        epic_num = task.metadata.get("epic_number")
+        if epic_num:
+            result["epic_number"] = int(epic_num)
+        else:
+            match = re.search(r"[Pp]arent\s+[Ee]pic[:\s#]*(\d+)", task.body)
+            if match:
+                result["epic_number"] = int(match.group(1))
+        return result
+
     def _snapshot_queued(self) -> dict[str, list[PipelineSnapshotEntry]]:
         """Return queued tasks grouped by stage."""
         snapshot: dict[str, list[PipelineSnapshotEntry]] = {}
@@ -494,14 +511,16 @@ class IssueStore:
                     duplicate_count += 1
                     continue
                 stage_seen.add(task.id)
-                entries.append(
-                    PipelineSnapshotEntry(
-                        issue_number=task.id,
-                        title=task.title,
-                        url=task.source_url,
-                        status="queued",
-                    )
+                entry = PipelineSnapshotEntry(
+                    issue_number=task.id,
+                    title=task.title,
+                    url=task.source_url,
+                    status="queued",
                 )
+                epic_meta = self._epic_metadata(task)
+                if epic_meta:
+                    entry.update(epic_meta)  # type: ignore[typeddict-item]
+                entries.append(entry)
             if duplicate_count:
                 self._dedup_stats["snapshot_entries"] += duplicate_count
                 logger.warning(
@@ -524,6 +543,10 @@ class IssueStore:
                 url=cached.source_url if cached else "",
                 status="active",
             )
+            if cached:
+                epic_meta = self._epic_metadata(cached)
+                if epic_meta:
+                    entry.update(epic_meta)  # type: ignore[typeddict-item]
             active_by_stage.setdefault(stage, []).append(entry)
         return active_by_stage
 
@@ -532,14 +555,17 @@ class IssueStore:
         hitl_list: list[PipelineSnapshotEntry] = []
         for issue_number in self._hitl_numbers:
             cached = self._issue_cache.get(issue_number)
-            hitl_list.append(
-                PipelineSnapshotEntry(
-                    issue_number=issue_number,
-                    title=cached.title if cached else f"Issue #{issue_number}",
-                    url=cached.source_url if cached else "",
-                    status="hitl",
-                )
+            entry = PipelineSnapshotEntry(
+                issue_number=issue_number,
+                title=cached.title if cached else f"Issue #{issue_number}",
+                url=cached.source_url if cached else "",
+                status="hitl",
             )
+            if cached:
+                epic_meta = self._epic_metadata(cached)
+                if epic_meta:
+                    entry.update(epic_meta)  # type: ignore[typeddict-item]
+            hitl_list.append(entry)
         return hitl_list
 
     def get_pipeline_snapshot(self) -> dict[str, list[PipelineSnapshotEntry]]:

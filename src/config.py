@@ -334,6 +334,16 @@ class HydraFlowConfig(BaseModel):
         default=["hydraflow-epic-child"],
         description="Labels for child issues linked to epics (OR logic)",
     )
+    epic_group_planning: bool = Field(
+        default=True,
+        description="Group epic children for cohort planning with gap review",
+    )
+    epic_gap_review_max_iterations: int = Field(
+        default=2,
+        ge=0,
+        le=5,
+        description="Max gap review + re-plan iterations (0 disables gap review)",
+    )
 
     # Discovery / planner configuration
     find_label: list[str] = Field(

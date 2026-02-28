@@ -2268,14 +2268,16 @@ class TestIssueOutcomeTracking:
         stats = tracker.get_lifetime_stats()
         assert stats.total_outcomes_failed == 1
 
-    def test_record_outcome_manual_close_no_counter(self, tmp_path: Path) -> None:
-        """MANUAL_CLOSE has no dedicated counter — should not crash."""
+    def test_record_outcome_manual_close_increments_counter(
+        self, tmp_path: Path
+    ) -> None:
+        """MANUAL_CLOSE should increment total_outcomes_manual_close."""
         from models import IssueOutcomeType
 
         tracker = make_tracker(tmp_path)
         tracker.record_outcome(1, IssueOutcomeType.MANUAL_CLOSE, "manual", phase="hitl")
-        # Should not raise; no counter incremented
         stats = tracker.get_lifetime_stats()
+        assert stats.total_outcomes_manual_close == 1
         assert stats.total_outcomes_merged == 0
 
     def test_outcome_persists_across_reload(self, tmp_path: Path) -> None:
@@ -2361,3 +2363,135 @@ class TestHookFailureTracking:
         tracker2 = make_tracker(tmp_path)
         failures = tracker2.get_hook_failures(42)
         assert len(failures) == 1
+
+    def test_record_hook_failure_caps_at_500(self, tmp_path: Path) -> None:
+        """Adding more than 500 failures should trim oldest entries."""
+        tracker = make_tracker(tmp_path)
+        for i in range(501):
+            tracker.record_hook_failure(42, "hook", f"error-{i}")
+        failures = tracker.get_hook_failures(42)
+        assert len(failures) == 500
+        # Oldest entry (error-0) should be trimmed, newest (error-500) kept
+        assert failures[-1].error == "error-500"
+        assert failures[0].error == "error-1"
+
+    def test_record_hook_failure_appends(self, tmp_path: Path) -> None:
+        """Multiple failures should accumulate for the same issue."""
+        tracker = make_tracker(tmp_path)
+        tracker.record_hook_failure(42, "hook_a", "first")
+        tracker.record_hook_failure(42, "hook_b", "second")
+        failures = tracker.get_hook_failures(42)
+        assert len(failures) == 2
+        assert failures[0].hook_name == "hook_a"
+        assert failures[1].hook_name == "hook_b"
+
+    def test_hook_failure_fields_round_trip(self, tmp_path: Path) -> None:
+        """All HookFailureRecord fields should survive store and retrieval."""
+        tracker = make_tracker(tmp_path)
+        tracker.record_hook_failure(42, "AC generation", "Connection timeout")
+        failures = tracker.get_hook_failures(42)
+        assert len(failures) == 1
+        assert failures[0].hook_name == "AC generation"
+        assert failures[0].error == "Connection timeout"
+        assert failures[0].timestamp  # non-empty ISO timestamp
+
+    def test_get_hook_failures_returns_deep_copy(self, tmp_path: Path) -> None:
+        """Mutating the returned list should not affect internal state."""
+        tracker = make_tracker(tmp_path)
+        tracker.record_hook_failure(42, "hook", "error")
+        failures = tracker.get_hook_failures(42)
+        failures.append(failures[0])  # mutate the returned list
+        assert len(tracker.get_hook_failures(42)) == 1  # internal unchanged
+
+    def test_reset_clears_hook_failures(self, tmp_path: Path) -> None:
+        """reset() should clear all hook failure records."""
+        tracker = make_tracker(tmp_path)
+        tracker.record_hook_failure(42, "hook", "error")
+        tracker.reset()
+        assert tracker.get_hook_failures(42) == []
+
+
+# ---------------------------------------------------------------------------
+# Outcome tracking — additional coverage
+# ---------------------------------------------------------------------------
+
+
+class TestOutcomeTrackingAdditional:
+    """Additional tests for record_outcome/get_all_outcomes."""
+
+    def test_record_outcome_unknown_type_skips_counter(self, tmp_path: Path) -> None:
+        """An outcome type not in counter_map should not crash."""
+        from models import IssueOutcomeType
+
+        tracker = make_tracker(tmp_path)
+        # All known types are in the map now; this just verifies no crash
+        for otype in IssueOutcomeType:
+            tracker.record_outcome(
+                100 + hash(otype) % 1000, otype, "test", phase="test"
+            )
+        # No assertion failure means success
+
+    def test_get_all_outcomes_returns_deep_copy(self, tmp_path: Path) -> None:
+        """Mutating the returned dict should not affect internal state."""
+        from models import IssueOutcomeType
+
+        tracker = make_tracker(tmp_path)
+        tracker.record_outcome(1, IssueOutcomeType.MERGED, "merged", phase="review")
+        outcomes = tracker.get_all_outcomes()
+        # Mutate the returned dict
+        outcomes.pop("1", None)
+        # Internal state should be unchanged
+        assert tracker.get_all_outcomes().get("1") is not None
+
+    def test_get_all_outcomes_deep_copy_protects_objects(self, tmp_path: Path) -> None:
+        """Mutating a returned IssueOutcome should not affect internal state."""
+        from models import IssueOutcomeType
+
+        tracker = make_tracker(tmp_path)
+        tracker.record_outcome(1, IssueOutcomeType.MERGED, "original", phase="review")
+        outcomes = tracker.get_all_outcomes()
+        # Mutate the returned object's field
+        outcomes["1"].reason = "mutated"
+        # Internal state should still have the original value
+        internal = tracker.get_outcome(1)
+        assert internal is not None
+        assert internal.reason == "original"
+
+    def test_record_outcome_populates_closed_at(self, tmp_path: Path) -> None:
+        """closed_at should be set to an ISO timestamp."""
+        from models import IssueOutcomeType
+
+        tracker = make_tracker(tmp_path)
+        tracker.record_outcome(1, IssueOutcomeType.MERGED, "merged", phase="review")
+        outcome = tracker.get_outcome(1)
+        assert outcome is not None
+        assert outcome.closed_at  # non-empty
+        # Should be a valid ISO timestamp
+        from datetime import datetime
+
+        datetime.fromisoformat(outcome.closed_at)
+
+    def test_record_outcome_stores_all_fields(self, tmp_path: Path) -> None:
+        """All fields (outcome_type, reason, phase, pr_number) should be stored."""
+        from models import IssueOutcomeType
+
+        tracker = make_tracker(tmp_path)
+        tracker.record_outcome(
+            42, IssueOutcomeType.MERGED, "PR approved", pr_number=99, phase="review"
+        )
+        outcome = tracker.get_outcome(42)
+        assert outcome is not None
+        assert outcome.outcome == IssueOutcomeType.MERGED
+        assert outcome.reason == "PR approved"
+        assert outcome.pr_number == 99
+        assert outcome.phase == "review"
+
+    def test_reset_clears_outcomes(self, tmp_path: Path) -> None:
+        """reset() should clear all recorded outcomes."""
+        from models import IssueOutcomeType
+
+        tracker = make_tracker(tmp_path)
+        tracker.record_outcome(1, IssueOutcomeType.MERGED, "merged", phase="review")
+        tracker.reset()
+        assert tracker.get_outcome(1) is None
+        assert tracker.get_all_outcomes() == {}

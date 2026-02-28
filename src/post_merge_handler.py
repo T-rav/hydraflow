@@ -238,21 +238,35 @@ class PostMergeHandler:
                 issue_number,
                 exc_info=True,
             )
-            self._state.record_hook_failure(issue_number, name, error_msg)
-            await self._bus.publish(
-                HydraFlowEvent(
-                    type=EventType.SYSTEM_ALERT,
-                    data={
-                        "message": (
-                            f"Post-merge hook '{name}' failed for issue "
-                            f"#{issue_number}: {error_msg}"
-                        ),
-                        "source": "post_merge_hook",
-                        "hook_name": name,
-                        "issue": issue_number,
-                    },
+            try:
+                self._state.record_hook_failure(issue_number, name, error_msg)
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "Failed to record hook failure for issue #%d",
+                    issue_number,
+                    exc_info=True,
                 )
-            )
+            try:
+                await self._bus.publish(
+                    HydraFlowEvent(
+                        type=EventType.SYSTEM_ALERT,
+                        data={
+                            "message": (
+                                f"Post-merge hook '{name}' failed for issue "
+                                f"#{issue_number}: {error_msg}"
+                            ),
+                            "source": "post_merge_hook",
+                            "hook_name": name,
+                            "issue": issue_number,
+                        },
+                    )
+                )
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "Failed to publish hook failure event for issue #%d",
+                    issue_number,
+                    exc_info=True,
+                )
             try:
                 await self._prs.post_comment(
                     issue_number,

@@ -43,20 +43,26 @@ function PipelineFlow({ stageGroups }) {
             <span style={flowLabelStyles[group.stage.key]}>{group.stage.label}</span>
             {group.issues.length > 0 && (
               <div style={styles.flowDots}>
-                {group.issues.map(issue => (
-                  <span
-                    key={issue.issueNumber}
-                    style={
-                      issue.overallStatus === 'active' ? flowDotActiveStyles[group.stage.key]
-                      : issue.overallStatus === 'failed' ? flowDotFailedStyles[group.stage.key]
-                      : issue.overallStatus === 'hitl' ? flowDotHitlStyles[group.stage.key]
-                      : issue.overallStatus === 'queued' ? flowDotQueuedStyles[group.stage.key]
-                      : flowDotStyles[group.stage.key]
-                    }
-                    title={`#${issue.issueNumber}`}
-                    data-testid={`flow-dot-${issue.issueNumber}`}
-                  />
-                ))}
+                {group.issues.map(issue => {
+                  const isEpic = issue.isEpicChild || issue.epicNumber > 0
+                  const dotStyles = isEpic ? epicFlowDotStyleMap : regularFlowDotStyleMap
+                  const dotStyle =
+                    issue.overallStatus === 'active' ? dotStyles.active[group.stage.key]
+                    : issue.overallStatus === 'failed' ? dotStyles.failed[group.stage.key]
+                    : issue.overallStatus === 'hitl' ? dotStyles.hitl[group.stage.key]
+                    : issue.overallStatus === 'queued' ? dotStyles.queued[group.stage.key]
+                    : dotStyles.base[group.stage.key]
+                  return (
+                    <span
+                      key={issue.issueNumber}
+                      style={dotStyle}
+                      title={`#${issue.issueNumber}${isEpic ? ` (Epic #${issue.epicNumber})` : ''}`}
+                      data-testid={`flow-dot-${issue.issueNumber}`}
+                    >
+                      {isEpic ? 'e' : null}
+                    </span>
+                  )
+                })}
               </div>
             )}
           </div>
@@ -70,6 +76,24 @@ function PipelineFlow({ stageGroups }) {
           {failedCount > 0 && <span style={flowSummaryFailedStyle}>{failedCount} failed</span>}
         </span>
       )}
+    </div>
+  )
+}
+
+function EpicContainer({ epicNumber, issues, children }) {
+  const activeCount = issues.filter(i => i.overallStatus === 'active').length
+  return (
+    <div style={epicContainerStyles.wrapper}>
+      <div style={epicContainerStyles.header}>
+        <span style={epicContainerStyles.badge}>Epic #{epicNumber}</span>
+        <span style={epicContainerStyles.progress}>
+          {activeCount} / {issues.length} active
+        </span>
+        {activeCount > 0 && <span style={epicContainerStyles.pulse} />}
+      </div>
+      <div style={epicContainerStyles.children}>
+        {children}
+      </div>
     </div>
   )
 }
@@ -118,16 +142,47 @@ function StageSection({ stage, issues, workerCount, workerCap, intentMap, onRequ
           data-testid={`stage-dot-${stage.key}`}
         />
       </div>
-      {open && issues.map(issue => (
-        <StreamCard
-          key={issue.issueNumber}
-          issue={issue}
-          intent={intentMap.get(issue.issueNumber)}
-          defaultExpanded={issue.overallStatus === 'active'}
-          onRequestChanges={onRequestChanges}
-          transcript={findWorkerTranscript(workers, prs, stage.key, issue.issueNumber)}
-        />
-      ))}
+      {open && (() => {
+        // Group epic children by epicNumber, keep standalone separate
+        const epicGroups = {}
+        const standalone = []
+        for (const issue of issues) {
+          if (issue.isEpicChild && issue.epicNumber > 0) {
+            if (!epicGroups[issue.epicNumber]) epicGroups[issue.epicNumber] = []
+            epicGroups[issue.epicNumber].push(issue)
+          } else {
+            standalone.push(issue)
+          }
+        }
+        return (
+          <>
+            {standalone.map(issue => (
+              <StreamCard
+                key={issue.issueNumber}
+                issue={issue}
+                intent={intentMap.get(issue.issueNumber)}
+                defaultExpanded={issue.overallStatus === 'active'}
+                onRequestChanges={onRequestChanges}
+                transcript={findWorkerTranscript(workers, prs, stage.key, issue.issueNumber)}
+              />
+            ))}
+            {Object.entries(epicGroups).map(([epicNum, epicIssues]) => (
+              <EpicContainer key={`epic-${epicNum}`} epicNumber={Number(epicNum)} issues={epicIssues}>
+                {epicIssues.map(issue => (
+                  <StreamCard
+                    key={issue.issueNumber}
+                    issue={issue}
+                    intent={intentMap.get(issue.issueNumber)}
+                    defaultExpanded={issue.overallStatus === 'active'}
+                    onRequestChanges={onRequestChanges}
+                    transcript={findWorkerTranscript(workers, prs, stage.key, issue.issueNumber)}
+                  />
+                ))}
+              </EpicContainer>
+            ))}
+          </>
+        )
+      })()}
     </div>
   )
 }
@@ -179,6 +234,8 @@ export function toStreamIssue(pipeIssue, stageKey, prs) {
     pr,
     branch: `agent/issue-${pipeIssue.issue_number}`,
     stages,
+    epicNumber: pipeIssue.epic_number || 0,
+    isEpicChild: pipeIssue.is_epic_child || false,
   }
 }
 
@@ -366,6 +423,57 @@ const flowDotHitlStyles = Object.fromEntries(
   PIPELINE_STAGES.map(s => [s.key, { ...flowDotBase, background: theme.yellow }])
 )
 
+// Epic dot styles — 12px circles with centered "e" text
+const epicDotBase = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 12,
+  height: 12,
+  borderRadius: '50%',
+  flexShrink: 0,
+  fontSize: 7,
+  fontWeight: 700,
+  color: theme.bg,
+  transition: 'all 0.3s ease',
+}
+
+const epicFlowDotStyles = Object.fromEntries(
+  PIPELINE_STAGES.map(s => [s.key, { ...epicDotBase, background: s.color }])
+)
+const epicFlowDotQueuedStyles = Object.fromEntries(
+  PIPELINE_STAGES.map(s => [s.key, { ...epicDotBase, background: s.subtleColor }])
+)
+const epicFlowDotActiveStyles = Object.fromEntries(
+  PIPELINE_STAGES.map(s => [s.key, {
+    ...epicDotBase,
+    background: s.color,
+    animation: PULSE_ANIMATION,
+  }])
+)
+const epicFlowDotFailedStyles = Object.fromEntries(
+  PIPELINE_STAGES.map(s => [s.key, { ...epicDotBase, background: theme.red }])
+)
+const epicFlowDotHitlStyles = Object.fromEntries(
+  PIPELINE_STAGES.map(s => [s.key, { ...epicDotBase, background: theme.yellow }])
+)
+
+// Grouped style maps for quick lookup in render
+const regularFlowDotStyleMap = {
+  base: flowDotStyles,
+  queued: flowDotQueuedStyles,
+  active: flowDotActiveStyles,
+  failed: flowDotFailedStyles,
+  hitl: flowDotHitlStyles,
+}
+const epicFlowDotStyleMap = {
+  base: epicFlowDotStyles,
+  queued: epicFlowDotQueuedStyles,
+  active: epicFlowDotActiveStyles,
+  failed: epicFlowDotFailedStyles,
+  hitl: epicFlowDotHitlStyles,
+}
+
 const flowSummaryMergedStyle = { color: theme.green }
 const flowSummaryDividerStyle = { color: theme.textMuted }
 const flowSummaryFailedStyle = { color: theme.red }
@@ -482,6 +590,42 @@ const styles = {
     fontSize: 10,
     color: theme.textMuted,
     flexShrink: 0,
+  },
+}
+
+const epicContainerStyles = {
+  wrapper: {
+    borderLeft: `3px solid ${theme.purple}`,
+    background: theme.surfaceInset,
+    borderRadius: 8,
+    marginBottom: 4,
+    overflow: 'hidden',
+  },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '4px 12px',
+    background: theme.purpleSubtle,
+  },
+  badge: {
+    fontSize: 10,
+    fontWeight: 700,
+    color: theme.purple,
+  },
+  progress: {
+    fontSize: 10,
+    color: theme.textMuted,
+  },
+  pulse: {
+    ...dotBase,
+    width: 6,
+    height: 6,
+    background: theme.purple,
+    animation: PULSE_ANIMATION,
+  },
+  children: {
+    padding: 4,
   },
 }
 

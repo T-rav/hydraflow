@@ -743,3 +743,8 @@ class TestStreamClaudeProcessGhToken:
         # not explicitly injected by make_clean_env.
         # The key assertion: no bot-specific override was applied.
         assert captured_env.get("GH_TOKEN", "") != "ghp_bot_token"
+        # Also verify: GH_TOKEN key should be absent from env (not just
+        # different from ghp_bot_token) or should preserve the inherited value.
+        if "GH_TOKEN" in captured_env:
+            # If present, it was inherited from os.environ, not injected
+            assert captured_env["GH_TOKEN"] == os.environ.get("GH_TOKEN", "")

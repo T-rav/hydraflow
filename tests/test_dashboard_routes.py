@@ -446,6 +446,116 @@ class TestIssueHistoryEndpoint:
         assert len(payload["items"]) == 1
         assert payload["items"][0]["issue_number"] == 102
 
+    @pytest.mark.asyncio
+    async def test_issue_history_linked_issues_carry_kind(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """linked_issues populated via GitHub enrichment carry kind through."""
+        import json
+        from unittest.mock import AsyncMock, patch
+
+        from dashboard_routes import create_router
+        from pr_manager import PRManager
+
+        pr_mgr = PRManager(config, event_bus)
+        router = create_router(
+            config=config,
+            event_bus=event_bus,
+            state=state,
+            pr_manager=pr_mgr,
+            get_orchestrator=lambda: None,
+            set_orchestrator=lambda o: None,
+            set_run_task=lambda t: None,
+            ui_dist_dir=tmp_path / "no-dist",
+            template_dir=tmp_path / "no-templates",
+        )
+        endpoint = next(
+            r.endpoint
+            for r in router.routes
+            if getattr(r, "path", "") == "/api/issues/history"
+        )
+
+        await event_bus.publish(
+            HydraFlowEvent(
+                type=EventType.ISSUE_CREATED,
+                timestamp="2026-02-21T00:00:00+00:00",
+                data={"issue": 200, "title": "Test linked kinds"},
+            )
+        )
+
+        # Mock GitHub enrichment to return an issue with link patterns in body
+        mock_issue = type(
+            "MockIssue",
+            (),
+            {
+                "number": 200,
+                "title": "Test linked kinds",
+                "url": "https://example.com/issues/200",
+                "labels": [],
+                "body": "relates to #5\nduplicates #10",
+            },
+        )()
+        mock_fetcher = AsyncMock()
+        mock_fetcher.fetch_issue_by_number = AsyncMock(return_value=mock_issue)
+        with patch("dashboard_routes.IssueFetcher", return_value=mock_fetcher):
+            response = await endpoint(limit=100)
+
+        payload = json.loads(response.body)
+        issue = next((x for x in payload["items"] if x["issue_number"] == 200), None)
+        assert issue is not None
+        links = issue["linked_issues"]
+        assert len(links) >= 2
+        by_id = {lnk["target_id"]: lnk for lnk in links}
+        assert by_id[5]["kind"] == "relates_to"
+        assert by_id[10]["kind"] == "duplicates"
+        for link in links:
+            assert isinstance(link, dict)
+            assert "target_id" in link
+            assert "kind" in link
+            assert "target_url" in link
+
+    @pytest.mark.asyncio
+    async def test_issue_history_linked_issues_empty_is_list(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """An issue with no links still returns an empty list (not ints)."""
+        import json
+
+        from dashboard_routes import create_router
+        from pr_manager import PRManager
+
+        pr_mgr = PRManager(config, event_bus)
+        router = create_router(
+            config=config,
+            event_bus=event_bus,
+            state=state,
+            pr_manager=pr_mgr,
+            get_orchestrator=lambda: None,
+            set_orchestrator=lambda o: None,
+            set_run_task=lambda t: None,
+            ui_dist_dir=tmp_path / "no-dist",
+            template_dir=tmp_path / "no-templates",
+        )
+        endpoint = next(
+            r.endpoint
+            for r in router.routes
+            if getattr(r, "path", "") == "/api/issues/history"
+        )
+
+        await event_bus.publish(
+            HydraFlowEvent(
+                type=EventType.ISSUE_CREATED,
+                timestamp="2026-02-21T00:00:00+00:00",
+                data={"issue": 201, "title": "No links here"},
+            )
+        )
+
+        response = await endpoint(limit=100)
+        payload = json.loads(response.body)
+        issue = next((x for x in payload["items"] if x["issue_number"] == 201), None)
+        assert issue is not None
+        assert issue["linked_issues"] == []
+
 
 class TestControlStatusImproveLabel:
     """Tests that /api/control/status includes improve_label."""
@@ -4241,6 +4351,120 @@ class TestHITLCloseEndpoint:
         with pytest.raises(ValidationError):
             HITLCloseRequest(reason="")
 
+    @pytest.mark.asyncio
+    async def test_hitl_close_succeeds_even_if_comment_fails(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        """Close should succeed even if post_comment raises."""
+        import json
+
+        from models import HITLCloseRequest
+
+        mock_orch = MagicMock()
+        mock_orch.skip_hitl_issue = MagicMock()
+        router, pr_mgr = self._make_router(
+            config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
+        )
+        pr_mgr.close_issue = AsyncMock()
+        pr_mgr.remove_label = AsyncMock()
+        pr_mgr.post_comment = AsyncMock(side_effect=RuntimeError("GitHub down"))
+
+        # Pre-populate HITL state
+        state.set_hitl_origin(42, "hydraflow-review")
+        state.set_hitl_cause(42, "CI failure")
+        state.set_hitl_summary(42, "cached summary")
+
+        endpoint = self._find_endpoint(router, "/api/hitl/{issue_number}/close")
+        response = await endpoint(42, HITLCloseRequest(reason="Duplicate"))
+
+        assert response.status_code == 200
+        data = json.loads(response.body)
+        assert data["status"] == "ok"
+        pr_mgr.close_issue.assert_called_once_with(42)
+        # State should be cleaned up despite comment failure
+        assert state.get_hitl_origin(42) is None
+        assert state.get_hitl_cause(42) is None
+        assert state.get_hitl_summary(42) is None
+        outcome = state.get_outcome(42)
+        assert outcome is not None
+        assert outcome.outcome.value == "hitl_closed"
+
+
+# ---------------------------------------------------------------------------
+# HITL skip — comment failure resilience
+# ---------------------------------------------------------------------------
+
+
+class TestHITLSkipCommentResilience:
+    """Test that hitl_skip succeeds even when post_comment fails."""
+
+    def _make_router(self, config, event_bus, state, tmp_path, get_orch=None):
+        from dashboard_routes import create_router
+        from pr_manager import PRManager
+
+        pr_mgr = PRManager(config, event_bus)
+        pr_mgr.remove_label = AsyncMock()
+        pr_mgr.add_labels = AsyncMock()
+        pr_mgr.swap_pipeline_labels = AsyncMock()
+        return create_router(
+            config=config,
+            event_bus=event_bus,
+            state=state,
+            pr_manager=pr_mgr,
+            get_orchestrator=get_orch or (lambda: None),
+            set_orchestrator=lambda o: None,
+            set_run_task=lambda t: None,
+            ui_dist_dir=tmp_path / "no-dist",
+            template_dir=tmp_path / "no-templates",
+        ), pr_mgr
+
+    def _find_endpoint(self, router, path):
+        for route in router.routes:
+            if (
+                hasattr(route, "path")
+                and route.path == path
+                and hasattr(route, "endpoint")
+            ):
+                return route.endpoint
+        return None
+
+    @pytest.mark.asyncio
+    async def test_hitl_skip_succeeds_even_if_comment_fails(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        """Skip should succeed even if post_comment raises."""
+        import json
+
+        from models import HITLSkipRequest
+
+        mock_orch = MagicMock()
+        mock_orch.skip_hitl_issue = MagicMock()
+        router, pr_mgr = self._make_router(
+            config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
+        )
+        pr_mgr.post_comment = AsyncMock(side_effect=RuntimeError("GitHub down"))
+
+        # Pre-populate HITL state
+        state.set_hitl_origin(42, "hydraflow-plan")
+        state.set_hitl_cause(42, "Evidence rejected")
+        state.set_hitl_summary(42, "some summary")
+
+        skip = self._find_endpoint(router, "/api/hitl/{issue_number}/skip")
+        assert skip is not None
+        response = await skip(42, HITLSkipRequest(reason="Not needed"))
+
+        assert response.status_code == 200
+        data = json.loads(response.body)
+        assert data["status"] == "ok"
+        mock_orch.skip_hitl_issue.assert_called_once_with(42)
+        # State should be cleaned up despite comment failure
+        assert state.get_hitl_origin(42) is None
+        assert state.get_hitl_cause(42) is None
+        assert state.get_hitl_summary(42) is None
+        outcome = state.get_outcome(42)
+        assert outcome is not None
+        assert outcome.outcome.value == "hitl_skipped"
+
 
 # ---------------------------------------------------------------------------
 # POST /api/hitl/{issue_number}/approve-memory
@@ -4764,3 +4988,248 @@ class TestWebSocketEndpoint:
         mock_ws.accept.assert_called_once()
         # At least one history event should have been sent
         assert len(sent_texts) >= 1
+
+
+class TestIssueHistoryCache:
+    """Tests for issue history disk cache (save / load / warm-up / invalidation)."""
+
+    def _make_router(self, config, event_bus, state, tmp_path):
+        from dashboard_routes import create_router
+        from pr_manager import PRManager
+
+        pr_mgr = PRManager(config, event_bus)
+        return create_router(
+            config=config,
+            event_bus=event_bus,
+            state=state,
+            pr_manager=pr_mgr,
+            get_orchestrator=lambda: None,
+            set_orchestrator=lambda o: None,
+            set_run_task=lambda t: None,
+            ui_dist_dir=tmp_path / "no-dist",
+            template_dir=tmp_path / "no-templates",
+        )
+
+    def _get_history_endpoint(self, router):
+        for route in router.routes:
+            if (
+                hasattr(route, "path")
+                and route.path == "/api/issues/history"
+                and hasattr(route, "endpoint")
+            ):
+                return route.endpoint
+        raise AssertionError("history endpoint not found")
+
+    @pytest.mark.asyncio
+    async def test_save_load_round_trip_preserves_int_keys(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """Cache round-trip: int keys for prs / linked_issues survive JSON."""
+        import json
+
+        from prompt_telemetry import PromptTelemetry
+
+        telemetry = PromptTelemetry(config)
+        telemetry.record(
+            source="implementer",
+            tool="claude",
+            model="sonnet",
+            issue_number=50,
+            pr_number=200,
+            session_id="sess-cache",
+            prompt_chars=100,
+            transcript_chars=50,
+            duration_seconds=1.0,
+            success=True,
+            stats={"total_tokens": 500, "input_tokens": 300, "output_tokens": 200},
+        )
+
+        # First request — populates and saves cache.
+        router = self._make_router(config, event_bus, state, tmp_path)
+        ep = self._get_history_endpoint(router)
+        resp = await ep(limit=100)
+        payload = json.loads(resp.body)
+        assert payload["totals"]["issues"] >= 1
+
+        # Verify disk file was written.
+        cache_file = config.data_path("metrics", "history_cache.json")
+        assert cache_file.is_file()
+        raw = json.loads(cache_file.read_text())
+        assert "issue_rows" in raw
+
+        # Verify round-trip: load the cache in a fresh router and query again.
+        router2 = self._make_router(config, event_bus, state, tmp_path)
+        ep2 = self._get_history_endpoint(router2)
+        resp2 = await ep2(limit=100)
+        payload2 = json.loads(resp2.body)
+        issue = next((x for x in payload2["items"] if x["issue_number"] == 50), None)
+        assert issue is not None
+        assert issue["prs"][0]["number"] == 200
+
+    @pytest.mark.asyncio
+    async def test_corrupt_cache_file_is_ignored(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """A corrupt JSON cache file should not crash router creation."""
+        cache_file = config.data_path("metrics", "history_cache.json")
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text("NOT VALID JSON {{{")
+
+        # Router should create without error — corrupt file is silently skipped.
+        router = self._make_router(config, event_bus, state, tmp_path)
+        ep = self._get_history_endpoint(router)
+        import json
+
+        resp = await ep(limit=10)
+        payload = json.loads(resp.body)
+        # No crash, returns valid (possibly empty) response.
+        assert "items" in payload
+        assert "totals" in payload
+
+    @pytest.mark.asyncio
+    async def test_missing_cache_file_is_handled(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """Missing cache file should not crash router creation."""
+        cache_file = config.data_path("metrics", "history_cache.json")
+        assert not cache_file.exists()
+
+        router = self._make_router(config, event_bus, state, tmp_path)
+        ep = self._get_history_endpoint(router)
+        import json
+
+        resp = await ep(limit=10)
+        payload = json.loads(resp.body)
+        assert "items" in payload
+
+    @pytest.mark.asyncio
+    async def test_cache_hit_skips_aggregation(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """Second identical request within TTL should hit cache."""
+        import json
+
+        from prompt_telemetry import PromptTelemetry
+
+        telemetry = PromptTelemetry(config)
+        telemetry.record(
+            source="planner",
+            tool="claude",
+            model="opus",
+            issue_number=99,
+            pr_number=0,
+            session_id="sess-hit",
+            prompt_chars=50,
+            transcript_chars=20,
+            duration_seconds=0.5,
+            success=True,
+            stats={"total_tokens": 80},
+        )
+
+        router = self._make_router(config, event_bus, state, tmp_path)
+        ep = self._get_history_endpoint(router)
+
+        resp1 = await ep(limit=100)
+        p1 = json.loads(resp1.body)
+        assert p1["totals"]["issues"] >= 1
+
+        # Second call — same event count and telemetry mtime → cache hit.
+        resp2 = await ep(limit=100)
+        p2 = json.loads(resp2.body)
+        assert p2["totals"]["issues"] == p1["totals"]["issues"]
+
+    @pytest.mark.asyncio
+    async def test_cache_invalidated_by_new_event(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """Publishing a new event should invalidate the cache."""
+        import json
+
+        router = self._make_router(config, event_bus, state, tmp_path)
+        ep = self._get_history_endpoint(router)
+
+        resp1 = await ep(limit=100)
+        json.loads(resp1.body)  # populate cache
+
+        # Publish a new event, changing the event count.
+        await event_bus.publish(
+            HydraFlowEvent(
+                type=EventType.ISSUE_CREATED,
+                data={"issue": 999, "title": "New after cache"},
+            )
+        )
+
+        resp2 = await ep(limit=100)
+        p2 = json.loads(resp2.body)
+        # The new issue should appear.
+        found = any(x["issue_number"] == 999 for x in p2["items"])
+        assert found
+
+    @pytest.mark.asyncio
+    async def test_load_restores_linked_issues_with_int_keys(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """Ensure _load_history_cache restores linked_issues dict keys to int."""
+        import json
+
+        cache_file = config.data_path("metrics", "history_cache.json")
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        # Simulate JSON file with string keys (as produced by json.dumps).
+        cache_data = {
+            "event_count": 0,
+            "telemetry_mtime": 0.0,
+            "issue_rows": {
+                "42": {
+                    "issue_number": 42,
+                    "title": "Test issue",
+                    "issue_url": "",
+                    "status": "active",
+                    "epic": "",
+                    "linked_issues": {
+                        "5": {"target_id": 5, "kind": "relates_to", "target_url": None},
+                        "10": {
+                            "target_id": 10,
+                            "kind": "duplicates",
+                            "target_url": None,
+                        },
+                    },
+                    "prs": {
+                        "200": {
+                            "number": 200,
+                            "url": "https://example.com/pull/200",
+                            "merged": False,
+                        },
+                    },
+                    "session_ids": ["sess-a"],
+                    "source_calls": {"implementer": 1},
+                    "model_calls": {"sonnet": 1},
+                    "inference": {
+                        "inference_calls": 1,
+                        "total_tokens": 100,
+                        "input_tokens": 60,
+                        "output_tokens": 40,
+                        "pruned_chars_total": 0,
+                    },
+                    "first_seen": "2026-02-20T00:00:00+00:00",
+                    "last_seen": "2026-02-21T00:00:00+00:00",
+                    "status_updated_at": None,
+                },
+            },
+            "pr_to_issue": {"200": 42},
+            "enriched_issues": [42],
+        }
+        cache_file.write_text(json.dumps(cache_data))
+
+        # Load via router warm-up.
+        router = self._make_router(config, event_bus, state, tmp_path)
+        ep = self._get_history_endpoint(router)
+
+        resp = await ep(limit=100)
+        payload = json.loads(resp.body)
+        issue = next((x for x in payload["items"] if x["issue_number"] == 42), None)
+        assert issue is not None
+        assert issue["prs"][0]["number"] == 200
+        # linked_issues should have been rebuilt via _build_history_links.
+        assert len(issue["linked_issues"]) == 2
+        ids = {li["target_id"] for li in issue["linked_issues"]}
+        assert ids == {5, 10}

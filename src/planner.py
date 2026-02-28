@@ -937,9 +937,12 @@ This closes the issue automatically. False positives waste significant human tim
 
         if not feature_match or not feature_match.group(1).strip():
             errors.append("Missing or empty 'Feature:' field")
-        elif ":" not in feature_match.group(1):
-            # Must contain file:line reference
-            errors.append("'Feature:' field must include a file:line reference")
+        else:
+            # Must contain file:line reference (e.g. src/foo.py:42),
+            # but not a URL port like http://example.com:8080
+            file_line = re.search(r"\S+:\d+", feature_match.group(1))
+            if not file_line or "://" in file_line.group():
+                errors.append("'Feature:' field must include a file:line reference")
 
         if not tests_match or not tests_match.group(1).strip():
             errors.append("Missing or empty 'Tests:' field")
@@ -1120,3 +1123,55 @@ SUMMARY: <brief one-line description of the plan>
                 exc_info=True,
                 extra={"issue": issue_number},
             )
+
+    # ------------------------------------------------------------------
+    # Epic gap review
+    # ------------------------------------------------------------------
+
+    async def run_gap_review(
+        self,
+        epic_number: int,
+        child_plans: dict[int, str],
+        child_titles: dict[int, str],
+    ) -> str:
+        """Run a gap/conflict review across epic children's plans.
+
+        Returns the raw transcript for the caller to parse.
+        """
+        plans_section = "\n\n".join(
+            f"### Issue #{num}: {child_titles.get(num, 'Untitled')}\n\n{plan}"
+            for num, plan in child_plans.items()
+        )
+        prompt = (
+            f"You are reviewing the implementation plans for all children of "
+            f"Epic #{epic_number}. Your goal is to identify gaps, conflicts, "
+            f"ordering issues, and duplication across these plans.\n\n"
+            f"## Child Plans\n\n{plans_section}\n\n"
+            f"## Instructions\n\n"
+            f"Analyze the plans above and produce a structured review. "
+            f"Wrap your entire review between GAP_REVIEW_START and "
+            f"GAP_REVIEW_END markers.\n\n"
+            f"Include these sections:\n"
+            f"- **## Findings** — describe any gaps, conflicts, ordering "
+            f"issues, or duplicated work across the plans\n"
+            f"- **## Re-plan Required** — list the issue numbers (one per "
+            f"line, as `#NNN`) that need re-planning to resolve the findings. "
+            f"If all plans are coherent, write 'None'.\n"
+            f"- **## Guidance** — specific instructions for re-planning the "
+            f"flagged issues to resolve conflicts and fill gaps\n\n"
+            f"GAP_REVIEW_START\n"
+        )
+
+        cmd = self._build_command()
+
+        def _check_complete(accumulated: str) -> bool:
+            return "GAP_REVIEW_END" in accumulated
+
+        transcript = await self._execute(
+            cmd,
+            prompt,
+            self._config.repo_root,
+            {"epic": epic_number, "source": "planner-gap-review"},
+            on_output=_check_complete,
+        )
+        return transcript

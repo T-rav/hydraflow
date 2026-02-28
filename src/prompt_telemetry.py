@@ -255,6 +255,17 @@ class PromptTelemetry:
             return {}
         return parsed if isinstance(parsed, dict) else {}
 
+    def get_mtime(self) -> float:
+        """Return the modification time of the inferences file, or 0.0."""
+        try:
+            return (
+                self._inferences_file.stat().st_mtime
+                if self._inferences_file.is_file()
+                else 0.0
+            )
+        except OSError:
+            return 0.0
+
     def load_inferences(
         self,
         *,

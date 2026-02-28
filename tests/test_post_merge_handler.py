@@ -753,3 +753,83 @@ class TestMergeOutcomeRecording:
         assert outcome.outcome == IssueOutcomeType.MERGED
         assert outcome.pr_number == 10
         assert outcome.phase == "review"
+
+
+# ---------------------------------------------------------------------------
+# _safe_hook recovery — secondary crash protection
+# ---------------------------------------------------------------------------
+
+
+class TestSafeHookRecovery:
+    """Tests that _safe_hook survives secondary failures in error handling."""
+
+    @pytest.mark.asyncio
+    async def test_safe_hook_record_failure_survives_secondary_crash(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """If record_hook_failure raises, _safe_hook should not propagate."""
+        handler = _make_handler(config)
+        handler._state.record_hook_failure = MagicMock(
+            side_effect=RuntimeError("disk full")
+        )
+
+        async def failing_coro():
+            raise ValueError("original error")
+
+        result = await handler._safe_hook("test_hook", failing_coro(), 42)
+        assert result is None  # Should not propagate
+
+    @pytest.mark.asyncio
+    async def test_safe_hook_bus_publish_survives_crash(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """If bus.publish raises, _safe_hook should not propagate."""
+        handler = _make_handler(config)
+        handler._bus.publish = AsyncMock(side_effect=RuntimeError("bus broken"))
+
+        async def failing_coro():
+            raise ValueError("original error")
+
+        result = await handler._safe_hook("test_hook", failing_coro(), 42)
+        assert result is None  # Should not propagate
+
+    @pytest.mark.asyncio
+    async def test_safe_hook_logs_original_and_secondary_errors(
+        self, config: HydraFlowConfig, caplog
+    ) -> None:
+        """Both the original and secondary errors should be logged."""
+        handler = _make_handler(config)
+        handler._state.record_hook_failure = MagicMock(
+            side_effect=RuntimeError("secondary crash")
+        )
+
+        async def failing_coro():
+            raise ValueError("original error")
+
+        with caplog.at_level(logging.WARNING):
+            await handler._safe_hook("test_hook", failing_coro(), 42)
+
+        # Original error should be logged as WARNING
+        assert any("test_hook failed" in r.message for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_safe_hook_publishes_event_even_when_record_failure_crashes(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """bus.publish should still be called even if record_hook_failure raises."""
+        handler = _make_handler(config)
+        handler._state.record_hook_failure = MagicMock(
+            side_effect=RuntimeError("disk full")
+        )
+        handler._bus.publish = AsyncMock()
+
+        async def failing_coro():
+            raise ValueError("original error")
+
+        await handler._safe_hook("test_hook", failing_coro(), 42)
+
+        # bus.publish should still have been called despite record_hook_failure crash
+        handler._bus.publish.assert_awaited_once()
+        event_data = handler._bus.publish.call_args.args[0].data
+        assert event_data["hook_name"] == "test_hook"
+        assert event_data["issue"] == 42

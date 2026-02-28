@@ -2671,6 +2671,54 @@ class TestIssueOutcomeModels:
         assert data.issue_outcomes == {}
         assert data.hook_failures == {}
 
+    def test_issue_history_link_defaults(self) -> None:
+        from models import IssueHistoryLink, TaskLinkKind
+
+        link = IssueHistoryLink(target_id=42)
+        assert link.target_id == 42
+        assert link.kind == TaskLinkKind.RELATES_TO
+        assert link.target_url is None
+
+    def test_issue_history_link_with_kind(self) -> None:
+        from models import IssueHistoryLink, TaskLinkKind
+
+        link = IssueHistoryLink(
+            target_id=10,
+            kind=TaskLinkKind.DUPLICATES,
+            target_url="https://github.com/org/repo/issues/10",
+        )
+        assert link.target_id == 10
+        assert link.kind == TaskLinkKind.DUPLICATES
+        assert link.target_url == "https://github.com/org/repo/issues/10"
+
+    def test_issue_history_link_serialization_round_trip(self) -> None:
+        from models import IssueHistoryLink, TaskLinkKind
+
+        link = IssueHistoryLink(target_id=5, kind=TaskLinkKind.SUPERSEDES)
+        data = link.model_dump()
+        assert data == {"target_id": 5, "kind": "supersedes", "target_url": None}
+        restored = IssueHistoryLink.model_validate(data)
+        assert restored == link
+        assert restored.kind == TaskLinkKind.SUPERSEDES
+
+    def test_issue_history_entry_linked_issues_accepts_history_links(self) -> None:
+        from models import IssueHistoryEntry, IssueHistoryLink, TaskLinkKind
+
+        links = [
+            IssueHistoryLink(target_id=1, kind=TaskLinkKind.RELATES_TO),
+            IssueHistoryLink(target_id=2, kind=TaskLinkKind.DUPLICATES),
+        ]
+        entry = IssueHistoryEntry(issue_number=42, linked_issues=links)
+        assert len(entry.linked_issues) == 2
+        assert entry.linked_issues[0].target_id == 1
+        assert entry.linked_issues[1].kind == TaskLinkKind.DUPLICATES
+
+    def test_issue_history_entry_linked_issues_defaults_empty(self) -> None:
+        from models import IssueHistoryEntry
+
+        entry = IssueHistoryEntry(issue_number=42)
+        assert entry.linked_issues == []
+
     def test_lifetime_stats_outcome_counters_default_zero(self) -> None:
         stats = LifetimeStats()
         assert stats.total_outcomes_merged == 0

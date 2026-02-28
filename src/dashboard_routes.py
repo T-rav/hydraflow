@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import importlib
 import logging
+import time
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -33,6 +34,7 @@ from models import (
     IntentRequest,
     IntentResponse,
     IssueHistoryEntry,
+    IssueHistoryLink,
     IssueHistoryPR,
     IssueHistoryResponse,
     IssueOutcomeType,
@@ -279,6 +281,29 @@ def create_router(
             return []
         return snapshots[-limit:]
 
+    def _build_history_links(
+        raw: dict[int, dict[str, Any]] | Iterable[Any],
+    ) -> list[IssueHistoryLink]:
+        """Convert the internal linked_issues accumulator to a sorted list."""
+        if isinstance(raw, dict):
+            return sorted(
+                (
+                    IssueHistoryLink(
+                        target_id=int(v["target_id"]),
+                        kind=v.get("kind", "relates_to"),
+                        target_url=v.get("target_url"),
+                    )
+                    for v in raw.values()
+                    if isinstance(v, dict) and _coerce_int(v.get("target_id")) > 0
+                ),
+                key=lambda lnk: lnk.target_id,
+            )
+        # Legacy fallback: bare set of ints
+        return sorted(
+            (IssueHistoryLink(target_id=int(v)) for v in raw if _coerce_int(v) > 0),
+            key=lambda lnk: lnk.target_id,
+        )
+
     def _new_issue_history_entry(issue_number: int) -> dict[str, Any]:
         return {
             "issue_number": issue_number,
@@ -286,7 +311,7 @@ def create_router(
             "issue_url": "",
             "status": "unknown",
             "epic": "",
-            "linked_issues": set(),
+            "linked_issues": {},
             "prs": {},
             "session_ids": set(),
             "source_calls": {},
@@ -295,7 +320,6 @@ def create_router(
             "first_seen": None,
             "last_seen": None,
             "status_updated_at": None,
-            "outcome": None,
         }
 
     def _touch_issue_timestamps(row: dict[str, Any], timestamp: str | None) -> None:
@@ -333,7 +357,12 @@ def create_router(
                 epic = next((lbl for lbl in labels if "epic" in lbl.lower()), "")
                 row["epic"] = epic
             for link in parse_task_links(issue.body or ""):
-                row["linked_issues"].add(int(link.target_id))
+                tid = int(link.target_id)
+                row["linked_issues"][tid] = {
+                    "target_id": tid,
+                    "kind": str(link.kind),
+                    "target_url": link.target_url or None,
+                }
 
         await asyncio.gather(*(_fetch_and_apply(num) for num in issue_numbers))
 
@@ -645,14 +674,6 @@ def create_router(
         if not orch:
             return JSONResponse({"status": "no orchestrator"}, status_code=400)
 
-        # Post reason as comment before skipping
-        await pr_manager.post_comment(
-            issue_number,
-            f"**HITL Skip** — Operator skipped this issue.\n\n"
-            f"**Reason:** {body.reason}\n\n"
-            f"---\n*HydraFlow Dashboard*",
-        )
-
         # Read origin before clearing state
         origin = state.get_hitl_origin(issue_number)
 
@@ -675,6 +696,21 @@ def create_router(
             for lbl in config.all_pipeline_labels:
                 await pr_manager.remove_label(issue_number, lbl)
 
+        # Post reason as comment (best-effort, after skip succeeds)
+        try:
+            await pr_manager.post_comment(
+                issue_number,
+                f"**HITL Skip** — Operator skipped this issue.\n\n"
+                f"**Reason:** {body.reason}\n\n"
+                f"---\n*HydraFlow Dashboard*",
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to post skip comment for issue #%d",
+                issue_number,
+                exc_info=True,
+            )
+
         await event_bus.publish(
             HydraFlowEvent(
                 type=EventType.HITL_UPDATE,
@@ -695,14 +731,6 @@ def create_router(
         if not orch:
             return JSONResponse({"status": "no orchestrator"}, status_code=400)
 
-        # Post reason as comment before closing
-        await pr_manager.post_comment(
-            issue_number,
-            f"**HITL Close** — Operator closed this issue.\n\n"
-            f"**Reason:** {body.reason}\n\n"
-            f"---\n*HydraFlow Dashboard*",
-        )
-
         orch.skip_hitl_issue(issue_number)
         state.remove_hitl_origin(issue_number)
         state.remove_hitl_cause(issue_number)
@@ -714,6 +742,22 @@ def create_router(
             phase="hitl",
         )
         await pr_manager.close_issue(issue_number)
+
+        # Post reason as comment (best-effort, after close succeeds)
+        try:
+            await pr_manager.post_comment(
+                issue_number,
+                f"**HITL Close** — Operator closed this issue.\n\n"
+                f"**Reason:** {body.reason}\n\n"
+                f"---\n*HydraFlow Dashboard*",
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to post close comment for issue #%d",
+                issue_number,
+                exc_info=True,
+            )
+
         await event_bus.publish(
             HydraFlowEvent(
                 type=EventType.HITL_UPDATE,
@@ -1166,6 +1210,97 @@ def create_router(
         outcomes = state.get_all_outcomes()
         return JSONResponse({k: v.model_dump() for k, v in outcomes.items()})
 
+    # --- Issue history cache ---
+    # Cache the aggregated issue_rows + pr_to_issue for the unfiltered case.
+    # Persisted to disk so the first request after restart is fast.
+    # Invalidated when the event count or telemetry file changes.
+    _history_cache_file = config.data_path("metrics", "history_cache.json")
+    _HISTORY_CACHE_TTL = 30  # seconds
+
+    _history_cache: dict[str, Any] = {
+        "event_count": -1,
+        "telemetry_mtime": 0.0,
+        "issue_rows": None,
+        "pr_to_issue": None,
+        "enriched_issues": set(),
+    }
+    _history_cache_ts: list[float] = [0.0]
+
+    def _save_history_cache() -> None:
+        """Persist in-memory history cache to disk."""
+        import json
+
+        rows = _history_cache.get("issue_rows")
+        if rows is None:
+            return
+        serialisable_rows: dict[str, Any] = {}
+        for k, v in rows.items():
+            entry = dict(v)
+            # Convert sets to lists for JSON serialisation.
+            entry["session_ids"] = sorted(entry.get("session_ids") or [])
+            serialisable_rows[str(k)] = entry
+        payload = {
+            "event_count": _history_cache.get("event_count", -1),
+            "telemetry_mtime": _history_cache.get("telemetry_mtime", 0.0),
+            "issue_rows": serialisable_rows,
+            "pr_to_issue": {
+                str(k): v for k, v in (_history_cache.get("pr_to_issue") or {}).items()
+            },
+            "enriched_issues": sorted(_history_cache.get("enriched_issues") or []),
+        }
+        try:
+            _history_cache_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp = _history_cache_file.with_suffix(".tmp")
+            tmp.write_text(json.dumps(payload))
+            tmp.replace(_history_cache_file)
+        except OSError:
+            logger.debug("Could not persist history cache", exc_info=True)
+
+    def _load_history_cache() -> None:
+        """Load persisted history cache from disk into memory."""
+        import json
+
+        if not _history_cache_file.is_file():
+            return
+        try:
+            raw = json.loads(_history_cache_file.read_text())
+        except (OSError, json.JSONDecodeError, ValueError):
+            logger.debug("Corrupt history cache, ignoring", exc_info=True)
+            return
+        if not isinstance(raw, dict) or "issue_rows" not in raw:
+            return
+        rows: dict[int, dict[str, Any]] = {}
+        for k, v in raw.get("issue_rows", {}).items():
+            if not isinstance(v, dict):
+                continue
+            entry = dict(v)
+            # Restore session_ids to a set.
+            entry["session_ids"] = set(entry.get("session_ids") or [])
+            # JSON keys are always strings — restore int keys for sub-dicts
+            # so enrichment lookups (which use int keys) don't create dupes.
+            if isinstance(entry.get("prs"), dict):
+                entry["prs"] = {int(pk): pv for pk, pv in entry["prs"].items()}
+            if isinstance(entry.get("linked_issues"), dict):
+                entry["linked_issues"] = {
+                    int(lk): lv for lk, lv in entry["linked_issues"].items()
+                }
+            rows[int(k)] = entry
+        _history_cache["issue_rows"] = rows
+        _history_cache["pr_to_issue"] = {
+            int(k): int(v) for k, v in raw.get("pr_to_issue", {}).items()
+        }
+        _history_cache["event_count"] = raw.get("event_count", -1)
+        _history_cache["telemetry_mtime"] = raw.get("telemetry_mtime", 0.0)
+        _history_cache["enriched_issues"] = set(raw.get("enriched_issues") or [])
+        # Set timestamp so TTL check works (treat as "just loaded").
+        _history_cache_ts[0] = time.monotonic()
+
+    # Warm the in-memory cache from disk on startup.
+    try:
+        _load_history_cache()
+    except Exception:
+        logger.debug("History cache warm-up failed", exc_info=True)
+
     @router.get("/api/issues/history")
     async def get_issue_history(
         since: str | None = None,
@@ -1182,19 +1317,42 @@ def create_router(
         clamped_limit = max(1, min(limit, 1000))
 
         telemetry = PromptTelemetry(config)
-        issue_rows: dict[int, dict[str, Any]] = {}
         all_events = event_bus.get_history()
-        pr_to_issue: dict[int, int] = {}
 
-        # Build PR→issue mapping from all in-memory events first so merge events
-        # in the selected range still resolve when PR creation happened earlier.
-        for event in all_events:
-            if event.type != EventType.PR_CREATED:
-                continue
-            mapped_issue = _event_issue_number(event.data)
-            mapped_pr = _coerce_int(event.data.get("pr"))
-            if mapped_issue is not None and mapped_issue > 0 and mapped_pr > 0:
-                pr_to_issue[mapped_pr] = mapped_issue
+        # Check if we can reuse cached aggregation for the unfiltered case.
+        use_unfiltered = since_dt is None and until_dt is None
+        event_count = len(all_events)
+        telem_mtime = telemetry.get_mtime()
+        now = time.monotonic()
+        cache_hit = (
+            use_unfiltered
+            and _history_cache["issue_rows"] is not None
+            and _history_cache["event_count"] == event_count
+            and _history_cache["telemetry_mtime"] == telem_mtime
+            and (now - _history_cache_ts[0]) < _HISTORY_CACHE_TTL
+        )
+
+        if cache_hit:
+            import copy
+
+            issue_rows: dict[int, dict[str, Any]] = copy.deepcopy(
+                _history_cache["issue_rows"]
+            )
+            pr_to_issue: dict[int, int] = dict(_history_cache["pr_to_issue"])
+        else:
+            issue_rows = {}
+            pr_to_issue = {}
+
+            # Build PR→issue mapping from all in-memory events first so merge
+            # events in the selected range still resolve when PR creation
+            # happened earlier.
+            for event in all_events:
+                if event.type != EventType.PR_CREATED:
+                    continue
+                mapped_issue = _event_issue_number(event.data)
+                mapped_pr = _coerce_int(event.data.get("pr"))
+                if mapped_issue is not None and mapped_issue > 0 and mapped_pr > 0:
+                    pr_to_issue[mapped_pr] = mapped_issue
 
         use_issue_rollups = (
             since_dt is None
@@ -1202,7 +1360,9 @@ def create_router(
             and not query_text
             and not requested_status
         )
-        if use_issue_rollups:
+        if cache_hit:
+            pass  # aggregation already done
+        elif use_issue_rollups:
             for issue_number, counters in telemetry.get_issue_totals().items():
                 row = issue_rows.setdefault(
                     issue_number, _new_issue_history_entry(issue_number)
@@ -1287,80 +1447,92 @@ def create_router(
                         }
                     pr_to_issue.setdefault(pr_number, issue_number)
 
-        for event in all_events:
-            timestamp = event.timestamp
-            if not _is_timestamp_in_range(timestamp, since_dt, until_dt):
-                continue
+        if not cache_hit:
+            for event in all_events:
+                timestamp = event.timestamp
+                if not _is_timestamp_in_range(timestamp, since_dt, until_dt):
+                    continue
 
-            issue_number = _event_issue_number(event.data)
-            if issue_number is None and event.type == EventType.MERGE_UPDATE:
-                pr_num = _coerce_int(event.data.get("pr"))
-                issue_number = pr_to_issue.get(pr_num)
+                issue_number = _event_issue_number(event.data)
+                if issue_number is None and event.type == EventType.MERGE_UPDATE:
+                    pr_num = _coerce_int(event.data.get("pr"))
+                    issue_number = pr_to_issue.get(pr_num)
 
-            if issue_number is None or issue_number <= 0:
-                continue
+                if issue_number is None or issue_number <= 0:
+                    continue
 
-            row = issue_rows.setdefault(
-                issue_number, _new_issue_history_entry(issue_number)
-            )
-            _touch_issue_timestamps(row, timestamp)
-
-            maybe_title = str(event.data.get("title", "")).strip()
-            if maybe_title:
-                row["title"] = maybe_title
-
-            maybe_url = str(event.data.get("url", "")).strip()
-            if maybe_url.startswith(("http://", "https://")):
-                row["issue_url"] = maybe_url
-
-            if event.type == EventType.ISSUE_CREATED:
-                labels = event.data.get("labels", [])
-                if isinstance(labels, list) and not row.get("epic"):
-                    for lbl in labels:
-                        s = str(lbl).strip()
-                        if s and "epic" in s.lower():
-                            row["epic"] = s
-                            break
-
-            if event.type == EventType.PR_CREATED:
-                pr_number = _coerce_int(event.data.get("pr"))
-                if pr_number > 0:
-                    pr_to_issue[pr_number] = issue_number
-                    prs = row["prs"]
-                    payload = prs.get(
-                        pr_number,
-                        {"number": pr_number, "url": "", "merged": False},
-                    )
-                    url = str(event.data.get("url", "")).strip()
-                    if url.startswith(("http://", "https://")):
-                        payload["url"] = url
-                    prs[pr_number] = payload
-
-            if event.type == EventType.MERGE_UPDATE:
-                pr_number = _coerce_int(event.data.get("pr"))
-                if pr_number > 0:
-                    prs = row["prs"]
-                    payload = prs.get(
-                        pr_number,
-                        {"number": pr_number, "url": "", "merged": False},
-                    )
-                    if str(event.data.get("status", "")).lower() == "merged":
-                        payload["merged"] = True
-                    prs[pr_number] = payload
-
-            normalised = _normalise_event_status(event.type, event.data)
-            if normalised:
-                current = str(row.get("status", "unknown"))
-                current_ts = (
-                    row.get("status_updated_at")
-                    if isinstance(row.get("status_updated_at"), str)
-                    else None
+                row = issue_rows.setdefault(
+                    issue_number, _new_issue_history_entry(issue_number)
                 )
-                if _status_sort_key(normalised, timestamp) >= _status_sort_key(
-                    current, current_ts
-                ):
-                    row["status"] = normalised
-                    row["status_updated_at"] = timestamp
+                _touch_issue_timestamps(row, timestamp)
+
+                maybe_title = str(event.data.get("title", "")).strip()
+                if maybe_title:
+                    row["title"] = maybe_title
+
+                maybe_url = str(event.data.get("url", "")).strip()
+                if maybe_url.startswith(("http://", "https://")):
+                    row["issue_url"] = maybe_url
+
+                if event.type == EventType.ISSUE_CREATED:
+                    labels = event.data.get("labels", [])
+                    if isinstance(labels, list) and not row.get("epic"):
+                        for lbl in labels:
+                            s = str(lbl).strip()
+                            if s and "epic" in s.lower():
+                                row["epic"] = s
+                                break
+
+                if event.type == EventType.PR_CREATED:
+                    pr_number = _coerce_int(event.data.get("pr"))
+                    if pr_number > 0:
+                        pr_to_issue[pr_number] = issue_number
+                        prs = row["prs"]
+                        payload = prs.get(
+                            pr_number,
+                            {"number": pr_number, "url": "", "merged": False},
+                        )
+                        url = str(event.data.get("url", "")).strip()
+                        if url.startswith(("http://", "https://")):
+                            payload["url"] = url
+                        prs[pr_number] = payload
+
+                if event.type == EventType.MERGE_UPDATE:
+                    pr_number = _coerce_int(event.data.get("pr"))
+                    if pr_number > 0:
+                        prs = row["prs"]
+                        payload = prs.get(
+                            pr_number,
+                            {"number": pr_number, "url": "", "merged": False},
+                        )
+                        if str(event.data.get("status", "")).lower() == "merged":
+                            payload["merged"] = True
+                        prs[pr_number] = payload
+
+                normalised = _normalise_event_status(event.type, event.data)
+                if normalised:
+                    current = str(row.get("status", "unknown"))
+                    current_ts = (
+                        row.get("status_updated_at")
+                        if isinstance(row.get("status_updated_at"), str)
+                        else None
+                    )
+                    if _status_sort_key(normalised, timestamp) >= _status_sort_key(
+                        current, current_ts
+                    ):
+                        row["status"] = normalised
+                        row["status_updated_at"] = timestamp
+
+            # Store in cache if this was an unfiltered aggregation.
+            if use_unfiltered:
+                import copy
+
+                _history_cache["issue_rows"] = copy.deepcopy(issue_rows)
+                _history_cache["pr_to_issue"] = dict(pr_to_issue)
+                _history_cache["event_count"] = event_count
+                _history_cache["telemetry_mtime"] = telem_mtime
+                _history_cache_ts[0] = now
+                _save_history_cache()
 
         items: list[IssueHistoryEntry] = []
         for row in issue_rows.values():
@@ -1377,9 +1549,7 @@ def create_router(
             ):
                 continue
 
-            linked_issues = sorted(
-                int(v) for v in row.get("linked_issues", set()) if _coerce_int(v) > 0
-            )
+            linked_issues = _build_history_links(row.get("linked_issues", {}))
             prs_map = row.get("prs", {})
             if not isinstance(prs_map, dict):
                 prs_map = {}
@@ -1422,13 +1592,16 @@ def create_router(
             )
 
         # Keep API fast by enriching only visible rows and only when needed.
+        # Skip issues already enriched in a previous request.
+        already_enriched: set[int] = _history_cache.get("enriched_issues", set())
         issue_lookup = {
             item.issue_number: issue_rows[item.issue_number] for item in items
         }
         enrich_candidates = [
             item.issue_number
             for item in items
-            if (
+            if item.issue_number not in already_enriched
+            and (
                 not item.issue_url
                 or item.title.startswith("Issue #")
                 or (not item.epic and not item.linked_issues)
@@ -1438,6 +1611,15 @@ def create_router(
             await _enrich_issue_history_with_github(
                 {k: issue_lookup[k] for k in enrich_candidates}
             )
+            already_enriched.update(enrich_candidates)
+            _history_cache["enriched_issues"] = already_enriched
+            # Update cached issue_rows with enrichment data so future cache
+            # hits include titles/epics/linked_issues from GitHub.
+            if use_unfiltered and _history_cache["issue_rows"] is not None:
+                import copy
+
+                _history_cache["issue_rows"] = copy.deepcopy(issue_rows)
+                _save_history_cache()
             items = []
             for row in issue_rows.values():
                 row_status = str(row.get("status", "unknown")).lower()
@@ -1451,11 +1633,7 @@ def create_router(
                     and query_text not in str(issue_number)
                 ):
                     continue
-                linked_issues = sorted(
-                    int(v)
-                    for v in row.get("linked_issues", set())
-                    if _coerce_int(v) > 0
-                )
+                linked_issues = _build_history_links(row.get("linked_issues", {}))
                 prs_map = row.get("prs", {})
                 if not isinstance(prs_map, dict):
                     prs_map = {}

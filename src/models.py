@@ -245,6 +245,16 @@ class PlanResult(BaseModel):
     actionability_rank: str = "unknown"
     retry_attempted: bool = False
     already_satisfied: bool = False
+    epic_number: int = 0
+
+
+class EpicGapReview(BaseModel):
+    """Result of a gap review across an epic's child plans."""
+
+    epic_number: int
+    findings: str = ""
+    replan_issues: list[int] = Field(default_factory=list)
+    guidance: str = ""
 
 
 # --- Delta Verification ---
@@ -631,6 +641,7 @@ class LifetimeStats(BaseModel):
     total_outcomes_hitl_closed: int = 0
     total_outcomes_hitl_skipped: int = 0
     total_outcomes_failed: int = 0
+    total_outcomes_manual_close: int = 0
     # Threshold proposals already filed (avoid re-filing)
     fired_thresholds: list[str] = Field(default_factory=list)
 
@@ -708,6 +719,8 @@ class PipelineIssue(BaseModel):
     title: str = ""
     url: HttpUrl = ""
     status: PipelineIssueStatus = PipelineIssueStatus.QUEUED
+    epic_number: int = 0
+    is_epic_child: bool = False
 
 
 class PipelineSnapshot(BaseModel):
@@ -842,6 +855,7 @@ class TranscriptEventData(TypedDict, total=False):
 
     issue: int
     pr: int
+    epic: int
     source: str
 
 
@@ -993,6 +1007,8 @@ class PipelineSnapshotEntry(TypedDict):
     title: str
     url: str
     status: str
+    epic_number: NotRequired[int]
+    is_epic_child: NotRequired[bool]
 
 
 class LabelCounts(TypedDict):
@@ -1212,6 +1228,14 @@ class MetricsResponse(BaseModel):
     inference_session: dict[str, int] = Field(default_factory=dict)
 
 
+class IssueHistoryLink(BaseModel):
+    """A link from one issue to another, preserving relationship kind."""
+
+    target_id: int
+    kind: TaskLinkKind = TaskLinkKind.RELATES_TO
+    target_url: str | None = None
+
+
 class IssueHistoryPR(BaseModel):
     """A PR linked to an issue in history views."""
 
@@ -1228,7 +1252,7 @@ class IssueHistoryEntry(BaseModel):
     issue_url: HttpUrl = ""
     status: str = "unknown"
     epic: str = ""
-    linked_issues: list[int] = Field(default_factory=list)
+    linked_issues: list[IssueHistoryLink] = Field(default_factory=list)
     prs: list[IssueHistoryPR] = Field(default_factory=list)
     session_ids: list[str] = Field(default_factory=list)
     source_calls: dict[str, int] = Field(default_factory=dict)

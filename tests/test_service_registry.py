@@ -70,6 +70,11 @@ class TestBuildServices:
         assert registry.agents._runner is registry.subprocess_runner
         assert registry.planners._runner is registry.subprocess_runner
         assert registry.reviewers._runner is registry.subprocess_runner
+        # Verify the runner type matches the expected execution mode
+        from docker_runner import get_docker_runner
+
+        runner = get_docker_runner(config)
+        assert type(registry.subprocess_runner) is type(runner)
 
     def test_store_uses_fetcher(self, config: HydraFlowConfig) -> None:
         """IssueStore should be initialized with the fetcher."""

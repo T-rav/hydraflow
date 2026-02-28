@@ -746,6 +746,7 @@ class TestRunPrecheckContext:
         assert call_kwargs["cmd"] == ["cmd"]
         assert call_kwargs["prompt"] == "prompt"
         assert call_kwargs["event_data"]["source"] == "ac_precheck"
+        assert call_kwargs["gh_token"] == cfg.gh_token
 
     @pytest.mark.asyncio
     async def test_execute_debug_closure_uses_ac_precheck_debug_source(
@@ -785,3 +786,4 @@ class TestRunPrecheckContext:
 
         mock_stream.assert_called_once()
         assert mock_stream.call_args[1]["event_data"]["source"] == "ac_precheck_debug"
+        assert mock_stream.call_args[1]["gh_token"] == cfg.gh_token

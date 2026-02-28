@@ -310,3 +310,27 @@ class TestPromptTelemetry:
         inf_file = config.data_path("metrics", "prompt", "inferences.jsonl")
         row = json.loads(inf_file.read_text().strip())
         assert row["pruned_chars_total"] == 500
+
+    def test_get_mtime_returns_zero_when_no_file(self, tmp_path):
+        config = ConfigFactory.create(repo_root=tmp_path)
+        telemetry = PromptTelemetry(config)
+        assert telemetry.get_mtime() == 0.0
+
+    def test_get_mtime_returns_positive_after_record(self, tmp_path):
+        config = ConfigFactory.create(repo_root=tmp_path)
+        telemetry = PromptTelemetry(config)
+        telemetry.record(
+            source="planner",
+            tool="claude",
+            model="opus",
+            issue_number=1,
+            pr_number=0,
+            session_id="s1",
+            prompt_chars=10,
+            transcript_chars=5,
+            duration_seconds=0.1,
+            success=True,
+            stats={},
+        )
+        mtime = telemetry.get_mtime()
+        assert mtime > 0.0

@@ -336,6 +336,7 @@ class StateTracker:
             IssueOutcomeType.HITL_CLOSED: "total_outcomes_hitl_closed",
             IssueOutcomeType.HITL_SKIPPED: "total_outcomes_hitl_skipped",
             IssueOutcomeType.FAILED: "total_outcomes_failed",
+            IssueOutcomeType.MANUAL_CLOSE: "total_outcomes_manual_close",
         }
 
         key = str(issue_number)
@@ -367,10 +368,14 @@ class StateTracker:
         return self._data.issue_outcomes.get(str(issue_number))
 
     def get_all_outcomes(self) -> dict[str, IssueOutcome]:
-        """Return all recorded issue outcomes."""
-        return dict(self._data.issue_outcomes)
+        """Return all recorded issue outcomes (deep copy)."""
+        return {
+            k: v.model_copy(deep=True) for k, v in self._data.issue_outcomes.items()
+        }
 
     # --- hook failure tracking ---
+
+    _MAX_HOOK_FAILURES = 500
 
     def record_hook_failure(
         self, issue_number: int, hook_name: str, error: str
@@ -386,11 +391,19 @@ class StateTracker:
                 timestamp=datetime.now(UTC).isoformat(),
             )
         )
+        # Cap at _MAX_HOOK_FAILURES per issue, trimming oldest
+        if len(self._data.hook_failures[key]) > self._MAX_HOOK_FAILURES:
+            self._data.hook_failures[key] = self._data.hook_failures[key][
+                -self._MAX_HOOK_FAILURES :
+            ]
         self.save()
 
     def get_hook_failures(self, issue_number: int) -> list[HookFailureRecord]:
-        """Return hook failure records for *issue_number*."""
-        return list(self._data.hook_failures.get(str(issue_number), []))
+        """Return hook failure records for *issue_number* (deep copy)."""
+        return [
+            f.model_copy(deep=True)
+            for f in self._data.hook_failures.get(str(issue_number), [])
+        ]
 
     # --- reset ---
 
