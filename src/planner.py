@@ -488,13 +488,30 @@ Use only label `{find_label}`.
 
 ## Already Satisfied
 
-If requirements are already fully met (no changes needed), do NOT produce a plan. Output:
+IMPORTANT: This should be used VERY RARELY. Only if the EXACT feature described in the
+issue is ALREADY fully implemented, tested, and working. You must be able to prove it.
+
+Before marking as already satisfied, verify ALL of the following:
+1. The specific functions/classes requested in the issue ALREADY EXIST (cite exact file:line)
+2. Existing tests ALREADY COVER the described behavior (cite test names)
+3. The acceptance criteria in the issue are ALL already met by existing code
+
+DO NOT mark as already satisfied if:
+- The feature is similar to something that exists but not identical
+- The infrastructure exists but the specific feature does not
+- Related code exists but the issue asks for NEW functionality
+- You are unsure — when in doubt, produce a plan
+
+If ALL verification checks above pass, output:
 
 ALREADY_SATISFIED_START
-<explanation of why no changes are needed, referencing specific files and code>
+Evidence:
+- Feature: <exact function/class name at file:line that implements this>
+- Tests: <exact test names that verify this behavior>
+- Criteria: <how each acceptance criterion is already met>
 ALREADY_SATISFIED_END
 
-This closes the issue automatically. Use only when you are certain.
+This closes the issue automatically. False positives waste significant human time.
 
 {MEMORY_SUGGESTION_PROMPT.format(context="planning")}"""
         stats = {

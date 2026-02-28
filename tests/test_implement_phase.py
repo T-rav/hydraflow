@@ -963,18 +963,16 @@ class TestWorkerResultMetaPersistence:
 
 
 # ---------------------------------------------------------------------------
-# Zero-commit already-satisfied handling
+# Zero-commit escalation handling
 # ---------------------------------------------------------------------------
 
 
-class TestAlreadySatisfiedZeroCommit:
-    """Tests that zero-commit failures close the issue as already satisfied."""
+class TestZeroCommitEscalation:
+    """Tests that zero-commit failures escalate to HITL instead of closing."""
 
     @pytest.mark.asyncio
-    async def test_zero_commit_closes_issue_with_dup_label(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """When agent returns zero commits, issue should be closed with dup label."""
+    async def test_zero_commit_escalates_to_hitl(self, config: HydraFlowConfig) -> None:
+        """When agent returns zero commits, issue should escalate to HITL."""
         issue = TaskFactory.create()
 
         async def zero_commit_agent(
@@ -994,26 +992,21 @@ class TestAlreadySatisfiedZeroCommit:
             )
 
         phase, _, mock_prs = _make_phase(config, [issue], agent_run=zero_commit_agent)
-        mock_prs.close_task = AsyncMock()
 
         results, _ = await phase.run_batch()
 
-        # dup labels should be added
-        add_calls = [c.args for c in mock_prs.add_labels.call_args_list]
-        assert any(config.dup_label == c[1] for c in add_calls)
-
-        # Comment should be posted with "Already Satisfied"
+        # Comment should be posted about zero commits
         comment_calls = [c.args for c in mock_prs.post_comment.call_args_list]
-        assert any("Already Satisfied" in c[1] for c in comment_calls)
+        assert any("Zero Commits" in c[1] for c in comment_calls)
 
-        # Issue should be closed
-        mock_prs.close_task.assert_awaited_once_with(42)
+        # Issue should be transitioned to HITL
+        mock_prs.transition.assert_awaited_once_with(42, "hitl")
 
     @pytest.mark.asyncio
-    async def test_zero_commit_marks_issue_already_satisfied(
+    async def test_zero_commit_marks_issue_failed(
         self, config: HydraFlowConfig
     ) -> None:
-        """When zero-commit detected, issue state should be 'already_satisfied'."""
+        """When zero-commit detected, issue state should be 'failed'."""
         issue = TaskFactory.create()
 
         async def zero_commit_agent(
@@ -1033,52 +1026,16 @@ class TestAlreadySatisfiedZeroCommit:
             )
 
         phase, _, mock_prs = _make_phase(config, [issue], agent_run=zero_commit_agent)
-        mock_prs.close_task = AsyncMock()
 
         await phase.run_batch()
 
-        assert (
-            phase._state.to_dict()["processed_issues"].get(str(42))
-            == "already_satisfied"
-        )
+        assert phase._state.to_dict()["processed_issues"].get(str(42)) == "failed"
 
     @pytest.mark.asyncio
-    async def test_zero_commit_removes_ready_labels(
+    async def test_nonzero_commits_not_escalated_as_zero_commit(
         self, config: HydraFlowConfig
     ) -> None:
-        """When zero-commit detected, ready labels should be removed."""
-        issue = TaskFactory.create()
-
-        async def zero_commit_agent(
-            issue: Task,
-            wt_path: Path,
-            branch: str,
-            worker_id: int = 0,
-            review_feedback: str = "",
-        ) -> WorkerResult:
-            return WorkerResult(
-                issue_number=issue.id,
-                branch=branch,
-                success=False,
-                error="No commits found on branch",
-                commits=0,
-                worktree_path=str(wt_path),
-            )
-
-        phase, _, mock_prs = _make_phase(config, [issue], agent_run=zero_commit_agent)
-        mock_prs.close_task = AsyncMock()
-
-        await phase.run_batch()
-
-        remove_calls = [c.args for c in mock_prs.remove_label.call_args_list]
-        for lbl in config.ready_label:
-            assert (42, lbl) in remove_calls
-
-    @pytest.mark.asyncio
-    async def test_nonzero_commits_not_treated_as_already_satisfied(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """A failed result with commits > 0 should NOT be treated as already satisfied."""
+        """A failed result with commits > 0 should NOT be treated as zero-commit."""
         issue = TaskFactory.create()
 
         async def failing_with_commits(
@@ -1503,8 +1460,8 @@ class TestHandleImplementationResult:
     """Unit tests for the _handle_implementation_result helper."""
 
     @pytest.mark.asyncio
-    async def test_zero_commit_closes_issue(self, config: HydraFlowConfig) -> None:
-        """Zero-commit failure should close issue as already satisfied."""
+    async def test_zero_commit_escalates_to_hitl(self, config: HydraFlowConfig) -> None:
+        """Zero-commit failure should escalate to HITL, not close as satisfied."""
         issue = TaskFactory.create()
         result = WorkerResult(
             issue_number=42,
@@ -1516,15 +1473,11 @@ class TestHandleImplementationResult:
         )
 
         phase, _, mock_prs = _make_phase(config, [issue])
-        mock_prs.close_task = AsyncMock()
 
         returned = await phase._handle_implementation_result(issue, result, False)
 
-        assert (
-            phase._state.to_dict()["processed_issues"].get(str(42))
-            == "already_satisfied"
-        )
-        mock_prs.close_task.assert_awaited_once_with(42)
+        assert phase._state.to_dict()["processed_issues"].get(str(42)) == "failed"
+        mock_prs.transition.assert_awaited_once_with(42, "hitl")
         assert returned is result
 
     @pytest.mark.asyncio
@@ -1571,10 +1524,10 @@ class TestHandleImplementationResult:
         mock_prs.transition.assert_awaited_once_with(42, "review", pr_number=101)
 
     @pytest.mark.asyncio
-    async def test_success_without_pr_and_no_branch_diff_closes_issue(
+    async def test_success_without_pr_and_no_branch_diff_escalates_to_hitl(
         self, config: HydraFlowConfig
     ) -> None:
-        """No PR + no branch diff should close issue as already satisfied."""
+        """No PR + no branch diff should escalate to HITL, not close as satisfied."""
         issue = TaskFactory.create()
         result = WorkerResultFactory.create(
             issue_number=42,
@@ -1588,15 +1541,10 @@ class TestHandleImplementationResult:
         mock_prs.find_open_pr_for_branch.return_value = None
         mock_prs.branch_has_diff_from_main.return_value = False
 
-        returned = await phase._handle_implementation_result(issue, result, False)
+        await phase._handle_implementation_result(issue, result, False)
 
-        assert returned.success is True
-        assert (
-            phase._state.to_dict()["processed_issues"].get(str(42))
-            == "already_satisfied"
-        )
-        mock_prs.transition.assert_not_awaited()
-        mock_prs.close_task.assert_awaited_once_with(42)
+        assert phase._state.to_dict()["processed_issues"].get(str(42)) == "failed"
+        mock_prs.transition.assert_awaited_once_with(42, "hitl")
 
     @pytest.mark.asyncio
     async def test_success_without_pr_and_with_diff_stays_ready_as_failed(
