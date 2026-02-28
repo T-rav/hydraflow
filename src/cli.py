@@ -676,9 +676,9 @@ def build_config(args: argparse.Namespace) -> HydraFlowConfig:
 
 
 async def _run_prep(config: HydraFlowConfig) -> bool:
-    """Create HydraFlow lifecycle labels on the target repo.
+    """Sync HydraFlow lifecycle labels and run the repo audit.
 
-    Returns ``True`` if all labels were created/updated successfully,
+    Returns ``True`` if label sync had no failures,
     ``False`` if any labels failed.
     """
     from prep import RepoAuditor, ensure_labels  # noqa: PLC0415
