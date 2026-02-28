@@ -46,7 +46,6 @@ function sanitizeClonedDocumentForHtml2Canvas(clonedDoc) {
     })
   })
 }
-
 async function captureDashboardScreenshot(root, html2canvas) {
   if (!root) return null
   const STYLE_PROPS = [
