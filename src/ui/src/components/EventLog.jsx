@@ -50,7 +50,7 @@ export function eventMessage(type, data) {
   return summary
 }
 
-export function EventLog({ events }) {
+export function EventLog({ events = [] }) {
   // Filter out noisy transcript_line events from the log
   const filtered = events.filter(e => e.type !== 'transcript_line')
 

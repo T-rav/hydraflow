@@ -221,6 +221,7 @@ const styles = {
   },
   eventLogColumn: {
     width: 320,
+    minWidth: 320,
     flexShrink: 0,
     display: 'flex',
     flexDirection: 'column',
