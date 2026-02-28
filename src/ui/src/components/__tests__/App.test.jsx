@@ -195,7 +195,7 @@ describe('EventLog side panel', () => {
 
     const panel = screen.getByTestId('event-log-panel')
     expect(panel).toBeInTheDocument()
-    expect(within(panel).getByText('merge update')).toBeInTheDocument()
+    expect(within(panel).getByText('[review]')).toBeInTheDocument()
     expect(within(panel).getByText('PR #42 merged')).toBeInTheDocument()
   })
 
