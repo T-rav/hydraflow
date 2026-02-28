@@ -544,6 +544,11 @@ class HydraFlowConfig(BaseModel):
         description="When True, memory suggestions skip HITL and go directly to the sync queue",
     )
 
+    memory_prune_stale_items: bool = Field(
+        default=True,
+        description="Remove local memory item files whose source issue is no longer active",
+    )
+
     # Observability context injection
     inject_runtime_logs: bool = Field(
         default=False,

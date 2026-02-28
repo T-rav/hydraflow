@@ -1100,6 +1100,8 @@ class MemorySyncResult(TypedDict):
     item_count: int
     compacted: bool
     digest_chars: int
+    pruned: NotRequired[int]
+    issues_closed: NotRequired[int]
 
 
 class UnstickResult(TypedDict):
