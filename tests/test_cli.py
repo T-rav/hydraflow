@@ -14,8 +14,6 @@ import pytest
 import cli as cli_module
 from cli import (
     _best_model_for_tool,
-    _build_prep_agent_prompt,
-    _build_prep_failure_error_message,
     _choose_prep_tool,
     _coverage_validation_roots,
     _detect_available_prep_tools,
@@ -24,7 +22,6 @@ from cli import (
     _extract_coverage_percent,
     _load_prep_coverage_floor,
     _parse_label_arg,
-    _parse_prep_result,
     _prep_coverage_has_measurement,
     _project_has_test_signal,
     _run_main,
@@ -65,66 +62,6 @@ class TestParseLabelArg:
 
     def test_empty_string_returns_empty_list(self) -> None:
         assert _parse_label_arg("") == []
-
-
-class TestPrepFailureErrorMessage:
-    """Tests for prep failure message classification."""
-
-    def test_classifies_edit_before_read_tool_error(self) -> None:
-        transcript = (
-            "some output\n"
-            "<tool_use_error>File has not been read yet. Read it first before writing to it.</tool_use_error>"
-        )
-        msg = _build_prep_failure_error_message(
-            transcript, ".hydraflow/prep/runs/20260224/a.log"
-        )
-        assert "tool precondition failure" in msg
-        assert "Transcript path: .hydraflow/prep/runs/20260224/a.log" in msg
-
-    def test_classifies_turn_limit_error(self) -> None:
-        transcript = "agent stopped due to max turns reached"
-        msg = _build_prep_failure_error_message(
-            transcript, ".hydraflow/prep/runs/20260224/b.log"
-        )
-        assert "turn limit" in msg
-
-
-class TestPrepResultParsing:
-    """Tests for structured prep result parsing."""
-
-    def test_prefers_json_success(self) -> None:
-        success, mode = _parse_prep_result(
-            '... PREP_RESULT_JSON: {"prep_status":"SUCCESS","summary":"ok"}'
-        )
-        assert success is True
-        assert mode == "json"
-
-    def test_json_failed_returns_false(self) -> None:
-        success, mode = _parse_prep_result(
-            '... PREP_RESULT_JSON: {"prep_status":"FAILED","summary":"broken"}'
-        )
-        assert success is False
-        assert mode == "json"
-
-    def test_falls_back_to_legacy_status(self) -> None:
-        success, mode = _parse_prep_result("PREP_STATUS: SUCCESS")
-        assert success is True
-        assert mode == "legacy"
-
-
-class TestPrepAgentPrompt:
-    """Tests for prep prompt safety constraints."""
-
-    def test_prompt_includes_scope_and_parallel_fanout_constraints(self) -> None:
-        prompt = _build_prep_agent_prompt(
-            stack="node",
-            failures=[("prep-workflow-agent", ["claude", "opus"], "failed")],
-            issue_filenames=["auto-fix-prep.md"],
-        )
-        assert "fan out work to sub-agents in parallel" in prompt
-        assert "max 4 concurrent tracks" in prompt
-        assert "one file at a time" in prompt
-        assert "Do not refactor unrelated application source" in prompt
 
 
 class TestPrepModelSelection:
