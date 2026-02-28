@@ -61,6 +61,7 @@ function AppContent() {
     currentSessionId,
     stageStatus,
     requestChanges, resetSession,
+    creditsPausedUntil,
   } = useHydraFlow()
   const [activeTab, setActiveTab] = useState('issues')
   const [expandedStages, setExpandedStages] = useState({})
@@ -103,6 +104,7 @@ function AppContent() {
       <Header
         connected={connected}
         orchestratorStatus={orchestratorStatus}
+        creditsPausedUntil={creditsPausedUntil}
         onStart={handleStart}
         onStop={handleStop}
       />

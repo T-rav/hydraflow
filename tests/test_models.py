@@ -1280,6 +1280,19 @@ class TestControlStatusResponse:
         assert data["config"]["batch_size"] == 15
         assert data["config"]["model"] == "sonnet"
 
+    def test_credits_paused_until_default_none(self) -> None:
+        resp = ControlStatusResponse()
+        assert resp.credits_paused_until is None
+
+    def test_credits_paused_until_set(self) -> None:
+        resp = ControlStatusResponse(
+            status="credits_paused",
+            credits_paused_until="2026-02-28T15:30:00+00:00",
+        )
+        assert resp.credits_paused_until == "2026-02-28T15:30:00+00:00"
+        data = resp.model_dump()
+        assert data["credits_paused_until"] == "2026-02-28T15:30:00+00:00"
+
 
 # ---------------------------------------------------------------------------
 # LifetimeStats

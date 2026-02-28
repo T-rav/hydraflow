@@ -860,8 +860,14 @@ def create_router(
         if update_result is not None:
             latest_version = update_result.latest_version or ""
             update_available = update_result.update_available
+        credits_until = (
+            orch.credits_paused_until.isoformat()
+            if orch and orch.credits_paused_until
+            else None
+        )
         response = ControlStatusResponse(
             status=status,
+            credits_paused_until=credits_until,
             config=ControlStatusConfig(
                 app_version=get_app_version(),
                 latest_version=latest_version,

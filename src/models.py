@@ -833,6 +833,7 @@ class ControlStatusResponse(BaseModel):
     """Response for GET /api/control/status."""
 
     status: str = "idle"
+    credits_paused_until: str | None = None
     config: ControlStatusConfig = Field(default_factory=ControlStatusConfig)
 
 

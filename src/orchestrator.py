@@ -178,6 +178,16 @@ class HydraFlowOrchestrator:
         )
 
     @property
+    def credits_paused_until(self) -> datetime | None:
+        """The UTC datetime when credit pause ends, or ``None``."""
+        if (
+            self._credits_paused_until is not None
+            and self._credits_paused_until > datetime.now(UTC)
+        ):
+            return self._credits_paused_until
+        return None
+
+    @property
     def run_status(self) -> str:
         """Return the current lifecycle status: idle, running, stopping, auth_failed, credits_paused, or done."""
         if self._auth_failed:
@@ -368,7 +378,14 @@ class HydraFlowOrchestrator:
         await self._bus.publish(
             HydraFlowEvent(
                 type=EventType.ORCHESTRATOR_STATUS,
-                data={"status": self.run_status},
+                data={
+                    "status": self.run_status,
+                    **(
+                        {"credits_paused_until": self.credits_paused_until.isoformat()}
+                        if self.credits_paused_until
+                        else {}
+                    ),
+                },
             )
         )
 
