@@ -199,6 +199,49 @@ class TestCreate:
             await manager.create(issue_number=7, branch="agent/issue-7")
 
     @pytest.mark.asyncio
+    async def test_create_retries_on_origin_main_ref_lock_race(
+        self, config, tmp_path: Path
+    ) -> None:
+        """create should retry when git fetch hits origin/main ref-lock races."""
+        manager = WorktreeManager(config)
+        config.worktree_base.mkdir(parents=True, exist_ok=True)
+
+        race_proc = make_proc(
+            returncode=1,
+            stderr=(
+                b"error: cannot lock ref 'refs/remotes/origin/main': is at aaaaaaaa "
+                b"but expected bbbbbbbb\n"
+                b"! bbbbbbbb..aaaaaaaa main -> origin/main (unable to update local ref)"
+            ),
+        )
+        success_proc = make_proc(returncode=0)
+
+        call_count = 0
+
+        async def fake_exec(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            # First fetch races; second fetch succeeds; rest succeed.
+            if call_count == 1:
+                return race_proc
+            return success_proc
+
+        with (
+            patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+            patch("asyncio.sleep", new_callable=AsyncMock) as sleep_mock,
+            patch.object(manager, "_delete_local_branch", new_callable=AsyncMock),
+            patch.object(manager, "_remote_branch_exists", return_value=False),
+            patch.object(manager, "_setup_env"),
+            patch.object(manager, "_create_venv", new_callable=AsyncMock),
+            patch.object(manager, "_install_hooks", new_callable=AsyncMock),
+        ):
+            result = await manager.create(issue_number=7, branch="agent/issue-7")
+
+        assert result == config.worktree_base / "issue-7"
+        assert call_count >= 4  # fetch (fail), fetch (retry), branch, worktree add
+        sleep_mock.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_create_raises_when_worktree_add_fails_after_branch_created(
         self, config, tmp_path: Path
     ) -> None:
