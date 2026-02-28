@@ -682,6 +682,23 @@ class IntentResponse(BaseModel):
     status: str = "created"
 
 
+class ReportIssueRequest(BaseModel):
+    """Request body for POST /api/report."""
+
+    description: str = Field(..., min_length=1, max_length=5000)
+    screenshot_base64: str = Field(default="", max_length=5_000_000)
+    environment: dict[str, Any] = Field(default_factory=dict)
+
+
+class ReportIssueResponse(BaseModel):
+    """Response for POST /api/report."""
+
+    issue_number: int
+    title: str
+    url: HttpUrl = ""
+    status: str = "created"
+
+
 class PRListItem(BaseModel):
     """A PR entry returned by GET /api/prs."""
 

@@ -26,6 +26,19 @@ export const PIPELINE_STAGES = [
   { key: 'merged',    label: 'Merged',    color: theme.green,       subtleColor: theme.greenSubtle,  role: null,           configKey: null },
 ]
 
+/**
+ * Annotation pen colors for the Report Issue modal.
+ * Maps to pipeline stage palette so operators can color-code annotations.
+ */
+export const ANNOTATION_COLORS = [
+  { key: 'triage',    label: 'Triage',    color: theme.yellow },
+  { key: 'plan',      label: 'Plan',      color: theme.purple },
+  { key: 'implement', label: 'Implement', color: theme.accent },
+  { key: 'review',    label: 'Review',    color: theme.orange },
+  { key: 'merged',    label: 'Merged',    color: theme.green },
+  { key: 'failed',    label: 'Failed',    color: theme.red },
+]
+
 /** Shared CSS animation value for the stream-pulse keyframe. */
 export const PULSE_ANIMATION = 'stream-pulse 1.5s ease-in-out infinite'
 

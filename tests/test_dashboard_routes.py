@@ -96,6 +96,7 @@ class TestCreateRouter:
             "/api/timeline",
             "/api/timeline/issue/{issue_num}",
             "/api/intent",
+            "/api/report",
             "/api/sessions",
             "/api/sessions/{session_id}",
             "/api/request-changes",
@@ -4121,6 +4122,141 @@ class TestSubmitIntentEndpoint:
         pr_mgr.create_issue = AsyncMock(return_value=0)  # type: ignore[method-assign]
         endpoint = self._find_endpoint(router, "/api/intent")
         request = IntentRequest(text="Add something")
+        response = await endpoint(request)
+        assert response.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# POST /api/report
+# ---------------------------------------------------------------------------
+
+
+class TestSubmitReportEndpoint:
+    """Tests for POST /api/report."""
+
+    def _make_router(self, config, event_bus, state, tmp_path):
+        from dashboard_routes import create_router
+        from pr_manager import PRManager
+
+        pr_mgr = PRManager(config, event_bus)
+        return create_router(
+            config=config,
+            event_bus=event_bus,
+            state=state,
+            pr_manager=pr_mgr,
+            get_orchestrator=lambda: None,
+            set_orchestrator=lambda o: None,
+            set_run_task=lambda t: None,
+            ui_dist_dir=tmp_path / "no-dist",
+            template_dir=tmp_path / "no-templates",
+        ), pr_mgr
+
+    def _find_endpoint(self, router, path):
+        for route in router.routes:
+            if (
+                hasattr(route, "path")
+                and route.path == path
+                and hasattr(route, "endpoint")
+            ):
+                return route.endpoint
+        return None
+
+    @pytest.mark.asyncio
+    async def test_submit_report_creates_issue(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        import json
+
+        from models import ReportIssueRequest
+
+        router, pr_mgr = self._make_router(config, event_bus, state, tmp_path)
+        pr_mgr.create_issue = AsyncMock(return_value=42)  # type: ignore[method-assign]
+        pr_mgr.upload_screenshot_gist = AsyncMock(return_value="")  # type: ignore[method-assign]
+        endpoint = self._find_endpoint(router, "/api/report")
+        request = ReportIssueRequest(description="Button is broken")
+        response = await endpoint(request)
+        data = json.loads(response.body)
+        assert data["issue_number"] == 42
+        assert data["title"] == "[Bug Report] Button is broken"
+        assert data["status"] == "created"
+
+    @pytest.mark.asyncio
+    async def test_submit_report_with_screenshot(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        import base64
+
+        from models import ReportIssueRequest
+
+        router, pr_mgr = self._make_router(config, event_bus, state, tmp_path)
+        pr_mgr.create_issue = AsyncMock(return_value=99)  # type: ignore[method-assign]
+        pr_mgr.upload_screenshot_gist = AsyncMock(  # type: ignore[method-assign]
+            return_value="https://gist.githubusercontent.com/user/abc/raw/screenshot.png"
+        )
+        endpoint = self._find_endpoint(router, "/api/report")
+        fake_png = base64.b64encode(b"fake-png-data").decode()
+        request = ReportIssueRequest(
+            description="UI glitch", screenshot_base64=fake_png
+        )
+        await endpoint(request)
+        pr_mgr.upload_screenshot_gist.assert_awaited_once_with(fake_png)
+        # Body should contain the screenshot URL
+        call_kwargs = pr_mgr.create_issue.call_args
+        body = call_kwargs.kwargs.get("body") or call_kwargs[1].get("body", "")
+        assert "![Screenshot](" in body
+
+    @pytest.mark.asyncio
+    async def test_submit_report_empty_screenshot_skips_gist(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        from models import ReportIssueRequest
+
+        router, pr_mgr = self._make_router(config, event_bus, state, tmp_path)
+        pr_mgr.create_issue = AsyncMock(return_value=10)  # type: ignore[method-assign]
+        pr_mgr.upload_screenshot_gist = AsyncMock(return_value="")  # type: ignore[method-assign]
+        endpoint = self._find_endpoint(router, "/api/report")
+        request = ReportIssueRequest(description="Something broke")
+        await endpoint(request)
+        pr_mgr.upload_screenshot_gist.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_submit_report_body_includes_environment(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        from models import ReportIssueRequest
+
+        router, pr_mgr = self._make_router(config, event_bus, state, tmp_path)
+        pr_mgr.create_issue = AsyncMock(return_value=55)  # type: ignore[method-assign]
+        pr_mgr.upload_screenshot_gist = AsyncMock(return_value="")  # type: ignore[method-assign]
+        endpoint = self._find_endpoint(router, "/api/report")
+        request = ReportIssueRequest(
+            description="Bug",
+            environment={
+                "source": "monitoring",
+                "app_version": "1.0.0",
+                "orchestrator_status": "running",
+                "queue_depths": {"triage": 3, "plan": 1, "implement": 2, "review": 0},
+            },
+        )
+        await endpoint(request)
+        call_kwargs = pr_mgr.create_issue.call_args
+        body = call_kwargs.kwargs.get("body") or call_kwargs[1].get("body", "")
+        assert "**HydraFlow version**: 1.0.0" in body
+        assert "**Status**: running" in body
+        assert "**Queue depths**: triage=3, plan=1, implement=2, review=0" in body
+        assert "**Source**: monitoring" in body
+
+    @pytest.mark.asyncio
+    async def test_submit_report_returns_error_on_failure(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        from models import ReportIssueRequest
+
+        router, pr_mgr = self._make_router(config, event_bus, state, tmp_path)
+        pr_mgr.create_issue = AsyncMock(return_value=0)  # type: ignore[method-assign]
+        pr_mgr.upload_screenshot_gist = AsyncMock(return_value="")  # type: ignore[method-assign]
+        endpoint = self._find_endpoint(router, "/api/report")
+        request = ReportIssueRequest(description="fail test")
         response = await endpoint(request)
         assert response.status_code == 500
 

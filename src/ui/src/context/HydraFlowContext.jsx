@@ -761,6 +761,32 @@ export function HydraFlowProvider({ children }) {
     }
   }, [])
 
+  const submitReport = useCallback(async ({ description, screenshot_base64 }) => {
+    const pi = state.pipelineIssues || {}
+    const environment = {
+      source: 'dashboard',
+      app_version: state.config?.app_version || '',
+      orchestrator_status: state.orchestratorStatus || 'unknown',
+      queue_depths: {
+        triage: (pi.triage || []).length,
+        plan: (pi.plan || []).length,
+        implement: (pi.implement || []).length,
+        review: (pi.review || []).length,
+      },
+    }
+    try {
+      const res = await fetch('/api/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description, screenshot_base64, environment }),
+      })
+      if (!res.ok) return null
+      return await res.json()
+    } catch {
+      return null
+    }
+  }, [state.config, state.orchestratorStatus, state.pipelineIssues])
+
   const resetSession = useCallback(() => {
     dispatch({ type: 'SESSION_RESET' })
   }, [])
@@ -1005,6 +1031,7 @@ export function HydraFlowProvider({ children }) {
     stageStatus,
     resetSession,
     submitIntent,
+    submitReport,
     submitHumanInput,
     requestChanges,
     toggleBgWorker,

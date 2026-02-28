@@ -40,6 +40,8 @@ from models import (
     PipelineSnapshot,
     PipelineSnapshotEntry,
     QueueStats,
+    ReportIssueRequest,
+    ReportIssueResponse,
     parse_task_links,
 )
 from pr_manager import PRManager
@@ -1720,6 +1722,61 @@ def create_router(
 
         url = f"https://github.com/{config.repo}/issues/{issue_number}"
         response = IntentResponse(issue_number=issue_number, title=title, url=url)
+        return JSONResponse(response.model_dump())
+
+    @router.post("/api/report")
+    async def submit_report(request: ReportIssueRequest) -> JSONResponse:
+        """Create a GitHub issue from a bug report with optional screenshot."""
+        # Upload screenshot if provided
+        screenshot_url = ""
+        if request.screenshot_base64:
+            screenshot_url = await pr_manager.upload_screenshot_gist(
+                request.screenshot_base64
+            )
+
+        # Build structured markdown body
+        env = request.environment
+        source = env.get("source", "dashboard")
+        version = env.get("app_version", get_app_version())
+        status = env.get("orchestrator_status", "unknown")
+
+        body_parts = ["## Bug Report", "", "### Description", request.description]
+
+        if screenshot_url:
+            body_parts += [
+                "",
+                "### Dashboard Screenshot",
+                f"![Screenshot]({screenshot_url})",
+            ]
+
+        queue_depths = env.get("queue_depths", {})
+        queue_line = ", ".join(
+            f"{k}={queue_depths.get(k, 0)}"
+            for k in ("triage", "plan", "implement", "review")
+        )
+
+        body_parts += [
+            "",
+            "### Environment",
+            f"- **HydraFlow version**: {version}",
+            f"- **Status**: {status}",
+            f"- **Queue depths**: {queue_line}",
+            f"- **Source**: {source}",
+        ]
+
+        body = "\n".join(body_parts)
+        title = f"[Bug Report] {request.description[:100]}"
+        labels = list(config.planner_label)
+
+        issue_number = await pr_manager.create_issue(
+            title=title, body=body, labels=labels
+        )
+
+        if issue_number == 0:
+            return JSONResponse({"error": "Failed to create issue"}, status_code=500)
+
+        url = f"https://github.com/{config.repo}/issues/{issue_number}"
+        response = ReportIssueResponse(issue_number=issue_number, title=title, url=url)
         return JSONResponse(response.model_dump())
 
     @router.get("/api/sessions")
