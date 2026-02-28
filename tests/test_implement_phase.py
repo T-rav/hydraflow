@@ -1001,7 +1001,7 @@ class TestZeroCommitEscalation:
 
         # Issue should be escalated to HITL with cause
         mock_prs.swap_pipeline_labels.assert_awaited_once_with(42, config.hitl_label[0])
-        assert phase._state.get_hitl_cause(42) == "Implementation produced zero commits"
+        assert phase._state.get_hitl_cause(42) == "implementation produced zero commits"
 
     @pytest.mark.asyncio
     async def test_zero_commit_marks_issue_failed(
@@ -1065,6 +1065,39 @@ class TestZeroCommitEscalation:
         # Should NOT close the issue
         mock_prs.close_task.assert_not_awaited()
         assert phase._state.to_dict()["processed_issues"].get(str(42)) == "failed"
+
+    @pytest.mark.asyncio
+    async def test_epic_child_zero_commit_cause_includes_epic_context(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Epic child issues should have cause prefixed with epic context."""
+        issue = TaskFactory.create(
+            tags=["hydraflow-epic-child"],
+            body="## Parent Epic: #1551\n\nSome description",
+        )
+
+        async def zero_commit_agent(
+            issue: Task,
+            wt_path: Path,
+            branch: str,
+            worker_id: int = 0,
+            review_feedback: str = "",
+        ) -> WorkerResult:
+            return WorkerResult(
+                issue_number=issue.id,
+                branch=branch,
+                success=False,
+                error="No commits found on branch",
+                commits=0,
+                worktree_path=str(wt_path),
+            )
+
+        phase, _, mock_prs = _make_phase(config, [issue], agent_run=zero_commit_agent)
+
+        await phase.run_batch()
+
+        cause = phase._state.get_hitl_cause(42)
+        assert cause == "Epic child (#1551): implementation produced zero commits"
 
 
 # ---------------------------------------------------------------------------
@@ -1479,7 +1512,7 @@ class TestHandleImplementationResult:
 
         assert phase._state.to_dict()["processed_issues"].get(str(42)) == "failed"
         mock_prs.swap_pipeline_labels.assert_awaited_once_with(42, config.hitl_label[0])
-        assert phase._state.get_hitl_cause(42) == "Implementation produced zero commits"
+        assert phase._state.get_hitl_cause(42) == "implementation produced zero commits"
         assert returned is result
 
     @pytest.mark.asyncio
@@ -1549,7 +1582,7 @@ class TestHandleImplementationResult:
         mock_prs.swap_pipeline_labels.assert_awaited()
         assert (
             phase._state.get_hitl_cause(42)
-            == "Implementation produced no changes (zero diff)"
+            == "implementation produced no changes (zero diff)"
         )
 
     @pytest.mark.asyncio

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from pathlib import Path
 
 from agent import AgentRunner
@@ -56,6 +57,18 @@ class ImplementPhase:
         self._harness_insights = harness_insights
         self._active_issues: set[int] = set()
         self._active_issues_lock = asyncio.Lock()
+
+    def _hitl_cause(self, issue: Task, reason: str) -> str:
+        """Build a HITL cause string, prefixing with epic context if applicable."""
+        epic_child_labels = {lbl.lower() for lbl in self._config.epic_child_label}
+        issue_labels = {t.lower() for t in issue.tags}
+        if not (epic_child_labels & issue_labels):
+            return reason
+        # Try to find parent epic number from issue body
+        match = re.search(r"[Pp]arent\s+[Ee]pic[:\s#]*(\d+)", issue.body)
+        if match:
+            return f"Epic child (#{match.group(1)}): {reason}"
+        return f"Epic child: {reason}"
 
     async def run_batch(
         self,
@@ -325,7 +338,7 @@ class ImplementPhase:
                 self._state,
                 self._prs,
                 issue.id,
-                cause="Implementation produced zero commits",
+                cause=self._hitl_cause(issue, "implementation produced zero commits"),
                 origin_label=self._config.ready_label[0],
                 hitl_label=self._config.hitl_label[0],
             )
@@ -372,7 +385,9 @@ class ImplementPhase:
                             self._state,
                             self._prs,
                             issue.id,
-                            cause="Implementation produced no changes (zero diff)",
+                            cause=self._hitl_cause(
+                                issue, "implementation produced no changes (zero diff)"
+                            ),
                             origin_label=self._config.ready_label[0],
                             hitl_label=self._config.hitl_label[0],
                         )
