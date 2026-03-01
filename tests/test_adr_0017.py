@@ -1,4 +1,4 @@
-"""Tests for ADR-0009: Auto-Decompose Triage Counter Exclusion."""
+"""Tests for ADR-0017: Auto-Decompose Triage Counter Exclusion."""
 
 from __future__ import annotations
 
@@ -7,33 +7,33 @@ from pathlib import Path
 import pytest
 
 ADR_DIR = Path(__file__).resolve().parent.parent / "docs" / "adr"
-ADR_PATH = ADR_DIR / "0009-auto-decompose-triage-counter-exclusion.md"
+ADR_PATH = ADR_DIR / "0017-auto-decompose-triage-counter-exclusion.md"
 README_PATH = ADR_DIR / "README.md"
 
 
-class TestADR0009Exists:
-    """ADR-0009 file must exist and be indexed in the README."""
+class TestADR0017Exists:
+    """ADR-0017 file must exist and be indexed in the README."""
 
     def test_adr_file_exists(self) -> None:
-        assert ADR_PATH.exists(), "ADR-0009 markdown file must exist"
+        assert ADR_PATH.exists(), "ADR-0017 markdown file must exist"
 
     def test_adr_indexed_in_readme(self) -> None:
         readme = README_PATH.read_text()
-        assert "0009" in readme, "ADR-0009 must be listed in the README index"
-        assert "0009-auto-decompose-triage-counter-exclusion.md" in readme, (
-            "README must link to the ADR-0009 file"
+        assert "0017" in readme, "ADR-0017 must be listed in the README index"
+        assert "0017-auto-decompose-triage-counter-exclusion.md" in readme, (
+            "README must link to the ADR-0017 file"
         )
 
 
-class TestADR0009Structure:
-    """ADR-0009 must follow the project's ADR format."""
+class TestADR0017Structure:
+    """ADR-0017 must follow the project's ADR format."""
 
     @pytest.fixture()
     def content(self) -> str:
         return ADR_PATH.read_text()
 
     def test_has_title(self, content: str) -> None:
-        assert content.startswith("# ADR-0009:")
+        assert content.startswith("# ADR-0017:")
 
     def test_has_status_proposed(self, content: str) -> None:
         assert "**Status:** Proposed" in content
@@ -46,14 +46,14 @@ class TestADR0009Structure:
         ["## Context", "## Decision", "## Consequences", "## Related"],
     )
     def test_has_required_section(self, content: str, section: str) -> None:
-        assert section in content, f"ADR-0009 must contain a '{section}' section"
+        assert section in content, f"ADR-0017 must contain a '{section}' section"
 
     def test_has_alternatives_considered(self, content: str) -> None:
         assert "## Alternatives considered" in content
 
 
-class TestADR0009Content:
-    """ADR-0009 must reference the correct source material and code paths."""
+class TestADR0017Content:
+    """ADR-0017 must reference the correct source material and code paths."""
 
     @pytest.fixture()
     def content(self) -> str:

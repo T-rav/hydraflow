@@ -1,4 +1,4 @@
-# ADR-0009: Auto-Decompose Triage Path Excluded from Session Counter
+# ADR-0017: Auto-Decompose Triage Path Excluded from Session Counter
 
 **Status:** Proposed
 **Date:** 2026-03-01
