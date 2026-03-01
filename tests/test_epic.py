@@ -644,6 +644,75 @@ class TestNestedEpics:
 
         prs.close_issue.assert_called_once_with(100)
 
+    @pytest.mark.asyncio
+    async def test_child_epic_close_propagates_to_parent(self) -> None:
+        """When a child epic closes, its parent epic gets re-checked and closes."""
+        child_epic = _make_epic(200, [3])
+        parent_epic = _make_epic(100, [1, 200])
+        sub_issues = {
+            # Parent epic's sub-issues
+            1: IssueFactory.create(
+                number=1, labels=["hydraflow-fixed"], title="Issue #1"
+            ),
+            200: GitHubIssue(
+                number=200,
+                title="[Epic] Child epic",
+                labels=["hydraflow-epic"],
+                state="closed",
+            ),
+            # Child epic's sub-issues
+            3: IssueFactory.create(
+                number=3, labels=["hydraflow-fixed"], title="Issue #3"
+            ),
+        }
+        # Both epics are returned by fetch_issues_by_labels
+        checker, prs, _, _ = _make_checker_with_state(
+            epics=[parent_epic, child_epic],
+            sub_issues=sub_issues,
+            epic_state=EpicState(epic_number=200, child_issues=[3]),
+        )
+
+        # Closing sub-issue #3 closes child epic #200, which should
+        # propagate to parent epic #100 and close it too.
+        await checker.check_and_close_epics(3)
+
+        # Both child and parent should be closed
+        close_calls = [call[0][0] for call in prs.close_issue.call_args_list]
+        assert 200 in close_calls
+        assert 100 in close_calls
+
+    @pytest.mark.asyncio
+    async def test_recursion_guard_prevents_infinite_loop(self) -> None:
+        """Circular epic references don't cause infinite recursion."""
+        # Epic A references Epic B, and Epic B references Epic A
+        epic_a = _make_epic(100, [200])
+        epic_b = _make_epic(200, [100])
+        sub_issues = {
+            100: GitHubIssue(
+                number=100,
+                title="[Epic] A",
+                labels=["hydraflow-epic"],
+                state="closed",
+            ),
+            200: GitHubIssue(
+                number=200,
+                title="[Epic] B",
+                labels=["hydraflow-epic"],
+                state="closed",
+            ),
+        }
+        checker, prs, _, _ = _make_checker_with_state(
+            epics=[epic_a, epic_b],
+            sub_issues=sub_issues,
+            epic_state=EpicState(epic_number=100, child_issues=[200]),
+        )
+
+        # Should not infinite-loop; recursion guard stops re-entry
+        await checker.check_and_close_epics(200)
+
+        # At least epic_a should close; the guard prevents re-entering _try_close_epic(100)
+        assert prs.close_issue.call_count >= 1
+
 
 class TestDynamicSubIssueAudit:
     """Audit trail for sub-issue list changes between checks."""

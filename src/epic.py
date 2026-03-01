@@ -72,6 +72,7 @@ class EpicCompletionChecker:
         self._prs = prs
         self._fetcher = fetcher
         self._state = state
+        self._active_closings: set[int] = set()  # recursion guard for nested epics
 
     async def check_and_close_epics(self, completed_issue_number: int) -> bool:
         """Check all open epics and close any whose sub-issues are all completed.
@@ -124,8 +125,26 @@ class EpicCompletionChecker:
         Sub-issues with the HITL label that are still open produce a warning
         comment and DO temporarily block epic completion until resolved.
 
+        After closing, triggers a parent-epic re-check so that nested epic
+        closure propagates upward automatically.
+
         Returns True if the epic was closed, False otherwise.
         """
+        if epic_number in self._active_closings:
+            return False
+        self._active_closings.add(epic_number)
+
+        try:
+            return await self._do_close_epic(
+                epic_number, epic_title, epic_body, sub_issues
+            )
+        finally:
+            self._active_closings.discard(epic_number)
+
+    async def _do_close_epic(
+        self, epic_number: int, epic_title: str, epic_body: str, sub_issues: list[int]
+    ) -> bool:
+        """Inner close logic — separated to allow recursion guard in _try_close_epic."""
         fixed_label = self._config.fixed_label[0] if self._config.fixed_label else ""
         hitl_labels = set(self._config.hitl_label)
         epic_labels = set(self._config.epic_label)
@@ -212,6 +231,11 @@ class EpicCompletionChecker:
             close_comment += f"\n\n**Release:** {release_url}"
         await self._prs.post_comment(epic_number, close_comment)
         await self._prs.close_issue(epic_number)
+
+        # Propagate to parent epics: the just-closed epic may be a sub-issue
+        # of another epic. Re-check so parent closure cascades automatically.
+        await self.check_and_close_epics(epic_number)
+
         return True
 
     async def close_specific_epic(self, epic_number: int) -> bool | None:
