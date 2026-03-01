@@ -66,6 +66,7 @@ vi.mock('../../context/HydraFlowContext', () => ({
 }))
 
 beforeEach(() => {
+  global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: async () => [] }))
   mockState.hitlItems = []
   mockState.prs = []
   mockState.events = []
