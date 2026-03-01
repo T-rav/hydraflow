@@ -1,10 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { theme } from '../theme'
-import { PIPELINE_LOOPS, PIPELINE_STAGES, ACTIVE_STATUSES } from '../constants'
+import { PIPELINE_LOOPS, PIPELINE_STAGES, ACTIVE_STATUSES, WORKER_COUNT_MIN, WORKER_COUNT_MAX } from '../constants'
 import { useHydraFlow } from '../context/HydraFlowContext'
-
-const WORKER_COUNT_MIN = 1
-const WORKER_COUNT_MAX = 10
 
 function formatDuration(startTime) {
   if (!startTime) return ''
@@ -330,6 +327,7 @@ const styles = {
     lineHeight: '18px',
     minWidth: 20,
     textAlign: 'center',
+    transition: 'all 0.15s',
   },
   statusRow: {
     display: 'flex',

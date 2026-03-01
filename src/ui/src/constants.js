@@ -83,6 +83,10 @@ export const PULSE_ANIMATION = 'stream-pulse 1.5s ease-in-out infinite'
 /** Valid overall statuses for stream cards. */
 export const STREAM_CARD_STATUSES = ['active', 'queued', 'done', 'failed', 'hitl']
 
+/** Min/max bounds for per-stage worker counts — mirrors backend Pydantic field constraints. */
+export const WORKER_COUNT_MIN = 1
+export const WORKER_COUNT_MAX = 10
+
 /**
  * Pipeline loop definitions — core processing loops that can be toggled on/off.
  */

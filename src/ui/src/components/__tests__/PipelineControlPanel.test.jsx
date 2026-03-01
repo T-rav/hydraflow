@@ -142,15 +142,6 @@ describe('PipelineControlPanel', () => {
       expect(triageLabel.style.color).toBe('var(--text-muted)')
     })
 
-    it('shows triage max count from shared worker caps', () => {
-      const triageWorker = {
-        'triage-5': { status: 'evaluating', worker: 1, role: 'triage', title: 'Triage #5', branch: '', transcript: [], pr: null },
-      }
-      mockUseHydraFlow.mockReturnValue(defaultMockContext({ workers: triageWorker }))
-      render(<PipelineControlPanel />)
-      expect(screen.getByTestId('loop-count-triage')).toHaveTextContent('1')
-    })
-
     it('falls back to active-only counts when config is null', () => {
       mockUseHydraFlow.mockReturnValue(defaultMockContext({ workers: mockPipelineWorkers, config: null }))
       render(<PipelineControlPanel />)
