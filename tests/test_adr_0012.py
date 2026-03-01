@@ -1,4 +1,4 @@
-"""Tests for ADR-0009: Epic Merge Coordination Architecture."""
+"""Tests for ADR-0012: Epic Merge Coordination Architecture."""
 
 from __future__ import annotations
 
@@ -7,31 +7,31 @@ from pathlib import Path
 import pytest
 
 _ADR_DIR = Path(__file__).resolve().parent.parent / "docs" / "adr"
-_ADR_FILE = _ADR_DIR / "0009-epic-merge-coordination-architecture.md"
+_ADR_FILE = _ADR_DIR / "0012-epic-merge-coordination-architecture.md"
 _README = _ADR_DIR / "README.md"
 
 
-class TestADR0009Exists:
-    """ADR-0009 file and index entry must exist."""
+class TestADR0012Exists:
+    """ADR-0012 file and index entry must exist."""
 
     def test_adr_file_exists(self) -> None:
-        assert _ADR_FILE.exists(), "ADR-0009 markdown file must exist"
+        assert _ADR_FILE.exists(), "ADR-0012 markdown file must exist"
 
     def test_adr_listed_in_readme_index(self) -> None:
         content = _README.read_text()
-        assert "0009" in content, "ADR-0009 must be listed in the README index"
+        assert "0012" in content, "ADR-0012 must be listed in the README index"
         assert "Epic Merge Coordination" in content
 
 
-class TestADR0009Format:
-    """ADR-0009 must follow the required format from docs/adr/README.md."""
+class TestADR0012Format:
+    """ADR-0012 must follow the required format from docs/adr/README.md."""
 
     @pytest.fixture()
     def content(self) -> str:
         return _ADR_FILE.read_text()
 
     def test_has_title(self, content: str) -> None:
-        assert content.startswith("# ADR-0009:")
+        assert content.startswith("# ADR-0012:")
 
     def test_has_status(self, content: str) -> None:
         assert "**Status:** Proposed" in content
@@ -55,8 +55,8 @@ class TestADR0009Format:
         assert "## Related" in content
 
 
-class TestADR0009Content:
-    """ADR-0009 must capture the epic merge coordination decision accurately."""
+class TestADR0012Content:
+    """ADR-0012 must capture the epic merge coordination decision accurately."""
 
     @pytest.fixture()
     def content(self) -> str:

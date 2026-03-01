@@ -1,4 +1,4 @@
-# ADR-0009: Epic Merge Coordination Architecture
+# ADR-0012: Epic Merge Coordination Architecture
 
 **Status:** Proposed
 **Date:** 2026-03-01
