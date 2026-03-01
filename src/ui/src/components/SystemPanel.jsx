@@ -406,6 +406,7 @@ export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onUpdateInter
           <div
             key={tab.key}
             onClick={() => setActiveSubTab(tab.key)}
+            data-testid={`system-subtab-${tab.key}`}
             style={activeSubTab === tab.key ? subTabActiveStyle : subTabInactiveStyle}
           >
             {tab.label}

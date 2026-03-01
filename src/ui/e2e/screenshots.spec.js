@@ -144,11 +144,9 @@ test.describe('populated pipeline', () => {
       test(`subtab: ${subtab}`, async ({ page }) => {
         await switchTab(page, 'system')
         // Click the system sub-tab
-        const subtabButton = page.locator(`[data-testid="system-subtab-${subtab}"], [role="tab"]`).filter({ hasText: new RegExp(subtab, 'i') })
-        if (await subtabButton.count() > 0) {
-          await subtabButton.first().click()
-          await page.waitForTimeout(300)
-        }
+        const subtabButton = page.locator(`[data-testid="system-subtab-${subtab}"]`)
+        await subtabButton.click()
+        await expect(subtabButton).toBeVisible()
         await expect(page).toHaveScreenshot(`populated-system-${subtab}.png`, {
           fullPage: false,
           animations: 'disabled',
