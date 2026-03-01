@@ -821,6 +821,7 @@ class TestDisabledWorkerPersistenceAcrossRestart:
         assert states["memory_sync"]["status"] == "error"
         assert states["memory_sync"]["last_run"] is not None
         assert states["memory_sync"]["enabled"] is True
+        assert states["memory_sync"]["details"] == {"msg": "fail"}
 
     def test_fresh_install_shows_never(
         self, config, event_bus: EventBus, tmp_path: Path
@@ -854,6 +855,40 @@ class TestDisabledWorkerPersistenceAcrossRestart:
         states = orch2.get_bg_worker_states()
         assert states["memory_sync"]["last_run"] == last_run
         assert states["memory_sync"]["enabled"] is False
+
+    def test_corrupt_disabled_workers_field_gracefully_resets(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """A corrupt disabled_workers type should reset the whole state to defaults, not crash."""
+        import json
+
+        state_path = tmp_path / "corrupt_state.json"
+        # Use integer 99, which cannot be coerced to list[str] and triggers ValidationError
+        state_path.write_text(json.dumps({"disabled_workers": 99}))
+
+        state = StateTracker(state_path)
+        loaded = state.load()
+        # Full state resets to defaults when ValidationError is caught
+        assert loaded.get("disabled_workers", []) == []
+
+    def test_corrupt_state_file_disabled_workers_defaults_on_restart(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """After a corrupt state file, orchestrator should start with no disabled workers."""
+        import json
+
+        from orchestrator import HydraFlowOrchestrator
+
+        state_path = tmp_path / "corrupt2_state.json"
+        state_path.write_text(json.dumps({"disabled_workers": 99}))
+
+        state = StateTracker(state_path)
+        orch = HydraFlowOrchestrator(config, event_bus=event_bus, state=state)
+        orch._restore_state()
+
+        # All workers should be enabled (defaults) since state was corrupt
+        assert orch.is_bg_worker_enabled("memory_sync") is True
+        assert orch.is_bg_worker_enabled("metrics") is True
 
 
 class TestOrchestratorIntervalManagement:
