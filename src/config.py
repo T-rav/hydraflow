@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import Any, Literal, get_args
 
@@ -1310,8 +1311,6 @@ def _resolve_repo_scoped_paths(config: HydraFlowConfig) -> None:
     Legacy flat files are migrated on first run: if the repo-scoped file does not
     exist but the legacy flat file does, a copy is made so no data is lost.
     """
-    import shutil  # noqa: PLC0415
-
     data_root = config.data_root
     slug = config.repo_slug
     explicit = config.__pydantic_fields_set__
@@ -1360,6 +1359,10 @@ def _resolve_repo_scoped_paths(config: HydraFlowConfig) -> None:
                 scoped.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(default_cfg, scoped)
             object.__setattr__(config, "config_file", scoped)
+    elif config.config_file is not None:
+        object.__setattr__(
+            config, "config_file", config.config_file.expanduser().resolve()
+        )
 
     # --- sessions.jsonl (derived from state_file parent, migrate if needed) ---
     flat_sessions = data_root / "sessions.jsonl"
@@ -1577,8 +1580,6 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
 def _validate_docker(config: HydraFlowConfig) -> None:
     """Validate Docker availability when execution_mode is 'docker'."""
     if config.execution_mode == "docker":
-        import shutil  # noqa: PLC0415
-
         if shutil.which("docker") is None:
             msg = (
                 "execution_mode is 'docker' but the 'docker' command "

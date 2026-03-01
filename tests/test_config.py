@@ -4672,17 +4672,18 @@ class TestNamespaceRepoPaths:
         expected = tmp_path / ".hydraflow" / "acme-widgets" / "events.jsonl"
         assert cfg.event_log_path == expected
 
-    def test_config_file_namespaced_when_default(self, tmp_path: Path) -> None:
-        """Default config_file should be under data_root/<slug>/."""
+    def test_explicit_config_file_not_namespaced(self, tmp_path: Path) -> None:
+        """Explicitly-set config_file should not be repo-scoped."""
         data_root = tmp_path / ".hydraflow"
         data_root.mkdir()
+        explicit_cfg = data_root / "config.json"
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             repo="acme/widgets",
-            config_file=data_root / "config.json",
+            config_file=explicit_cfg,
         )
-        # config_file was explicitly set to the flat path, so it stays
-        assert cfg.config_file == data_root / "config.json"
+        # config_file was explicitly set to the flat path, so it stays (not scoped)
+        assert cfg.config_file == explicit_cfg.resolve()
 
     def test_explicit_state_file_not_namespaced(self, tmp_path: Path) -> None:
         """Explicitly-set state_file should not be repo-scoped."""
