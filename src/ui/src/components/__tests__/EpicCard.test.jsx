@@ -185,4 +185,24 @@ describe('EpicCard', () => {
     fireEvent.click(screen.getByText('Epic: Build dashboard'))
     expect(screen.queryByTestId('readiness-section')).not.toBeInTheDocument()
   })
+
+  it('passes releasing state to EpicReleaseButton when expanded', () => {
+    const bundledEpic = {
+      ...baseEpic,
+      merge_strategy: 'bundled_hitl',
+      readiness: {
+        all_implemented: true,
+        all_approved: true,
+        ci_passing: true,
+        no_conflicts: true,
+        changelog_generated: true,
+        version_determined: true,
+      },
+    }
+    const releasing = { epicNumber: 100, progress: 2, total: 5 }
+    render(<EpicCard epic={bundledEpic} onRelease={vi.fn()} releasing={releasing} />)
+    fireEvent.click(screen.getByText('Epic: Build dashboard'))
+    expect(screen.getByText('Releasing...')).toBeInTheDocument()
+    expect(screen.getByText('2/5')).toBeInTheDocument()
+  })
 })

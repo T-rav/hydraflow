@@ -115,37 +115,23 @@ export function EpicReleaseButton({ epic, onRelease, releasing }) {
   )
 }
 
+const btnBase = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  fontSize: 12,
+  fontWeight: 700,
+  padding: '6px 16px',
+  borderRadius: 8,
+  userSelect: 'none',
+}
+
 const styles = {
   container: {
     padding: '8px 0',
   },
-  enabledBtn: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 6,
-    fontSize: 12,
-    fontWeight: 700,
-    padding: '6px 16px',
-    borderRadius: 8,
-    background: theme.green,
-    color: theme.white,
-    cursor: 'pointer',
-    transition: 'all 0.15s',
-    userSelect: 'none',
-  },
-  disabledBtn: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 6,
-    fontSize: 12,
-    fontWeight: 700,
-    padding: '6px 16px',
-    borderRadius: 8,
-    background: theme.border,
-    color: theme.textMuted,
-    cursor: 'not-allowed',
-    userSelect: 'none',
-  },
+  enabledBtn: { ...btnBase, background: theme.green, color: theme.white, cursor: 'pointer', transition: 'all 0.15s' },
+  disabledBtn: { ...btnBase, background: theme.border, color: theme.textMuted, cursor: 'not-allowed' },
   releasingBtn: {
     display: 'inline-flex',
     alignItems: 'center',

@@ -87,6 +87,14 @@ export function EpicReadinessChecklist({ epic }) {
   )
 }
 
+const checkBase = {
+  fontSize: 12,
+  fontWeight: 700,
+  width: 16,
+  textAlign: 'center',
+  flexShrink: 0,
+}
+
 const styles = {
   container: {
     padding: '8px 0',
@@ -122,30 +130,9 @@ const styles = {
     alignItems: 'center',
     gap: 8,
   },
-  checkPass: {
-    fontSize: 12,
-    fontWeight: 700,
-    color: theme.green,
-    width: 16,
-    textAlign: 'center',
-    flexShrink: 0,
-  },
-  checkPending: {
-    fontSize: 12,
-    fontWeight: 700,
-    color: theme.textMuted,
-    width: 16,
-    textAlign: 'center',
-    flexShrink: 0,
-  },
-  checkWarn: {
-    fontSize: 12,
-    fontWeight: 700,
-    color: theme.yellow,
-    width: 16,
-    textAlign: 'center',
-    flexShrink: 0,
-  },
+  checkPass: { ...checkBase, color: theme.green },
+  checkPending: { ...checkBase, color: theme.textMuted },
+  checkWarn: { ...checkBase, color: theme.yellow },
   labelPass: {
     fontSize: 11,
     color: theme.text,
