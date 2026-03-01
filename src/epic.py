@@ -73,8 +73,11 @@ class EpicCompletionChecker:
         self._fetcher = fetcher
         self._state = state
 
-    async def check_and_close_epics(self, completed_issue_number: int) -> None:
-        """Check all open epics and close any whose sub-issues are all completed."""
+    async def check_and_close_epics(self, completed_issue_number: int) -> bool:
+        """Check all open epics and close any whose sub-issues are all completed.
+
+        Returns True if at least one epic was successfully closed.
+        """
         try:
             epics = await self._fetcher.fetch_issues_by_labels(
                 self._config.epic_label, limit=50
@@ -84,8 +87,9 @@ class EpicCompletionChecker:
                 "Failed to fetch epic issues for completion check",
                 exc_info=True,
             )
-            return
+            return False
 
+        closed_any = False
         for epic in epics:
             sub_issues = parse_epic_sub_issues(epic.body)
             if not sub_issues:
@@ -94,19 +98,22 @@ class EpicCompletionChecker:
                 continue
 
             try:
-                await self._try_close_epic(
+                closed = await self._try_close_epic(
                     epic.number, epic.title, epic.body, sub_issues
                 )
+                if closed:
+                    closed_any = True
             except Exception:  # noqa: BLE001
                 logger.warning(
                     "Epic completion check failed for epic #%d",
                     epic.number,
                     exc_info=True,
                 )
+        return closed_any
 
     async def _try_close_epic(
         self, epic_number: int, epic_title: str, epic_body: str, sub_issues: list[int]
-    ) -> None:
+    ) -> bool:
         """Close the epic if all sub-issues are resolved (fixed, closed, or excluded).
 
         A sub-issue is considered resolved if it:
@@ -116,6 +123,8 @@ class EpicCompletionChecker:
 
         Sub-issues with the HITL label that are still open produce a warning
         comment but do NOT block epic completion.
+
+        Returns True if the epic was closed, False otherwise.
         """
         fixed_label = self._config.fixed_label[0] if self._config.fixed_label else ""
         hitl_labels = set(self._config.hitl_label)
@@ -135,7 +144,7 @@ class EpicCompletionChecker:
                     issue_num,
                     epic_number,
                 )
-                return
+                return False
 
             # Check if sub-issue has the fixed label — normal completion
             if fixed_label and fixed_label in issue.labels:
@@ -164,12 +173,12 @@ class EpicCompletionChecker:
                 continue
 
             # Sub-issue is still open and unresolved
-            return
+            return False
 
         # Post HITL warnings if any sub-issues are in HITL
         if hitl_blocked:
             await self._post_hitl_warnings(epic_number, hitl_blocked)
-            return
+            return False
 
         # All sub-issues are resolved — close the epic
         logger.info("All sub-issues resolved for epic #%d — closing", epic_number)
@@ -202,6 +211,7 @@ class EpicCompletionChecker:
             close_comment += f"\n\n**Release:** {release_url}"
         await self._prs.post_comment(epic_number, close_comment)
         await self._prs.close_issue(epic_number)
+        return True
 
     async def _post_hitl_warnings(
         self, epic_number: int, hitl_issues: list[int]
@@ -264,6 +274,11 @@ class EpicCompletionChecker:
                 epic_number,
                 ", ".join(f"#{n}" for n in sorted(removed)),
             )
+            # Keep state in sync so _try_auto_close uses the current child list
+            if not added:  # avoid double-write when both added and removed
+                epic_state.child_issues = list(current)
+                epic_state.last_activity = datetime.now(UTC).isoformat()
+                self._state.upsert_epic_state(epic_state)
 
     async def _create_release_for_epic(
         self,
@@ -582,8 +597,9 @@ class EpicManager:
         # Use a completed child as the trigger; fall back to excluded if all children
         # were closed-without-merge (completed_children may be empty in that case).
         trigger = (epic.completed_children or epic.excluded_children)[-1]
+        github_closed = False
         try:
-            await self._checker.check_and_close_epics(trigger)
+            github_closed = await self._checker.check_and_close_epics(trigger)
         except Exception:  # noqa: BLE001
             logger.warning(
                 "EpicCompletionChecker failed for #%d — attempting direct close",
@@ -596,6 +612,7 @@ class EpicManager:
                     "All child issues completed — closing epic automatically.",
                 )
                 await self._prs.close_issue(epic_number)
+                github_closed = True
             except Exception:  # noqa: BLE001
                 logger.warning(
                     "Direct close also failed for epic #%d",
@@ -603,6 +620,13 @@ class EpicManager:
                     exc_info=True,
                 )
                 return
+
+        if not github_closed:
+            logger.warning(
+                "Epic #%d was not closed by checker (GitHub state may differ from local state)",
+                epic_number,
+            )
+            return
 
         self._state.close_epic(epic_number)
         await self._publish_update(epic_number, "closed")

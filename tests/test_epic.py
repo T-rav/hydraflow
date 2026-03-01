@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from epic import EpicCompletionChecker, check_all_checkboxes, parse_epic_sub_issues
+from epic import (
+    EpicCompletionChecker,
+    EpicManager,
+    check_all_checkboxes,
+    parse_epic_sub_issues,
+)
 from models import EpicState, GitHubIssue
-from tests.conftest import IssueFactory
+from tests.conftest import IssueFactory, make_state
 from tests.helpers import ConfigFactory
 
 # ---------------------------------------------------------------------------
@@ -723,3 +729,219 @@ class TestEpicExcludedStateTracking:
         await checker.check_and_close_epics(1)
 
         prs.close_issue.assert_called_once_with(100)
+
+
+# ---------------------------------------------------------------------------
+# check_and_close_epics return value
+# ---------------------------------------------------------------------------
+
+
+class TestCheckAndCloseEpicsReturnValue:
+    """check_and_close_epics returns True iff at least one epic was closed."""
+
+    @pytest.mark.asyncio
+    async def test_returns_true_when_epic_closed(self) -> None:
+        epic = _make_epic(100, [1])
+        sub_issues = {
+            1: IssueFactory.create(
+                number=1, labels=["hydraflow-fixed"], title="Issue #1"
+            ),
+        }
+        checker, _, _ = _make_checker(epics=[epic], sub_issues=sub_issues)
+
+        result = await checker.check_and_close_epics(1)
+
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_returns_false_when_no_epic_closed(self) -> None:
+        epic = _make_epic(100, [1, 2])
+        sub_issues = {
+            1: IssueFactory.create(
+                number=1, labels=["hydraflow-fixed"], title="Issue #1"
+            ),
+            2: GitHubIssue(number=2, title="Issue #2", labels=[], state="open"),
+        }
+        checker, _, _ = _make_checker(epics=[epic], sub_issues=sub_issues)
+
+        result = await checker.check_and_close_epics(1)
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_returns_false_on_fetch_failure(self) -> None:
+        config = ConfigFactory.create(epic_label=["hydraflow-epic"])
+        prs = AsyncMock()
+        fetcher = AsyncMock()
+        fetcher.fetch_issues_by_labels = AsyncMock(
+            side_effect=RuntimeError("API error")
+        )
+        checker = EpicCompletionChecker(config, prs, fetcher)
+
+        result = await checker.check_and_close_epics(1)
+
+        assert result is False
+
+
+# ---------------------------------------------------------------------------
+# EpicManager — on_child_excluded and _try_auto_close
+# ---------------------------------------------------------------------------
+
+
+def _make_epic_manager(
+    tmp_path: Path,
+    *,
+    epics: list[GitHubIssue] | None = None,
+    sub_issues: dict[int, GitHubIssue] | None = None,
+) -> tuple[EpicManager, AsyncMock, AsyncMock]:
+    """Build an EpicManager with a real StateTracker and mocked GitHub dependencies."""
+    config = ConfigFactory.create(
+        epic_label=["hydraflow-epic"],
+        hitl_label=["hydraflow-hitl"],
+    )
+    state = make_state(tmp_path)
+    prs = AsyncMock()
+    fetcher = AsyncMock()
+    fetcher.fetch_issues_by_labels = AsyncMock(return_value=epics or [])
+    sub_map = sub_issues or {}
+    fetcher.fetch_issue_by_number = AsyncMock(side_effect=sub_map.get)
+    bus = AsyncMock()
+    bus.publish = AsyncMock()
+    manager = EpicManager(config, state, prs, fetcher, bus)
+    return manager, prs, fetcher
+
+
+class TestEpicManagerOnChildExcluded:
+    """EpicManager.on_child_excluded records exclusion and triggers auto-close."""
+
+    @pytest.mark.asyncio
+    async def test_records_excluded_child_in_state(self, tmp_path: Path) -> None:
+        manager, prs, _ = _make_epic_manager(tmp_path)
+        manager._state.upsert_epic_state(
+            EpicState(epic_number=100, child_issues=[1, 2])
+        )
+
+        await manager.on_child_excluded(100, 2)
+
+        epic = manager._state.get_epic_state(100)
+        assert epic is not None
+        assert 2 in epic.excluded_children
+
+    @pytest.mark.asyncio
+    async def test_duplicate_exclusion_not_duplicated(self, tmp_path: Path) -> None:
+        manager, _, _ = _make_epic_manager(tmp_path)
+        manager._state.upsert_epic_state(
+            EpicState(epic_number=100, child_issues=[1, 2], excluded_children=[2])
+        )
+
+        await manager.on_child_excluded(100, 2)
+
+        epic = manager._state.get_epic_state(100)
+        assert epic is not None
+        assert epic.excluded_children.count(2) == 1
+
+    @pytest.mark.asyncio
+    async def test_triggers_auto_close_when_all_excluded(self, tmp_path: Path) -> None:
+        epic_gh = _make_epic(100, [1, 2])
+        sub_issues = {
+            1: GitHubIssue(
+                number=1, title="Issue #1", labels=["wontfix"], state="closed"
+            ),
+            2: GitHubIssue(
+                number=2, title="Issue #2", labels=["duplicate"], state="closed"
+            ),
+        }
+        manager, prs, _ = _make_epic_manager(
+            tmp_path, epics=[epic_gh], sub_issues=sub_issues
+        )
+        manager._state.upsert_epic_state(
+            EpicState(epic_number=100, child_issues=[1, 2], excluded_children=[1])
+        )
+
+        # Excluding child #2 makes all children resolved
+        await manager.on_child_excluded(100, 2)
+
+        prs.close_issue.assert_called_once_with(100)
+
+    @pytest.mark.asyncio
+    async def test_noop_when_epic_not_in_state(self, tmp_path: Path) -> None:
+        manager, prs, _ = _make_epic_manager(tmp_path)
+
+        # No epic registered — should not raise
+        await manager.on_child_excluded(999, 1)
+
+        prs.close_issue.assert_not_called()
+
+
+class TestEpicManagerTryAutoClose:
+    """EpicManager._try_auto_close guards: only closes state when GitHub is closed."""
+
+    @pytest.mark.asyncio
+    async def test_state_not_marked_closed_when_github_noop(
+        self, tmp_path: Path
+    ) -> None:
+        """If checker returns False (epic not closeable on GitHub), state stays open."""
+        # Epic body has sub-issue [1, 2, 3] but state knows only [1, 2]
+        # so GitHub check finds issue 3 still open → checker returns False
+        epic_gh = _make_epic(100, [1, 2, 3])
+        sub_issues = {
+            1: IssueFactory.create(
+                number=1, labels=["hydraflow-fixed"], title="Issue #1"
+            ),
+            2: GitHubIssue(
+                number=2, title="Issue #2", labels=["wontfix"], state="closed"
+            ),
+            3: GitHubIssue(number=3, title="Issue #3", labels=[], state="open"),
+        }
+        manager, prs, _ = _make_epic_manager(
+            tmp_path, epics=[epic_gh], sub_issues=sub_issues
+        )
+        # State only knows [1, 2] — all resolved — so _try_auto_close fires
+        manager._state.upsert_epic_state(
+            EpicState(
+                epic_number=100,
+                child_issues=[1, 2],
+                completed_children=[1],
+                excluded_children=[2],
+            )
+        )
+
+        await manager._try_auto_close(100)
+
+        # GitHub was NOT closed (issue 3 in body is still open)
+        prs.close_issue.assert_not_called()
+        # State must NOT be marked closed (would permanently block future retries)
+        epic = manager._state.get_epic_state(100)
+        assert epic is not None
+        assert epic.closed is False
+
+    @pytest.mark.asyncio
+    async def test_state_marked_closed_when_github_closes(self, tmp_path: Path) -> None:
+        """When all GitHub sub-issues are resolved, state is correctly marked closed."""
+        epic_gh = _make_epic(100, [1, 2])
+        sub_issues = {
+            1: IssueFactory.create(
+                number=1, labels=["hydraflow-fixed"], title="Issue #1"
+            ),
+            2: GitHubIssue(
+                number=2, title="Issue #2", labels=["wontfix"], state="closed"
+            ),
+        }
+        manager, prs, _ = _make_epic_manager(
+            tmp_path, epics=[epic_gh], sub_issues=sub_issues
+        )
+        manager._state.upsert_epic_state(
+            EpicState(
+                epic_number=100,
+                child_issues=[1, 2],
+                completed_children=[1],
+                excluded_children=[2],
+            )
+        )
+
+        await manager._try_auto_close(100)
+
+        prs.close_issue.assert_called_once_with(100)
+        epic = manager._state.get_epic_state(100)
+        assert epic is not None
+        assert epic.closed is True
