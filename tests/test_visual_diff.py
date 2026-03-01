@@ -718,6 +718,19 @@ class TestVisualValidationConfig:
         )
         assert cfg.visual_diff_threshold == 0.05
 
+    def test_env_override_warn_threshold(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from config import HydraFlowConfig
+
+        monkeypatch.setenv("HYDRAFLOW_VISUAL_WARN_THRESHOLD", "0.002")
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert cfg.visual_warn_threshold == 0.002
+
     def test_env_override_max_screens(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
