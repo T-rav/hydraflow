@@ -263,10 +263,11 @@ class EpicManager:
         self._checker = EpicCompletionChecker(config, prs, fetcher, state=state)
         # Background cache: keyed by epic_number → EpicDetail
         self._detail_cache: dict[int, EpicDetail] = {}
-        self._cache_updated_at: float = 0.0
+        self._cache_timestamps: dict[int, float] = {}  # per-entry TTL
         self._cache_ttl_seconds: float = 60.0
         self._release_jobs: dict[int, str] = {}  # epic_number → job_id
         self._release_locks: dict[int, asyncio.Lock] = {}
+        self._background_tasks: set[asyncio.Task[None]] = set()
 
     async def register_epic(
         self,
@@ -436,7 +437,8 @@ class EpicManager:
 
     def get_cached_detail(self, epic_number: int) -> EpicDetail | None:
         """Return cached detail if still fresh, else None."""
-        if time.monotonic() - self._cache_updated_at > self._cache_ttl_seconds:
+        ts = self._cache_timestamps.get(epic_number, 0.0)
+        if time.monotonic() - ts > self._cache_ttl_seconds:
             return None
         return self._detail_cache.get(epic_number)
 
@@ -471,12 +473,12 @@ class EpicManager:
             child_info = await self._build_child_info(
                 child_num, epic, repo, fixed_label
             )
-            # Count by status
+            # Count by status (failed is tracked via progress.failed; exclude here)
             if child_info.status == "done":
                 merged_count += 1
-            elif child_info.status in ("running", "failed"):
+            elif child_info.status == "running":
                 active_count += 1
-            else:
+            elif child_info.status != "failed":
                 queued_count += 1
             children.append(child_info)
 
@@ -507,7 +509,7 @@ class EpicManager:
             release=release_data,
         )
         self._detail_cache[epic_number] = detail
-        self._cache_updated_at = time.monotonic()
+        self._cache_timestamps[epic_number] = time.monotonic()
         return detail
 
     async def _build_child_info(
@@ -697,7 +699,6 @@ class EpicManager:
                     epic.epic_number,
                     exc_info=True,
                 )
-        self._cache_updated_at = time.monotonic()
 
     async def trigger_release(self, epic_number: int) -> dict:
         """Trigger async merge sequence and release creation for a bundled epic.
@@ -724,8 +725,12 @@ class EpicManager:
         job_id = f"release-{epic_number}-{int(time.time())}"
         self._release_jobs[epic_number] = job_id
 
-        # Launch background task
-        asyncio.create_task(self._execute_release(epic_number, job_id))
+        # Launch background task — store reference to prevent premature GC
+        task: asyncio.Task[None] = asyncio.create_task(
+            self._execute_release(epic_number, job_id)
+        )
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
         return {"job_id": job_id, "status": "started"}
 

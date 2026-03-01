@@ -606,7 +606,7 @@ class TestCache:
         # Cache is set, so second call uses cache
         import time
 
-        mgr._cache_updated_at = time.monotonic()
+        mgr._cache_timestamps[100] = time.monotonic()
         detail2 = mgr.get_cached_detail(100)
         assert detail2 is not None
         assert detail2.epic_number == 100
@@ -627,7 +627,7 @@ class TestCache:
 
         await mgr.get_detail(100)
         # Force cache expiry
-        mgr._cache_updated_at = 0.0
+        mgr._cache_timestamps[100] = 0.0
         cached = mgr.get_cached_detail(100)
         assert cached is None
 
