@@ -148,6 +148,14 @@ describe('Header component', () => {
   it('does not render Session label', () => {
     render(<Header {...defaultProps} />)
     expect(screen.queryByText('Session')).toBeNull()
+    // pipeline row must still be present to confirm the container rendered
+    expect(screen.getByTestId('session-pipeline')).toBeInTheDocument()
+  })
+
+  it('session box has accessible aria-label', () => {
+    render(<Header {...defaultProps} />)
+    const sessionBox = screen.getByTestId('session-box')
+    expect(sessionBox).toHaveAttribute('aria-label', 'Session pipeline statistics')
   })
 
   it('renders tagline as two stacked lines', () => {
