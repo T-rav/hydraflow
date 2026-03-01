@@ -834,6 +834,35 @@ class PRManager:
             logger.error("Could not get diff file names for PR #%d: %s", pr_number, exc)
             return []
 
+    async def get_pr_approvers(self, pr_number: int) -> list[str]:
+        """Fetch the list of GitHub usernames that approved *pr_number*."""
+        try:
+            import json as _json
+
+            output = await self._run_gh(
+                "gh",
+                "pr",
+                "view",
+                str(pr_number),
+                "--repo",
+                self._repo,
+                "--json",
+                "reviews",
+            )
+            data = _json.loads(output)
+            reviews = data.get("reviews", [])
+            approvers: list[str] = []
+            for review in reviews:
+                if review.get("state") == "APPROVED":
+                    author = review.get("author", {})
+                    login = author.get("login", "")
+                    if login and login not in approvers:
+                        approvers.append(login)
+            return approvers
+        except (RuntimeError, ValueError) as exc:
+            logger.debug("Could not get approvers for PR #%d: %s", pr_number, exc)
+            return []
+
     async def pull_main(self) -> bool:
         """Pull latest main into the local repo."""
         if self._config.dry_run:
@@ -1317,6 +1346,31 @@ class PRManager:
             with contextlib.suppress(ValueError):
                 issue_num = int(branch.rsplit("-", maxsplit=1)[-1])
         return issue_num
+
+    async def find_pr_for_issue(self, issue_number: int) -> int:
+        """Find the open PR number for the given *issue_number* by branch convention.
+
+        Returns the PR number, or 0 if not found.
+        """
+        branch = f"agent/issue-{issue_number}"
+        try:
+            raw = await self._run_gh(
+                "gh",
+                "pr",
+                "list",
+                "--head",
+                branch,
+                "--state",
+                "open",
+                "--json",
+                "number",
+                "--jq",
+                ".[0].number // 0",
+            )
+            return int(raw.strip()) if raw.strip() else 0
+        except (RuntimeError, ValueError):
+            logger.debug("Could not find PR for issue #%d", issue_number, exc_info=True)
+            return 0
 
     async def _get_pr_branch_and_draft(self, pr_number: int) -> tuple[str, bool]:
         """Resolve branch + draft status for a PR via REST API."""

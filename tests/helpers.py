@@ -277,13 +277,23 @@ class ConfigFactory:
         epic_monitor_interval: int = 1800,
         worktree_gc_interval: int = 1800,
         epic_stale_days: int = 7,
+        epic_merge_strategy: Literal[
+            "independent", "bundled", "bundled_hitl", "ordered"
+        ] = "independent",
         collaborator_check_enabled: bool = False,
         collaborator_cache_ttl: int = 600,
+        artifact_retention_days: int = 30,
+        artifact_max_size_mb: int = 500,
+        runs_gc_interval: int = 3600,
         release_on_epic_close: bool = False,
         release_version_source: Literal[
             "epic_title", "milestone", "manual"
         ] = "epic_title",
         release_tag_prefix: str = "v",
+        baseline_snapshot_patterns: list[str] | None = None,
+        baseline_approval_required: bool = True,
+        baseline_approvers: list[str] | None = None,
+        baseline_max_audit_records: int = 100,
         visual_validation_enabled: bool = True,
         visual_validation_trigger_patterns: list[str] | None = None,
         visual_required_label: str = "hydraflow-visual-required",
@@ -452,13 +462,25 @@ class ConfigFactory:
             epic_monitor_interval=epic_monitor_interval,
             worktree_gc_interval=worktree_gc_interval,
             epic_stale_days=epic_stale_days,
+            epic_merge_strategy=epic_merge_strategy,
             auto_process_epics=auto_process_epics,
             auto_process_bug_reports=auto_process_bug_reports,
             collaborator_check_enabled=collaborator_check_enabled,
             collaborator_cache_ttl=collaborator_cache_ttl,
+            artifact_retention_days=artifact_retention_days,
+            artifact_max_size_mb=artifact_max_size_mb,
+            runs_gc_interval=runs_gc_interval,
             release_on_epic_close=release_on_epic_close,
             release_version_source=release_version_source,
             release_tag_prefix=release_tag_prefix,
+            baseline_snapshot_patterns=baseline_snapshot_patterns
+            if baseline_snapshot_patterns is not None
+            else ["**/__snapshots__/**", "**/*.snap.png", "**/*.baseline.png"],
+            baseline_approval_required=baseline_approval_required,
+            baseline_approvers=baseline_approvers
+            if baseline_approvers is not None
+            else [],
+            baseline_max_audit_records=baseline_max_audit_records,
             visual_validation_enabled=visual_validation_enabled,
             visual_validation_trigger_patterns=(
                 visual_validation_trigger_patterns
@@ -770,6 +792,7 @@ def make_review_phase(
     default_mocks: bool = False,
     review_result=None,
     issue_number: int = 42,
+    baseline_policy=None,
 ):
     """Build a ReviewPhase with standard mock dependencies.
 
@@ -849,6 +872,7 @@ def make_review_phase(
         event_bus=bus,
         conflict_resolver=conflict_resolver,
         post_merge=post_merge,
+        baseline_policy=baseline_policy,
     )
 
     if default_mocks:
