@@ -670,12 +670,9 @@ class ReviewPhase:
             result.visual_passed = True
             return True
 
-        # --- Simulate visual pipeline invocation ---
-        # In production this would call an external visual validation service.
-        # For now we treat it as a placeholder that always passes.
-        verdict = "pass"
-        artifacts: dict[str, str] = {}
-        reason = "visual validation passed"
+        verdict, artifacts, reason = await self._invoke_visual_pipeline(
+            pr, issue, worker_id
+        )
 
         runtime = round(time.monotonic() - start, 3)
 
@@ -735,6 +732,20 @@ class ReviewPhase:
             task=issue,
         )
         return False
+
+    async def _invoke_visual_pipeline(
+        self,
+        pr: PRInfo,  # noqa: ARG002
+        issue: Task,  # noqa: ARG002
+        worker_id: int,  # noqa: ARG002
+    ) -> tuple[str, dict[str, str], str]:
+        """Invoke the external visual validation service.
+
+        Returns (verdict, artifacts, reason).
+        Override or mock this method in tests to exercise fail paths.
+        In production this will call an external visual validation service.
+        """
+        return "pass", {}, "visual validation passed"
 
     async def _run_ci_wait_attempt(
         self, pr: PRInfo, attempt: int, worker_id: int
