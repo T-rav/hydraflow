@@ -462,6 +462,86 @@ class ReviewResult(BaseModel):
     duration_seconds: float = 0.0
 
 
+# --- Visual Validation ---
+
+
+class VisualFailureClass(StrEnum):
+    """Classification of a visual validation failure."""
+
+    INFRA_FAILURE = "infra_failure"
+    VISUAL_DIFF = "visual_diff"
+    TIMEOUT = "timeout"
+    CAPTURE_ERROR = "capture_error"
+
+
+class VisualScreenVerdict(StrEnum):
+    """Verdict for a single visual screen check."""
+
+    PASS = "pass"
+    WARN = "warn"
+    FAIL = "fail"
+
+
+class VisualScreenResult(BaseModel):
+    """Result of a single visual screen validation."""
+
+    screen_name: str
+    diff_ratio: float = 0.0
+    verdict: VisualScreenVerdict = VisualScreenVerdict.PASS
+    failure_class: VisualFailureClass | None = None
+    error: str = ""
+    retries_used: int = 0
+
+
+class VisualValidationReport(BaseModel):
+    """Aggregated result of all visual screen validations."""
+
+    screens: list[VisualScreenResult] = Field(default_factory=list)
+    overall_verdict: VisualScreenVerdict = VisualScreenVerdict.PASS
+    total_retries: int = 0
+    infra_failures: int = 0
+    visual_diffs: int = 0
+
+    @property
+    def has_failures(self) -> bool:
+        """Return True if any screen failed."""
+        return self.overall_verdict == VisualScreenVerdict.FAIL
+
+    @property
+    def has_warnings(self) -> bool:
+        """Return True if any screen has a warning or failure."""
+        return self.overall_verdict in (
+            VisualScreenVerdict.WARN,
+            VisualScreenVerdict.FAIL,
+        )
+
+    def format_summary(self) -> str:
+        """Format a human-readable summary for PR comments."""
+        lines: list[str] = ["## Visual Validation Report", ""]
+        lines.append(f"**Overall: {self.overall_verdict.value.upper()}**")
+        if self.total_retries:
+            lines.append(f"Total retries: {self.total_retries}")
+        if self.infra_failures:
+            lines.append(f"Infrastructure failures: {self.infra_failures}")
+        lines.append("")
+
+        for screen in self.screens:
+            icon = {"pass": "✅", "warn": "⚠️", "fail": "❌"}.get(
+                screen.verdict.value, "❓"
+            )
+            line = f"- {icon} **{screen.screen_name}**: {screen.verdict.value.upper()}"
+            if screen.diff_ratio > 0:
+                line += f" (diff: {screen.diff_ratio:.2%})"
+            if screen.failure_class:
+                line += f" [{screen.failure_class.value}]"
+            if screen.retries_used:
+                line += f" ({screen.retries_used} retries)"
+            if screen.error:
+                line += f" — {screen.error}"
+            lines.append(line)
+        return "\n".join(lines)
+
+
 # --- Verification Judge ---
 
 

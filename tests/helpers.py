@@ -282,6 +282,11 @@ class ConfigFactory:
             "epic_title", "milestone", "manual"
         ] = "epic_title",
         release_tag_prefix: str = "v",
+        visual_validation_enabled: bool = False,
+        visual_max_retries: int = 2,
+        visual_retry_delay: float = 0.0,
+        visual_warn_threshold: float = 0.05,
+        visual_fail_threshold: float = 0.15,
     ):
         """Create a HydraFlowConfig with test-friendly defaults."""
         from config import HydraFlowConfig
@@ -449,6 +454,11 @@ class ConfigFactory:
             release_on_epic_close=release_on_epic_close,
             release_version_source=release_version_source,
             release_tag_prefix=release_tag_prefix,
+            visual_validation_enabled=visual_validation_enabled,
+            visual_max_retries=visual_max_retries,
+            visual_retry_delay=visual_retry_delay,
+            visual_warn_threshold=visual_warn_threshold,
+            visual_fail_threshold=visual_fail_threshold,
         )
 
 
