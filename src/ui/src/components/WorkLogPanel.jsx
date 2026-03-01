@@ -85,8 +85,10 @@ function EpicRow({ epic }) {
   const repo = config?.repo || ''
   const epicUrl = repo ? `https://github.com/${repo}/issues/${epic.epic_number}` : ''
 
+  const fetchingRef = useRef(false)
   const handleToggle = useCallback(async () => {
-    if (!expanded && children === null) {
+    if (!expanded && children === null && !fetchingRef.current) {
+      fetchingRef.current = true
       setLoading(true)
       try {
         const res = await fetch(`/api/epics/${epic.epic_number}`)
@@ -96,13 +98,18 @@ function EpicRow({ epic }) {
         }
       } catch { /* ignore */ }
       setLoading(false)
+      fetchingRef.current = false
     }
     setExpanded(prev => !prev)
   }, [expanded, children, epic.epic_number])
 
+  const handleKeyDown = useCallback((e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleToggle() }
+  }, [handleToggle])
+
   return (
     <div style={styles.epicCard}>
-      <div style={styles.epicCardHeader} onClick={handleToggle} role="button" tabIndex={0}>
+      <div style={styles.epicCardHeader} onClick={handleToggle} onKeyDown={handleKeyDown} role="button" tabIndex={0} aria-expanded={expanded} aria-label={`Toggle epic #${epic.epic_number}`}>
         <span style={styles.chevron}>{expanded ? '\u25BE' : '\u25B8'}</span>
         {epicUrl ? (
           <a
@@ -164,14 +171,18 @@ function CrateRow({ crate }) {
   const total = crate.total_issues || 0
   const progress = crate.progress || 0
   const badge = crateBadgeStyles[crate.state] || crateBadgeStyles.open
+  const toggle = () => setExpanded(prev => !prev)
 
   return (
     <div style={styles.crateCard}>
       <div
         style={styles.crateCardHeader}
-        onClick={() => setExpanded(prev => !prev)}
+        onClick={toggle}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
         role="button"
         tabIndex={0}
+        aria-expanded={expanded}
+        aria-label={`Toggle crate ${crate.title || ''}`}
       >
         <span style={styles.chevron}>{expanded ? '\u25BE' : '\u25B8'}</span>
         <span style={styles.crateTitle}>{crate.title}</span>
@@ -212,8 +223,10 @@ export function WorkLogPanel() {
   const cachedCrates = useRef(null)
   const refreshTimer = useRef(null)
 
+  const abortRef = useRef(null)
+
   const fetchData = useCallback((opts = {}) => {
-    const { background = false } = opts
+    const { background = false, signal } = opts
     if (!background) {
       if (cachedEpics.current) setEpics(cachedEpics.current)
       if (cachedCrates.current) setCrates(cachedCrates.current)
@@ -222,7 +235,7 @@ export function WorkLogPanel() {
     }
 
     return Promise.all([
-      fetch('/api/epics')
+      fetch('/api/epics', { signal })
         .then(async (res) => {
           if (!res.ok) throw new Error(`status ${res.status}`)
           return await res.json()
@@ -232,7 +245,7 @@ export function WorkLogPanel() {
           cachedEpics.current = list
           setEpics(list)
         }),
-      fetch('/api/crates')
+      fetch('/api/crates', { signal })
         .then(async (res) => {
           if (!res.ok) throw new Error(`status ${res.status}`)
           return await res.json()
@@ -243,7 +256,8 @@ export function WorkLogPanel() {
           setCrates(list)
         }),
     ])
-      .catch(() => {
+      .catch((err) => {
+        if (err?.name === 'AbortError') return
         if (!background) setError('Could not load work log data')
       })
       .finally(() => {
@@ -252,11 +266,13 @@ export function WorkLogPanel() {
   }, [])
 
   useEffect(() => {
-    fetchData()
+    const ac = new AbortController()
+    abortRef.current = ac
+    fetchData({ signal: ac.signal })
     refreshTimer.current = setInterval(() => {
       fetchData({ background: true })
     }, 30_000)
-    return () => clearInterval(refreshTimer.current)
+    return () => { ac.abort(); clearInterval(refreshTimer.current) }
   }, [fetchData])
 
   const filteredEpics = useMemo(() => {
@@ -273,7 +289,7 @@ export function WorkLogPanel() {
     return crates.filter(crate => {
       if (crateFilter !== 'all' && crate.state !== crateFilter) return false
       if (!search.trim()) return true
-      return crate.title.toLowerCase().includes(search.trim().toLowerCase())
+      return (crate.title || '').toLowerCase().includes(search.trim().toLowerCase())
     })
   }, [crates, crateFilter, search])
 
@@ -289,6 +305,7 @@ export function WorkLogPanel() {
     const title = newCrateName.trim()
     if (!title) return
     setCreating(true)
+    setError('')
     try {
       const res = await fetch('/api/crates', {
         method: 'POST',
@@ -298,8 +315,12 @@ export function WorkLogPanel() {
       if (res.ok) {
         setNewCrateName('')
         fetchData()
+      } else {
+        setError('Failed to create crate')
       }
-    } catch { /* ignore */ }
+    } catch {
+      setError('Failed to create crate')
+    }
     setCreating(false)
   }, [newCrateName, fetchData])
 

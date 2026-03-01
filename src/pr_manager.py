@@ -1447,7 +1447,7 @@ class PRManager:
     def _parse_milestone(self, raw: dict[str, Any]) -> Crate:
         """Parse a GitHub milestone JSON object into a Crate model."""
         return Crate(
-            number=raw.get("number", 0),
+            number=raw.get("number") or 0,
             title=raw.get("title", ""),
             description=raw.get("description") or "",
             due_on=raw.get("due_on") or None,
@@ -1459,7 +1459,7 @@ class PRManager:
         )
 
     async def list_milestones(self, state: str = "all") -> list[Crate]:
-        """List all milestones for the repo."""
+        """List all milestones for the repo (paginated)."""
         self._assert_repo()
         raw = await self._run_gh(
             "gh",
@@ -1469,6 +1469,7 @@ class PRManager:
             f"state={state}",
             "-f",
             "per_page=100",
+            "--paginate",
         )
         items = json.loads(raw) if raw.strip() else []
         return [self._parse_milestone(m) for m in items]
@@ -1484,7 +1485,7 @@ class PRManager:
             )
             return self._parse_milestone(json.loads(raw))
         except RuntimeError as exc:
-            if "404" in str(exc):
+            if "HTTP 404" in str(exc).upper() or "Not Found" in str(exc):
                 return None
             raise
 
@@ -1526,7 +1527,10 @@ class PRManager:
             "PATCH",
         ]
         for key, value in fields.items():
-            if value is not None:
+            if value is None:
+                # -F sends raw JSON values; use for null to clear fields like due_on
+                cmd.extend(["-F", f"{key}=null"])
+            else:
                 cmd.extend(["-f", f"{key}={value}"])
         raw = await self._run_gh(*cmd)
         return self._parse_milestone(json.loads(raw))
@@ -1572,7 +1576,7 @@ class PRManager:
     async def list_milestone_issues(
         self, milestone_number: int
     ) -> list[dict[str, Any]]:
-        """List issues assigned to a milestone."""
+        """List issues assigned to a milestone (paginated)."""
         self._assert_repo()
         raw = await self._run_gh(
             "gh",
@@ -1584,5 +1588,6 @@ class PRManager:
             "state=all",
             "-f",
             "per_page=100",
+            "--paginate",
         )
         return json.loads(raw) if raw.strip() else []

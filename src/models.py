@@ -849,12 +849,17 @@ class CrateCreateRequest(BaseModel):
 
 
 class CrateUpdateRequest(BaseModel):
-    """Request body for PATCH /api/crates/{number}."""
+    """Request body for PATCH /api/crates/{number}.
+
+    Fields use a sentinel pattern: only fields present in the request JSON
+    are forwarded to GitHub.  Sending ``"due_on": null`` explicitly clears
+    the milestone due date.
+    """
 
     title: str | None = None
     description: str | None = None
     due_on: str | None = None
-    state: str | None = None
+    state: Literal["open", "closed"] | None = None
 
 
 class CrateItemsRequest(BaseModel):

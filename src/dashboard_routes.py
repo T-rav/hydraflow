@@ -678,8 +678,12 @@ def create_router(
 
     @router.patch("/api/crates/{crate_number}")
     async def update_crate(crate_number: int, body: CrateUpdateRequest) -> JSONResponse:
-        """Update a milestone (crate)."""
-        fields = {k: v for k, v in body.model_dump().items() if v is not None}
+        """Update a milestone (crate).
+
+        Only fields present in the request JSON are forwarded.  Sending
+        ``"due_on": null`` clears the milestone due date.
+        """
+        fields = {k: body.model_dump()[k] for k in body.model_fields_set}
         if not fields:
             return JSONResponse({"error": "no fields to update"}, status_code=400)
         try:
@@ -718,11 +722,21 @@ def create_router(
     async def remove_crate_items(
         crate_number: int, body: CrateItemsRequest
     ) -> JSONResponse:
-        """Remove issues from a milestone (crate) by clearing their milestone."""
+        """Remove issues from a milestone (crate) by clearing their milestone.
+
+        Only clears the milestone if the issue is currently assigned to the
+        specified crate (milestone), avoiding unintended removal from a
+        different milestone.
+        """
         try:
+            current_issues = await pr_manager.list_milestone_issues(crate_number)
+            current_nums = {i.get("number") for i in current_issues}
+            removed = 0
             for issue_num in body.issue_numbers:
-                await pr_manager.set_issue_milestone(issue_num, None)
-            return JSONResponse({"ok": True, "removed": len(body.issue_numbers)})
+                if issue_num in current_nums:
+                    await pr_manager.set_issue_milestone(issue_num, None)
+                    removed += 1
+            return JSONResponse({"ok": True, "removed": removed})
         except RuntimeError as exc:
             logger.error("Failed to remove items from crate #%d: %s", crate_number, exc)
             return JSONResponse(

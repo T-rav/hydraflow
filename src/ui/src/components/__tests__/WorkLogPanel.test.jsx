@@ -127,4 +127,36 @@ describe('WorkLogPanel', () => {
       expect(body.title).toBe('Sprint 3')
     })
   })
+
+  it('shows error message when API fails', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('network error'))
+    render(<WorkLogPanel />)
+    await waitFor(() => expect(screen.getByText('Could not load work log data')).toBeInTheDocument())
+  })
+
+  it('filters epics by search text', async () => {
+    render(<WorkLogPanel />)
+    await waitFor(() => expect(screen.getByText('Auth overhaul')).toBeInTheDocument())
+
+    fireEvent.change(screen.getByPlaceholderText('Search crates, epics'), { target: { value: 'auth' } })
+    expect(screen.getByText('Auth overhaul')).toBeInTheDocument()
+    // Crates should also be filtered — 'Release v2.0' doesn't match 'auth'
+    expect(screen.queryByText('Release v2.0')).not.toBeInTheDocument()
+  })
+
+  it('creates crate on Enter key', async () => {
+    render(<WorkLogPanel />)
+    await waitFor(() => expect(screen.getByTestId('new-crate-input')).toBeInTheDocument())
+
+    const input = screen.getByTestId('new-crate-input')
+    fireEvent.change(input, { target: { value: 'Sprint 4' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => {
+      const postCalls = global.fetch.mock.calls.filter(
+        ([url, opts]) => url === '/api/crates' && opts?.method === 'POST'
+      )
+      expect(postCalls.length).toBe(1)
+    })
+  })
 })
