@@ -2093,9 +2093,7 @@ def create_router(
         """Return storage statistics for run artifacts."""
         orch = get_orchestrator()
         if not orch:
-            return JSONResponse(
-                {"total_bytes": 0, "total_mb": 0, "total_runs": 0, "issues": 0}
-            )
+            return JSONResponse({"error": "no orchestrator"}, status_code=400)
         stats = orch.run_recorder.get_storage_stats()
         stats["retention_days"] = config.artifact_retention_days
         stats["max_size_mb"] = config.artifact_max_size_mb

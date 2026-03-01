@@ -259,14 +259,14 @@ class RunRecorder:
                 if run_dir.is_dir():
                     runs.append((run_dir.name, run_dir))
 
-        # Sort oldest first
-        runs.sort(key=lambda r: r[0])
+        # Sort descending so pop() removes the oldest (O(1) vs pop(0) O(n))
+        runs.sort(key=lambda r: r[0], reverse=True)
         max_bytes = max_size_mb * 1024 * 1024
         removed = 0
         current_bytes = self._compute_total_bytes()
 
         while runs and current_bytes > max_bytes:
-            _, oldest_run = runs.pop(0)
+            _, oldest_run = runs.pop()
             parent = oldest_run.parent
             run_bytes = sum(
                 f.stat().st_size for f in oldest_run.rglob("*") if f.is_file()
