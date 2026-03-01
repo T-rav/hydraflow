@@ -507,6 +507,7 @@ class EpicManager:
             release=release_data,
         )
         self._detail_cache[epic_number] = detail
+        self._cache_updated_at = time.monotonic()
         return detail
 
     async def _build_child_info(
@@ -676,7 +677,9 @@ class EpicManager:
                     # Check and publish readiness
                     if (
                         detail.readiness.all_implemented
+                        and detail.readiness.all_approved
                         and detail.readiness.all_ci_passing
+                        and detail.readiness.no_conflicts
                     ):
                         await self._bus.publish(
                             HydraFlowEvent(
@@ -707,6 +710,9 @@ class EpicManager:
         if epic.closed:
             return {"error": "epic already closed", "status": "failed"}
 
+        if epic.released:
+            return {"error": "epic already released", "status": "failed"}
+
         # Check if a release job is already running
         if epic_number in self._release_jobs:
             return {
@@ -732,10 +738,9 @@ class EpicManager:
                 )
             )
 
-            # Delegate to the existing completion checker
-            epic = self._state.get_epic_state(epic_number)
-            if epic and epic.completed_children:
-                await self._checker.check_and_close_epics(epic.completed_children[-1])
+            result = await self.release_epic(epic_number)
+            if "error" in result:
+                raise RuntimeError(result["error"])
 
             await self._bus.publish(
                 HydraFlowEvent(
