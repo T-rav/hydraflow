@@ -424,7 +424,7 @@ class VisualEvidenceItem(BaseModel):
     baseline_url: HttpUrl = ""
     actual_url: HttpUrl = ""
     diff_url: HttpUrl = ""
-    status: Literal["pass", "fail", "warn"] = "pass"
+    status: Literal["pass", "fail", "warn"]
 
 
 class VisualEvidence(BaseModel):

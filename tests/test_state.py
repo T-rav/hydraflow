@@ -592,10 +592,16 @@ class TestHITLVisualEvidence:
 
         tracker = make_tracker(tmp_path)
         ev1 = VisualEvidence(
-            items=[VisualEvidenceItem(screen_name="page1", diff_percent=1.0)],
+            items=[
+                VisualEvidenceItem(screen_name="page1", diff_percent=1.0, status="pass")
+            ],
         )
         ev2 = VisualEvidence(
-            items=[VisualEvidenceItem(screen_name="page2", diff_percent=10.0)],
+            items=[
+                VisualEvidenceItem(
+                    screen_name="page2", diff_percent=10.0, status="fail"
+                )
+            ],
             attempt=2,
         )
         tracker.set_hitl_visual_evidence(42, ev1)
@@ -645,13 +651,17 @@ class TestHITLVisualEvidence:
         tracker.set_hitl_visual_evidence(
             1,
             VisualEvidence(
-                items=[VisualEvidenceItem(screen_name="a", diff_percent=1.0)]
+                items=[
+                    VisualEvidenceItem(screen_name="a", diff_percent=1.0, status="pass")
+                ]
             ),
         )
         tracker.set_hitl_visual_evidence(
             2,
             VisualEvidence(
-                items=[VisualEvidenceItem(screen_name="b", diff_percent=2.0)]
+                items=[
+                    VisualEvidenceItem(screen_name="b", diff_percent=2.0, status="pass")
+                ]
             ),
         )
         assert tracker.get_hitl_visual_evidence(1).items[0].screen_name == "a"

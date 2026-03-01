@@ -189,7 +189,7 @@ export function HITLTable({ items, onRefresh }) {
               <React.Fragment key={item.issue}>
                 <tr
                   onClick={() => toggleExpandAndLoadSummary(item.issue)}
-                  style={{ ...styles.row, ...(isExpanded ? styles.rowExpanded : {}) }}
+                  style={isExpanded ? styles.rowActive : styles.row}
                   data-testid={`hitl-row-${item.issue}`}
                 >
                   <td style={styles.td}>
@@ -269,7 +269,7 @@ export function HITLTable({ items, onRefresh }) {
                             )}
                             <div style={styles.visualGrid}>
                               {item.visualEvidence.items.map((ev, idx) => (
-                                <div key={ev.screen_name || idx} style={styles.visualCard} data-testid={`hitl-visual-item-${item.issue}-${idx}`}>
+                                <div key={`${ev.screen_name}-${idx}`} style={styles.visualCard} data-testid={`hitl-visual-item-${item.issue}-${idx}`}>
                                   <div style={styles.visualCardHeader}>
                                     <span style={styles.visualScreenName}>{ev.screen_name}</span>
                                     <span style={visualStatusStyle(ev.status)}>
@@ -412,9 +412,14 @@ function visualStatusStyle(status) {
   }
 }
 
+const diffFillBg = { fail: theme.red, warn: theme.yellow, pass: theme.green }
+
 function diffFillStyle(status, diffPercent) {
-  const bg = status === 'fail' ? theme.red : status === 'warn' ? theme.yellow : theme.green
-  return { ...styles.visualDiffFill, width: `${Math.min(diffPercent, 100)}%`, background: bg }
+  return {
+    height: '100%', borderRadius: 2, transition: 'width 0.3s',
+    width: `${Math.min(diffPercent, 100)}%`,
+    background: diffFillBg[status] || theme.red,
+  }
 }
 
 function causeBadgeStyle(item) {
@@ -455,7 +460,7 @@ const styles = {
   },
   td: { padding: 8, borderBottom: `1px solid ${theme.border}` },
   row: { cursor: 'pointer' },
-  rowExpanded: { background: theme.surfaceInset },
+  rowActive: { cursor: 'pointer', background: theme.surfaceInset },
   link: { color: theme.accent, textDecoration: 'none' },
   noPr: { color: theme.textMuted, fontStyle: 'italic' },
   causeText: { fontSize: 11, color: theme.orange, fontWeight: 500 },
@@ -559,7 +564,6 @@ const styles = {
     height: 4, borderRadius: 2, background: theme.surfaceInset,
     marginBottom: 4, overflow: 'hidden',
   },
-  visualDiffFill: { height: '100%', borderRadius: 2, transition: 'width 0.3s' },
   visualDiffLabel: { fontSize: 10, color: theme.textMuted },
   visualLinks: { display: 'flex', gap: 8, marginTop: 4, fontSize: 11 },
 }

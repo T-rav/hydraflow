@@ -2867,10 +2867,14 @@ class TestVisualEvidenceItem:
     """Tests for the VisualEvidenceItem model."""
 
     def test_minimal_instantiation(self) -> None:
-        item = VisualEvidenceItem(screen_name="login")
+        item = VisualEvidenceItem(screen_name="login", status="pass")
         assert item.screen_name == "login"
         assert item.diff_percent == 0.0
         assert item.status == "pass"
+
+    def test_status_is_required(self) -> None:
+        with pytest.raises(ValidationError):
+            VisualEvidenceItem(screen_name="login")
 
     def test_all_fields(self) -> None:
         item = VisualEvidenceItem(
@@ -2951,7 +2955,9 @@ class TestHITLItemVisualEvidence:
 
     def test_with_visual_evidence(self) -> None:
         ev = VisualEvidence(
-            items=[VisualEvidenceItem(screen_name="home", diff_percent=10.0)],
+            items=[
+                VisualEvidenceItem(screen_name="home", diff_percent=10.0, status="fail")
+            ],
             summary="1 screen failed",
         )
         item = HITLItem(issue=1, visualEvidence=ev)
