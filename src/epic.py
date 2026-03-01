@@ -180,10 +180,7 @@ class EpicCompletionChecker:
             # Guard against path traversal outside the repo root
             repo_resolved = self._config.repo_root.resolve()
             path_resolved = changelog_path.resolve()
-            if (
-                not str(path_resolved).startswith(str(repo_resolved) + "/")
-                and path_resolved != repo_resolved
-            ):
+            if not path_resolved.is_relative_to(repo_resolved):
                 logger.warning(
                     "changelog_file %r resolves outside repo_root %r — skipping write",
                     str(changelog_path),

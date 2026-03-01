@@ -254,6 +254,28 @@ class TestFormatChangelog:
         result = format_changelog("1.0.0", entries, date="2026-02-28")
         assert "- Add new feature\n" in result
 
+    def test_non_conventional_colon_prefix_preserved(self) -> None:
+        """Titles like 'HTTP: ...' or 'WIP: ...' must NOT have their prefix stripped."""
+        entries = [
+            ChangelogEntry(
+                category=ChangeCategory.MISCELLANEOUS,
+                title="HTTP: improve request handling",
+            ),
+        ]
+        result = format_changelog("1.0.0", entries, date="2026-02-28")
+        assert "- HTTP: improve request handling\n" in result
+
+    def test_chore_prefix_preserved(self) -> None:
+        """'chore:' is not in the categorized prefix map — keep it in display."""
+        entries = [
+            ChangelogEntry(
+                category=ChangeCategory.MISCELLANEOUS,
+                title="chore: update dependencies",
+            ),
+        ]
+        result = format_changelog("1.0.0", entries, date="2026-02-28")
+        assert "- chore: update dependencies\n" in result
+
 
 # ---------------------------------------------------------------------------
 # generate_changelog (async integration)

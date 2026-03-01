@@ -56,11 +56,20 @@ def extract_summary(body: str) -> str:
     return ""
 
 
+# Matches only the conventional commit types used in _PREFIX_MAP — avoids
+# stripping arbitrary WORD: prefixes (e.g. "HTTP:", "WIP:") from titles.
+_CLEAN_PREFIX_RE = re.compile(
+    r"^(?:feat|fix|refactor|perf|docs?)(\(.+?\))?!?:\s*",
+    re.IGNORECASE,
+)
+
+
 def _clean_title(title: str) -> str:
     """Remove conventional commit prefix from a title for display."""
-    # Strip "feat: ", "fix(scope): ", "feat!: ", etc.
-    cleaned = re.sub(r"^[a-zA-Z]+(\(.+?\))?!?:\s*", "", title)
-    return cleaned.strip() or title.strip()
+    # Strip "feat: ", "fix(scope): ", "feat!: ", etc. — only known types.
+    stripped = title.strip()
+    cleaned = _CLEAN_PREFIX_RE.sub("", stripped)
+    return cleaned.strip() or stripped
 
 
 def format_changelog(
