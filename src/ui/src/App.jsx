@@ -62,24 +62,11 @@ function AppContent() {
     selectedSession, selectSession,
     currentSessionId,
     stageStatus,
-    requestChanges, resetSession,
-    creditsPausedUntil,
+    requestChanges,
   } = useHydraFlow()
   const [activeTab, setActiveTab] = useState('worklog')
   const [expandedStages, setExpandedStages] = useState({})
 
-  const handleStart = useCallback(async () => {
-    resetSession()
-    try {
-      await fetch('/api/control/start', { method: 'POST' })
-    } catch { /* ignore */ }
-  }, [resetSession])
-
-  const handleStop = useCallback(async () => {
-    try {
-      await fetch('/api/control/stop', { method: 'POST' })
-    } catch { /* ignore */ }
-  }, [])
 
   const handleRequestChanges = useCallback(async (issueNumber, feedback, stage) => {
     const ok = await requestChanges(issueNumber, feedback, stage)
@@ -106,9 +93,6 @@ function AppContent() {
       <Header
         connected={connected}
         orchestratorStatus={orchestratorStatus}
-        creditsPausedUntil={creditsPausedUntil}
-        onStart={handleStart}
-        onStop={handleStop}
       />
 
       <div style={styles.body}>

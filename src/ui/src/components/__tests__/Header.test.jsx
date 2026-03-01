@@ -1,11 +1,10 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { deriveStageStatus } from '../../hooks/useStageStatus'
 import { PIPELINE_STAGES } from '../../constants'
 import { theme } from '../../theme'
 import {
   dotConnected, dotDisconnected,
-  startBtnEnabled, startBtnDisabled,
   stageAbbreviations,
   pipelineStageStylesMap,
   pipelineLabelStylesMap,
@@ -58,20 +57,8 @@ describe('Header pre-computed styles', () => {
     })
   })
 
-  describe('start button variants', () => {
-    it('startBtnEnabled has opacity 1 and pointer cursor', () => {
-      expect(startBtnEnabled).toMatchObject({ opacity: 1, cursor: 'pointer' })
-      expect(startBtnEnabled.background).toBe('var(--btn-green)')
-    })
-
-    it('startBtnDisabled has opacity 0.4 and not-allowed cursor', () => {
-      expect(startBtnDisabled).toMatchObject({ opacity: 0.4, cursor: 'not-allowed' })
-    })
-  })
-
   it('style objects are referentially stable', () => {
     expect(dotConnected).toBe(dotConnected)
-    expect(startBtnEnabled).toBe(startBtnEnabled)
   })
 
   describe('pipelineStageStylesMap', () => {
@@ -119,8 +106,6 @@ describe('Header component', () => {
   const defaultProps = {
     connected: true,
     orchestratorStatus: 'idle',
-    onStart: () => {},
-    onStop: () => {},
   }
 
   it('renders without errors', () => {
@@ -128,14 +113,24 @@ describe('Header component', () => {
     expect(screen.getByText('HYDRAFLOW')).toBeInTheDocument()
   })
 
-  it('renders Start button when idle', () => {
+  it('does not render Start button', () => {
     render(<Header {...defaultProps} />)
-    expect(screen.getByText('Start')).toBeInTheDocument()
+    expect(screen.queryByText('Start')).toBeNull()
   })
 
-  it('renders Stop button when running', () => {
+  it('does not render Stop button when running', () => {
     render(<Header {...defaultProps} orchestratorStatus="running" />)
-    expect(screen.getByText('Stop')).toBeInTheDocument()
+    expect(screen.queryByText('Stop')).toBeNull()
+  })
+
+  it('does not render Stopping badge when stopping', () => {
+    render(<Header {...defaultProps} orchestratorStatus="stopping" />)
+    expect(screen.queryByText('Stopping\u2026')).toBeNull()
+  })
+
+  it('does not render Credits Paused badge when credits_paused', () => {
+    render(<Header {...defaultProps} orchestratorStatus="credits_paused" />)
+    expect(screen.queryByText('Credits Paused')).toBeNull()
   })
 
   it('does not render workload counters', () => {
@@ -185,8 +180,8 @@ describe('Header component', () => {
 
   it('controls section has marginLeft for spacing from center content', () => {
     render(<Header {...defaultProps} />)
-    const startBtn = screen.getByText('Start')
-    const controlsDiv = startBtn.parentElement
+    const reportBtn = screen.getByTestId('report-button')
+    const controlsDiv = reportBtn.parentElement
     expect(controlsDiv.style.marginLeft).toBe('10px')
   })
 
@@ -200,8 +195,8 @@ describe('Header component', () => {
 
   it('controls section has flexShrink 0 to prevent collapsing', () => {
     render(<Header {...defaultProps} />)
-    const startBtn = screen.getByText('Start')
-    const controlsDiv = startBtn.parentElement
+    const reportBtn = screen.getByTestId('report-button')
+    const controlsDiv = reportBtn.parentElement
     expect(controlsDiv.style.flexShrink).toBe('0')
   })
 
@@ -247,7 +242,7 @@ describe('Header component', () => {
         expect(pill).toHaveTextContent(String(expectedCounts[stage.key] ?? 0))
       })
 
-      const arrows = screen.getAllByText('→')
+      const arrows = screen.getAllByText('\u2192')
       expect(arrows.length).toBe(PIPELINE_STAGES.length - 1)
     })
 
@@ -265,123 +260,6 @@ describe('Header component', () => {
         const pill = screen.getByTestId(`session-stage-${stage.key}`)
         expect(pill.style.borderColor).toBe(stage.color)
       })
-    })
-  })
-
-  describe('stopping state with active workers', () => {
-    const activeWorkers = {
-      1: { status: 'running', worker: 1, role: 'implementer', title: 'Issue #1', branch: '', transcript: [], pr: null },
-      2: { status: 'done', worker: 2, role: 'implementer', title: 'Issue #2', branch: '', transcript: [], pr: null },
-    }
-    const allDoneWorkers = {
-      1: { status: 'done', worker: 1, role: 'implementer', title: 'Issue #1', branch: '', transcript: [], pr: null },
-      2: { status: 'done', worker: 2, role: 'implementer', title: 'Issue #2', branch: '', transcript: [], pr: null },
-    }
-    const planningWorkers = {
-      1: { status: 'planning', worker: 1, role: 'planner', title: 'Plan #1', branch: '', transcript: [], pr: null },
-    }
-
-    it('shows Start when orchestratorStatus is idle even with stale active workers', () => {
-      mockUseHydraFlow.mockReturnValue({ stageStatus: mockStageStatus(activeWorkers) })
-      render(<Header {...defaultProps} orchestratorStatus="idle" />)
-      expect(screen.getByText('Start')).toBeInTheDocument()
-      expect(screen.queryByText('Stopping\u2026')).toBeNull()
-    })
-
-    it('shows Start when idle and all workers are done', () => {
-      mockUseHydraFlow.mockReturnValue({ stageStatus: mockStageStatus(allDoneWorkers) })
-      render(<Header {...defaultProps} orchestratorStatus="idle" />)
-      expect(screen.getByText('Start')).toBeInTheDocument()
-      expect(screen.queryByText('Stopping\u2026')).toBeNull()
-    })
-
-    it('shows Stopping badge when orchestratorStatus is stopping', () => {
-      render(<Header {...defaultProps} orchestratorStatus="stopping" />)
-      expect(screen.getByText('Stopping\u2026')).toBeInTheDocument()
-      expect(screen.queryByText('Start')).toBeNull()
-      expect(screen.queryByText('Stop')).toBeNull()
-    })
-
-    it('shows Start when orchestratorStatus is idle even with stale planning workers', () => {
-      mockUseHydraFlow.mockReturnValue({ stageStatus: mockStageStatus(planningWorkers) })
-      render(<Header {...defaultProps} orchestratorStatus="idle" />)
-      expect(screen.getByText('Start')).toBeInTheDocument()
-      expect(screen.queryByText('Stopping\u2026')).toBeNull()
-    })
-
-    it('shows Start when orchestratorStatus is done and no active workers', () => {
-      mockUseHydraFlow.mockReturnValue({ stageStatus: mockStageStatus(allDoneWorkers) })
-      render(<Header {...defaultProps} orchestratorStatus="done" />)
-      expect(screen.getByText('Start')).toBeInTheDocument()
-    })
-
-    it('shows Start when orchestratorStatus is done even with stale active workers', () => {
-      mockUseHydraFlow.mockReturnValue({ stageStatus: mockStageStatus(activeWorkers) })
-      render(<Header {...defaultProps} orchestratorStatus="done" />)
-      expect(screen.getByText('Start')).toBeInTheDocument()
-      expect(screen.queryByText('Stopping\u2026')).toBeNull()
-    })
-
-    it('shows Credits Paused badge and Stop button when credits_paused', () => {
-      render(<Header {...defaultProps} orchestratorStatus="credits_paused" />)
-      expect(screen.getByText('Credits Paused')).toBeInTheDocument()
-      expect(screen.getByText('Stop')).toBeInTheDocument()
-      expect(screen.queryByText('Start')).toBeNull()
-    })
-  })
-
-  describe('minimum stopping hold timer', () => {
-    beforeEach(() => {
-      vi.useFakeTimers()
-    })
-    afterEach(() => {
-      vi.useRealTimers()
-    })
-
-    it('clears Stopping immediately when transitioning to idle with no active workers', () => {
-      const { rerender } = render(
-        <Header {...defaultProps} orchestratorStatus="stopping" />
-      )
-      expect(screen.getByText('Stopping\u2026')).toBeInTheDocument()
-
-      // Transition to idle with no active workers — second effect clears held state early
-      rerender(<Header {...defaultProps} orchestratorStatus="idle" />)
-
-      expect(screen.getByText('Start')).toBeInTheDocument()
-    })
-
-    it('holds Stopping badge while workers are still active after idle', () => {
-      const activeWorkers = {
-        1: { status: 'running', worker: 1, role: 'implementer', title: 'Issue #1', branch: '', transcript: [], pr: null },
-      }
-
-      mockUseHydraFlow.mockReturnValue({ stageStatus: mockStageStatus(activeWorkers) })
-      const { rerender } = render(
-        <Header {...defaultProps} orchestratorStatus="stopping" />
-      )
-      expect(screen.getByText('Stopping\u2026')).toBeInTheDocument()
-
-      // Status transitions to idle but workers still active
-      rerender(<Header {...defaultProps} orchestratorStatus="idle" />)
-
-      // Should still show Stopping because workers are active
-      expect(screen.getByText('Stopping\u2026')).toBeInTheDocument()
-      expect(screen.queryByText('Start')).toBeNull()
-
-      // Workers finish
-      mockUseHydraFlow.mockReturnValue({ stageStatus: mockStageStatus({}) })
-      rerender(<Header {...defaultProps} orchestratorStatus="idle" />)
-
-      // Now Start should appear
-      expect(screen.getByText('Start')).toBeInTheDocument()
-    })
-
-    it('handles disconnect during stopping gracefully', () => {
-      render(
-        <Header {...defaultProps} orchestratorStatus="stopping" connected={false} />
-      )
-      expect(screen.getByText('Stopping\u2026')).toBeInTheDocument()
-      expect(screen.queryByText('Start')).toBeNull()
     })
   })
 
@@ -508,6 +386,26 @@ describe('Header component', () => {
   })
 
   describe('Report button', () => {
+    it('renders as an icon button with aria-label', () => {
+      render(<Header {...defaultProps} />)
+      const btn = screen.getByTestId('report-button')
+      expect(btn).toBeInTheDocument()
+      expect(btn.getAttribute('aria-label')).toBe('Report issue')
+    })
+
+    it('contains an SVG icon instead of text', () => {
+      render(<Header {...defaultProps} />)
+      const btn = screen.getByTestId('report-button')
+      expect(btn.querySelector('svg')).not.toBeNull()
+      expect(btn.textContent).toBe('')
+    })
+
+    it('has a title attribute for tooltip', () => {
+      render(<Header {...defaultProps} />)
+      const btn = screen.getByTestId('report-button')
+      expect(btn.getAttribute('title')).toBe('Report issue')
+    })
+
     it('renders in idle state', () => {
       render(<Header {...defaultProps} orchestratorStatus="idle" />)
       expect(screen.getByTestId('report-button')).toBeInTheDocument()

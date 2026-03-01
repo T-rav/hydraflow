@@ -228,16 +228,14 @@ describe('Main tab bar', () => {
   })
 })
 
-describe('Start button dispatches session reset', () => {
-  it('calls resetSession when Start is clicked', async () => {
-    const resetMock = vi.fn()
-    mockState.resetSession = resetMock
+describe('Header does not render main Start/Stop controls', () => {
+  it('does not render Start or Stop buttons in the header', async () => {
     mockState.orchestratorStatus = 'idle'
     const { default: App } = await import('../../App')
     render(<App />)
 
-    fireEvent.click(screen.getByText('Start'))
-    expect(resetMock).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText('Start')).toBeNull()
+    expect(screen.queryByText('Stop')).toBeNull()
 
     // Restore
     mockState.orchestratorStatus = 'running'

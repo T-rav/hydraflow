@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useCallback, useMemo } from 'react'
 import { theme } from '../theme'
 import { useHydraFlow } from '../context/HydraFlowContext'
 import { PIPELINE_STAGES, SENSITIVE_SELECTORS } from '../constants'
@@ -160,47 +160,11 @@ async function captureDashboardScreenshot(root, html2canvas) {
   }
 }
 
-export function Header({
-  connected, orchestratorStatus, creditsPausedUntil,
-  onStart, onStop,
-}) {
+export function Header({ connected, orchestratorStatus }) {
   const { stageStatus, config, submitReport, runtimes = [], supervisedRepos = [] } = useHydraFlow()
-  const hasActiveWorkers = stageStatus.workload.active > 0
   const appVersion = config?.app_version || ''
   const latestVersion = config?.latest_version || ''
   const updateAvailable = Boolean(config?.update_available && latestVersion)
-
-  // Track minimum stopping duration to prevent flicker
-  const [stoppingHeld, setStoppingHeld] = useState(false)
-  const stoppingTimer = useRef(null)
-
-  useEffect(() => {
-    if (orchestratorStatus === 'stopping') {
-      setStoppingHeld(true)
-      if (stoppingTimer.current) clearTimeout(stoppingTimer.current)
-    } else if (stoppingHeld) {
-      stoppingTimer.current = setTimeout(() => {
-        setStoppingHeld(false)
-      }, 1500)
-    }
-    return () => {
-      if (stoppingTimer.current) clearTimeout(stoppingTimer.current)
-    }
-  }, [orchestratorStatus]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Clear held state early when workers confirm idle and status is not stopping
-  useEffect(() => {
-    if (!hasActiveWorkers && orchestratorStatus !== 'stopping') {
-      if (stoppingTimer.current) clearTimeout(stoppingTimer.current)
-      setStoppingHeld(false)
-    }
-  }, [hasActiveWorkers, orchestratorStatus])
-
-  const isStopping = orchestratorStatus === 'stopping' || stoppingHeld
-  const canStart = (orchestratorStatus === 'idle' || orchestratorStatus === 'done' || orchestratorStatus === 'auth_failed') &&
-    !stoppingHeld
-  const isRunning = orchestratorStatus === 'running'
-  const isCreditsPaused = orchestratorStatus === 'credits_paused'
 
   const [reportModalOpen, setReportModalOpen] = useState(false)
   const [screenshotDataUrl, setScreenshotDataUrl] = useState(null)
@@ -288,51 +252,17 @@ export function Header({
             {runningRepos} / {totalRepos} {totalRepos === 1 ? 'repo' : 'repos'}
           </span>
         )}
-        {canStart && (
-          <button
-            style={connected ? startBtnEnabled : startBtnDisabled}
-            onClick={onStart}
-            disabled={!connected}
-          >
-            Start
-          </button>
-        )}
-        {isRunning && (
-          <button style={styles.stopBtn} onClick={onStop}>
-            Stop
-          </button>
-        )}
-        {isCreditsPaused && (
-          <>
-            <span
-              style={styles.creditsPausedBadge}
-              title={creditsPausedUntil ? new Date(creditsPausedUntil).toString() : ''}
-            >
-              Credits Paused
-              {creditsPausedUntil && (
-                <span style={styles.creditResumeTime}>
-                  {' · resumes '}
-                  {new Date(creditsPausedUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
-              )}
-            </span>
-            <button style={styles.stopBtn} onClick={onStop}>
-              Stop
-            </button>
-          </>
-        )}
-        {isStopping && (
-          <span style={styles.stoppingBadge}>
-            Stopping…
-          </span>
-        )}
         <button
           style={connected ? styles.reportBtn : reportBtnDisabled}
           onClick={handleReportClick}
           disabled={!connected}
           data-testid="report-button"
+          aria-label="Report issue"
+          title="Report issue"
         >
-          Report
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <path d="M8 1C4.13 1 1 4.13 1 8s3.13 7 7 7 7-3.13 7-7-3.13-7-7-7zm.5 11h-1v-1h1v1zm1.07-4.78l-.45.47C8.73 8.07 8.5 8.5 8.5 9.5h-1v-.25c0-.74.3-1.41.78-1.9l.62-.63A.98.98 0 009.5 6c0-.55-.45-1-1-1s-1 .45-1 1h-1a2 2 0 114 0c0 .44-.18.84-.43 1.22z" fill="currentColor" />
+          </svg>
         </button>
       </div>
       <ReportIssueModal
@@ -419,46 +349,6 @@ const styles = {
     fontWeight: 600,
   },
   controls: { display: 'flex', alignItems: 'center', gap: 10, marginLeft: 10, flexShrink: 0 },
-  startBtn: {
-    padding: '4px 14px',
-    borderRadius: 6,
-    border: 'none',
-    background: theme.btnGreen,
-    color: theme.white,
-    fontSize: 12,
-    fontWeight: 600,
-    cursor: 'pointer',
-  },
-  stopBtn: {
-    padding: '4px 14px',
-    borderRadius: 6,
-    border: 'none',
-    background: theme.btnRed,
-    color: theme.white,
-    fontSize: 12,
-    fontWeight: 600,
-    cursor: 'pointer',
-  },
-  stoppingBadge: {
-    padding: '4px 12px',
-    borderRadius: 6,
-    background: theme.yellow,
-    color: theme.bg,
-    fontSize: 12,
-    fontWeight: 600,
-  },
-  creditsPausedBadge: {
-    padding: '4px 12px',
-    borderRadius: 6,
-    background: theme.yellow,
-    color: theme.bg,
-    fontSize: 12,
-    fontWeight: 600,
-  },
-  creditResumeTime: {
-    fontWeight: 400,
-    opacity: 0.85,
-  },
   reposRunningBadge: {
     fontSize: 11,
     fontWeight: 600,
@@ -470,14 +360,16 @@ const styles = {
     whiteSpace: 'nowrap',
   },
   reportBtn: {
-    padding: '4px 14px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 6,
     borderRadius: 6,
     border: `1px solid ${theme.border}`,
     background: theme.surface,
     color: theme.textMuted,
-    fontSize: 12,
-    fontWeight: 600,
     cursor: 'pointer',
+    transition: 'color 0.15s',
   },
 }
 
@@ -490,10 +382,6 @@ export const pipelineLabelStylesMap = Object.fromEntries(PIPELINE_STAGES.map(s =
 // Pre-computed connection dot variants
 export const dotConnected = { ...styles.dot, background: theme.green }
 export const dotDisconnected = { ...styles.dot, background: theme.red }
-
-// Pre-computed start button variants
-export const startBtnEnabled = { ...styles.startBtn, opacity: 1, cursor: 'pointer' }
-export const startBtnDisabled = { ...styles.startBtn, opacity: 0.4, cursor: 'not-allowed' }
 
 // Pre-computed report button variant
 const reportBtnDisabled = { ...styles.reportBtn, opacity: 0.4, cursor: 'not-allowed' }
