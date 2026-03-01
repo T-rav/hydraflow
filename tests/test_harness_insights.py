@@ -181,6 +181,16 @@ class TestVisualFailureCategories:
         )
         assert record.category == "visual_warn"
 
+    def test_visual_fail_suggestion_text(self) -> None:
+        body = build_harness_issue_body(FailureCategory.VISUAL_FAIL, 4, 20, [])
+        assert "baseline" in body.lower()
+        assert "Suggested Improvement" in body
+
+    def test_visual_warn_suggestion_text(self) -> None:
+        body = build_harness_issue_body(FailureCategory.VISUAL_WARN, 3, 20, [])
+        assert "threshold" in body.lower()
+        assert "Suggested Improvement" in body
+
 
 # ---------------------------------------------------------------------------
 # FailureRecord model

@@ -48,11 +48,12 @@ _CAUSE_INSTRUCTIONS: dict[HITLCauseKey, str] = {
     "visual": (
         "This issue was escalated due to visual validation failure.\n"
         "Screenshot diffs exceeded the allowed threshold.\n"
-        "1. Review the visual evidence links in the escalation reason.\n"
-        "2. Compare baseline vs actual screenshots to identify the regression.\n"
-        "3. Fix the UI code causing the visual difference.\n"
-        "4. Run `make quality` to verify.\n"
-        '5. Commit with message: "hitl-fix: resolve visual regression (#{issue})".'
+        "1. Review the escalation reason above for affected screen names and diff percentages.\n"
+        "2. Check the HITL dashboard for artifact links (baseline/actual/diff images).\n"
+        "3. Compare baseline vs actual screenshots to identify the regression.\n"
+        "4. Fix the UI code causing the visual difference.\n"
+        "5. Run `make quality` to verify.\n"
+        '6. Commit with message: "hitl-fix: resolve visual regression (#{issue})".'
     ),
     "default": (
         "This issue was escalated to human review.\n"
