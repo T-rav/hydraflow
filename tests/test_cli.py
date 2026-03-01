@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import signal
 import sys
@@ -676,6 +677,23 @@ class TestBuildConfig:
         args = parse_args(["--max-hitl-workers", "3"])
         cfg = build_config(args)
         assert cfg.max_hitl_workers == 3
+
+    def test_worker_counts_loaded_from_config_file(self, tmp_path: Path) -> None:
+        """Worker counts set in the config JSON file should be applied by build_config."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({"max_workers": 5, "max_planners": 3}))
+        args = parse_args(["--config-file", str(config_file)])
+        cfg = build_config(args)
+        assert cfg.max_workers == 5
+        assert cfg.max_planners == 3
+
+    def test_cli_arg_overrides_config_file_worker_count(self, tmp_path: Path) -> None:
+        """Explicit CLI --max-workers should override the config file value."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({"max_workers": 5}))
+        args = parse_args(["--config-file", str(config_file), "--max-workers", "2"])
+        cfg = build_config(args)
+        assert cfg.max_workers == 2
 
     def test_hitl_active_label_passed_through(self) -> None:
         args = parse_args(["--hitl-active-label", "my-active"])

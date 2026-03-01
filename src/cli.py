@@ -572,6 +572,10 @@ def build_config(args: argparse.Namespace) -> HydraFlowConfig:
     Merge priority: defaults → config file → env vars → CLI args.
     Only explicitly-provided CLI values are passed through;
     HydraFlowConfig supplies all defaults.
+
+    Note: worker count fields (max_workers, max_planners, max_reviewers,
+    max_triagers, max_hitl_workers) are exempt from env var overrides — they
+    are managed exclusively via the config JSON file and dashboard UI.
     """
     # 0) Load config file values (lowest priority after defaults)
     from pathlib import Path  # noqa: PLC0415
