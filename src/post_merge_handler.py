@@ -135,6 +135,7 @@ class PostMergeHandler:
             self._state.mark_issue(pr.issue_number, "merged")
             self._state.record_pr_merged()
             self._state.record_issue_completed()
+            self._state.increment_session_counter("merged")
             if result.ci_fix_attempts > 0:
                 self._state.record_ci_fix_rounds(result.ci_fix_attempts)
                 for _ in range(result.ci_fix_attempts):

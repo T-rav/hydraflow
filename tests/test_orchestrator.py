@@ -3234,7 +3234,9 @@ class TestPipelineStatsEmission:
         from orchestrator import HydraFlowOrchestrator
 
         orch = HydraFlowOrchestrator(config)
-        orch._session_issue_results = {1: True, 2: True, 3: False}
+        orch._state.reset_session_counters("2026-01-01T00:00:00+00:00")
+        orch._state.increment_session_counter("merged")
+        orch._state.increment_session_counter("merged")
         stats = orch.build_pipeline_stats()
         assert stats.stages["merged"].completed_session == 2
 
