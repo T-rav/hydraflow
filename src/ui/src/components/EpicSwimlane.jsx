@@ -11,8 +11,8 @@ import { PIPELINE_STAGES } from '../constants'
  *   children: array of sub-issue objects
  *     [{ issue_number, title, url, current_stage, status, stage_entered_at }]
  */
-export function EpicSwimlane({ children }) {
-  if (!children || children.length === 0) {
+export function EpicSwimlane({ issues }) {
+  if (!issues || issues.length === 0) {
     return (
       <div style={styles.empty} data-testid="swimlane-empty">
         No sub-issues
@@ -38,7 +38,7 @@ export function EpicSwimlane({ children }) {
         <span style={styles.headerTime}>Time</span>
       </div>
 
-      {children.map(issue => (
+      {issues.map(issue => (
         <EpicSwimlaneRow key={issue.issue_number} issue={issue} />
       ))}
     </div>

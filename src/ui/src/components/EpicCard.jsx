@@ -37,9 +37,9 @@ export function EpicCard({ epic }) {
     const total = epic.total_children || epic.children?.length || 0
     const merged = epic.merged_children || 0
     const active = epic.active_children || 0
-    const queued = total - merged - active
+    const queued = epic.queued_children ?? Math.max(0, total - merged - active)
     const pct = total > 0 ? Math.round((merged / total) * 100) : 0
-    return { total, merged, active, queued: Math.max(0, queued), pct }
+    return { total, merged, active, queued, pct }
   }, [epic])
 
   return (
@@ -92,7 +92,7 @@ export function EpicCard({ epic }) {
 
       {expanded && (
         <div style={styles.swimlaneWrapper}>
-          <EpicSwimlane>{epic.children || []}</EpicSwimlane>
+          <EpicSwimlane issues={epic.children || []} />
         </div>
       )}
     </div>

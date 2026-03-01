@@ -114,6 +114,7 @@ export function EpicDashboard() {
           <input
             type="text"
             placeholder="Search epics..."
+            aria-label="Search epics"
             value={search}
             onChange={e => setSearch(e.target.value)}
             style={styles.search}
