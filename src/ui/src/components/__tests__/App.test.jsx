@@ -71,7 +71,6 @@ beforeEach(() => {
   mockState.prs = []
   mockState.events = []
   mockState.epics = []
-  mockState.resetSession = undefined
   mockState.metrics = null
   cleanup()
 })
