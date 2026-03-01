@@ -286,6 +286,12 @@ class ConfigFactory:
         baseline_approval_required: bool = True,
         baseline_approvers: list[str] | None = None,
         baseline_max_audit_records: int = 100,
+        visual_validation_enabled: bool = True,
+        visual_validation_trigger_patterns: list[str] | None = None,
+        visual_required_label: str = "hydraflow-visual-required",
+        visual_skip_label: str = "hydraflow-visual-skip",
+        screenshot_redaction_enabled: bool = True,
+        screenshot_gist_public: bool = False,
     ):
         """Create a HydraFlowConfig with test-friendly defaults."""
         from config import HydraFlowConfig
@@ -461,6 +467,26 @@ class ConfigFactory:
             if baseline_approvers is not None
             else [],
             baseline_max_audit_records=baseline_max_audit_records,
+            visual_validation_enabled=visual_validation_enabled,
+            visual_validation_trigger_patterns=(
+                visual_validation_trigger_patterns
+                if visual_validation_trigger_patterns is not None
+                else [
+                    "src/ui/**",
+                    "ui/**",
+                    "frontend/**",
+                    "web/**",
+                    "*.css",
+                    "*.scss",
+                    "*.tsx",
+                    "*.jsx",
+                    "*.html",
+                ]
+            ),
+            visual_required_label=visual_required_label,
+            visual_skip_label=visual_skip_label,
+            screenshot_redaction_enabled=screenshot_redaction_enabled,
+            screenshot_gist_public=screenshot_gist_public,
         )
 
 
