@@ -137,6 +137,18 @@ class PostMergeHandler:
                     "PR #%d: visual_gate_enabled but no visual_gate_fn provided — skipping gate",
                     pr.number,
                 )
+                await self._bus.publish(
+                    HydraFlowEvent(
+                        type=EventType.VISUAL_GATE,
+                        data={
+                            "pr": pr.number,
+                            "issue": issue.id,
+                            "worker": worker_id,
+                            "verdict": "skipped",
+                            "reason": "no visual_gate_fn provided to handle_approved",
+                        },
+                    )
+                )
             else:
                 visual_ok = await visual_gate_fn(pr, issue, result, worker_id)
                 if not visual_ok:

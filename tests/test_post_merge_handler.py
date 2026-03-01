@@ -960,3 +960,45 @@ class TestVisualGateInHandleApproved:
         )
 
         assert result.merged is True
+
+    @pytest.mark.asyncio
+    async def test_visual_gate_enabled_no_fn_emits_audit_event(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """When visual gate enabled but no fn provided, an audit event is still emitted."""
+        cfg = ConfigFactory.create(
+            visual_gate_enabled=True,
+            repo_root=config.repo_root,
+            worktree_base=config.worktree_base,
+            state_file=config.state_file,
+        )
+        handler = _make_handler(cfg)
+        handler._prs.merge_pr = AsyncMock(return_value=True)
+        handler._bus.publish = AsyncMock()
+        result = ReviewResultFactory.create()
+        pr = PRInfoFactory.create()
+        issue = TaskFactory.create()
+
+        await handler.handle_approved(
+            pr,
+            issue,
+            result,
+            "diff",
+            0,
+            ci_gate_fn=AsyncMock(return_value=True),
+            escalate_fn=AsyncMock(),
+            publish_fn=AsyncMock(),
+            # No visual_gate_fn provided
+        )
+
+        assert result.merged is True
+        # Verify an audit event was published for the skipped gate
+        published_events = [
+            call.args[0] for call in handler._bus.publish.call_args_list
+        ]
+        gate_events = [
+            e for e in published_events if e.data.get("verdict") == "skipped"
+        ]
+        assert len(gate_events) == 1, "Expected one VISUAL_GATE skipped audit event"
+        assert gate_events[0].data["pr"] == pr.number
+        assert gate_events[0].data["issue"] == issue.id
