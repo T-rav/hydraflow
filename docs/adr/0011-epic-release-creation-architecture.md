@@ -1,4 +1,4 @@
-# ADR-0009: Epic Release Creation Architecture
+# ADR-0011: Epic Release Creation Architecture
 
 **Status:** Proposed
 **Date:** 2026-03-01

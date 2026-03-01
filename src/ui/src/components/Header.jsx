@@ -1,7 +1,7 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react'
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { theme } from '../theme'
 import { useHydraFlow } from '../context/HydraFlowContext'
-import { PIPELINE_STAGES } from '../constants'
+import { PIPELINE_STAGES, SENSITIVE_SELECTORS } from '../constants'
 import { ReportIssueModal } from './ReportIssueModal'
 
 function isCrossOriginImage(el) {
@@ -19,6 +19,27 @@ function isCrossOriginImage(el) {
 function stripUnsupportedColorFunctions(value, fallback) {
   if (typeof value !== 'string') return value
   return value.includes('color(') ? fallback : value
+}
+
+/**
+ * Redact elements marked with data-sensitive in a cloned DOM tree.
+ * Replaces their innerHTML with a placeholder overlay so sensitive
+ * content (transcripts, event logs) never appears in screenshots.
+ */
+function redactSensitiveElements(clonedRoot) {
+  const selector = SENSITIVE_SELECTORS.join(',')
+  clonedRoot.querySelectorAll(selector).forEach((el) => {
+    el.innerHTML = ''
+    el.style.setProperty('background', '#1a1a2e')
+    el.style.setProperty('color', '#555')
+    el.style.setProperty('display', 'flex')
+    el.style.setProperty('align-items', 'center')
+    el.style.setProperty('justify-content', 'center')
+    el.style.setProperty('min-height', '40px')
+    el.style.setProperty('font-size', '11px')
+    el.style.setProperty('font-style', 'italic')
+    el.textContent = '[Content redacted for security]'
+  })
 }
 
 function sanitizeClonedDocumentForHtml2Canvas(clonedDoc) {
@@ -85,6 +106,7 @@ async function captureDashboardScreenshot(root, html2canvas) {
       scale: window.devicePixelRatio || 1,
       ignoreElements: isCrossOriginImage,
       onclone: (_doc, clonedEl) => {
+        redactSensitiveElements(clonedEl)
         const clonedChildren = clonedEl.querySelectorAll('*')
         clonedChildren.forEach((el, i) => {
           const styles = resolvedStyles.get(i)
@@ -108,6 +130,9 @@ async function captureDashboardScreenshot(root, html2canvas) {
       backgroundColor: '#0d1117',
       scale: 1,
       ignoreElements: isCrossOriginImage,
+      onclone: (_doc, clonedEl) => {
+        redactSensitiveElements(clonedEl)
+      },
     })
     return second.toDataURL('image/png')
   } catch (secondErr) {
@@ -124,6 +149,7 @@ async function captureDashboardScreenshot(root, html2canvas) {
       foreignObjectRendering: true,
       ignoreElements: isCrossOriginImage,
       onclone: (clonedDoc) => {
+        redactSensitiveElements(clonedDoc)
         sanitizeClonedDocumentForHtml2Canvas(clonedDoc)
       },
     })
@@ -138,7 +164,7 @@ export function Header({
   connected, orchestratorStatus, creditsPausedUntil,
   onStart, onStop,
 }) {
-  const { stageStatus, config, submitReport } = useHydraFlow()
+  const { stageStatus, config, submitReport, runtimes = [], supervisedRepos = [] } = useHydraFlow()
   const hasActiveWorkers = stageStatus.workload.active > 0
   const appVersion = config?.app_version || ''
   const latestVersion = config?.latest_version || ''
@@ -198,6 +224,16 @@ export function Header({
     if (submitReport) await submitReport(data)
   }, [submitReport])
 
+  const totalRepos = supervisedRepos.length
+  const supervisedSlugs = useMemo(
+    () => new Set(supervisedRepos.map(r => r.slug)),
+    [supervisedRepos]
+  )
+  const runningRepos = useMemo(
+    () => runtimes.filter(rt => rt.running && supervisedSlugs.has(rt.slug)).length,
+    [runtimes, supervisedSlugs]
+  )
+
   const sessionStages = PIPELINE_STAGES.map((stage) => ({
     key: stage.key,
     count: stageStatus?.[stage.key]?.sessionCount || 0,
@@ -244,6 +280,14 @@ export function Header({
         </div>
       </div>
       <div style={styles.controls}>
+        {totalRepos > 0 && (
+          <span
+            style={runningRepos > 0 ? reposRunningBadgeActive : styles.reposRunningBadge}
+            data-testid="repos-running-badge"
+          >
+            {runningRepos} / {totalRepos} {totalRepos === 1 ? 'repo' : 'repos'}
+          </span>
+        )}
         {canStart && (
           <button
             style={connected ? startBtnEnabled : startBtnDisabled}
@@ -415,6 +459,16 @@ const styles = {
     fontWeight: 400,
     opacity: 0.85,
   },
+  reposRunningBadge: {
+    fontSize: 11,
+    fontWeight: 600,
+    color: theme.textMuted,
+    padding: '4px 8px',
+    borderRadius: 6,
+    border: `1px solid ${theme.border}`,
+    background: theme.surface,
+    whiteSpace: 'nowrap',
+  },
   reportBtn: {
     padding: '4px 14px',
     borderRadius: 6,
@@ -443,3 +497,6 @@ export const startBtnDisabled = { ...styles.startBtn, opacity: 0.4, cursor: 'not
 
 // Pre-computed report button variant
 const reportBtnDisabled = { ...styles.reportBtn, opacity: 0.4, cursor: 'not-allowed' }
+
+// Pre-computed repos running badge variant
+const reposRunningBadgeActive = { ...styles.reposRunningBadge, color: theme.green, borderColor: theme.green }
