@@ -365,7 +365,7 @@ class TestVisualConfigFields:
         config = ConfigFactory.create()
 
         # Assert
-        assert config.visual_validation_enabled is False
+        assert config.visual_validation_enabled is True
         assert config.visual_max_retries == 2
         assert config.visual_retry_delay == 0.0  # test factory default
         assert config.visual_warn_threshold == 0.05
@@ -442,6 +442,26 @@ class TestVisualConfigFields:
 
         # Assert
         assert config.visual_fail_threshold == pytest.approx(0.30)
+
+    def test_env_override_invalid_threshold_combination_reverts_fail_to_default(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Should revert visual_fail_threshold to default when env overrides produce warn >= fail.
+
+        The Pydantic field_validator only fires at model construction; env overrides use
+        object.__setattr__ and bypass it.  _apply_env_overrides must enforce the invariant
+        itself and revert to the default (0.15) when it would be violated.
+        """
+        # Arrange — warn=0.20 > fail=0.10 after env override
+        monkeypatch.setenv("HYDRAFLOW_VISUAL_WARN_THRESHOLD", "0.20")
+        monkeypatch.setenv("HYDRAFLOW_VISUAL_FAIL_THRESHOLD", "0.10")
+
+        # Act
+        config = ConfigFactory.create()
+
+        # Assert — fail_threshold must be reverted so the invariant holds
+        assert config.visual_fail_threshold > config.visual_warn_threshold
 
 
 # ---------------------------------------------------------------------------

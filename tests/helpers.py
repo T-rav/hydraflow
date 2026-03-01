@@ -282,7 +282,10 @@ class ConfigFactory:
             "epic_title", "milestone", "manual"
         ] = "epic_title",
         release_tag_prefix: str = "v",
-        visual_validation_enabled: bool = False,
+        visual_validation_enabled: bool = True,
+        visual_validation_trigger_patterns: list[str] | None = None,
+        visual_required_label: str = "hydraflow-visual-required",
+        visual_skip_label: str = "hydraflow-visual-skip",
         visual_max_retries: int = 2,
         visual_retry_delay: float = 0.0,
         visual_warn_threshold: float = 0.05,
@@ -455,6 +458,23 @@ class ConfigFactory:
             release_version_source=release_version_source,
             release_tag_prefix=release_tag_prefix,
             visual_validation_enabled=visual_validation_enabled,
+            visual_validation_trigger_patterns=(
+                visual_validation_trigger_patterns
+                if visual_validation_trigger_patterns is not None
+                else [
+                    "src/ui/**",
+                    "ui/**",
+                    "frontend/**",
+                    "web/**",
+                    "*.css",
+                    "*.scss",
+                    "*.tsx",
+                    "*.jsx",
+                    "*.html",
+                ]
+            ),
+            visual_required_label=visual_required_label,
+            visual_skip_label=visual_skip_label,
             visual_max_retries=visual_max_retries,
             visual_retry_delay=visual_retry_delay,
             visual_warn_threshold=visual_warn_threshold,

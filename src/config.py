@@ -123,8 +123,8 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("auto_process_bug_reports", "HYDRAFLOW_AUTO_PROCESS_BUG_REPORTS", False),
     ("collaborator_check_enabled", "HYDRAFLOW_COLLABORATOR_CHECK_ENABLED", True),
     ("code_scanning_enabled", "HYDRAFLOW_CODE_SCANNING_ENABLED", False),
-    ("visual_validation_enabled", "HYDRAFLOW_VISUAL_VALIDATION_ENABLED", False),
     ("release_on_epic_close", "HYDRAFLOW_RELEASE_ON_EPIC_CLOSE", False),
+    ("visual_validation_enabled", "HYDRAFLOW_VISUAL_VALIDATION_ENABLED", True),
 ]
 
 # Literal-typed env-var overrides.
@@ -656,10 +656,32 @@ class HydraFlowConfig(BaseModel):
         description="Max characters for code scanning alert injection",
     )
 
-    # Visual validation (flake mitigation)
+    # Visual validation scope and flake mitigation
     visual_validation_enabled: bool = Field(
-        default=False,
-        description="Run visual validation checks during review (opt-in)",
+        default=True,
+        description="Enable visual validation scope checks and runtime validation during review",
+    )
+    visual_validation_trigger_patterns: list[str] = Field(
+        default_factory=lambda: [
+            "src/ui/**",
+            "ui/**",
+            "frontend/**",
+            "web/**",
+            "*.css",
+            "*.scss",
+            "*.tsx",
+            "*.jsx",
+            "*.html",
+        ],
+        description="Glob patterns for files that trigger visual validation requirement",
+    )
+    visual_required_label: str = Field(
+        default="hydraflow-visual-required",
+        description="Override label to force visual validation regardless of file paths",
+    )
+    visual_skip_label: str = Field(
+        default="hydraflow-visual-skip",
+        description="Override label to skip visual validation with an audit reason",
     )
     visual_max_retries: int = Field(
         default=2,
@@ -1474,6 +1496,18 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
                                 f"{env_key}={new_val} is above maximum {le}"
                             )
                     object.__setattr__(config, field, new_val)
+
+    # Cross-field validation: visual_fail_threshold must remain > visual_warn_threshold
+    # after env overrides (the Pydantic field_validator only fires at model construction).
+    if config.visual_fail_threshold <= config.visual_warn_threshold:
+        logger.warning(
+            "visual_fail_threshold (%.4f) is not greater than visual_warn_threshold (%.4f) "
+            "after env overrides; reverting both thresholds to defaults (warn=0.05, fail=0.15)",
+            config.visual_fail_threshold,
+            config.visual_warn_threshold,
+        )
+        object.__setattr__(config, "visual_warn_threshold", 0.05)
+        object.__setattr__(config, "visual_fail_threshold", 0.15)
 
     # Data-driven env var overrides (bool fields)
     for field, env_key, default in _ENV_BOOL_OVERRIDES:
