@@ -149,6 +149,7 @@ class GitHubIssue(BaseModel):
     comments: list[str] = Field(default_factory=list)
     url: HttpUrl = ""
     author: str = ""
+    state: str = "open"  # "open" or "closed" from GitHub API
     created_at: str = Field(
         default="",
         validation_alias=AliasChoices("createdAt", "created_at"),
@@ -494,6 +495,84 @@ class ReviewResult(BaseModel):
 # --- Visual Validation ---
 
 
+class VisualFailureClass(StrEnum):
+    """Classification of a visual validation failure."""
+
+    INFRA_FAILURE = "infra_failure"
+    VISUAL_DIFF = "visual_diff"
+    TIMEOUT = "timeout"
+    CAPTURE_ERROR = "capture_error"
+
+
+class VisualScreenVerdict(StrEnum):
+    """Verdict for a single visual screen check."""
+
+    PASS = "pass"
+    WARN = "warn"
+    FAIL = "fail"
+
+
+class VisualScreenResult(BaseModel):
+    """Result of a single visual screen validation."""
+
+    screen_name: str
+    diff_ratio: float = 0.0
+    verdict: VisualScreenVerdict = VisualScreenVerdict.PASS
+    failure_class: VisualFailureClass | None = None
+    error: str = ""
+    retries_used: int = 0
+
+
+class VisualValidationReport(BaseModel):
+    """Aggregated result of all visual screen validations."""
+
+    screens: list[VisualScreenResult] = Field(default_factory=list)
+    overall_verdict: VisualScreenVerdict = VisualScreenVerdict.PASS
+    total_retries: int = 0
+    infra_failures: int = 0
+    visual_diffs: int = 0
+
+    @property
+    def has_failures(self) -> bool:
+        """Return True if any screen failed."""
+        return self.overall_verdict == VisualScreenVerdict.FAIL
+
+    @property
+    def has_warnings(self) -> bool:
+        """Return True if any screen has a warning or failure."""
+        return self.overall_verdict in (
+            VisualScreenVerdict.WARN,
+            VisualScreenVerdict.FAIL,
+        )
+
+    def format_summary(self) -> str:
+        """Format a human-readable summary for PR comments."""
+        lines: list[str] = ["## Visual Validation Report", ""]
+        lines.append(f"**Overall: {self.overall_verdict.value.upper()}**")
+        if self.total_retries:
+            lines.append(f"Total retries: {self.total_retries}")
+        if self.infra_failures:
+            lines.append(f"Infrastructure failures: {self.infra_failures}")
+        lines.append("")
+
+        for screen in self.screens:
+            icon = {"pass": "✅", "warn": "⚠️", "fail": "❌"}.get(
+                screen.verdict.value, "❓"
+            )
+            line = f"- {icon} **{screen.screen_name}**: {screen.verdict.value.upper()}"
+            if screen.diff_ratio > 0:
+                line += f" (diff: {screen.diff_ratio:.2%})"
+            if screen.failure_class:
+                line += f" [{screen.failure_class.value}]"
+            if screen.retries_used:
+                label = "retry" if screen.retries_used == 1 else "retries"
+                line += f" ({screen.retries_used} {label})"
+            if screen.error:
+                line += f" — {screen.error}"
+            lines.append(line)
+        return "\n".join(lines)
+
+
 class VisualValidationPolicy(StrEnum):
     """Deterministic policy for visual validation scope."""
 
@@ -822,6 +901,8 @@ class EpicState(BaseModel):
     child_issues: list[int] = Field(default_factory=list)
     completed_children: list[int] = Field(default_factory=list)
     failed_children: list[int] = Field(default_factory=list)
+    excluded_children: list[int] = Field(default_factory=list)
+    hitl_warned_children: list[int] = Field(default_factory=list)
     approved_children: list[int] = Field(default_factory=list)
     merge_strategy: str = "independent"
     created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
@@ -903,6 +984,7 @@ class EpicProgress(BaseModel):
     total_children: int = 0
     completed: int = 0
     failed: int = 0
+    excluded: int = 0
     in_progress: int = 0
     approved: int = 0
     ready_to_merge: bool = False
@@ -926,6 +1008,7 @@ class EpicChildInfo(BaseModel):
     status: str = "queued"  # done, running, queued, failed
     is_completed: bool = False
     is_failed: bool = False
+    is_excluded: bool = False
     is_approved: bool = False
     pr_number: int | None = None
     pr_url: str = ""
@@ -974,6 +1057,29 @@ class EpicDetail(BaseModel):
     children: list[EpicChildInfo] = Field(default_factory=list)
     readiness: EpicReadiness = Field(default_factory=EpicReadiness)
     release: dict | None = None
+
+
+# --- Changelog ---
+
+
+class ChangeCategory(StrEnum):
+    """Category for a changelog entry derived from conventional commit prefixes."""
+
+    FEATURES = "Features"
+    BUG_FIXES = "Bug Fixes"
+    IMPROVEMENTS = "Improvements"
+    DOCUMENTATION = "Documentation"
+    MISCELLANEOUS = "Miscellaneous"
+
+
+class ChangelogEntry(BaseModel):
+    """A single entry in a generated changelog."""
+
+    category: ChangeCategory = ChangeCategory.MISCELLANEOUS
+    title: str
+    summary: str = ""
+    issue_number: int = 0
+    pr_number: int = 0
 
 
 class Crate(BaseModel):

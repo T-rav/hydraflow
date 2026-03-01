@@ -55,6 +55,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("max_runtime_log_chars", "HYDRAFLOW_MAX_RUNTIME_LOG_CHARS", 8_000),
     ("max_ci_log_chars", "HYDRAFLOW_MAX_CI_LOG_CHARS", 12_000),
     ("max_code_scanning_chars", "HYDRAFLOW_MAX_CODE_SCANNING_CHARS", 6_000),
+    ("visual_max_retries", "HYDRAFLOW_VISUAL_MAX_RETRIES", 2),
     ("agent_timeout", "HYDRAFLOW_AGENT_TIMEOUT", 3600),
     ("transcript_summary_timeout", "HYDRAFLOW_TRANSCRIPT_SUMMARY_TIMEOUT", 120),
     ("memory_compaction_timeout", "HYDRAFLOW_MEMORY_COMPACTION_TIMEOUT", 60),
@@ -87,12 +88,22 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("subskill_model", "HYDRAFLOW_SUBSKILL_MODEL", "haiku"),
     ("debug_model", "HYDRAFLOW_DEBUG_MODEL", "opus"),
     ("report_issue_model", "HYDRAFLOW_REPORT_ISSUE_MODEL", "haiku"),
+    ("changelog_file", "HYDRAFLOW_CHANGELOG_FILE", ""),
     ("release_tag_prefix", "HYDRAFLOW_RELEASE_TAG_PREFIX", "v"),
 ]
 
 _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
     ("docker_cpu_limit", "HYDRAFLOW_DOCKER_CPU_LIMIT", 2.0),
     ("docker_spawn_delay", "HYDRAFLOW_DOCKER_SPAWN_DELAY", 2.0),
+    ("visual_retry_delay", "HYDRAFLOW_VISUAL_RETRY_DELAY", 2.0),
+]
+
+# Float overrides with tight [0, 1] bounds — handled separately from the
+# parametrized table because the generic test adds ``default + 1.0`` which
+# exceeds their upper bound.
+_ENV_FLOAT_RATIO_OVERRIDES: list[tuple[str, str, float]] = [
+    ("visual_warn_threshold", "HYDRAFLOW_VISUAL_WARN_THRESHOLD", 0.05),
+    ("visual_fail_threshold", "HYDRAFLOW_VISUAL_FAIL_THRESHOLD", 0.15),
 ]
 
 _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
@@ -702,10 +713,10 @@ class HydraFlowConfig(BaseModel):
         description="Emergency bypass for visual gate (audit-logged)",
     )
 
-    # Visual validation
+    # Visual validation scope and flake mitigation
     visual_validation_enabled: bool = Field(
         default=True,
-        description="Enable deterministic visual validation scope checks during review",
+        description="Enable visual validation scope checks and runtime validation during review",
     )
     visual_diff_threshold: float = Field(
         default=0.01,
@@ -750,6 +761,30 @@ class HydraFlowConfig(BaseModel):
     visual_skip_label: str = Field(
         default="hydraflow-visual-skip",
         description="Override label to skip visual validation with an audit reason",
+    )
+    visual_max_retries: int = Field(
+        default=2,
+        ge=0,
+        le=5,
+        description="Max retries for transient visual validation failures",
+    )
+    visual_retry_delay: float = Field(
+        default=2.0,
+        ge=0.0,
+        le=30.0,
+        description="Seconds to wait between visual validation retries",
+    )
+    visual_warn_threshold: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=1.0,
+        description="Diff ratio above which a screen gets a WARN verdict",
+    )
+    visual_fail_threshold: float = Field(
+        default=0.15,
+        ge=0.0,
+        le=1.0,
+        description="Diff ratio above which a screen gets a FAIL verdict",
     )
 
     # Screenshot security
@@ -866,6 +901,13 @@ class HydraFlowConfig(BaseModel):
     config_file: Path | None = Field(
         default=None,
         description="Path to JSON config file for persisting runtime changes",
+    )
+
+    # Changelog
+    changelog_file: str = Field(
+        default="",
+        description="Path to CHANGELOG.md file for epic completion changelog generation; "
+        "empty string disables file output",
     )
 
     # Dashboard
@@ -1106,6 +1148,19 @@ class HydraFlowConfig(BaseModel):
         """Validate Docker size notation (digits followed by b/k/m/g)."""
         if not re.fullmatch(r"\d+[bkmg]", v, re.IGNORECASE):
             msg = f"Invalid Docker size notation '{v}'; expected digits followed by b/k/m/g (e.g., '4g', '512m')"
+            raise ValueError(msg)
+        return v
+
+    @field_validator("visual_fail_threshold")
+    @classmethod
+    def visual_fail_above_warn(cls, v: float, info: Any) -> float:
+        """Ensure visual_fail_threshold > visual_warn_threshold."""
+        warn = info.data.get("visual_warn_threshold", 0.05)
+        if v <= warn:
+            msg = (
+                f"visual_fail_threshold ({v}) must be greater than "
+                f"visual_warn_threshold ({warn})"
+            )
             raise ValueError(msg)
         return v
 
@@ -1549,7 +1604,19 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
             env_val = _get_env(env_key)
             if env_val is not None:
                 with contextlib.suppress(ValueError):
-                    object.__setattr__(config, field, int(env_val))
+                    new_val = int(env_val)
+                    for constraint in HydraFlowConfig.model_fields[field].metadata:
+                        ge = getattr(constraint, "ge", None)
+                        le = getattr(constraint, "le", None)
+                        if ge is not None and new_val < ge:
+                            raise ValueError(
+                                f"{env_key}={new_val} is below minimum {ge}"
+                            )
+                        if le is not None and new_val > le:
+                            raise ValueError(
+                                f"{env_key}={new_val} is above maximum {le}"
+                            )
+                    object.__setattr__(config, field, new_val)
 
     # Data-driven env var overrides (str fields)
     for field, env_key, default in _ENV_STR_OVERRIDES:
@@ -1577,6 +1644,71 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
                                 f"{env_key}={new_val} is above maximum {le}"
                             )
                     object.__setattr__(config, field, new_val)
+
+    # Ratio float overrides ([0, 1] bounds) — parse failures are silently ignored
+    # but out-of-bounds values emit a warning so operators know their config was rejected.
+    for field, env_key, default in _ENV_FLOAT_RATIO_OVERRIDES:
+        if getattr(config, field) == default:
+            env_val = _get_env(env_key)
+            if env_val is not None:
+                try:
+                    new_val = float(env_val)
+                except ValueError:
+                    continue
+                in_bounds = True
+                for constraint in HydraFlowConfig.model_fields[field].metadata:
+                    ge = getattr(constraint, "ge", None)
+                    le = getattr(constraint, "le", None)
+                    if ge is not None and new_val < ge:
+                        logger.warning(
+                            "%s=%s is below minimum %s; ignoring env override",
+                            env_key,
+                            new_val,
+                            ge,
+                        )
+                        in_bounds = False
+                        break
+                    if le is not None and new_val > le:
+                        logger.warning(
+                            "%s=%s is above maximum %s; ignoring env override",
+                            env_key,
+                            new_val,
+                            le,
+                        )
+                        in_bounds = False
+                        break
+                if in_bounds:
+                    object.__setattr__(config, field, new_val)
+
+    # Cross-field validation: visual_fail_threshold must remain > visual_warn_threshold
+    # after env overrides (the Pydantic field_validator only fires at model construction).
+    # Strategy: revert only visual_fail_threshold first; if that still violates the
+    # invariant (e.g. warn was also overridden to a value >= the fail default), revert
+    # visual_warn_threshold too so we always land on a valid pair.
+    if config.visual_fail_threshold <= config.visual_warn_threshold:
+        _fail_default: float = HydraFlowConfig.model_fields[
+            "visual_fail_threshold"
+        ].default
+        _warn_default: float = HydraFlowConfig.model_fields[
+            "visual_warn_threshold"
+        ].default
+        logger.warning(
+            "visual_fail_threshold (%.4f) is not greater than visual_warn_threshold (%.4f) "
+            "after env overrides; reverting visual_fail_threshold to default (%.4f)",
+            config.visual_fail_threshold,
+            config.visual_warn_threshold,
+            _fail_default,
+        )
+        object.__setattr__(config, "visual_fail_threshold", _fail_default)
+        if config.visual_fail_threshold <= config.visual_warn_threshold:
+            logger.warning(
+                "visual_warn_threshold (%.4f) still >= fail default (%.4f); "
+                "reverting visual_warn_threshold to default (%.4f) as well",
+                config.visual_warn_threshold,
+                _fail_default,
+                _warn_default,
+            )
+            object.__setattr__(config, "visual_warn_threshold", _warn_default)
 
     # Data-driven env var overrides (bool fields)
     for field, env_key, default in _ENV_BOOL_OVERRIDES:

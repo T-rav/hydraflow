@@ -127,6 +127,54 @@ class TestOnChildFailed:
         assert any(e.data["action"] == "child_failed" for e in updates)
 
 
+class TestOnChildExcluded:
+    @pytest.mark.asyncio
+    async def test_records_exclusion_and_publishes(self, tmp_path: Path) -> None:
+        mgr, state, bus, _, _ = _make_manager(tmp_path)
+        await mgr.register_epic(100, "Epic", [1, 2])
+
+        await mgr.on_child_excluded(100, 1)
+
+        epic = state.get_epic_state(100)
+        assert 1 in epic.excluded_children
+        updates = [e for e in bus.get_history() if e.type == EventType.EPIC_UPDATE]
+        assert any(e.data["action"] == "child_excluded" for e in updates)
+
+    @pytest.mark.asyncio
+    async def test_auto_close_when_all_excluded(self, tmp_path: Path) -> None:
+        """Epic closes when all sub-issues are excluded (closed without merge).
+
+        Regression: _try_auto_close previously accessed completed_children[-1]
+        which raised IndexError when all children were excluded (none completed).
+        """
+        mgr, state, _, _, fetcher = _make_manager(tmp_path)
+        fetcher.fetch_issues_by_labels = AsyncMock(return_value=[])
+        await mgr.register_epic(100, "Epic", [1, 2])
+
+        await mgr.on_child_excluded(100, 1)
+        assert state.get_epic_state(100).closed is False
+
+        await mgr.on_child_excluded(100, 2)
+        assert state.get_epic_state(100).closed is True
+
+    @pytest.mark.asyncio
+    async def test_no_duplicate_exclusion(self, tmp_path: Path) -> None:
+        mgr, state, _, _, _ = _make_manager(tmp_path)
+        await mgr.register_epic(100, "Epic", [1, 2])
+
+        await mgr.on_child_excluded(100, 1)
+        await mgr.on_child_excluded(100, 1)  # Second call — should not duplicate
+
+        epic = state.get_epic_state(100)
+        assert epic.excluded_children.count(1) == 1
+
+    @pytest.mark.asyncio
+    async def test_noop_for_unknown_epic(self, tmp_path: Path) -> None:
+        mgr, _, _, _, _ = _make_manager(tmp_path)
+        # Should not raise
+        await mgr.on_child_excluded(999, 1)
+
+
 class TestOnChildPlanned:
     @pytest.mark.asyncio
     async def test_updates_last_activity(self, tmp_path: Path) -> None:

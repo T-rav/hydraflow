@@ -9,7 +9,10 @@ import time
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from visual_validator import VisualValidator
 
 from baseline_policy import BaselinePolicy
 from config import HydraFlowConfig
@@ -28,7 +31,9 @@ from models import (
     StatusCallback,
     Task,
     VisualEvidence,
+    VisualScreenResult,
     VisualValidationDecision,
+    VisualValidationReport,
 )
 from phase_utils import (
     adr_validation_reasons,
@@ -111,6 +116,11 @@ class ReviewPhase:
             epic_checker=None,
         )
         self._baseline_policy = baseline_policy
+        self._visual_validator: VisualValidator | None = None
+        if config.visual_validation_enabled:
+            from visual_validator import VisualValidator  # noqa: PLC0415
+
+            self._visual_validator = VisualValidator(config)
 
     async def review_prs(
         self,
@@ -437,6 +447,13 @@ class ReviewPhase:
                 code_scanning_alerts=code_scanning_alerts,
             )
 
+        # Visual validation (opt-in) — runs after review, before merge decision
+        visual_report = await self._run_visual_validation(pr, wt_path, idx)
+        if visual_report and visual_report.has_failures:
+            result = await self._handle_visual_failure(
+                pr, task, result, visual_report, idx
+            )
+
         await self._record_review_outcome(pr, result)
 
         # Verdict-specific handling
@@ -497,6 +514,82 @@ class ReviewPhase:
                     summary="Skipped — no new commits since last review",
                 )
         return None
+
+    async def _run_visual_validation(
+        self, pr: PRInfo, wt_path: Path, worker_id: int
+    ) -> VisualValidationReport | None:
+        """Run visual validation if enabled. Returns None when disabled or on error."""
+        if self._visual_validator is None:
+            return None
+        try:
+            await self._publish_review_status(pr, worker_id, "visual_check")
+            # The check_fn is a placeholder — real implementations would inject
+            # an actual screenshot capture + diffing callable.  For now the
+            # validator infrastructure is wired up but produces an empty report
+            # unless a check function is supplied externally.
+            report = await self._visual_validator.validate_screens(
+                [], self._noop_visual_check
+            )
+            if report.screens:
+                logger.info(
+                    "PR #%d: visual validation %s (%d screens, %d retries)",
+                    pr.number,
+                    report.overall_verdict.value,
+                    len(report.screens),
+                    report.total_retries,
+                )
+            return report
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Visual validation failed for PR #%d — skipping",
+                pr.number,
+                exc_info=True,
+            )
+            return None
+
+    @staticmethod
+    async def _noop_visual_check(screen_name: str) -> VisualScreenResult:
+        """Default no-op visual check (placeholder for real implementation)."""
+        return VisualScreenResult(screen_name=screen_name, diff_ratio=0.0)
+
+    async def _handle_visual_failure(
+        self,
+        pr: PRInfo,
+        task: Task,
+        result: ReviewResult,
+        report: VisualValidationReport,
+        worker_id: int,
+    ) -> ReviewResult:
+        """Handle a visual validation failure — escalate to HITL with report details."""
+        summary_text = report.format_summary()
+
+        if report.infra_failures > 0 and report.visual_diffs == 0:
+            cause = "Visual validation infrastructure failure (not a visual diff)"
+        else:
+            cause = "Visual validation detected failures"
+
+        await self._publish_review_status(pr, worker_id, "escalating")
+        await self._escalate_to_hitl(
+            task.id,
+            pr.number,
+            cause=cause,
+            origin_label=self._config.review_label[0],
+            comment=(
+                f"**Visual validation failed** — escalating to human review.\n\n"
+                f"{summary_text}"
+            ),
+            event_cause="visual_validation_failed",
+            extra_event_data={
+                "visual_verdict": report.overall_verdict.value,
+                "visual_retries": report.total_retries,
+                "infra_failures": report.infra_failures,
+                "visual_diffs": report.visual_diffs,
+            },
+            task=task,
+        )
+        result.verdict = ReviewVerdict.REQUEST_CHANGES
+        result.summary = f"Visual validation failed: {cause}"
+        return result
 
     async def _record_review_outcome(self, pr: PRInfo, result: ReviewResult) -> None:
         """Record all post-review state: verdicts, SHA, duration, insights.

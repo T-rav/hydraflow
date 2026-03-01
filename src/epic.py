@@ -7,7 +7,9 @@ import logging
 import re
 import time
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
+from changelog import generate_changelog
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from issue_fetcher import IssueFetcher
@@ -73,17 +75,6 @@ def extract_version_from_title(title: str) -> str:
     return (match.group(1) or match.group(2)) if match else ""
 
 
-def generate_changelog(sub_issue_titles: list[str]) -> str:
-    """Generate a changelog body from sub-issue titles.
-
-    Returns a markdown-formatted list of changes.
-    """
-    if not sub_issue_titles:
-        return ""
-    lines = [f"- {title}" for title in sub_issue_titles]
-    return "## What's Changed\n\n" + "\n".join(lines) + "\n"
-
-
 class EpicCompletionChecker:
     """Checks whether parent epics should be auto-closed after sub-issue completion."""
 
@@ -98,9 +89,13 @@ class EpicCompletionChecker:
         self._prs = prs
         self._fetcher = fetcher
         self._state = state
+        self._active_closings: set[int] = set()  # recursion guard for nested epics
 
-    async def check_and_close_epics(self, completed_issue_number: int) -> None:
-        """Check all open epics and close any whose sub-issues are all completed."""
+    async def check_and_close_epics(self, completed_issue_number: int) -> bool:
+        """Check all open epics and close any whose sub-issues are all completed.
+
+        Returns True if at least one epic was successfully closed.
+        """
         try:
             epics = await self._fetcher.fetch_issues_by_labels(
                 self._config.epic_label, limit=50
@@ -110,8 +105,9 @@ class EpicCompletionChecker:
                 "Failed to fetch epic issues for completion check",
                 exc_info=True,
             )
-            return
+            return False
 
+        closed_any = False
         for epic in epics:
             sub_issues = parse_epic_sub_issues(epic.body)
             if not sub_issues:
@@ -120,69 +116,334 @@ class EpicCompletionChecker:
                 continue
 
             try:
-                await self._try_close_epic(
+                closed = await self._try_close_epic(
                     epic.number, epic.title, epic.body, sub_issues
                 )
+                if closed:
+                    closed_any = True
             except Exception:  # noqa: BLE001
                 logger.warning(
                     "Epic completion check failed for epic #%d",
                     epic.number,
                     exc_info=True,
                 )
+        return closed_any
 
     async def _try_close_epic(
         self, epic_number: int, epic_title: str, epic_body: str, sub_issues: list[int]
-    ) -> None:
-        """Close the epic if all sub-issues are completed."""
+    ) -> bool:
+        """Close the epic if all sub-issues are resolved (fixed, closed, or excluded).
+
+        A sub-issue is considered resolved if it:
+        - Has the ``fixed_label`` (completed normally)
+        - Is a nested epic that is itself closed
+        - Is closed without the fixed_label (wontfix/duplicate/invalid)
+
+        Sub-issues with the HITL label that are still open produce a warning
+        comment and DO temporarily block epic completion until resolved.
+
+        After closing, triggers a parent-epic re-check so that nested epic
+        closure propagates upward automatically.
+
+        Returns True if the epic was closed, False otherwise.
+        """
+        if epic_number in self._active_closings:
+            return False
+        self._active_closings.add(epic_number)
+
+        try:
+            return await self._do_close_epic(
+                epic_number, epic_title, epic_body, sub_issues
+            )
+        finally:
+            self._active_closings.discard(epic_number)
+
+    async def _do_close_epic(
+        self, epic_number: int, epic_title: str, epic_body: str, sub_issues: list[int]
+    ) -> bool:
+        """Inner close logic — separated to allow recursion guard in _try_close_epic."""
         fixed_label = self._config.fixed_label[0] if self._config.fixed_label else ""
+        hitl_labels = set(self._config.hitl_label)
+        epic_labels = set(self._config.epic_label)
+
+        # Track sub-issue list changes for audit trail
+        self._audit_sub_issue_changes(epic_number, sub_issues)
 
         sub_issue_titles: list[str] = []
+        excluded_issues: list[int] = []
+        hitl_blocked: list[int] = []
         for issue_num in sub_issues:
             issue = await self._fetcher.fetch_issue_by_number(issue_num)
             if issue is None:
-                # Can't confirm completion — treat as incomplete
                 logger.warning(
                     "Sub-issue #%d not found while checking epic #%d — skipping",
                     issue_num,
                     epic_number,
                 )
-                return
+                return False
+
+            # Check if sub-issue has the fixed label — normal completion
             if fixed_label and fixed_label in issue.labels:
                 sub_issue_titles.append(issue.title)
                 continue
-            # Not completed
-            return
 
-        # All sub-issues are completed — close the epic
-        logger.info("All sub-issues completed for epic #%d — closing", epic_number)
+            # Check if sub-issue is a nested epic that is closed
+            if epic_labels & set(issue.labels) and issue.state == "closed":
+                sub_issue_titles.append(issue.title)
+                continue
+
+            # Check if sub-issue is closed (wontfix/duplicate/invalid)
+            if issue.state == "closed":
+                excluded_issues.append(issue_num)
+                logger.info(
+                    "Sub-issue #%d closed without fixed label — treating as excluded "
+                    "for epic #%d",
+                    issue_num,
+                    epic_number,
+                )
+                continue
+
+            # Check if sub-issue is escalated to HITL (still open)
+            if hitl_labels & set(issue.labels):
+                hitl_blocked.append(issue_num)
+                continue
+
+            # Sub-issue is still open and unresolved
+            return False
+
+        # Post HITL warnings if any sub-issues are in HITL
+        if hitl_blocked:
+            await self._post_hitl_warnings(epic_number, hitl_blocked)
+            return False
+
+        # All sub-issues are resolved — close the epic
+        logger.info("All sub-issues resolved for epic #%d — closing", epic_number)
+
+        # Persist excluded children in state if available
+        if self._state is not None and excluded_issues:
+            epic_state = self._state.get_epic_state(epic_number)
+            if epic_state is not None:
+                for excl in excluded_issues:
+                    if excl not in epic_state.excluded_children:
+                        epic_state.excluded_children.append(excl)
+                self._state.upsert_epic_state(epic_state)
 
         updated_body = check_all_checkboxes(epic_body)
         await self._prs.update_issue_body(epic_number, updated_body)
-        await self._prs.add_labels(epic_number, [fixed_label])
+        if fixed_label:
+            await self._prs.add_labels(epic_number, [fixed_label])
 
         # Create release if feature is enabled
         release_url = ""
+        generated_changelog = ""
         if self._config.release_on_epic_close:
-            release_url = await self._create_release_for_epic(
-                epic_number, epic_title, sub_issues, sub_issue_titles
+            release_url, generated_changelog = await self._create_release_for_epic(
+                epic_number, epic_title, sub_issues
             )
 
-        close_comment = "All sub-issues completed — closing epic automatically."
+        close_comment = "All sub-issues resolved — closing epic automatically."
+        if excluded_issues:
+            excluded_str = ", ".join(f"#{n}" for n in excluded_issues)
+            close_comment += f"\n\n**Excluded (closed without merge):** {excluded_str}"
         if release_url:
             close_comment += f"\n\n**Release:** {release_url}"
         await self._prs.post_comment(epic_number, close_comment)
         await self._prs.close_issue(epic_number)
+
+        # Optionally write to CHANGELOG.md file
+        if self._config.changelog_file:
+            if not generated_changelog:
+                extracted_version = extract_version_from_title(epic_title) or None
+                generated_changelog = await self._generate_epic_changelog(
+                    epic_number, sub_issues, version=extracted_version
+                )
+            if generated_changelog:
+                self._write_changelog_file(generated_changelog)
+
+        # Propagate to parent epics: the just-closed epic may be a sub-issue
+        # of another epic. Re-check so parent closure cascades automatically.
+        await self.check_and_close_epics(epic_number)
+
+        return True
+
+    async def close_specific_epic(self, epic_number: int) -> bool | None:
+        """Check and close a specific epic if all sub-issues are resolved.
+
+        Returns ``True`` if the epic was closed, ``False`` if the epic was
+        found but has unresolved sub-issues, or ``None`` if the epic could
+        not be located on GitHub (missing label, API failure, etc.).
+        """
+        try:
+            epics = await self._fetcher.fetch_issues_by_labels(
+                self._config.epic_label, limit=50
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to fetch epic issues for specific-epic check",
+                exc_info=True,
+            )
+            return None
+
+        epic = next((e for e in epics if e.number == epic_number), None)
+        if epic is None:
+            return None
+
+        sub_issues = parse_epic_sub_issues(epic.body)
+        if not sub_issues:
+            return None
+
+        try:
+            return await self._try_close_epic(
+                epic.number, epic.title, epic.body, sub_issues
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Epic close failed for #%d during specific-epic check",
+                epic_number,
+                exc_info=True,
+            )
+            return None
+
+    async def _post_hitl_warnings(
+        self, epic_number: int, hitl_issues: list[int]
+    ) -> None:
+        """Post a warning comment for HITL-escalated sub-issues (once per issue)."""
+        epic_state: EpicState | None = None
+        already_warned: set[int] = set()
+        if self._state is not None:
+            epic_state = self._state.get_epic_state(epic_number)
+            if epic_state is not None:
+                already_warned = set(epic_state.hitl_warned_children)
+
+        new_warnings = [n for n in hitl_issues if n not in already_warned]
+        if not new_warnings:
+            return
+
+        issues_str = ", ".join(f"#{n}" for n in new_warnings)
+        try:
+            await self._prs.post_comment(
+                epic_number,
+                f"**Epic completion blocked:** {issues_str} "
+                f"{'is' if len(new_warnings) == 1 else 'are'} escalated to HITL.\n"
+                f"Resolve the HITL {'issue' if len(new_warnings) == 1 else 'issues'} "
+                f"or close {'it' if len(new_warnings) == 1 else 'them'} to unblock the release.\n\n"
+                f"---\n*HydraFlow Epic Monitor*",
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to post HITL warning comment for epic #%d",
+                epic_number,
+                exc_info=True,
+            )
+            return
+
+        # Track that we've warned about these issues
+        if self._state is not None:
+            if epic_state is None:
+                epic_state = EpicState(epic_number=epic_number)
+            for n in new_warnings:
+                if n not in epic_state.hitl_warned_children:
+                    epic_state.hitl_warned_children.append(n)
+            self._state.upsert_epic_state(epic_state)
+
+    def _audit_sub_issue_changes(
+        self, epic_number: int, current_sub_issues: list[int]
+    ) -> None:
+        """Log when the sub-issue list changes between checks."""
+        if self._state is None:
+            return
+        epic_state = self._state.get_epic_state(epic_number)
+        if epic_state is None:
+            return
+        known = set(epic_state.child_issues)
+        current = set(current_sub_issues)
+        added = current - known
+        removed = known - current
+        if added:
+            logger.info(
+                "Epic #%d: new sub-issues detected: %s",
+                epic_number,
+                ", ".join(f"#{n}" for n in sorted(added)),
+            )
+            epic_state.child_issues = list(current)
+            epic_state.last_activity = datetime.now(UTC).isoformat()
+            self._state.upsert_epic_state(epic_state)
+        if removed:
+            logger.info(
+                "Epic #%d: sub-issues removed from body: %s",
+                epic_number,
+                ", ".join(f"#{n}" for n in sorted(removed)),
+            )
+            if not added:
+                epic_state.child_issues = list(current)
+                epic_state.last_activity = datetime.now(UTC).isoformat()
+                self._state.upsert_epic_state(epic_state)
+
+    async def _generate_epic_changelog(
+        self, epic_number: int, sub_issues: list[int], version: str | None = None
+    ) -> str:
+        """Generate a changelog from sub-issue PRs. Returns empty string on failure."""
+        try:
+            v = version or f"epic-{epic_number}"
+            return await generate_changelog(
+                pr_manager=self._prs,
+                sub_issues=sub_issues,
+                version=v,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Changelog generation failed for epic #%d",
+                epic_number,
+                exc_info=True,
+            )
+            return ""
+
+    def _write_changelog_file(self, content: str) -> None:
+        """Append changelog content to the configured changelog file."""
+        try:
+            changelog_path = Path(self._config.changelog_file)
+            if not changelog_path.is_absolute():
+                changelog_path = self._config.repo_root / changelog_path
+
+            repo_resolved = self._config.repo_root.resolve()
+            path_resolved = changelog_path.resolve()
+            if not path_resolved.is_relative_to(repo_resolved):
+                logger.warning(
+                    "changelog_file %r resolves outside repo_root %r — skipping write",
+                    str(changelog_path),
+                    str(repo_resolved),
+                )
+                return
+
+            existing = ""
+            if changelog_path.exists():
+                existing = changelog_path.read_text(encoding="utf-8")
+
+            if existing.startswith("# "):
+                first_nl = existing.index("\n") if "\n" in existing else len(existing)
+                rest = existing[first_nl + 1 :].lstrip("\n")
+                updated = existing[: first_nl + 1] + "\n" + content + "\n" + rest
+            else:
+                updated = content + "\n" + existing
+
+            changelog_path.write_text(updated, encoding="utf-8")
+            logger.info("Changelog written to %s", changelog_path)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to write changelog file",
+                exc_info=True,
+            )
 
     async def _create_release_for_epic(
         self,
         epic_number: int,
         epic_title: str,
         sub_issues: list[int],
-        sub_issue_titles: list[str],
-    ) -> str:
+    ) -> tuple[str, str]:
         """Create a git tag and GitHub Release for a completed epic.
 
-        Returns the release URL on success, empty string on failure.
+        Returns ``(release_url, changelog)`` on success, ``("", "")`` on failure.
+        The caller can reuse the generated changelog to avoid redundant API calls.
         """
         if self._config.release_version_source != "epic_title":
             logger.warning(
@@ -197,23 +458,25 @@ class EpicCompletionChecker:
                 epic_number,
                 epic_title,
             )
-            return ""
+            return "", ""
 
         tag = f"{self._config.release_tag_prefix}{version}"
-        changelog = generate_changelog(sub_issue_titles)
+        changelog = await self._generate_epic_changelog(
+            epic_number, sub_issues, version=version
+        )
         release_title = f"Release {tag}"
 
         # Create the git tag
         tag_ok = await self._prs.create_tag(tag)
         if not tag_ok:
             logger.warning("Tag creation failed for %s — skipping release", tag)
-            return ""
+            return "", changelog  # preserve changelog so caller can still write to file
 
         # Create the GitHub Release
         release_ok = await self._prs.create_release(tag, release_title, changelog)
         if not release_ok:
             logger.warning("GitHub Release creation failed for %s", tag)
-            return ""
+            return "", changelog  # preserve changelog so caller can still write to file
 
         release_url = f"https://github.com/{self._config.repo}/releases/tag/{tag}"
 
@@ -236,7 +499,7 @@ class EpicCompletionChecker:
             epic_number,
             len(sub_issues),
         )
-        return release_url
+        return release_url, changelog
 
 
 class EpicManager:
@@ -373,6 +636,23 @@ class EpicManager:
             child_number,
         )
 
+    async def on_child_excluded(self, epic_number: int, child_number: int) -> None:
+        """Record a child exclusion (closed without merge) and attempt auto-close."""
+        epic = self._state.get_epic_state(epic_number)
+        if epic is None:
+            return
+        if child_number not in epic.excluded_children:
+            epic.excluded_children.append(child_number)
+            epic.last_activity = datetime.now(UTC).isoformat()
+            self._state.upsert_epic_state(epic)
+        await self._publish_update(epic_number, "child_excluded")
+        logger.info(
+            "Epic #%d child #%d excluded (closed without merge)",
+            epic_number,
+            child_number,
+        )
+        await self._try_auto_close(epic_number)
+
     def get_progress(self, epic_number: int) -> EpicProgress | None:
         """Compute progress from persisted state."""
         epic = self._state.get_epic_state(epic_number)
@@ -382,8 +662,9 @@ class EpicManager:
         total = len(epic.child_issues)
         completed = len(epic.completed_children)
         failed = len(epic.failed_children)
+        excluded = len(epic.excluded_children)
         approved = len(epic.approved_children)
-        in_progress = total - completed - failed
+        in_progress = total - completed - failed - excluded
 
         if epic.closed:
             status = "completed"
@@ -394,7 +675,8 @@ class EpicManager:
         else:
             status = "active"
 
-        pct = (completed / total * 100) if total > 0 else 0.0
+        resolved = completed + excluded
+        pct = (resolved / total * 100) if total > 0 else 0.0
 
         # Ready to merge when all children are approved or already merged,
         # the strategy is not independent, and the epic has not yet been released.
@@ -415,6 +697,7 @@ class EpicManager:
             total_children=total,
             completed=completed,
             failed=failed,
+            excluded=excluded,
             in_progress=max(in_progress, 0),
             approved=approved,
             ready_to_merge=ready_to_merge,
@@ -1021,43 +1304,53 @@ class EpicManager:
         return parents
 
     async def _try_auto_close(self, epic_number: int) -> None:
-        """Attempt to auto-close an epic if all children are completed."""
+        """Attempt to auto-close an epic if all children are resolved."""
         epic = self._state.get_epic_state(epic_number)
         if epic is None or epic.closed:
             return
 
-        completed = set(epic.completed_children)
+        resolved = set(epic.completed_children) | set(epic.excluded_children)
         all_children = set(epic.child_issues)
-        if not all_children or not all_children.issubset(completed):
+        if not all_children or not all_children.issubset(resolved):
             return
 
-        # Delegate to the existing EpicCompletionChecker for GitHub operations
-        # (checkbox update, label add, close). If that fails, try a direct close.
+        # Try the full checker workflow (body update, label, release).
+        # close_specific_epic returns True (closed), False (not ready), or
+        # None (epic not found on GitHub).
+        result = await self._checker.close_specific_epic(epic_number)
+        if result is True:
+            self._state.close_epic(epic_number)
+            await self._publish_update(epic_number, "closed")
+            logger.info("Epic #%d auto-closed — all children resolved", epic_number)
+            return
+
+        if result is False:
+            # Checker found the epic but sub-issues are not all resolved
+            # on GitHub — respect GitHub as source of truth.
+            logger.warning(
+                "Epic #%d: GitHub sub-issues not all resolved — skipping auto-close",
+                epic_number,
+            )
+            return
+
+        # Epic not found on GitHub — fall back to direct close.
         try:
-            await self._checker.check_and_close_epics(epic.completed_children[-1])
+            await self._prs.post_comment(
+                epic_number,
+                "All child issues completed — closing epic automatically.",
+            )
+            await self._prs.close_issue(epic_number)
         except Exception:  # noqa: BLE001
             logger.warning(
-                "EpicCompletionChecker failed for #%d — attempting direct close",
+                "Direct close failed for epic #%d",
                 epic_number,
                 exc_info=True,
             )
-            try:
-                await self._prs.post_comment(
-                    epic_number,
-                    "All child issues completed — closing epic automatically.",
-                )
-                await self._prs.close_issue(epic_number)
-            except Exception:  # noqa: BLE001
-                logger.warning(
-                    "Direct close also failed for epic #%d",
-                    epic_number,
-                    exc_info=True,
-                )
-                return
+            return
 
         self._state.close_epic(epic_number)
         await self._publish_update(epic_number, "closed")
-        logger.info("Epic #%d auto-closed — all children completed", epic_number)
+        logger.info("Epic #%d auto-closed — all children resolved", epic_number)
 
     def _is_stale(self, epic: EpicState) -> bool:
         """Return True if the epic has had no activity within the stale threshold."""
