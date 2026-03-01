@@ -77,9 +77,7 @@ async function stubApiRoutes(page) {
   })
 
   // Block WebSocket upgrade — seed state replaces live data
-  await page.route('**/ws', (route) =>
-    route.fulfill({ status: 200, body: '' }),
-  )
+  await page.route('**/ws', (route) => route.abort())
 }
 
 /**
@@ -146,7 +144,8 @@ test.describe('populated pipeline', () => {
         // Click the system sub-tab
         const subtabButton = page.locator(`[data-testid="system-subtab-${subtab}"]`)
         await subtabButton.click()
-        await expect(subtabButton).toBeVisible()
+        await expect(subtabButton).toHaveAttribute('aria-selected', 'true')
+        await page.waitForTimeout(300)
         await expect(page).toHaveScreenshot(`populated-system-${subtab}.png`, {
           fullPage: false,
           animations: 'disabled',
