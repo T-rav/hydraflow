@@ -439,6 +439,40 @@ class TestPostMergeVisualDecisionEnforcement:
         )
         assert result is False
 
+    def test_visual_skipped_still_honours_manual_keyword_cues(self) -> None:
+        """SKIPPED suppresses diff-based check but still honours manual keyword cues.
+
+        By design: if the issue title/body or judge instructions contain
+        UI-surface keywords (e.g. 'visual', 'ui', 'button'), verification is
+        created even when the SKIPPED override is set. This documents the
+        intentional boundary documented in _should_create_verification_issue.
+        """
+        config = ConfigFactory.create()
+        handler = self._make_handler(config)
+        # Issue body explicitly references a UI surface keyword
+        issue = TaskFactory.create(
+            title="Fix visual glitch on settings page",
+            body="The button color is wrong",
+        )
+        judge_result = self._make_judge_result(
+            instructions="Verify that the button colour renders correctly"
+        )
+
+        visual_decision = VisualValidationDecision(
+            policy=VisualValidationPolicy.SKIPPED,
+            reason="CSS-only change, no logical impact",
+            override_label="hydraflow-visual-skip",
+        )
+
+        # Manual keyword cues ('visual', 'button', 'page') override the SKIP decision
+        result = handler._should_create_verification_issue(
+            issue, judge_result, _BACKEND_DIFF, visual_decision
+        )
+        assert result is True, (
+            "SKIPPED suppresses the diff-based check but must still honour "
+            "keyword-based manual cues from issue text / judge instructions"
+        )
+
 
 class TestReviewPhaseVisualValidation:
     """Tests for visual validation integration in ReviewPhase."""

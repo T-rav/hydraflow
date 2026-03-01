@@ -478,7 +478,7 @@ class VisualValidationDecision(BaseModel):
     policy: VisualValidationPolicy
     reason: str
     triggered_patterns: list[str] = Field(default_factory=list)
-    override_label: str = ""
+    override_label: str | None = None
 
 
 # --- Verification Judge ---
