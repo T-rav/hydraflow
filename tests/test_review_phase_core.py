@@ -2096,6 +2096,42 @@ class TestRecordReviewOutcome:
             mock_record.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_increments_reviewed_session_counter_on_approve(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Should increment 'reviewed' session counter only on APPROVE verdict."""
+        phase = make_review_phase(config)
+        phase._state.reset_session_counters("2026-01-01T00:00:00+00:00")
+        pr = PRInfoFactory.create()
+        result = ReviewResultFactory.create(verdict=ReviewVerdict.APPROVE)
+        phase._prs.get_pr_head_sha = AsyncMock(return_value="sha")
+
+        await phase._record_review_outcome(pr, result)
+
+        counters = phase._state.get_session_counters()
+        assert counters.reviewed == 1
+
+    @pytest.mark.asyncio
+    async def test_does_not_increment_reviewed_session_counter_on_request_changes(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Should NOT increment 'reviewed' session counter on REQUEST_CHANGES."""
+        from unittest.mock import MagicMock, patch
+
+        phase = make_review_phase(config)
+        phase._state.reset_session_counters("2026-01-01T00:00:00+00:00")
+        pr = PRInfoFactory.create()
+        result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
+        phase._prs.get_pr_head_sha = AsyncMock(return_value="sha")
+        phase._harness_insights = MagicMock()
+
+        with patch("review_phase.record_harness_failure"):
+            await phase._record_review_outcome(pr, result)
+
+        counters = phase._state.get_session_counters()
+        assert counters.reviewed == 0
+
+    @pytest.mark.asyncio
     async def test_skips_duration_recording_when_zero(
         self, config: HydraFlowConfig
     ) -> None:
