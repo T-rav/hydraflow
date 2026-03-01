@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import UTC, datetime, timedelta
@@ -235,6 +236,7 @@ class EpicManager:
         self._fetcher = fetcher
         self._bus = event_bus
         self._checker = EpicCompletionChecker(config, prs, fetcher, state=state)
+        self._release_locks: dict[int, asyncio.Lock] = {}
 
     async def register_epic(
         self,
@@ -355,10 +357,11 @@ class EpicManager:
         pct = (completed / total * 100) if total > 0 else 0.0
 
         # Ready to merge when all children are approved or already merged,
-        # and the strategy is not independent.
+        # the strategy is not independent, and the epic has not yet been released.
         ready_to_merge = (
             total > 0
             and failed == 0
+            and not epic.released
             and epic.merge_strategy != "independent"
             and all(
                 c in epic.approved_children or c in epic.completed_children
@@ -581,8 +584,16 @@ class EpicManager:
 
         Returns a summary dict with merge results.  Idempotent: a second
         call after a successful release returns an error instead of
-        attempting duplicate merges.
+        attempting duplicate merges.  A per-epic asyncio.Lock prevents
+        concurrent invocations from both passing the ``released`` guard.
         """
+        if epic_number not in self._release_locks:
+            self._release_locks[epic_number] = asyncio.Lock()
+        async with self._release_locks[epic_number]:
+            return await self._do_release_epic(epic_number)
+
+    async def _do_release_epic(self, epic_number: int) -> dict[str, object]:
+        """Inner (lock-protected) implementation of release_epic."""
         epic = self._state.get_epic_state(epic_number)
         if epic is None:
             return {"error": "epic not found"}
@@ -601,7 +612,13 @@ class EpicManager:
                 pr_number = await self._prs.find_pr_for_issue(child_num)
                 if not pr_number:
                     results.append({"issue": child_num, "status": "no_pr"})
-                    continue
+                    # Halt on missing PR — bundle guarantee requires all PRs to merge
+                    await self._publish_update(epic_number, "release_failed")
+                    return {
+                        "epic_number": epic_number,
+                        "merges": results,
+                        "error": f"no PR found for child #{child_num}; bundle halted",
+                    }
                 merged = await self._prs.merge_pr(pr_number)
                 if merged:
                     self._state.mark_epic_child_complete(epic_number, child_num)

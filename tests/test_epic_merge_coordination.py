@@ -550,6 +550,7 @@ class TestReleaseEpic:
 
     @pytest.mark.asyncio
     async def test_release_handles_no_pr(self, tmp_path: Path) -> None:
+        """Missing PR halts the bundle rather than silently skipping."""
         mgr, _, _, prs, _ = _make_manager(tmp_path, epic_merge_strategy="bundled_hitl")
         await mgr.register_epic(100, "Epic", [1])
         await mgr.on_child_approved(100, 1)
@@ -558,6 +559,25 @@ class TestReleaseEpic:
 
         result = await mgr.release_epic(100)
         assert result["merges"][0]["status"] == "no_pr"
+        assert "error" in result  # bundle halts — doesn't mark as released
+        assert "no PR" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_release_no_pr_does_not_set_released(self, tmp_path: Path) -> None:
+        """A missing PR halts and leaves released=False so the operator can retry."""
+        mgr, state, _, prs, _ = _make_manager(
+            tmp_path, epic_merge_strategy="bundled_hitl"
+        )
+        await mgr.register_epic(100, "Epic", [1])
+        await mgr.on_child_approved(100, 1)
+
+        prs.find_pr_for_issue = AsyncMock(return_value=0)
+
+        await mgr.release_epic(100)
+
+        epic = state.get_epic_state(100)
+        assert epic is not None
+        assert epic.released is False
 
     @pytest.mark.asyncio
     async def test_release_handles_merge_failure(self, tmp_path: Path) -> None:
@@ -685,7 +705,11 @@ class TestEpicProgressApprovalTracking:
 
     @pytest.mark.asyncio
     async def test_progress_ready_when_all_approved(self, tmp_path: Path) -> None:
-        mgr, state, _, _, _ = _make_manager(tmp_path, epic_merge_strategy="bundled")
+        # Use bundled_hitl so on_child_approved does NOT auto-trigger a merge;
+        # that lets us inspect the ready_to_merge state before any release occurs.
+        mgr, state, _, _, _ = _make_manager(
+            tmp_path, epic_merge_strategy="bundled_hitl"
+        )
         await mgr.register_epic(100, "Epic", [1, 2])
         await mgr.on_child_approved(100, 1)
         await mgr.on_child_approved(100, 2)
@@ -693,7 +717,7 @@ class TestEpicProgressApprovalTracking:
         progress = mgr.get_progress(100)
         assert progress is not None
         assert progress.ready_to_merge is True
-        assert progress.merge_strategy == "bundled"
+        assert progress.merge_strategy == "bundled_hitl"
 
     @pytest.mark.asyncio
     async def test_progress_not_ready_for_independent(self, tmp_path: Path) -> None:
@@ -724,6 +748,29 @@ class TestEpicProgressApprovalTracking:
         assert child_2.is_approved is False
         assert detail.approved == 1
         assert detail.merge_strategy == "bundled"
+
+    @pytest.mark.asyncio
+    async def test_ready_to_merge_false_after_release(self, tmp_path: Path) -> None:
+        """ready_to_merge should be False once the epic has been released."""
+        mgr, state, _, prs, _ = _make_manager(
+            tmp_path, epic_merge_strategy="bundled_hitl"
+        )
+        await mgr.register_epic(100, "Epic", [1])
+        await mgr.on_child_approved(100, 1)
+
+        # Verify it's True before release
+        progress = mgr.get_progress(100)
+        assert progress is not None
+        assert progress.ready_to_merge is True
+
+        prs.find_pr_for_issue = AsyncMock(return_value=10)
+        prs.merge_pr = AsyncMock(return_value=True)
+        await mgr.release_epic(100)
+
+        # Should be False after release
+        progress = mgr.get_progress(100)
+        assert progress is not None
+        assert progress.ready_to_merge is False
 
 
 # ---------------------------------------------------------------------------
@@ -963,6 +1010,40 @@ class TestTriageParentEpicEnrichment:
 # ---------------------------------------------------------------------------
 # EventType: EPIC_READY
 # ---------------------------------------------------------------------------
+
+
+class TestReleaseEpicConcurrency:
+    """Tests for concurrent-call safety of release_epic."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_release_calls_merge_prs_once(
+        self, tmp_path: Path
+    ) -> None:
+        """Two concurrent release_epic calls must not double-merge PRs."""
+        import asyncio
+
+        mgr, state, _, prs, _ = _make_manager(
+            tmp_path, epic_merge_strategy="bundled_hitl"
+        )
+        await mgr.register_epic(100, "Epic", [1])
+        await mgr.on_child_approved(100, 1)
+
+        prs.find_pr_for_issue = AsyncMock(return_value=10)
+        prs.merge_pr = AsyncMock(return_value=True)
+
+        # Fire two concurrent release calls
+        results = await asyncio.gather(
+            mgr.release_epic(100),
+            mgr.release_epic(100),
+        )
+
+        # Exactly one should succeed; the other must return an error
+        successes = [r for r in results if "error" not in r]
+        errors = [r for r in results if "error" in r]
+        assert len(successes) == 1
+        assert len(errors) == 1
+        # merge_pr called exactly once (not twice)
+        assert prs.merge_pr.call_count == 1
 
 
 class TestEpicReadyEventType:
