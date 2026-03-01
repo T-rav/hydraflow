@@ -31,6 +31,7 @@ const { mockState } = vi.hoisted(() => {
       githubMetrics: null,
       metricsHistory: null,
       intents: [],
+      epics: [],
       submitIntent: () => {},
       toggleBgWorker: () => {},
       systemAlert: null,
@@ -65,9 +66,11 @@ vi.mock('../../context/HydraFlowContext', () => ({
 }))
 
 beforeEach(() => {
+  global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: async () => [] }))
   mockState.hitlItems = []
   mockState.prs = []
   mockState.events = []
+  mockState.epics = []
   mockState.resetSession = undefined
   mockState.metrics = null
   cleanup()
@@ -189,11 +192,11 @@ describe('Main tab bar', () => {
   it('has exactly 5 main tabs', async () => {
     const { default: App } = await import('../../App')
     render(<App />)
-    const tabLabels = ['Work Stream', 'Outcomes', 'HITL', 'Work Log', 'System']
+    const tabLabels = ['Delivery Queue', 'Work Stream', 'HITL', 'Outcomes', 'System']
     const tabContainer = screen.getByTestId('main-tabs')
     expect(tabContainer.childElementCount).toBe(tabLabels.length)
     for (const label of tabLabels) {
-      expect(screen.getByText(label)).toBeInTheDocument()
+      expect(within(tabContainer).getByText(label)).toBeInTheDocument()
     }
   })
 
@@ -210,11 +213,18 @@ describe('Main tab bar', () => {
     expect(screen.queryByText('Livestream')).not.toBeInTheDocument()
   })
 
-  it('Work Stream is the default tab', async () => {
+  it('Delivery Queue tab is rendered first (tab order)', async () => {
     const { default: App } = await import('../../App')
     render(<App />)
-    const issueStreamTab = screen.getByText('Work Stream')
-    expect(issueStreamTab.style.color).toBe('var(--accent)')
+    const tabContainer = screen.getByTestId('main-tabs')
+    expect(tabContainer.firstElementChild.textContent).toBe('Delivery Queue')
+  })
+
+  it('Delivery Queue is the default tab', async () => {
+    const { default: App } = await import('../../App')
+    render(<App />)
+    const deliveryQueueTab = screen.getByText('Delivery Queue')
+    expect(deliveryQueueTab.style.color).toBe('var(--accent)')
   })
 })
 
@@ -234,49 +244,6 @@ describe('Start button dispatches session reset', () => {
   })
 })
 
-describe('EventLog panel', () => {
-  it('renders EventLog panel with data-testid', async () => {
-    const { default: App } = await import('../../App')
-    render(<App />)
-    expect(screen.getByTestId('event-log-panel')).toBeInTheDocument()
-  })
-
-  it('EventLog panel is visible on all main tabs', async () => {
-    const { default: App } = await import('../../App')
-    render(<App />)
-    const tabs = ['Work Stream', 'Outcomes', 'HITL', 'Work Log', 'System']
-    for (const tabLabel of tabs) {
-      fireEvent.click(screen.getByRole('tab', { name: tabLabel }))
-      expect(screen.getByTestId('event-log-panel')).toBeVisible()
-    }
-  })
-
-  it('EventLog panel has fixed 320px width', async () => {
-    const { default: App } = await import('../../App')
-    render(<App />)
-    const wrapper = screen.getByTestId('event-log-wrapper')
-    expect(wrapper.style.width).toBe('320px')
-    expect(wrapper.style.flexShrink).toBe('0')
-  })
-
-  it('shows empty state when no events', async () => {
-    mockState.events = []
-    const { default: App } = await import('../../App')
-    render(<App />)
-    expect(screen.getByText('Waiting for events...')).toBeInTheDocument()
-  })
-
-  it('renders events passed from context', async () => {
-    mockState.events = [
-      { type: 'error', timestamp: new Date().toISOString(), data: { message: 'test error' } },
-    ]
-    const { default: App } = await import('../../App')
-    render(<App />)
-    const panel = screen.getByTestId('event-log-panel')
-    expect(within(panel).getByText('test error')).toBeInTheDocument()
-    expect(within(panel).getByText('[system]')).toBeInTheDocument()
-  })
-})
 
 describe('Pipeline sub-tab under System', () => {
   it('Pipeline is accessible as a sub-tab under System', async () => {

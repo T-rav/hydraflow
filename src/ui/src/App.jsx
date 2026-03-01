@@ -8,16 +8,15 @@ import { OutcomesPanel } from './components/IssueHistoryPanel'
 import { StreamView } from './components/StreamView'
 import { WorkLogPanel } from './components/WorkLogPanel'
 import { SessionSidebar } from './components/SessionSidebar'
-import { EventLog } from './components/EventLog'
 import { theme } from './theme'
 
-const TABS = ['issues', 'outcomes', 'hitl', 'worklog', 'system']
+const TABS = ['worklog', 'issues', 'hitl', 'outcomes', 'system']
 
 const TAB_LABELS = {
   issues: 'Work Stream',
   outcomes: 'Outcomes',
   hitl: 'HITL',
-  worklog: 'Work Log',
+  worklog: 'Delivery Queue',
   system: 'System',
 }
 
@@ -65,9 +64,8 @@ function AppContent() {
     stageStatus,
     requestChanges, resetSession,
     creditsPausedUntil,
-    events,
   } = useHydraFlow()
-  const [activeTab, setActiveTab] = useState('issues')
+  const [activeTab, setActiveTab] = useState('worklog')
   const [expandedStages, setExpandedStages] = useState({})
 
   const handleStart = useCallback(async () => {
@@ -143,30 +141,25 @@ function AppContent() {
           ))}
         </div>
 
-        <div style={styles.contentRow}>
-          <div style={styles.tabContent}>
-            {activeTab === 'issues' && (
-              <StreamView
-                intents={intents}
-                expandedStages={expandedStages}
-                onToggleStage={setExpandedStages}
-                onRequestChanges={handleRequestChanges}
-              />
-            )}
-            {activeTab === 'outcomes' && <OutcomesPanel />}
-            {activeTab === 'hitl' && <HITLTable items={hitlItems} onRefresh={refreshHitl} />}
-            {activeTab === 'worklog' && <WorkLogPanel />}
-            {activeTab === 'system' && (
-              <SystemPanel
-                backgroundWorkers={backgroundWorkers}
-                onToggleBgWorker={toggleBgWorker}
-                onUpdateInterval={updateBgWorkerInterval}
-              />
-            )}
-          </div>
-          <div style={styles.eventLogWrapper} data-testid="event-log-wrapper">
-            <EventLog events={events} />
-          </div>
+        <div style={styles.tabContent}>
+          {activeTab === 'issues' && (
+            <StreamView
+              intents={intents}
+              expandedStages={expandedStages}
+              onToggleStage={setExpandedStages}
+              onRequestChanges={handleRequestChanges}
+            />
+          )}
+          {activeTab === 'outcomes' && <OutcomesPanel />}
+          {activeTab === 'hitl' && <HITLTable items={hitlItems} onRefresh={refreshHitl} />}
+          {activeTab === 'worklog' && <WorkLogPanel />}
+          {activeTab === 'system' && (
+            <SystemPanel
+              backgroundWorkers={backgroundWorkers}
+              onToggleBgWorker={toggleBgWorker}
+              onUpdateInterval={updateBgWorkerInterval}
+            />
+          )}
         </div>
       </div>
 
@@ -219,24 +212,12 @@ const styles = {
     color: theme.accent,
     borderBottom: `2px solid ${theme.accent}`,
   },
-  contentRow: {
-    flex: 1,
-    display: 'flex',
-    overflow: 'hidden',
-  },
   tabContent: {
     flex: 1,
     minWidth: 0,
     overflow: 'hidden',
     display: 'flex',
     flexDirection: 'column',
-  },
-  eventLogWrapper: {
-    width: 320,
-    flexShrink: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden',
   },
   hitlBadge: {
     background: theme.red,
