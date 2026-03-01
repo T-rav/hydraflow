@@ -251,6 +251,28 @@ class TestReportIssueLoopDoWork:
         prompt = mock_stream.call_args.kwargs.get("prompt", "")
         assert "Screenshot" not in prompt
 
+    @pytest.mark.asyncio
+    async def test_scanner_disabled_uploads_screenshot_with_secrets(
+        self, tmp_path: Path
+    ) -> None:
+        """When screenshot_redaction_enabled=False, scan is skipped and secrets are uploaded."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
+        object.__setattr__(loop._config, "screenshot_redaction_enabled", False)
+        report = PendingReport(
+            description="UI glitch",
+            screenshot_base64="ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijkl",
+        )
+        state.enqueue_report(report)
+
+        with patch(
+            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+        ) as mock_stream:
+            mock_stream.return_value = "done"
+            await loop._do_work()
+
+        # Scan is disabled — screenshot should be uploaded despite containing a token
+        pr_mgr.upload_screenshot_gist.assert_awaited_once()
+
 
 class TestReportIssueLoopInterval:
     """Tests for interval configuration."""

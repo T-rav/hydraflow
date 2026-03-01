@@ -683,7 +683,13 @@ class HydraFlowConfig(BaseModel):
     # Screenshot security
     screenshot_redaction_enabled: bool = Field(
         default=True,
-        description="Redact elements marked data-sensitive in dashboard screenshots",
+        description=(
+            "Run backend secret-pattern scan before uploading dashboard screenshots. "
+            "When True, payloads matching known secret patterns (GitHub tokens, AWS keys, "
+            "etc.) are rejected and the screenshot is stripped from the report. "
+            "Frontend DOM redaction of [data-sensitive] elements is always active "
+            "and is unaffected by this setting."
+        ),
     )
     screenshot_gist_public: bool = Field(
         default=False,
