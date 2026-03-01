@@ -331,7 +331,7 @@ function ProcessToggles() {
   }, [])
 
   return (
-    <div style={styles.processTogglesSection}>
+    <div>
       <h3 style={styles.sectionHeading}>Process Toggles</h3>
       <ToggleRow
         label="Auto Process Epics"
@@ -720,9 +720,6 @@ const styles = {
     color: theme.accent,
     cursor: 'pointer',
     transition: 'all 0.15s',
-  },
-  processTogglesSection: {
-    paddingTop: 0,
   },
   autoApproveRow: {
     display: 'flex',

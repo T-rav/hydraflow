@@ -391,12 +391,13 @@ describe('SystemPanel', () => {
   })
 
   describe('Sub-tab Navigation', () => {
-    it('shows Workers, Pipeline, Metrics, Processes, and Livestream sub-tab labels', () => {
+    it('shows Workers, Pipeline, Metrics, Processes, Insights, and Livestream sub-tab labels', () => {
       render(<SystemPanel backgroundWorkers={[]} />)
       expect(screen.getByText('Workers')).toBeInTheDocument()
       expect(screen.getByText('Pipeline')).toBeInTheDocument()
       expect(screen.getByText('Metrics')).toBeInTheDocument()
       expect(screen.getByText('Processes')).toBeInTheDocument()
+      expect(screen.getByText('Insights')).toBeInTheDocument()
       expect(screen.getByText('Livestream')).toBeInTheDocument()
       expect(screen.queryByText('Event Log')).not.toBeInTheDocument()
     })
@@ -496,6 +497,18 @@ describe('SystemPanel', () => {
       fireEvent.click(screen.getByText('Workers'))
       expect(screen.getByText('Background Workers')).toBeInTheDocument()
       expect(screen.queryByTestId('auto-process-epics-toggle')).not.toBeInTheDocument()
+    })
+
+    it('process toggles reflect config values when enabled', () => {
+      mockUseHydraFlow.mockReturnValue(defaultMockContext({
+        config: { auto_process_epics: true, auto_process_bug_reports: false },
+      }))
+      render(<SystemPanel backgroundWorkers={[]} />)
+      fireEvent.click(screen.getByText('Processes'))
+      const epicsToggle = screen.getByTestId('auto-process-epics-toggle')
+      const bugsToggle = screen.getByTestId('auto-process-bugs-toggle')
+      expect(epicsToggle).toHaveTextContent('On')
+      expect(bugsToggle).toHaveTextContent('Off')
     })
   })
 
