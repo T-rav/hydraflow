@@ -40,6 +40,7 @@ from retrospective import RetrospectiveCollector
 from review_phase import ReviewPhase
 from reviewer import ReviewRunner
 from run_recorder import RunRecorder
+from runs_gc_loop import RunsGCLoop
 from state import StateTracker
 from transcript_summarizer import TranscriptSummarizer
 from triage import TriageRunner
@@ -98,6 +99,7 @@ class ServiceRegistry:
     report_issue_loop: ReportIssueLoop
     epic_monitor_loop: EpicMonitorLoop
     worktree_gc_loop: WorktreeGCLoop
+    runs_gc_loop: RunsGCLoop
 
 
 @dataclass
@@ -347,6 +349,17 @@ def build_services(
         interval_cb=callbacks.get_bg_worker_interval,
     )
 
+    runs_gc_loop = RunsGCLoop(
+        config=config,
+        run_recorder=run_recorder,
+        event_bus=event_bus,
+        stop_event=stop_event,
+        status_cb=callbacks.update_bg_worker_status,
+        enabled_cb=callbacks.is_bg_worker_enabled,
+        sleep_fn=callbacks.sleep_or_stop,
+        interval_cb=callbacks.get_bg_worker_interval,
+    )
+
     return ServiceRegistry(
         worktrees=worktrees,
         subprocess_runner=subprocess_runner,
@@ -380,4 +393,5 @@ def build_services(
         report_issue_loop=report_issue_loop,
         epic_monitor_loop=epic_monitor_loop,
         worktree_gc_loop=worktree_gc_loop,
+        runs_gc_loop=runs_gc_loop,
     )

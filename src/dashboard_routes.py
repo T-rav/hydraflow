@@ -2105,6 +2105,17 @@ def create_router(
             return JSONResponse({"error": "artifact not found"}, status_code=404)
         return Response(content=content, media_type="text/plain")
 
+    @router.get("/api/artifacts/stats")
+    async def get_artifact_stats() -> JSONResponse:
+        """Return storage statistics for run artifacts."""
+        orch = get_orchestrator()
+        if not orch:
+            return JSONResponse({"error": "no orchestrator"}, status_code=400)
+        stats = orch.run_recorder.get_storage_stats()
+        stats["retention_days"] = config.artifact_retention_days
+        stats["max_size_mb"] = config.artifact_max_size_mb
+        return JSONResponse(stats)
+
     @router.get("/api/harness-insights")
     async def get_harness_insights() -> JSONResponse:
         """Return recent harness failure patterns and improvement suggestions."""
