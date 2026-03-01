@@ -22,6 +22,7 @@ from models import (
     LifetimeStats,
     PendingReport,
     PersistedWorkerHeartbeat,
+    Release,
     SessionCounters,
     SessionLog,
     SessionStatus,
@@ -502,6 +503,22 @@ class StateTracker:
         epic.closed = True
         epic.last_activity = datetime.now(UTC).isoformat()
         self.save()
+
+    # --- release tracking ---
+
+    def upsert_release(self, release: Release) -> None:
+        """Create or update a release record, keyed by epic number."""
+        self._data.releases[str(release.epic_number)] = release.model_copy(deep=True)
+        self.save()
+
+    def get_release(self, epic_number: int) -> Release | None:
+        """Return the release for *epic_number*, or ``None``."""
+        rel = self._data.releases.get(str(epic_number))
+        return rel.model_copy(deep=True) if rel else None
+
+    def get_all_releases(self) -> dict[str, Release]:
+        """Return all persisted releases (deep copy)."""
+        return {k: v.model_copy(deep=True) for k, v in self._data.releases.items()}
 
     # --- reset ---
 

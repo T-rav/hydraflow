@@ -277,6 +277,15 @@ class ConfigFactory:
         epic_stale_days: int = 7,
         collaborator_check_enabled: bool = False,
         collaborator_cache_ttl: int = 600,
+        release_on_epic_close: bool = False,
+        release_version_source: Literal[
+            "epic_title", "milestone", "manual"
+        ] = "epic_title",
+        release_tag_prefix: str = "v",
+        visual_validation_enabled: bool = True,
+        visual_validation_trigger_patterns: list[str] | None = None,
+        visual_required_label: str = "hydraflow-visual-required",
+        visual_skip_label: str = "hydraflow-visual-skip",
     ):
         """Create a HydraFlowConfig with test-friendly defaults."""
         from config import HydraFlowConfig
@@ -441,6 +450,27 @@ class ConfigFactory:
             auto_process_bug_reports=auto_process_bug_reports,
             collaborator_check_enabled=collaborator_check_enabled,
             collaborator_cache_ttl=collaborator_cache_ttl,
+            release_on_epic_close=release_on_epic_close,
+            release_version_source=release_version_source,
+            release_tag_prefix=release_tag_prefix,
+            visual_validation_enabled=visual_validation_enabled,
+            visual_validation_trigger_patterns=(
+                visual_validation_trigger_patterns
+                if visual_validation_trigger_patterns is not None
+                else [
+                    "src/ui/**",
+                    "ui/**",
+                    "frontend/**",
+                    "web/**",
+                    "*.css",
+                    "*.scss",
+                    "*.tsx",
+                    "*.jsx",
+                    "*.html",
+                ]
+            ),
+            visual_required_label=visual_required_label,
+            visual_skip_label=visual_skip_label,
         )
 
 

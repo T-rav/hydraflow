@@ -147,7 +147,7 @@ def build_services(
     troubleshooting_store = TroubleshootingPatternStore(config.data_path("memory"))
 
     # Epic management
-    epic_checker = EpicCompletionChecker(config, prs, fetcher)
+    epic_checker = EpicCompletionChecker(config, prs, fetcher, state=state)
     epic_manager = EpicManager(config, state, prs, fetcher, event_bus)
 
     # Phase coordinators

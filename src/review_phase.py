@@ -24,6 +24,7 @@ from models import (
     ReviewVerdict,
     StatusCallback,
     Task,
+    VisualValidationDecision,
 )
 from phase_utils import (
     adr_validation_reasons,
@@ -220,7 +221,6 @@ class ReviewPhase:
         self._state.mark_issue(issue.id, "completed")
         self._state.record_issue_completed()
         self._state.increment_session_counter("reviewed")
-        self._state.increment_session_counter("merged")
         return ReviewResult(
             pr_number=0,
             issue_number=issue.id,
@@ -326,6 +326,18 @@ class ReviewPhase:
 
         diff = await self._prs.get_pr_diff(pr.number)
 
+        # Visual validation scope check
+        visual_decision = self._compute_visual_validation(diff, task)
+        if visual_decision is not None and pr.number > 0:
+            from visual_validation import (
+                format_visual_validation_comment,  # noqa: PLC0415
+            )
+
+            await self._prs.post_pr_comment(
+                pr.number,
+                format_visual_validation_comment(visual_decision),
+            )
+
         # Fetch code scanning alerts (opt-in)
         code_scanning_alerts = await self._fetch_code_scanning_alerts(pr)
 
@@ -368,6 +380,7 @@ class ReviewPhase:
                 diff,
                 idx,
                 code_scanning_alerts=code_scanning_alerts,
+                visual_decision=visual_decision,
             )
         elif result.verdict in (
             ReviewVerdict.REQUEST_CHANGES,
@@ -380,6 +393,21 @@ class ReviewPhase:
         await self._cleanup_worktree(pr, result, skip_worktree_cleanup)
 
         return result
+
+    def _compute_visual_validation(
+        self, diff: str, task: Task
+    ) -> VisualValidationDecision | None:
+        """Compute the visual validation decision for a PR diff."""
+        if not self._config.visual_validation_enabled:
+            return None
+        from visual_validation import compute_visual_validation  # noqa: PLC0415
+
+        return compute_visual_validation(
+            self._config,
+            diff,
+            issue_labels=task.tags,
+            issue_comments=task.comments,
+        )
 
     async def _check_sha_skip_guard(self, pr: PRInfo) -> ReviewResult | None:
         """Return a skip result if no new commits since last review, else None."""
@@ -618,6 +646,7 @@ class ReviewPhase:
         diff: str,
         worker_id: int,
         code_scanning_alerts: list[dict] | None = None,
+        visual_decision: VisualValidationDecision | None = None,
     ) -> None:
         """Attempt merge for an approved PR (with optional CI gate)."""
         await self._post_merge.handle_approved(
@@ -630,6 +659,7 @@ class ReviewPhase:
             escalate_fn=self._escalate_to_hitl,
             publish_fn=self._publish_review_status,
             code_scanning_alerts=code_scanning_alerts,
+            visual_decision=visual_decision,
         )
 
     async def _run_ci_wait_attempt(

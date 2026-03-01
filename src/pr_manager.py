@@ -620,6 +620,55 @@ class PRManager:
         finally:
             Path(tmp_path).unlink(missing_ok=True)
 
+    async def create_tag(self, tag: str, *, ref: str = "HEAD") -> bool:
+        """Create a git tag on the given *ref* and push it to origin.
+
+        Returns *True* on success, *False* on failure.
+        """
+        self._assert_repo()
+        if self._config.dry_run:
+            logger.info("[dry-run] Would create tag %s on %s", tag, ref)
+            return True
+        try:
+            await self._run_gh("git", "tag", tag, ref)
+            await self._run_gh("git", "push", "origin", tag)
+            return True
+        except RuntimeError as exc:
+            logger.warning("Could not create tag %s: %s", tag, exc)
+            return False
+
+    async def create_release(
+        self,
+        tag: str,
+        title: str,
+        body: str,
+    ) -> bool:
+        """Create a GitHub Release for the given *tag*.
+
+        Returns *True* on success, *False* on failure.
+        """
+        self._assert_repo()
+        if self._config.dry_run:
+            logger.info("[dry-run] Would create release %s", tag)
+            return True
+        try:
+            await self._run_gh(
+                "gh",
+                "release",
+                "create",
+                tag,
+                "--repo",
+                self._repo,
+                "--title",
+                title,
+                "--notes",
+                body,
+            )
+            return True
+        except RuntimeError as exc:
+            logger.warning("Could not create release %s: %s", tag, exc)
+            return False
+
     async def remove_pr_label(self, pr_number: int, label: str) -> None:
         """Remove *label* from a GitHub pull request."""
         await self._remove_label("pr", pr_number, label)

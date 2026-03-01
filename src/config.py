@@ -78,6 +78,7 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("subskill_model", "HYDRAFLOW_SUBSKILL_MODEL", "haiku"),
     ("debug_model", "HYDRAFLOW_DEBUG_MODEL", "opus"),
     ("report_issue_model", "HYDRAFLOW_REPORT_ISSUE_MODEL", "haiku"),
+    ("release_tag_prefix", "HYDRAFLOW_RELEASE_TAG_PREFIX", "v"),
 ]
 
 _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
@@ -112,6 +113,8 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("auto_process_bug_reports", "HYDRAFLOW_AUTO_PROCESS_BUG_REPORTS", False),
     ("collaborator_check_enabled", "HYDRAFLOW_COLLABORATOR_CHECK_ENABLED", True),
     ("code_scanning_enabled", "HYDRAFLOW_CODE_SCANNING_ENABLED", False),
+    ("release_on_epic_close", "HYDRAFLOW_RELEASE_ON_EPIC_CLOSE", False),
+    ("visual_validation_enabled", "HYDRAFLOW_VISUAL_VALIDATION_ENABLED", True),
 ]
 
 # Literal-typed env-var overrides.
@@ -133,6 +136,7 @@ _ENV_LITERAL_OVERRIDES: list[tuple[str, str]] = [
     ("subskill_tool", "HYDRAFLOW_SUBSKILL_TOOL"),
     ("debug_tool", "HYDRAFLOW_DEBUG_TOOL"),
     ("report_issue_tool", "HYDRAFLOW_REPORT_ISSUE_TOOL"),
+    ("release_version_source", "HYDRAFLOW_RELEASE_VERSION_SOURCE"),
 ]
 
 # Deprecated env var aliases (HYDRA_ → HYDRAFLOW_).
@@ -396,6 +400,20 @@ class HydraFlowConfig(BaseModel):
         description="When True, detected bug reports auto-proceed. When False, route to HITL for review.",
     )
 
+    # Release configuration
+    release_on_epic_close: bool = Field(
+        default=False,
+        description="Create a GitHub Release when an epic completes",
+    )
+    release_version_source: Literal["epic_title", "milestone", "manual"] = Field(
+        default="epic_title",
+        description="How to determine the release version string",
+    )
+    release_tag_prefix: str = Field(
+        default="v",
+        description="Prefix for git tags (e.g. 'v' produces 'v1.2.0')",
+    )
+
     # Discovery / planner configuration
     find_label: list[str] = Field(
         default=["hydraflow-find"],
@@ -626,6 +644,34 @@ class HydraFlowConfig(BaseModel):
         ge=1_000,
         le=100_000,
         description="Max characters for code scanning alert injection",
+    )
+
+    # Visual validation scope
+    visual_validation_enabled: bool = Field(
+        default=True,
+        description="Enable deterministic visual validation scope checks during review",
+    )
+    visual_validation_trigger_patterns: list[str] = Field(
+        default_factory=lambda: [
+            "src/ui/**",
+            "ui/**",
+            "frontend/**",
+            "web/**",
+            "*.css",
+            "*.scss",
+            "*.tsx",
+            "*.jsx",
+            "*.html",
+        ],
+        description="Glob patterns for files that trigger visual validation requirement",
+    )
+    visual_required_label: str = Field(
+        default="hydraflow-visual-required",
+        description="Override label to force visual validation regardless of file paths",
+    )
+    visual_skip_label: str = Field(
+        default="hydraflow-visual-skip",
+        description="Override label to skip visual validation with an audit reason",
     )
 
     # Manifest detection
