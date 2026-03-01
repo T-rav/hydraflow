@@ -72,11 +72,13 @@ _MAX_HITL_CAUSE_CHARS = 2000
 def _classify_cause(cause: str) -> HITLCauseKey:
     """Map a free-text escalation cause to a prompt template key."""
     lower = cause.lower()
+    # Check visual BEFORE needs_info — visual summaries can contain "needs"
+    # (e.g. "login screen needs baseline update").
+    if any(kw in lower for kw in ("visual", "screenshot", "diff image")):
+        return "visual"
     # Check needs_info BEFORE ci — "insufficient" contains the substring "ci".
     if "insufficient" in lower or "needs" in lower or "detail" in lower:
         return "needs_info"
-    if any(kw in lower for kw in ("visual", "screenshot", "diff image")):
-        return "visual"
     if "ci" in lower or "check" in lower or "test fail" in lower:
         return "ci"
     if "merge" in lower and "conflict" in lower:

@@ -337,6 +337,8 @@ def _generate_suggestion(category: str, subcategory: str, count: int) -> str:
         "test_failure": " Strengthen TDD requirements in the implementation prompt.",
         "import_error": " Improve dependency resolution guidance in the planner.",
         "merge_conflict": " Consider more frequent main-branch merges during implementation.",
+        "visual_diff": " Update visual baselines after intentional UI changes to reduce false positives.",
+        "visual_regression": " Add visual regression gates earlier in the review pipeline.",
     }
     hint = sub_hints.get(subcategory, "")
 

@@ -85,6 +85,15 @@ class TestClassifyCause:
         """Visual keywords should match before CI keywords when both present."""
         assert _classify_cause("Visual check failed in CI") == "visual"
 
+    def test_visual_before_needs_info_priority(self) -> None:
+        """Visual keywords should match before needs_info when summary contains 'needs'."""
+        assert (
+            _classify_cause(
+                "Visual validation failed: login screen needs baseline update"
+            )
+            == "visual"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Prompt building
