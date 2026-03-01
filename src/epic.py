@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from datetime import UTC, datetime, timedelta
@@ -30,18 +29,22 @@ def check_all_checkboxes(body: str) -> str:
     return re.sub(r"- \[ \] (#\d+)", r"- [x] \1", body)
 
 
-# Matches version-like strings in epic titles: "v1.2.0", "1.0", "v2", etc.
-_VERSION_PATTERN = re.compile(r"v?(\d+(?:\.\d+)*)")
+# Matches version strings requiring either a "v" prefix (v1, v1.2, v1.2.3)
+# or multi-part notation (1.2, 1.2.3) to avoid matching bare integers like
+# "Phase 3" or "Sprint 5".
+_VERSION_PATTERN = re.compile(r"v(\d+(?:\.\d+)*)|\b(\d+\.\d+(?:\.\d+)*)\b")
 
 
 def extract_version_from_title(title: str) -> str:
     """Extract a semantic version string from an epic title.
 
     Looks for patterns like "v1.2.0", "1.0", "v2" in the title.
+    Requires either a 'v' prefix or multi-part notation to avoid matching
+    bare integers (e.g. "Phase 3" would not extract "3").
     Returns the matched version (without 'v' prefix) or empty string.
     """
     match = _VERSION_PATTERN.search(title)
-    return match.group(1) if match else ""
+    return (match.group(1) or match.group(2)) if match else ""
 
 
 def generate_changelog(sub_issue_titles: list[str]) -> str:
@@ -174,36 +177,6 @@ class EpicCompletionChecker:
         changelog = generate_changelog(sub_issue_titles)
         release_title = f"Release {tag}"
 
-        # Collect PR numbers from sub-issue branches
-        pr_numbers: list[int] = []
-        for issue_num in sub_issues:
-            branch = f"agent/issue-{issue_num}"
-            try:
-                prs_raw = await self._prs._run_gh(  # noqa: SLF001
-                    "gh",
-                    "pr",
-                    "list",
-                    "--repo",
-                    self._config.repo,
-                    "--head",
-                    branch,
-                    "--state",
-                    "merged",
-                    "--json",
-                    "number",
-                    "--limit",
-                    "1",
-                )
-                pr_list = json.loads(prs_raw) if prs_raw.strip() else []
-                for pr in pr_list:
-                    pr_numbers.append(int(pr["number"]))
-            except Exception:  # noqa: BLE001
-                logger.debug(
-                    "Could not find PR for issue #%d branch %s",
-                    issue_num,
-                    branch,
-                )
-
         # Create the git tag
         tag_ok = await self._prs.create_tag(tag)
         if not tag_ok:
@@ -223,7 +196,6 @@ class EpicCompletionChecker:
             version=version,
             epic_number=epic_number,
             sub_issues=list(sub_issues),
-            pr_numbers=pr_numbers,
             status="released",
             released_at=datetime.now(UTC).isoformat(),
             changelog=changelog,

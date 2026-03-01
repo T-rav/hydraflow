@@ -104,6 +104,15 @@ class TestExtractVersionFromTitle:
         title = "[Epic] Release v0.9.1-beta — Improvements"
         assert extract_version_from_title(title) == "0.9.1"
 
+    def test_bare_integer_not_extracted(self) -> None:
+        # "Phase 3" or "Sprint 5" should NOT be treated as a release version
+        assert extract_version_from_title("[Epic] Phase 3 Backend") == ""
+        assert extract_version_from_title("[Epic] Sprint 5 improvements") == ""
+
+    def test_bare_integer_without_prefix_not_extracted(self) -> None:
+        # A bare number without v-prefix should not create a spurious release
+        assert extract_version_from_title("5 Features") == ""
+
 
 # ---------------------------------------------------------------------------
 # generate_changelog
