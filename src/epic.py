@@ -194,15 +194,13 @@ class EpicCompletionChecker:
 
             # Prepend new changelog entry after any top-level heading
             if existing.startswith("# "):
-                # Insert after the first line (the heading)
+                # Insert after the first line (the heading).
+                # Strip leading blank lines from the remainder so the
+                # single blank line already inside `content` provides
+                # the correct separation — avoids double blank lines.
                 first_nl = existing.index("\n") if "\n" in existing else len(existing)
-                updated = (
-                    existing[: first_nl + 1]
-                    + "\n"
-                    + content
-                    + "\n"
-                    + existing[first_nl + 1 :]
-                )
+                rest = existing[first_nl + 1 :].lstrip("\n")
+                updated = existing[: first_nl + 1] + "\n" + content + "\n" + rest
             else:
                 updated = content + "\n" + existing
 

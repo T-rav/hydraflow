@@ -145,12 +145,29 @@ async def generate_changelog(
     entries: list[ChangelogEntry] = []
 
     for issue_num in sub_issues:
-        pr_number = await pr_manager.get_pr_for_issue(issue_num)
+        try:
+            pr_number = await pr_manager.get_pr_for_issue(issue_num)
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "Failed to look up PR for sub-issue #%d — skipping",
+                issue_num,
+                exc_info=True,
+            )
+            continue
         if not pr_number:
             logger.debug("No PR found for sub-issue #%d — skipping", issue_num)
             continue
 
-        title, body = await pr_manager.get_pr_title_and_body(pr_number)
+        try:
+            title, body = await pr_manager.get_pr_title_and_body(pr_number)
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "Failed to fetch PR #%d for sub-issue #%d — skipping",
+                pr_number,
+                issue_num,
+                exc_info=True,
+            )
+            continue
         if not title:
             logger.debug(
                 "Empty title for PR #%d (issue #%d) — skipping",

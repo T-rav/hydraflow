@@ -682,6 +682,39 @@ class TestEpicChangelogIntegration:
         assert new_pos < old_pos
 
     @pytest.mark.asyncio
+    async def test_write_changelog_file_blocks_absolute_path_traversal(
+        self, tmp_path: Path
+    ) -> None:
+        """Absolute changelog_file paths outside repo_root must be silently skipped."""
+        epic = _make_epic_issue(100, [1])
+        sub_issues = {
+            1: IssueFactory.create(
+                number=1, labels=["hydraflow-fixed"], title="Issue #1"
+            ),
+        }
+        config = ConfigFactory.create(
+            epic_label=["hydraflow-epic"],
+            repo_root=tmp_path,
+        )
+        evil_path = tmp_path.parent / "evil_changelog.md"
+        config.changelog_file = str(evil_path)
+
+        prs = AsyncMock()
+        fetcher = AsyncMock()
+        fetcher.fetch_issues_by_labels = AsyncMock(return_value=[epic])
+        fetcher.fetch_issue_by_number = AsyncMock(side_effect=sub_issues.get)
+        checker = EpicCompletionChecker(config, prs, fetcher)
+
+        changelog_content = "## [epic-100]\n\n### Features\n- stuff\n"
+        with patch(
+            "epic.generate_changelog", AsyncMock(return_value=changelog_content)
+        ):
+            await checker.check_and_close_epics(1)
+
+        assert not evil_path.exists()
+        prs.close_issue.assert_called_once_with(100)
+
+    @pytest.mark.asyncio
     async def test_write_changelog_file_blocks_path_traversal(
         self, tmp_path: Path
     ) -> None:
