@@ -1159,7 +1159,7 @@ class HITLEscalationPayload(TypedDict, total=False):
     status: str
     role: str
     repo: str
-    visual_evidence: dict[str, object]
+    visual_evidence: VisualEvidence
 
 
 class IssueCreatedPayload(TypedDict):

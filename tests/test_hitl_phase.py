@@ -63,6 +63,38 @@ class TestHITLPhaseProcessing:
         assert state.get_hitl_cause(42) is None
 
     @pytest.mark.asyncio
+    async def test_success_clears_visual_evidence(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """On success, visual evidence should be cleared from state."""
+        from models import HITLResult, VisualEvidence, VisualEvidenceItem
+
+        phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42, title="Test HITL", body="Fix it")
+
+        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        state.set_hitl_origin(42, "hydraflow-review")
+        state.set_hitl_cause(42, "Visual validation failed")
+        state.set_hitl_visual_evidence(
+            42,
+            VisualEvidence(
+                items=[
+                    VisualEvidenceItem(
+                        screen_name="login", diff_percent=8.0, status="fail"
+                    )
+                ],
+                summary="1 screen exceeded threshold",
+            ),
+        )
+
+        runner.run = AsyncMock(return_value=HITLResult(issue_number=42, success=True))
+
+        semaphore = asyncio.Semaphore(1)
+        await phase._process_one_hitl(42, "Fix the visual regression", semaphore)
+
+        assert state.get_hitl_visual_evidence(42) is None
+
+    @pytest.mark.asyncio
     async def test_failure_keeps_hitl_label(self, config: HydraFlowConfig) -> None:
         """On failure, the hydraflow-hitl label should be re-applied."""
         from models import HITLResult
