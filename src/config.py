@@ -18,7 +18,6 @@ logger = logging.getLogger("hydraflow.config")
 # Data-driven env-var override tables.
 # Each tuple: (field_name, env_var_key, default_value)
 _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
-    ("max_triagers", "HYDRAFLOW_MAX_TRIAGERS", 1),
     ("min_plan_words", "HYDRAFLOW_MIN_PLAN_WORDS", 200),
     (
         "max_pre_quality_review_attempts",
@@ -194,13 +193,14 @@ class HydraFlowConfig(BaseModel):
         description="GitHub repo (owner/name); auto-detected from git remote if empty",
     )
 
-    # Worker configuration
-    max_workers: int = Field(default=2, ge=1, le=10, description="Concurrent agents")
+    # Worker configuration — managed via config JSON file and dashboard UI,
+    # not environment variables. All defaults are 1.
+    max_workers: int = Field(default=1, ge=1, le=10, description="Concurrent agents")
     max_planners: int = Field(
         default=1, ge=1, le=10, description="Concurrent planning agents"
     )
     max_reviewers: int = Field(
-        default=2, ge=1, le=10, description="Concurrent review agents"
+        default=1, ge=1, le=10, description="Concurrent review agents"
     )
     max_triagers: int = Field(
         default=1, ge=1, le=10, description="Concurrent triage agents"
