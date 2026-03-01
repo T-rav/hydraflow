@@ -1056,3 +1056,58 @@ class TestRepoConfigOverlay:
         original_batch = cfg.batch_size
         _apply_repo_config_overlay(cfg, cli_explicit=set())
         assert cfg.batch_size == original_batch
+
+    def test_worker_counts_loaded_from_repo_config_file(self, tmp_path: Path) -> None:
+        """Worker counts in the repo config file are applied (config file is source of truth)."""
+        import json
+
+        from cli import _apply_repo_config_overlay
+        from config import HydraFlowConfig
+
+        repo_cfg_dir = tmp_path / ".hydraflow" / "org-repo"
+        repo_cfg_dir.mkdir(parents=True)
+        repo_cfg_file = repo_cfg_dir / "config.json"
+        repo_cfg_file.write_text(
+            json.dumps(
+                {
+                    "max_workers": 3,
+                    "max_planners": 2,
+                    "max_reviewers": 4,
+                    "max_triagers": 2,
+                    "max_hitl_workers": 3,
+                }
+            )
+        )
+
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path, repo="org/repo", config_file=repo_cfg_file
+        )
+        _apply_repo_config_overlay(cfg, cli_explicit=set())
+
+        assert cfg.max_workers == 3
+        assert cfg.max_planners == 2
+        assert cfg.max_reviewers == 4
+        assert cfg.max_triagers == 2
+        assert cfg.max_hitl_workers == 3
+
+    def test_cli_worker_count_beats_repo_config_file(self, tmp_path: Path) -> None:
+        """An explicit CLI --max-workers value overrides the config file worker count."""
+        import json
+
+        from cli import _apply_repo_config_overlay
+        from config import HydraFlowConfig
+
+        repo_cfg_dir = tmp_path / ".hydraflow" / "org-repo"
+        repo_cfg_dir.mkdir(parents=True)
+        repo_cfg_file = repo_cfg_dir / "config.json"
+        repo_cfg_file.write_text(json.dumps({"max_workers": 5}))
+
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            repo="org/repo",
+            max_workers=2,
+            config_file=repo_cfg_file,
+        )
+        _apply_repo_config_overlay(cfg, cli_explicit={"max_workers"})
+
+        assert cfg.max_workers == 2
