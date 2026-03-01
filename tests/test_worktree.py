@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from tests.helpers import make_proc
+from tests.helpers import make_docker_manager, make_proc
 from worktree import WorktreeManager
 
 # ---------------------------------------------------------------------------
@@ -984,7 +984,7 @@ class TestSetupDotenv:
         self, tmp_path: Path
     ) -> None:
         """In docker mode, _setup_dotenv should copy .env and add it to .gitignore."""
-        manager = _make_docker_manager(tmp_path)
+        manager = make_docker_manager(tmp_path)
         repo_root = manager._repo_root
         repo_root.mkdir(parents=True, exist_ok=True)
         wt_path = tmp_path / "worktree"
@@ -1102,7 +1102,7 @@ class TestSetupNodeModules:
 
     def test_docker_mode_copies_node_modules(self, tmp_path: Path) -> None:
         """In docker mode, _setup_node_modules should copy node_modules."""
-        manager = _make_docker_manager(tmp_path)
+        manager = make_docker_manager(tmp_path)
         repo_root = manager._repo_root
         repo_root.mkdir(parents=True, exist_ok=True)
         wt_path = tmp_path / "worktree"
@@ -1809,13 +1809,6 @@ class TestGetMainCommitsSinceDiverge:
 # ---------------------------------------------------------------------------
 
 
-def _make_docker_manager(tmp_path: Path) -> WorktreeManager:
-    """Create a WorktreeManager with docker execution mode."""
-    from tests.helpers import make_docker_manager
-
-    return make_docker_manager(tmp_path)
-
-
 def _make_hooks_subprocess_mock(hooks_dir: Path):
     """Return a coroutine that fakes 'git rev-parse --git-path hooks'."""
 
@@ -1837,7 +1830,7 @@ class TestSetupEnvDocker:
 
     def test_setup_env_docker_copies_dotenv(self, tmp_path: Path) -> None:
         """In docker mode, .env should be copied (not symlinked) into worktree."""
-        manager = _make_docker_manager(tmp_path)
+        manager = make_docker_manager(tmp_path)
 
         repo_root = manager._repo_root
         wt_path = tmp_path / "worktree"
@@ -1858,7 +1851,7 @@ class TestSetupEnvDocker:
 
     def test_setup_env_docker_copies_node_modules(self, tmp_path: Path) -> None:
         """In docker mode, node_modules/ should be copied (not symlinked)."""
-        manager = _make_docker_manager(tmp_path)
+        manager = make_docker_manager(tmp_path)
 
         repo_root = manager._repo_root
         wt_path = tmp_path / "worktree"
@@ -1885,7 +1878,7 @@ class TestSetupEnvDocker:
 
     def test_setup_env_docker_skips_missing_sources(self, tmp_path: Path) -> None:
         """In docker mode, missing .env and node_modules should be skipped gracefully."""
-        manager = _make_docker_manager(tmp_path)
+        manager = make_docker_manager(tmp_path)
 
         repo_root = manager._repo_root
         repo_root.mkdir(parents=True, exist_ok=True)
@@ -1898,7 +1891,7 @@ class TestSetupEnvDocker:
 
     def test_setup_env_docker_does_not_overwrite_existing(self, tmp_path: Path) -> None:
         """In docker mode, existing destination files should not be overwritten."""
-        manager = _make_docker_manager(tmp_path)
+        manager = make_docker_manager(tmp_path)
 
         repo_root = manager._repo_root
         wt_path = tmp_path / "worktree"
@@ -1917,7 +1910,7 @@ class TestSetupEnvDocker:
 
     def test_setup_env_docker_handles_copy_oserror(self, tmp_path: Path) -> None:
         """In docker mode, OSError during copy should be caught and not raised."""
-        manager = _make_docker_manager(tmp_path)
+        manager = make_docker_manager(tmp_path)
 
         repo_root = manager._repo_root
         wt_path = tmp_path / "worktree"
@@ -1937,7 +1930,7 @@ class TestSetupEnvDocker:
 
     def test_setup_env_docker_handles_copytree_oserror(self, tmp_path: Path) -> None:
         """In docker mode, OSError during node_modules copytree should be caught."""
-        manager = _make_docker_manager(tmp_path)
+        manager = make_docker_manager(tmp_path)
 
         repo_root = manager._repo_root
         wt_path = tmp_path / "worktree"
@@ -1952,7 +1945,7 @@ class TestSetupEnvDocker:
 
     def test_setup_env_docker_adds_env_to_gitignore(self, tmp_path: Path) -> None:
         """In docker mode, .env should be appended to worktree .gitignore."""
-        manager = _make_docker_manager(tmp_path)
+        manager = make_docker_manager(tmp_path)
 
         repo_root = manager._repo_root
         wt_path = tmp_path / "worktree"
@@ -1972,7 +1965,7 @@ class TestSetupEnvDocker:
         self, tmp_path: Path
     ) -> None:
         """In docker mode, .env should not be added to .gitignore if already present."""
-        manager = _make_docker_manager(tmp_path)
+        manager = make_docker_manager(tmp_path)
 
         repo_root = manager._repo_root
         wt_path = tmp_path / "worktree"
@@ -1995,7 +1988,7 @@ class TestSetupEnvDocker:
         self, tmp_path: Path
     ) -> None:
         """In docker mode, OSError when updating .gitignore should be caught."""
-        manager = _make_docker_manager(tmp_path)
+        manager = make_docker_manager(tmp_path)
 
         repo_root = manager._repo_root
         wt_path = tmp_path / "worktree"
@@ -2041,7 +2034,7 @@ class TestInstallHooksDocker:
     @pytest.mark.asyncio
     async def test_install_hooks_docker_copies_hook_files(self, tmp_path: Path) -> None:
         """In docker mode, hook files should be copied to the git hooks dir."""
-        manager = _make_docker_manager(tmp_path)
+        manager = make_docker_manager(tmp_path)
 
         repo_root = manager._repo_root
         repo_root.mkdir(parents=True, exist_ok=True)
@@ -2075,7 +2068,7 @@ class TestInstallHooksDocker:
         self, tmp_path: Path
     ) -> None:
         """In docker mode, missing .githooks/ should be handled gracefully."""
-        manager = _make_docker_manager(tmp_path)
+        manager = make_docker_manager(tmp_path)
 
         repo_root = manager._repo_root
         repo_root.mkdir(parents=True, exist_ok=True)
@@ -2092,7 +2085,7 @@ class TestInstallHooksDocker:
         self, tmp_path: Path
     ) -> None:
         """In docker mode, OSError during hook copy should be caught."""
-        manager = _make_docker_manager(tmp_path)
+        manager = make_docker_manager(tmp_path)
 
         repo_root = manager._repo_root
         repo_root.mkdir(parents=True, exist_ok=True)
@@ -2120,7 +2113,7 @@ class TestInstallHooksDocker:
         self, tmp_path: Path
     ) -> None:
         """In docker mode, OSError creating git hooks dir should be caught."""
-        manager = _make_docker_manager(tmp_path)
+        manager = make_docker_manager(tmp_path)
 
         repo_root = manager._repo_root
         repo_root.mkdir(parents=True, exist_ok=True)
@@ -2172,7 +2165,7 @@ class TestInstallHooksDocker:
         self, tmp_path: Path
     ) -> None:
         """In docker mode, all hook files should be copied."""
-        manager = _make_docker_manager(tmp_path)
+        manager = make_docker_manager(tmp_path)
 
         repo_root = manager._repo_root
         repo_root.mkdir(parents=True, exist_ok=True)
@@ -2201,7 +2194,7 @@ class TestInstallHooksDocker:
         self, tmp_path: Path
     ) -> None:
         """In docker mode, RuntimeError from git rev-parse should be caught."""
-        manager = _make_docker_manager(tmp_path)
+        manager = make_docker_manager(tmp_path)
 
         repo_root = manager._repo_root
         repo_root.mkdir(parents=True, exist_ok=True)
