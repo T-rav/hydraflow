@@ -257,8 +257,7 @@ export function Header({
         <span style={connected ? dotConnected : dotDisconnected} />
       </div>
       <div style={styles.center}>
-        <div style={styles.sessionBox}>
-          <span style={styles.sessionLabel}>Session</span>
+        <div style={styles.sessionBox} data-testid="session-box">
           <div style={styles.pipelineRow} data-testid="session-pipeline">
             {sessionStages.map((stage, index) => (
               <React.Fragment key={stage.key}>
@@ -379,13 +378,6 @@ const styles = {
     borderRadius: 8,
     padding: '8px 14px',
     background: theme.bg,
-  },
-  sessionLabel: {
-    color: theme.textMuted,
-    fontSize: 13,
-    fontWeight: 600,
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px',
   },
   pipelineRow: {
     display: 'flex',

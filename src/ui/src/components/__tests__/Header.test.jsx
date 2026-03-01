@@ -150,9 +150,9 @@ describe('Header component', () => {
     expect(screen.queryByText(/\d+\s+total/i)).toBeNull()
   })
 
-  it('renders Session label', () => {
+  it('does not render Session label', () => {
     render(<Header {...defaultProps} />)
-    expect(screen.getByText('Session')).toBeInTheDocument()
+    expect(screen.queryByText('Session')).toBeNull()
   })
 
   it('renders tagline as two stacked lines', () => {
@@ -207,8 +207,8 @@ describe('Header component', () => {
 
   it('center section has minWidth 0 and overflow hidden for graceful truncation', () => {
     render(<Header {...defaultProps} />)
-    const sessionLabel = screen.getByText('Session')
-    const centerDiv = sessionLabel.closest('div').parentElement
+    const sessionBox = screen.getByTestId('session-box')
+    const centerDiv = sessionBox.parentElement
     expect(centerDiv.style.minWidth).toBe('0px')
     expect(centerDiv.style.overflow).toBe('hidden')
   })
