@@ -137,7 +137,7 @@ class PostMergeHandler:
         if self._config.visual_gate_enabled:
             if visual_gate_fn is None:
                 logger.warning(
-                    "PR #%d: visual_gate_enabled but no visual_gate_fn provided — skipping gate",
+                    "PR #%d: visual_gate_enabled but no visual_gate_fn provided — blocking merge",
                     pr.number,
                 )
                 await self._bus.publish(
@@ -147,11 +147,12 @@ class PostMergeHandler:
                             "pr": pr.number,
                             "issue": issue.id,
                             "worker": worker_id,
-                            "verdict": "skipped",
+                            "verdict": "blocked",
                             "reason": "no visual_gate_fn provided to handle_approved",
                         },
                     )
                 )
+                return
             else:
                 visual_ok = await visual_gate_fn(pr, issue, result, worker_id)
                 if not visual_ok:

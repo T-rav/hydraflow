@@ -933,10 +933,10 @@ class TestVisualGateInHandleApproved:
         handler._prs.merge_pr.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_visual_gate_enabled_no_fn_skips_check(
+    async def test_visual_gate_enabled_no_fn_blocks_merge(
         self, config: HydraFlowConfig
     ) -> None:
-        """When visual gate enabled but no fn provided, merge proceeds."""
+        """When visual gate enabled but no fn provided, merge is blocked."""
         cfg = ConfigFactory.create(
             visual_gate_enabled=True,
             repo_root=config.repo_root,
@@ -959,7 +959,8 @@ class TestVisualGateInHandleApproved:
             # No visual_gate_fn provided
         )
 
-        assert result.merged is True
+        assert result.merged is False
+        handler._prs.merge_pr.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_visual_gate_enabled_no_fn_emits_audit_event(

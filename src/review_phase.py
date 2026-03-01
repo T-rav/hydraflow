@@ -723,6 +723,7 @@ class ReviewPhase:
                         "reason": reason,
                         "runtime_seconds": runtime,
                         "retries": 0,
+                        "artifact_count": len(artifacts),
                         "artifacts": artifacts,
                     },
                 )
@@ -783,7 +784,7 @@ class ReviewPhase:
 
     async def _invoke_visual_pipeline(
         self,
-        pr: PRInfo,  # noqa: ARG002
+        pr: PRInfo,
         issue: Task,  # noqa: ARG002
         worker_id: int,  # noqa: ARG002
     ) -> tuple[str, dict[str, str], str]:
@@ -792,7 +793,15 @@ class ReviewPhase:
         Returns (verdict, artifacts, reason).
         Override or mock this method in tests to exercise fail paths.
         In production this will call an external visual validation service.
+
+        WARNING: This is a placeholder stub. With visual_gate_enabled=True the
+        gate will always pass until this method is connected to a real service.
         """
+        logger.warning(
+            "PR #%d: _invoke_visual_pipeline is a stub — visual gate is not connected "
+            "to a real validation service; verdict will always be 'pass'",
+            pr.number,
+        )
         return "pass", {}, "visual validation passed"
 
     async def _run_ci_wait_attempt(
