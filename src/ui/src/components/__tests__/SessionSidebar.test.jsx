@@ -157,13 +157,25 @@ describe('SessionSidebar with multiple repos', () => {
     expect(screen.getByText('other-org/other-repo')).toBeDefined()
   })
 
-  it('renders add repo button and disconnect button per repo', () => {
+  it('renders add repo button and disconnect button per supervised repo', () => {
+    mockUseHydraFlow.mockReturnValue(
+      defaultContext({
+        sessions: [SESSION_A],
+        supervisedRepos: [{ slug: 'repo', path: 'org/repo', running: false }],
+      })
+    )
+    render(<SessionSidebar />)
+    expect(screen.getByLabelText('Add repo')).toBeDefined()
+    expect(screen.getByLabelText('Disconnect repo')).toBeDefined()
+  })
+
+  it('does not render disconnect button for session-only repos', () => {
     mockUseHydraFlow.mockReturnValue(
       defaultContext({ sessions: [SESSION_A] })
     )
     render(<SessionSidebar />)
     expect(screen.getByLabelText('Add repo')).toBeDefined()
-    expect(screen.getByLabelText('Disconnect repo')).toBeDefined()
+    expect(screen.queryByLabelText('Disconnect repo')).toBeNull()
   })
 })
 
@@ -484,15 +496,29 @@ describe('SessionSidebar add repo button', () => {
 // ---------------------------------------------------------------------------
 
 describe('SessionSidebar disconnect repo button', () => {
-  it('renders disconnect button for each repo row', () => {
+  it('renders disconnect button only for supervised repos', () => {
+    mockUseHydraFlow.mockReturnValue(
+      defaultContext({
+        sessions: [SESSION_A, SESSION_OTHER],
+        supervisedRepos: [
+          { slug: 'repo', path: 'org/repo', running: false },
+          { slug: 'other-repo', path: 'other-org/other-repo', running: false },
+        ],
+      })
+    )
+    render(<SessionSidebar />)
+    const btns = screen.getAllByLabelText('Disconnect repo')
+    expect(btns.length).toBe(2)
+  })
+
+  it('does not render disconnect button for session-only repos without supervised entry', () => {
     mockUseHydraFlow.mockReturnValue(
       defaultContext({
         sessions: [SESSION_A, SESSION_OTHER],
       })
     )
     render(<SessionSidebar />)
-    const btns = screen.getAllByLabelText('Disconnect repo')
-    expect(btns.length).toBe(2)
+    expect(screen.queryByLabelText('Disconnect repo')).toBeNull()
   })
 
   it('calls removeRepoShortcut when disconnect button is clicked on a stopped repo', () => {
@@ -648,5 +674,23 @@ describe('SessionSidebar per-repo Start/Stop', () => {
     selectRepo.mockClear()
     fireEvent.click(screen.getByText('Start'))
     expect(selectRepo).not.toHaveBeenCalled()
+  })
+
+  it('shows Start button for session-only repo (no supervised entry)', () => {
+    mockUseHydraFlow.mockReturnValue(
+      defaultContext({ sessions: [SESSION_A] })
+    )
+    render(<SessionSidebar />)
+    expect(screen.getByText('Start')).toBeDefined()
+    expect(screen.getByTitle('Start this repo runtime')).toBeDefined()
+  })
+
+  it('session-only repo shows Start but no Disconnect button', () => {
+    mockUseHydraFlow.mockReturnValue(
+      defaultContext({ sessions: [SESSION_A] })
+    )
+    render(<SessionSidebar />)
+    expect(screen.getByText('Start')).toBeDefined()
+    expect(screen.queryByLabelText('Disconnect repo')).toBeNull()
   })
 })
