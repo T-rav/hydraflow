@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { EpicCard } from '../EpicCard'
 
@@ -118,5 +118,71 @@ describe('EpicCard', () => {
   it('renders the data-testid on the card', () => {
     render(<EpicCard epic={baseEpic} />)
     expect(screen.getByTestId('epic-card-100')).toBeInTheDocument()
+  })
+
+  // Released epic tests
+  it('renders EpicReleasedCard for released epics', () => {
+    const releasedEpic = {
+      ...baseEpic,
+      status: 'released',
+      version: 'v1.0.0',
+      released_at: new Date().toISOString(),
+      release_url: 'https://github.com/org/repo/releases/v1.0.0',
+    }
+    render(<EpicCard epic={releasedEpic} />)
+    expect(screen.getByTestId('released-card-100')).toBeInTheDocument()
+    expect(screen.queryByTestId('epic-card-100')).not.toBeInTheDocument()
+  })
+
+  // Readiness section tests
+  it('shows readiness section for bundled epics when expanded', () => {
+    const bundledEpic = {
+      ...baseEpic,
+      merge_strategy: 'bundled',
+      readiness: {
+        all_implemented: false,
+        all_approved: false,
+        ci_passing: false,
+        no_conflicts: true,
+        changelog_generated: false,
+        version_determined: false,
+      },
+    }
+    render(<EpicCard epic={bundledEpic} onRelease={vi.fn()} releasing={null} />)
+    fireEvent.click(screen.getByText('Epic: Build dashboard'))
+    expect(screen.getByTestId('readiness-section')).toBeInTheDocument()
+    expect(screen.getByTestId('readiness-checklist')).toBeInTheDocument()
+    expect(screen.getByTestId('release-button')).toBeInTheDocument()
+  })
+
+  it('shows readiness section for bundled_hitl epics when expanded', () => {
+    const bundledHitlEpic = {
+      ...baseEpic,
+      merge_strategy: 'bundled_hitl',
+      readiness: {
+        all_implemented: false,
+        all_approved: false,
+        ci_passing: false,
+        no_conflicts: true,
+        changelog_generated: false,
+        version_determined: false,
+      },
+    }
+    render(<EpicCard epic={bundledHitlEpic} onRelease={vi.fn()} releasing={null} />)
+    fireEvent.click(screen.getByText('Epic: Build dashboard'))
+    expect(screen.getByTestId('readiness-section')).toBeInTheDocument()
+  })
+
+  it('does not show readiness section for independent epics', () => {
+    render(<EpicCard epic={baseEpic} onRelease={vi.fn()} releasing={null} />)
+    fireEvent.click(screen.getByText('Epic: Build dashboard'))
+    expect(screen.queryByTestId('readiness-section')).not.toBeInTheDocument()
+  })
+
+  it('does not show readiness section for ordered epics', () => {
+    const orderedEpic = { ...baseEpic, merge_strategy: 'ordered' }
+    render(<EpicCard epic={orderedEpic} onRelease={vi.fn()} releasing={null} />)
+    fireEvent.click(screen.getByText('Epic: Build dashboard'))
+    expect(screen.queryByTestId('readiness-section')).not.toBeInTheDocument()
   })
 })
