@@ -3,6 +3,9 @@ import { theme } from '../theme'
 import { PIPELINE_LOOPS, PIPELINE_STAGES, ACTIVE_STATUSES } from '../constants'
 import { useHydraFlow } from '../context/HydraFlowContext'
 
+const WORKER_COUNT_MIN = 1
+const WORKER_COUNT_MAX = 10
+
 function formatDuration(startTime) {
   if (!startTime) return ''
   const diff = Date.now() - new Date(startTime).getTime()
@@ -152,8 +155,8 @@ export function PipelineControlPanel({ onToggleBgWorker }) {
               {loop.configKey && effectiveMax != null ? (
                 <>
                   <button
-                    style={effectiveMax <= 1 ? styles.capBtnDisabled : styles.capBtn}
-                    disabled={effectiveMax <= 1}
+                    style={effectiveMax <= WORKER_COUNT_MIN ? styles.capBtnDisabled : styles.capBtn}
+                    disabled={effectiveMax <= WORKER_COUNT_MIN}
                     onClick={() => updateWorkerCount(loop.key, loop.configKey, effectiveMax - 1)}
                     data-testid={`dec-${loop.key}`}
                     aria-label={`Decrease ${loop.label} workers`}
@@ -167,8 +170,8 @@ export function PipelineControlPanel({ onToggleBgWorker }) {
                     {effectiveMax}
                   </span>
                   <button
-                    style={effectiveMax >= 10 ? styles.capBtnDisabled : styles.capBtn}
-                    disabled={effectiveMax >= 10}
+                    style={effectiveMax >= WORKER_COUNT_MAX ? styles.capBtnDisabled : styles.capBtn}
+                    disabled={effectiveMax >= WORKER_COUNT_MAX}
                     onClick={() => updateWorkerCount(loop.key, loop.configKey, effectiveMax + 1)}
                     data-testid={`inc-${loop.key}`}
                     aria-label={`Increase ${loop.label} workers`}
