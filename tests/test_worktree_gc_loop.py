@@ -413,3 +413,154 @@ class TestWorktreeGCStopEvent:
         assert result["collected"] == 1
         loop._git_worktree_prune.assert_not_awaited()
         loop._collect_orphaned_branches.assert_not_awaited()
+
+
+class TestWorktreeGCOrphanedDirsBudget:
+    """Tests for Phase 2 budget exhaustion."""
+
+    @pytest.mark.asyncio
+    async def test_orphaned_dirs_respect_budget(self, tmp_path: Path) -> None:
+        """Phase 2 stops collecting when budget is exhausted."""
+        # Phase 1 collects 18, leaving budget of 2 for Phase 2
+        wts = {i: f"/p/issue-{i}" for i in range(1, 19)}
+        loop, _s, _e = _make_loop(tmp_path, active_worktrees=wts)
+        loop._get_issue_state = AsyncMock(return_value="closed")
+
+        # Create 5 orphaned dirs — only 2 should be collected (budget = 20 - 18)
+        slug = loop._config.repo_slug
+        for i in range(100, 105):
+            (loop._config.worktree_base / slug / f"issue-{i}").mkdir(parents=True)
+
+        result = await loop._do_work()
+        assert result["collected"] == _MAX_GC_PER_CYCLE  # 18 + 2 = 20
+
+
+class TestWorktreeGCOrphanedDirsErrors:
+    """Tests for Phase 2 error handling."""
+
+    @pytest.mark.asyncio
+    async def test_orphaned_dir_destroy_failure_continues(self, tmp_path: Path) -> None:
+        """A destroy failure for one orphaned dir does not stop processing others."""
+        loop, _s, _e = _make_loop(tmp_path)
+        slug = loop._config.repo_slug
+        (loop._config.worktree_base / slug / "issue-50").mkdir(parents=True)
+        (loop._config.worktree_base / slug / "issue-51").mkdir(parents=True)
+
+        loop._get_issue_state = AsyncMock(return_value="closed")
+
+        call_count = 0
+
+        async def fail_then_succeed(issue_num: int) -> None:
+            nonlocal call_count
+            call_count += 1
+            if issue_num == 50:
+                raise RuntimeError("destroy failed")
+
+        loop._worktrees.destroy = fail_then_succeed  # type: ignore[method-assign]
+
+        result = await loop._do_work()
+        # issue-50 fails, issue-51 succeeds
+        assert call_count == 2
+        assert result["collected"] >= 1
+
+
+class TestWorktreeGCStopEventPhase2:
+    """Tests for stop event within Phase 2 iteration."""
+
+    @pytest.mark.asyncio
+    async def test_stop_event_halts_orphaned_dir_iteration(
+        self, tmp_path: Path
+    ) -> None:
+        """Stop event set during Phase 2 stops collecting orphaned dirs."""
+        loop, _s, stop = _make_loop(tmp_path)
+        slug = loop._config.repo_slug
+        for i in range(100, 105):
+            (loop._config.worktree_base / slug / f"issue-{i}").mkdir(parents=True)
+
+        call_count = 0
+
+        async def gc_and_stop_on_second(issue_number: int) -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 2:
+                stop.set()
+            return "closed"
+
+        loop._get_issue_state = AsyncMock(side_effect=gc_and_stop_on_second)
+
+        result = await loop._do_work()
+        # Should stop after 2 orphaned dirs due to stop event
+        assert result["collected"] <= 3
+        loop._git_worktree_prune.assert_not_awaited()
+
+
+class TestWorktreeGCBranchActiveIssues:
+    """Tests for branch skipping based on active_issue_numbers."""
+
+    @pytest.mark.asyncio
+    async def test_skips_branches_with_active_issue_number(
+        self, tmp_path: Path
+    ) -> None:
+        """Branches for active issues (no worktree entry) are not deleted."""
+        loop, _s, _e = _make_loop(tmp_path, active_issue_numbers=[99])
+        loop._collect_orphaned_branches = (
+            WorktreeGCLoop._collect_orphaned_branches.__get__(loop)
+        )  # type: ignore[attr-defined]
+        with patch("worktree_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
+            m.return_value = "  agent/issue-99\n"
+            count = await loop._collect_orphaned_branches()
+        assert count == 0
+        assert m.await_count == 1
+
+
+class TestIsSafeToGCDirect:
+    """Direct unit tests for _is_safe_to_gc."""
+
+    @pytest.mark.asyncio
+    async def test_safe_for_closed_issue(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        loop._get_issue_state = AsyncMock(return_value="closed")
+        assert await loop._is_safe_to_gc(42) is True
+
+    @pytest.mark.asyncio
+    async def test_unsafe_for_active_issue(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path, active_issue_numbers=[42])
+        assert await loop._is_safe_to_gc(42) is False
+
+    @pytest.mark.asyncio
+    async def test_unsafe_for_hitl_issue(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path, hitl_causes={42: "ci_failure"})
+        assert await loop._is_safe_to_gc(42) is False
+
+    @pytest.mark.asyncio
+    async def test_unsafe_for_open_issue_with_pr(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        loop._get_issue_state = AsyncMock(return_value="open")
+        loop._has_open_pr = AsyncMock(return_value=True)
+        assert await loop._is_safe_to_gc(42) is False
+
+    @pytest.mark.asyncio
+    async def test_safe_for_open_issue_without_pr(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        loop._get_issue_state = AsyncMock(return_value="open")
+        loop._has_open_pr = AsyncMock(return_value=False)
+        assert await loop._is_safe_to_gc(42) is True
+
+    @pytest.mark.asyncio
+    async def test_unsafe_on_api_error(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        loop._get_issue_state = AsyncMock(side_effect=RuntimeError("API error"))
+        assert await loop._is_safe_to_gc(42) is False
+
+    @pytest.mark.asyncio
+    async def test_unsafe_on_unknown_state(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        loop._get_issue_state = AsyncMock(return_value="weird_state")
+        assert await loop._is_safe_to_gc(42) is False
+
+    @pytest.mark.asyncio
+    async def test_unsafe_on_pr_check_error(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        loop._get_issue_state = AsyncMock(return_value="open")
+        loop._has_open_pr = AsyncMock(side_effect=RuntimeError("PR check error"))
+        assert await loop._is_safe_to_gc(42) is False
