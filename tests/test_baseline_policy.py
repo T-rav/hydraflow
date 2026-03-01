@@ -236,9 +236,10 @@ class TestCheckApproval:
         assert records[0].change_type == BaselineChangeType.UPDATE
 
     @pytest.mark.asyncio
-    async def test_no_audit_on_denied(
+    async def test_denial_is_recorded_in_audit(
         self, policy: BaselinePolicy, state: StateTracker
     ):
+        """Denied baseline change attempts must be persistently recorded for audit."""
         await policy.check_approval(
             pr_number=101,
             issue_number=42,
@@ -246,7 +247,10 @@ class TestCheckApproval:
             pr_approvers=["charlie"],
         )
         records = state.get_baseline_audit(42)
-        assert len(records) == 0
+        assert len(records) == 1
+        assert records[0].approver == ""
+        assert "denied" in records[0].reason.lower()
+        assert records[0].change_type == BaselineChangeType.UPDATE
 
 
 # ---------------------------------------------------------------------------

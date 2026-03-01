@@ -126,22 +126,27 @@ class BaselinePolicy:
             )
         )
 
-        # Record audit trail for approved changes
-        if approved:
-            record = BaselineAuditRecord(
-                pr_number=pr_number,
-                issue_number=issue_number,
-                changed_files=baseline_files,
-                change_type=BaselineChangeType.UPDATE,
-                approver=approver,
-                reason=f"Approved by {approver} via PR #{pr_number}",
-            )
-            self._state.record_baseline_change(
-                issue_number,
-                record,
-                max_records=self._config.baseline_max_audit_records,
-            )
-        else:
+        # Record audit trail for all baseline change attempts (approved or denied)
+        audit_reason = (
+            f"Approved by {approver} via PR #{pr_number}"
+            if approved
+            else "Baseline approval denied — no authorized approver found"
+        )
+        record = BaselineAuditRecord(
+            pr_number=pr_number,
+            issue_number=issue_number,
+            changed_files=baseline_files,
+            change_type=BaselineChangeType.UPDATE,
+            approver=approver,
+            reason=audit_reason,
+        )
+        self._state.record_baseline_change(
+            issue_number,
+            record,
+            max_records=self._config.baseline_max_audit_records,
+        )
+
+        if not approved:
             logger.warning(
                 "Baseline approval denied for PR #%d (issue #%d): %d file(s) require "
                 "approval from a designated owner. Files: %s",
@@ -217,7 +222,12 @@ class BaselinePolicy:
 
         lines = [f"### Baseline Audit Trail (issue #{issue_number})\n"]
         for record in records:
-            ts = datetime.fromisoformat(record.timestamp).strftime("%Y-%m-%dT%H:%M:%S")
+            try:
+                ts = datetime.fromisoformat(record.timestamp).strftime(
+                    "%Y-%m-%dT%H:%M:%S"
+                )
+            except ValueError:
+                ts = record.timestamp
             action = record.change_type.value.upper()
             approver = record.approver or "unknown"
             files = ", ".join(record.changed_files[:3])

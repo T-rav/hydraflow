@@ -314,11 +314,15 @@ class ReviewPhase:
             )
         except Exception:  # noqa: BLE001
             logger.warning(
-                "Baseline policy check failed for PR #%d — proceeding without baseline enforcement",
+                "Baseline policy check failed for PR #%d — failing closed to protect baseline integrity",
                 pr.number,
                 exc_info=True,
             )
-            return None
+            return BaselineApprovalResult(
+                approved=False,
+                requires_approval=True,
+                reason="Baseline policy check failed — manual review required",
+            )
 
     async def _review_one_inner(
         self,
