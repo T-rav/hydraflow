@@ -269,6 +269,24 @@ class TestCheckApproval:
         assert event.data["approved"] is True
 
     @pytest.mark.asyncio
+    async def test_publishes_event_on_denial(
+        self, policy: BaselinePolicy, bus: EventBus
+    ):
+        """BASELINE_UPDATE event must be published even when approval is denied."""
+        queue = bus.subscribe()
+        await policy.check_approval(
+            pr_number=101,
+            issue_number=42,
+            changed_files=["tests/__snapshots__/home.snap.png"],
+            pr_approvers=["charlie"],  # Not in baseline_approvers
+        )
+        event = queue.get_nowait()
+        assert event.type == EventType.BASELINE_UPDATE
+        assert event.data["pr_number"] == 101
+        assert event.data["approved"] is False
+        assert event.data["approver"] == ""
+
+    @pytest.mark.asyncio
     async def test_first_audit_record_uses_initial_type(
         self, policy: BaselinePolicy, state: StateTracker
     ):

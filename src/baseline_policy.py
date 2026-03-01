@@ -138,21 +138,7 @@ class BaselinePolicy:
             ),
         )
 
-        # Publish event
-        await self._bus.publish(
-            HydraFlowEvent(
-                type=EventType.BASELINE_UPDATE,
-                data={
-                    "pr_number": pr_number,
-                    "issue_number": issue_number,
-                    "baseline_files": baseline_files,
-                    "approved": approved,
-                    "approver": approver,
-                },
-            )
-        )
-
-        # Record audit trail for all baseline change attempts (approved or denied)
+        # Record audit trail first — ensures persistence before any event is emitted.
         audit_reason = (
             f"Approved by {approver} via PR #{pr_number}"
             if approved
@@ -177,6 +163,27 @@ class BaselinePolicy:
             record,
             max_records=self._config.baseline_max_audit_records,
         )
+
+        # Publish event after audit is persisted; failures here are non-fatal.
+        try:
+            await self._bus.publish(
+                HydraFlowEvent(
+                    type=EventType.BASELINE_UPDATE,
+                    data={
+                        "pr_number": pr_number,
+                        "issue_number": issue_number,
+                        "baseline_files": baseline_files,
+                        "approved": approved,
+                        "approver": approver,
+                    },
+                )
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to publish BASELINE_UPDATE event for PR #%d",
+                pr_number,
+                exc_info=True,
+            )
 
         if not approved:
             logger.warning(
@@ -256,7 +263,7 @@ class BaselinePolicy:
         for record in records:
             try:
                 ts = datetime.fromisoformat(record.timestamp).strftime(
-                    "%Y-%m-%dT%H:%M:%S"
+                    "%Y-%m-%dT%H:%M:%SZ"
                 )
             except ValueError:
                 ts = record.timestamp
