@@ -460,6 +460,7 @@ class ReviewResult(BaseModel):
     ci_passed: bool | None = None  # None = not checked, True/False = outcome
     ci_fix_attempts: int = 0
     duration_seconds: float = 0.0
+    visual_passed: bool | None = None  # None = not checked, True/False = outcome
 
 
 # --- Verification Judge ---
@@ -1677,6 +1678,21 @@ class CiGateFn(Protocol):
         result: ReviewResult,
         worker_id: int,
         code_scanning_alerts: list[dict] | None = None,
+    ) -> bool: ...
+
+
+class VisualGateFn(Protocol):
+    """Async callback for visual validation gate checks.
+
+    Matches ``ReviewPhase.check_visual_gate``.
+    """
+
+    async def __call__(
+        self,
+        pr: PRInfo,
+        issue: Task,
+        result: ReviewResult,
+        worker_id: int,
     ) -> bool: ...
 
 

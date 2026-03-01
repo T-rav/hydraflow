@@ -29,6 +29,7 @@ from models import (
     StatusCallback,
     Task,
     VerificationCriterion,
+    VisualGateFn,
 )
 from pr_manager import PRManager
 from prompt_telemetry import PromptTelemetry
@@ -113,6 +114,7 @@ class PostMergeHandler:
         escalate_fn: EscalateFn,
         publish_fn: PublishFn,
         code_scanning_alerts: list[dict] | None = None,
+        visual_gate_fn: VisualGateFn | None = None,
     ) -> None:
         """Attempt merge for an approved PR (with optional CI gate)."""
         should_merge = True
@@ -127,6 +129,12 @@ class PostMergeHandler:
             )
         if not should_merge:
             return
+
+        # Visual validation gate
+        if self._config.visual_gate_enabled and visual_gate_fn is not None:
+            visual_ok = await visual_gate_fn(pr, issue, result, worker_id)
+            if not visual_ok:
+                return
 
         await publish_fn(pr, worker_id, "merging")
         success = await self._prs.merge_pr(pr.number)

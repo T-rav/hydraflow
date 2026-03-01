@@ -112,6 +112,8 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("auto_process_bug_reports", "HYDRAFLOW_AUTO_PROCESS_BUG_REPORTS", False),
     ("collaborator_check_enabled", "HYDRAFLOW_COLLABORATOR_CHECK_ENABLED", True),
     ("code_scanning_enabled", "HYDRAFLOW_CODE_SCANNING_ENABLED", False),
+    ("visual_gate_enabled", "HYDRAFLOW_VISUAL_GATE_ENABLED", False),
+    ("visual_gate_bypass", "HYDRAFLOW_VISUAL_GATE_BYPASS", False),
 ]
 
 # Literal-typed env-var overrides.
@@ -626,6 +628,16 @@ class HydraFlowConfig(BaseModel):
         ge=1_000,
         le=100_000,
         description="Max characters for code scanning alert injection",
+    )
+
+    # Visual gate
+    visual_gate_enabled: bool = Field(
+        default=False,
+        description="Require visual validation gate before merge finalization",
+    )
+    visual_gate_bypass: bool = Field(
+        default=False,
+        description="Emergency bypass for visual gate (audit-logged)",
     )
 
     # Manifest detection

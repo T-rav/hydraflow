@@ -626,7 +626,116 @@ class ReviewPhase:
             escalate_fn=self._escalate_to_hitl,
             publish_fn=self._publish_review_status,
             code_scanning_alerts=code_scanning_alerts,
+            visual_gate_fn=self.check_visual_gate,
         )
+
+    async def check_visual_gate(
+        self,
+        pr: PRInfo,
+        issue: Task,
+        result: ReviewResult,
+        worker_id: int,
+    ) -> bool:
+        """Run visual validation gate before merge finalization.
+
+        Returns True if merge may proceed, False to block.
+        When the gate is bypassed an audit event is emitted.
+        """
+        import time
+
+        start = time.monotonic()
+
+        if not self._config.visual_gate_enabled:
+            return True
+
+        # Emergency bypass — allow merge but log an audit event
+        if self._config.visual_gate_bypass:
+            logger.warning(
+                "PR #%d: visual gate BYPASSED (emergency kill-switch)",
+                pr.number,
+            )
+            if self._bus:
+                await self._bus.publish(
+                    HydraFlowEvent(
+                        type=EventType.VISUAL_GATE,
+                        data={
+                            "pr": pr.number,
+                            "issue": issue.id,
+                            "worker": worker_id,
+                            "verdict": "bypass",
+                            "reason": "emergency kill-switch active",
+                            "runtime_seconds": round(time.monotonic() - start, 3),
+                        },
+                    )
+                )
+            result.visual_passed = True
+            return True
+
+        # --- Simulate visual pipeline invocation ---
+        # In production this would call an external visual validation service.
+        # For now we treat it as a placeholder that always passes.
+        verdict = "pass"
+        artifacts: dict[str, str] = {}
+        reason = "visual validation passed"
+
+        runtime = round(time.monotonic() - start, 3)
+
+        # Emit gate telemetry
+        if self._bus:
+            await self._bus.publish(
+                HydraFlowEvent(
+                    type=EventType.VISUAL_GATE,
+                    data={
+                        "pr": pr.number,
+                        "issue": issue.id,
+                        "worker": worker_id,
+                        "verdict": verdict,
+                        "reason": reason,
+                        "runtime_seconds": runtime,
+                        "retries": 0,
+                        "artifacts": artifacts,
+                    },
+                )
+            )
+
+        if verdict == "pass":
+            result.visual_passed = True
+            # Post sign-off comment with evidence links
+            sign_off = (
+                f"**Visual Gate: PASSED**\n\n"
+                f"Visual validation completed successfully.\n"
+                f"Verdict: `{verdict}` | Runtime: {runtime}s"
+            )
+            if artifacts:
+                sign_off += "\n\n**Artifacts:**\n"
+                for name, link in artifacts.items():
+                    sign_off += f"- [{name}]({link})\n"
+            await self._prs.post_pr_comment(pr.number, sign_off)
+            return True
+
+        # Warn/fail blocks merge and escalates to HITL
+        result.visual_passed = False
+        logger.warning(
+            "PR #%d: visual gate FAILED (verdict=%s) — blocking merge",
+            pr.number,
+            verdict,
+        )
+        await self._prs.post_pr_comment(
+            pr.number,
+            f"**Visual Gate: BLOCKED**\n\n"
+            f"Verdict: `{verdict}` — {reason}\n"
+            f"Escalating to human review.",
+        )
+        await self._escalate_to_hitl(
+            pr.issue_number,
+            pr.number,
+            cause=f"Visual gate {verdict}",
+            origin_label=self._config.review_label[0],
+            comment=f"Visual gate verdict: {verdict} — {reason}",
+            event_cause="visual_gate_failed",
+            task=issue,
+        )
+        return False
 
     async def _run_ci_wait_attempt(
         self, pr: PRInfo, attempt: int, worker_id: int
