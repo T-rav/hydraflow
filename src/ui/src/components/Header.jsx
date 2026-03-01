@@ -369,6 +369,7 @@ const styles = {
     background: theme.surface,
     color: theme.textMuted,
     cursor: 'pointer',
+    transition: 'opacity 0.15s',
   },
 }
 

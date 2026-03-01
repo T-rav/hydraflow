@@ -473,5 +473,23 @@ describe('Header component', () => {
       })
       expect(html2canvasFn).toHaveBeenCalledTimes(2)
     })
+
+    it('opens modal without screenshot when all capture attempts fail', async () => {
+      html2canvasFn
+        .mockRejectedValueOnce(new Error('attempt 1 failed'))
+        .mockRejectedValueOnce(new Error('attempt 2 failed'))
+        .mockRejectedValueOnce(new Error('attempt 3 failed'))
+
+      const root = createRootContainer()
+
+      render(<Header {...defaultProps} connected={true} />, { container: root })
+      fireEvent.click(screen.getByTestId('report-button'))
+
+      await waitFor(() => {
+        expect(screen.getByTestId('report-modal-overlay')).toBeInTheDocument()
+      })
+      expect(screen.queryByTestId('screenshot-thumbnail')).toBeNull()
+      expect(html2canvasFn).toHaveBeenCalledTimes(3)
+    })
   })
 })
