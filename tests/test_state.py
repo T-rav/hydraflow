@@ -553,6 +553,122 @@ class TestHITLCauseTracking:
 
 
 # ---------------------------------------------------------------------------
+# HITL visual evidence tracking
+# ---------------------------------------------------------------------------
+
+
+class TestHITLVisualEvidence:
+    def test_set_and_get_visual_evidence(self, tmp_path: Path) -> None:
+        from models import VisualEvidence, VisualEvidenceItem
+
+        tracker = make_tracker(tmp_path)
+        ev = VisualEvidence(
+            items=[
+                VisualEvidenceItem(screen_name="login", diff_percent=5.0, status="fail")
+            ],
+            summary="1 screen failed",
+        )
+        tracker.set_hitl_visual_evidence(42, ev)
+        result = tracker.get_hitl_visual_evidence(42)
+        assert result is not None
+        assert len(result.items) == 1
+        assert result.items[0].screen_name == "login"
+        assert result.summary == "1 screen failed"
+
+    def test_get_returns_none_for_unknown(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        assert tracker.get_hitl_visual_evidence(999) is None
+
+    def test_set_triggers_save(self, tmp_path: Path) -> None:
+        from models import VisualEvidence
+
+        state_file = tmp_path / "state.json"
+        tracker = StateTracker(state_file)
+        tracker.set_hitl_visual_evidence(42, VisualEvidence())
+        assert state_file.exists()
+
+    def test_set_overwrites_existing(self, tmp_path: Path) -> None:
+        from models import VisualEvidence, VisualEvidenceItem
+
+        tracker = make_tracker(tmp_path)
+        ev1 = VisualEvidence(
+            items=[
+                VisualEvidenceItem(screen_name="page1", diff_percent=1.0, status="pass")
+            ],
+        )
+        ev2 = VisualEvidence(
+            items=[
+                VisualEvidenceItem(
+                    screen_name="page2", diff_percent=10.0, status="fail"
+                )
+            ],
+            attempt=2,
+        )
+        tracker.set_hitl_visual_evidence(42, ev1)
+        tracker.set_hitl_visual_evidence(42, ev2)
+        result = tracker.get_hitl_visual_evidence(42)
+        assert result is not None
+        assert result.items[0].screen_name == "page2"
+        assert result.attempt == 2
+
+    def test_remove_deletes_entry(self, tmp_path: Path) -> None:
+        from models import VisualEvidence
+
+        tracker = make_tracker(tmp_path)
+        tracker.set_hitl_visual_evidence(42, VisualEvidence())
+        tracker.remove_hitl_visual_evidence(42)
+        assert tracker.get_hitl_visual_evidence(42) is None
+
+    def test_remove_nonexistent_is_noop(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        tracker.remove_hitl_visual_evidence(999)
+        assert tracker.get_hitl_visual_evidence(999) is None
+
+    def test_persists_across_reload(self, tmp_path: Path) -> None:
+        from models import VisualEvidence, VisualEvidenceItem
+
+        state_file = tmp_path / "state.json"
+        tracker = StateTracker(state_file)
+        ev = VisualEvidence(
+            items=[
+                VisualEvidenceItem(screen_name="dash", diff_percent=8.0, status="warn")
+            ],
+            summary="warn threshold",
+            attempt=3,
+        )
+        tracker.set_hitl_visual_evidence(42, ev)
+
+        tracker2 = StateTracker(state_file)
+        result = tracker2.get_hitl_visual_evidence(42)
+        assert result is not None
+        assert result.items[0].screen_name == "dash"
+        assert result.attempt == 3
+
+    def test_multiple_issues_tracked_independently(self, tmp_path: Path) -> None:
+        from models import VisualEvidence, VisualEvidenceItem
+
+        tracker = make_tracker(tmp_path)
+        tracker.set_hitl_visual_evidence(
+            1,
+            VisualEvidence(
+                items=[
+                    VisualEvidenceItem(screen_name="a", diff_percent=1.0, status="pass")
+                ]
+            ),
+        )
+        tracker.set_hitl_visual_evidence(
+            2,
+            VisualEvidence(
+                items=[
+                    VisualEvidenceItem(screen_name="b", diff_percent=2.0, status="pass")
+                ]
+            ),
+        )
+        assert tracker.get_hitl_visual_evidence(1).items[0].screen_name == "a"
+        assert tracker.get_hitl_visual_evidence(2).items[0].screen_name == "b"
+
+
+# ---------------------------------------------------------------------------
 # Reset
 # ---------------------------------------------------------------------------
 
@@ -2618,3 +2734,239 @@ class TestOutcomeTrackingAdditional:
         tracker.reset()
         assert tracker.get_outcome(1) is None
         assert tracker.get_all_outcomes() == {}
+
+
+# ---------------------------------------------------------------------------
+# Session Counters
+# ---------------------------------------------------------------------------
+
+
+class TestSessionCounters:
+    def test_increment_session_counter_triaged(self, tmp_path: Path) -> None:
+        """Incrementing 'triaged' should update only that counter."""
+        tracker = make_tracker(tmp_path)
+        tracker.reset_session_counters("2026-01-01T00:00:00+00:00")
+        tracker.increment_session_counter("triaged")
+        counters = tracker.get_session_counters()
+        assert counters.triaged == 1
+        assert counters.planned == 0
+        assert counters.implemented == 0
+        assert counters.reviewed == 0
+        assert counters.merged == 0
+
+    def test_increment_session_counter_all_stages(self, tmp_path: Path) -> None:
+        """Each stage counter increments independently."""
+        tracker = make_tracker(tmp_path)
+        tracker.reset_session_counters("2026-01-01T00:00:00+00:00")
+        tracker.increment_session_counter("triaged")
+        tracker.increment_session_counter("triaged")
+        tracker.increment_session_counter("planned")
+        tracker.increment_session_counter("implemented")
+        tracker.increment_session_counter("reviewed")
+        tracker.increment_session_counter("merged")
+        counters = tracker.get_session_counters()
+        assert counters.triaged == 2
+        assert counters.planned == 1
+        assert counters.implemented == 1
+        assert counters.reviewed == 1
+        assert counters.merged == 1
+
+    def test_increment_unknown_stage_is_noop(self, tmp_path: Path) -> None:
+        """Incrementing an unknown stage should not raise or change counters."""
+        tracker = make_tracker(tmp_path)
+        tracker.reset_session_counters("2026-01-01T00:00:00+00:00")
+        tracker.increment_session_counter("nonexistent")
+        counters = tracker.get_session_counters()
+        assert counters.triaged == 0
+        assert counters.planned == 0
+
+    def test_session_counters_persist_across_reload(self, tmp_path: Path) -> None:
+        """Session counters should survive a StateTracker reload from disk."""
+        tracker = make_tracker(tmp_path)
+        tracker.reset_session_counters("2026-02-01T12:00:00+00:00")
+        tracker.increment_session_counter("triaged")
+        tracker.increment_session_counter("planned")
+        tracker.increment_session_counter("implemented")
+
+        # Reload from disk
+        tracker2 = make_tracker(tmp_path)
+        counters = tracker2.get_session_counters()
+        assert counters.triaged == 1
+        assert counters.planned == 1
+        assert counters.implemented == 1
+        assert counters.session_start == "2026-02-01T12:00:00+00:00"
+
+    def test_reset_session_counters(self, tmp_path: Path) -> None:
+        """Resetting session counters should zero all counts and set new start time."""
+        tracker = make_tracker(tmp_path)
+        tracker.reset_session_counters("2026-01-01T00:00:00+00:00")
+        tracker.increment_session_counter("triaged")
+        tracker.increment_session_counter("merged")
+
+        tracker.reset_session_counters("2026-02-01T00:00:00+00:00")
+        counters = tracker.get_session_counters()
+        assert counters.triaged == 0
+        assert counters.merged == 0
+        assert counters.session_start == "2026-02-01T00:00:00+00:00"
+
+    def test_get_session_counters_returns_copy(self, tmp_path: Path) -> None:
+        """get_session_counters should return a copy, not a reference."""
+        tracker = make_tracker(tmp_path)
+        tracker.reset_session_counters("2026-01-01T00:00:00+00:00")
+        tracker.increment_session_counter("triaged")
+        counters = tracker.get_session_counters()
+        counters.triaged = 999
+        assert tracker.get_session_counters().triaged == 1
+
+    def test_state_reset_clears_session_counters(self, tmp_path: Path) -> None:
+        """StateTracker.reset() should clear session counters."""
+        tracker = make_tracker(tmp_path)
+        tracker.reset_session_counters("2026-01-01T00:00:00+00:00")
+        tracker.increment_session_counter("triaged")
+        tracker.reset()
+        counters = tracker.get_session_counters()
+        assert counters.triaged == 0
+        assert counters.session_start == ""
+
+    def test_session_counters_in_state_data(self, tmp_path: Path) -> None:
+        """session_counters should appear in to_dict() output."""
+        tracker = make_tracker(tmp_path)
+        tracker.reset_session_counters("2026-01-01T00:00:00+00:00")
+        tracker.increment_session_counter("planned")
+        d = tracker.to_dict()
+        sc = d["session_counters"]
+        assert sc["planned"] == 1
+        assert sc["session_start"] == "2026-01-01T00:00:00+00:00"
+
+    def test_compute_throughput(self, tmp_path: Path) -> None:
+        """Throughput should be computed as count / uptime_hours."""
+        tracker = make_tracker(tmp_path)
+        # Set session_start to 2 hours ago
+        from datetime import UTC, datetime, timedelta
+
+        two_hours_ago = (datetime.now(UTC) - timedelta(hours=2)).isoformat()
+        tracker.reset_session_counters(two_hours_ago)
+        tracker.increment_session_counter("triaged")
+        tracker.increment_session_counter("triaged")
+        tracker.increment_session_counter("triaged")
+        tracker.increment_session_counter("triaged")
+
+        throughput = tracker.compute_session_throughput()
+        # 4 triaged / ~2 hours ≈ 2.0/hr (allow some tolerance for test timing)
+        assert 1.5 <= throughput["triaged"] <= 2.5
+        assert throughput["planned"] == 0.0
+
+    def test_compute_throughput_no_session_start(self, tmp_path: Path) -> None:
+        """Throughput with empty session_start should return all zeros."""
+        tracker = make_tracker(tmp_path)
+        throughput = tracker.compute_session_throughput()
+        assert throughput["triaged"] == 0.0
+        assert throughput["planned"] == 0.0
+        assert throughput["implemented"] == 0.0
+        assert throughput["reviewed"] == 0.0
+        assert throughput["merged"] == 0.0
+
+    def test_compute_throughput_very_short_session(self, tmp_path: Path) -> None:
+        """Throughput with very short uptime should not divide by zero."""
+        from datetime import UTC, datetime
+
+        tracker = make_tracker(tmp_path)
+        just_now = datetime.now(UTC).isoformat()
+        tracker.reset_session_counters(just_now)
+        tracker.increment_session_counter("triaged")
+        throughput = tracker.compute_session_throughput()
+        # Should not raise; throughput may be very high but finite
+        assert throughput["triaged"] >= 0.0
+
+
+# ---------------------------------------------------------------------------
+# Disabled workers persistence
+# ---------------------------------------------------------------------------
+
+
+class TestDisabledWorkersPersistence:
+    def test_get_disabled_workers_empty_by_default(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        assert tracker.get_disabled_workers() == set()
+
+    def test_set_and_get_disabled_workers(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        tracker.set_disabled_workers({"memory_sync", "metrics"})
+        assert tracker.get_disabled_workers() == {"memory_sync", "metrics"}
+
+    def test_disabled_workers_survive_reload(self, tmp_path: Path) -> None:
+        state_file = tmp_path / "state.json"
+        t1 = StateTracker(state_file)
+        t1.set_disabled_workers({"memory_sync", "pr_unsticker"})
+
+        t2 = StateTracker(state_file)
+        assert t2.get_disabled_workers() == {"memory_sync", "pr_unsticker"}
+
+    def test_empty_disabled_workers_clears(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        tracker.set_disabled_workers({"memory_sync"})
+        tracker.set_disabled_workers(set())
+        assert tracker.get_disabled_workers() == set()
+
+    def test_partial_corruption_missing_disabled_workers(self, tmp_path: Path) -> None:
+        """State file with missing disabled_workers field loads gracefully."""
+        state_file = tmp_path / "state.json"
+        data = {
+            "processed_issues": {},
+            "active_worktrees": {},
+            "active_branches": {},
+            "reviewed_prs": {},
+            "bg_worker_states": {
+                "memory_sync": {
+                    "name": "memory_sync",
+                    "status": "ok",
+                    "last_run": "2026-02-20T10:00:00Z",
+                    "details": {},
+                }
+            },
+        }
+        state_file.write_text(json.dumps(data))
+
+        tracker = StateTracker(state_file)
+        assert tracker.get_disabled_workers() == set()
+        states = tracker.get_bg_worker_states()
+        assert "memory_sync" in states
+
+    def test_partial_corruption_invalid_bg_worker_states(self, tmp_path: Path) -> None:
+        """State file with corrupted bg_worker_states section but valid JSON loads gracefully."""
+        state_file = tmp_path / "state.json"
+        data = {
+            "processed_issues": {"42": "merged"},
+            "active_worktrees": {},
+            "active_branches": {},
+            "reviewed_prs": {},
+            "bg_worker_states": "not_a_dict",
+            "worker_heartbeats": {},
+            "disabled_workers": ["memory_sync"],
+        }
+        state_file.write_text(json.dumps(data))
+
+        # Pydantic validation will fail, resetting to defaults
+        tracker = StateTracker(state_file)
+        # After reset, disabled workers should be empty (defaults)
+        assert tracker.get_disabled_workers() == set()
+        assert tracker.get_bg_worker_states() == {}
+
+    def test_deleted_bg_worker_states_preserves_disabled_workers(
+        self, tmp_path: Path
+    ) -> None:
+        """Deleting bg_worker_states from state file preserves disabled_workers."""
+        state_file = tmp_path / "state.json"
+        data = {
+            "processed_issues": {},
+            "active_worktrees": {},
+            "active_branches": {},
+            "reviewed_prs": {},
+            "disabled_workers": ["memory_sync"],
+        }
+        state_file.write_text(json.dumps(data))
+
+        tracker = StateTracker(state_file)
+        assert tracker.get_disabled_workers() == {"memory_sync"}
+        # bg_worker_states defaults to empty when absent
+        assert tracker.get_bg_worker_states() == {}

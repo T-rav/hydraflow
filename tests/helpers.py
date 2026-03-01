@@ -257,6 +257,8 @@ class ConfigFactory:
         max_ci_log_chars: int = 12_000,
         code_scanning_enabled: bool = False,
         max_code_scanning_chars: int = 6_000,
+        visual_gate_enabled: bool = False,
+        visual_gate_bypass: bool = False,
         agent_timeout: int = 3600,
         transcript_summary_timeout: int = 120,
         memory_compaction_timeout: int = 60,
@@ -275,8 +277,29 @@ class ConfigFactory:
         epic_monitor_interval: int = 1800,
         worktree_gc_interval: int = 1800,
         epic_stale_days: int = 7,
+        epic_merge_strategy: Literal[
+            "independent", "bundled", "bundled_hitl", "ordered"
+        ] = "independent",
         collaborator_check_enabled: bool = False,
         collaborator_cache_ttl: int = 600,
+        artifact_retention_days: int = 30,
+        artifact_max_size_mb: int = 500,
+        runs_gc_interval: int = 3600,
+        release_on_epic_close: bool = False,
+        release_version_source: Literal[
+            "epic_title", "milestone", "manual"
+        ] = "epic_title",
+        release_tag_prefix: str = "v",
+        baseline_snapshot_patterns: list[str] | None = None,
+        baseline_approval_required: bool = True,
+        baseline_approvers: list[str] | None = None,
+        baseline_max_audit_records: int = 100,
+        visual_validation_enabled: bool = True,
+        visual_validation_trigger_patterns: list[str] | None = None,
+        visual_required_label: str = "hydraflow-visual-required",
+        visual_skip_label: str = "hydraflow-visual-skip",
+        screenshot_redaction_enabled: bool = True,
+        screenshot_gist_public: bool = False,
     ):
         """Create a HydraFlowConfig with test-friendly defaults."""
         from config import HydraFlowConfig
@@ -421,6 +444,8 @@ class ConfigFactory:
             max_ci_log_chars=max_ci_log_chars,
             code_scanning_enabled=code_scanning_enabled,
             max_code_scanning_chars=max_code_scanning_chars,
+            visual_gate_enabled=visual_gate_enabled,
+            visual_gate_bypass=visual_gate_bypass,
             agent_timeout=agent_timeout,
             transcript_summary_timeout=transcript_summary_timeout,
             memory_compaction_timeout=memory_compaction_timeout,
@@ -437,10 +462,45 @@ class ConfigFactory:
             epic_monitor_interval=epic_monitor_interval,
             worktree_gc_interval=worktree_gc_interval,
             epic_stale_days=epic_stale_days,
+            epic_merge_strategy=epic_merge_strategy,
             auto_process_epics=auto_process_epics,
             auto_process_bug_reports=auto_process_bug_reports,
             collaborator_check_enabled=collaborator_check_enabled,
             collaborator_cache_ttl=collaborator_cache_ttl,
+            artifact_retention_days=artifact_retention_days,
+            artifact_max_size_mb=artifact_max_size_mb,
+            runs_gc_interval=runs_gc_interval,
+            release_on_epic_close=release_on_epic_close,
+            release_version_source=release_version_source,
+            release_tag_prefix=release_tag_prefix,
+            baseline_snapshot_patterns=baseline_snapshot_patterns
+            if baseline_snapshot_patterns is not None
+            else ["**/__snapshots__/**", "**/*.snap.png", "**/*.baseline.png"],
+            baseline_approval_required=baseline_approval_required,
+            baseline_approvers=baseline_approvers
+            if baseline_approvers is not None
+            else [],
+            baseline_max_audit_records=baseline_max_audit_records,
+            visual_validation_enabled=visual_validation_enabled,
+            visual_validation_trigger_patterns=(
+                visual_validation_trigger_patterns
+                if visual_validation_trigger_patterns is not None
+                else [
+                    "src/ui/**",
+                    "ui/**",
+                    "frontend/**",
+                    "web/**",
+                    "*.css",
+                    "*.scss",
+                    "*.tsx",
+                    "*.jsx",
+                    "*.html",
+                ]
+            ),
+            visual_required_label=visual_required_label,
+            visual_skip_label=visual_skip_label,
+            screenshot_redaction_enabled=screenshot_redaction_enabled,
+            screenshot_gist_public=screenshot_gist_public,
         )
 
 
@@ -503,6 +563,226 @@ class AuditResultFactory:
         )
 
 
+def make_plan_phase(
+    config,
+    *,
+    summarizer=None,
+):
+    """Build a PlanPhase with mock dependencies.
+
+    Promoted from test_plan_phase._make_phase() for reuse across test files.
+
+    Returns (phase, state, planners_mock, prs_mock, store, stop_event).
+    """
+    from events import EventBus
+    from issue_store import IssueStore
+    from plan_phase import PlanPhase
+    from state import StateTracker
+
+    state = StateTracker(config.state_file)
+    bus = EventBus()
+    fetcher = AsyncMock()
+    store = IssueStore(config, fetcher, bus)
+    planners = AsyncMock()
+    prs = AsyncMock()
+    prs.post_comment = AsyncMock()
+    prs.remove_label = AsyncMock()
+    prs.add_labels = AsyncMock()
+    prs.swap_pipeline_labels = AsyncMock()
+    prs.transition = AsyncMock()
+    prs.create_task = AsyncMock(return_value=99)
+    prs.close_task = AsyncMock()
+    stop_event = asyncio.Event()
+    phase = PlanPhase(
+        config,
+        state,
+        store,
+        planners,
+        prs,
+        bus,
+        stop_event,
+        transcript_summarizer=summarizer,
+    )
+    return phase, state, planners, prs, store, stop_event
+
+
+def make_implement_phase(
+    config,
+    issues,
+    *,
+    agent_run=None,
+    success=True,
+    push_return=True,
+    create_pr_return=None,
+):
+    """Build an ImplementPhase with standard mocks.
+
+    Promoted from test_implement_phase._make_phase() for reuse across test files.
+
+    Returns (phase, mock_wt, mock_prs).
+    """
+    from implement_phase import ImplementPhase
+    from issue_store import IssueStore
+    from models import Task, WorkerResult
+    from state import StateTracker
+    from tests.conftest import PRInfoFactory, WorkerResultFactory
+
+    state = StateTracker(config.state_file)
+    stop_event = asyncio.Event()
+
+    if agent_run is None:
+
+        async def _default_agent_run(
+            issue: Task,
+            wt_path: Path,
+            branch: str,
+            worker_id: int = 0,
+            review_feedback: str = "",
+        ) -> WorkerResult:
+            return WorkerResultFactory.create(
+                issue_number=issue.id,
+                success=success,
+                worktree_path=str(wt_path),
+            )
+
+        agent_run = _default_agent_run
+
+    mock_agents = AsyncMock()
+    mock_agents.run = agent_run
+
+    # Mock IssueStore — get_implementable returns the supplied issues
+    mock_store = AsyncMock(spec=IssueStore)
+    mock_store.get_implementable = lambda limit: issues
+    mock_store.mark_active = lambda num, stage: None
+    mock_store.mark_complete = lambda num: None
+    mock_store.is_active = lambda num: False
+
+    mock_wt = AsyncMock()
+    mock_wt.create = AsyncMock(
+        side_effect=lambda num, branch: config.worktree_base / f"issue-{num}"
+    )
+
+    mock_prs = AsyncMock()
+    mock_prs.push_branch = AsyncMock(return_value=push_return)
+    mock_prs.create_pr = AsyncMock(
+        return_value=create_pr_return
+        if create_pr_return is not None
+        else PRInfoFactory.create()
+    )
+    mock_prs.find_open_pr_for_branch = AsyncMock(return_value=PRInfoFactory.create())
+    mock_prs.branch_has_diff_from_main = AsyncMock(return_value=True)
+    mock_prs.add_labels = AsyncMock()
+    mock_prs.remove_label = AsyncMock()
+    mock_prs.swap_pipeline_labels = AsyncMock()
+    mock_prs.transition = AsyncMock()
+    mock_prs.post_comment = AsyncMock()
+    mock_prs.close_task = AsyncMock()
+    mock_prs.add_pr_labels = AsyncMock()
+
+    phase = ImplementPhase(
+        config=config,
+        state=state,
+        worktrees=mock_wt,
+        agents=mock_agents,
+        prs=mock_prs,
+        store=mock_store,
+        stop_event=stop_event,
+    )
+
+    return phase, mock_wt, mock_prs
+
+
+def make_hitl_phase(config):
+    """Build a HITLPhase with mock dependencies.
+
+    Promoted from test_hitl_phase._make_phase() for reuse across test files.
+
+    Returns (phase, state, fetcher_mock, prs_mock, worktrees_mock,
+             hitl_runner_mock, bus).
+    """
+    from events import EventBus
+    from hitl_phase import HITLPhase
+    from issue_store import IssueStore
+    from state import StateTracker
+
+    state = StateTracker(config.state_file)
+    bus = EventBus()
+    fetcher_mock = AsyncMock()
+    store = IssueStore(config, AsyncMock(), bus)
+    worktrees = AsyncMock()
+    worktrees.create = AsyncMock(return_value=config.worktree_base / "issue-42")
+    worktrees.destroy = AsyncMock()
+    hitl_runner = AsyncMock()
+    prs = AsyncMock()
+    prs.remove_label = AsyncMock()
+    prs.add_labels = AsyncMock()
+    prs.swap_pipeline_labels = AsyncMock()
+    prs.push_branch = AsyncMock(return_value=True)
+    prs.post_comment = AsyncMock()
+    stop_event = asyncio.Event()
+    phase = HITLPhase(
+        config,
+        state,
+        store,
+        fetcher_mock,
+        worktrees,
+        hitl_runner,
+        prs,
+        bus,
+        stop_event,
+    )
+    return phase, state, fetcher_mock, prs, worktrees, hitl_runner, bus
+
+
+def make_triage_phase(config):
+    """Build a TriagePhase with mock dependencies.
+
+    Promoted from test_triage_phase._make_phase() for reuse across test files.
+
+    Returns (phase, state, triage_mock, prs_mock, store, stop_event).
+    """
+    from events import EventBus
+    from issue_store import IssueStore
+    from state import StateTracker
+    from triage_phase import TriagePhase
+
+    state = StateTracker(config.state_file)
+    bus = EventBus()
+    fetcher = AsyncMock()
+    store = IssueStore(config, fetcher, bus)
+    triage = AsyncMock()
+    prs = AsyncMock()
+    prs.remove_label = AsyncMock()
+    prs.add_labels = AsyncMock()
+    prs.swap_pipeline_labels = AsyncMock()
+    prs.post_comment = AsyncMock()
+    stop_event = asyncio.Event()
+    phase = TriagePhase(config, state, store, triage, prs, bus, stop_event)
+    return phase, state, triage, prs, store, stop_event
+
+
+def make_conflict_resolver(config, *, agents=None):
+    """Build a MergeConflictResolver with standard mock dependencies.
+
+    Promoted from test_merge_conflict_resolver._make_resolver() for reuse
+    across test files.
+    """
+    from events import EventBus
+    from merge_conflict_resolver import MergeConflictResolver
+    from state import StateTracker
+
+    state = StateTracker(config.state_file)
+    return MergeConflictResolver(
+        config=config,
+        worktrees=AsyncMock(),
+        agents=agents,
+        prs=AsyncMock(),
+        event_bus=EventBus(),
+        state=state,
+        summarizer=None,
+    )
+
+
 def make_review_phase(
     config,
     *,
@@ -512,6 +792,7 @@ def make_review_phase(
     default_mocks: bool = False,
     review_result=None,
     issue_number: int = 42,
+    baseline_policy=None,
 ):
     """Build a ReviewPhase with standard mock dependencies.
 
@@ -591,6 +872,7 @@ def make_review_phase(
         event_bus=bus,
         conflict_resolver=conflict_resolver,
         post_merge=post_merge,
+        baseline_policy=baseline_policy,
     )
 
     if default_mocks:

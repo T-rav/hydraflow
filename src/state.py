@@ -13,6 +13,8 @@ from pydantic import ValidationError
 from file_util import atomic_write
 from models import (
     BackgroundWorkerState,
+    BaselineAuditRecord,
+    BaselineChangeType,
     EpicState,
     HITLSummaryCacheEntry,
     HITLSummaryFailureEntry,
@@ -22,10 +24,13 @@ from models import (
     LifetimeStats,
     PendingReport,
     PersistedWorkerHeartbeat,
+    Release,
+    SessionCounters,
     SessionLog,
     SessionStatus,
     StateData,
     ThresholdProposal,
+    VisualEvidence,
     WorkerResultMeta,
 )
 
@@ -104,6 +109,7 @@ class StateTracker:
                 OSError,
                 ValueError,
                 UnicodeDecodeError,
+                ValidationError,
             ) as exc:
                 logger.warning("Corrupt state file, resetting: %s", exc, exc_info=True)
                 self._data = StateData()
@@ -240,6 +246,24 @@ class StateTracker:
     def clear_hitl_summary_failure(self, issue_number: int) -> None:
         """Clear summary-generation failure metadata for *issue_number*."""
         self._data.hitl_summary_failures.pop(str(issue_number), None)
+        self.save()
+
+    # --- HITL visual evidence ---
+
+    def set_hitl_visual_evidence(
+        self, issue_number: int, evidence: VisualEvidence
+    ) -> None:
+        """Persist visual validation evidence for *issue_number*."""
+        self._data.hitl_visual_evidence[str(issue_number)] = evidence
+        self.save()
+
+    def get_hitl_visual_evidence(self, issue_number: int) -> VisualEvidence | None:
+        """Return visual evidence for *issue_number*, or ``None``."""
+        return self._data.hitl_visual_evidence.get(str(issue_number))
+
+    def remove_hitl_visual_evidence(self, issue_number: int) -> None:
+        """Clear visual evidence for *issue_number*."""
+        self._data.hitl_visual_evidence.pop(str(issue_number), None)
         self.save()
 
     # --- review attempt tracking ---
@@ -489,6 +513,51 @@ class StateTracker:
         epic.last_activity = datetime.now(UTC).isoformat()
         self.save()
 
+    def mark_epic_child_approved(self, epic_number: int, child_number: int) -> None:
+        """Add *child_number* to approved_children for *epic_number*."""
+        epic = self._data.epic_states.get(str(epic_number))
+        if epic is None:
+            return
+        if child_number not in epic.approved_children:
+            epic.approved_children.append(child_number)
+        epic.last_activity = datetime.now(UTC).isoformat()
+        self.save()
+
+    def get_epic_progress(self, epic_number: int) -> dict[str, object]:
+        """Return epic progress summary for *epic_number*.
+
+        Returns a dict with keys: total, merged, in_progress, pending,
+        approved, ready_to_merge, merge_strategy.
+        """
+        epic = self._data.epic_states.get(str(epic_number))
+        if epic is None:
+            return {}
+        total = len(epic.child_issues)
+        merged = len(epic.completed_children)
+        failed = len(epic.failed_children)
+        approved = len(epic.approved_children)
+        in_progress = total - merged - failed
+        pending = total - merged - failed - approved
+        # Ready to merge: all children approved or merged, none failed, non-independent
+        ready = (
+            total > 0
+            and failed == 0
+            and epic.merge_strategy != "independent"
+            and all(
+                c in epic.approved_children or c in epic.completed_children
+                for c in epic.child_issues
+            )
+        )
+        return {
+            "total": total,
+            "merged": merged,
+            "in_progress": max(in_progress, 0),
+            "pending": max(pending, 0),
+            "approved": approved,
+            "ready_to_merge": ready,
+            "merge_strategy": epic.merge_strategy,
+        }
+
     def get_all_epic_states(self) -> dict[str, EpicState]:
         """Return all persisted epic states (deep copy)."""
         return {k: v.model_copy(deep=True) for k, v in self._data.epic_states.items()}
@@ -501,6 +570,22 @@ class StateTracker:
         epic.closed = True
         epic.last_activity = datetime.now(UTC).isoformat()
         self.save()
+
+    # --- release tracking ---
+
+    def upsert_release(self, release: Release) -> None:
+        """Create or update a release record, keyed by epic number."""
+        self._data.releases[str(release.epic_number)] = release.model_copy(deep=True)
+        self.save()
+
+    def get_release(self, epic_number: int) -> Release | None:
+        """Return the release for *epic_number*, or ``None``."""
+        rel = self._data.releases.get(str(epic_number))
+        return rel.model_copy(deep=True) if rel else None
+
+    def get_all_releases(self) -> dict[str, Release]:
+        """Return all persisted releases (deep copy)."""
+        return {k: v.model_copy(deep=True) for k, v in self._data.releases.items()}
 
     # --- reset ---
 
@@ -570,6 +655,52 @@ class StateTracker:
         """Return a copy of the lifetime stats counters."""
         return self._data.lifetime_stats.model_copy()
 
+    # --- session counters ---
+
+    _SESSION_COUNTER_FIELDS = frozenset(
+        {"triaged", "planned", "implemented", "reviewed", "merged"}
+    )
+
+    def increment_session_counter(self, stage: str) -> None:
+        """Increment the session counter for *stage* and persist.
+
+        Unknown stage names are silently ignored.
+        """
+        if stage not in self._SESSION_COUNTER_FIELDS:
+            return
+        sc = self._data.session_counters
+        setattr(sc, stage, getattr(sc, stage) + 1)
+        self.save()
+
+    def get_session_counters(self) -> SessionCounters:
+        """Return a copy of the current session counters."""
+        return self._data.session_counters.model_copy()
+
+    def reset_session_counters(self, session_start: str) -> None:
+        """Replace session counters with a fresh instance and persist."""
+        self._data.session_counters = SessionCounters(session_start=session_start)
+        self.save()
+
+    def compute_session_throughput(self) -> dict[str, float]:
+        """Compute issues/hour per stage from session counters and uptime.
+
+        Returns a dict with keys matching the counter fields, values in issues/hour.
+        Returns all zeros if session_start is empty or unparseable.
+        """
+        sc = self._data.session_counters
+        if not sc.session_start:
+            return dict.fromkeys(self._SESSION_COUNTER_FIELDS, 0.0)
+        try:
+            started = datetime.fromisoformat(sc.session_start)
+        except (ValueError, TypeError):
+            return dict.fromkeys(self._SESSION_COUNTER_FIELDS, 0.0)
+        uptime_hours = (datetime.now(UTC) - started).total_seconds() / 3600.0
+        uptime_hours = max(uptime_hours, 0.001)  # avoid division by near-zero
+        return {
+            f: round(getattr(sc, f) / uptime_hours, 2)
+            for f in self._SESSION_COUNTER_FIELDS
+        }
+
     # --- memory state ---
 
     def update_memory_state(self, issue_ids: list[int], digest_hash: str) -> None:
@@ -629,6 +760,17 @@ class StateTracker:
     def set_worker_intervals(self, intervals: dict[str, int]) -> None:
         """Persist worker interval overrides."""
         self._data.worker_intervals = intervals
+        self.save()
+
+    # --- disabled workers ---
+
+    def get_disabled_workers(self) -> set[str]:
+        """Return the set of worker names that have been disabled."""
+        return set(self._data.disabled_workers)
+
+    def set_disabled_workers(self, names: set[str]) -> None:
+        """Persist the set of disabled worker names."""
+        self._data.disabled_workers = sorted(names)
         self.save()
 
     # --- background worker states ---
@@ -1004,3 +1146,66 @@ class StateTracker:
                 self.clear_threshold_fired(name)
 
         return proposals
+
+    # --- Baseline audit trail ---
+
+    _MAX_BASELINE_AUDIT_RECORDS = 100
+
+    def record_baseline_change(
+        self,
+        issue_number: int,
+        record: BaselineAuditRecord,
+        max_records: int = 0,
+    ) -> None:
+        """Append a baseline audit record for *issue_number*.
+
+        Caps at *max_records* (falls back to ``_MAX_BASELINE_AUDIT_RECORDS``).
+        """
+        cap = max_records or self._MAX_BASELINE_AUDIT_RECORDS
+        key = str(issue_number)
+        if key not in self._data.baseline_audit:
+            self._data.baseline_audit[key] = []
+        self._data.baseline_audit[key].append(record)
+        if len(self._data.baseline_audit[key]) > cap:
+            self._data.baseline_audit[key] = self._data.baseline_audit[key][-cap:]
+        self.save()
+
+    def get_baseline_audit(self, issue_number: int) -> list[BaselineAuditRecord]:
+        """Return baseline audit records for *issue_number*."""
+        return list(self._data.baseline_audit.get(str(issue_number), []))
+
+    def get_latest_baseline_record(
+        self, issue_number: int
+    ) -> BaselineAuditRecord | None:
+        """Return the most recent baseline audit record, or *None*."""
+        records = self._data.baseline_audit.get(str(issue_number), [])
+        return records[-1] if records else None
+
+    def rollback_baseline(
+        self,
+        issue_number: int,
+        pr_number: int,
+        approver: str,
+        reason: str,
+        commit_sha: str = "",
+    ) -> BaselineAuditRecord:
+        """Record a baseline rollback for *issue_number*."""
+        # Find the last non-rollback record to identify files
+        records = self._data.baseline_audit.get(str(issue_number), [])
+        changed_files: list[str] = []
+        for record in reversed(records):
+            if record.change_type != BaselineChangeType.ROLLBACK:
+                changed_files = list(record.changed_files)
+                break
+
+        rollback_record = BaselineAuditRecord(
+            pr_number=pr_number,
+            issue_number=issue_number,
+            changed_files=changed_files,
+            change_type=BaselineChangeType.ROLLBACK,
+            approver=approver,
+            reason=reason,
+            commit_sha=commit_sha,
+        )
+        self.record_baseline_change(issue_number, rollback_record)
+        return rollback_record

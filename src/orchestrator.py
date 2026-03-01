@@ -138,6 +138,7 @@ class HydraFlowOrchestrator:
         self._epic_manager = svc.epic_manager
         self._epic_monitor_loop = svc.epic_monitor_loop
         self._worktree_gc_loop = svc.worktree_gc_loop
+        self._runs_gc_loop = svc.runs_gc_loop
 
     @property
     def event_bus(self) -> EventBus:
@@ -343,8 +344,10 @@ class HydraFlowOrchestrator:
         self._state.set_bg_worker_state(name, self._bg_worker_states[name])
 
     def set_bg_worker_enabled(self, name: str, enabled: bool) -> None:
-        """Enable or disable a background worker by name."""
+        """Enable or disable a background worker by name and persist to state."""
         self._bg_worker_enabled[name] = enabled
+        disabled = {n for n, e in self._bg_worker_enabled.items() if not e}
+        self._state.set_disabled_workers(disabled)
 
     def is_bg_worker_enabled(self, name: str) -> bool:
         """Return whether a background worker is enabled (defaults to True)."""
@@ -397,7 +400,7 @@ class HydraFlowOrchestrator:
             )
         )
 
-    def _build_pipeline_stats(self) -> PipelineStats:
+    def build_pipeline_stats(self) -> PipelineStats:
         """Build a unified snapshot of the pipeline state."""
         queue_stats = self._store.get_queue_stats()
         lifetime = self._state.get_lifetime_stats()
@@ -438,8 +441,15 @@ class HydraFlowOrchestrator:
             "hitl": "hitl",
         }
 
-        # Session completions from _session_issue_results
-        session_succeeded = sum(1 for s in self._session_issue_results.values() if s)
+        # Session counters from persisted state
+        session_counters = self._state.get_session_counters()
+        session_counter_map: dict[str, str] = {
+            "triage": "triaged",
+            "plan": "planned",
+            "implement": "implemented",
+            "review": "reviewed",
+            "hitl": "",  # HITL has no dedicated counter; shows 0
+        }
 
         stages: dict[str, StageStats] = {}
         for stage_key in ("triage", "plan", "implement", "review", "hitl"):
@@ -449,7 +459,10 @@ class HydraFlowOrchestrator:
             )
             queued = queue_stats.queue_depth.get(store_key, 0)
             active = queue_stats.active_count.get(store_key, 0)
-            session_processed = queue_stats.total_processed.get(store_key, 0)
+            counter_field = session_counter_map.get(stage_key, "")
+            session_processed = (
+                getattr(session_counters, counter_field, 0) if counter_field else 0
+            )
             completed_lt = queue_stats.total_processed.get(store_key, 0)
 
             stages[stage_key] = StageStats(
@@ -461,23 +474,21 @@ class HydraFlowOrchestrator:
                 worker_cap=stage_caps.get(stage_key),
             )
 
-        # Add a merged pseudo-stage from lifetime stats
+        # Add a merged pseudo-stage from session counters and lifetime stats
         stages["merged"] = StageStats(
-            completed_session=session_succeeded,
+            completed_session=session_counters.merged,
             completed_lifetime=lifetime.prs_merged,
         )
 
-        # Compute throughput (issues/hour) from session processed / uptime
-        hours = uptime / 3600.0 if uptime > 0 else 0.0
-        throughput = ThroughputStats()
-        if hours > 0:
-            for stage_key in ("triage", "plan", "implement", "review", "hitl"):
-                store_key = next(
-                    (k for k, v in store_stage_map.items() if v == stage_key),
-                    stage_key,
-                )
-                processed = queue_stats.total_processed.get(store_key, 0)
-                setattr(throughput, stage_key, round(processed / hours, 2))
+        # Compute throughput (issues/hour) from session counters / uptime
+        session_throughput = self._state.compute_session_throughput()
+        throughput = ThroughputStats(
+            triage=session_throughput.get("triaged", 0.0),
+            plan=session_throughput.get("planned", 0.0),
+            implement=session_throughput.get("implemented", 0.0),
+            review=session_throughput.get("reviewed", 0.0),
+            hitl=0.0,
+        )
 
         return PipelineStats(
             timestamp=datetime.now(UTC).isoformat(),
@@ -489,7 +500,7 @@ class HydraFlowOrchestrator:
 
     async def emit_pipeline_stats(self) -> None:
         """Build and publish a PIPELINE_STATS event."""
-        stats = self._build_pipeline_stats()
+        stats = self.build_pipeline_stats()
         await self._bus.publish(
             HydraFlowEvent(
                 type=EventType.PIPELINE_STATS,
@@ -545,11 +556,46 @@ class HydraFlowOrchestrator:
             )
             self._state.clear_interrupted_issues()
 
+    def _restore_disabled_workers(self) -> None:
+        """Restore persisted disabled-worker flags into the in-memory map."""
+        disabled = self._state.get_disabled_workers()
+        if disabled:
+            for name in disabled:
+                self._bg_worker_enabled[name] = False
+            logger.info(
+                "Restored %d disabled worker(s) from state: %s",
+                len(disabled),
+                sorted(disabled),
+            )
+
+    def _prune_stale_disabled_workers(self, known_names: set[str]) -> None:
+        """Remove disabled-worker entries for workers that no longer exist.
+
+        Called after loop factories are defined so we know the full set of
+        valid worker names.  Stale entries accumulate when workers are renamed
+        or removed between releases.
+        """
+        if not known_names:
+            return
+        disabled = self._state.get_disabled_workers()
+        stale = disabled - known_names
+        if not stale:
+            return
+        logger.info(
+            "Pruning %d stale disabled-worker name(s) from state: %s",
+            len(stale),
+            sorted(stale),
+        )
+        for name in stale:
+            self._bg_worker_enabled.pop(name, None)
+        self._state.set_disabled_workers(disabled - stale)
+
     def _restore_state(self) -> None:
-        """Restore worker intervals, crash-recovered issues, interrupted issues, and background worker heartbeats."""
+        """Restore worker intervals, crash-recovered issues, interrupted issues, disabled workers, and background worker heartbeats."""
         self._restore_worker_intervals()
         self._restore_crash_recovered_issues()
         self._restore_interrupted_issues()
+        self._restore_disabled_workers()
         self._restore_bg_worker_states()
 
     def _restore_bg_worker_states(self) -> None:
@@ -613,6 +659,7 @@ class HydraFlowOrchestrator:
             started_at=session_start_time.isoformat(),
         )
         self._session_issue_results = {}
+        self._state.reset_session_counters(session_start_time.isoformat())
         self._state.save_session(self._current_session)
         self._bus.set_session_id(session_id)
         await self._bus.publish(
@@ -802,8 +849,10 @@ class HydraFlowOrchestrator:
             ("report_issue", self._report_issue_loop.run),
             ("epic_monitor", self._epic_monitor_loop.run),
             ("worktree_gc", self._worktree_gc_loop.run),
+            ("runs_gc", self._runs_gc_loop.run),
             ("pipeline_stats", self._pipeline_stats_loop),
         ]
+        self._prune_stale_disabled_workers({n for n, _ in loop_factories})
         tasks: dict[str, asyncio.Task[None]] = {}
         for name, factory in loop_factories:
             tasks[name] = asyncio.create_task(factory(), name=f"hydraflow-{name}")

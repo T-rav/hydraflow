@@ -35,7 +35,6 @@ from models import (
     PipelineStats,
     PlanAccuracyResult,
     PlannerStatus,
-    PlanResult,
     PrecheckResult,
     PRInfo,
     PRInfoExtract,
@@ -56,11 +55,13 @@ from models import (
     TimelineStage,
     VerificationCriteria,
     VerificationCriterion,
+    VisualEvidence,
+    VisualEvidenceItem,
     WorkerResult,
     WorkerStatus,
     parse_task_links,
 )
-from tests.conftest import AnalysisResultFactory, ReviewResultFactory
+from tests.conftest import AnalysisResultFactory, PlanResultFactory, ReviewResultFactory
 
 # ---------------------------------------------------------------------------
 # GitHubIssue
@@ -394,73 +395,76 @@ class TestNewIssueSpec:
 class TestPlanResult:
     """Tests for the PlanResult model."""
 
+    @staticmethod
+    def _create(**overrides):
+        overrides.setdefault("issue_number", 1)
+        overrides.setdefault("use_defaults", True)
+        return PlanResultFactory.create(**overrides)
+
     def test_minimal_instantiation(self) -> None:
-        result = PlanResult(issue_number=10)
+        result = self._create(issue_number=10)
         assert result.issue_number == 10
 
     def test_success_defaults_to_false(self) -> None:
-        result = PlanResult(issue_number=1)
+        result = self._create()
         assert result.success is False
 
     def test_plan_defaults_to_empty_string(self) -> None:
-        result = PlanResult(issue_number=1)
+        result = self._create()
         assert result.plan == ""
 
     def test_summary_defaults_to_empty_string(self) -> None:
-        result = PlanResult(issue_number=1)
+        result = self._create()
         assert result.summary == ""
 
     def test_error_defaults_to_none(self) -> None:
-        result = PlanResult(issue_number=1)
+        result = self._create()
         assert result.error is None
 
     def test_transcript_defaults_to_empty_string(self) -> None:
-        result = PlanResult(issue_number=1)
+        result = self._create()
         assert result.transcript == ""
 
     def test_duration_seconds_defaults_to_zero(self) -> None:
-        result = PlanResult(issue_number=1)
+        result = self._create()
         assert result.duration_seconds == pytest.approx(0.0)
 
     def test_new_issues_defaults_to_empty_list(self) -> None:
-        result = PlanResult(issue_number=1)
+        result = self._create()
         assert result.new_issues == []
 
     def test_new_issues_can_be_populated(self) -> None:
         spec = NewIssueSpec(title="Bug", body="Details")
-        result = PlanResult(issue_number=1, new_issues=[spec])
+        result = self._create(new_issues=[spec])
         assert len(result.new_issues) == 1
         assert result.new_issues[0].title == "Bug"
 
     def test_validation_errors_defaults_to_empty_list(self) -> None:
-        result = PlanResult(issue_number=1)
+        result = self._create()
         assert result.validation_errors == []
 
     def test_validation_errors_can_be_populated(self) -> None:
-        result = PlanResult(
-            issue_number=1,
-            validation_errors=["Missing section", "Too short"],
-        )
+        result = self._create(validation_errors=["Missing section", "Too short"])
         assert len(result.validation_errors) == 2
 
     def test_retry_attempted_defaults_to_false(self) -> None:
-        result = PlanResult(issue_number=1)
+        result = self._create()
         assert result.retry_attempted is False
 
     def test_retry_attempted_can_be_set(self) -> None:
-        result = PlanResult(issue_number=1, retry_attempted=True)
+        result = self._create(retry_attempted=True)
         assert result.retry_attempted is True
 
     def test_already_satisfied_defaults_to_false(self) -> None:
-        result = PlanResult(issue_number=1)
+        result = self._create()
         assert result.already_satisfied is False
 
     def test_already_satisfied_can_be_set(self) -> None:
-        result = PlanResult(issue_number=1, already_satisfied=True)
+        result = self._create(already_satisfied=True)
         assert result.already_satisfied is True
 
     def test_all_fields_set(self) -> None:
-        result = PlanResult(
+        result = self._create(
             issue_number=7,
             success=True,
             plan="Step 1: Do the thing",
@@ -478,7 +482,7 @@ class TestPlanResult:
         assert result.duration_seconds == pytest.approx(30.5)
 
     def test_serialization_with_model_dump(self) -> None:
-        result = PlanResult(
+        result = self._create(
             issue_number=3,
             success=True,
             plan="The plan",
@@ -1204,6 +1208,7 @@ class TestHITLItem:
             "isMemorySuggestion": False,
             "llmSummary": "",
             "llmSummaryUpdatedAt": None,
+            "visualEvidence": None,
         }
 
     def test_serialization_defaults_include_new_fields(self) -> None:
@@ -2851,3 +2856,125 @@ class TestPipelineStats:
         json_str = json.dumps(data)
         restored = PipelineStats.model_validate_json(json_str)
         assert restored.stages["triage"].queued == 1
+
+
+# ---------------------------------------------------------------------------
+# VisualEvidenceItem
+# ---------------------------------------------------------------------------
+
+
+class TestVisualEvidenceItem:
+    """Tests for the VisualEvidenceItem model."""
+
+    def test_minimal_instantiation(self) -> None:
+        item = VisualEvidenceItem(screen_name="login", status="pass")
+        assert item.screen_name == "login"
+        assert item.diff_percent == 0.0
+        assert item.status == "pass"
+
+    def test_status_is_required(self) -> None:
+        with pytest.raises(ValidationError):
+            VisualEvidenceItem(screen_name="login")
+
+    def test_all_fields(self) -> None:
+        item = VisualEvidenceItem(
+            screen_name="dashboard",
+            diff_percent=12.5,
+            baseline_url="https://example.com/baseline.png",
+            actual_url="https://example.com/actual.png",
+            diff_url="https://example.com/diff.png",
+            status="warn",
+        )
+        assert item.screen_name == "dashboard"
+        assert item.diff_percent == 12.5
+        assert item.status == "warn"
+        assert str(item.baseline_url) == "https://example.com/baseline.png"
+
+    def test_status_pass(self) -> None:
+        item = VisualEvidenceItem(screen_name="home", status="pass")
+        assert item.status == "pass"
+
+
+# ---------------------------------------------------------------------------
+# VisualEvidence
+# ---------------------------------------------------------------------------
+
+
+class TestVisualEvidence:
+    """Tests for the VisualEvidence model."""
+
+    def test_defaults(self) -> None:
+        ev = VisualEvidence()
+        assert ev.items == []
+        assert ev.summary == ""
+        assert ev.attempt == 1
+
+    def test_with_items(self) -> None:
+        ev = VisualEvidence(
+            items=[
+                VisualEvidenceItem(
+                    screen_name="login", diff_percent=5.0, status="warn"
+                ),
+                VisualEvidenceItem(
+                    screen_name="dashboard", diff_percent=20.0, status="fail"
+                ),
+            ],
+            summary="2 screens failed visual check",
+            run_url="https://ci.example.com/run/42",
+            attempt=2,
+        )
+        assert len(ev.items) == 2
+        assert ev.items[0].screen_name == "login"
+        assert ev.items[1].status == "fail"
+        assert ev.attempt == 2
+
+    def test_model_dump_roundtrip(self) -> None:
+        ev = VisualEvidence(
+            items=[
+                VisualEvidenceItem(screen_name="page", diff_percent=3.0, status="pass")
+            ],
+            summary="All checks passed",
+        )
+        data = ev.model_dump()
+        restored = VisualEvidence.model_validate(data)
+        assert restored.items[0].screen_name == "page"
+        assert restored.summary == "All checks passed"
+
+
+# ---------------------------------------------------------------------------
+# HITLItem — visualEvidence field
+# ---------------------------------------------------------------------------
+
+
+class TestHITLItemVisualEvidence:
+    """Tests for the visualEvidence field on HITLItem."""
+
+    def test_default_is_none(self) -> None:
+        item = HITLItem(issue=1)
+        assert item.visualEvidence is None
+
+    def test_with_visual_evidence(self) -> None:
+        ev = VisualEvidence(
+            items=[
+                VisualEvidenceItem(screen_name="home", diff_percent=10.0, status="fail")
+            ],
+            summary="1 screen failed",
+        )
+        item = HITLItem(issue=1, visualEvidence=ev)
+        assert item.visualEvidence is not None
+        assert item.visualEvidence.items[0].screen_name == "home"
+
+    def test_model_dump_includes_visual_evidence(self) -> None:
+        ev = VisualEvidence(
+            items=[
+                VisualEvidenceItem(screen_name="nav", diff_percent=2.0, status="warn")
+            ],
+        )
+        item = HITLItem(issue=1, visualEvidence=ev)
+        data = item.model_dump()
+        assert data["visualEvidence"]["items"][0]["screen_name"] == "nav"
+
+    def test_model_dump_excludes_none_visual_evidence(self) -> None:
+        item = HITLItem(issue=1)
+        data = item.model_dump()
+        assert data["visualEvidence"] is None

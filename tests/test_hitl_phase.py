@@ -13,59 +13,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from typing import TYPE_CHECKING
 
-from events import EventBus, EventType
-from hitl_phase import HITLPhase
-from issue_store import IssueStore
-from state import StateTracker
-from tests.conftest import IssueFactory
+from events import EventType
+from tests.conftest import TaskFactory
+from tests.helpers import make_hitl_phase
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _make_phase(
-    config: HydraFlowConfig,
-) -> tuple[
-    HITLPhase, StateTracker, AsyncMock, AsyncMock, AsyncMock, AsyncMock, EventBus
-]:
-    """Build a HITLPhase with mock dependencies.
-
-    Returns (phase, state, fetcher_mock, prs_mock, worktrees_mock,
-             hitl_runner_mock, bus).
-    """
-    state = StateTracker(config.state_file)
-    bus = EventBus()
-    fetcher_mock = AsyncMock()
-    fetcher_store = AsyncMock()
-    store = IssueStore(config, fetcher_store, bus)
-    worktrees = AsyncMock()
-    worktrees.create = AsyncMock(return_value=config.worktree_path_for_issue(42))
-    worktrees.destroy = AsyncMock()
-    hitl_runner = AsyncMock()
-    prs = AsyncMock()
-    prs.remove_label = AsyncMock()
-    prs.add_labels = AsyncMock()
-    prs.swap_pipeline_labels = AsyncMock()
-    prs.push_branch = AsyncMock(return_value=True)
-    prs.post_comment = AsyncMock()
-    stop_event = asyncio.Event()
-    phase = HITLPhase(
-        config,
-        state,
-        store,
-        fetcher_mock,
-        worktrees,
-        hitl_runner,
-        prs,
-        bus,
-        stop_event,
-    )
-    return phase, state, fetcher_mock, prs, worktrees, hitl_runner, bus
-
 
 # ---------------------------------------------------------------------------
 # HITL phase — process_corrections & _process_one_hitl
@@ -79,7 +32,7 @@ class TestHITLPhaseProcessing:
     async def test_process_corrections_skips_when_empty(
         self, config: HydraFlowConfig
     ) -> None:
-        phase, _state, _fetcher, prs, _wt, _runner, _bus = _make_phase(config)
+        phase, _state, _fetcher, prs, _wt, _runner, _bus = make_hitl_phase(config)
 
         await phase.process_corrections()
 
@@ -90,8 +43,8 @@ class TestHITLPhaseProcessing:
         """On success, the origin label should be restored."""
         from models import HITLResult
 
-        phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = IssueFactory.create(number=42, title="Test HITL", body="Fix it")
+        phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42, title="Test HITL", body="Fix it")
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -110,16 +63,59 @@ class TestHITLPhaseProcessing:
         assert state.get_hitl_cause(42) is None
 
     @pytest.mark.asyncio
+    async def test_success_clears_visual_evidence(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """On success, visual evidence should be cleared from state."""
+        from models import HITLResult, VisualEvidence, VisualEvidenceItem
+
+        phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42, title="Test HITL", body="Fix it")
+
+        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        state.set_hitl_origin(42, "hydraflow-review")
+        state.set_hitl_cause(42, "Visual validation failed")
+        state.set_hitl_visual_evidence(
+            42,
+            VisualEvidence(
+                items=[
+                    VisualEvidenceItem(
+                        screen_name="login", diff_percent=8.0, status="fail"
+                    )
+                ],
+                summary="1 screen exceeded threshold",
+            ),
+        )
+
+        runner.run = AsyncMock(return_value=HITLResult(issue_number=42, success=True))
+
+        semaphore = asyncio.Semaphore(1)
+        await phase._process_one_hitl(42, "Fix the visual regression", semaphore)
+
+        assert state.get_hitl_visual_evidence(42) is None
+
+    @pytest.mark.asyncio
     async def test_failure_keeps_hitl_label(self, config: HydraFlowConfig) -> None:
         """On failure, the hydraflow-hitl label should be re-applied."""
-        from models import HITLResult
+        from models import HITLResult, VisualEvidence, VisualEvidenceItem
 
-        phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = IssueFactory.create(number=42, title="Test HITL", body="Fix it")
+        phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42, title="Test HITL", body="Fix it")
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
         state.set_hitl_cause(42, "CI failed")
+        state.set_hitl_visual_evidence(
+            42,
+            VisualEvidence(
+                items=[
+                    VisualEvidenceItem(
+                        screen_name="login", diff_percent=5.0, status="fail"
+                    )
+                ],
+                summary="1 screen exceeded threshold",
+            ),
+        )
 
         runner.run = AsyncMock(
             return_value=HITLResult(
@@ -133,16 +129,17 @@ class TestHITLPhaseProcessing:
         # Verify HITL label was re-applied via swap
         prs.swap_pipeline_labels.assert_any_call(42, config.hitl_label[0])
 
-        # Verify HITL state is preserved (not cleaned up)
+        # Verify HITL state is preserved (not cleaned up) — spec: requeue retains evidence
         assert state.get_hitl_origin(42) == "hydraflow-review"
         assert state.get_hitl_cause(42) == "CI failed"
+        assert state.get_hitl_visual_evidence(42) is not None
 
     @pytest.mark.asyncio
     async def test_success_posts_comment(self, config: HydraFlowConfig) -> None:
         from models import HITLResult
 
-        phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -160,8 +157,8 @@ class TestHITLPhaseProcessing:
     async def test_failure_posts_comment(self, config: HydraFlowConfig) -> None:
         from models import HITLResult
 
-        phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -182,7 +179,7 @@ class TestHITLPhaseProcessing:
 
     @pytest.mark.asyncio
     async def test_skips_when_issue_not_found(self, config: HydraFlowConfig) -> None:
-        phase, _state, fetcher, prs, _wt, _runner, _bus = _make_phase(config)
+        phase, _state, fetcher, prs, _wt, _runner, _bus = make_hitl_phase(config)
         fetcher.fetch_issue_by_number = AsyncMock(return_value=None)
 
         semaphore = asyncio.Semaphore(1)
@@ -197,8 +194,8 @@ class TestHITLPhaseProcessing:
     ) -> None:
         from models import HITLResult
 
-        phase, state, fetcher, prs, wt, runner, bus = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        phase, state, fetcher, prs, wt, runner, bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -222,8 +219,8 @@ class TestHITLPhaseProcessing:
     ) -> None:
         from models import HITLResult
 
-        phase, state, fetcher, prs, wt, runner, bus = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        phase, state, fetcher, prs, wt, runner, bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -250,7 +247,7 @@ class TestHITLPhaseProcessing:
         """After stop_event, cancelled tasks must be awaited for clean shutdown."""
         from models import HITLResult
 
-        phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
+        phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
 
         # Allow two concurrent workers so task 43 is genuinely mid-execution
         # (blocked in runner.run) when it gets cancelled.  With max_hitl_workers=1
@@ -262,7 +259,7 @@ class TestHITLPhaseProcessing:
         task_43_running = asyncio.Event()
 
         async def run_by_issue(issue, correction, cause, wt_path):  # noqa: ANN001, ANN202, ARG001
-            if issue.number == 42:
+            if issue.id == 42:
                 first_task_started.set()
                 # Wait for task 43 to be truly blocked inside runner.run, then stop
                 await task_43_running.wait()
@@ -275,7 +272,7 @@ class TestHITLPhaseProcessing:
                 return HITLResult(issue_number=43, success=True)
 
         fetcher.fetch_issue_by_number = AsyncMock(
-            side_effect=lambda n: IssueFactory.create(number=n)
+            side_effect=lambda n: TaskFactory.create(id=n)
         )
         runner.run = AsyncMock(side_effect=run_by_issue)
 
@@ -302,8 +299,8 @@ class TestHITLPhaseProcessing:
         """Issue should be removed from active_hitl_issues after processing."""
         from models import HITLResult
 
-        phase, _state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        phase, _state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
 
@@ -319,8 +316,8 @@ class TestHITLPhaseProcessing:
         """Processing should swap to hitl-active label before running agent."""
         from models import HITLResult
 
-        phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -338,8 +335,8 @@ class TestHITLPhaseProcessing:
         """On success, the worktree should be destroyed."""
         from models import HITLResult
 
-        phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -358,8 +355,8 @@ class TestHITLPhaseProcessing:
         """On failure, the worktree should be kept for retry."""
         from models import HITLResult
 
-        phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -386,7 +383,7 @@ class TestHITLGetStatus:
         self, config: HydraFlowConfig
     ) -> None:
         """Memory suggestions with improve origin should show 'approval'."""
-        phase, state, *_ = _make_phase(config)
+        phase, state, *_ = make_hitl_phase(config)
         state.set_hitl_origin(42, config.improve_label[0])
         assert phase.get_status(42) == "approval"
 
@@ -394,7 +391,7 @@ class TestHITLGetStatus:
         self, config: HydraFlowConfig
     ) -> None:
         """Non-memory escalations should not show 'approval'."""
-        phase, state, *_ = _make_phase(config)
+        phase, state, *_ = make_hitl_phase(config)
         state.set_hitl_origin(42, "hydraflow-review")
         assert phase.get_status(42) != "approval"
 
@@ -403,27 +400,27 @@ class TestHITLPhaseCorrections:
     """Direct unit tests for submit_correction() and skip_issue()."""
 
     def test_submit_correction_stores_value(self, config: HydraFlowConfig) -> None:
-        phase, *_ = _make_phase(config)
+        phase, *_ = make_hitl_phase(config)
         phase.submit_correction(42, "Fix the test")
         assert phase.hitl_corrections == {42: "Fix the test"}
 
     def test_submit_correction_overwrites_existing(
         self, config: HydraFlowConfig
     ) -> None:
-        phase, *_ = _make_phase(config)
+        phase, *_ = make_hitl_phase(config)
         phase.submit_correction(42, "First attempt")
         phase.submit_correction(42, "Second attempt")
         assert phase.hitl_corrections == {42: "Second attempt"}
 
     def test_skip_issue_removes_correction(self, config: HydraFlowConfig) -> None:
-        phase, *_ = _make_phase(config)
+        phase, *_ = make_hitl_phase(config)
         phase.submit_correction(42, "Fix")
         phase.skip_issue(42)
         assert 42 not in phase.hitl_corrections
 
     def test_skip_issue_noop_for_unknown_issue(self, config: HydraFlowConfig) -> None:
         """Skipping an issue that was never submitted should not raise."""
-        phase, *_ = _make_phase(config)
+        phase, *_ = make_hitl_phase(config)
         phase.skip_issue(99)  # should not raise
         assert phase.hitl_corrections == {}
 
@@ -438,7 +435,7 @@ class TestHITLResetsAttempts:
         """On successful HITL correction, issue_attempts should be reset."""
         from models import HITLResult
 
-        phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
+        phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
 
         # Set up state with attempts
         state.increment_issue_attempts(42)
@@ -454,7 +451,7 @@ class TestHITLResetsAttempts:
 
         # Mock fetcher and PR manager
         fetcher.fetch_issue_by_number = AsyncMock(
-            return_value=IssueFactory.create(number=42)
+            return_value=TaskFactory.create(id=42)
         )
 
         # Create worktree directory
@@ -484,8 +481,8 @@ class TestHITLImproveTransition:
         """On success with improve origin, should remove improve and add find label."""
         from models import HITLResult
 
-        phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = IssueFactory.create(number=42, title="Improve: test", body="Details")
+        phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42, title="Improve: test", body="Details")
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-improve")
@@ -510,8 +507,8 @@ class TestHITLImproveTransition:
         """Non-improve origins should still restore the original label."""
         from models import HITLResult
 
-        phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = IssueFactory.create(number=42, title="Test", body="Details")
+        phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42, title="Test", body="Details")
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -536,8 +533,8 @@ class TestHITLImproveTransition:
         """On failure, improve origin state should be preserved for retry."""
         from models import HITLResult
 
-        phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = IssueFactory.create(number=42, title="Improve: test", body="Details")
+        phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42, title="Improve: test", body="Details")
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-improve")
@@ -566,8 +563,8 @@ class TestHITLImproveTransition:
         """Success comment for improve origin should mention the find/triage stage."""
         from models import HITLResult
 
-        phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = IssueFactory.create(number=42, title="Improve: test", body="Details")
+        phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42, title="Improve: test", body="Details")
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-improve")
@@ -605,8 +602,8 @@ class TestHITLMemorySuggestionFiling:
         """On success with transcript, file_memory_suggestion should be called."""
         from models import HITLResult
 
-        phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -637,8 +634,8 @@ class TestHITLMemorySuggestionFiling:
         """On failure with transcript, file_memory_suggestion should still be called."""
         from models import HITLResult
 
-        phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -672,8 +669,8 @@ class TestHITLMemorySuggestionFiling:
         """Empty transcript should not trigger file_memory_suggestion."""
         from models import HITLResult
 
-        phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -697,8 +694,8 @@ class TestHITLMemorySuggestionFiling:
         """file_memory_suggestion errors should be logged but not interrupt processing."""
         from models import HITLResult
 
-        phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -741,8 +738,8 @@ class TestHITLExceptionPropagation:
         """AuthenticationError should propagate, not be caught by except Exception."""
         from subprocess_util import AuthenticationError
 
-        phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -761,8 +758,8 @@ class TestHITLExceptionPropagation:
         """CreditExhaustedError should propagate, not be caught by except Exception."""
         from subprocess_util import CreditExhaustedError
 
-        phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -779,8 +776,8 @@ class TestHITLExceptionPropagation:
         self, config: HydraFlowConfig
     ) -> None:
         """MemoryError should propagate, not be caught by except Exception."""
-        phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
@@ -799,8 +796,8 @@ class TestHITLExceptionPropagation:
         """Active HITL issues should be cleaned up even when critical errors propagate."""
         from subprocess_util import AuthenticationError
 
-        phase, state, fetcher, prs, wt, runner, _bus = _make_phase(config)
-        issue = IssueFactory.create(number=42)
+        phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42)
 
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")

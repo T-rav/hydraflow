@@ -29,6 +29,9 @@ from models import (
     StatusCallback,
     Task,
     VerificationCriterion,
+    VisualGateFn,
+    VisualValidationDecision,
+    VisualValidationPolicy,
 )
 from pr_manager import PRManager
 from prompt_telemetry import PromptTelemetry
@@ -102,6 +105,33 @@ class PostMergeHandler:
         self._prompt_telemetry = PromptTelemetry(config)
         self._epic_manager = epic_manager
 
+    def _should_defer_merge(self, issue_number: int) -> bool:
+        """Return True if merge should be deferred for bundled epic strategy."""
+        if self._epic_manager is None:
+            return False
+        parent_epics = self._epic_manager.find_parent_epics(issue_number)
+        for epic_num in parent_epics:
+            epic = self._state.get_epic_state(epic_num)
+            if epic is not None and epic.merge_strategy != "independent":
+                return True
+        return False
+
+    async def _notify_epic_approval(self, issue_number: int) -> None:
+        """Notify EpicManager that a child issue's PR was approved."""
+        if self._epic_manager is None:
+            return
+        parent_epics = self._epic_manager.find_parent_epics(issue_number)
+        for epic_num in parent_epics:
+            try:
+                await self._epic_manager.on_child_approved(epic_num, issue_number)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Epic approval notification failed for child #%d of epic #%d",
+                    issue_number,
+                    epic_num,
+                    exc_info=True,
+                )
+
     async def handle_approved(
         self,
         pr: PRInfo,
@@ -113,8 +143,28 @@ class PostMergeHandler:
         escalate_fn: EscalateFn,
         publish_fn: PublishFn,
         code_scanning_alerts: list[dict] | None = None,
+        visual_gate_fn: VisualGateFn | None = None,
+        visual_decision: VisualValidationDecision | None = None,
     ) -> None:
-        """Attempt merge for an approved PR (with optional CI gate)."""
+        """Attempt merge for an approved PR (with optional CI gate).
+
+        For epic children with bundled merge strategies, the PR is approved
+        but merge is deferred until all siblings are ready.
+        """
+        # Notify EpicManager of approval (for bundled merge coordination)
+        if self._epic_manager is not None:
+            await self._notify_epic_approval(pr.issue_number)
+
+        # Check if merge should be deferred for bundled epic strategy
+        if self._should_defer_merge(pr.issue_number):
+            logger.info(
+                "PR #%d (issue #%d): deferring merge — "
+                "bundled epic strategy requires all siblings to be approved",
+                pr.number,
+                pr.issue_number,
+            )
+            return
+
         should_merge = True
         if self._config.max_ci_fix_attempts > 0:
             should_merge = await ci_gate_fn(
@@ -128,6 +178,31 @@ class PostMergeHandler:
         if not should_merge:
             return
 
+        # Visual validation gate
+        if self._config.visual_gate_enabled:
+            if visual_gate_fn is None:
+                logger.warning(
+                    "PR #%d: visual_gate_enabled but no visual_gate_fn provided — blocking merge",
+                    pr.number,
+                )
+                await self._bus.publish(
+                    HydraFlowEvent(
+                        type=EventType.VISUAL_GATE,
+                        data={
+                            "pr": pr.number,
+                            "issue": issue.id,
+                            "worker": worker_id,
+                            "verdict": "blocked",
+                            "reason": "no visual_gate_fn provided to handle_approved",
+                        },
+                    )
+                )
+                return
+            else:
+                visual_ok = await visual_gate_fn(pr, issue, result, worker_id)
+                if not visual_ok:
+                    return
+
         await publish_fn(pr, worker_id, "merging")
         success = await self._prs.merge_pr(pr.number)
         if success:
@@ -135,6 +210,7 @@ class PostMergeHandler:
             self._state.mark_issue(pr.issue_number, "merged")
             self._state.record_pr_merged()
             self._state.record_issue_completed()
+            self._state.increment_session_counter("merged")
             if result.ci_fix_attempts > 0:
                 self._state.record_ci_fix_rounds(result.ci_fix_attempts)
                 for _ in range(result.ci_fix_attempts):
@@ -183,7 +259,7 @@ class PostMergeHandler:
                 pr.issue_number, self._config.fixed_label[0]
             )
             await self._post_inference_totals_comment(pr, issue)
-            await self._run_post_merge_hooks(pr, issue, result, diff)
+            await self._run_post_merge_hooks(pr, issue, result, diff, visual_decision)
         else:
             logger.warning("PR #%d merge failed — escalating to HITL", pr.number)
             await publish_fn(pr, worker_id, "escalating")
@@ -295,6 +371,7 @@ class PostMergeHandler:
         issue: Task,
         result: ReviewResult,
         diff: str,
+        visual_decision: VisualValidationDecision | None = None,
     ) -> None:
         """Run non-blocking post-merge hooks (AC, retrospective, judge, epic)."""
         if self._ac_generator:
@@ -351,7 +428,7 @@ class PostMergeHandler:
 
         judge_result = self._get_judge_result(issue, pr, verdict)
         if judge_result is not None and self._should_create_verification_issue(
-            issue, judge_result, diff
+            issue, judge_result, diff, visual_decision
         ):
             await self._safe_hook(
                 "verification issue creation",
@@ -410,9 +487,19 @@ class PostMergeHandler:
         )
 
     def _should_create_verification_issue(
-        self, issue: Task, judge_result: JudgeResult, diff: str
+        self,
+        issue: Task,
+        judge_result: JudgeResult,
+        diff: str,
+        visual_decision: VisualValidationDecision | None = None,
     ) -> bool:
-        """Return True only when the change needs human/manual verification."""
+        """Return True only when the change needs human/manual verification.
+
+        When a ``VisualValidationDecision`` is provided, it takes precedence
+        over the legacy heuristic for UI-surface detection:
+        - REQUIRED → always create a verification issue (if instructions exist).
+        - SKIPPED  → skip the user-surface diff check (still honours manual cues).
+        """
         instructions = judge_result.verification_instructions.strip()
         if not instructions:
             logger.info(
@@ -421,13 +508,33 @@ class PostMergeHandler:
             )
             return False
 
+        # Visual validation override: REQUIRED forces creation
+        if (
+            visual_decision is not None
+            and visual_decision.policy == VisualValidationPolicy.REQUIRED
+        ):
+            logger.info(
+                "Creating verification issue for #%d: visual validation required (%s)",
+                issue.id,
+                visual_decision.reason,
+            )
+            return True
+
         issue_text = f"{issue.title}\n{issue.body}".lower()
         instructions_text = instructions.lower()
         has_manual_cues = any(
             kw in instructions_text or kw in issue_text
             for kw in _MANUAL_VERIFY_KEYWORDS
         )
-        touches_user_surface = bool(_USER_SURFACE_DIFF_RE.search(diff or ""))
+
+        # When visual validation says SKIPPED, skip the diff-based user-surface check
+        if (
+            visual_decision is not None
+            and visual_decision.policy == VisualValidationPolicy.SKIPPED
+        ):
+            touches_user_surface = False
+        else:
+            touches_user_surface = bool(_USER_SURFACE_DIFF_RE.search(diff or ""))
 
         if has_manual_cues or touches_user_surface:
             return True

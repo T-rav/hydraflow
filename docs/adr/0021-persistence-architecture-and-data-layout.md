@@ -1,4 +1,4 @@
-# ADR-0009: Persistence Architecture and Data Layout
+# ADR-0021: Persistence Architecture and Data Layout
 
 **Status:** Proposed
 **Date:** 2026-02-28

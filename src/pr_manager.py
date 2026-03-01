@@ -620,6 +620,55 @@ class PRManager:
         finally:
             Path(tmp_path).unlink(missing_ok=True)
 
+    async def create_tag(self, tag: str, *, ref: str = "HEAD") -> bool:
+        """Create a git tag on the given *ref* and push it to origin.
+
+        Returns *True* on success, *False* on failure.
+        """
+        self._assert_repo()
+        if self._config.dry_run:
+            logger.info("[dry-run] Would create tag %s on %s", tag, ref)
+            return True
+        try:
+            await self._run_gh("git", "tag", tag, ref)
+            await self._run_gh("git", "push", "origin", tag)
+            return True
+        except RuntimeError as exc:
+            logger.warning("Could not create tag %s: %s", tag, exc)
+            return False
+
+    async def create_release(
+        self,
+        tag: str,
+        title: str,
+        body: str,
+    ) -> bool:
+        """Create a GitHub Release for the given *tag*.
+
+        Returns *True* on success, *False* on failure.
+        """
+        self._assert_repo()
+        if self._config.dry_run:
+            logger.info("[dry-run] Would create release %s", tag)
+            return True
+        try:
+            await self._run_gh(
+                "gh",
+                "release",
+                "create",
+                tag,
+                "--repo",
+                self._repo,
+                "--title",
+                title,
+                "--notes",
+                body,
+            )
+            return True
+        except RuntimeError as exc:
+            logger.warning("Could not create release %s: %s", tag, exc)
+            return False
+
     async def remove_pr_label(self, pr_number: int, label: str) -> None:
         """Remove *label* from a GitHub pull request."""
         await self._remove_label("pr", pr_number, label)
@@ -723,15 +772,16 @@ class PRManager:
             with os.fdopen(fd, "wb") as f:
                 f.write(base64.b64decode(png_base64))
 
-            output = await self._run_gh(
+            gist_args = [
                 "gh",
                 "gist",
                 "create",
-                "--public",
-                "--filename",
-                "screenshot.png",
-                tmp_path,
-            )
+            ]
+            if self._config.screenshot_gist_public:
+                gist_args.append("--public")
+            gist_args += ["--filename", "screenshot.png", tmp_path]
+
+            output = await self._run_gh(*gist_args)
             # gh gist create prints the gist URL, e.g.
             # https://gist.github.com/user/abc123
             gist_url = output.strip()
@@ -782,6 +832,35 @@ class PRManager:
             return [f.strip() for f in output.strip().splitlines() if f.strip()]
         except RuntimeError as exc:
             logger.error("Could not get diff file names for PR #%d: %s", pr_number, exc)
+            return []
+
+    async def get_pr_approvers(self, pr_number: int) -> list[str]:
+        """Fetch the list of GitHub usernames that approved *pr_number*."""
+        try:
+            import json as _json
+
+            output = await self._run_gh(
+                "gh",
+                "pr",
+                "view",
+                str(pr_number),
+                "--repo",
+                self._repo,
+                "--json",
+                "reviews",
+            )
+            data = _json.loads(output)
+            reviews = data.get("reviews", [])
+            approvers: list[str] = []
+            for review in reviews:
+                if review.get("state") == "APPROVED":
+                    author = review.get("author", {})
+                    login = author.get("login", "")
+                    if login and login not in approvers:
+                        approvers.append(login)
+            return approvers
+        except (RuntimeError, ValueError) as exc:
+            logger.debug("Could not get approvers for PR #%d: %s", pr_number, exc)
             return []
 
     async def pull_main(self) -> bool:
@@ -1099,6 +1178,33 @@ class PRManager:
             logger.warning("Could not fetch reviews for PR #%d: %s", pr_number, exc)
             return []
 
+    async def get_pr_mergeable(self, pr_number: int) -> bool | None:
+        """Return whether *pr_number* is mergeable (no conflicts).
+
+        Returns ``True`` if mergeable, ``False`` if there are conflicts,
+        or ``None`` if the status is unknown or cannot be determined.
+        """
+        if self._config.dry_run:
+            return None
+
+        try:
+            raw = await self._run_gh(
+                "gh",
+                "api",
+                f"repos/{self._repo}/pulls/{pr_number}",
+                "--jq",
+                ".mergeable",
+            )
+            value = raw.strip()
+            if value == "true":
+                return True
+            if value == "false":
+                return False
+            return None
+        except RuntimeError:
+            logger.debug("Could not fetch mergeable status for PR #%d", pr_number)
+            return None
+
     async def get_pr_comments(self, pr_number: int) -> list[dict[str, str]]:
         """Fetch issue-level comments for *pr_number* with author info.
 
@@ -1267,6 +1373,31 @@ class PRManager:
             with contextlib.suppress(ValueError):
                 issue_num = int(branch.rsplit("-", maxsplit=1)[-1])
         return issue_num
+
+    async def find_pr_for_issue(self, issue_number: int) -> int:
+        """Find the open PR number for the given *issue_number* by branch convention.
+
+        Returns the PR number, or 0 if not found.
+        """
+        branch = f"agent/issue-{issue_number}"
+        try:
+            raw = await self._run_gh(
+                "gh",
+                "pr",
+                "list",
+                "--head",
+                branch,
+                "--state",
+                "open",
+                "--json",
+                "number",
+                "--jq",
+                ".[0].number // 0",
+            )
+            return int(raw.strip()) if raw.strip() else 0
+        except (RuntimeError, ValueError):
+            logger.debug("Could not find PR for issue #%d", issue_number, exc_info=True)
+            return 0
 
     async def _get_pr_branch_and_draft(self, pr_number: int) -> tuple[str, bool]:
         """Resolve branch + draft status for a PR via REST API."""

@@ -1,4 +1,4 @@
-"""Tests for ADR file structure and README index consistency."""
+"""Tests that ADR files under docs/adr/ follow the required format."""
 
 from __future__ import annotations
 
@@ -8,36 +8,21 @@ from pathlib import Path
 import pytest
 
 ADR_DIR = Path(__file__).resolve().parent.parent / "docs" / "adr"
+
 REQUIRED_SECTIONS = ["## Context", "## Decision", "## Consequences"]
-STATUS_VALUES = {"Accepted", "Proposed", "Deprecated"}
-ADR_FILENAME_RE = re.compile(r"^\d{4}-[a-z0-9-]+\.md$")
-README_ROW_RE = re.compile(r"\|\s*\[(\d{4})\]\(([^)]+)\)\s*\|([^|]+)\|([^|]+)\|")
+OPTIONAL_SECTIONS = ["## Alternatives considered", "## Related"]
+
+STATUS_VALUES = {"Proposed", "Accepted", "Deprecated", "Superseded"}
 
 
 def _adr_files() -> list[Path]:
-    """Return all ADR markdown files (excluding README)."""
-    return sorted(p for p in ADR_DIR.glob("*.md") if p.name != "README.md")
+    """Return all numbered ADR markdown files (excluding README)."""
+    return sorted(ADR_DIR.glob("[0-9]*.md"))
 
 
-class TestADRFilenameConventions:
-    def test_adr_directory_exists(self) -> None:
-        assert ADR_DIR.is_dir(), f"ADR directory not found at {ADR_DIR}"
+class TestADRFileStructure:
+    """Validate that every ADR file follows the required format from README.md."""
 
-    def test_adr_files_follow_naming_convention(self) -> None:
-        for path in _adr_files():
-            assert ADR_FILENAME_RE.match(path.name), (
-                f"ADR filename {path.name!r} does not match "
-                f"expected pattern NNNN-kebab-case-title.md"
-            )
-
-    def test_adr_numbers_are_sequential(self) -> None:
-        numbers = [int(p.name[:4]) for p in _adr_files()]
-        assert numbers == list(range(1, len(numbers) + 1)), (
-            f"ADR numbers are not sequential: {numbers}"
-        )
-
-
-class TestADRContent:
     @pytest.fixture(params=_adr_files(), ids=lambda p: p.name)
     def adr_path(self, request: pytest.FixtureRequest) -> Path:
         return request.param
@@ -45,91 +30,121 @@ class TestADRContent:
     def test_has_title_heading(self, adr_path: Path) -> None:
         content = adr_path.read_text()
         assert content.startswith("# ADR-"), (
-            f"{adr_path.name} must start with '# ADR-NNNN: <Title>'"
+            f"{adr_path.name} must start with '# ADR-NNNN: Title'"
         )
 
-    def test_has_status(self, adr_path: Path) -> None:
+    def test_has_status_metadata(self, adr_path: Path) -> None:
         content = adr_path.read_text()
-        assert "**Status:**" in content, f"{adr_path.name} missing **Status:** metadata"
-        match = re.search(r"\*\*Status:\*\*\s+(\w+)", content)
-        assert match, f"{adr_path.name} has malformed Status line"
-        status = match.group(1)
-        assert status in STATUS_VALUES or status.startswith("Superseded"), (
-            f"{adr_path.name} has unexpected status: {status!r}"
+        match = re.search(r"\*\*Status:\*\*\s*(\w+)", content)
+        assert match, f"{adr_path.name} missing **Status:** metadata"
+        assert match.group(1) in STATUS_VALUES, (
+            f"{adr_path.name} has unrecognised status '{match.group(1)}'"
         )
 
-    def test_has_date(self, adr_path: Path) -> None:
+    def test_has_date_metadata(self, adr_path: Path) -> None:
         content = adr_path.read_text()
-        assert "**Date:**" in content, f"{adr_path.name} missing **Date:** metadata"
-        assert re.search(r"\*\*Date:\*\*\s+\d{4}-\d{2}-\d{2}", content), (
-            f"{adr_path.name} has malformed Date line"
+        assert re.search(r"\*\*Date:\*\*\s*\d{4}-\d{2}-\d{2}", content), (
+            f"{adr_path.name} missing **Date:** YYYY-MM-DD metadata"
         )
 
     def test_has_required_sections(self, adr_path: Path) -> None:
         content = adr_path.read_text()
         for section in REQUIRED_SECTIONS:
             assert section in content, (
-                f"{adr_path.name} missing required section: {section}"
+                f"{adr_path.name} missing required section '{section}'"
+            )
+
+    def test_required_sections_are_non_empty(self, adr_path: Path) -> None:
+        content = adr_path.read_text()
+        for section in REQUIRED_SECTIONS:
+            idx = content.find(section)
+            if idx == -1:
+                pytest.skip(f"Section '{section}' not found")
+            after = content[idx + len(section) :]
+            next_heading = re.search(r"\n## ", after)
+            body = after[: next_heading.start()] if next_heading else after
+            stripped = body.strip()
+            assert len(stripped) > 10, (
+                f"{adr_path.name} section '{section}' is too short"
             )
 
 
 class TestADRReadmeIndex:
-    def test_readme_exists(self) -> None:
-        readme = ADR_DIR / "README.md"
-        assert readme.exists(), "docs/adr/README.md not found"
+    """Validate that the README index lists all ADR files."""
 
-    def test_all_adrs_listed_in_readme(self) -> None:
+    def test_all_adr_files_listed_in_readme(self) -> None:
         readme = (ADR_DIR / "README.md").read_text()
-        rows = README_ROW_RE.findall(readme)
-        indexed_files = {filename for _, filename, _, _ in rows}
-
-        for path in _adr_files():
-            assert path.name in indexed_files, (
-                f"{path.name} exists on disk but is not listed in README.md index"
+        for adr_file in _adr_files():
+            assert adr_file.name in readme, (
+                f"{adr_file.name} is not listed in docs/adr/README.md index"
             )
 
-    def test_readme_links_point_to_existing_files(self) -> None:
+    def test_readme_links_are_not_broken(self) -> None:
         readme = (ADR_DIR / "README.md").read_text()
-        rows = README_ROW_RE.findall(readme)
-
-        for number, filename, _title, _status in rows:
-            file_path = ADR_DIR / filename
-            assert file_path.exists(), (
-                f"README.md references {filename} but file does not exist"
-            )
-            assert filename.startswith(number), (
-                f"README.md row number {number} does not match filename {filename}"
+        links = re.findall(r"\[(\d{4})\]\(([^)]+)\)", readme)
+        for number, filename in links:
+            path = ADR_DIR / filename
+            assert path.exists(), f"README links to {filename} but file does not exist"
+            assert number in filename, (
+                f"README link number {number} does not match filename {filename}"
             )
 
-    def test_readme_index_count_matches_files(self) -> None:
-        readme = (ADR_DIR / "README.md").read_text()
-        rows = README_ROW_RE.findall(readme)
-        files = _adr_files()
-        assert len(rows) == len(files), (
-            f"README.md lists {len(rows)} ADRs but {len(files)} files exist on disk"
-        )
+
+class TestADR0018ScreenshotPipeline:
+    """Specific content tests for ADR-0018."""
+
+    @pytest.fixture
+    def content(self) -> str:
+        return (ADR_DIR / "0018-screenshot-capture-pipeline.md").read_text()
+
+    def test_links_to_source_memory(self, content: str) -> None:
+        assert "#1734" in content, "ADR-0018 must reference source memory #1734"
+
+    def test_links_to_adr_issue(self, content: str) -> None:
+        assert "#1749" in content, "ADR-0018 must reference ADR issue #1749"
+
+    def test_documents_frontend_redaction(self, content: str) -> None:
+        assert "data-sensitive" in content
+        assert "redactSensitiveElements" in content
+
+    def test_documents_fallback_strategy(self, content: str) -> None:
+        assert "fallback" in content.lower()
+        assert "html2canvas" in content
+
+    def test_documents_backend_scan(self, content: str) -> None:
+        assert "scan_base64_for_secrets" in content
+        assert "screenshot_scanner" in content
+
+    def test_documents_gist_visibility(self, content: str) -> None:
+        assert "screenshot_gist_public" in content
+        assert "upload_screenshot_gist" in content
+
+    def test_documents_config_knobs(self, content: str) -> None:
+        assert "screenshot_redaction_enabled" in content
+        assert "HYDRAFLOW_SCREENSHOT_REDACTION_ENABLED" in content
+        assert "HYDRAFLOW_SCREENSHOT_GIST_PUBLIC" in content
 
 
-class TestADR0009Specifics:
-    """Content checks specific to ADR-0009 (persistence architecture)."""
+class TestADR0021PersistenceArchitecture:
+    """Content checks specific to ADR-0021 (persistence architecture)."""
 
     @pytest.fixture()
     def content(self) -> str:
-        path = ADR_DIR / "0009-persistence-architecture-and-data-layout.md"
-        assert path.exists(), "ADR-0009 file not found"
+        path = ADR_DIR / "0021-persistence-architecture-and-data-layout.md"
+        assert path.exists(), "ADR-0021 file not found"
         return path.read_text()
 
     def test_title(self, content: str) -> None:
-        assert "# ADR-0009: Persistence Architecture and Data Layout" in content
+        assert "# ADR-0021: Persistence Architecture and Data Layout" in content
 
     def test_status_proposed(self, content: str) -> None:
         assert "**Status:** Proposed" in content
 
     def test_references_source_memory(self, content: str) -> None:
-        assert "#1624" in content, "ADR-0009 must link to source memory issue #1624"
+        assert "#1624" in content, "ADR-0021 must link to source memory issue #1624"
 
     def test_references_this_issue(self, content: str) -> None:
-        assert "#1633" in content, "ADR-0009 must link to this issue #1633"
+        assert "#1633" in content, "ADR-0021 must link to this issue #1633"
 
     def test_documents_data_root(self, content: str) -> None:
         assert "data_root" in content

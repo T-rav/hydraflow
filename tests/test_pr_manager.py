@@ -671,6 +671,50 @@ class TestUploadScreenshotGist:
 
         assert result == ""
 
+    @pytest.mark.asyncio
+    async def test_default_gist_visibility_is_secret(self, event_bus, tmp_path):
+        """By default (screenshot_gist_public=False), --public flag is omitted."""
+        import base64
+
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+            screenshot_gist_public=False,
+        )
+        mgr = _make_manager(cfg, event_bus)
+        gist_url = "https://gist.github.com/testuser/abc123"
+        mock_exec = SubprocessMockBuilder().with_stdout(gist_url).build()
+
+        png_b64 = base64.b64encode(b"\x89PNG fake data").decode()
+        with patch("asyncio.create_subprocess_exec", mock_exec):
+            await mgr.upload_screenshot_gist(png_b64)
+
+        args = mock_exec.call_args[0]
+        assert "--public" not in args
+
+    @pytest.mark.asyncio
+    async def test_public_gist_visibility(self, event_bus, tmp_path):
+        """When screenshot_gist_public=True, --public flag is included."""
+        import base64
+
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+            screenshot_gist_public=True,
+        )
+        mgr = _make_manager(cfg, event_bus)
+        gist_url = "https://gist.github.com/testuser/abc123"
+        mock_exec = SubprocessMockBuilder().with_stdout(gist_url).build()
+
+        png_b64 = base64.b64encode(b"\x89PNG fake data").decode()
+        with patch("asyncio.create_subprocess_exec", mock_exec):
+            await mgr.upload_screenshot_gist(png_b64)
+
+        args = mock_exec.call_args[0]
+        assert "--public" in args
+
 
 # ---------------------------------------------------------------------------
 # push_branch
@@ -3855,6 +3899,93 @@ class TestGetPrReviews:
 
         mock_create.assert_not_called()
         assert reviews == []
+
+
+# ---------------------------------------------------------------------------
+# get_pr_mergeable (issue #1608)
+# ---------------------------------------------------------------------------
+
+
+class TestGetPrMergeable:
+    """Tests for PRManager.get_pr_mergeable."""
+
+    @pytest.mark.asyncio
+    async def test_returns_true_when_mergeable(self, event_bus, tmp_path):
+        """get_pr_mergeable returns True when GitHub says 'true'."""
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+        )
+        mgr = _make_manager(cfg, event_bus)
+        mock_create = SubprocessMockBuilder().with_stdout("true\n").build()
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            result = await mgr.get_pr_mergeable(101)
+
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_returns_false_when_not_mergeable(self, event_bus, tmp_path):
+        """get_pr_mergeable returns False when GitHub says 'false'."""
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+        )
+        mgr = _make_manager(cfg, event_bus)
+        mock_create = SubprocessMockBuilder().with_stdout("false\n").build()
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            result = await mgr.get_pr_mergeable(101)
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_null(self, event_bus, tmp_path):
+        """get_pr_mergeable returns None when GitHub says 'null'."""
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+        )
+        mgr = _make_manager(cfg, event_bus)
+        mock_create = SubprocessMockBuilder().with_stdout("null\n").build()
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            result = await mgr.get_pr_mergeable(101)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_failure(self, event_bus, tmp_path):
+        """get_pr_mergeable returns None on API failure."""
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+        )
+        mgr = _make_manager(cfg, event_bus)
+        mock_create = (
+            SubprocessMockBuilder().with_returncode(1).with_stderr("not found").build()
+        )
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            result = await mgr.get_pr_mergeable(999)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_dry_run_returns_none(self, dry_config, event_bus):
+        """In dry-run mode, get_pr_mergeable returns None."""
+        mgr = _make_manager(dry_config, event_bus)
+        mock_create = SubprocessMockBuilder().build()
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            result = await mgr.get_pr_mergeable(101)
+
+        mock_create.assert_not_called()
+        assert result is None
 
 
 # ---------------------------------------------------------------------------
