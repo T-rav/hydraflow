@@ -143,7 +143,7 @@ export const UNSTICK_BATCH_OPTIONS = [1, 2, 3, 5, 10, 15, 20, 30, 50]
 export const SESSION_STATUSES = ['active', 'completed']
 
 /** Epic lifecycle statuses for the epic overview panel. */
-export const EPIC_STATUSES = ['active', 'completed', 'stale', 'blocked']
+export const EPIC_STATUSES = ['active', 'completed', 'released', 'stale', 'blocked']
 
 /**
  * Merge strategy definitions for epics.

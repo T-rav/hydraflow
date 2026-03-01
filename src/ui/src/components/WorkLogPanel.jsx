@@ -6,6 +6,7 @@ import { useHydraFlow } from '../context/HydraFlowContext'
 const STATUS_COLORS = {
   active: { color: theme.accent, bg: theme.accentSubtle },
   completed: { color: theme.green, bg: theme.greenSubtle },
+  released: { color: theme.green, bg: theme.greenSubtle },
   stale: { color: theme.yellow, bg: theme.yellowSubtle },
   blocked: { color: theme.red, bg: theme.redSubtle },
 }
