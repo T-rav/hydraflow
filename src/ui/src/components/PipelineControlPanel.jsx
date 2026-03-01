@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { theme } from '../theme'
 import { PIPELINE_LOOPS, PIPELINE_STAGES, ACTIVE_STATUSES } from '../constants'
 import { useHydraFlow } from '../context/HydraFlowContext'
@@ -97,6 +97,37 @@ function PipelineWorkerCard({ workerKey, worker }) {
 
 export function PipelineControlPanel({ onToggleBgWorker }) {
   const { workers, stageStatus, hitlItems } = useHydraFlow()
+  const workerCaps = stageStatus?.workerCaps || {}
+
+  const [localCaps, setLocalCaps] = useState({})
+
+  useEffect(() => {
+    setLocalCaps({})
+  }, [workerCaps.triage, workerCaps.plan, workerCaps.implement, workerCaps.review])
+
+  const updateWorkerCount = useCallback(async (loopKey, configKey, newValue) => {
+    setLocalCaps(caps => ({ ...caps, [loopKey]: newValue }))
+    try {
+      const res = await fetch('/api/control/config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [configKey]: newValue, persist: true }),
+      })
+      if (!res.ok) {
+        setLocalCaps(caps => {
+          const next = { ...caps }
+          delete next[loopKey]
+          return next
+        })
+      }
+    } catch {
+      setLocalCaps(caps => {
+        const next = { ...caps }
+        delete next[loopKey]
+        return next
+      })
+    }
+  }, [])
 
   const pipelineWorkers = Object.entries(workers || {}).filter(
     ([, w]) => w.role && ACTIVE_STATUSES.includes(w.status)
@@ -113,20 +144,47 @@ export function PipelineControlPanel({ onToggleBgWorker }) {
           const status = stageStatus[loop.key] || {}
           const enabled = status.enabled !== false
           const activeCount = status.workerCount || 0
-          const maxWorkers = stageStatus?.workerCaps?.[loop.key] ?? null
+          const effectiveMax = localCaps[loop.key] ?? workerCaps[loop.key] ?? null
           return (
             <div key={loop.key} style={styles.loopChip}>
               <span style={enabled ? loopDotLit[loop.key] : loopDotDim[loop.key]} />
               <span style={enabled ? styles.loopLabel : styles.loopLabelDim}>{loop.label}</span>
-              <span
-                style={enabled && activeCount > 0 ? loopCountActive[loop.key] : loopCountDim}
-                data-testid={`loop-count-${loop.key}`}
-              >
-                {maxWorkers != null ? `${activeCount}/${maxWorkers}` : activeCount}
-              </span>
-              <span style={styles.loopCountLabel}>
-                {activeCount === 1 && maxWorkers == null ? 'worker' : 'workers'}
-              </span>
+              {loop.configKey && effectiveMax != null ? (
+                <>
+                  <button
+                    style={effectiveMax <= 1 ? styles.capBtnDisabled : styles.capBtn}
+                    disabled={effectiveMax <= 1}
+                    onClick={() => updateWorkerCount(loop.key, loop.configKey, effectiveMax - 1)}
+                    data-testid={`dec-${loop.key}`}
+                    aria-label={`Decrease ${loop.label} workers`}
+                  >
+                    −
+                  </button>
+                  <span
+                    style={enabled && activeCount > 0 ? loopCountActive[loop.key] : loopCountDim}
+                    data-testid={`loop-count-${loop.key}`}
+                  >
+                    {effectiveMax}
+                  </span>
+                  <button
+                    style={effectiveMax >= 10 ? styles.capBtnDisabled : styles.capBtn}
+                    disabled={effectiveMax >= 10}
+                    onClick={() => updateWorkerCount(loop.key, loop.configKey, effectiveMax + 1)}
+                    data-testid={`inc-${loop.key}`}
+                    aria-label={`Increase ${loop.label} workers`}
+                  >
+                    +
+                  </button>
+                </>
+              ) : (
+                <span
+                  style={enabled && activeCount > 0 ? loopCountActive[loop.key] : loopCountDim}
+                  data-testid={`loop-count-${loop.key}`}
+                >
+                  {activeCount}
+                </span>
+              )}
+              <span style={styles.loopCountLabel}>workers</span>
               {onToggleBgWorker && (
                 <button
                   style={enabled ? styles.toggleOn : styles.toggleOff}
@@ -242,6 +300,33 @@ const styles = {
     color: theme.textMuted,
     cursor: 'pointer',
     transition: 'all 0.15s',
+  },
+  capBtn: {
+    padding: '0 4px',
+    fontSize: 11,
+    fontWeight: 700,
+    border: `1px solid ${theme.border}`,
+    borderRadius: 4,
+    background: theme.surface,
+    color: theme.text,
+    cursor: 'pointer',
+    lineHeight: '18px',
+    minWidth: 20,
+    textAlign: 'center',
+    transition: 'all 0.15s',
+  },
+  capBtnDisabled: {
+    padding: '0 4px',
+    fontSize: 11,
+    fontWeight: 700,
+    border: `1px solid ${theme.border}`,
+    borderRadius: 4,
+    background: theme.bg,
+    color: theme.textInactive,
+    cursor: 'default',
+    lineHeight: '18px',
+    minWidth: 20,
+    textAlign: 'center',
   },
   statusRow: {
     display: 'flex',
