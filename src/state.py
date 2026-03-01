@@ -1111,6 +1111,7 @@ class StateTracker:
         pr_number: int,
         approver: str,
         reason: str,
+        commit_sha: str = "",
     ) -> BaselineAuditRecord:
         """Record a baseline rollback for *issue_number*."""
         # Find the last non-rollback record to identify files
@@ -1128,6 +1129,7 @@ class StateTracker:
             change_type=BaselineChangeType.ROLLBACK,
             approver=approver,
             reason=reason,
+            commit_sha=commit_sha,
         )
         self.record_baseline_change(issue_number, rollback_record)
         return rollback_record

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import fnmatch
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
@@ -203,6 +203,7 @@ class BaselinePolicy:
         pr_number: int,
         approver: str,
         reason: str,
+        commit_sha: str = "",
     ) -> BaselineAuditRecord:
         """Record a baseline rollback and publish an event.
 
@@ -223,21 +224,29 @@ class BaselinePolicy:
             pr_number=pr_number,
             approver=approver,
             reason=reason,
+            commit_sha=commit_sha,
         )
 
-        await self._bus.publish(
-            HydraFlowEvent(
-                type=EventType.BASELINE_UPDATE,
-                data={
-                    "pr_number": pr_number,
-                    "issue_number": issue_number,
-                    "baseline_files": record.changed_files,
-                    "rollback": True,
-                    "approver": approver,
-                    "reason": reason,
-                },
+        try:
+            await self._bus.publish(
+                HydraFlowEvent(
+                    type=EventType.BASELINE_UPDATE,
+                    data={
+                        "pr_number": pr_number,
+                        "issue_number": issue_number,
+                        "baseline_files": record.changed_files,
+                        "rollback": True,
+                        "approver": approver,
+                        "reason": reason,
+                    },
+                )
             )
-        )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to publish BASELINE_UPDATE event for rollback PR #%d",
+                pr_number,
+                exc_info=True,
+            )
 
         logger.info(
             "Baseline rollback recorded for issue #%d (PR #%d) by %s: %s",
@@ -262,8 +271,10 @@ class BaselinePolicy:
         lines = [f"### Baseline Audit Trail (issue #{issue_number})\n"]
         for record in records:
             try:
-                ts = datetime.fromisoformat(record.timestamp).strftime(
-                    "%Y-%m-%dT%H:%M:%SZ"
+                ts = (
+                    datetime.fromisoformat(record.timestamp)
+                    .astimezone(UTC)
+                    .strftime("%Y-%m-%dT%H:%M:%SZ")
                 )
             except ValueError:
                 ts = record.timestamp

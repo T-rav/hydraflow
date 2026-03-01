@@ -466,6 +466,44 @@ class TestRollback:
         assert record.change_type == BaselineChangeType.ROLLBACK
         assert record.approver == "anyone"
 
+    @pytest.mark.asyncio
+    async def test_rollback_records_commit_sha(
+        self, policy: BaselinePolicy, state: StateTracker
+    ):
+        """commit_sha should be stored in the rollback audit record."""
+        record = await policy.rollback(
+            issue_number=42,
+            pr_number=101,
+            approver="alice",
+            reason="regression",
+            commit_sha="deadbeef1234",
+        )
+        assert record.commit_sha == "deadbeef1234"
+        records = state.get_baseline_audit(42)
+        assert records[-1].commit_sha == "deadbeef1234"
+
+    @pytest.mark.asyncio
+    async def test_rollback_event_publish_failure_does_not_raise(
+        self, policy: BaselinePolicy, state: StateTracker
+    ):
+        """A failed bus publish during rollback must not propagate — audit record is already persisted."""
+        from unittest.mock import AsyncMock, patch
+
+        with patch.object(
+            policy._bus, "publish", new=AsyncMock(side_effect=RuntimeError("bus down"))
+        ):
+            # Should not raise even though publish fails
+            record = await policy.rollback(
+                issue_number=42,
+                pr_number=101,
+                approver="alice",
+                reason="regression",
+            )
+        assert record.change_type == BaselineChangeType.ROLLBACK
+        # Audit record must be persisted regardless of publish failure
+        records = state.get_baseline_audit(42)
+        assert len(records) == 1
+
 
 # ---------------------------------------------------------------------------
 # Audit trail
