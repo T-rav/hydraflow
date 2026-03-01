@@ -97,7 +97,7 @@ class TestHITLPhaseProcessing:
     @pytest.mark.asyncio
     async def test_failure_keeps_hitl_label(self, config: HydraFlowConfig) -> None:
         """On failure, the hydraflow-hitl label should be re-applied."""
-        from models import HITLResult
+        from models import HITLResult, VisualEvidence, VisualEvidenceItem
 
         phase, state, fetcher, prs, wt, runner, _bus = make_hitl_phase(config)
         issue = TaskFactory.create(id=42, title="Test HITL", body="Fix it")
@@ -105,6 +105,17 @@ class TestHITLPhaseProcessing:
         fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
         state.set_hitl_origin(42, "hydraflow-review")
         state.set_hitl_cause(42, "CI failed")
+        state.set_hitl_visual_evidence(
+            42,
+            VisualEvidence(
+                items=[
+                    VisualEvidenceItem(
+                        screen_name="login", diff_percent=5.0, status="fail"
+                    )
+                ],
+                summary="1 screen exceeded threshold",
+            ),
+        )
 
         runner.run = AsyncMock(
             return_value=HITLResult(
@@ -118,9 +129,10 @@ class TestHITLPhaseProcessing:
         # Verify HITL label was re-applied via swap
         prs.swap_pipeline_labels.assert_any_call(42, config.hitl_label[0])
 
-        # Verify HITL state is preserved (not cleaned up)
+        # Verify HITL state is preserved (not cleaned up) — spec: requeue retains evidence
         assert state.get_hitl_origin(42) == "hydraflow-review"
         assert state.get_hitl_cause(42) == "CI failed"
+        assert state.get_hitl_visual_evidence(42) is not None
 
     @pytest.mark.asyncio
     async def test_success_posts_comment(self, config: HydraFlowConfig) -> None:

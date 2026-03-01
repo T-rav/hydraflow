@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Literal
@@ -79,7 +80,7 @@ def _classify_cause(cause: str) -> HITLCauseKey:
     # Check needs_info BEFORE ci — "insufficient" contains the substring "ci".
     if "insufficient" in lower or "needs" in lower or "detail" in lower:
         return "needs_info"
-    if "ci" in lower or "check" in lower or "test fail" in lower:
+    if re.search(r"\bci\b", lower) or "check" in lower or "test fail" in lower:
         return "ci"
     if "merge" in lower and "conflict" in lower:
         return "merge_conflict"

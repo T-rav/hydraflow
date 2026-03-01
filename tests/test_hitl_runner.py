@@ -94,6 +94,11 @@ class TestClassifyCause:
             == "visual"
         )
 
+    def test_ci_word_boundary_not_substring(self) -> None:
+        """'ci' as a substring of a longer word should not match the ci category."""
+        # "deficit" contains "ci" as a substring — should not misclassify
+        assert _classify_cause("deficit in implementation coverage") == "default"
+
 
 # ---------------------------------------------------------------------------
 # Prompt building
