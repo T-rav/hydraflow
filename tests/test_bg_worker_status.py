@@ -891,6 +891,79 @@ class TestDisabledWorkerPersistenceAcrossRestart:
         assert orch.is_bg_worker_enabled("metrics") is True
 
 
+class TestStaleDisabledWorkerPruning:
+    """Tests for pruning stale worker names from disabled_workers on startup."""
+
+    def test_stale_worker_name_pruned_on_startup(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """Disabled worker names not in known_names should be pruned from state."""
+        from orchestrator import HydraFlowOrchestrator
+
+        state = StateTracker(tmp_path / "state.json")
+        orch = HydraFlowOrchestrator(config, event_bus=event_bus, state=state)
+        orch.set_bg_worker_enabled("memory_sync", False)
+        orch.set_bg_worker_enabled("removed_worker", False)
+
+        known = {"memory_sync", "metrics", "pr_unsticker"}
+        orch._prune_stale_disabled_workers(known)
+
+        # "removed_worker" should be pruned, "memory_sync" should remain disabled
+        assert orch.is_bg_worker_enabled("memory_sync") is False
+        assert (
+            orch.is_bg_worker_enabled("removed_worker") is True
+        )  # defaults to True after prune
+        assert state.get_disabled_workers() == {"memory_sync"}
+
+    def test_no_pruning_when_all_disabled_workers_are_valid(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """No state write should happen when all disabled workers are valid."""
+        from orchestrator import HydraFlowOrchestrator
+
+        state = StateTracker(tmp_path / "state.json")
+        orch = HydraFlowOrchestrator(config, event_bus=event_bus, state=state)
+        orch.set_bg_worker_enabled("memory_sync", False)
+
+        known = {"memory_sync", "metrics", "pr_unsticker"}
+        orch._prune_stale_disabled_workers(known)
+
+        assert orch.is_bg_worker_enabled("memory_sync") is False
+        assert state.get_disabled_workers() == {"memory_sync"}
+
+    def test_no_pruning_when_no_workers_disabled(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """Pruning is a no-op when no workers are disabled."""
+        from orchestrator import HydraFlowOrchestrator
+
+        state = StateTracker(tmp_path / "state.json")
+        orch = HydraFlowOrchestrator(config, event_bus=event_bus, state=state)
+
+        known = {"memory_sync", "metrics"}
+        orch._prune_stale_disabled_workers(known)
+
+        assert state.get_disabled_workers() == set()
+
+    def test_all_disabled_workers_pruned_when_all_stale(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """When all disabled workers are stale, the disabled set should be empty after pruning."""
+        from orchestrator import HydraFlowOrchestrator
+
+        state = StateTracker(tmp_path / "state.json")
+        orch = HydraFlowOrchestrator(config, event_bus=event_bus, state=state)
+        orch.set_bg_worker_enabled("old_worker_a", False)
+        orch.set_bg_worker_enabled("old_worker_b", False)
+
+        known = {"memory_sync", "metrics"}
+        orch._prune_stale_disabled_workers(known)
+
+        assert orch.is_bg_worker_enabled("old_worker_a") is True
+        assert orch.is_bg_worker_enabled("old_worker_b") is True
+        assert state.get_disabled_workers() == set()
+
+
 class TestOrchestratorIntervalManagement:
     """Tests for set_bg_worker_interval/get_bg_worker_interval."""
 

@@ -2835,3 +2835,22 @@ class TestDisabledWorkersPersistence:
         # After reset, disabled workers should be empty (defaults)
         assert tracker.get_disabled_workers() == set()
         assert tracker.get_bg_worker_states() == {}
+
+    def test_deleted_bg_worker_states_preserves_disabled_workers(
+        self, tmp_path: Path
+    ) -> None:
+        """Deleting bg_worker_states from state file preserves disabled_workers."""
+        state_file = tmp_path / "state.json"
+        data = {
+            "processed_issues": {},
+            "active_worktrees": {},
+            "active_branches": {},
+            "reviewed_prs": {},
+            "disabled_workers": ["memory_sync"],
+        }
+        state_file.write_text(json.dumps(data))
+
+        tracker = StateTracker(state_file)
+        assert tracker.get_disabled_workers() == {"memory_sync"}
+        # bg_worker_states defaults to empty when absent
+        assert tracker.get_bg_worker_states() == {}
