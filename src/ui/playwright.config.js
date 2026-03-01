@@ -2,6 +2,7 @@ import { defineConfig } from '@playwright/test'
 
 export default defineConfig({
   testDir: './e2e',
+  testMatch: '*.spec.js',
   outputDir: './e2e/results',
   snapshotDir: './e2e/screenshots',
   timeout: 30_000,

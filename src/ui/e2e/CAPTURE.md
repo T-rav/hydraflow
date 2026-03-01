@@ -81,5 +81,8 @@ make screenshot-update
 The `visual-capture` job in `.github/workflows/ci.yml`:
 
 1. Installs Node dependencies and Playwright Chromium.
-2. Runs `npm run screenshot:update` to capture fresh screenshots.
-3. Uploads captures as a `visual-captures` artifact (retained 30 days).
+2. Generates baseline screenshots with `npm run screenshot:update`.
+3. Runs a second pass with `npm run screenshot` to compare against the
+   baselines — this validates that captures are reproducible across two
+   consecutive runs. The job fails if any screenshot differs.
+4. Uploads captures as a `visual-captures` artifact (retained 30 days).

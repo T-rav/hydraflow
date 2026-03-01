@@ -152,9 +152,12 @@ jobs:
       - name: Install Playwright browsers
         working-directory: src/ui
         run: npx playwright install --with-deps chromium
-      - name: Capture screenshots
+      - name: Generate baseline screenshots
         working-directory: src/ui
         run: npm run screenshot:update
+      - name: Verify reproducibility (second run must match)
+        working-directory: src/ui
+        run: npm run screenshot
       - name: Upload screenshot artifacts
         if: always()
         uses: actions/upload-artifact@v4
