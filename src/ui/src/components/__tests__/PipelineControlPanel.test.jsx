@@ -410,10 +410,10 @@ describe('PipelineControlPanel', () => {
 
     it('has aria-labels for accessibility', () => {
       render(<PipelineControlPanel />)
-      expect(screen.getByLabelText('Decrease Triage workers')).toBeInTheDocument()
-      expect(screen.getByLabelText('Increase Triage workers')).toBeInTheDocument()
-      expect(screen.getByLabelText('Decrease Implement workers')).toBeInTheDocument()
-      expect(screen.getByLabelText('Increase Implement workers')).toBeInTheDocument()
+      for (const loop of PIPELINE_LOOPS) {
+        expect(screen.getByLabelText(`Decrease ${loop.label} workers`)).toBeInTheDocument()
+        expect(screen.getByLabelText(`Increase ${loop.label} workers`)).toBeInTheDocument()
+      }
     })
   })
 

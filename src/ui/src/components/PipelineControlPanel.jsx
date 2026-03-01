@@ -163,7 +163,7 @@ export function PipelineControlPanel({ onToggleBgWorker }) {
               {loop.configKey && effectiveMax != null ? (
                 <>
                   <button
-                    style={effectiveMax <= WORKER_COUNT_MIN ? styles.capBtnDisabled : styles.capBtn}
+                    style={effectiveMax <= WORKER_COUNT_MIN ? capBtnDisabled : capBtn}
                     disabled={effectiveMax <= WORKER_COUNT_MIN}
                     onClick={() => updateWorkerCount(loop.key, loop.configKey, effectiveMax - 1)}
                     data-testid={`dec-${loop.key}`}
@@ -178,7 +178,7 @@ export function PipelineControlPanel({ onToggleBgWorker }) {
                     {effectiveMax}
                   </span>
                   <button
-                    style={effectiveMax >= WORKER_COUNT_MAX ? styles.capBtnDisabled : styles.capBtn}
+                    style={effectiveMax >= WORKER_COUNT_MAX ? capBtnDisabled : capBtn}
                     disabled={effectiveMax >= WORKER_COUNT_MAX}
                     onClick={() => updateWorkerCount(loop.key, loop.configKey, effectiveMax + 1)}
                     data-testid={`inc-${loop.key}`}
@@ -312,29 +312,12 @@ const styles = {
     cursor: 'pointer',
     transition: 'all 0.15s',
   },
-  capBtn: {
+  capBtnBase: {
     padding: '0 4px',
     fontSize: 11,
     fontWeight: 700,
     border: `1px solid ${theme.border}`,
     borderRadius: 4,
-    background: theme.surface,
-    color: theme.text,
-    cursor: 'pointer',
-    lineHeight: '18px',
-    minWidth: 20,
-    textAlign: 'center',
-    transition: 'all 0.15s',
-  },
-  capBtnDisabled: {
-    padding: '0 4px',
-    fontSize: 11,
-    fontWeight: 700,
-    border: `1px solid ${theme.border}`,
-    borderRadius: 4,
-    background: theme.bg,
-    color: theme.textInactive,
-    cursor: 'default',
     lineHeight: '18px',
     minWidth: 20,
     textAlign: 'center',
@@ -471,3 +454,6 @@ const loopDotLit = Object.fromEntries(PIPELINE_LOOPS.map(l => [l.key, { ...style
 const loopDotDim = Object.fromEntries(PIPELINE_LOOPS.map(l => [l.key, { ...styles.dot, background: l.dimColor }]))
 const loopCountActive = Object.fromEntries(PIPELINE_LOOPS.map(l => [l.key, { ...styles.loopCount, color: l.color }]))
 const loopCountDim = { ...styles.loopCount, color: theme.textMuted }
+// Pre-computed cap button style variants
+const capBtn = { ...styles.capBtnBase, background: theme.surface, color: theme.text, cursor: 'pointer' }
+const capBtnDisabled = { ...styles.capBtnBase, background: theme.bg, color: theme.textInactive, cursor: 'default' }
