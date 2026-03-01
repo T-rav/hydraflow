@@ -574,6 +574,8 @@ class HydraFlowOrchestrator:
         valid worker names.  Stale entries accumulate when workers are renamed
         or removed between releases.
         """
+        if not known_names:
+            return
         disabled = self._state.get_disabled_workers()
         stale = disabled - known_names
         if not stale:

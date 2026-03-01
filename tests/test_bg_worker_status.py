@@ -899,6 +899,26 @@ class TestDisabledWorkerPersistenceAcrossRestart:
         assert orch.is_bg_worker_enabled("memory_sync") is True
         assert orch.is_bg_worker_enabled("metrics") is True
 
+    def test_interval_and_last_run_both_persist_after_restart(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """Custom poll interval AND last_run timestamp should both survive a restart (issue req #6)."""
+        from orchestrator import HydraFlowOrchestrator
+
+        state_path = tmp_path / "state.json"
+        state1 = StateTracker(state_path)
+        orch1 = HydraFlowOrchestrator(config, event_bus=event_bus, state=state1)
+        orch1.set_bg_worker_interval("memory_sync", 3600)
+        orch1.update_bg_worker_status("memory_sync", "ok", {"count": 1})
+        last_run = orch1.get_bg_worker_states()["memory_sync"]["last_run"]
+
+        state2 = StateTracker(state_path)
+        orch2 = HydraFlowOrchestrator(config, event_bus=EventBus(), state=state2)
+        orch2._restore_state()
+
+        assert orch2.get_bg_worker_interval("memory_sync") == 3600
+        assert orch2.get_bg_worker_states()["memory_sync"]["last_run"] == last_run
+
 
 class TestStaleDisabledWorkerPruning:
     """Tests for pruning stale worker names from disabled_workers on startup."""
@@ -927,7 +947,7 @@ class TestStaleDisabledWorkerPruning:
     def test_no_pruning_when_all_disabled_workers_are_valid(
         self, config, event_bus: EventBus, tmp_path: Path
     ) -> None:
-        """No state write should happen when all disabled workers are valid."""
+        """Disabled workers remain unchanged after pruning when all names are valid."""
         from orchestrator import HydraFlowOrchestrator
 
         state = StateTracker(tmp_path / "state.json")
