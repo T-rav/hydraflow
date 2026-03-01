@@ -491,7 +491,7 @@ class TestEpicChangelogIntegration:
 
         # Comment includes release URL
         comment = prs.post_comment.call_args[0][1]
-        assert "All sub-issues completed" in comment
+        assert "All sub-issues resolved" in comment
         assert "Release" in comment
 
     @pytest.mark.asyncio

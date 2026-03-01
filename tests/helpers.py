@@ -259,6 +259,9 @@ class ConfigFactory:
         max_code_scanning_chars: int = 6_000,
         visual_gate_enabled: bool = False,
         visual_gate_bypass: bool = False,
+        visual_diff_threshold: float = 0.01,
+        visual_max_screens: int = 20,
+        visual_per_screen_budget_bytes: int = 5_000_000,
         agent_timeout: int = 3600,
         transcript_summary_timeout: int = 120,
         memory_compaction_timeout: int = 60,
@@ -486,6 +489,10 @@ class ConfigFactory:
             else [],
             baseline_max_audit_records=baseline_max_audit_records,
             visual_validation_enabled=visual_validation_enabled,
+            visual_diff_threshold=visual_diff_threshold,
+            visual_warn_threshold=visual_warn_threshold,
+            visual_max_screens=visual_max_screens,
+            visual_per_screen_budget_bytes=visual_per_screen_budget_bytes,
             visual_validation_trigger_patterns=(
                 visual_validation_trigger_patterns
                 if visual_validation_trigger_patterns is not None
@@ -505,7 +512,6 @@ class ConfigFactory:
             visual_skip_label=visual_skip_label,
             visual_max_retries=visual_max_retries,
             visual_retry_delay=visual_retry_delay,
-            visual_warn_threshold=visual_warn_threshold,
             visual_fail_threshold=visual_fail_threshold,
             screenshot_redaction_enabled=screenshot_redaction_enabled,
             screenshot_gist_public=screenshot_gist_public,
