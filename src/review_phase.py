@@ -409,7 +409,8 @@ class ReviewPhase:
         self._state.mark_pr(pr.number, result.verdict.value)
         self._state.mark_issue(pr.issue_number, "reviewed")
         self._state.record_review_verdict(result.verdict.value, result.fixes_made)
-        self._state.increment_session_counter("reviewed")
+        if result.verdict == ReviewVerdict.APPROVE:
+            self._state.increment_session_counter("reviewed")
 
         post_review_sha = await self._prs.get_pr_head_sha(pr.number)
         if isinstance(post_review_sha, str) and post_review_sha:
