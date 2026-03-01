@@ -1323,6 +1323,9 @@ def _resolve_repo_scoped_paths(config: HydraFlowConfig) -> None:
     explicit = config.__pydantic_fields_set__
 
     # Target directory: repo-scoped when a slug is available, flat otherwise.
+    # NOTE: repo_slug never returns "" for a non-root repo_root, so the `else
+    # data_root` branch below and the `if slug` migration guards are only
+    # reached when repo_root is the filesystem root ("/").
     repo_dir = data_root / slug if slug else data_root
 
     # --- state_file ---

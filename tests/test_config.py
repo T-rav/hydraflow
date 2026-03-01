@@ -4750,6 +4750,21 @@ class TestNamespaceRepoPaths:
         cfg = HydraFlowConfig(repo_root=tmp_path, repo="acme/widgets")
         assert cfg.state_file.read_text() == '{"new": true}'
 
+    def test_no_migration_when_scoped_event_log_already_exists(
+        self, tmp_path: Path
+    ) -> None:
+        """If scoped events.jsonl already exists, legacy file should not overwrite it."""
+        data_root = tmp_path / ".hydraflow"
+        data_root.mkdir()
+        legacy_events = data_root / "events.jsonl"
+        legacy_events.write_text('{"event":"old"}\n')
+        scoped_dir = data_root / "acme-widgets"
+        scoped_dir.mkdir(parents=True)
+        (scoped_dir / "events.jsonl").write_text('{"event":"new"}\n')
+
+        cfg = HydraFlowConfig(repo_root=tmp_path, repo="acme/widgets")
+        assert cfg.event_log_path.read_text() == '{"event":"new"}\n'
+
 
 # ---------------------------------------------------------------------------
 # Two-phase path resolution order (base paths → repo → repo-scoped paths)
