@@ -7023,7 +7023,15 @@ class TestAddRepoByPath:
                 "hf supervisor is not running. Run `hf run` inside a repo to start it."
             )
         )
-        with patch.dict("sys.modules", {"hf_cli.supervisor_client": mock_supervisor}):
+        mock_supervisor_manager = MagicMock()
+        mock_supervisor_manager.ensure_running = MagicMock(return_value=None)
+        with patch.dict(
+            "sys.modules",
+            {
+                "hf_cli.supervisor_client": mock_supervisor,
+                "hf_cli.supervisor_manager": mock_supervisor_manager,
+            },
+        ):
             from dashboard_routes import create_router
             from pr_manager import PRManager
 
@@ -7046,7 +7054,79 @@ class TestAddRepoByPath:
         data = json_mod.loads(resp.body)
         assert resp.status_code == 503
         assert "hf supervisor is not running" in data["error"]
+        mock_supervisor_manager.ensure_running.assert_called_once()
         ensure_labels.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_supervisor_autostart_then_register_succeeds(
+        self,
+        config,
+        event_bus: EventBus,
+        state,
+        tmp_path: Path,
+    ) -> None:
+        import json as json_mod
+        import subprocess
+
+        repo_dir = tmp_path / "supervisor-autostart-repo"
+        repo_dir.mkdir()
+        subprocess.run(["git", "init", str(repo_dir)], capture_output=True, check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_dir),
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/org/autostart.git",
+            ],
+            capture_output=True,
+            check=True,
+        )
+
+        mock_supervisor = MagicMock()
+        mock_supervisor.register_repo = MagicMock(
+            side_effect=[
+                RuntimeError(
+                    "hf supervisor is not running. Run `hf run` inside a repo to start it."
+                ),
+                {"status": "ok"},
+            ]
+        )
+        mock_supervisor_manager = MagicMock()
+        mock_supervisor_manager.ensure_running = MagicMock(return_value=None)
+        with patch.dict(
+            "sys.modules",
+            {
+                "hf_cli.supervisor_client": mock_supervisor,
+                "hf_cli.supervisor_manager": mock_supervisor_manager,
+            },
+        ):
+            from dashboard_routes import create_router
+            from pr_manager import PRManager
+
+            pr_mgr = PRManager(config, event_bus)
+            router = create_router(
+                config=config,
+                event_bus=event_bus,
+                state=state,
+                pr_manager=pr_mgr,
+                get_orchestrator=lambda: None,
+                set_orchestrator=lambda o: None,
+                set_run_task=lambda t: None,
+                ui_dist_dir=tmp_path / "no-dist",
+                template_dir=tmp_path / "no-templates",
+            )
+            endpoint = self._get_endpoint(router)
+            with patch("prep.ensure_labels", new_callable=AsyncMock):
+                resp = await endpoint({"path": str(repo_dir)})
+
+        data = json_mod.loads(resp.body)
+        assert resp.status_code == 200
+        assert data["status"] == "ok"
+        assert mock_supervisor.register_repo.call_count == 2
+        mock_supervisor_manager.ensure_running.assert_called_once()
 
 
 class TestPickRepoFolder:
