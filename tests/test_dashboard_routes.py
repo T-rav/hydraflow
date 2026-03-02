@@ -1391,12 +1391,12 @@ class TestHITLEndpointCause:
                 if label_arg == f"labels={config.hitl_label[0]}":
                     return (
                         '[{"number": 42, "title": "Issue from hitl", '
-                        '"url": "https://github.com/T-rav/hyrda/issues/42"}]'
+                        '"url": "https://github.com/T-rav/hyrdaflow/issues/42"}]'
                     )
                 if label_arg == f"labels={config.hitl_active_label[0]}":
                     return (
                         '[{"number": 77, "title": "Issue from hitl-active", '
-                        '"url": "https://github.com/T-rav/hyrda/issues/77"}]'
+                        '"url": "https://github.com/T-rav/hyrdaflow/issues/77"}]'
                     )
                 return "[]"
             # list_hitl_items -> _build_hitl_item PR lookup
