@@ -2752,13 +2752,27 @@ def create_router(
         home_root = os.path.realpath(str(Path.home()))
         temp_root = os.path.realpath(tempfile.gettempdir())
         expanded_input = os.path.expanduser(raw_path)
-        normalized_path: str | None = None
-        for root in (home_root, temp_root):
-            candidate = os.path.realpath(os.path.join(root, expanded_input))
-            if candidate == root or candidate.startswith(f"{root}{os.sep}"):
-                normalized_path = candidate
-                break
-        if normalized_path is None:
+        base_root: str | None = None
+        relative_fragment = ""
+        if expanded_input == home_root:
+            base_root = home_root
+        elif expanded_input.startswith(f"{home_root}{os.sep}"):
+            base_root = home_root
+            relative_fragment = expanded_input.removeprefix(f"{home_root}{os.sep}")
+        elif expanded_input == temp_root:
+            base_root = temp_root
+        elif expanded_input.startswith(f"{temp_root}{os.sep}"):
+            base_root = temp_root
+            relative_fragment = expanded_input.removeprefix(f"{temp_root}{os.sep}")
+        if base_root is None:
+            return JSONResponse(
+                {"error": "path must be inside your home directory or temp directory"},
+                status_code=400,
+            )
+        normalized_path = os.path.realpath(os.path.join(base_root, relative_fragment))
+        if normalized_path != base_root and not normalized_path.startswith(
+            f"{base_root}{os.sep}"
+        ):
             return JSONResponse(
                 {"error": "path must be inside your home directory or temp directory"},
                 status_code=400,
