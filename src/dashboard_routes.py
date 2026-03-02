@@ -2750,12 +2750,6 @@ def create_router(
         if not raw_path:
             return JSONResponse({"error": "path required"}, status_code=400)
         normalized_path = os.path.realpath(os.path.expanduser(raw_path))
-        repo_path = Path(normalized_path)
-        if not repo_path.is_dir():
-            return JSONResponse(
-                {"error": f"path does not exist: {raw_path}"},
-                status_code=400,
-            )
         home_root = os.path.realpath(str(Path.home()))
         temp_root = os.path.realpath(tempfile.gettempdir())
         is_allowed = (
@@ -2766,6 +2760,12 @@ def create_router(
         if not is_allowed:
             return JSONResponse(
                 {"error": "path must be inside your home directory or temp directory"},
+                status_code=400,
+            )
+        repo_path = Path(normalized_path)
+        if not repo_path.is_dir():
+            return JSONResponse(
+                {"error": f"path does not exist: {raw_path}"},
                 status_code=400,
             )
         # Validate it's a git repo

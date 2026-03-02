@@ -6798,7 +6798,7 @@ class TestAddRepoByPath:
         class FakeReq(BaseModel):
             path: str = ""
 
-        resp = await endpoint(FakeReq(path="/nonexistent/path"))
+        resp = await endpoint(FakeReq(path=str(tmp_path / "missing-repo-dir")))
         data = json_mod.loads(resp.body)
         assert resp.status_code == 400
         assert "does not exist" in data["error"]
