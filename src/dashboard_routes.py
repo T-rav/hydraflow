@@ -2749,15 +2749,16 @@ def create_router(
         raw_path = (req.path or "").strip()
         if not raw_path:
             return JSONResponse({"error": "path required"}, status_code=400)
-        normalized_path = os.path.realpath(os.path.expanduser(raw_path))
         home_root = os.path.realpath(str(Path.home()))
         temp_root = os.path.realpath(tempfile.gettempdir())
-        is_allowed = (
-            normalized_path in (home_root, temp_root)
-            or normalized_path.startswith(f"{home_root}{os.sep}")
-            or normalized_path.startswith(f"{temp_root}{os.sep}")
-        )
-        if not is_allowed:
+        expanded_input = os.path.expanduser(raw_path)
+        normalized_path: str | None = None
+        for root in (home_root, temp_root):
+            candidate = os.path.realpath(os.path.join(root, expanded_input))
+            if candidate == root or candidate.startswith(f"{root}{os.sep}"):
+                normalized_path = candidate
+                break
+        if normalized_path is None:
             return JSONResponse(
                 {"error": "path must be inside your home directory or temp directory"},
                 status_code=400,
