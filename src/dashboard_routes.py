@@ -124,27 +124,8 @@ async def _run_dialog_command(*cmd: str, timeout_seconds: float = 30.0) -> str |
 
 async def _pick_folder_with_dialog() -> str | None:
     """Open a best-effort native folder picker and return the selected path."""
-    try:
-        import tkinter as tk  # noqa: PLC0415
-        from tkinter import filedialog  # noqa: PLC0415
-
-        def _choose_dir() -> str | None:
-            root = tk.Tk()
-            root.withdraw()
-            with contextlib.suppress(Exception):
-                root.wm_attributes("-topmost", 1)
-            try:
-                selected = filedialog.askdirectory(title="Select repository folder")
-                return selected or None
-            finally:
-                root.destroy()
-
-        selected = await asyncio.to_thread(_choose_dir)
-        if selected:
-            return selected
-    except Exception:
-        logger.debug("Tk folder picker unavailable", exc_info=True)
-
+    # NOTE: avoid Tk-based pickers here. This endpoint may run off the main
+    # thread, and macOS AppKit requires UI objects to be created on main thread.
     if sys.platform == "darwin":
         selected = await _run_dialog_command(
             "osascript",
