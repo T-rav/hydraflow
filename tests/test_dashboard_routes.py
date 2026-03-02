@@ -6329,3 +6329,45 @@ class TestCrateEndpoints:
         body = CrateItemsRequest(issue_numbers=[10])
         response = await endpoint(5, body)
         assert response.status_code == 500
+
+
+class TestFindRepoMatch:
+    """Tests for the _find_repo_match cascading match helper."""
+
+    def _call(self, slug: str, repos: list[dict]) -> dict | None:
+        from dashboard_routes import _find_repo_match
+
+        return _find_repo_match(slug, repos)
+
+    def test_exact_slug_match(self) -> None:
+        repos = [{"slug": "insightmesh", "path": "/repos/insightmesh"}]
+        assert self._call("insightmesh", repos) == repos[0]
+
+    def test_owner_repo_format_strips_prefix(self) -> None:
+        repos = [{"slug": "insightmesh", "path": "/repos/insightmesh"}]
+        assert self._call("8thlight/insightmesh", repos) == repos[0]
+
+    def test_path_tail_match(self) -> None:
+        repos = [{"slug": "mesh", "path": "/home/user/insightmesh"}]
+        assert self._call("insightmesh", repos) == repos[0]
+
+    def test_path_substring_match(self) -> None:
+        repos = [{"slug": "mesh", "path": "/repos/8thlight/insightmesh"}]
+        assert self._call("8thlight/insightmesh", repos) == repos[0]
+
+    def test_exact_match_has_priority_over_path_match(self) -> None:
+        exact = {"slug": "myrepo", "path": "/other/path"}
+        path_match = {"slug": "other", "path": "/repos/myrepo"}
+        repos = [path_match, exact]
+        assert self._call("myrepo", repos) == exact
+
+    def test_empty_slug_returns_none(self) -> None:
+        repos = [{"slug": "foo", "path": "/repos/foo"}]
+        assert self._call("", repos) is None
+
+    def test_no_match_returns_none(self) -> None:
+        repos = [{"slug": "foo", "path": "/repos/foo"}]
+        assert self._call("bar", repos) is None
+
+    def test_empty_repos_list_returns_none(self) -> None:
+        assert self._call("foo", []) is None

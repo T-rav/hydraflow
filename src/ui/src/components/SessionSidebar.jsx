@@ -30,6 +30,7 @@ export function SessionSidebar() {
   const [hoveredDeleteId, setHoveredDeleteId] = useState(null)
   const [showAddRepo, setShowAddRepo] = useState(false)
   const [addRepoValue, setAddRepoValue] = useState('')
+  const [addRepoError, setAddRepoError] = useState('')
   const addRepoInputRef = useRef(null)
 
   const repoEntries = useMemo(() => {
@@ -101,12 +102,17 @@ export function SessionSidebar() {
     }
   }, [showAddRepo])
 
-  const handleAddRepoSubmit = () => {
+  const handleAddRepoSubmit = async () => {
     const trimmed = addRepoValue.trim()
     if (!trimmed) return
     if (addRepoShortcut) {
-      addRepoShortcut(trimmed)
+      const result = await addRepoShortcut(trimmed)
+      if (result && !result.ok) {
+        setAddRepoError(result.error || 'Failed to add repo')
+        return
+      }
     }
+    setAddRepoError('')
     setAddRepoValue('')
     setShowAddRepo(false)
   }
@@ -115,6 +121,7 @@ export function SessionSidebar() {
     if (e.key === 'Enter') {
       handleAddRepoSubmit()
     } else if (e.key === 'Escape') {
+      setAddRepoError('')
       setAddRepoValue('')
       setShowAddRepo(false)
     }
@@ -161,11 +168,14 @@ export function SessionSidebar() {
             ref={addRepoInputRef}
             type="text"
             value={addRepoValue}
-            onChange={(e) => setAddRepoValue(e.target.value)}
+            onChange={(e) => { setAddRepoError(''); setAddRepoValue(e.target.value) }}
             onKeyDown={handleAddRepoKeyDown}
             placeholder="owner/repo"
-            style={styles.addRepoInput}
+            style={addRepoError ? addRepoInputError : styles.addRepoInput}
           />
+          {addRepoError && (
+            <div style={styles.addRepoErrorMsg}>{addRepoError}</div>
+          )}
         </div>
       )}
 
@@ -364,6 +374,11 @@ const styles = {
     outline: 'none',
     boxSizing: 'border-box',
   },
+  addRepoErrorMsg: {
+    fontSize: 10,
+    color: theme.red,
+    padding: '2px 0 0',
+  },
   disconnectBtn: {
     background: 'none',
     border: 'none',
@@ -555,4 +570,5 @@ const repoHeaderSelected = { ...styles.repoHeader, background: theme.accentSubtl
 const sessionRowSelected = { ...styles.sessionRow, background: theme.accentSubtle }
 const sessionRowCurrent = { ...styles.sessionRow, borderLeft: `3px solid ${theme.accent}` }
 const sessionRowCurrentSelected = { ...sessionRowCurrent, background: theme.accentSubtle }
+const addRepoInputError = { ...styles.addRepoInput, border: `1px solid ${theme.red}` }
 const deleteButtonHovered = { ...styles.deleteButton, color: theme.red, background: theme.redSubtle }

@@ -217,6 +217,48 @@ def _is_expected_supervisor_unavailable(exc: Exception) -> bool:
     return text.startswith("hf supervisor is not running.")
 
 
+def _find_repo_match(slug: str, repos: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Find a repo entry matching *slug* using cascading strategies.
+
+    1. Exact slug match
+    2. Strip owner prefix (``owner/repo`` → try ``repo``)
+    3. Path-tail match (last component of repo path equals slug)
+    4. Path substring match (slug found within the repo path)
+    """
+    if not slug:
+        return None
+
+    # 1. Exact slug match
+    for r in repos:
+        if r.get("slug") == slug:
+            return r
+
+    # 2. Strip owner prefix — e.g. "8thlight/insightmesh" → "insightmesh"
+    short = slug.rsplit("/", maxsplit=1)[-1] if "/" in slug else None
+    if short:
+        for r in repos:
+            if r.get("slug") == short:
+                return r
+
+    # 3. Path-tail match — last path component matches slug or short slug
+    candidates = [slug]
+    if short:
+        candidates.append(short)
+    for candidate in candidates:
+        for r in repos:
+            path = r.get("path", "")
+            if path and Path(path).name == candidate:
+                return r
+
+    # 4. Path substring match — full slug found anywhere in path
+    for r in repos:
+        path = r.get("path", "")
+        if path and slug in path:
+            return r
+
+    return None
+
+
 def create_router(
     config: HydraFlowConfig,
     event_bus: EventBus,
@@ -2454,7 +2496,7 @@ def create_router(
                     logger.warning("Supervisor list_repos failed: %s", exc)
                     error_payload = ("Supervisor unavailable", 503)
                 else:
-                    match = next((r for r in repos if r.get("slug") == slug), None)
+                    match = _find_repo_match(slug, repos)
                     if not match:
                         error_payload = (f"slug '{slug}' not registered", 404)
                     else:
