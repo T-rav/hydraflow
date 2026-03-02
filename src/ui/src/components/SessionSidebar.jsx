@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { useHydraFlow } from '../context/HydraFlowContext'
 import { theme } from '../theme'
 import { PULSE_ANIMATION } from '../constants'
@@ -22,7 +22,7 @@ export function SessionSidebar() {
     runtimes = [],
     startRuntime = () => {},
     stopRuntime = () => {},
-    addRepoFromPicker,
+    addRepoByPath,
     removeRepoShortcut,
   } = useHydraFlow()
   const [expandedRepos, setExpandedRepos] = useState({})
@@ -31,6 +31,11 @@ export function SessionSidebar() {
   const [showAddRepo, setShowAddRepo] = useState(false)
   const [addRepoError, setAddRepoError] = useState('')
   const [isAddRepoSubmitting, setIsAddRepoSubmitting] = useState(false)
+  const [browseRoots, setBrowseRoots] = useState([])
+  const [browsePath, setBrowsePath] = useState('')
+  const [browseParentPath, setBrowseParentPath] = useState(null)
+  const [browseDirs, setBrowseDirs] = useState([])
+  const [isBrowseLoading, setIsBrowseLoading] = useState(false)
 
   const repoEntries = useMemo(() => {
     const entries = new Map()
@@ -95,22 +100,73 @@ export function SessionSidebar() {
     deleteSession(sessionId)
   }
 
-  const handlePickRepoFolder = async () => {
-    if (isAddRepoSubmitting) return
-    if (!addRepoFromPicker) {
-      setAddRepoError('Folder picker is unavailable')
-      return
+  const loadBrowseDirectory = async (path) => {
+    if (!path) return
+    setIsBrowseLoading(true)
+    try {
+      const res = await fetch(`/api/fs/list?path=${encodeURIComponent(path)}`)
+      const data = await res.json()
+      if (!res.ok) {
+        setAddRepoError(data.error || 'Failed to browse folders')
+        return
+      }
+      setBrowsePath(data.current_path || path)
+      setBrowseParentPath(data.parent_path || null)
+      setBrowseDirs(Array.isArray(data.directories) ? data.directories : [])
+      setAddRepoError('')
+    } catch {
+      setAddRepoError('Failed to browse folders')
+    } finally {
+      setIsBrowseLoading(false)
     }
+  }
+
+  useEffect(() => {
+    if (!showAddRepo) return
+    let cancelled = false
+    const loadRoots = async () => {
+      setIsBrowseLoading(true)
+      try {
+        const res = await fetch('/api/fs/roots')
+        const data = await res.json()
+        if (!res.ok) {
+          if (!cancelled) setAddRepoError(data.error || 'Failed to load folders')
+          return
+        }
+        const roots = Array.isArray(data.roots) ? data.roots : []
+        const firstRoot = roots[0]?.path || ''
+        if (cancelled) return
+        setBrowseRoots(roots)
+        if (!firstRoot) {
+          setBrowsePath('')
+          setBrowseDirs([])
+          setBrowseParentPath(null)
+          setAddRepoError('No browse roots available')
+          return
+        }
+        await loadBrowseDirectory(firstRoot)
+      } catch {
+        if (!cancelled) setAddRepoError('Failed to load folders')
+      } finally {
+        if (!cancelled) setIsBrowseLoading(false)
+      }
+    }
+    loadRoots()
+    return () => { cancelled = true }
+  }, [showAddRepo])
+
+  const handleUseCurrentFolder = async () => {
+    if (!browsePath || isAddRepoSubmitting || !addRepoByPath) return
     setIsAddRepoSubmitting(true)
     setAddRepoError('')
     try {
-      const result = await addRepoFromPicker()
+      const result = await addRepoByPath(browsePath)
       if (result && !result.ok) {
         setAddRepoError(result.error || 'Failed to add repo')
         return
       }
-      setAddRepoError('')
       setShowAddRepo(false)
+      setAddRepoError('')
     } catch {
       setAddRepoError('Failed to add repo')
     } finally {
@@ -149,6 +205,12 @@ export function SessionSidebar() {
             e.stopPropagation()
             setShowAddRepo(prev => {
               if (prev) setAddRepoError('')
+              if (!prev) {
+                setBrowseRoots([])
+                setBrowsePath('')
+                setBrowseParentPath(null)
+                setBrowseDirs([])
+              }
               return !prev
             })
           }}
@@ -161,14 +223,59 @@ export function SessionSidebar() {
       </div>
       {showAddRepo && (
         <div style={styles.addRepoRow}>
-          <button
-            onClick={handlePickRepoFolder}
-            disabled={isAddRepoSubmitting}
-            style={styles.pickFolderBtn}
-            title="Pick a local repo folder"
-          >
-            Pick Folder
-          </button>
+          {browseRoots.length > 1 && (
+            <div style={styles.browseRoots}>
+              {browseRoots.map(root => (
+                <button
+                  key={root.path}
+                  onClick={() => loadBrowseDirectory(root.path)}
+                  style={browsePath === root.path ? browseRootBtnActive : styles.browseRootBtn}
+                  disabled={isBrowseLoading}
+                  title={root.path}
+                >
+                  {root.name}
+                </button>
+              ))}
+            </div>
+          )}
+          <div style={styles.browsePath} title={browsePath}>
+            {browsePath || 'Loading...'}
+          </div>
+          <div style={styles.browseControls}>
+            <button
+              onClick={() => { if (browseParentPath) loadBrowseDirectory(browseParentPath) }}
+              style={styles.pickFolderBtn}
+              disabled={!browseParentPath || isBrowseLoading || isAddRepoSubmitting}
+              title="Go up one directory"
+            >
+              Up
+            </button>
+            <button
+              onClick={handleUseCurrentFolder}
+              style={styles.pickFolderBtn}
+              disabled={!browsePath || isBrowseLoading || isAddRepoSubmitting}
+              title="Use this folder as repo path"
+            >
+              Use This Folder
+            </button>
+          </div>
+          <div style={styles.browseList}>
+            {browseDirs.length === 0 ? (
+              <div style={styles.browseEmpty}>{isBrowseLoading ? 'Loading…' : 'No subfolders'}</div>
+            ) : (
+              browseDirs.map(dir => (
+                <button
+                  key={dir.path}
+                  onClick={() => loadBrowseDirectory(dir.path)}
+                  style={styles.browseDirBtn}
+                  disabled={isBrowseLoading || isAddRepoSubmitting}
+                  title={dir.path}
+                >
+                  {dir.name}
+                </button>
+              ))
+            )}
+          </div>
           {addRepoError && (
             <div style={styles.addRepoErrorMsg} role="alert">{addRepoError}</div>
           )}
@@ -358,6 +465,64 @@ const styles = {
   addRepoRow: {
     padding: '4px 12px 8px',
     borderBottom: `1px solid ${theme.border}`,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+  },
+  browseRoots: {
+    display: 'flex',
+    gap: 6,
+    flexWrap: 'wrap',
+  },
+  browseRootBtn: {
+    background: 'none',
+    border: `1px solid ${theme.border}`,
+    borderRadius: 4,
+    color: theme.textMuted,
+    fontSize: 10,
+    fontWeight: 600,
+    cursor: 'pointer',
+    padding: '2px 6px',
+  },
+  browsePath: {
+    fontSize: 10,
+    color: theme.textMuted,
+    border: `1px solid ${theme.border}`,
+    borderRadius: 4,
+    padding: '4px 6px',
+    background: theme.bg,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  browseControls: {
+    display: 'flex',
+    gap: 6,
+  },
+  browseList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+    maxHeight: 160,
+    overflowY: 'auto',
+    border: `1px solid ${theme.border}`,
+    borderRadius: 4,
+    padding: 4,
+  },
+  browseDirBtn: {
+    background: 'none',
+    border: `1px solid ${theme.border}`,
+    borderRadius: 4,
+    color: theme.text,
+    fontSize: 11,
+    textAlign: 'left',
+    cursor: 'pointer',
+    padding: '4px 6px',
+  },
+  browseEmpty: {
+    fontSize: 10,
+    color: theme.textMuted,
+    padding: '4px 6px',
   },
   pickFolderBtn: {
     background: 'none',
@@ -566,4 +731,5 @@ const repoHeaderSelected = { ...styles.repoHeader, background: theme.accentSubtl
 const sessionRowSelected = { ...styles.sessionRow, background: theme.accentSubtle }
 const sessionRowCurrent = { ...styles.sessionRow, borderLeft: `3px solid ${theme.accent}` }
 const sessionRowCurrentSelected = { ...sessionRowCurrent, background: theme.accentSubtle }
+const browseRootBtnActive = { ...styles.browseRootBtn, border: `1px solid ${theme.accent}`, color: theme.accent }
 const deleteButtonHovered = { ...styles.deleteButton, color: theme.red, background: theme.redSubtle }

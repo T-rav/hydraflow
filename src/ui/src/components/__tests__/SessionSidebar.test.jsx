@@ -23,8 +23,7 @@ function defaultContext(overrides = {}) {
     runtimes: [],
     startRuntime: vi.fn(),
     stopRuntime: vi.fn(),
-    addRepoFromPicker: vi.fn(),
-    addRepoShortcut: vi.fn(),
+    addRepoByPath: vi.fn(),
     removeRepoShortcut: vi.fn(),
     ...overrides,
   }
@@ -429,50 +428,110 @@ describe('SessionSidebar delete button', () => {
 // ---------------------------------------------------------------------------
 
 describe('SessionSidebar add repo button', () => {
+  beforeEach(() => {
+    global.fetch = vi.fn(async (url) => {
+      const rawUrl = String(url || '')
+      if (rawUrl.includes('/api/fs/roots')) {
+        return {
+          ok: true,
+          json: async () => ({
+            roots: [
+              { name: 'Home', path: '/home/user' },
+              { name: 'Temp', path: '/tmp' },
+            ],
+          }),
+        }
+      }
+      if (rawUrl.includes('/api/fs/list')) {
+        const path = decodeURIComponent(rawUrl.split('path=')[1] || '/home/user')
+        if (path === '/home/user/repos') {
+          return {
+            ok: true,
+            json: async () => ({
+              current_path: '/home/user/repos',
+              parent_path: '/home/user',
+              directories: [{ name: 'insightmesh', path: '/home/user/repos/insightmesh' }],
+            }),
+          }
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            current_path: '/home/user',
+            parent_path: '/home',
+            directories: [{ name: 'repos', path: '/home/user/repos' }],
+          }),
+        }
+      }
+      return { ok: false, json: async () => ({ error: `unexpected url: ${rawUrl}` }) }
+    })
+  })
+
   it('renders "+" button with aria-label next to All Repos', () => {
     render(<SessionSidebar />)
     expect(screen.getByLabelText('Add repo')).toBeDefined()
   })
 
-  it('shows picker button when "+" is clicked', () => {
+  it('loads browsable folders when "+" is clicked', async () => {
     render(<SessionSidebar />)
     fireEvent.click(screen.getByLabelText('Add repo'))
-    expect(screen.getByText('Pick Folder')).toBeDefined()
-  })
-
-  it('calls addRepoFromPicker when "Pick Folder" is clicked', async () => {
-    const addRepoFromPicker = vi.fn().mockResolvedValue({ ok: true })
-    mockUseHydraFlow.mockReturnValue(defaultContext({ addRepoFromPicker }))
-    render(<SessionSidebar />)
-    fireEvent.click(screen.getByLabelText('Add repo'))
-    fireEvent.click(screen.getByText('Pick Folder'))
     await vi.waitFor(() => {
-      expect(addRepoFromPicker).toHaveBeenCalledTimes(1)
-      expect(screen.queryByText('Pick Folder')).toBeNull()
+      expect(screen.getByText('Use This Folder')).toBeDefined()
+      expect(screen.getByText('repos')).toBeDefined()
+      expect(screen.getByText('/home/user')).toBeDefined()
     })
   })
 
-  it('shows error and keeps picker open when picker action fails', async () => {
-    const addRepoFromPicker = vi.fn().mockResolvedValue({ ok: false, error: 'No folder selected' })
+  it('navigates into a child directory and adds current folder', async () => {
+    const addRepoByPath = vi.fn().mockResolvedValue({ ok: true })
+    mockUseHydraFlow.mockReturnValue(defaultContext({ addRepoByPath }))
+    render(<SessionSidebar />)
+    fireEvent.click(screen.getByLabelText('Add repo'))
+    await vi.waitFor(() => {
+      expect(screen.getByText('repos')).toBeDefined()
+    })
+    fireEvent.click(screen.getByText('repos'))
+    await vi.waitFor(() => {
+      expect(screen.getByText('/home/user/repos')).toBeDefined()
+      expect(screen.getByText('insightmesh')).toBeDefined()
+    })
+    fireEvent.click(screen.getByText('Use This Folder'))
+    await vi.waitFor(() => {
+      expect(addRepoByPath).toHaveBeenCalledWith('/home/user/repos')
+      expect(screen.queryByText('Use This Folder')).toBeNull()
+    })
+  })
+
+  it('shows error and keeps panel open when addRepoByPath fails', async () => {
+    const addRepoByPath = vi.fn().mockResolvedValue({ ok: false, error: 'not a git repository: /home/user' })
     mockUseHydraFlow.mockReturnValue(
-      defaultContext({ addRepoFromPicker })
+      defaultContext({ addRepoByPath })
     )
     render(<SessionSidebar />)
     fireEvent.click(screen.getByLabelText('Add repo'))
-    fireEvent.click(screen.getByText('Pick Folder'))
     await vi.waitFor(() => {
-      expect(screen.getByText('No folder selected')).toBeDefined()
-      expect(screen.getByText('Pick Folder')).toBeDefined()
+      expect(screen.getByText('Use This Folder')).toBeDefined()
+      expect(screen.getByText('repos')).toBeDefined()
+    })
+    fireEvent.click(screen.getByText('Use This Folder'))
+    await vi.waitFor(() => {
+      expect(screen.getByText('not a git repository: /home/user')).toBeDefined()
+      expect(screen.getByText('Use This Folder')).toBeDefined()
     })
   })
 
-  it('shows fallback error when picker callback is missing', async () => {
-    mockUseHydraFlow.mockReturnValue(defaultContext({ addRepoFromPicker: undefined }))
+  it('shows browse error when filesystem API fails', async () => {
+    global.fetch = vi.fn(async (url) => {
+      const rawUrl = String(url || '')
+      if (rawUrl.includes('/api/fs/roots')) {
+        return { ok: false, json: async () => ({ error: 'Failed to load folders' }) }
+      }
+      return { ok: false, json: async () => ({ error: 'Failed to browse folders' }) }
+    })
     render(<SessionSidebar />)
     fireEvent.click(screen.getByLabelText('Add repo'))
-    fireEvent.click(screen.getByText('Pick Folder'))
     await vi.waitFor(() => {
-      expect(screen.getByText('Folder picker is unavailable')).toBeDefined()
+      expect(screen.getByText('Failed to load folders')).toBeDefined()
     })
   })
 })

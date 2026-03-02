@@ -160,6 +160,39 @@ async def _pick_folder_with_dialog() -> str | None:
     return None
 
 
+def _allowed_repo_roots() -> tuple[str, ...]:
+    """Return normalized filesystem roots that repo browsing is allowed within."""
+    roots = [
+        os.path.realpath(str(Path.home())),
+        os.path.realpath(tempfile.gettempdir()),
+    ]
+    deduped: list[str] = []
+    for root in roots:
+        if root not in deduped:
+            deduped.append(root)
+    return tuple(deduped)
+
+
+def _normalize_allowed_dir(raw_path: str) -> tuple[Path | None, str | None]:
+    """Validate and normalize a directory path constrained to allowed roots."""
+    candidate = (raw_path or "").strip()
+    if not candidate:
+        return None, "path required"
+    expanded = os.path.expanduser(candidate)
+    normalized = os.path.realpath(expanded)
+    allowed = _allowed_repo_roots()
+    inside_allowed = any(
+        normalized == root or normalized.startswith(f"{root}{os.sep}")
+        for root in allowed
+    )
+    if not inside_allowed:
+        return None, "path must be inside your home directory or temp directory"
+    path = Path(normalized)
+    if not path.is_dir():
+        return None, f"path does not exist: {candidate}"
+    return path, None
+
+
 def _parse_iso_or_none(raw: str | None) -> datetime | None:
     if not raw:
         return None
@@ -2705,6 +2738,74 @@ def create_router(
             return JSONResponse({"error": "Supervisor unavailable"}, status_code=503)
         return JSONResponse({"repos": repos})
 
+    @router.get("/api/fs/roots")
+    async def list_browsable_roots() -> JSONResponse:
+        """Return filesystem roots that are safe to browse from the UI."""
+        roots = [
+            {"name": "Home", "path": _allowed_repo_roots()[0]},
+            {"name": "Temp", "path": _allowed_repo_roots()[-1]},
+        ]
+        # De-duplicate when home and temp resolve to same location.
+        seen: set[str] = set()
+        unique_roots: list[dict[str, str]] = []
+        for root in roots:
+            path = root["path"]
+            if path in seen:
+                continue
+            seen.add(path)
+            unique_roots.append(root)
+        return JSONResponse({"roots": unique_roots})
+
+    @router.get("/api/fs/list")
+    async def list_browsable_directories(
+        path: str | None = Query(default=None),
+    ) -> JSONResponse:
+        """List child directories for the requested path under allowed roots."""
+        allowed_roots = _allowed_repo_roots()
+        target_raw = path or allowed_roots[0]
+        target_path, error = _normalize_allowed_dir(target_raw)
+        if error or target_path is None:
+            return JSONResponse({"error": error or "invalid path"}, status_code=400)
+
+        current = str(target_path)
+        parent: str | None = None
+        parent_candidate = os.path.realpath(str(target_path.parent))
+        inside_allowed_parent = any(
+            parent_candidate == root or parent_candidate.startswith(f"{root}{os.sep}")
+            for root in allowed_roots
+        )
+        if inside_allowed_parent and parent_candidate != current:
+            parent = parent_candidate
+
+        directories: list[dict[str, str]] = []
+        try:
+            for child in sorted(target_path.iterdir(), key=lambda p: p.name.lower()):
+                if not child.is_dir():
+                    continue
+                # Hide dot-directories in the default browser view.
+                if child.name.startswith("."):
+                    continue
+                child_real = os.path.realpath(str(child))
+                inside_allowed_child = any(
+                    child_real == root or child_real.startswith(f"{root}{os.sep}")
+                    for root in allowed_roots
+                )
+                if not inside_allowed_child:
+                    continue
+                directories.append({"name": child.name, "path": child_real})
+        except OSError as exc:
+            return JSONResponse(
+                {"error": f"failed to list directory: {exc}"}, status_code=500
+            )
+
+        return JSONResponse(
+            {
+                "current_path": current,
+                "parent_path": parent,
+                "directories": directories,
+            }
+        )
+
     @router.post("/api/repos")
     async def ensure_repo(req: RepoAddRequest) -> JSONResponse:
         error_payload: tuple[str, int] | None = None
@@ -2802,43 +2903,12 @@ def create_router(
     @router.post("/api/repos/add")
     async def add_repo_by_path(req: RepoAddByPathRequest) -> JSONResponse:  # noqa: PLR0911
         """Register a repo by local filesystem path (does NOT start it)."""
+        repo_path, path_error = _normalize_allowed_dir(req.path)
+        if path_error or repo_path is None:
+            return JSONResponse(
+                {"error": path_error or "invalid path"}, status_code=400
+            )
         raw_path = (req.path or "").strip()
-        if not raw_path:
-            return JSONResponse({"error": "path required"}, status_code=400)
-        home_root = os.path.realpath(str(Path.home()))
-        temp_root = os.path.realpath(tempfile.gettempdir())
-        expanded_input = os.path.expanduser(raw_path)
-        base_root: str | None = None
-        relative_fragment = ""
-        if expanded_input == home_root:
-            base_root = home_root
-        elif expanded_input.startswith(f"{home_root}{os.sep}"):
-            base_root = home_root
-            relative_fragment = expanded_input.removeprefix(f"{home_root}{os.sep}")
-        elif expanded_input == temp_root:
-            base_root = temp_root
-        elif expanded_input.startswith(f"{temp_root}{os.sep}"):
-            base_root = temp_root
-            relative_fragment = expanded_input.removeprefix(f"{temp_root}{os.sep}")
-        if base_root is None:
-            return JSONResponse(
-                {"error": "path must be inside your home directory or temp directory"},
-                status_code=400,
-            )
-        normalized_path = os.path.realpath(os.path.join(base_root, relative_fragment))
-        if normalized_path != base_root and not normalized_path.startswith(
-            f"{base_root}{os.sep}"
-        ):
-            return JSONResponse(
-                {"error": "path must be inside your home directory or temp directory"},
-                status_code=400,
-            )
-        repo_path = Path(normalized_path)
-        if not repo_path.is_dir():
-            return JSONResponse(
-                {"error": f"path does not exist: {raw_path}"},
-                status_code=400,
-            )
         # Validate it's a git repo
         is_git = False
         try:

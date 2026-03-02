@@ -7064,3 +7064,99 @@ class TestPickRepoFolder:
         data = json_mod.loads(resp.body)
         assert resp.status_code == 200
         assert data["path"] == str(repo_dir.resolve())
+
+
+class TestBrowsableFilesystemAPI:
+    """Tests for /api/fs/roots and /api/fs/list endpoints."""
+
+    def _make_router(self, config, event_bus, state, tmp_path):
+        from dashboard_routes import create_router
+        from pr_manager import PRManager
+
+        pr_mgr = PRManager(config, event_bus)
+        return create_router(
+            config=config,
+            event_bus=event_bus,
+            state=state,
+            pr_manager=pr_mgr,
+            get_orchestrator=lambda: None,
+            set_orchestrator=lambda o: None,
+            set_run_task=lambda t: None,
+            ui_dist_dir=tmp_path / "no-dist",
+            template_dir=tmp_path / "no-templates",
+        )
+
+    def _get_endpoint(self, router, target_path: str):
+        for route in router.routes:
+            if (
+                hasattr(route, "path")
+                and route.path == target_path
+                and hasattr(route, "endpoint")
+            ):
+                return route.endpoint
+        msg = f"{target_path} endpoint not found"
+        raise AssertionError(msg)
+
+    @pytest.mark.asyncio
+    async def test_fs_roots_returns_allowed_roots(
+        self,
+        config,
+        event_bus: EventBus,
+        state,
+        tmp_path: Path,
+    ) -> None:
+        import json as json_mod
+
+        router = self._make_router(config, event_bus, state, tmp_path)
+        endpoint = self._get_endpoint(router, "/api/fs/roots")
+        resp = await endpoint()
+        data = json_mod.loads(resp.body)
+        assert resp.status_code == 200
+        assert isinstance(data.get("roots"), list)
+        assert len(data["roots"]) >= 1
+        assert all("path" in root for root in data["roots"])
+
+    @pytest.mark.asyncio
+    async def test_fs_list_rejects_disallowed_path(
+        self,
+        config,
+        event_bus: EventBus,
+        state,
+        tmp_path: Path,
+    ) -> None:
+        import json as json_mod
+
+        router = self._make_router(config, event_bus, state, tmp_path)
+        endpoint = self._get_endpoint(router, "/api/fs/list")
+        resp = await endpoint(path="/")
+        data = json_mod.loads(resp.body)
+        assert resp.status_code == 400
+        assert "inside your home directory or temp directory" in data["error"]
+
+    @pytest.mark.asyncio
+    async def test_fs_list_returns_child_directories(
+        self,
+        config,
+        event_bus: EventBus,
+        state,
+        tmp_path: Path,
+    ) -> None:
+        import json as json_mod
+
+        root = tmp_path / "browse-root"
+        root.mkdir()
+        (root / "repo-a").mkdir()
+        (root / "repo-b").mkdir()
+        (root / ".hidden").mkdir()
+        router = self._make_router(config, event_bus, state, tmp_path)
+        endpoint = self._get_endpoint(router, "/api/fs/list")
+
+        with patch("dashboard_routes._allowed_repo_roots", return_value=(str(root),)):
+            resp = await endpoint(path=str(root))
+
+        data = json_mod.loads(resp.body)
+        assert resp.status_code == 200
+        names = [item["name"] for item in data["directories"]]
+        assert "repo-a" in names
+        assert "repo-b" in names
+        assert ".hidden" not in names
