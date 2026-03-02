@@ -843,23 +843,75 @@ export function HydraFlowProvider({ children }) {
     } catch { /* ignore */ }
   }, [])
 
+  const parseApiError = useCallback(async (res, fallback) => {
+    try {
+      const body = await res.json()
+      if (body && typeof body.error === 'string' && body.error.trim()) {
+        return body.error
+      }
+    } catch { /* ignore */ }
+    return fallback
+  }, [])
+
   const startRuntime = useCallback(async (slug) => {
     try {
-      await fetch(`/api/runtimes/${encodeURIComponent(slug)}/start`, { method: 'POST' })
-      await fetchRuntimes()
+      const encodedSlug = encodeURIComponent(slug)
+      const runtimeRes = await fetch(`/api/runtimes/${encodedSlug}/start`, {
+        method: 'POST',
+      })
+      if (runtimeRes.ok) {
+        await Promise.all([fetchRuntimes(), fetchRepos()])
+        return { ok: true }
+      }
+
+      // Compatibility mode: when no runtime registry is configured, start via supervisor.
+      if (runtimeRes.status === 404 || runtimeRes.status === 501) {
+        const repoRes = await fetch('/api/repos', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ slug }),
+        })
+        if (!repoRes.ok) {
+          const message = await parseApiError(
+            repoRes,
+            `Failed to start repo (${repoRes.status})`,
+          )
+          return { ok: false, error: message }
+        }
+        await Promise.all([fetchRepos(), fetchRuntimes()])
+        return { ok: true }
+      }
+
+      const message = await parseApiError(
+        runtimeRes,
+        `Failed to start runtime (${runtimeRes.status})`,
+      )
+      return { ok: false, error: message }
     } catch (err) {
       console.warn('Failed to start runtime', slug, err)
+      return { ok: false, error: err?.message || 'Failed to start runtime' }
     }
-  }, [fetchRuntimes])
+  }, [fetchRuntimes, fetchRepos, parseApiError])
 
   const stopRuntime = useCallback(async (slug) => {
     try {
-      await fetch(`/api/runtimes/${encodeURIComponent(slug)}/stop`, { method: 'POST' })
+      const res = await fetch(`/api/runtimes/${encodeURIComponent(slug)}/stop`, {
+        method: 'POST',
+      })
+      if (!res.ok) {
+        const message = await parseApiError(
+          res,
+          `Failed to stop runtime (${res.status})`,
+        )
+        return { ok: false, error: message }
+      }
       await fetchRuntimes()
+      return { ok: true }
     } catch (err) {
       console.warn('Failed to stop runtime', slug, err)
+      return { ok: false, error: err?.message || 'Failed to stop runtime' }
     }
-  }, [fetchRuntimes])
+  }, [fetchRuntimes, parseApiError])
 
   const removeRepo = useCallback(async (repoSlug) => {
     const slug = (repoSlug || '').trim()
@@ -1213,7 +1265,7 @@ export function HydraFlowProvider({ children }) {
   const repoFilteredSessions = useMemo(() => {
     if (!state.selectedRepoSlug) return state.sessions
     return state.sessions.filter(s => {
-      const slug = (s.repo || '').replace('/', '-')
+      const slug = String(s.repo || '').replace(/[\\/]+/g, '-')
       return slug === state.selectedRepoSlug
     })
   }, [state.sessions, state.selectedRepoSlug])

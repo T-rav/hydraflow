@@ -237,6 +237,16 @@ describe('SessionSidebar selection', () => {
     fireEvent.click(screen.getByText('2✓'))
     expect(selectSession).toHaveBeenCalledWith(SESSION_A.id)
   })
+
+  it('calls selectRepo with canonical slug when clicking repo header', () => {
+    const selectRepo = vi.fn()
+    mockUseHydraFlow.mockReturnValue(
+      defaultContext({ sessions: [SESSION_A], selectRepo })
+    )
+    render(<SessionSidebar />)
+    fireEvent.click(screen.getByText('org/repo'))
+    expect(selectRepo).toHaveBeenCalledWith('org-repo')
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -705,6 +715,16 @@ describe('SessionSidebar per-repo Start/Stop', () => {
     render(<SessionSidebar />)
     expect(screen.getByText('Start')).toBeDefined()
     expect(screen.queryByLabelText('Disconnect repo')).toBeNull()
+  })
+
+  it('session-only repo Start uses canonical runtime slug', () => {
+    const startRuntime = vi.fn()
+    mockUseHydraFlow.mockReturnValue(
+      defaultContext({ sessions: [SESSION_A], startRuntime })
+    )
+    render(<SessionSidebar />)
+    fireEvent.click(screen.getByText('Start'))
+    expect(startRuntime).toHaveBeenCalledWith('org-repo')
   })
 })
 

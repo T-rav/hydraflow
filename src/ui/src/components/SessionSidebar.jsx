@@ -8,6 +8,10 @@ function shortRepo(repo) {
   return parts.length > 1 ? parts[parts.length - 1] : repo
 }
 
+function canonicalRepoSlug(repo) {
+  return String(repo || '').trim().replace(/[\\/]+/g, '-')
+}
+
 export function SessionSidebar() {
   const {
     sessions,
@@ -29,6 +33,7 @@ export function SessionSidebar() {
   const [hoveredSession, setHoveredSession] = useState(null)
   const [hoveredDeleteId, setHoveredDeleteId] = useState(null)
   const [addRepoError, setAddRepoError] = useState('')
+  const [runtimeError, setRuntimeError] = useState('')
   const [isAddRepoSubmitting, setIsAddRepoSubmitting] = useState(false)
 
   const repoEntries = useMemo(() => {
@@ -50,7 +55,7 @@ export function SessionSidebar() {
     }
 
     for (const session of sessions) {
-      const slug = shortRepo(session.repo)
+      const slug = canonicalRepoSlug(session.repo) || shortRepo(session.repo)
       const key = slug || session.repo
       const entry = ensureEntry(key, slug, session.repo)
       entry.sessions.push(session)
@@ -58,7 +63,7 @@ export function SessionSidebar() {
 
     for (const repo of supervisedRepos || []) {
       if (!repo) continue
-      const slug = repo.slug || shortRepo(repo.path || '')
+      const slug = repo.slug || canonicalRepoSlug(repo.path || '') || shortRepo(repo.path || '')
       let entryKey = (slug && slugIndex.get(slug)) || slug
       let entry = entryKey ? entries.get(entryKey) : undefined
       if (!entry) {
@@ -133,6 +138,16 @@ export function SessionSidebar() {
     }
   }
 
+  const handleRuntimeToggle = async (e, slug, isRunning) => {
+    e.stopPropagation()
+    setRuntimeError('')
+    const action = isRunning ? stopRuntime : startRuntime
+    const result = await action(slug)
+    if (result && result.ok === false) {
+      setRuntimeError(result.error || `Failed to ${isRunning ? 'stop' : 'start'} repo runtime`)
+    }
+  }
+
   return (
     <div style={styles.sidebar}>
       <div style={styles.header}>
@@ -161,6 +176,9 @@ export function SessionSidebar() {
       </div>
       {addRepoError && (
         <div style={styles.addRepoErrorMsg} role="alert">{addRepoError}</div>
+      )}
+      {runtimeError && (
+        <div style={styles.addRepoErrorMsg} role="alert">{runtimeError}</div>
       )}
 
       <div style={styles.list}>
@@ -193,7 +211,7 @@ export function SessionSidebar() {
                 </div>
                 <div style={styles.repoMeta}>
                   <button
-                    onClick={(e) => { e.stopPropagation(); isRunning ? stopRuntime(entry.slug) : startRuntime(entry.slug) }}
+                    onClick={(e) => { handleRuntimeToggle(e, entry.slug, isRunning) }}
                     style={isRunning ? styles.repoStopBtn : styles.repoStartBtn}
                     title={isRunning ? 'Stop this repo runtime' : 'Start this repo runtime'}
                   >
