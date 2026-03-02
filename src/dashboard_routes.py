@@ -178,15 +178,24 @@ def _normalize_allowed_dir(raw_path: str) -> tuple[Path | None, str | None]:
     candidate = (raw_path or "").strip()
     if not candidate:
         return None, "path required"
-    resolved = Path(candidate).expanduser().resolve()
-    allowed_root: Path | None = None
+    expanded = os.path.expanduser(candidate)
+    if "\x00" in expanded:
+        return None, "invalid path"
+    resolved: Path | None = None
     for root in _allowed_repo_roots():
         root_path = Path(root).resolve()
         with contextlib.suppress(ValueError):
-            resolved.relative_to(root_path)
-            allowed_root = root_path
+            rel = os.path.relpath(expanded, str(root_path))
+            if rel in {"", "."}:
+                candidate_path = root_path
+            elif rel == ".." or rel.startswith(f"..{os.sep}"):
+                continue
+            else:
+                candidate_path = (root_path / rel).resolve()
+            candidate_path.relative_to(root_path)
+            resolved = candidate_path
             break
-    if allowed_root is None:
+    if resolved is None:
         return None, "path must be inside your home directory or temp directory"
     if not resolved.is_dir():
         return None, f"path does not exist: {candidate}"
