@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import importlib
 import logging
+import os
 import tempfile
 import time
 from collections import Counter
@@ -101,15 +102,6 @@ _INFERENCE_COUNTER_KEYS: tuple[str, ...] = (
     "cache_hits",
     "cache_misses",
 )
-
-
-def _is_allowed_local_repo_path(path: Path) -> bool:
-    """Allow user-supplied repo paths only under trusted local roots."""
-    roots = (
-        Path.home().resolve(),
-        Path(tempfile.gettempdir()).resolve(),
-    )
-    return any(path.is_relative_to(root) for root in roots)
 
 
 def _parse_iso_or_none(raw: str | None) -> datetime | None:
@@ -2757,13 +2749,21 @@ def create_router(
         raw_path = (req.path or "").strip()
         if not raw_path:
             return JSONResponse({"error": "path required"}, status_code=400)
-        repo_path = Path(raw_path).expanduser().resolve()
+        normalized_path = os.path.realpath(os.path.expanduser(raw_path))
+        repo_path = Path(normalized_path)
         if not repo_path.is_dir():
             return JSONResponse(
                 {"error": f"path does not exist: {raw_path}"},
                 status_code=400,
             )
-        if not _is_allowed_local_repo_path(repo_path):
+        allowed_roots = (
+            os.path.realpath(str(Path.home())),
+            os.path.realpath(tempfile.gettempdir()),
+        )
+        if not any(
+            os.path.commonpath([normalized_path, root]) == root
+            for root in allowed_roots
+        ):
             return JSONResponse(
                 {"error": "path must be inside your home directory or temp directory"},
                 status_code=400,
