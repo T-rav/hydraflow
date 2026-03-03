@@ -849,6 +849,18 @@ export function HydraFlowProvider({ children }) {
       if (body && typeof body.error === 'string' && body.error.trim()) {
         return body.error
       }
+      if (body && typeof body.detail === 'string' && body.detail.trim()) {
+        return body.detail
+      }
+      if (Array.isArray(body?.detail) && body.detail.length > 0) {
+        const parts = body.detail
+          .map((item) => {
+            if (item && typeof item.msg === 'string') return item.msg
+            return ''
+          })
+          .filter(Boolean)
+        if (parts.length > 0) return parts.join('; ')
+      }
     } catch { /* ignore */ }
     return fallback
   }, [])
@@ -857,23 +869,36 @@ export function HydraFlowProvider({ children }) {
     return String(value || '').trim().replace(/[\\/]+/g, '-').toLowerCase()
   }, [])
 
-  const postJsonCompat = useCallback(async (url, payload) => {
+  const postCompat = useCallback(async (url, options) => {
+    const payloads = Array.isArray(options?.payloads) ? options.payloads : []
+    const queryPayloads = Array.isArray(options?.queryPayloads) ? options.queryPayloads : []
     const baseInit = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     }
-    let res = await fetch(url, {
-      ...baseInit,
-      body: JSON.stringify(payload),
-    })
-    if (res.status === 422) {
-      // Some dashboard backends expect wrapped payloads: { req: { ... } }.
-      res = await fetch(url, {
+    let last = null
+
+    for (const payload of payloads) {
+      const res = await fetch(url, {
         ...baseInit,
-        body: JSON.stringify({ req: payload }),
+        body: JSON.stringify(payload),
       })
+      last = res
+      if (res.status !== 422) return res
     }
-    return res
+
+    for (const qp of queryPayloads) {
+      const params = new URLSearchParams()
+      for (const [key, value] of Object.entries(qp || {})) {
+        params.set(key, String(value ?? ''))
+      }
+      const queryUrl = `${url}?${params.toString()}`
+      const res = await fetch(queryUrl, { method: 'POST' })
+      last = res
+      if (res.status !== 422) return res
+    }
+
+    return last || fetch(url, { method: 'POST' })
   }, [])
 
   const startRuntime = useCallback(async (slug, repoPath = null) => {
@@ -889,7 +914,15 @@ export function HydraFlowProvider({ children }) {
 
       // Compatibility mode: when runtime registry route is unavailable, start via supervisor.
       if (runtimeRes.status === 404 || runtimeRes.status === 405 || runtimeRes.status === 501) {
-        const repoRes = await postJsonCompat('/api/repos', { slug })
+        const repoRes = await postCompat('/api/repos', {
+          payloads: [
+            { slug },
+            { req: { slug } },
+            { repo: slug },
+            { req: { repo: slug } },
+          ],
+          queryPayloads: [{ slug }, { repo: slug }],
+        })
         // Older backends may not support POST /api/repos; fallback to /api/repos/add by path.
         if (repoRes.status === 404 || repoRes.status === 405) {
           let path = String(repoPath || '').trim()
@@ -915,7 +948,15 @@ export function HydraFlowProvider({ children }) {
           if (!path) {
             return { ok: false, error: `Repo not found for slug: ${slug}` }
           }
-          const addRes = await postJsonCompat('/api/repos/add', { path })
+          const addRes = await postCompat('/api/repos/add', {
+            payloads: [
+              { path },
+              { req: { path } },
+              { repo_path: path },
+              { req: { repo_path: path } },
+            ],
+            queryPayloads: [{ path }, { repo_path: path }],
+          })
           if (!addRes.ok) {
             const message = await parseApiError(
               addRes,
@@ -946,7 +987,7 @@ export function HydraFlowProvider({ children }) {
       console.warn('Failed to start runtime', slug, err)
       return { ok: false, error: err?.message || 'Failed to start runtime' }
     }
-  }, [fetchRuntimes, fetchRepos, parseApiError, canonicalSlug, postJsonCompat])
+  }, [fetchRuntimes, fetchRepos, parseApiError, canonicalSlug, postCompat])
 
   const stopRuntime = useCallback(async (slug) => {
     try {
