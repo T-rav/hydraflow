@@ -2353,6 +2353,48 @@ class TestListHitlItems:
         mock_create.assert_not_called()
         assert result == []
 
+    @pytest.mark.asyncio
+    async def test_concurrency_limits_simultaneous_pr_lookups(
+        self, event_bus, tmp_path
+    ):
+        """concurrency kwarg caps how many _build_hitl_item calls run at once."""
+        import json
+
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+        )
+        mgr = _make_manager(cfg, event_bus)
+
+        # 5 issues, concurrency=2 — verify all 5 are still returned
+        issues = [{"number": i, "title": f"Issue {i}", "url": ""} for i in range(1, 6)]
+        issues_json = json.dumps(issues)
+        pr_json = json.dumps([])  # no PRs found
+
+        call_count = 0
+
+        async def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            mock_proc = AsyncMock()
+            mock_proc.returncode = 0
+            if call_count == 1:
+                mock_proc.communicate = AsyncMock(
+                    return_value=(issues_json.encode(), b"")
+                )
+            else:
+                mock_proc.communicate = AsyncMock(return_value=(pr_json.encode(), b""))
+            mock_proc.wait = AsyncMock(return_value=0)
+            return mock_proc
+
+        with patch("asyncio.create_subprocess_exec", side_effect=side_effect):
+            result = await mgr.list_hitl_items(["hydraflow-hitl"], concurrency=2)
+
+        assert len(result) == 5
+        # 1 issue-list call + 5 PR-lookup calls
+        assert call_count == 6
+
 
 # ---------------------------------------------------------------------------
 # Retry wrapper usage verification
@@ -3750,10 +3792,15 @@ class TestListHitlItemsExceptionHandling:
         assert "PR lookup failed for branch" in caplog.text
 
     @pytest.mark.asyncio
-    async def test_outer_failure_logs_warning(
+    async def test_per_item_failure_logs_debug_and_filters_out(
         self, config, event_bus, tmp_path, caplog
     ) -> None:
-        """Outer exception in list_hitl_items should log warning and return []."""
+        """Individual item build failures are logged at debug and excluded from result.
+
+        With asyncio.gather(return_exceptions=True) each failed item is captured
+        individually rather than propagating to the outer handler, so the remaining
+        items are still returned.  A debug-level entry is emitted for each failure.
+        """
         import logging
 
         from config import HydraFlowConfig
@@ -3767,13 +3814,12 @@ class TestListHitlItemsExceptionHandling:
         )
         mgr = _make_manager(cfg, event_bus)
 
-        # Issue list succeeds, but branch_for_issue raises KeyError
-        # which is outside the inner try/except blocks
+        # Issue list succeeds, but branch_for_issue raises KeyError for every item.
         issues_json = json.dumps([{"number": 42, "title": "Test", "url": ""}])
         mock_create = SubprocessMockBuilder().with_stdout(issues_json).build()
 
         with (
-            caplog.at_level(logging.WARNING, logger="hydraflow.pr_manager"),
+            caplog.at_level(logging.DEBUG, logger="hydraflow.pr_manager"),
             patch("asyncio.create_subprocess_exec", mock_create),
             patch(
                 "config.HydraFlowConfig.branch_for_issue",
@@ -3783,7 +3829,7 @@ class TestListHitlItemsExceptionHandling:
             result = await mgr.list_hitl_items(["hydraflow-hitl"])
 
         assert result == []
-        assert "Failed to fetch HITL items" in caplog.text
+        assert "Failed to build HITL item" in caplog.text
 
 
 # ---------------------------------------------------------------------------

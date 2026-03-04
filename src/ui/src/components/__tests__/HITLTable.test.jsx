@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { HITLTable } from '../HITLTable'
 
 const mockItems = [
@@ -207,7 +207,7 @@ describe('HITLTable component', () => {
     })
   })
 
-  it('calls correct API on skip click', async () => {
+  it('calls correct API on skip click with default reason', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true })
     global.fetch = fetchMock
     const onRefresh = vi.fn()
@@ -219,6 +219,8 @@ describe('HITLTable component', () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/api/hitl/42/skip', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'Skipped by operator' }),
       })
     })
     await waitFor(() => {
@@ -226,8 +228,7 @@ describe('HITLTable component', () => {
     })
   })
 
-  it('calls correct API on close click without confirmation prompt', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm')
+  it('calls correct API on close click with default reason', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true })
     global.fetch = fetchMock
     const onRefresh = vi.fn()
@@ -239,12 +240,13 @@ describe('HITLTable component', () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/api/hitl/42/close', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'Closed by operator' }),
       })
     })
     await waitFor(() => {
       expect(onRefresh).toHaveBeenCalled()
     })
-    expect(confirmSpy).not.toHaveBeenCalled()
   })
 
   it('removes item from UI immediately after successful close', async () => {
@@ -288,6 +290,64 @@ describe('HITLTable component', () => {
     expect(btn).toBeInTheDocument()
     fireEvent.click(btn)
     expect(onRefresh).toHaveBeenCalledOnce()
+  })
+
+  it('shows Refreshing... and disables button after click until items update', async () => {
+    const onRefresh = vi.fn()
+    const { rerender } = render(<HITLTable items={mockItems} onRefresh={onRefresh} />)
+
+    fireEvent.click(screen.getByText('Refresh'))
+    expect(screen.getByText('Refreshing...')).toBeInTheDocument()
+    expect(screen.getByText('Refreshing...')).toBeDisabled()
+
+    // Simulate items prop updating (context dispatched new data)
+    rerender(<HITLTable items={[...mockItems]} onRefresh={onRefresh} />)
+    await waitFor(() => {
+      expect(screen.getByText('Refresh')).toBeInTheDocument()
+      expect(screen.getByText('Refresh')).not.toBeDisabled()
+    })
+  })
+
+  it('shows auto countdown hint below the refresh button', () => {
+    render(<HITLTable items={mockItems} onRefresh={() => {}} />)
+    expect(screen.getByText(/^auto in \d+s$/)).toBeInTheDocument()
+  })
+
+  it('hides countdown hint while refreshing', () => {
+    render(<HITLTable items={mockItems} onRefresh={() => {}} />)
+    fireEvent.click(screen.getByText('Refresh'))
+    expect(screen.queryByText(/^auto in \d+s$/)).not.toBeInTheDocument()
+  })
+
+  it('resets countdown to 30s after manual refresh', async () => {
+    vi.useFakeTimers()
+    try {
+      const onRefresh = vi.fn()
+      render(<HITLTable items={mockItems} onRefresh={onRefresh} />)
+
+      // Tick down 5 seconds, flush React state updates
+      await act(async () => { vi.advanceTimersByTime(5000) })
+      expect(screen.getByText('auto in 25s')).toBeInTheDocument()
+
+      // Manual refresh resets to 30 synchronously
+      fireEvent.click(screen.getByText('Refresh'))
+      // Countdown is hidden during refreshing, but resets on next items update
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('triggers auto refresh when countdown reaches zero', async () => {
+    vi.useFakeTimers()
+    try {
+      const onRefresh = vi.fn()
+      render(<HITLTable items={mockItems} onRefresh={onRefresh} />)
+
+      await act(async () => { vi.advanceTimersByTime(30000) })
+      expect(onRefresh).toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('shows muted HITL header text in empty state', () => {

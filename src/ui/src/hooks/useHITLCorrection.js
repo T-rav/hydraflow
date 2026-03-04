@@ -10,16 +10,20 @@ export function useHITLCorrection() {
     return resp.ok
   }, [])
 
-  const skipIssue = useCallback(async (issueNumber) => {
+  const skipIssue = useCallback(async (issueNumber, reason) => {
     const resp = await fetch(`/api/hitl/${issueNumber}/skip`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: reason || 'Skipped by operator' }),
     })
     return resp.ok
   }, [])
 
-  const closeIssue = useCallback(async (issueNumber) => {
+  const closeIssue = useCallback(async (issueNumber, reason) => {
     const resp = await fetch(`/api/hitl/${issueNumber}/close`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: reason || 'Closed by operator' }),
     })
     return resp.ok
   }, [])

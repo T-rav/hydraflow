@@ -1559,19 +1559,44 @@ class PRManager:
             return "", False
         return str(data.get("headRefName", "")), bool(data.get("isDraft", False))
 
-    async def list_hitl_items(self, hitl_labels: list[str]) -> list[HITLItem]:
+    async def list_hitl_items(
+        self,
+        hitl_labels: list[str],
+        *,
+        concurrency: int = 10,
+    ) -> list[HITLItem]:
         """Fetch HITL issues and look up their associated PRs.
 
         For each HITL label, fetches open issues, deduplicates by issue
         number, then looks up the associated PR via the ``agent/issue-N``
         branch convention.  Returns ``[]`` in dry-run mode or on failure.
+
+        PR lookups run in parallel, capped at *concurrency* simultaneous
+        ``gh api`` calls (default 10) to avoid hammering the GitHub API
+        when there are many open HITL issues.
         """
         if self._config.dry_run:
             return []
 
         try:
             raw_issues = await self._fetch_hitl_raw_issues(hitl_labels)
-            return [await self._build_hitl_item(issue) for issue in raw_issues]
+            sem = asyncio.Semaphore(concurrency)
+
+            async def _guarded(issue: dict[str, Any]) -> HITLItem:
+                async with sem:
+                    return await self._build_hitl_item(issue)
+
+            results = await asyncio.gather(
+                *[_guarded(issue) for issue in raw_issues],
+                return_exceptions=True,
+            )
+            items: list[HITLItem] = []
+            for r in results:
+                if isinstance(r, BaseException):
+                    logger.debug("Failed to build HITL item", exc_info=r)
+                else:
+                    items.append(r)
+            return items
         except (RuntimeError, json.JSONDecodeError, KeyError, TypeError):
             logger.warning("Failed to fetch HITL items", exc_info=True)
             return []

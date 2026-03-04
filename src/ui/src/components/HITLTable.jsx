@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { theme } from '../theme'
 import { PIPELINE_STAGES } from '../constants'
 import { useHITLCorrection } from '../hooks/useHITLCorrection'
@@ -21,8 +21,32 @@ export function HITLTable({ items, onRefresh }) {
   )
   const [corrections, setCorrections] = useState({})
   const [actionLoading, setActionLoading] = useState(null)
+  const [actionError, setActionError] = useState({})
   const [closedIssues, setClosedIssues] = useState(() => new Set())
+  const [refreshing, setRefreshing] = useState(false)
+  const [countdown, setCountdown] = useState(30)
+  const onRefreshRef = useRef(onRefresh)
   const { submitCorrection, skipIssue, closeIssue, approveAsMemory, approveProcess } = useHITLCorrection()
+
+  useEffect(() => { onRefreshRef.current = onRefresh }, [onRefresh])
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          onRefreshRef.current()
+          return 30
+        }
+        return prev - 1
+      })
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    setRefreshing(false)
+    setCountdown(30)
+  }, [items])
 
   useEffect(() => {
     setSummaries(prev => {
@@ -112,24 +136,33 @@ export function HITLTable({ items, onRefresh }) {
 
   const handleSkip = async (issueNum) => {
     setActionLoading({ issue: issueNum, action: 'skip' })
-    await skipIssue(issueNum)
+    setActionError(prev => ({ ...prev, [issueNum]: null }))
+    const reason = corrections[issueNum] || ''
+    const ok = await skipIssue(issueNum, reason)
+    if (!ok) {
+      setActionError(prev => ({ ...prev, [issueNum]: 'Skip failed. Try again.' }))
+    }
     setActionLoading(null)
-    setExpandedIssue(null)
+    if (ok) setExpandedIssue(null)
     onRefresh()
   }
 
   const handleClose = async (issueNum) => {
     setActionLoading({ issue: issueNum, action: 'close' })
-    const ok = await closeIssue(issueNum)
+    setActionError(prev => ({ ...prev, [issueNum]: null }))
+    const reason = corrections[issueNum] || ''
+    const ok = await closeIssue(issueNum, reason)
     if (ok) {
       setClosedIssues(prev => {
         const next = new Set(prev)
         next.add(issueNum)
         return next
       })
+      setExpandedIssue(null)
+    } else {
+      setActionError(prev => ({ ...prev, [issueNum]: 'Close failed. Try again.' }))
     }
     setActionLoading(null)
-    setExpandedIssue(null)
     onRefresh()
   }
 
@@ -165,7 +198,18 @@ export function HITLTable({ items, onRefresh }) {
             ? 'HITL'
             : `${visibleItems.length} item${visibleItems.length !== 1 ? 's' : ''} awaiting action`}
         </span>
-        <button onClick={onRefresh} style={styles.refresh}>Refresh</button>
+        <div style={styles.refreshGroup}>
+          <button
+            onClick={() => { setRefreshing(true); setCountdown(30); onRefresh() }}
+            style={styles.refresh}
+            disabled={refreshing}
+          >
+            {refreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
+          <span style={styles.countdownHint}>
+            {refreshing ? '' : `auto in ${countdown}s`}
+          </span>
+        </div>
       </div>
       {visibleItems.length === 0 ? (
         <div style={styles.empty}>No stuck PRs</div>
@@ -349,6 +393,9 @@ export function HITLTable({ items, onRefresh }) {
                             </button>
                           )}
                         </div>
+                        {actionError[item.issue] && (
+                          <div style={styles.actionError}>{actionError[item.issue]}</div>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -445,9 +492,15 @@ const styles = {
     marginBottom: 12,
   },
   headerText: { color: theme.red, fontWeight: 600, fontSize: 13 },
+  refreshGroup: {
+    display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2,
+  },
   refresh: {
     background: theme.surfaceInset, border: `1px solid ${theme.border}`, color: theme.text,
     padding: '4px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 11,
+  },
+  countdownHint: {
+    fontSize: 10, color: theme.textMuted, lineHeight: 1,
   },
   empty: {
     display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -527,6 +580,7 @@ const styles = {
   retryBtn: { ...btnBase, background: theme.btnGreen, color: theme.white },
   skipBtn: { ...btnBase, background: theme.surfaceInset, color: theme.text, border: `1px solid ${theme.border}` },
   closeBtn: { ...btnBase, background: theme.btnRed, color: theme.white },
+  actionError: { marginTop: 6, fontSize: 12, color: theme.red || '#c0392b' },
   approveMemoryBtn: { ...btnBase, background: theme.purple, color: theme.white },
   approveProcessBtn: { ...btnBase, background: theme.btnGreen, color: theme.white },
   memoryCauseBadge: { ...badgeBase, background: theme.purpleSubtle, color: theme.purple },
