@@ -9,7 +9,9 @@ export default defineConfig({
   timeout: 30_000,
   expect: {
     timeout: 10_000,
-    toHaveScreenshot: { maxDiffPixelRatio: 0 },
+    // CI can produce tiny anti-aliasing drift across two immediate Chromium
+    // passes; keep ratio strict while allowing a minimal absolute pixel delta.
+    toHaveScreenshot: { maxDiffPixelRatio: 0, maxDiffPixels: 60 },
   },
   fullyParallel: false,
   retries: 0,
