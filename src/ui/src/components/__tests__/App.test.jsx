@@ -74,6 +74,8 @@ beforeEach(() => {
   mockState.events = []
   mockState.epics = []
   mockState.metrics = null
+  mockState.config = {}
+  mockState.orchestratorStatus = 'running'
   cleanup()
 })
 
@@ -186,6 +188,37 @@ describe('System and Metrics tabs', () => {
     fireEvent.click(screen.getByText('System'))
     fireEvent.click(screen.getByText('Metrics'))
     expect(screen.getByText('Lifetime')).toBeInTheDocument()
+  })
+})
+
+describe('Config warning banner', () => {
+  it('shows warning for likely repo typo configuration', async () => {
+    mockState.config = {
+      repo: 'T-rav/hyrda',
+      find_label: ['hydra-find'],
+      planner_label: ['hydra-plan'],
+      ready_label: ['hydra-ready'],
+      review_label: ['hydra-review'],
+      hitl_label: ['hydra-hitl'],
+    }
+    const { default: App } = await import('../../App')
+    render(<App />)
+    expect(screen.getByTestId('config-warning-banner')).toBeInTheDocument()
+    expect(screen.getByText(/This looks like a typo and can prevent issue pickup/)).toBeInTheDocument()
+  })
+
+  it('does not warn when labels use one consistent family', async () => {
+    mockState.config = {
+      repo: 'T-rav/hydraflow',
+      find_label: ['hydraflow-find'],
+      planner_label: ['hydraflow-plan'],
+      ready_label: ['hydraflow-ready'],
+      review_label: ['hydraflow-review'],
+      hitl_label: ['hydraflow-hitl'],
+    }
+    const { default: App } = await import('../../App')
+    render(<App />)
+    expect(screen.queryByTestId('config-warning-banner')).toBeNull()
   })
 })
 

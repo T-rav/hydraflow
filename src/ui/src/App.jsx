@@ -29,6 +29,42 @@ function SystemAlertBanner({ alert }) {
   )
 }
 
+function detectConfigWarning(config) {
+  if (!config) return ''
+  const repo = String(config.repo || '').trim()
+  const repoLower = repo.toLowerCase()
+  const labels = [
+    ...(config.find_label || []),
+    ...(config.planner_label || []),
+    ...(config.ready_label || []),
+    ...(config.review_label || []),
+    ...(config.hitl_label || []),
+  ].map(label => String(label || '').trim()).filter(Boolean)
+  const families = new Set(
+    labels.map((label) => label.split('-')[0]?.toLowerCase()).filter(Boolean)
+  )
+
+  if (repoLower.includes('/hyrda') || repoLower.endsWith('hyrda')) {
+    return `Config warning: repository is set to "${repo}". This looks like a typo and can prevent issue pickup.`
+  }
+
+  if (families.size > 1) {
+    return `Config warning: mixed pipeline label families detected (${Array.from(families).join(', ')}). Use one label family to avoid missed pickups.`
+  }
+
+  return ''
+}
+
+function ConfigWarningBanner({ warning }) {
+  if (!warning) return null
+  return (
+    <div style={styles.configWarningBanner} data-testid="config-warning-banner">
+      <span style={styles.configWarningIcon}>!</span>
+      <span>{warning}</span>
+    </div>
+  )
+}
+
 function SessionFilterBanner({ session, onClear, liveStats }) {
   if (!session) return null
   const d = new Date(session.started_at)
@@ -61,6 +97,7 @@ function AppContent() {
     currentSessionId,
     stageStatus,
     requestChanges,
+    config,
   } = useHydraFlow()
   const [activeTab, setActiveTab] = useState('issues')
   const [expandedStages, setExpandedStages] = useState({})
@@ -85,6 +122,7 @@ function AppContent() {
       issues_failed: failed,
     }
   }, [selectedSession, currentSessionId, stageStatus])
+  const configWarning = useMemo(() => detectConfigWarning(config), [config])
 
   return (
     <div style={styles.layout}>
@@ -103,6 +141,7 @@ function AppContent() {
           liveStats={selectedSessionLiveStats}
         />
         <SystemAlertBanner alert={systemAlert} />
+        <ConfigWarningBanner warning={configWarning} />
         <HumanInputBanner requests={humanInputRequests} onSubmit={submitHumanInput} />
 
         <div style={styles.tabs} data-testid="main-tabs" role="tablist">
@@ -238,6 +277,30 @@ const styles = {
     fontSize: 11,
     fontWeight: 400,
     opacity: 0.8,
+  },
+  configWarningBanner: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '8px 16px',
+    background: theme.yellowSubtle,
+    borderBottom: `1px solid ${theme.yellow}`,
+    color: theme.yellow,
+    fontSize: 12,
+    fontWeight: 600,
+  },
+  configWarningIcon: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 18,
+    height: 18,
+    borderRadius: '50%',
+    border: `1px solid ${theme.yellow}`,
+    color: theme.yellow,
+    fontSize: 11,
+    fontWeight: 700,
+    flexShrink: 0,
   },
   sessionBanner: {
     display: 'flex',
