@@ -10,6 +10,14 @@ from typing import Any
 
 from .config import DEFAULT_SUPERVISOR_PORT, SUPERVISOR_PORT_FILE
 
+_CONNECT_TIMEOUT_SECONDS = 1.0
+_DEFAULT_READ_TIMEOUT_SECONDS = 1.0
+_READ_TIMEOUT_BY_ACTION_SECONDS: dict[str, float] = {
+    # add_repo may block while the supervisor boots a repo dashboard process
+    # and waits for the health-check port to come up.
+    "add_repo": 25.0,
+}
+
 
 def _read_port() -> int:
     port_file_override = os.environ.get("HF_SUPERVISOR_PORT_FILE")
@@ -28,8 +36,16 @@ def _read_port() -> int:
 
 def _send(request: dict[str, Any]) -> dict[str, Any]:
     port = _read_port()
+    action = str(request.get("action", ""))
+    read_timeout = _READ_TIMEOUT_BY_ACTION_SECONDS.get(
+        action, _DEFAULT_READ_TIMEOUT_SECONDS
+    )
     try:
-        with socket.create_connection(("127.0.0.1", port), timeout=1) as sock:
+        with socket.create_connection(
+            ("127.0.0.1", port), timeout=_CONNECT_TIMEOUT_SECONDS
+        ) as sock:
+            if hasattr(sock, "settimeout"):
+                sock.settimeout(read_timeout)
             sock.sendall((json.dumps(request) + "\n").encode())
             data = sock.recv(65535).decode()
     except ConnectionRefusedError as exc:

@@ -79,6 +79,8 @@ def test_remove_repo_raises_when_server_returns_error(monkeypatch) -> None:
 
 
 def test_send_parses_newline_delimited_json(monkeypatch) -> None:
+    timeout_applied: list[float] = []
+
     class _FakeSocket:
         def __enter__(self):
             return self
@@ -90,6 +92,9 @@ def test_send_parses_newline_delimited_json(monkeypatch) -> None:
             request = json.loads(payload.decode().strip())
             assert request["action"] == "ping"
 
+        def settimeout(self, value: float) -> None:
+            timeout_applied.append(value)
+
         def recv(self, _size: int) -> bytes:
             return b'{"status":"ok"}\n'
 
@@ -99,3 +104,35 @@ def test_send_parses_newline_delimited_json(monkeypatch) -> None:
     )
 
     assert supervisor_client._send({"action": "ping"}) == {"status": "ok"}
+    assert timeout_applied[-1] == supervisor_client._DEFAULT_READ_TIMEOUT_SECONDS
+
+
+def test_send_uses_extended_timeout_for_add_repo(monkeypatch) -> None:
+    timeout_applied: list[float] = []
+
+    class _FakeSocket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def sendall(self, payload: bytes) -> None:
+            request = json.loads(payload.decode().strip())
+            assert request["action"] == "add_repo"
+
+        def settimeout(self, value: float) -> None:
+            timeout_applied.append(value)
+
+        def recv(self, _size: int) -> bytes:
+            return b'{"status":"ok"}\n'
+
+    monkeypatch.setattr(supervisor_client, "_read_port", lambda: 1234)
+    monkeypatch.setattr(
+        supervisor_client.socket, "create_connection", lambda *_a, **_k: _FakeSocket()
+    )
+
+    assert supervisor_client._send({"action": "add_repo", "path": "/tmp"}) == {
+        "status": "ok"
+    }
+    assert timeout_applied[-1] == 25.0

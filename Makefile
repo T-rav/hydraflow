@@ -38,7 +38,10 @@ RESET := \033[0m
 # Docker agent image
 DOCKER_IMAGE ?= ghcr.io/t-rav/hydraflow-agent:latest
 
-.PHONY: help run dev dry-run clean coverage cover smoke test test-fast test-cov lint lint-check lint-fix typecheck security quality quality-lite install setup status ui ui-dev ui-clean ensure-labels prep hot docker-build docker-test deps bundle-assets embed-assets cli-release screenshot screenshot-update
+.PHONY: help run dev dry-run clean coverage cover smoke test test-fast test-cov lint lint-check lint-fix typecheck security quality quality-lite install setup status ui ui-dev ui-clean ensure-labels prep hot docker-build docker-test deps bundle-assets embed-assets cli-release screenshot screenshot-update check-node-ui
+
+check-node-ui:
+	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh --version >/dev/null
 
 help:
 	@echo "$(BLUE)HydraFlow — Intent in. Software out.$(RESET)"
@@ -85,12 +88,12 @@ help:
 	@echo "  PORT             Dashboard port (default: 5555)"
 	@echo "  LOG_DIR          Log directory (default: .hydraflow/logs)"
 
-run:
+run: check-node-ui
 	@mkdir -p $(LOG_DIR)
 	@echo "$(BLUE)Starting HydraFlow — backend :$(PORT) + frontend :5556$(RESET)"
 	@echo "$(GREEN)Open http://localhost:5556 to use the dashboard$(RESET)"
 	@trap 'kill 0' EXIT; \
-	cd $(HYDRAFLOW_DIR)src/ui && npm install --silent 2>/dev/null && npm run dev 2>&1 | tee $(LOG_DIR)/vite.log & \
+	cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh install --silent 2>/dev/null && $(HYDRAFLOW_DIR)scripts/ui-npm.sh run dev 2>&1 | tee $(LOG_DIR)/vite.log & \
 	cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python -m cli \
 		--ready-label $(READY_LABEL) \
 		--max-workers $(WORKERS) \
@@ -191,11 +194,11 @@ smoke: deps
 		tests/test_dashboard_routes.py \
 		tests/test_runner_utils.py \
 		tests/test_stream_parser.py -q
-	@if command -v npm >/dev/null 2>&1; then \
+	@if [ -x "$(HYDRAFLOW_DIR)scripts/ui-npm.sh" ]; then \
 		echo "$(BLUE)Running UI smoke tests...$(RESET)"; \
-		cd $(HYDRAFLOW_DIR)src/ui && npm install --silent && npm test -- src/components/__tests__/App.test.jsx src/hooks/__tests__/useHydraFlowSocket.test.js; \
+		cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh install --silent && $(HYDRAFLOW_DIR)scripts/ui-npm.sh test -- src/components/__tests__/App.test.jsx src/hooks/__tests__/useHydraFlowSocket.test.js; \
 	else \
-		echo "$(YELLOW)Skipping UI smoke tests (npm not found)$(RESET)"; \
+		echo "$(YELLOW)Skipping UI smoke tests (ui-npm helper script not found)$(RESET)"; \
 	fi
 	@echo "$(GREEN)Smoke tests passed$(RESET)"
 
@@ -434,28 +437,28 @@ hot:
 		-d "$$JSON" | python -m json.tool
 	@echo "$(GREEN)Config update sent$(RESET)"
 
-ui:
+ui: check-node-ui
 	@echo "$(BLUE)Building HydraFlow React dashboard...$(RESET)"
-	@cd $(HYDRAFLOW_DIR)src/ui && npm install && npm run build
+	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh install && $(HYDRAFLOW_DIR)scripts/ui-npm.sh run build
 	@echo "$(GREEN)Dashboard built → src/ui/dist/$(RESET)"
 
-ui-dev:
+ui-dev: check-node-ui
 	@echo "$(BLUE)Starting HydraFlow dashboard dev server...$(RESET)"
-	@cd $(HYDRAFLOW_DIR)src/ui && npm install && npm run dev
+	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh install && $(HYDRAFLOW_DIR)scripts/ui-npm.sh run dev
 
 ui-clean:
 	@echo "$(YELLOW)Cleaning dashboard build artifacts...$(RESET)"
 	@rm -rf $(HYDRAFLOW_DIR)src/ui/dist $(HYDRAFLOW_DIR)src/ui/node_modules
 	@echo "$(GREEN)Dashboard cleaned$(RESET)"
 
-screenshot:
+screenshot: check-node-ui
 	@echo "$(BLUE)Capturing deterministic screenshots...$(RESET)"
-	@cd $(HYDRAFLOW_DIR)src/ui && npm ci && npx playwright install --with-deps chromium && npm run screenshot
+	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh ci && $(HYDRAFLOW_DIR)scripts/ui-npm.sh exec playwright install --with-deps chromium && $(HYDRAFLOW_DIR)scripts/ui-npm.sh run screenshot
 	@echo "$(GREEN)Screenshots captured → src/ui/e2e/screenshots/$(RESET)"
 
-screenshot-update:
+screenshot-update: check-node-ui
 	@echo "$(BLUE)Updating screenshot baselines...$(RESET)"
-	@cd $(HYDRAFLOW_DIR)src/ui && npm ci && npx playwright install --with-deps chromium && npm run screenshot:update
+	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh ci && $(HYDRAFLOW_DIR)scripts/ui-npm.sh exec playwright install --with-deps chromium && $(HYDRAFLOW_DIR)scripts/ui-npm.sh run screenshot:update
 	@echo "$(GREEN)Screenshot baselines updated → src/ui/e2e/screenshots/$(RESET)"
 
 docker-build:
