@@ -1819,7 +1819,7 @@ def create_router(
         "metrics": (30, 14400),
         "pr_unsticker": (60, 86400),
         "pipeline_poller": (5, 14400),
-        "adr_reviewer": (3600, 604800),
+        "adr_reviewer": (28800, 432000),
     }
 
     @router.post("/api/control/bg-worker/interval")

@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react'
 import { theme } from '../theme'
-import { BACKGROUND_WORKERS, INTERVAL_PRESETS, PIPELINE_POLLER_PRESETS, EDITABLE_INTERVAL_WORKERS, SYSTEM_WORKER_INTERVALS, UNSTICK_BATCH_OPTIONS } from '../constants'
+import { BACKGROUND_WORKERS, INTERVAL_PRESETS, PIPELINE_POLLER_PRESETS, ADR_REVIEWER_PRESETS, EDITABLE_INTERVAL_WORKERS, SYSTEM_WORKER_INTERVALS, UNSTICK_BATCH_OPTIONS } from '../constants'
 import { useHydraFlow } from '../context/HydraFlowContext'
 import { Livestream } from './Livestream'
 import { PipelineControlPanel } from './PipelineControlPanel'
@@ -73,7 +73,7 @@ function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssue
   const isSystem = def.system === true
   const orchRunning = orchestratorStatus === 'running'
   const isEditable = EDITABLE_INTERVAL_WORKERS.has(def.key)
-  const presets = isPipelinePoller ? PIPELINE_POLLER_PRESETS : INTERVAL_PRESETS
+  const presets = isPipelinePoller ? PIPELINE_POLLER_PRESETS : def.key === 'adr_reviewer' ? ADR_REVIEWER_PRESETS : INTERVAL_PRESETS
 
   let dotColor, statusText, lastRun, details
 

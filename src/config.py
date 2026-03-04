@@ -973,8 +973,8 @@ class HydraFlowConfig(BaseModel):
     # ADR Council Review
     adr_review_interval: int = Field(
         default=86400,
-        ge=60,
-        le=604800,
+        ge=28800,
+        le=432000,
         description="Seconds between ADR review cycles",
     )
     adr_review_approval_threshold: int = Field(

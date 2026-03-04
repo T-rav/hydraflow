@@ -118,6 +118,17 @@ export const PIPELINE_POLLER_PRESETS = [
 ]
 
 /**
+ * Preset interval options for the adr_reviewer worker.
+ * Longer cadence — ADR reviews are long-running review cycles.
+ */
+export const ADR_REVIEWER_PRESETS = [
+  { label: '8h', seconds: 28800 },
+  { label: '24h', seconds: 86400 },
+  { label: '2d', seconds: 172800 },
+  { label: '5d', seconds: 432000 },
+]
+
+/**
  * Workers whose interval can be edited from the UI.
  */
 export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'metrics', 'pr_unsticker', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer'])

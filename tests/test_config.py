@@ -4357,6 +4357,39 @@ class TestTimeoutConfigFields:
 
 
 # ---------------------------------------------------------------------------
+# ADR review interval bounds
+# ---------------------------------------------------------------------------
+
+
+class TestAdrReviewIntervalBounds:
+    """Tests for adr_review_interval Field bounds (ge=28800, le=432000)."""
+
+    def test_adr_review_interval_default(self) -> None:
+        config = HydraFlowConfig(repo="test/repo")
+        assert config.adr_review_interval == 86400
+
+    def test_adr_review_interval_accepts_minimum(self) -> None:
+        config = HydraFlowConfig(repo="test/repo", adr_review_interval=28800)
+        assert config.adr_review_interval == 28800
+
+    def test_adr_review_interval_accepts_maximum(self) -> None:
+        config = HydraFlowConfig(repo="test/repo", adr_review_interval=432000)
+        assert config.adr_review_interval == 432000
+
+    def test_adr_review_interval_rejects_below_minimum(self) -> None:
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            HydraFlowConfig(repo="test/repo", adr_review_interval=3600)
+
+    def test_adr_review_interval_rejects_above_maximum(self) -> None:
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            HydraFlowConfig(repo="test/repo", adr_review_interval=604800)
+
+
+# ---------------------------------------------------------------------------
 # Directory properties (log_dir, plans_dir, memory_dir)
 # ---------------------------------------------------------------------------
 
