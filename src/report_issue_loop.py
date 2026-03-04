@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Callable, Coroutine
 from typing import Any
 
@@ -27,6 +28,8 @@ logger = logging.getLogger("hydraflow.report_issue_loop")
 
 class ReportIssueLoop(BaseBackgroundLoop):
     """Processes queued bug reports into GitHub issues via the configured agent."""
+
+    _ISSUE_URL_RE = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/issues/(\d+)")
 
     def __init__(
         self,
@@ -119,7 +122,8 @@ class ReportIssueLoop(BaseBackgroundLoop):
 
         body = "\n".join(body_parts)
         repo = self._config.repo
-        labels = ",".join(self._config.planner_label)
+        labels_list = list(self._config.planner_label)
+        labels = ",".join(labels_list)
 
         prompt = (
             f"Create a GitHub issue in the repo {repo} with the following details.\n\n"
@@ -141,8 +145,9 @@ class ReportIssueLoop(BaseBackgroundLoop):
             "source": "report_issue",
         }
 
+        issue_number = 0
         try:
-            await stream_claude_process(
+            transcript = await stream_claude_process(
                 cmd=cmd,
                 prompt=prompt,
                 cwd=self._config.repo_root,
@@ -153,9 +158,33 @@ class ReportIssueLoop(BaseBackgroundLoop):
                 runner=self._runner,
                 gh_token=self._config.gh_token,
             )
+            issue_number = self._extract_issue_number_from_transcript(transcript)
         except Exception:
             logger.exception("Report issue agent failed for report %s", report.id)
+
+        # Reliability guard: never mark a report as processed until we have a
+        # concrete issue number.
+        if issue_number <= 0:
+            issue_number = await self._pr_manager.create_issue(title, body, labels_list)
+        if issue_number <= 0:
+            logger.error(
+                "Report %s failed: issue was not created via agent or fallback",
+                report.id,
+            )
             return {"processed": 0, "report_id": report.id, "error": True}
 
-        logger.info("Processed report %s: %s", report.id, title)
-        return {"processed": 1, "report_id": report.id}
+        logger.info(
+            "Processed report %s as issue #%d: %s", report.id, issue_number, title
+        )
+        return {"processed": 1, "report_id": report.id, "issue_number": issue_number}
+
+    @classmethod
+    def _extract_issue_number_from_transcript(cls, transcript: str) -> int:
+        """Return issue number parsed from transcript output, or 0 when absent."""
+        match = cls._ISSUE_URL_RE.search(transcript or "")
+        if not match:
+            return 0
+        try:
+            return int(match.group(1))
+        except ValueError:
+            return 0

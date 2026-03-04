@@ -34,6 +34,7 @@ def _make_loop(
     pr_manager.upload_screenshot_gist = AsyncMock(
         return_value="https://gist.example.com/screenshot.png"
     )
+    pr_manager.create_issue = AsyncMock(return_value=123)
     runner = MagicMock()
 
     loop = ReportIssueLoop(
@@ -72,13 +73,15 @@ class TestReportIssueLoopDoWork:
         with patch(
             "report_issue_loop.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
-            mock_stream.return_value = "Issue created"
+            mock_stream.return_value = "https://github.com/acme/repo/issues/77"
             result = await loop._do_work()
 
         assert result is not None
         assert result["processed"] == 1
         assert result["report_id"] == report.id
+        assert result["issue_number"] == 77
         mock_stream.assert_awaited_once()
+        _pr.create_issue.assert_not_awaited()
         assert mock_stream.call_args[1]["gh_token"] == loop._config.gh_token
         # Queue should be empty after processing
         assert state.dequeue_report() is None
@@ -117,9 +120,11 @@ class TestReportIssueLoopDoWork:
         pr_mgr.upload_screenshot_gist.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_agent_failure_does_not_crash(self, tmp_path: Path) -> None:
-        """If the agent subprocess fails, the error is logged and loop continues."""
-        loop, _stop, state, _pr = _make_loop(tmp_path)
+    async def test_agent_failure_falls_back_to_direct_issue_create(
+        self, tmp_path: Path
+    ) -> None:
+        """If agent execution fails, fallback direct issue creation is attempted."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
         report = PendingReport(description="Crash test")
         state.enqueue_report(report)
 
@@ -130,8 +135,32 @@ class TestReportIssueLoopDoWork:
             result = await loop._do_work()
 
         assert result is not None
-        assert result["error"] is True
+        assert result["processed"] == 1
         assert result["report_id"] == report.id
+        assert result["issue_number"] == 123
+        pr_mgr.create_issue.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_returns_error_when_agent_and_fallback_both_fail(
+        self, tmp_path: Path
+    ) -> None:
+        """When neither agent nor fallback creates an issue, report stays failed."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
+        pr_mgr.create_issue.return_value = 0
+        report = PendingReport(description="Still broken")
+        state.enqueue_report(report)
+
+        with patch(
+            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+        ) as mock_stream:
+            mock_stream.return_value = "no url in output"
+            result = await loop._do_work()
+
+        assert result is not None
+        assert result["error"] is True
+        assert result["processed"] == 0
+        assert result["report_id"] == report.id
+        pr_mgr.create_issue.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_dry_run_returns_none(self, tmp_path: Path) -> None:
