@@ -351,18 +351,15 @@ def _find_repo_match(
         return None
 
     if preferred_path:
-        preferred = os.path.normcase(
-            os.path.normpath(os.path.abspath(os.path.expanduser(preferred_path)))
-        )
-        for r in repos:
-            repo_path = r.get("path")
-            if not isinstance(repo_path, str) or not repo_path.strip():
-                continue
-            candidate = os.path.normcase(
-                os.path.normpath(os.path.abspath(os.path.expanduser(repo_path)))
-            )
-            if candidate == preferred:
-                return r
+        with contextlib.suppress(OSError, RuntimeError):
+            preferred = str(Path(preferred_path).resolve(strict=False))
+            for r in repos:
+                repo_path = r.get("path")
+                if not isinstance(repo_path, str) or not repo_path.strip():
+                    continue
+                with contextlib.suppress(OSError, RuntimeError):
+                    if str(Path(repo_path).resolve(strict=False)) == preferred:
+                        return r
 
     # 1. Exact slug match
     result = _slug_match(slug)
