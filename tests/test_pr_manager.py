@@ -715,6 +715,52 @@ class TestUploadScreenshotGist:
         args = mock_exec.call_args[0]
         assert "--public" in args
 
+    @pytest.mark.asyncio
+    async def test_binary_upload_falls_back_to_svg_gist(self, event_bus, tmp_path):
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+        )
+        mgr = _make_manager(cfg, event_bus)
+        png_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII="
+        binary_error = RuntimeError(
+            "Command ('gh', 'gist', 'create', ...) failed (rc=1): "
+            "failed to upload file: binary file not supported"
+        )
+        mgr._run_gh = AsyncMock(
+            side_effect=[
+                binary_error,
+                "https://gist.github.com/testuser/fallback123",
+            ]
+        )
+
+        result = await mgr.upload_screenshot_gist(png_b64)
+
+        assert result == (
+            "https://gist.githubusercontent.com/testuser/fallback123/raw/screenshot.svg"
+        )
+        assert mgr._run_gh.await_count == 2
+        first_call = mgr._run_gh.await_args_list[0].args
+        second_call = mgr._run_gh.await_args_list[1].args
+        assert "--filename" in first_call and "screenshot.png" in first_call
+        assert "--filename" in second_call and "screenshot.svg" in second_call
+
+    @pytest.mark.asyncio
+    async def test_invalid_base64_returns_empty_string(self, event_bus, tmp_path):
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+        )
+        mgr = _make_manager(cfg, event_bus)
+        mgr._run_gh = AsyncMock()
+
+        result = await mgr.upload_screenshot_gist("!!!invalid-base64!!!")
+
+        assert result == ""
+        mgr._run_gh.assert_not_awaited()
+
 
 # ---------------------------------------------------------------------------
 # push_branch
