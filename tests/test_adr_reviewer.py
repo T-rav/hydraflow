@@ -12,7 +12,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from adr_reviewer import ADRCouncilReviewer
 from models import ADRCouncilResult, CouncilVerdict, CouncilVote
-from tests.helpers import ConfigFactory
+from tests.conftest import TaskFactory
+from tests.helpers import ConfigFactory, make_triage_phase
 
 
 def _make_reviewer(
@@ -844,6 +845,105 @@ class TestRouteToTriage:
         routed = await reviewer._route_to_triage(result, reason="rejected")
 
         assert routed is False
+
+
+class TestADRTriageIntegration:
+    """Integration-style coverage for ADR council -> triage routing behavior."""
+
+    @pytest.mark.asyncio
+    async def test_request_changes_routes_to_triage_then_plan_when_ready(
+        self, tmp_path: Path
+    ) -> None:
+        reviewer = _make_reviewer(tmp_path)
+        result = ADRCouncilResult(
+            adr_number=12,
+            adr_title="Rework council handling",
+            final_decision="REQUEST_CHANGES",
+            summary="Needs implementation adjustments",
+            votes=[
+                CouncilVote(
+                    role="architect",
+                    verdict=CouncilVerdict.REQUEST_CHANGES,
+                    reasoning="Adjust pipeline routing",
+                ),
+            ],
+        )
+
+        # Step 1: ADR council routes rework into triage queue.
+        reviewer._prs.create_issue = AsyncMock(return_value=321)
+        routed = await reviewer._route_to_triage(result, reason="changes_requested")
+        assert routed is True
+        reviewer._prs.create_issue.assert_awaited_once()
+
+        created_title = reviewer._prs.create_issue.await_args.args[0]
+        created_body = reviewer._prs.create_issue.await_args.args[1]
+        created_labels = reviewer._prs.create_issue.await_args.kwargs["labels"]
+        assert "ADR-0012" in created_title
+        assert "Council Summary" in created_body
+        assert created_labels == reviewer._config.find_label
+
+        # Step 2: triage picks the created issue and sends it to planning.
+        triage_phase, _state, triage_runner, prs, store, _stop = make_triage_phase(
+            reviewer._config
+        )
+        from models import TriageResult
+
+        triage_task = TaskFactory.create(
+            id=321,
+            title=created_title,
+            body=created_body,
+            tags=list(reviewer._config.find_label),
+        )
+        triage_runner.evaluate = AsyncMock(
+            return_value=TriageResult(issue_number=321, ready=True)
+        )
+        store.get_triageable = lambda _max_count: [triage_task]  # type: ignore[method-assign]
+
+        processed = await triage_phase.triage_issues()
+        assert processed == 1
+        prs.transition.assert_called_once_with(321, "plan")
+        prs.swap_pipeline_labels.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_request_changes_routes_to_hitl_when_triage_not_ready(
+        self, tmp_path: Path
+    ) -> None:
+        reviewer = _make_reviewer(tmp_path)
+        result = ADRCouncilResult(
+            adr_number=22,
+            adr_title="Unclear proposal",
+            final_decision="REQUEST_CHANGES",
+        )
+        reviewer._prs.create_issue = AsyncMock(return_value=654)
+        routed = await reviewer._route_to_triage(result, reason="changes_requested")
+        assert routed is True
+
+        triage_phase, state, triage_runner, prs, store, _stop = make_triage_phase(
+            reviewer._config
+        )
+        from models import TriageResult
+
+        triage_task = TaskFactory.create(
+            id=654,
+            title="[ADR Follow-up] ADR-0022: Council requests changes",
+            body="Needs more details before planning.",
+            tags=list(reviewer._config.find_label),
+        )
+        triage_runner.evaluate = AsyncMock(
+            return_value=TriageResult(
+                issue_number=654,
+                ready=False,
+                reasons=["Missing concrete implementation details"],
+            )
+        )
+        store.get_triageable = lambda _max_count: [triage_task]  # type: ignore[method-assign]
+
+        processed = await triage_phase.triage_issues()
+        assert processed == 1
+        prs.swap_pipeline_labels.assert_called_once_with(
+            654, reviewer._config.hitl_label[0]
+        )
+        assert state.get_hitl_origin(654) == reviewer._config.find_label[0]
 
 
 class TestHandleDuplicate:
