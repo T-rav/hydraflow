@@ -318,7 +318,12 @@ class TestRecordHarnessFailure:
             )
 
             mock_logger.warning.assert_called_once()
-            assert "42" in str(mock_logger.warning.call_args)
+            logged_call = mock_logger.warning.call_args
+            assert logged_call.args[0].startswith(
+                "Failed to record harness failure for issue"
+            )
+            assert logged_call.args[1] == 42
+            assert logged_call.kwargs["exc_info"] is True
 
     def test_passes_pr_number_to_record(self, tmp_path: Path) -> None:
         """Should set pr_number on the FailureRecord when provided."""

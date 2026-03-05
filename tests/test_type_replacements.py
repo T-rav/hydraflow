@@ -75,7 +75,10 @@ class TestDockerSocketProtocol:
         """DockerSocket protocol should be importable from docker_runner."""
         from docker_runner import DockerSocket
 
-        assert DockerSocket is not None
+        required_methods = ("sendall", "recv")
+        for method in required_methods:
+            attr = getattr(DockerSocket, method, None)
+            assert callable(attr), f"DockerSocket missing {method}"
 
     def test_mock_satisfies_protocol(self) -> None:
         """A MagicMock with sendall/recv should satisfy the DockerSocket protocol."""
@@ -98,7 +101,17 @@ class TestContainerLikeProtocol:
         """ContainerLike protocol should be importable from docker_runner."""
         from docker_runner import ContainerLike
 
-        assert ContainerLike is not None
+        required_methods = (
+            "kill",
+            "wait",
+            "start",
+            "remove",
+            "logs",
+            "attach_socket",
+        )
+        for method in required_methods:
+            attr = getattr(ContainerLike, method, None)
+            assert callable(attr), f"ContainerLike missing {method}"
 
     def test_mock_satisfies_protocol(self) -> None:
         """A MagicMock should satisfy the ContainerLike protocol structurally."""
