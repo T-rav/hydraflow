@@ -823,7 +823,42 @@ class ReviewPhase:
             code_scanning_alerts=code_scanning_alerts,
             visual_gate_fn=self.check_visual_gate,
             visual_decision=visual_decision,
+            merge_conflict_fix_fn=self._attempt_post_merge_conflict_fix,
         )
+
+    async def _attempt_post_merge_conflict_fix(
+        self,
+        pr: PRInfo,
+        issue: Task,
+        worker_id: int,
+    ) -> bool:
+        """Attempt conflict resolution after a failed GitHub merge.
+
+        This keeps the standard review path aligned with unsticker behavior:
+        resolve merge conflicts on the branch, push updates, then retry merge.
+        """
+        wt_path = self._config.worktree_path_for_issue(pr.issue_number)
+        if not wt_path.exists():
+            wt_path = await self._worktrees.create(pr.issue_number, pr.branch)
+
+        resolution = await self._conflict_resolver.resolve_merge_conflicts(
+            pr,
+            issue,
+            wt_path,
+            worker_id=worker_id,
+            source="post_merge",
+        )
+        if not resolution.success:
+            return False
+
+        if resolution.used_rebuild:
+            await self._prs.force_push_branch(
+                self._config.worktree_path_for_issue(pr.issue_number),
+                pr.branch,
+            )
+        else:
+            await self._prs.push_branch(wt_path, pr.branch)
+        return True
 
     async def check_visual_gate(
         self,

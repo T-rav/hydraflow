@@ -2041,6 +2041,20 @@ class VisualGateFn(Protocol):
     ) -> bool: ...
 
 
+class MergeConflictFixFn(Protocol):
+    """Async callback for post-merge conflict recovery attempts.
+
+    Returns ``True`` when the conflict was resolved and branch updates were pushed.
+    """
+
+    async def __call__(
+        self,
+        pr: PRInfo,
+        issue: Task,
+        worker_id: int,
+    ) -> bool: ...
+
+
 class StatusCallback(Protocol):
     """Sync callback for background worker status updates.
 
