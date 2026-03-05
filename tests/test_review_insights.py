@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from models import ReviewVerdict
 from review_insights import (
     CATEGORY_DESCRIPTIONS,
+    CATEGORY_ESCALATIONS,
     CATEGORY_KEYWORDS,
     ReviewInsightStore,
     ReviewRecord,
@@ -17,6 +18,7 @@ from review_insights import (
     build_insight_issue_body,
     extract_categories,
     get_common_feedback_section,
+    get_escalation_data,
 )
 
 # ---------------------------------------------------------------------------
@@ -478,3 +480,121 @@ class TestReviewRecordFieldDescriptions:
         assert "summary" in props
         assert "fixes_made" in props
         assert "categories" in props
+
+
+# ---------------------------------------------------------------------------
+# CATEGORY_ESCALATIONS constant
+# ---------------------------------------------------------------------------
+
+
+class TestCategoryEscalations:
+    """Tests for the CATEGORY_ESCALATIONS constant."""
+
+    def test_missing_tests_has_mandatory_block(self) -> None:
+        assert "missing_tests" in CATEGORY_ESCALATIONS
+        esc = CATEGORY_ESCALATIONS["missing_tests"]
+        assert "mandatory_block" in esc
+        assert len(esc["mandatory_block"]) > 50
+
+    def test_missing_tests_has_checklist_items(self) -> None:
+        esc = CATEGORY_ESCALATIONS["missing_tests"]
+        assert "checklist_items" in esc
+        assert len(esc["checklist_items"]) >= 3
+        for item in esc["checklist_items"]:
+            assert item.startswith("- [ ] ")
+
+    def test_missing_tests_has_pre_quality_guidance(self) -> None:
+        esc = CATEGORY_ESCALATIONS["missing_tests"]
+        assert "pre_quality_guidance" in esc
+        assert len(esc["pre_quality_guidance"]) > 20
+
+    def test_all_escalations_have_required_keys(self) -> None:
+        required_keys = {"mandatory_block", "checklist_items", "pre_quality_guidance"}
+        for cat, esc in CATEGORY_ESCALATIONS.items():
+            for key in required_keys:
+                assert key in esc, f"Missing key '{key}' in escalation for '{cat}'"
+
+    def test_escalation_categories_are_valid(self) -> None:
+        for cat in CATEGORY_ESCALATIONS:
+            assert cat in CATEGORY_KEYWORDS, (
+                f"Escalation category '{cat}' not in CATEGORY_KEYWORDS"
+            )
+
+
+# ---------------------------------------------------------------------------
+# get_escalation_data
+# ---------------------------------------------------------------------------
+
+
+class TestGetEscalationData:
+    """Tests for get_escalation_data()."""
+
+    def test_returns_empty_list_when_no_records(self) -> None:
+        assert get_escalation_data([]) == []
+
+    def test_returns_empty_list_when_all_approve(self) -> None:
+        records = [
+            _make_record(verdict=ReviewVerdict.APPROVE, categories=["missing_tests"])
+            for _ in range(5)
+        ]
+        assert get_escalation_data(records) == []
+
+    def test_returns_escalation_for_recurring_category(self) -> None:
+        records = [
+            _make_record(pr_number=i, categories=["missing_tests"]) for i in range(5)
+        ]
+        escalations = get_escalation_data(records, top_n=3)
+        assert len(escalations) == 1
+        esc = escalations[0]
+        assert esc["category"] == "missing_tests"
+        assert esc["count"] == 5
+        assert "mandatory_block" in esc
+        assert "checklist_items" in esc
+        assert "pre_quality_guidance" in esc
+
+    def test_ignores_categories_without_escalation(self) -> None:
+        records = [_make_record(pr_number=i, categories=["naming"]) for i in range(5)]
+        escalations = get_escalation_data(records, top_n=3)
+        # naming has no escalation defined, so should be empty
+        assert len(escalations) == 0
+
+    def test_respects_top_n_limit(self) -> None:
+        records = [
+            _make_record(
+                pr_number=i, categories=["missing_tests", "error_handling", "security"]
+            )
+            for i in range(5)
+        ]
+        escalations = get_escalation_data(records, top_n=1)
+        assert len(escalations) <= 1
+
+    def test_returns_multiple_escalations_for_multiple_recurring(self) -> None:
+        records = [
+            _make_record(pr_number=i, categories=["missing_tests", "error_handling"])
+            for i in range(5)
+        ]
+        escalations = get_escalation_data(records, top_n=3)
+        cats = {e["category"] for e in escalations}
+        assert "missing_tests" in cats
+        assert "error_handling" in cats
+
+    def test_below_threshold_excluded(self) -> None:
+        records = [
+            _make_record(pr_number=1, categories=["missing_tests"]),
+        ]
+        escalations = get_escalation_data(records, top_n=3, threshold=3)
+        assert escalations == []
+
+    def test_default_threshold_is_three(self) -> None:
+        records = [
+            _make_record(pr_number=i, categories=["missing_tests"]) for i in range(3)
+        ]
+        escalations = get_escalation_data(records, top_n=3)
+        assert len(escalations) == 1
+
+    def test_below_default_threshold_excluded(self) -> None:
+        records = [
+            _make_record(pr_number=1, categories=["missing_tests"]),
+        ]
+        escalations = get_escalation_data(records, top_n=3)
+        assert escalations == []

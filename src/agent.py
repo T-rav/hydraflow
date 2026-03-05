@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
@@ -12,7 +13,11 @@ from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from events import EventBus, EventType, HydraFlowEvent
 from models import Task, WorkerResult, WorkerStatus
-from review_insights import ReviewInsightStore, get_common_feedback_section
+from review_insights import (
+    ReviewInsightStore,
+    get_common_feedback_section,
+    get_escalation_data,
+)
 from runner_constants import MEMORY_SUGGESTION_PROMPT
 from subprocess_util import CreditExhaustedError
 
@@ -50,6 +55,28 @@ Run through this checklist before your final commit:
 - [ ] **Existing tests still pass** — your changes don't break unrelated tests
 - [ ] **Commit message matches changes** — "Fixes #N: <summary>" accurately describes what changed
 """
+
+    @staticmethod
+    def _build_self_check_checklist(
+        escalations: list[dict[str, str | int | list[str]]],
+    ) -> str:
+        """Build the self-check checklist, dynamically extending with escalation items."""
+        base = AgentRunner._SELF_CHECK_CHECKLIST
+        if not escalations:
+            return base
+
+        extra_items: list[str] = []
+        for esc in escalations:
+            items = esc.get("checklist_items", [])
+            if isinstance(items, list):
+                extra_items.extend(str(item) for item in items)
+
+        if not extra_items:
+            return base
+
+        escalated = "\n### Escalated Checks (from recurring review feedback)\n"
+        escalated += "\n".join(extra_items) + "\n"
+        return base.rstrip() + "\n" + escalated
 
     def __init__(
         self,
@@ -267,6 +294,35 @@ Run through this checklist before your final commit:
         except Exception:  # noqa: BLE001
             return ""
 
+    def _get_escalation_data(self) -> list[dict[str, str | int | list[str]]]:
+        """Return escalation data for recurring feedback categories.
+
+        Uses the context cache with a separate key. The cache stores
+        JSON-serialized data since the cache interface is typed for strings.
+        Returns an empty list on any error.
+        """
+        try:
+            reviews_path = self._config.memory_dir / "reviews.jsonl"
+
+            def _load_escalations(_cfg: HydraFlowConfig) -> str:
+                recent = self._insights.load_recent(self._config.review_insight_window)
+                data = get_escalation_data(
+                    recent,
+                    threshold=self._config.review_pattern_threshold,
+                )
+                return json.dumps(data)
+
+            raw, _hit = self._context_cache.get_or_load(
+                key="review_escalations",
+                source_path=reviews_path,
+                loader=_load_escalations,
+            )
+            if not raw:
+                return []
+            return json.loads(raw)  # type: ignore[no-any-return]
+        except Exception:  # noqa: BLE001
+            return []
+
     def _summarize_for_prompt(self, text: str, max_chars: int, label: str) -> str:
         """Return text trimmed for prompt efficiency with a traceable note."""
         if len(text) <= max_chars:
@@ -377,6 +433,14 @@ Run through this checklist before your final commit:
             history_after += len(compact_feedback)
             feedback_section = compact_feedback
 
+        escalations = self._get_escalation_data()
+        escalation_section = ""
+        if escalations:
+            blocks = [str(e["mandatory_block"]) for e in escalations]
+            escalation_section = "\n\n" + "\n\n".join(blocks)
+            history_before += len(escalation_section)
+            history_after += len(escalation_section)
+
         manifest_section, memory_section = self._inject_manifest_and_memory()
 
         # Runtime log injection (opt-in)
@@ -414,8 +478,8 @@ Run through this checklist before your final commit:
 3. Run Pre-Quality Review Skill for correctness, plan adherence, and missing tests.
 4. Run Run-Tool Skill: `make lint` → `{test_cmd}` → `make quality`; fix and rerun.
 5. Commit with: "Fixes #{issue.id}: <concise summary>"
-{feedback_section}
-{self._SELF_CHECK_CHECKLIST}
+{feedback_section}{escalation_section}
+{self._build_self_check_checklist(escalations)}
 ## UI Guidelines
 
 - Before creating UI components, search `src/ui/src/components/` for existing patterns to reuse.
@@ -496,6 +560,15 @@ Focus on fixing the root causes, not suppressing warnings.
 
     def _build_pre_quality_review_prompt(self, issue: Task, attempt: int) -> str:
         """Build the pre-quality review/correction skill prompt."""
+        escalations = self._get_escalation_data()
+        escalation_guidance = ""
+        if escalations:
+            guidance_parts = [str(e["pre_quality_guidance"]) for e in escalations]
+            escalation_guidance = (
+                "\n\nEscalated Requirements (from recurring review feedback):\n"
+                + "\n".join(f"- {g}" for g in guidance_parts)
+            )
+
         return f"""You are running the Pre-Quality Review Skill for issue #{issue.id}: {issue.title}.
 
 Attempt: {attempt}
@@ -505,7 +578,7 @@ Scope:
 - add/fix tests for missing coverage and edge cases
 - verify all new functions have type hints and all imports are correct
 - check edge cases: empty inputs, None values, missing keys, boundary conditions
-- apply code fixes directly in this working tree
+- apply code fixes directly in this working tree{escalation_guidance}
 
 Constraints:
 - Do not push or open PRs
