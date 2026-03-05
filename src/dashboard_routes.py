@@ -1376,22 +1376,14 @@ def create_router(
     async def hitl_approve_process(issue_number: int) -> JSONResponse:
         """Approve a HITL item held for issue type review.
 
-        Bug reports → find/triage label (they need triage, not direct planning).
-        Epics and other types → planner label.
+        All issue types (bugs, epics, etc.) route to triage first.
         """
         orch = get_orchestrator()
         if not orch:
             return JSONResponse({"status": "no orchestrator"}, status_code=400)
 
-        # Route based on issue type: bugs go to triage, everything else to planning
-        cause = state.get_hitl_cause(issue_number) or ""
-        is_bug = "bug report detected" in cause.lower()
-        if is_bug and config.find_label:
-            target_label = config.find_label[0]
-            target_stage = "triage"
-        else:
-            target_label = config.planner_label[0]
-            target_stage = "planning"
+        target_label = config.find_label[0]
+        target_stage = "triage"
 
         await pr_manager.swap_pipeline_labels(issue_number, target_label)
 
@@ -1564,8 +1556,6 @@ def create_router(
         "memory_auto_approve",
         "unstick_auto_merge",
         "unstick_all_causes",
-        "auto_process_epics",
-        "auto_process_bug_reports",
         "worktree_base",
         "auto_crate",
     }

@@ -796,6 +796,48 @@ class TestPipelineSnapshot:
         assert plan_issues[0]["title"] == "Issue #999"
         assert plan_issues[0]["url"] == ""
 
+    def test_in_flight_items_appear_in_snapshot(self) -> None:
+        """Items dequeued but not yet marked active must still appear."""
+        store = _make_store()
+        store._route_issues([TaskFactory.create(id=1, tags=["hydraflow-plan"])])
+        store.get_plannable(1)  # dequeues → in-flight
+
+        snapshot = store.get_pipeline_snapshot()
+        plan_issues = snapshot[STAGE_PLAN]
+        assert len(plan_issues) == 1
+        assert plan_issues[0]["issue_number"] == 1
+        assert plan_issues[0]["status"] == "processing"
+
+    def test_in_flight_items_use_cached_details(self) -> None:
+        store = _make_store()
+        task = TaskFactory.create(
+            id=7,
+            title="In-flight task",
+            tags=["test-label"],
+            source_url="https://github.com/org/repo/issues/7",
+        )
+        store._route_issues([task])
+        store.get_implementable(1)
+
+        snapshot = store.get_pipeline_snapshot()
+        ready_issues = snapshot[STAGE_READY]
+        assert len(ready_issues) == 1
+        assert ready_issues[0]["title"] == "In-flight task"
+        assert ready_issues[0]["url"] == "https://github.com/org/repo/issues/7"
+        assert ready_issues[0]["status"] == "processing"
+
+    def test_in_flight_not_duplicated_when_marked_active(self) -> None:
+        """Once marked active, the item should appear once as 'active', not twice."""
+        store = _make_store()
+        store._route_issues([TaskFactory.create(id=1, tags=["hydraflow-plan"])])
+        store.get_plannable(1)
+        store.mark_active(1, STAGE_PLAN)
+
+        snapshot = store.get_pipeline_snapshot()
+        plan_issues = snapshot[STAGE_PLAN]
+        assert len(plan_issues) == 1
+        assert plan_issues[0]["status"] == "active"
+
 
 # ── In-Flight Protection ────────────────────────────────────────────
 
@@ -809,6 +851,7 @@ class TestInFlightProtection:
         store.get_plannable(1)
 
         assert 1 in store._in_flight
+        assert store._in_flight[1] == STAGE_PLAN
 
     def test_mark_active_clears_in_flight(self) -> None:
         store = _make_store()
@@ -906,7 +949,7 @@ class TestInFlightProtection:
 
         store.clear_active()
 
-        assert store._in_flight == set()
+        assert store._in_flight == {}
         assert store._eagerly_transitioned == {}
 
 

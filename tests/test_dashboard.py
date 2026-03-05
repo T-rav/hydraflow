@@ -2201,7 +2201,7 @@ class TestHITLApproveProcessEndpoint:
     def test_bug_report_routes_to_find_label(
         self, config: HydraFlowConfig, event_bus: EventBus, state
     ) -> None:
-        """Bug reports approved from HITL must go to find/triage, not planning."""
+        """Bug reports approved from HITL go to triage first."""
         from fastapi.testclient import TestClient
 
         from dashboard import HydraFlowDashboard
@@ -2227,10 +2227,10 @@ class TestHITLApproveProcessEndpoint:
         assert response.status_code == 200
         assert swapped == [(42, config.find_label[0])]
 
-    def test_epic_routes_to_planner_label(
+    def test_epic_routes_to_find_label(
         self, config: HydraFlowConfig, event_bus: EventBus, state
     ) -> None:
-        """Epic issues approved from HITL go to planning."""
+        """Epic issues approved from HITL also go to triage first."""
         from fastapi.testclient import TestClient
 
         from dashboard import HydraFlowDashboard
@@ -2254,7 +2254,7 @@ class TestHITLApproveProcessEndpoint:
             response = client.post("/api/hitl/42/approve-process")
 
         assert response.status_code == 200
-        assert swapped == [(42, config.planner_label[0])]
+        assert swapped == [(42, config.find_label[0])]
 
     def test_returns_400_without_orchestrator(
         self, config: HydraFlowConfig, event_bus: EventBus, state

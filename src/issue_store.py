@@ -95,7 +95,8 @@ class IssueStore:
         # In-flight protection: items between _take_from_queue and mark_active.
         # Prevents refresh() from re-queuing or evicting items that a phase
         # has dequeued but hasn't yet marked active (semaphore wait gap).
-        self._in_flight: set[int] = set()
+        # Maps task_id → stage so snapshots can include them.
+        self._in_flight: dict[int, str] = {}
 
         # Eager transition protection: items placed by enqueue_transition
         # before GitHub labels have caught up.  Keyed by target stage so
@@ -234,7 +235,9 @@ class IssueStore:
         eviction.
         """
         protected = (
-            set(self._active.keys()) | self._in_flight | set(self._eagerly_transitioned)
+            set(self._active.keys())
+            | set(self._in_flight)
+            | set(self._eagerly_transitioned)
         )
         for stage, q in self._queues.items():
             members = self._queue_members[stage]
@@ -301,7 +304,7 @@ class IssueStore:
             set(self._eagerly_transitioned)
             - incoming_ids
             - set(self._active.keys())
-            - self._in_flight
+            - set(self._in_flight)
         )
         for tid in vanished:
             del self._eagerly_transitioned[tid]
@@ -362,7 +365,7 @@ class IssueStore:
         if stage is None:
             return
 
-        self._in_flight.discard(task.id)
+        self._in_flight.pop(task.id, None)
         self._issue_cache[task.id] = task
         self._remove_from_all_queues(task.id)
         self._hitl_numbers.discard(task.id)
@@ -440,7 +443,8 @@ class IssueStore:
             self._queue_members[stage].add(task.id)
 
         if result:
-            self._in_flight.update(t.id for t in result)
+            for t in result:
+                self._in_flight[t.id] = stage
             self._publish_queue_update_nowait()
         return result
 
@@ -450,13 +454,13 @@ class IssueStore:
 
     def mark_active(self, task_id: int, stage: str) -> None:
         """Mark a task as actively being processed in *stage*."""
-        self._in_flight.discard(task_id)
+        self._in_flight.pop(task_id, None)
         self._active[task_id] = stage
         self._publish_queue_update_nowait()
 
     def mark_complete(self, task_id: int) -> None:
         """Mark a task as done processing; increment throughput counter."""
-        self._in_flight.discard(task_id)
+        self._in_flight.pop(task_id, None)
         stage = self._active.pop(task_id, None)
         if stage and stage in self._processed_count:
             self._processed_count[stage] += 1
@@ -477,7 +481,8 @@ class IssueStore:
         no orphaned in-flight entries survive if a worker exits without
         reaching ``mark_active`` or ``mark_complete``.
         """
-        self._in_flight -= task_ids
+        for tid in task_ids:
+            self._in_flight.pop(tid, None)
 
     def clear_active(self) -> None:
         """Clear all active issue tracking (used during reset)."""
@@ -591,6 +596,29 @@ class IssueStore:
             hitl_list.append(entry)
         return hitl_list
 
+    def _snapshot_in_flight(self) -> dict[str, list[PipelineSnapshotEntry]]:
+        """Return in-flight tasks grouped by their origin stage.
+
+        In-flight items have been dequeued but not yet marked active.
+        Including them in the snapshot prevents them from vanishing
+        in the dashboard during the dequeue-to-mark_active window.
+        """
+        by_stage: dict[str, list[PipelineSnapshotEntry]] = {}
+        for task_id, stage in self._in_flight.items():
+            cached = self._issue_cache.get(task_id)
+            entry = PipelineSnapshotEntry(
+                issue_number=task_id,
+                title=cached.title if cached else f"Issue #{task_id}",
+                url=cached.source_url if cached else "",
+                status="processing",
+            )
+            if cached:
+                epic_meta = self._epic_metadata(cached)
+                if epic_meta:
+                    entry.update(epic_meta)  # type: ignore[typeddict-item]
+            by_stage.setdefault(stage, []).append(entry)
+        return by_stage
+
     def get_pipeline_snapshot(self) -> dict[str, list[PipelineSnapshotEntry]]:
         """Return a snapshot of all pipeline stages with their issues.
 
@@ -598,6 +626,8 @@ class IssueStore:
         ``issue_number``, ``title``, ``url``, ``status``.
         """
         snapshot = self._snapshot_queued()
+        for stage, entries in self._snapshot_in_flight().items():
+            snapshot.setdefault(stage, []).extend(entries)
         for stage, entries in self._snapshot_active().items():
             snapshot.setdefault(stage, []).extend(entries)
         snapshot[STAGE_HITL] = self._snapshot_hitl()
