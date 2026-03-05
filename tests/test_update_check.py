@@ -39,8 +39,12 @@ class TestVersionKey:
     def test_parses_numeric_chunks(self) -> None:
         assert update_check._version_key("1.2.3") == (1, 2, 3)
 
-    def test_stops_when_chunk_has_no_digits(self) -> None:
+    def test_strips_non_digit_chars_from_chunks(self) -> None:
         assert update_check._version_key("1.2beta") == (1, 2)
+
+    def test_stops_at_all_alpha_chunk(self) -> None:
+        # "beta" has no digits at all — the break fires and trailing "3" is ignored
+        assert update_check._version_key("1.beta.3") == (1,)
 
 
 class TestIsNewer:
@@ -48,9 +52,13 @@ class TestIsNewer:
         assert update_check._is_newer("2.0.0", "1.9.9") is True
         assert update_check._is_newer("1.0.1", "1.2.0") is False
 
-    def test_falls_back_to_string_compare(self) -> None:
+    def test_falls_back_to_inequality_when_no_numeric_keys(self) -> None:
+        # Fallback uses `latest != current`, not lexicographic ordering
         assert update_check._is_newer("beta", "alpha") is True
         assert update_check._is_newer("beta", "beta") is False
+        assert (
+            update_check._is_newer("alpha", "beta") is True
+        )  # different → True despite lex order
 
 
 class TestReadCache:
@@ -64,6 +72,9 @@ class TestReadCache:
         cache_path = tmp_path / "cache.json"
         cache_path.write_text("{invalid json")
         assert update_check._read_cache(cache_path) is None
+
+    def test_returns_none_for_missing_file(self, tmp_path: Path) -> None:
+        assert update_check._read_cache(tmp_path / "nonexistent.json") is None
 
 
 class TestLoadCachedUpdateResult:
