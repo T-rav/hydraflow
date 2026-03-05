@@ -290,7 +290,7 @@ class TestGitHubIssue:
 class TestTask:
     """Tests for the Task model and GitHubIssue conversion helpers."""
 
-    def test_defaults(self) -> None:
+    def test_task_accepts_minimal_fields_with_sensible_defaults(self) -> None:
         """Task should accept only id and title with sensible defaults."""
         task = Task(id=1, title="Fix it")
         assert task.id == 1
@@ -2092,7 +2092,7 @@ class TestPrecheckResult:
         assert result.summary == "All good"
         assert result.parse_failed is False
 
-    def test_equality(self) -> None:
+    def test_precheck_result_equal_when_all_fields_match(self) -> None:
         a = PrecheckResult(
             risk="high",
             confidence=0.3,
@@ -2134,12 +2134,12 @@ class TestConflictResolutionResult:
         assert result.success is True
         assert result.used_rebuild is False
 
-    def test_equality(self) -> None:
+    def test_conflict_resolution_result_equal_when_all_fields_match(self) -> None:
         a = ConflictResolutionResult(success=True, used_rebuild=False)
         b = ConflictResolutionResult(success=True, used_rebuild=False)
         assert a == b
 
-    def test_inequality(self) -> None:
+    def test_conflict_resolution_result_not_equal_when_fields_differ(self) -> None:
         a = ConflictResolutionResult(success=True, used_rebuild=False)
         b = ConflictResolutionResult(success=False, used_rebuild=False)
         assert a != b
@@ -2929,7 +2929,7 @@ class TestVisualEvidenceItem:
 class TestVisualEvidence:
     """Tests for the VisualEvidence model."""
 
-    def test_defaults(self) -> None:
+    def test_visual_evidence_has_empty_defaults(self) -> None:
         ev = VisualEvidence()
         assert ev.items == []
         assert ev.summary == ""

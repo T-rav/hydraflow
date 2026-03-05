@@ -134,7 +134,7 @@ class TestADR0021PersistenceArchitecture:
         assert path.exists(), "ADR-0021 file not found"
         return path.read_text()
 
-    def test_title(self, content: str) -> None:
+    def test_adr_has_title_heading(self, content: str) -> None:
         assert "# ADR-0021: Persistence Architecture and Data Layout" in content
 
     def test_status_proposed(self, content: str) -> None:

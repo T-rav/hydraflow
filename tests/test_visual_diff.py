@@ -668,7 +668,9 @@ class TestWriteVisualReport:
 class TestVisualValidationConfig:
     """Tests for visual validation config fields."""
 
-    def test_defaults(self, tmp_path: Path) -> None:
+    def test_visual_validation_config_has_expected_defaults(
+        self, tmp_path: Path
+    ) -> None:
         from config import HydraFlowConfig
 
         cfg = HydraFlowConfig(
