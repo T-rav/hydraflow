@@ -22,6 +22,11 @@ logger = logging.getLogger("hydraflow.subprocess")
 _gh_semaphore: asyncio.Semaphore | None = None
 _GH_DEFAULT_CONCURRENCY = 5
 
+# Global rate-limit cooldown: when ANY call gets a 403 rate limit,
+# ALL callers pause until this timestamp (UTC).
+_rate_limit_until: datetime | None = None
+_RATE_LIMIT_COOLDOWN_SECONDS = 60
+
 
 def configure_gh_concurrency(limit: int) -> None:
     """Set the global GitHub API concurrency limit.
@@ -39,6 +44,37 @@ def _get_gh_semaphore() -> asyncio.Semaphore:
     if _gh_semaphore is None:
         _gh_semaphore = asyncio.Semaphore(_GH_DEFAULT_CONCURRENCY)
     return _gh_semaphore
+
+
+def _is_rate_limited(stderr: str) -> bool:
+    """Check if stderr indicates a GitHub API rate limit (403)."""
+    lower = stderr.lower()
+    return "rate limit" in lower and ("403" in lower or "http 403" in lower)
+
+
+def _trigger_rate_limit_cooldown() -> None:
+    """Set the global cooldown so all callers pause."""
+    global _rate_limit_until  # noqa: PLW0603
+    _rate_limit_until = datetime.now(tz=UTC) + timedelta(
+        seconds=_RATE_LIMIT_COOLDOWN_SECONDS
+    )
+    logger.warning(
+        "GitHub API rate limit hit — pausing ALL gh/git calls for %ds",
+        _RATE_LIMIT_COOLDOWN_SECONDS,
+    )
+
+
+async def _wait_for_rate_limit_cooldown() -> None:
+    """If a global rate-limit cooldown is active, sleep until it expires."""
+    if _rate_limit_until is None:
+        return
+    remaining = (_rate_limit_until - datetime.now(tz=UTC)).total_seconds()
+    if remaining > 0:
+        logger.info(
+            "Rate-limit cooldown active — waiting %.0fs before gh/git call",
+            remaining,
+        )
+        await asyncio.sleep(remaining)
 
 
 class AuthenticationError(RuntimeError):
@@ -261,17 +297,19 @@ async def run_subprocess(
             msg = f"Command {cmd!r} failed (rc={result.returncode}): {result.stderr}"
             if _is_auth_error(result.stderr):
                 raise AuthenticationError(msg)
+            if _is_rate_limited(result.stderr):
+                _trigger_rate_limit_cooldown()
             raise RuntimeError(msg)
         return result.stdout
 
     if use_semaphore:
+        await _wait_for_rate_limit_cooldown()
         async with _get_gh_semaphore():
             return await _exec()
     return await _exec()
 
 
 _RETRYABLE_PATTERNS = (
-    "rate limit",
     "timeout",
     "timed out",
     "connection",
@@ -279,17 +317,20 @@ _RETRYABLE_PATTERNS = (
     "503",
     "504",
 )
+# Rate-limit errors are handled by the global cooldown in run_subprocess(),
+# not by per-call retries which would just amplify the problem.
 _NON_RETRYABLE_PATTERNS = ("401", "403", "404")
 
 
 def _is_retryable_error(stderr: str) -> bool:
-    """Check if a subprocess error indicates a transient/retryable condition."""
+    """Check if a subprocess error indicates a transient/retryable condition.
+
+    Rate-limit errors (403 + "rate limit") are NOT retried per-call;
+    they trigger a global cooldown in :func:`run_subprocess` instead.
+    """
     stderr_lower = stderr.lower()
     for pattern in _NON_RETRYABLE_PATTERNS:
         if pattern in stderr_lower:
-            # 403 with "rate limit" IS retryable
-            if pattern == "403" and "rate limit" in stderr_lower:
-                continue
             return False
     return any(p in stderr_lower for p in _RETRYABLE_PATTERNS)
 
