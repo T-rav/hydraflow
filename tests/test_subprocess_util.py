@@ -65,7 +65,9 @@ async def test_error_message_includes_command_and_returncode() -> None:
         pytest.raises(RuntimeError, match=r"rc=42") as exc_info,
     ):
         await run_subprocess("git", "status")
-    assert "('git', 'status')" in str(exc_info.value)
+    assert exc_info.value.args, "RuntimeError should include a message"
+    message = exc_info.value.args[0]
+    assert "('git', 'status')" in message
 
 
 # --- environment ---
