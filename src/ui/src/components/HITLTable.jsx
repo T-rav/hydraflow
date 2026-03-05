@@ -152,11 +152,14 @@ export function HITLTable({ items, onRefresh }) {
     onRefresh()
   }
 
-  const handleClose = async (issueNum) => {
+  const handleClose = async (issueNum, options = {}) => {
+    const { fallbackReason } = options
     setActionLoading({ issue: issueNum, action: 'close' })
     setActionError(prev => ({ ...prev, [issueNum]: null }))
-    const reason = corrections[issueNum] || ''
-    const ok = await closeIssue(issueNum, reason)
+    const rawReason = corrections[issueNum] || ''
+    const normalizedReason = rawReason.trim()
+    const reasonToSend = normalizedReason ? normalizedReason : (fallbackReason || '')
+    const ok = await closeIssue(issueNum, reasonToSend)
     if (ok) {
       setClosedIssues(prev => {
         const next = new Set(prev)
@@ -382,7 +385,10 @@ export function HITLTable({ items, onRefresh }) {
                               <button
                                 style={styles.closeBtn}
                                 disabled={isAnyActionLoading(item.issue)}
-                                onClick={e => { e.stopPropagation(); handleClose(item.issue) }}
+                                onClick={e => {
+                                  e.stopPropagation()
+                                  handleClose(item.issue, { fallbackReason: 'Rejected by verifier' })
+                                }}
                                 data-testid={`hitl-reject-${item.issue}`}
                               >
                                 {isActionLoading(item.issue, 'close') ? 'Rejecting...' : 'Reject'}

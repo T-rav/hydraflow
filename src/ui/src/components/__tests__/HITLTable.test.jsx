@@ -623,9 +623,51 @@ describe('HITLTable component', () => {
       expect(fetchMock).toHaveBeenCalledWith('/api/hitl/42/close', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: 'Closed by operator' }),
+        body: JSON.stringify({ reason: 'Rejected by verifier' }),
       })
     })
+    await waitFor(() => {
+      expect(onRefresh).toHaveBeenCalled()
+    })
+  })
+
+  it('uses operator-provided reject reason when present for review issues', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true })
+    global.fetch = fetchMock
+    const onRefresh = vi.fn()
+
+    const items = [{ ...mockItems[0], issueTypeReview: true }]
+    render(<HITLTable items={items} onRefresh={onRefresh} />)
+    fireEvent.click(screen.getByTestId('hitl-row-42'))
+    fireEvent.change(screen.getByTestId('hitl-textarea-42'), { target: { value: '  Needs more tests ' } })
+    fireEvent.click(screen.getByTestId('hitl-reject-42'))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/hitl/42/close', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'Needs more tests' }),
+      })
+    })
+    await waitFor(() => {
+      expect(onRefresh).toHaveBeenCalled()
+    })
+  })
+
+  it('surfaces verification errors without collapsing the panel', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false })
+    global.fetch = fetchMock
+    const onRefresh = vi.fn()
+
+    const items = [{ ...mockItems[0], issueTypeReview: true }]
+    render(<HITLTable items={items} onRefresh={onRefresh} />)
+    fireEvent.click(screen.getByTestId('hitl-row-42'))
+    fireEvent.click(screen.getByTestId('hitl-verify-42'))
+
+    await waitFor(() => {
+      expect(screen.getByText('Verify failed. Try again.')).toBeInTheDocument()
+    })
+    expect(screen.getByTestId('hitl-detail-42')).toBeInTheDocument()
     await waitFor(() => {
       expect(onRefresh).toHaveBeenCalled()
     })
