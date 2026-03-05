@@ -76,5 +76,5 @@ class TestADR0020Content:
     def test_references_autoApproveRow_style(self, content: str) -> None:
         assert "autoApproveRow" in content
 
-    def test_references_process_toggles(self, content: str) -> None:
-        assert "ProcessToggles" in content
+    def test_is_superseded(self, content: str) -> None:
+        assert "Superseded" in content
