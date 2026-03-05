@@ -1015,3 +1015,40 @@ class TestPlanPhaseEvidenceValidation:
         assert len(plan_failure_comments) == 1
         assert "after planning attempts" in plan_failure_comments[0]
         assert "after two attempts" not in plan_failure_comments[0]
+
+
+class TestPlanPhaseBatchScaling:
+    """Batch fetch size must scale with max_planners, not use fixed batch_size."""
+
+    @pytest.mark.asyncio
+    async def test_batch_fetch_scales_with_max_planners(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """get_plannable should be called with 2 * max_planners."""
+        from unittest.mock import MagicMock
+
+        phase, _state, _planners, _prs, store, _stop = make_plan_phase(config)
+        store.get_plannable = MagicMock(return_value=[])  # type: ignore[method-assign]
+
+        config.max_planners = 3  # type: ignore[assignment]
+        await phase.plan_issues()
+
+        store.get_plannable.assert_called_once_with(6)
+
+    @pytest.mark.asyncio
+    async def test_batch_fetch_reflects_updated_worker_count(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """After bumping max_planners, the next batch should fetch more."""
+        from unittest.mock import MagicMock
+
+        phase, _state, _planners, _prs, store, _stop = make_plan_phase(config)
+        store.get_plannable = MagicMock(return_value=[])  # type: ignore[method-assign]
+
+        config.max_planners = 1  # type: ignore[assignment]
+        await phase.plan_issues()
+        store.get_plannable.assert_called_with(2)
+
+        config.max_planners = 5  # type: ignore[assignment]
+        await phase.plan_issues()
+        store.get_plannable.assert_called_with(10)

@@ -268,3 +268,40 @@ class TestTriagePhase:
         comment = prs.post_comment.call_args.args[1]
         assert "Needs More Information" in comment
         assert "Missing required ADR sections" in comment
+
+
+class TestTriagePhaseBatchScaling:
+    """Batch fetch size must scale with max_triagers, not use fixed batch_size."""
+
+    @pytest.mark.asyncio
+    async def test_batch_fetch_scales_with_max_triagers(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """get_triageable should be called with 2 * max_triagers."""
+        from unittest.mock import MagicMock
+
+        phase, _state, _triage, _prs, store, _stop = make_triage_phase(config)
+        store.get_triageable = MagicMock(return_value=[])  # type: ignore[method-assign]
+
+        config.max_triagers = 4  # type: ignore[assignment]
+        await phase.triage_issues()
+
+        store.get_triageable.assert_called_once_with(8)
+
+    @pytest.mark.asyncio
+    async def test_batch_fetch_reflects_updated_worker_count(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """After bumping max_triagers, the next batch should fetch more."""
+        from unittest.mock import MagicMock
+
+        phase, _state, _triage, _prs, store, _stop = make_triage_phase(config)
+        store.get_triageable = MagicMock(return_value=[])  # type: ignore[method-assign]
+
+        config.max_triagers = 1  # type: ignore[assignment]
+        await phase.triage_issues()
+        store.get_triageable.assert_called_with(2)
+
+        config.max_triagers = 5  # type: ignore[assignment]
+        await phase.triage_issues()
+        store.get_triageable.assert_called_with(10)

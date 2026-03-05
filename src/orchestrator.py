@@ -1099,7 +1099,7 @@ class HydraFlowOrchestrator:
         """Work function for the review loop."""
         did_work = False
         while not self._stop_event.is_set():
-            review_issues = self._store.get_reviewable(self._config.batch_size)
+            review_issues = self._store.get_reviewable(2 * self._config.max_reviewers)
             if not review_issues:
                 break
             try:

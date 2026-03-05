@@ -570,7 +570,7 @@ class PlanPhase:
 
     async def plan_issues(self) -> list[PlanResult]:
         """Run planning agents on issues from the plan queue."""
-        issues = self._store.get_plannable(self._config.batch_size)
+        issues = self._store.get_plannable(2 * self._config.max_planners)
         if not issues:
             return []
 

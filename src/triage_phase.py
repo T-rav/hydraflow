@@ -69,7 +69,7 @@ class TriagePhase:
         comment explaining what is missing so the dashboard surfaces
         them as "needs attention".
         """
-        issues = self._store.get_triageable(self._config.batch_size)
+        issues = self._store.get_triageable(2 * self._config.max_triagers)
         if not issues:
             return 0
 
