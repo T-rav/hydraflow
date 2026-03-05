@@ -290,16 +290,24 @@ class TestGitHubIssue:
 class TestTask:
     """Tests for the Task model and GitHubIssue conversion helpers."""
 
-    def test_defaults(self) -> None:
-        """Task should accept only id and title with sensible defaults."""
+    def test_task_requires_id_and_title(self) -> None:
+        """Task constructor should store the required id and title fields."""
         task = Task(id=1, title="Fix it")
         assert task.id == 1
         assert task.title == "Fix it"
+
+    def test_task_string_defaults_to_empty(self) -> None:
+        """Optional string fields should default to empty strings."""
+        task = Task(id=1, title="Fix it")
         assert task.body == ""
-        assert task.tags == []
-        assert task.comments == []
         assert task.source_url == ""
         assert task.created_at == ""
+
+    def test_task_collection_defaults_to_empty(self) -> None:
+        """Optional collection fields should default to empty containers."""
+        task = Task(id=1, title="Fix it")
+        assert task.tags == []
+        assert task.comments == []
         assert task.metadata == {}
 
     def test_round_trip_to_task(self) -> None:

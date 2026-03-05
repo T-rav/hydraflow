@@ -155,12 +155,15 @@ class TestExecute:
         assert result == "transcript output"
         mock.assert_awaited_once()
         call_kwargs = mock.call_args[1]
-        assert call_kwargs["cmd"] == ["claude", "-p"]
-        assert call_kwargs["prompt"] == "prompt"
-        assert call_kwargs["cwd"] == tmp_path
-        assert call_kwargs["event_data"] == {"issue": 42}
-        assert call_kwargs["on_output"] is None
-        assert call_kwargs["gh_token"] == config.gh_token
+        expected_kwargs = {
+            "cmd": ["claude", "-p"],
+            "prompt": "prompt",
+            "cwd": tmp_path,
+            "event_data": {"issue": 42},
+            "on_output": None,
+            "gh_token": config.gh_token,
+        }
+        assert {k: call_kwargs[k] for k in expected_kwargs} == expected_kwargs
 
     @pytest.mark.asyncio
     async def test_passes_on_output_callback(
