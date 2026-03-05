@@ -887,6 +887,20 @@ async def test_create_pr_includes_required_flags(config, event_bus, issue):
 
 
 @pytest.mark.asyncio
+async def test_create_pr_includes_review_label(config, event_bus, issue):
+    manager = _make_manager(config, event_bus)
+    pr_url = "https://github.com/test-org/test-repo/pull/55"
+    mock_create = SubprocessMockBuilder().with_stdout(pr_url).build()
+
+    with patch("asyncio.create_subprocess_exec", mock_create):
+        await manager.create_pr(issue, "agent/issue-42")
+
+    args = mock_create.call_args[0]
+    assert "--label" in args
+    assert config.review_label[0] in args
+
+
+@pytest.mark.asyncio
 async def test_create_pr_parses_pr_number_from_url(config, event_bus, issue):
     manager = _make_manager(config, event_bus)
     pr_url = "https://github.com/test-org/test-repo/pull/123"

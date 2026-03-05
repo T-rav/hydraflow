@@ -245,6 +245,9 @@ class PRManager:
         ]
         if draft:
             cmd.append("--draft")
+        review_labels = self._config.review_label or ["hydraflow-review"]
+        for label in review_labels:
+            cmd.extend(["--label", label])
 
         try:
             output = await self._run_with_body_file(
