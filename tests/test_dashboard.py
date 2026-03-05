@@ -2191,6 +2191,94 @@ class TestHITLApproveMemoryEndpoint:
 
 
 # ---------------------------------------------------------------------------
+# POST /api/hitl/{issue}/approve-process
+# ---------------------------------------------------------------------------
+
+
+class TestHITLApproveProcessEndpoint:
+    """Tests for the POST /api/hitl/{issue}/approve-process route."""
+
+    @pytest.mark.parametrize(
+        "cause",
+        [
+            "Bug report detected — awaiting human review",
+            "Epic detected — awaiting human review",
+            None,
+        ],
+    )
+    def test_routes_to_planner_label(
+        self, config: HydraFlowConfig, event_bus: EventBus, state, cause: str | None
+    ) -> None:
+        """Verify approve-process sends issues directly to planning."""
+        from fastapi.testclient import TestClient
+
+        from dashboard import HydraFlowDashboard
+
+        orch = make_orchestrator_mock()
+        orch.skip_hitl_issue = MagicMock()
+
+        if cause:
+            state.set_hitl_cause(42, cause)
+
+        dashboard = HydraFlowDashboard(config, event_bus, state, orchestrator=orch)
+        app = dashboard.create_app()
+
+        client = TestClient(app)
+        swapped: list[tuple[int, str]] = []
+
+        async def _fake_swap(issue_number: int, label: str, **_kw: object) -> None:
+            swapped.append((issue_number, label))
+
+        with (
+            patch("pr_manager.PRManager.swap_pipeline_labels", side_effect=_fake_swap),
+            patch("pr_manager.PRManager.post_comment", new_callable=AsyncMock),
+        ):
+            response = client.post("/api/hitl/42/approve-process")
+
+        assert response.status_code == 200
+        assert swapped == [(42, config.planner_label[0])]
+        orch.skip_hitl_issue.assert_called_once_with(42)
+
+    def test_returns_400_without_orchestrator(
+        self, config: HydraFlowConfig, event_bus: EventBus, state
+    ) -> None:
+        from fastapi.testclient import TestClient
+
+        from dashboard import HydraFlowDashboard
+
+        dashboard = HydraFlowDashboard(config, event_bus, state)
+        app = dashboard.create_app()
+        client = TestClient(app)
+        response = client.post("/api/hitl/42/approve-process")
+        assert response.status_code == 400
+
+    def test_clears_hitl_state(
+        self, config: HydraFlowConfig, event_bus: EventBus, state
+    ) -> None:
+        """After approve-process, HITL cause and origin should be cleared."""
+        from fastapi.testclient import TestClient
+
+        from dashboard import HydraFlowDashboard
+
+        orch = make_orchestrator_mock()
+        orch.skip_hitl_issue = MagicMock()
+        state.set_hitl_cause(42, "Issue type review")
+        state.set_hitl_origin(42, "hydraflow-hitl")
+        dashboard = HydraFlowDashboard(config, event_bus, state, orchestrator=orch)
+        app = dashboard.create_app()
+
+        client = TestClient(app)
+        with (
+            patch("pr_manager.PRManager.swap_pipeline_labels", new_callable=AsyncMock),
+            patch("pr_manager.PRManager.post_comment", new_callable=AsyncMock),
+        ):
+            client.post("/api/hitl/42/approve-process")
+
+        assert state.get_hitl_cause(42) is None
+        assert state.get_hitl_origin(42) is None
+
+
+# ---------------------------------------------------------------------------
 # GET /api/hitl enriched with status
 # ---------------------------------------------------------------------------
 
@@ -2273,6 +2361,45 @@ class TestHITLEnrichedRoute:
         assert "cause" in body[0]
         assert "status" in body[0]
         assert body[0]["cause"] == "CI failure"
+
+    @pytest.mark.parametrize(
+        "cause,expected",
+        [
+            ("Bug report detected — awaiting human review", True),
+            ("Epic detected — awaiting human review", True),
+            ("CI failure — test suite failed", False),
+            (None, False),
+        ],
+    )
+    def test_hitl_sets_issue_type_review_flag(
+        self,
+        config: HydraFlowConfig,
+        event_bus: EventBus,
+        state,
+        cause: str | None,
+        expected: bool,
+    ) -> None:
+        """issueTypeReview should be True only for bug-report/epic causes."""
+        from fastapi.testclient import TestClient
+
+        from dashboard import HydraFlowDashboard
+
+        dashboard = HydraFlowDashboard(config, event_bus, state)
+        app = dashboard.create_app()
+
+        if cause:
+            state.set_hitl_cause(42, cause)
+
+        mock_items = [
+            HITLItem(issue=42, title="Fix widget", branch="agent/issue-42"),
+        ]
+
+        client = TestClient(app)
+        with patch("pr_manager.PRManager.list_hitl_items", return_value=mock_items):
+            response = client.get("/api/hitl")
+
+        body = response.json()
+        assert body[0].get("issueTypeReview", False) is expected
 
 
 # ---------------------------------------------------------------------------

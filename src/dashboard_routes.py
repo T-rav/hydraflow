@@ -1379,8 +1379,11 @@ def create_router(
         if not orch:
             return JSONResponse({"status": "no orchestrator"}, status_code=400)
 
+        target_label = config.planner_label[0]
+        target_stage = "planning"
+
         # Issue was already triaged as ready — send directly to planning
-        await pr_manager.swap_pipeline_labels(issue_number, config.planner_label[0])
+        await pr_manager.swap_pipeline_labels(issue_number, target_label)
 
         # Clear HITL state after label swap succeeds
         orch.skip_hitl_issue(issue_number)
@@ -1390,7 +1393,7 @@ def create_router(
         state.record_outcome(
             issue_number,
             IssueOutcomeType.HITL_APPROVED,
-            reason="Operator approved issue type for processing",
+            reason=(f"Operator approved issue type for processing ({target_stage})"),
             phase="hitl",
         )
 
@@ -1398,6 +1401,7 @@ def create_router(
             await pr_manager.post_comment(
                 issue_number,
                 "**Approved for processing** — Operator approved this issue.\n\n"
+                f"Routing to **{target_stage}** (`{target_label}`).\n\n"
                 "---\n*HydraFlow Dashboard*",
             )
         except Exception:  # noqa: BLE001
