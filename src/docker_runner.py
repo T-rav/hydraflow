@@ -114,7 +114,17 @@ class DockerStdinWriter:
         pass
 
     def close(self) -> None:
+        if self._closed:
+            return
         self._closed = True
+        # Shut down the write side of the socket so the container
+        # process receives EOF on stdin — without this, Claude CLI
+        # hangs forever waiting for more input.
+        import socket as _socket  # noqa: PLC0415
+
+        sock: Any = getattr(self._socket, "_sock", self._socket)
+        with contextlib.suppress(OSError):
+            sock.shutdown(_socket.SHUT_WR)
 
 
 class DockerStdoutReader:

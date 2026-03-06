@@ -142,6 +142,24 @@ class TestDockerStdinWriter:
         writer.write(b"should not send")
         sock._sock.sendall.assert_not_called()
 
+    def test_close_shuts_down_socket_write_side(self) -> None:
+        import socket as _socket
+
+        sock = MagicMock()
+        sock._sock = MagicMock()
+        writer = DockerStdinWriter(sock)
+        writer.close()
+        sock._sock.shutdown.assert_called_once_with(_socket.SHUT_WR)
+
+    def test_close_is_idempotent(self) -> None:
+        sock = MagicMock()
+        sock._sock = MagicMock()
+        writer = DockerStdinWriter(sock)
+        writer.close()
+        writer.close()
+        # shutdown should only be called once
+        assert sock._sock.shutdown.call_count == 1
+
     @pytest.mark.asyncio
     async def test_drain_is_noop(self) -> None:
         sock = _make_mock_socket()
