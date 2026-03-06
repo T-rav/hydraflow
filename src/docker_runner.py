@@ -422,7 +422,7 @@ class DockerRunner:
         *,
         cwd: str | None = None,
         env: dict[str, str] | None = None,  # noqa: ARG002
-        stdin: int | None = None,  # noqa: ARG002
+        stdin: int | None = None,
         stdout: int | None = None,  # noqa: ARG002
         stderr: int | None = None,  # noqa: ARG002
         limit: int = 1024 * 1024,  # noqa: ARG002
@@ -449,12 +449,14 @@ class DockerRunner:
         container_env = self._build_env()
         working_dir = "/workspace" if cwd else None
 
+        needs_stdin = stdin is None or stdin == asyncio.subprocess.PIPE
+
         container_kwargs: dict[str, Any] = {
             "image": self._image,
             "command": cmd,
             "environment": container_env,
             "volumes": mounts,
-            "stdin_open": True,
+            "stdin_open": needs_stdin,
             "detach": True,
         }
         if working_dir:
@@ -473,11 +475,12 @@ class DockerRunner:
 
         try:
             await loop.run_in_executor(None, container.start)
+            attach_params = {"stdout": 1, "stderr": 1, "stream": 1}
+            if needs_stdin:
+                attach_params["stdin"] = 1
             socket = await loop.run_in_executor(
                 None,
-                lambda: container.attach_socket(
-                    params={"stdin": 1, "stdout": 1, "stderr": 1, "stream": 1}
-                ),
+                lambda: container.attach_socket(params=attach_params),
             )
             return cast(
                 asyncio.subprocess.Process,
