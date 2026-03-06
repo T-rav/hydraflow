@@ -27,10 +27,12 @@ from models import (
     EpicStatus,
     GitHubIssue,
     HITLItem,
+    HITLItemStatus,
     InstructionsQuality,
     InstructionsQualityResult,
     IntentResponse,
     IssueTimeline,
+    IssueType,
     JudgeResult,
     LifetimeStats,
     ManifestRefreshResult,
@@ -65,6 +67,7 @@ from models import (
     TaskLinkKind,
     ThroughputStats,
     TimelineStage,
+    TriageResult,
     VerificationCriteria,
     VerificationCriterion,
     VisualEvidence,
@@ -2095,7 +2098,7 @@ class TestMemoryType:
 # ---------------------------------------------------------------------------
 
 
-class TestPrecheckResult:
+class TestPrecheckResultModel:
     """Tests for the PrecheckResult dataclass."""
 
     def test_fields_accessible_by_name(self) -> None:
@@ -2112,7 +2115,7 @@ class TestPrecheckResult:
         assert result.summary == "All good"
         assert result.parse_failed is False
 
-    def test_equality(self) -> None:
+    def test_precheck_result_equality_by_value(self) -> None:
         a = PrecheckResult(
             risk="high",
             confidence=0.3,
@@ -2154,12 +2157,12 @@ class TestConflictResolutionResult:
         assert result.success is True
         assert result.used_rebuild is False
 
-    def test_equality(self) -> None:
+    def test_conflict_result_equality_by_value(self) -> None:
         a = ConflictResolutionResult(success=True, used_rebuild=False)
         b = ConflictResolutionResult(success=True, used_rebuild=False)
         assert a == b
 
-    def test_inequality(self) -> None:
+    def test_conflict_result_inequality_on_success_field(self) -> None:
         a = ConflictResolutionResult(success=True, used_rebuild=False)
         b = ConflictResolutionResult(success=False, used_rebuild=False)
         assert a != b
@@ -2394,6 +2397,27 @@ class TestEnumValidation:
     def test_hitl_item_rejects_invalid_status(self) -> None:
         with pytest.raises(ValidationError, match="status"):
             HITLItem(issue=1, status="queued")  # type: ignore[arg-type]
+
+    def test_hitl_item_accepts_all_valid_statuses(self) -> None:
+        for status in (
+            HITLItemStatus.PENDING,
+            HITLItemStatus.PROCESSING,
+            HITLItemStatus.RESOLVED,
+        ):
+            item = HITLItem(issue=1, status=status)
+            assert item.status == status
+
+    def test_triage_result_coerces_valid_issue_type_string(self) -> None:
+        result = TriageResult(issue_number=1, issue_type="bug")
+        assert result.issue_type == IssueType.BUG
+
+    def test_triage_result_coerces_issue_type_enum_passthrough(self) -> None:
+        result = TriageResult(issue_number=1, issue_type=IssueType.EPIC)
+        assert result.issue_type == IssueType.EPIC
+
+    def test_triage_result_coerces_unknown_issue_type_to_feature(self) -> None:
+        result = TriageResult(issue_number=1, issue_type="unknown_type")
+        assert result.issue_type == IssueType.FEATURE
 
     def test_intent_response_status_literal_enforced(self) -> None:
         with pytest.raises(ValidationError, match="status"):
@@ -3023,7 +3047,7 @@ class TestVisualEvidenceItem:
 class TestVisualEvidence:
     """Tests for the VisualEvidence model."""
 
-    def test_defaults(self) -> None:
+    def test_visual_evidence_has_empty_defaults(self) -> None:
         ev = VisualEvidence()
         assert ev.items == []
         assert ev.summary == ""

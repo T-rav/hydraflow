@@ -23,6 +23,9 @@ from models import (
     EpicProgress,
     EpicReadiness,
     EpicState,
+    EpicStatus,
+    GitHubIssueState,
+    MergeStrategy,
     Release,
     ReviewStatus,
 )
@@ -50,6 +53,17 @@ def _stage_from_labels(labels: list[str], config: HydraFlowConfig) -> str:
 
 # Matches checkbox lines like "- [ ] #123 — title" or "- [x] #456 — title"
 _CHECKBOX_PATTERN = re.compile(r"- \[[ x]\] #(\d+)")
+
+
+def _coerce_merge_strategy(value: str | MergeStrategy) -> MergeStrategy:
+    """Normalise config/state merge strategy values to the enum."""
+    if isinstance(value, MergeStrategy):
+        return value
+    text = str(value).strip().lower()
+    try:
+        return MergeStrategy(text)
+    except ValueError:
+        return MergeStrategy.INDEPENDENT
 
 
 def parse_epic_sub_issues(body: str) -> list[int]:
@@ -193,12 +207,15 @@ class EpicCompletionChecker:
                 continue
 
             # Check if sub-issue is a nested epic that is closed
-            if epic_labels & set(issue.labels) and issue.state == "closed":
+            if (
+                epic_labels & set(issue.labels)
+                and issue.state == GitHubIssueState.CLOSED
+            ):
                 sub_issue_titles.append(issue.title)
                 continue
 
             # Check if sub-issue is closed (wontfix/duplicate/invalid)
-            if issue.state == "closed":
+            if issue.state == GitHubIssueState.CLOSED:
                 excluded_issues.append(issue_num)
                 logger.info(
                     "Sub-issue #%d closed without fixed label — treating as excluded "
@@ -554,7 +571,7 @@ class EpicManager:
             created_at=now,
             last_activity=now,
             auto_decomposed=auto_decomposed,
-            merge_strategy=self._config.epic_merge_strategy,
+            merge_strategy=_coerce_merge_strategy(self._config.epic_merge_strategy),
         )
         self._state.upsert_epic_state(epic_state)
         await self._publish_update(epic_number, "registered")
@@ -602,8 +619,8 @@ class EpicManager:
         if epic.released:
             return
 
-        strategy = epic.merge_strategy
-        if strategy == "independent":
+        strategy = _coerce_merge_strategy(epic.merge_strategy)
+        if strategy == MergeStrategy.INDEPENDENT:
             return
 
         # Check if all siblings are approved or already merged
@@ -611,11 +628,11 @@ class EpicManager:
         if progress is None or not progress.ready_to_merge:
             return
 
-        if strategy == "bundled":
+        if strategy == MergeStrategy.BUNDLED:
             await self._handle_bundled_ready(epic_number)
-        elif strategy == "bundled_hitl":
+        elif strategy == MergeStrategy.BUNDLED_HITL:
             await self._handle_bundled_hitl_ready(epic_number)
-        elif strategy == "ordered":
+        elif strategy == MergeStrategy.ORDERED:
             await self._handle_ordered_ready(epic_number)
 
     async def on_child_completed(self, epic_number: int, child_number: int) -> None:
@@ -672,16 +689,17 @@ class EpicManager:
         in_progress = total - completed - failed - excluded
 
         if epic.closed:
-            status = "completed"
+            status = EpicStatus.COMPLETED
         elif failed > 0 and in_progress == 0:
-            status = "blocked"
+            status = EpicStatus.BLOCKED
         elif self._is_stale(epic):
-            status = "stale"
+            status = EpicStatus.STALE
         else:
-            status = "active"
+            status = EpicStatus.ACTIVE
 
         resolved = completed + excluded
         pct = (resolved / total * 100) if total > 0 else 0.0
+        strategy = _coerce_merge_strategy(epic.merge_strategy)
 
         # Ready to merge when all children are approved or already merged,
         # the strategy is not independent, and the epic has not yet been released.
@@ -689,7 +707,7 @@ class EpicManager:
             total > 0
             and failed == 0
             and not epic.released
-            and epic.merge_strategy != "independent"
+            and strategy != MergeStrategy.INDEPENDENT
             and all(
                 c in epic.approved_children or c in epic.completed_children
                 for c in epic.child_issues
@@ -706,7 +724,7 @@ class EpicManager:
             in_progress=max(in_progress, 0),
             approved=approved,
             ready_to_merge=ready_to_merge,
-            merge_strategy=epic.merge_strategy,
+            merge_strategy=strategy,
             status=status,
             percent_complete=round(pct, 1),
             last_activity=epic.last_activity,
