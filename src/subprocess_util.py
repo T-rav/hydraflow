@@ -226,7 +226,7 @@ def make_docker_env(
     Unlike :func:`make_clean_env` which inherits the full host env, this
     passes only the variables necessary for agent operation inside a container.
     """
-    env: dict[str, str] = {"HOME": "/root"}
+    env: dict[str, str] = {"HOME": "/home/hydraflow"}
 
     if gh_token:
         env["GH_TOKEN"] = gh_token

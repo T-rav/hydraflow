@@ -509,7 +509,7 @@ class TestDockerRunnerCreateStreamingProcess:
 
         create_call = client.containers.create.call_args
         env = create_call.kwargs.get("environment", {})
-        assert env["HOME"] == "/root"
+        assert env["HOME"] == "/home/hydraflow"
         assert env["GH_TOKEN"] == "ghp_test"
         assert env["ANTHROPIC_API_KEY"] == "sk-test"
         assert env["GIT_AUTHOR_NAME"] == "Bot"
@@ -535,9 +535,9 @@ class TestDockerRunnerCreateStreamingProcess:
 
         create_call = client.containers.create.call_args
         env = create_call.kwargs.get("environment", {})
-        assert env["PI_CODING_AGENT_DIR"] == "/root/.pi/agent"
-        assert env["CODEX_HOME"] == "/root/.codex"
-        assert env["CLAUDE_CONFIG_DIR"] == "/root/.claude"
+        assert env["PI_CODING_AGENT_DIR"] == "/home/hydraflow/.pi/agent"
+        assert env["CODEX_HOME"] == "/home/hydraflow/.codex"
+        assert env["CLAUDE_CONFIG_DIR"] == "/home/hydraflow/.claude"
 
     @pytest.mark.asyncio
     async def test_no_host_path_or_python_vars_leaked(self, tmp_path: Path) -> None:
@@ -663,7 +663,7 @@ class TestDockerRunnerCreateStreamingProcess:
         # Approved vars must be present
         assert env.get("GH_TOKEN") == "ghp_secret"
         assert env.get("ANTHROPIC_API_KEY") == "sk-test"
-        assert env.get("HOME") == "/root"
+        assert env.get("HOME") == "/home/hydraflow"
 
     @pytest.mark.asyncio
     async def test_cleanup_on_start_failure(self, tmp_path: Path) -> None:
@@ -1211,11 +1211,20 @@ class TestBuildMounts:
             mounts = runner._build_mounts(None)
 
         assert str(home / ".pi") in mounts
-        assert mounts[str(home / ".pi")] == {"bind": "/root/.pi", "mode": "rw"}
+        assert mounts[str(home / ".pi")] == {
+            "bind": "/home/hydraflow/.pi",
+            "mode": "rw",
+        }
         assert str(home / ".codex") in mounts
-        assert mounts[str(home / ".codex")] == {"bind": "/root/.codex", "mode": "rw"}
+        assert mounts[str(home / ".codex")] == {
+            "bind": "/home/hydraflow/.codex",
+            "mode": "rw",
+        }
         assert str(home / ".claude") in mounts
-        assert mounts[str(home / ".claude")] == {"bind": "/root/.claude", "mode": "rw"}
+        assert mounts[str(home / ".claude")] == {
+            "bind": "/home/hydraflow/.claude",
+            "mode": "rw",
+        }
 
     def test_mounts_custom_pi_agent_dir_when_configured(self, tmp_path: Path) -> None:
         home = tmp_path / "home"
@@ -1233,7 +1242,10 @@ class TestBuildMounts:
             mounts = runner._build_mounts(None)
 
         assert str(custom_pi) in mounts
-        assert mounts[str(custom_pi)] == {"bind": "/root/.pi/agent", "mode": "rw"}
+        assert mounts[str(custom_pi)] == {
+            "bind": "/home/hydraflow/.pi/agent",
+            "mode": "rw",
+        }
         assert str(home / ".pi") not in mounts
 
     def test_mounts_custom_claude_config_dir_when_configured(
@@ -1254,5 +1266,8 @@ class TestBuildMounts:
             mounts = runner._build_mounts(None)
 
         assert str(custom_claude) in mounts
-        assert mounts[str(custom_claude)] == {"bind": "/root/.claude", "mode": "rw"}
+        assert mounts[str(custom_claude)] == {
+            "bind": "/home/hydraflow/.claude",
+            "mode": "rw",
+        }
         assert str(home / ".claude") not in mounts
