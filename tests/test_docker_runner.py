@@ -1392,83 +1392,33 @@ class TestDetectWorktree:
         assert DockerRunner._detect_worktree(str(tmp_path)) is None
 
 
-class TestWrapCmdForWorktree:
-    """Tests for DockerRunner._wrap_cmd_for_worktree."""
+class TestWorktreeGitEnv:
+    """Tests for DockerRunner._worktree_git_env."""
 
-    def test_wraps_command_for_worktree(self, tmp_path: Path) -> None:
+    def test_returns_git_env_for_worktree(self, tmp_path: Path) -> None:
         (tmp_path / ".git").write_text("gitdir: /repo/.git/worktrees/issue-99\n")
         runner, _ = _make_runner(log_dir=tmp_path / "logs")
         (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
 
-        wrapped, git_file, git_original = runner._wrap_cmd_for_worktree(
-            ["claude", "-p", "hello"], str(tmp_path)
-        )
+        env = runner._worktree_git_env(str(tmp_path))
 
-        assert wrapped[0] == "sh"
-        assert wrapped[1] == "-c"
-        assert "/dot-git/worktrees/issue-99" in wrapped[2]
-        assert "claude" in wrapped[2]
-        assert git_file == tmp_path / ".git"
-        assert "gitdir: /repo/.git/worktrees/issue-99" in git_original
+        assert env["GIT_DIR"] == "/dot-git/worktrees/issue-99"
+        assert env["GIT_WORK_TREE"] == "/workspace"
 
-    def test_no_wrap_for_non_worktree(self, tmp_path: Path) -> None:
+    def test_empty_for_non_worktree(self, tmp_path: Path) -> None:
         (tmp_path / ".git").mkdir()
         runner, _ = _make_runner(log_dir=tmp_path / "logs")
         (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
 
-        cmd = ["claude", "-p", "hello"]
-        wrapped, git_file, git_original = runner._wrap_cmd_for_worktree(
-            cmd, str(tmp_path)
-        )
-        assert list(wrapped) == cmd
-        assert git_file is None
-        assert git_original == ""
+        env = runner._worktree_git_env(str(tmp_path))
+        assert env == {}
 
-    def test_no_wrap_when_cwd_none(self, tmp_path: Path) -> None:
+    def test_empty_when_cwd_none(self, tmp_path: Path) -> None:
         runner, _ = _make_runner(log_dir=tmp_path / "logs")
         (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
 
-        cmd = ["claude", "-p", "hello"]
-        wrapped, git_file, git_original = runner._wrap_cmd_for_worktree(cmd, None)
-        assert list(wrapped) == cmd
-        assert git_file is None
-        assert git_original == ""
-
-
-class TestRestoreHostGitFile:
-    """Tests for DockerRunner._restore_host_git_file."""
-
-    def test_restores_corrupted_git_file(self, tmp_path: Path) -> None:
-        git_file = tmp_path / ".git"
-        original = "gitdir: /home/user/repo/.git/worktrees/issue-99"
-        git_file.write_text("gitdir: /dot-git/worktrees/issue-99\n")
-
-        DockerRunner._restore_host_git_file(git_file, original)
-
-        assert git_file.read_text() == original + "\n"
-
-    def test_no_op_when_already_correct(self, tmp_path: Path) -> None:
-        git_file = tmp_path / ".git"
-        original = "gitdir: /home/user/repo/.git/worktrees/issue-99"
-        git_file.write_text(original + "\n")
-
-        DockerRunner._restore_host_git_file(git_file, original)
-
-        assert git_file.read_text() == original + "\n"
-
-    def test_no_op_when_original_empty(self, tmp_path: Path) -> None:
-        git_file = tmp_path / ".git"
-        git_file.write_text("gitdir: /dot-git/worktrees/issue-99\n")
-
-        DockerRunner._restore_host_git_file(git_file, "")
-
-        # Should not modify — empty original means we don't know what to restore
-        assert "dot-git" in git_file.read_text()
-
-    def test_no_op_when_parent_missing(self, tmp_path: Path) -> None:
-        git_file = tmp_path / "nonexistent" / ".git"
-        # Should not raise
-        DockerRunner._restore_host_git_file(git_file, "gitdir: something")
+        env = runner._worktree_git_env(None)
+        assert env == {}
 
 
 class TestBuildMountsGitDir:

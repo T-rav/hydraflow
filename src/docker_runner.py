@@ -11,7 +11,6 @@ import asyncio
 import contextlib
 import logging
 import os
-import shlex
 import struct
 from collections.abc import Sequence
 from pathlib import Path
@@ -249,13 +248,10 @@ class DockerProcess:
         container: ContainerLike,
         socket: DockerSocket,
         loop: asyncio.AbstractEventLoop,
-        *,
-        git_restore: tuple[Path, str] | None = None,
     ) -> None:
         self._container = container
         self._socket = socket
         self._loop = loop
-        self._git_restore = git_restore
         stdout_reader = DockerStdoutReader(socket, loop)
         self.stdin = DockerStdinWriter(socket)
         self.stdout = stdout_reader
@@ -271,9 +267,6 @@ class DockerProcess:
         result = await self._loop.run_in_executor(None, self._container.wait)
         code = int(result.get("StatusCode", 1))
         self.returncode = code
-        if self._git_restore:
-            git_file, original = self._git_restore
-            DockerRunner._restore_host_git_file(git_file, original)
         return code
 
 
@@ -376,62 +369,23 @@ class DockerRunner:
                 mounts[parts[0]] = {"bind": parts[1], "mode": mode}
         return mounts
 
-    @staticmethod
-    def _restore_host_git_file(git_file: Path, original: str) -> None:
-        """Restore a worktree ``.git`` file on the host after container exit.
+    def _worktree_git_env(self, cwd: str | None) -> dict[str, str]:
+        """Return ``GIT_DIR`` / ``GIT_WORK_TREE`` env vars when *cwd* is a worktree.
 
-        The in-container shell script tries to restore it, but if the
-        container is killed (OOM, timeout, force-stop) the restore never
-        runs.  This host-side fallback guarantees the file is correct.
-        """
-        if not original or not git_file.parent.exists():
-            return
-        try:
-            current = git_file.read_text().strip()
-        except OSError:
-            return
-        if current != original:
-            logger.info("Restoring host .git file: %s", git_file)
-            git_file.write_text(original + "\n")
-
-    def _wrap_cmd_for_worktree(
-        self,
-        cmd: Sequence[str],
-        cwd: str | None,
-    ) -> tuple[Sequence[str], Path | None, str]:
-        """Wrap *cmd* with a git-fixup preamble when *cwd* is a worktree.
-
-        Inside the container the worktree's ``.git`` file still references a
-        host-absolute path.  We rewrite it to ``/dot-git/worktrees/<name>``
-        before exec-ing the real command so that git operations work.
-
-        Returns ``(wrapped_cmd, git_file_path, original_content)`` so that
-        callers can restore the ``.git`` file on the host after the container
-        exits — even when the container is killed ungracefully.
+        Instead of rewriting the ``.git`` file inside the container (which
+        corrupts the host worktree when the container is killed), we set
+        environment variables that tell git where the gitdir lives.  This is
+        safe regardless of how the container exits.
         """
         if not cwd:
-            return cmd, None, ""
+            return {}
         wt_name = self._detect_worktree(cwd)
         if not wt_name:
-            return cmd, None, ""
-        # Read the original .git content so we can restore it on exit.
-        git_file = Path(cwd) / ".git"
-        try:
-            original = git_file.read_text().strip()
-        except OSError:
-            original = ""
-
-        escaped = " ".join(shlex.quote(a) for a in cmd)
-        # Shell wrapper: rewrite .git → container path, run the command,
-        # then restore the original .git content regardless of exit code.
-        script = (
-            f'printf "gitdir: /dot-git/worktrees/{wt_name}\\n" > /workspace/.git; '
-            f"{escaped}; "
-            f"RC=$?; "
-            f"printf {shlex.quote(original + chr(10))} > /workspace/.git; "
-            f"exit $RC"
-        )
-        return ["sh", "-c", script], git_file, original
+            return {}
+        return {
+            "GIT_DIR": f"/dot-git/worktrees/{wt_name}",
+            "GIT_WORK_TREE": "/workspace",
+        }
 
     def _get_user_tool_mounts(self) -> dict[str, dict[str, str]]:
         """Return cached user-tool mounts, refreshing when env/home selection changes."""
@@ -561,15 +515,14 @@ class DockerRunner:
         loop = asyncio.get_running_loop()
         mounts = self._build_mounts(cwd)
         container_env = self._build_env()
+        container_env.update(self._worktree_git_env(cwd))
         working_dir = "/workspace" if cwd else None
-        actual_cmd, git_file, git_original = self._wrap_cmd_for_worktree(cmd, cwd)
-        git_restore = (git_file, git_original) if git_file else None
 
         needs_stdin = stdin is None or stdin == asyncio.subprocess.PIPE
 
         container_kwargs: dict[str, Any] = {
             "image": self._image,
-            "command": actual_cmd,
+            "command": list(cmd),
             "environment": container_env,
             "volumes": mounts,
             "stdin_open": needs_stdin,
@@ -604,12 +557,9 @@ class DockerRunner:
                     cast(ContainerLike, container),
                     cast(DockerSocket, socket),
                     loop,
-                    git_restore=git_restore,
                 ),
             )
         except Exception:
-            if git_file:
-                self._restore_host_git_file(git_file, git_original)
             with contextlib.suppress(Exception):
                 await loop.run_in_executor(None, lambda: container.remove(force=True))
             self._containers.discard(container)
@@ -638,12 +588,12 @@ class DockerRunner:
         loop = asyncio.get_running_loop()
         mounts = self._build_mounts(cwd)
         container_env = self._build_env()
+        container_env.update(self._worktree_git_env(cwd))
         working_dir = "/workspace" if cwd else None
-        actual_cmd, git_file, git_original = self._wrap_cmd_for_worktree(cmd, cwd)
 
         container_kwargs: dict[str, Any] = {
             "image": self._image,
-            "command": actual_cmd,
+            "command": list(cmd),
             "environment": container_env,
             "volumes": mounts,
             "detach": True,
@@ -693,8 +643,6 @@ class DockerRunner:
                 await loop.run_in_executor(None, container.kill)
             raise
         finally:
-            if git_file:
-                self._restore_host_git_file(git_file, git_original)
             with contextlib.suppress(Exception):
                 await loop.run_in_executor(None, lambda: container.remove(force=True))
             self._containers.discard(container)
