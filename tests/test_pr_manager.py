@@ -829,6 +829,22 @@ async def test_push_branch_force_dry_run(dry_config, event_bus, tmp_path):
     assert result is True
 
 
+@pytest.mark.asyncio
+async def test_push_branch_force_failure_returns_false(config, event_bus, tmp_path):
+    manager = _make_manager(config, event_bus)
+    mock_create = (
+        SubprocessMockBuilder()
+        .with_returncode(1)
+        .with_stderr("error: failed to push (rejected, non-fast-forward)")
+        .build()
+    )
+
+    with patch("asyncio.create_subprocess_exec", mock_create):
+        result = await manager.push_branch(tmp_path, "agent/issue-99", force=True)
+
+    assert result is False
+
+
 # ---------------------------------------------------------------------------
 # _gh_json_query
 # ---------------------------------------------------------------------------
@@ -941,6 +957,26 @@ class TestGhJsonQuery:
         )
 
         assert result == payload
+
+    @pytest.mark.asyncio
+    async def test_error_log_level_is_respected(self, config, event_bus):
+        mgr = _make_manager(config, event_bus)
+        mgr._run_gh = AsyncMock(side_effect=RuntimeError("gh: not found"))
+
+        with patch("pr_manager.logger") as mock_logger:
+            await mgr._gh_json_query(
+                "gh",
+                "api",
+                "/test",
+                default=None,
+                dry_run_message="Would fetch",
+                error_message="Could not fetch",
+                error_log_level=logging.DEBUG,
+            )
+
+        mock_logger.log.assert_called_once()
+        call_level = mock_logger.log.call_args[0][0]
+        assert call_level == logging.DEBUG
 
 
 # ---------------------------------------------------------------------------
