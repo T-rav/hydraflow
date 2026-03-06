@@ -217,7 +217,7 @@ Agents running inside containers cannot access your host's OAuth session or macO
 claude setup-token
 
 # Add the token to .env
-CLAUDE_CODE_API_KEY=<token-from-setup-token>
+CLAUDE_CODE_OAUTH_TOKEN=<token-from-setup-token>
 ```
 
 **Claude (API key):**
