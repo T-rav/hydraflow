@@ -63,6 +63,9 @@ def _coerce_merge_strategy(value: str | MergeStrategy) -> MergeStrategy:
     try:
         return MergeStrategy(text)
     except ValueError:
+        logger.warning(
+            "Unknown merge_strategy %r; falling back to 'independent'", value
+        )
         return MergeStrategy.INDEPENDENT
 
 
@@ -619,7 +622,7 @@ class EpicManager:
         if epic.released:
             return
 
-        strategy = _coerce_merge_strategy(epic.merge_strategy)
+        strategy = epic.merge_strategy
         if strategy == MergeStrategy.INDEPENDENT:
             return
 
@@ -699,7 +702,7 @@ class EpicManager:
 
         resolved = completed + excluded
         pct = (resolved / total * 100) if total > 0 else 0.0
-        strategy = _coerce_merge_strategy(epic.merge_strategy)
+        strategy = epic.merge_strategy
 
         # Ready to merge when all children are approved or already merged,
         # the strategy is not independent, and the epic has not yet been released.
