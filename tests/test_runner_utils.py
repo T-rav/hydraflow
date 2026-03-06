@@ -247,6 +247,23 @@ class TestStreamClaudeProcessConfig:
         assert args[-1] == prompt
         assert kwargs["stdin"] == asyncio.subprocess.DEVNULL
 
+    @pytest.mark.asyncio
+    async def test_claude_print_passes_prompt_as_argument(self, event_bus) -> None:
+        """Claude -p should receive prompt as CLI arg, not stdin pipe."""
+        mock_create = make_streaming_proc(returncode=0, stdout="ok")
+        cmd = ["claude", "-p", "--output-format", "stream-json", "--model", "sonnet"]
+        prompt = "evaluate this issue"
+
+        with patch("asyncio.create_subprocess_exec", mock_create) as mock_exec:
+            await stream_claude_process(
+                **_default_kwargs(event_bus, cmd=cmd, prompt=prompt)
+            )
+
+        args = list(mock_exec.call_args[0])
+        kwargs = mock_exec.call_args[1]
+        assert args[-1] == prompt
+        assert kwargs["stdin"] == asyncio.subprocess.DEVNULL
+
 
 # ---------------------------------------------------------------------------
 # stream_claude_process — non-zero exit handling
