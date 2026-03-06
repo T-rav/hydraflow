@@ -7,7 +7,8 @@
 
 HydraFlow's dashboard includes a "Report Issue" feature that captures a
 screenshot of the current dashboard state, allows the user to annotate it, and
-submits it as a GitHub issue with the image attached via a GitHub Gist. Because
+submits it as a GitHub issue with the image uploaded to the repository via the
+GitHub Contents API. Because
 the dashboard displays pipeline data, agent transcripts, and event logs, the
 screenshot payload can inadvertently contain secrets (API keys, tokens, or
 sensitive configuration values rendered in the UI).
@@ -54,7 +55,7 @@ succeeds.
 
 ### 3. Backend base64 secret scan (configurable)
 
-Before uploading to GitHub Gist, `ReportIssueLoop` in `report_issue_loop.py`
+Before uploading to the repository, `ReportIssueLoop` in `report_issue_loop.py`
 passes the base64 payload through `screenshot_scanner.scan_base64_for_secrets()`.
 This regex-based scanner checks for 13 known token patterns (GitHub PATs, AWS
 keys, Slack tokens, Anthropic/OpenAI API keys, PEM private keys, and generic
@@ -71,25 +72,30 @@ remains the principal defense.
 This layer is controlled by `screenshot_redaction_enabled` (default: `True`,
 env: `HYDRAFLOW_SCREENSHOT_REDACTION_ENABLED`).
 
-### 4. Gist visibility control
+### 4. Repository storage control
 
-`PRManager.upload_screenshot_gist()` uploads the decoded PNG as a GitHub Gist.
-Visibility is controlled by `screenshot_gist_public` (default: `False`, env:
-`HYDRAFLOW_SCREENSHOT_GIST_PUBLIC`). The default creates secret/unlisted gists
-that require a direct link to access, limiting exposure if a screenshot
-inadvertently contains sensitive information.
+`PRManager.upload_screenshot()` uploads the decoded PNG to the repo using the
+GitHub Contents API. Storage is controlled by `screenshot_storage_path`
+(default: `.hydraflow/screenshots`, env:
+`HYDRAFLOW_SCREENSHOT_STORAGE_PATH`) and `screenshot_storage_branch` (env:
+`HYDRAFLOW_SCREENSHOT_STORAGE_BRANCH`, defaults to `main_branch` when unset).
+The default path keeps screenshots under `.hydraflow/screenshots/` on the main
+branch. URLs use the raw.githubusercontent.com endpoint so that embedded
+Markdown renders inline inside GitHub issues. Branch/path overrides let operators
+route uploads to a dedicated artifacts branch if desired.
 
 ## Consequences
 
 **Positive:**
-- Defense-in-depth: three independent layers (DOM redaction, base64 scan, gist
-  visibility) each reduce the blast radius of a missed redaction.
+- Defense-in-depth: DOM redaction, backend secret scanning, and segregated
+  repository storage each reduce the blast radius of a missed redaction.
 - Progressive fallback ensures screenshots succeed across browser environments
   with varying CSS support, avoiding blank or broken captures.
 - The `data-sensitive` attribute convention is simple to adopt — new components
   only need a single attribute to opt in to redaction.
-- Configuration knobs (`screenshot_redaction_enabled`, `screenshot_gist_public`)
-  allow operators to tune the security/usability tradeoff per deployment.
+- Configuration knobs (`screenshot_redaction_enabled`,
+  `screenshot_storage_path`, `screenshot_storage_branch`) allow operators to
+  tune the security/usability tradeoff per deployment.
 
 **Trade-offs:**
 - The base64 secret scanner has limited effectiveness on compressed PNG payloads.
@@ -100,9 +106,10 @@ inadvertently contains sensitive information.
 - The aggressive sanitization fallback (attempt 3) produces lower-fidelity
   screenshots with stripped styles. This is acceptable as a last resort but
   means some bug reports may have less visual context.
-- Secret/unlisted gists are not truly private — anyone with the URL can view
-  them. For highly sensitive deployments, operators should consider disabling
-  screenshot uploads entirely or routing through a private artifact store.
+- Repository-stored screenshots become part of git history. On public repos,
+  anyone with access to the raw URL (or commit history) can view them. Highly
+  sensitive deployments should consider disabling screenshot uploads entirely or
+  routing them through a private artifacts branch/repo.
 
 ## Alternatives considered
 
@@ -116,10 +123,11 @@ inadvertently contains sensitive information.
    (Tesseract or similar). The zlib-compressed base64 scan is lightweight, and
    the primary defense (DOM redaction) operates before capture.
 
-3. **Upload screenshots as PR/issue attachments instead of Gists.**
+3. **Upload screenshots as PR/issue attachments instead of repository files.**
    Rejected: GitHub issue attachments are always public on public repos and
-   cannot be made unlisted. Gists provide the `--public` / unlisted toggle,
-   giving operators control over visibility.
+   cannot be made unlisted. Repository storage keeps screenshots under version
+   control, allows branch-level protections, and avoids editing the issue body
+   every time a replacement upload is necessary.
 
 4. **Single html2canvas configuration with no fallback.**
    Rejected: html2canvas frequently fails on modern CSS features (especially
@@ -129,9 +137,9 @@ inadvertently contains sensitive information.
 ## Related
 
 - **Supersedes ADR-0013** — ADR-0013 documented the original screenshot pipeline
-  with hardcoded `--public` gists and no DOM redaction. This ADR adds defense-in-depth
-  security (DOM redaction, backend secret scanning, configurable gist visibility),
-  making ADR-0013's public-gist-only design obsolete.
+  with hardcoded public gists and no DOM redaction. This ADR adds defense-in-depth
+  security (DOM redaction, backend secret scanning, configurable repository storage),
+  making ADR-0013's design obsolete.
 - Source memory: #1734
 - ADR issue: #1749
 - `src/ui/src/components/Header.jsx` — `captureDashboardScreenshot()`, `redactSensitiveElements()`
@@ -139,5 +147,6 @@ inadvertently contains sensitive information.
 - `src/ui/src/constants.js` — `SENSITIVE_SELECTORS`
 - `src/report_issue_loop.py` — `ReportIssueLoop._do_work()`
 - `src/screenshot_scanner.py` — `scan_base64_for_secrets()`
-- `src/pr_manager.py` — `PRManager.upload_screenshot_gist()`
-- `src/config.py` — `screenshot_redaction_enabled`, `screenshot_gist_public`
+- `src/pr_manager.py` — `PRManager.upload_screenshot()`
+- `src/config.py` — `screenshot_redaction_enabled`, `screenshot_storage_path`,
+  `screenshot_storage_branch`

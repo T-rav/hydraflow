@@ -94,6 +94,16 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("subskill_model", "HYDRAFLOW_SUBSKILL_MODEL", "haiku"),
     ("debug_model", "HYDRAFLOW_DEBUG_MODEL", "opus"),
     ("report_issue_model", "HYDRAFLOW_REPORT_ISSUE_MODEL", "haiku"),
+    (
+        "screenshot_storage_path",
+        "HYDRAFLOW_SCREENSHOT_STORAGE_PATH",
+        ".hydraflow/screenshots",
+    ),
+    (
+        "screenshot_storage_branch",
+        "HYDRAFLOW_SCREENSHOT_STORAGE_BRANCH",
+        "",
+    ),
     ("adr_review_model", "HYDRAFLOW_ADR_REVIEW_MODEL", "sonnet"),
     ("changelog_file", "HYDRAFLOW_CHANGELOG_FILE", ""),
     ("release_tag_prefix", "HYDRAFLOW_RELEASE_TAG_PREFIX", "v"),
@@ -149,7 +159,6 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_SCREENSHOT_REDACTION_ENABLED",
         True,
     ),
-    ("screenshot_gist_public", "HYDRAFLOW_SCREENSHOT_GIST_PUBLIC", False),
 ]
 
 # Literal-typed env-var overrides.
@@ -813,9 +822,19 @@ class HydraFlowConfig(BaseModel):
             "and is unaffected by this setting."
         ),
     )
-    screenshot_gist_public: bool = Field(
-        default=False,
-        description="Upload screenshot gists as public (True) or secret/unlisted (False)",
+    screenshot_storage_path: str = Field(
+        default=".hydraflow/screenshots",
+        description=(
+            "Relative repo path for GitHub Contents uploads of dashboard screenshots. "
+            "Intermediate directories are created implicitly by the GitHub API."
+        ),
+    )
+    screenshot_storage_branch: str = Field(
+        default="",
+        description=(
+            "Branch used for screenshot storage commits. When empty, falls back to "
+            "main_branch to avoid accidental uploads to feature branches."
+        ),
     )
 
     # Manifest detection

@@ -31,8 +31,11 @@ def _make_loop(
 
     state = StateTracker(tmp_path / "state.json")
     pr_manager = MagicMock()
-    pr_manager.upload_screenshot_gist = AsyncMock(
-        return_value="https://gist.example.com/screenshot.png"
+    pr_manager.upload_screenshot = AsyncMock(
+        return_value=(
+            "https://raw.githubusercontent.com/example/repo/main/"
+            ".hydraflow/screenshots/demo.png"
+        )
     )
     pr_manager.create_issue = AsyncMock(return_value=123)
     runner = MagicMock()
@@ -102,11 +105,14 @@ class TestReportIssueLoopDoWork:
             mock_stream.return_value = "done"
             await loop._do_work()
 
-        pr_mgr.upload_screenshot_gist.assert_awaited_once_with("iVBORw0KGgo=")
+        pr_mgr.upload_screenshot.assert_awaited_once()
+        call = pr_mgr.upload_screenshot.await_args
+        assert call.args[0] == "iVBORw0KGgo="
+        assert call.kwargs["slug"] == report.id
 
     @pytest.mark.asyncio
-    async def test_empty_screenshot_skips_gist_upload(self, tmp_path: Path) -> None:
-        """When screenshot_base64 is empty, gist upload is skipped."""
+    async def test_empty_screenshot_skips_upload(self, tmp_path: Path) -> None:
+        """When screenshot_base64 is empty, the upload call is skipped."""
         loop, _stop, state, pr_mgr = _make_loop(tmp_path)
         report = PendingReport(description="No screenshot")
         state.enqueue_report(report)
@@ -117,7 +123,7 @@ class TestReportIssueLoopDoWork:
             mock_stream.return_value = "done"
             await loop._do_work()
 
-        pr_mgr.upload_screenshot_gist.assert_not_awaited()
+        pr_mgr.upload_screenshot.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_agent_failure_falls_back_to_direct_issue_create(
@@ -234,7 +240,7 @@ class TestReportIssueLoopDoWork:
             await loop._do_work()
 
         # Screenshot should NOT have been uploaded
-        pr_mgr.upload_screenshot_gist.assert_not_awaited()
+        pr_mgr.upload_screenshot.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_screenshot_without_secrets_is_uploaded(self, tmp_path: Path) -> None:
@@ -252,9 +258,10 @@ class TestReportIssueLoopDoWork:
             mock_stream.return_value = "done"
             await loop._do_work()
 
-        pr_mgr.upload_screenshot_gist.assert_awaited_once_with(
-            "iVBORw0KGgoAAAANSUhEUgAA"
-        )
+        pr_mgr.upload_screenshot.assert_awaited_once()
+        call = pr_mgr.upload_screenshot.await_args
+        assert call.args[0] == "iVBORw0KGgoAAAANSUhEUgAA"
+        assert call.kwargs["slug"] == report.id
 
     @pytest.mark.asyncio
     async def test_screenshot_with_secrets_still_creates_issue(
@@ -276,9 +283,10 @@ class TestReportIssueLoopDoWork:
 
         assert result is not None
         assert result["processed"] == 1
-        # The prompt should not include a screenshot URL
         prompt = mock_stream.call_args.kwargs.get("prompt", "")
-        assert "Screenshot" not in prompt
+        assert (
+            "_Screenshot omitted: potential secrets detected during upload._" in prompt
+        )
 
     @pytest.mark.asyncio
     async def test_scanner_disabled_uploads_screenshot_with_secrets(
@@ -300,7 +308,30 @@ class TestReportIssueLoopDoWork:
             await loop._do_work()
 
         # Scan is disabled — screenshot should be uploaded despite containing a token
-        pr_mgr.upload_screenshot_gist.assert_awaited_once()
+        pr_mgr.upload_screenshot.assert_awaited_once()
+        prompt = mock_stream.call_args.kwargs.get("prompt", "")
+        assert "![Screenshot](" in prompt
+
+    @pytest.mark.asyncio
+    async def test_screenshot_upload_failure_adds_note(self, tmp_path: Path) -> None:
+        """When upload returns empty URL, a markdown note explains the failure."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
+        pr_mgr.upload_screenshot.return_value = ""
+        report = PendingReport(
+            description="Upload failed",
+            screenshot_base64="iVBORw0KGgoAAAANSUhEUgAA",
+        )
+        state.enqueue_report(report)
+
+        with patch(
+            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+        ) as mock_stream:
+            mock_stream.return_value = "done"
+            await loop._do_work()
+
+        pr_mgr.upload_screenshot.assert_awaited_once()
+        prompt = mock_stream.call_args.kwargs.get("prompt", "")
+        assert "_Screenshot upload failed; HydraFlow logs contain details._" in prompt
 
 
 class TestReportIssueLoopInterval:

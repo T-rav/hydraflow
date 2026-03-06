@@ -70,8 +70,9 @@ class ReportIssueLoop(BaseBackgroundLoop):
         if report is None:
             return None
 
-        # Upload screenshot gist if present (skip if secrets detected)
+        # Upload screenshot if present (skip if secrets detected)
         screenshot_url = ""
+        screenshot_note = ""
         if report.screenshot_base64:
             secret_hits = (
                 scan_base64_for_secrets(report.screenshot_base64)
@@ -85,10 +86,17 @@ class ReportIssueLoop(BaseBackgroundLoop):
                     report.id,
                     ", ".join(secret_hits),
                 )
-            else:
-                screenshot_url = await self._pr_manager.upload_screenshot_gist(
-                    report.screenshot_base64
+                screenshot_note = (
+                    "_Screenshot omitted: potential secrets detected during upload._"
                 )
+            else:
+                screenshot_url = await self._pr_manager.upload_screenshot(
+                    report.screenshot_base64, slug=report.id
+                )
+                if not screenshot_url:
+                    screenshot_note = (
+                        "_Screenshot upload failed; HydraFlow logs contain details._"
+                    )
 
         # Build the agent prompt
         title = f"[Bug Report] {report.description[:100]}"
@@ -100,6 +108,8 @@ class ReportIssueLoop(BaseBackgroundLoop):
                 "### Dashboard Screenshot",
                 f"![Screenshot]({screenshot_url})",
             ]
+        elif screenshot_note:
+            body_parts += ["", "### Dashboard Screenshot", screenshot_note]
 
         env = report.environment
         if env:

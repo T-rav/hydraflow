@@ -14,6 +14,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import quote
+from uuid import uuid4
 
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
@@ -761,112 +762,136 @@ class PRManager:
             logger.error("Issue creation failed for %r: %s", title, exc)
             return 0
 
-    async def upload_screenshot_gist(self, png_base64: str) -> str:
-        """Upload a base64-encoded PNG as a GitHub gist and return the raw URL.
+    async def upload_screenshot(
+        self, png_base64: str, *, slug: str | None = None
+    ) -> str:
+        """Upload a base64-encoded PNG to the repo via the GitHub Contents API.
 
-        Returns an empty string on failure or in dry-run mode.
+        Returns a raw.githubusercontent.com URL on success, or an empty string on
+        failure (including dry-run mode).
         """
+        self._assert_repo()
         if self._config.dry_run:
-            logger.info("[dry-run] Would upload screenshot gist")
+            logger.info("[dry-run] Would upload dashboard screenshot")
             return ""
 
-        # Strip optional data URI prefix
-        if png_base64.startswith("data:"):
-            _, _, png_base64 = png_base64.partition(",")
+        payload = png_base64
+        if payload.startswith("data:"):
+            _, _, payload = payload.partition(",")
 
         try:
-            png_bytes = base64.b64decode(png_base64, validate=True)
+            png_bytes = base64.b64decode(payload, validate=True)
         except (ValueError, binascii.Error):
-            logger.warning("Screenshot gist upload skipped: invalid base64 payload")
+            logger.warning("Screenshot upload skipped: invalid base64 payload")
             return ""
 
-        fd, tmp_path = tempfile.mkstemp(suffix=".png", prefix="hydraflow-screenshot-")
-        fallback_svg_path: str | None = None
-        try:
-            with os.fdopen(fd, "wb") as f:
-                f.write(png_bytes)
+        if not png_bytes:
+            logger.warning("Screenshot upload skipped: decoded payload is empty")
+            return ""
 
-            gist_args = [
-                "gh",
-                "gist",
-                "create",
-            ]
-            if self._config.screenshot_gist_public:
-                gist_args.append("--public")
-            gist_args += ["--filename", "screenshot.png", tmp_path]
+        normalized_slug = self._normalize_screenshot_slug(slug)
+        branch = self._config.screenshot_storage_branch or self._config.main_branch
+        encoded_branch = quote(branch, safe="")
+        encoded_content = base64.b64encode(png_bytes).decode("ascii")
 
+        slug_candidates = [normalized_slug]
+        if slug:
+            slug_candidates.append(f"{normalized_slug}-{uuid4().hex[:8]}")
+
+        result_url = ""
+        for idx, candidate in enumerate(slug_candidates):
+            target_path = self._build_screenshot_path(candidate)
             try:
-                output = await self._run_gh(*gist_args)
-                return self._gist_raw_url(output, "screenshot.png")
-            except RuntimeError as exc:
-                if "binary file not supported" not in str(exc).lower():
-                    raise
+                await self._upload_screenshot_contents(
+                    path=target_path,
+                    branch=branch,
+                    encoded_content=encoded_content,
+                    slug=candidate,
+                )
+                encoded_path = quote(target_path, safe="/-_.")
+                raw_url = (
+                    f"https://raw.githubusercontent.com/{self._repo}/"
+                    f"{encoded_branch}/{encoded_path}"
+                )
                 logger.info(
-                    "Binary gist upload not supported; falling back to SVG wrapper"
+                    "Uploaded dashboard screenshot to %s on branch %s",
+                    target_path,
+                    branch,
                 )
+                result_url = raw_url
+                break
+            except RuntimeError as exc:
+                if slug and idx == 0 and self._is_existing_file_error(exc):
+                    logger.info(
+                        "Screenshot path %s already exists; retrying with suffix",
+                        target_path,
+                    )
+                    continue
+                logger.error(
+                    "Screenshot upload failed for %s on %s: %s",
+                    target_path,
+                    branch,
+                    exc,
+                )
+                break
+            except Exception:
+                logger.exception("Screenshot upload failed for %s", target_path)
+                break
+        return result_url
 
-                width, height = self._png_dimensions(png_bytes)
-                svg_payload = (
-                    f'<svg xmlns="http://www.w3.org/2000/svg" '
-                    f'width="{width}" height="{height}" viewBox="0 0 {width} {height}">'
-                    f'<image href="data:image/png;base64,{png_base64}" '
-                    f'width="{width}" height="{height}"/></svg>'
-                )
-                svg_fd, fallback_svg_path = tempfile.mkstemp(
-                    suffix=".svg",
-                    prefix="hydraflow-screenshot-",
-                )
-                with os.fdopen(svg_fd, "w", encoding="utf-8") as f:
-                    f.write(svg_payload)
+    def _build_screenshot_path(self, slug: str) -> str:
+        """Return a sanitized repo-relative path for the uploaded screenshot."""
+        base_path = (self._config.screenshot_storage_path or "").strip().strip("/")
+        segments = [
+            segment
+            for segment in base_path.split("/")
+            if segment and segment not in (".", "..")
+        ]
+        normalized_base = "/".join(segments) or ".hydraflow/screenshots"
+        return f"{normalized_base}/{slug}.png"
 
-                fallback_args = [
-                    "gh",
-                    "gist",
-                    "create",
-                ]
-                if self._config.screenshot_gist_public:
-                    fallback_args.append("--public")
-                fallback_args += [
-                    "--filename",
-                    "screenshot.svg",
-                    fallback_svg_path,
-                ]
-                output = await self._run_gh(*fallback_args)
-                return self._gist_raw_url(output, "screenshot.svg")
-        except Exception:
-            logger.exception("Screenshot gist upload failed")
-            return ""
+    def _normalize_screenshot_slug(self, slug: str | None) -> str:
+        """Sanitize the provided slug and fall back to a UUID when necessary."""
+        token = (slug or uuid4().hex).strip()
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "-", token)
+        safe = safe.strip("-_.")
+        if not safe:
+            safe = uuid4().hex
+        return safe
+
+    @staticmethod
+    def _is_existing_file_error(exc: RuntimeError) -> bool:
+        """Return True when GitHub reports that the file already exists."""
+        message = str(exc).lower()
+        return "already exists" in message or "sha wasn't supplied" in message
+
+    async def _upload_screenshot_contents(
+        self, *, path: str, branch: str, encoded_content: str, slug: str
+    ) -> None:
+        """Write the JSON payload to disk and invoke gh api to upload."""
+        fd, tmp_path = tempfile.mkstemp(
+            suffix=".json",
+            prefix="hydraflow-screenshot-",
+        )
+        payload = {
+            "message": f"Attach dashboard screenshot {slug}.png",
+            "content": encoded_content,
+            "branch": branch,
+        }
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle)
+            await self._run_gh(
+                "gh",
+                "api",
+                "--method",
+                "PUT",
+                f"repos/{self._repo}/contents/{path}",
+                "--input",
+                tmp_path,
+            )
         finally:
             Path(tmp_path).unlink(missing_ok=True)
-            if fallback_svg_path:
-                Path(fallback_svg_path).unlink(missing_ok=True)
-
-    @staticmethod
-    def _gist_raw_url(gist_output: str, filename: str) -> str:
-        """Convert ``gh gist create`` output to a raw gist URL for *filename*."""
-        gist_url = gist_output.strip()
-        if "gist.github.com" not in gist_url:
-            logger.warning("Unexpected gist create output: %s", gist_url[:200])
-            return ""
-        return (
-            gist_url.replace("gist.github.com", "gist.githubusercontent.com")
-            + f"/raw/{filename}"
-        )
-
-    @staticmethod
-    def _png_dimensions(png_bytes: bytes) -> tuple[int, int]:
-        """Return PNG dimensions, or a safe default when parsing fails."""
-        # PNG signature (8 bytes) + IHDR length/type (8 bytes) + width/height (8 bytes)
-        if (
-            len(png_bytes) >= 24
-            and png_bytes[:8] == b"\x89PNG\r\n\x1a\n"
-            and png_bytes[12:16] == b"IHDR"
-        ):
-            width = int.from_bytes(png_bytes[16:20], "big")
-            height = int.from_bytes(png_bytes[20:24], "big")
-            if width > 0 and height > 0:
-                return width, height
-        return (1280, 720)
 
     async def get_pr_diff(self, pr_number: int) -> str:
         """Fetch the diff for *pr_number*."""
