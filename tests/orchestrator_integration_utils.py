@@ -253,6 +253,8 @@ class ScriptedImplementPhase:
                 )
                 continue
             if behavior == "fail":
+                # Intentional: consume issue from queue without re-enqueuing,
+                # simulating a terminal failure (worktree cleaned, issue dropped).
                 self._worktrees.cleanup(issue.id)
                 results.append(
                     WorkerResult(
@@ -345,6 +347,7 @@ class ScriptedHITLPhase:
             stage = self._script.hitl_for(issue_number)
             task = self._store.get_cached(issue_number)
             if task is None:
+                self._active_hitl_issues.discard(issue_number)
                 continue
             self._store.enqueue_transition(task, stage)
             self._active_hitl_issues.discard(issue_number)

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Callable, Coroutine, Iterator
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
@@ -17,6 +18,7 @@ from subprocess_util import CreditExhaustedError
 from tests.conftest import TaskFactory
 from tests.helpers import ConfigFactory
 from tests.orchestrator_integration_utils import (
+    FakeWorktreeManager,
     PipelineScript,
     build_scripted_services,
 )
@@ -57,13 +59,13 @@ async def _wait_for(condition: Callable[[], bool], timeout: float = 1.0) -> None
 
 async def _drive_loop(
     orch: HydraFlowOrchestrator,
-    coro_fn: Callable[[], Awaitable[None]],
+    coro_fn: Callable[[], Coroutine[Any, Any, None]],
     condition: Callable[[], bool],
     timeout: float = 1.0,
 ) -> None:
     """Run an orchestrator loop until *condition* becomes true."""
     orch._stop_event.clear()
-    task = asyncio.create_task(coro_fn())
+    task = asyncio.create_task(coro_fn())  # type: ignore[arg-type]
     try:
         await _wait_for(condition, timeout)
     finally:
@@ -166,7 +168,9 @@ async def test_credit_pause_publishes_alerts_and_restores_loops(tmp_path) -> Non
         async def fake_loop() -> None:
             await asyncio.sleep(0)
 
-        loop_factories = [("triage", fake_loop)]
+        loop_factories: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]] = [
+            ("triage", fake_loop)
+        ]
         resume_at = datetime.now(UTC) + timedelta(seconds=0.02)
         exc = CreditExhaustedError("limit reached", resume_at=resume_at)
 
@@ -235,7 +239,8 @@ async def test_failed_implementation_discards_worktree(tmp_path) -> None:
             lambda: _queue_depth(orch, "ready") == 0,
         )
 
-        assert issue_id in orch._worktrees.cleaned
+        worktrees = cast(FakeWorktreeManager, orch._worktrees)
+        assert issue_id in worktrees.cleaned
 
 
 @pytest.mark.asyncio
@@ -252,7 +257,10 @@ async def test_concurrent_loops_do_not_double_process_same_issue(tmp_path) -> No
         )
         orch._store.enqueue_transition(issue, "ready")
 
-        # Run two concurrent implement work calls; only one should pick up the issue.
+        # Run two implement work calls concurrently in the same event loop.
+        # ScriptedImplementPhase.run_batch has no await points, so the first
+        # coroutine dequeues atomically before the second starts — verifying
+        # that the IssueStore dequeue is not vulnerable to same-loop races.
         results = await asyncio.gather(
             orch._do_implement_work(),
             orch._do_implement_work(),
