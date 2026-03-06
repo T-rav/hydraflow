@@ -121,6 +121,7 @@ _RESET_TIME_RE = re.compile(
 _DOCKER_ENV_PASSTHROUGH_KEYS = (
     # Primary provider auth keys
     "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_API_KEY",
     "OPENAI_API_KEY",
     "OPENROUTER_API_KEY",
     "GEMINI_API_KEY",
