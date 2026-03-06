@@ -1472,7 +1472,7 @@ class TestSummariseWithModel:
 
     @pytest.mark.asyncio
     async def test_calls_run_simple_not_raw_subprocess(self, tmp_path: Path) -> None:
-        """Verify run_simple is used (not asyncio.create_subprocess_exec)."""
+        """Verify run_simple is used and prompt is passed as CLI arg (not stdin)."""
         config = ConfigFactory.create(repo_root=tmp_path)
         runner = AsyncMock()
         runner.run_simple = AsyncMock(
@@ -1482,9 +1482,11 @@ class TestSummariseWithModel:
         await worker._summarise_with_model("content", 4000)
 
         runner.run_simple.assert_awaited_once()
-        call_kwargs = runner.run_simple.call_args[1]
-        assert call_kwargs["input"] is not None
-        assert isinstance(call_kwargs["input"], bytes)
+        call_args = runner.run_simple.call_args
+        cmd = call_args[0][0]
+        assert cmd[0] == "claude"
+        assert cmd[1] == "-p"
+        assert call_args[1].get("input") is None
 
     @pytest.mark.asyncio
     async def test_codex_tool_passes_prompt_as_cli_arg(self, tmp_path: Path) -> None:

@@ -753,8 +753,8 @@ class MemorySyncWorker:
             ]
             cmd_input = None
         else:
-            cmd = ["claude", "-p", "--model", model]
-            cmd_input = prompt.encode()
+            cmd = ["claude", "-p", "--model", model, prompt]
+            cmd_input = None
         env = make_clean_env(self._config.gh_token)
 
         try:
