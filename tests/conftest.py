@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import socket
 import sys
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -596,22 +597,11 @@ def make_state(tmp_path: Path) -> StateTracker:
 # --- Event Bus Fixture ---
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def event_bus():
     from events import EventBus
 
     return EventBus()
-
-
-@pytest.fixture(autouse=True)
-def reset_event_bus(event_bus):
-    """Ensure each test sees a clean EventBus history/subscribers list.
-
-    Note: this only resets the shared module-scoped ``event_bus`` fixture.
-    Tests that construct their own local EventBus instances are unaffected.
-    """
-    event_bus.clear()
-    yield
 
 
 # --- Dashboard Fixtures ---
@@ -642,11 +632,13 @@ def dashboard_app(config: HydraFlowConfig, tmp_path: Path) -> DashboardAppBundle
 
 
 @pytest.fixture
-def free_port() -> int:
+def free_port() -> Iterator[int]:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        yield sock.getsockname()[1]
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    # Socket is closed here so the port is actually free for the test to use.
+    yield port
 
 
 # --- Lint Scaffold Result Factory ---
