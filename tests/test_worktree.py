@@ -1436,6 +1436,13 @@ class TestConfigureGitIdentity:
         """Should not run any git config commands when identity is empty."""
         monkeypatch.delenv("HYDRAFLOW_GIT_USER_NAME", raising=False)
         monkeypatch.delenv("HYDRAFLOW_GIT_USER_EMAIL", raising=False)
+        for var in (
+            "GIT_AUTHOR_NAME",
+            "GIT_COMMITTER_NAME",
+            "GIT_AUTHOR_EMAIL",
+            "GIT_COMMITTER_EMAIL",
+        ):
+            monkeypatch.delenv(var, raising=False)
 
         from tests.helpers import ConfigFactory
 
@@ -1458,6 +1465,8 @@ class TestConfigureGitIdentity:
         """Should only set user.name when email is empty."""
         monkeypatch.delenv("HYDRAFLOW_GIT_USER_NAME", raising=False)
         monkeypatch.delenv("HYDRAFLOW_GIT_USER_EMAIL", raising=False)
+        monkeypatch.delenv("GIT_AUTHOR_EMAIL", raising=False)
+        monkeypatch.delenv("GIT_COMMITTER_EMAIL", raising=False)
 
         from tests.helpers import ConfigFactory
 
@@ -1487,6 +1496,8 @@ class TestConfigureGitIdentity:
         """Should only set user.email when name is empty."""
         monkeypatch.delenv("HYDRAFLOW_GIT_USER_NAME", raising=False)
         monkeypatch.delenv("HYDRAFLOW_GIT_USER_EMAIL", raising=False)
+        monkeypatch.delenv("GIT_AUTHOR_NAME", raising=False)
+        monkeypatch.delenv("GIT_COMMITTER_NAME", raising=False)
 
         from tests.helpers import ConfigFactory
 

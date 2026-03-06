@@ -13,9 +13,18 @@ from models import (
     BackgroundWorkerStatus,
     BatchResult,
     BGWorkerHealth,
+    CIStatus,
     ConflictResolutionResult,
     ControlStatusConfig,
     ControlStatusResponse,
+    EpicChildInfo,
+    EpicChildPRState,
+    EpicChildState,
+    EpicChildStatus,
+    EpicDetail,
+    EpicProgress,
+    EpicState,
+    EpicStatus,
     GitHubIssue,
     HITLItem,
     InstructionsQuality,
@@ -25,6 +34,7 @@ from models import (
     JudgeResult,
     LifetimeStats,
     ManifestRefreshResult,
+    MergeStrategy,
     MetricsSnapshot,
     NewIssueSpec,
     ParsedCriteria,
@@ -40,8 +50,10 @@ from models import (
     PRInfoExtract,
     PRListItem,
     QueueStats,
+    ReportIssueResponse,
     ReviewerStatus,
     ReviewResult,
+    ReviewStatus,
     ReviewVerdict,
     SessionLog,
     SessionStatus,
@@ -2325,6 +2337,79 @@ class TestUrlValidation:
             ValidationError, match="URL must be empty or start with http"
         ):
             IssueTimeline(issue_number=1, pr_url="bad")
+
+
+# ---------------------------------------------------------------------------
+# Enum Validation
+# ---------------------------------------------------------------------------
+
+
+class TestEnumValidation:
+    """Tests enforcing Literal/StrEnum constraints."""
+
+    def test_github_issue_rejects_invalid_state(self) -> None:
+        with pytest.raises(ValidationError, match="state"):
+            GitHubIssue(number=1, title="t", state="pending")
+
+    def test_epic_state_merge_strategy_rejects_invalid_value(self) -> None:
+        with pytest.raises(ValidationError, match="merge_strategy"):
+            EpicState(epic_number=1, merge_strategy="fast_track")  # type: ignore[arg-type]
+
+    def test_epic_progress_accepts_valid_status_and_strategy(self) -> None:
+        progress = EpicProgress(
+            epic_number=100,
+            status="completed",
+            merge_strategy="ordered",
+        )
+        assert progress.status == EpicStatus.COMPLETED
+        assert progress.merge_strategy == MergeStrategy.ORDERED
+
+    def test_epic_progress_rejects_invalid_status(self) -> None:
+        with pytest.raises(ValidationError, match="status"):
+            EpicProgress(epic_number=100, status="paused")  # type: ignore[arg-type]
+
+    def test_epic_detail_rejects_invalid_merge_strategy(self) -> None:
+        with pytest.raises(ValidationError, match="merge_strategy"):
+            EpicDetail(epic_number=5, merge_strategy="parallel")  # type: ignore[arg-type]
+
+    def test_epic_child_info_accepts_enum_fields(self) -> None:
+        child = EpicChildInfo(
+            issue_number=55,
+            state="closed",
+            status="done",
+            pr_state="draft",
+            ci_status="pending",
+            review_status="approved",
+        )
+        assert child.state == EpicChildState.CLOSED
+        assert child.status == EpicChildStatus.DONE
+        assert child.pr_state == EpicChildPRState.DRAFT
+        assert child.ci_status == CIStatus.PENDING
+        assert child.review_status == ReviewStatus.APPROVED
+
+    def test_epic_child_info_rejects_invalid_status(self) -> None:
+        with pytest.raises(ValidationError, match="status"):
+            EpicChildInfo(issue_number=55, status="sleeping")  # type: ignore[arg-type]
+
+    def test_hitl_item_rejects_invalid_status(self) -> None:
+        with pytest.raises(ValidationError, match="status"):
+            HITLItem(issue=1, status="queued")  # type: ignore[arg-type]
+
+    def test_intent_response_status_literal_enforced(self) -> None:
+        with pytest.raises(ValidationError, match="status"):
+            IntentResponse(issue_number=1, title="t", status="queued")  # type: ignore[arg-type]
+
+    def test_report_issue_response_status_supports_queued_and_rejects_invalid(
+        self,
+    ) -> None:
+        response = ReportIssueResponse(issue_number=1, title="t", status="queued")
+        assert response.status == "queued"
+        with pytest.raises(ValidationError, match="status"):
+            ReportIssueResponse(issue_number=1, title="t", status="pending")  # type: ignore[arg-type]
+
+    def test_control_status_response_rejects_unknown_status(self) -> None:
+        with pytest.raises(ValidationError, match="status"):
+            ControlStatusResponse(status="paused")  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------

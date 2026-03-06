@@ -14,12 +14,17 @@ from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from issue_fetcher import IssueFetcher
 from models import (
+    CIStatus,
     EpicChildInfo,
+    EpicChildPRState,
+    EpicChildState,
+    EpicChildStatus,
     EpicDetail,
     EpicProgress,
     EpicReadiness,
     EpicState,
     Release,
+    ReviewStatus,
 )
 from pr_manager import PRManager
 from state import StateTracker
@@ -766,11 +771,11 @@ class EpicManager:
                 child_num, epic, repo, fixed_label
             )
             # Count by status (failed is tracked via progress.failed; exclude here)
-            if child_info.status == "done":
+            if child_info.status == EpicChildStatus.DONE:
                 merged_count += 1
-            elif child_info.status == "running":
+            elif child_info.status == EpicChildStatus.RUNNING:
                 active_count += 1
-            elif child_info.status != "failed":
+            elif child_info.status != EpicChildStatus.FAILED:
                 queued_count += 1
             children.append(child_info)
 
@@ -827,10 +832,10 @@ class EpicManager:
         if is_completed:
             child_info.current_stage = "merged"
             child_info.stage = "merged"
-            child_info.status = "done"
-            child_info.state = "closed"
+            child_info.status = EpicChildStatus.DONE
+            child_info.state = EpicChildState.CLOSED
         elif is_failed:
-            child_info.status = "failed"
+            child_info.status = EpicChildStatus.FAILED
 
         # Fetch live data from GitHub
         try:
@@ -838,18 +843,18 @@ class EpicManager:
             if gh_issue is not None:
                 child_info.title = gh_issue.title
                 if fixed_label and fixed_label in gh_issue.labels:
-                    child_info.state = "closed"
+                    child_info.state = EpicChildState.CLOSED
                 # Derive stage from labels if not already set
                 if not child_info.current_stage:
                     stage = _stage_from_labels(gh_issue.labels, self._config)
                     child_info.stage = stage
                     child_info.current_stage = stage
                     if stage in ("implement", "review"):
-                        child_info.status = "running"
+                        child_info.status = EpicChildStatus.RUNNING
                     elif stage == "merged":
-                        child_info.status = "done"
+                        child_info.status = EpicChildStatus.DONE
                     elif stage:
-                        child_info.status = "queued"
+                        child_info.status = EpicChildStatus.QUEUED
         except Exception:  # noqa: BLE001
             logger.debug("Could not fetch child #%d for epic detail", child_num)
 
@@ -864,7 +869,11 @@ class EpicManager:
                 if pr_info is not None:
                     child_info.pr_number = pr_info.number
                     child_info.pr_url = pr_info.url
-                    child_info.pr_state = "draft" if pr_info.draft else "open"
+                    child_info.pr_state = (
+                        EpicChildPRState.DRAFT
+                        if pr_info.draft
+                        else EpicChildPRState.OPEN
+                    )
                     # Fetch CI and review status
                     await self._enrich_pr_status(child_info, pr_info.number)
             except Exception:  # noqa: BLE001
@@ -885,11 +894,11 @@ class EpicManager:
             if checks:
                 states = {c.get("state", "") for c in checks}
                 if all(s == "success" for s in states):
-                    child_info.ci_status = "passing"
+                    child_info.ci_status = CIStatus.PASSING
                 elif "failure" in states or "error" in states:
-                    child_info.ci_status = "failing"
+                    child_info.ci_status = CIStatus.FAILING
                 else:
-                    child_info.ci_status = "pending"
+                    child_info.ci_status = CIStatus.PENDING
         except Exception:  # noqa: BLE001
             logger.debug("Could not fetch CI checks for PR #%d", pr_number)
 
@@ -898,11 +907,11 @@ class EpicManager:
             if reviews:
                 review_states = [r.get("state", "") for r in reviews]
                 if "APPROVED" in review_states:
-                    child_info.review_status = "approved"
+                    child_info.review_status = ReviewStatus.APPROVED
                 elif "CHANGES_REQUESTED" in review_states:
-                    child_info.review_status = "changes_requested"
+                    child_info.review_status = ReviewStatus.CHANGES_REQUESTED
                 else:
-                    child_info.review_status = "pending"
+                    child_info.review_status = ReviewStatus.PENDING
         except Exception:  # noqa: BLE001
             logger.debug("Could not fetch reviews for PR #%d", pr_number)
 
@@ -919,12 +928,15 @@ class EpicManager:
             return EpicReadiness()
 
         all_implemented = all(
-            c.status == "done" or c.pr_number is not None for c in children
+            c.status == EpicChildStatus.DONE or c.pr_number is not None
+            for c in children
         )
         all_approved = all(
-            c.review_status == "approved" for c in children if c.pr_number
+            c.review_status == ReviewStatus.APPROVED for c in children if c.pr_number
         )
-        all_ci_passing = all(c.ci_status == "passing" for c in children if c.pr_number)
+        all_ci_passing = all(
+            c.ci_status == CIStatus.PASSING for c in children if c.pr_number
+        )
         no_conflicts = all(c.mergeable is not False for c in children if c.pr_number)
 
         version = extract_version_from_title(epic.title)
