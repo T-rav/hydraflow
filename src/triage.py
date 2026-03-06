@@ -129,6 +129,11 @@ class TriageRunner(BaseRunner):
             result = await self._evaluate_with_llm(issue)
         except CreditExhaustedError:
             raise
+        except RuntimeError:
+            # Infrastructure errors (empty response, subprocess crash) should
+            # propagate so the issue stays in the triage queue for retry
+            # instead of being incorrectly escalated to HITL.
+            raise
         except Exception as exc:
             logger.warning(
                 "LLM evaluation failed for issue #%d: %s",
@@ -259,15 +264,22 @@ or
         )
         self._save_transcript("triage-issue", issue.id, transcript)
 
+        if not transcript.strip():
+            raise RuntimeError(
+                "LLM returned empty response — subprocess produced no output"
+            )
+
         result = self._parse_verdict(transcript, issue.id)
         if result is not None:
             return result
 
-        # Fallback: could not parse LLM response
+        # Fallback: could not parse LLM response — include a transcript
+        # snippet so the failure reason is visible in HITL comments.
+        snippet = transcript.strip()[:200]
         return TriageResult(
             issue_number=issue.id,
             ready=False,
-            reasons=["Could not parse LLM evaluation response"],
+            reasons=[f"Could not parse LLM evaluation response: {snippet!r}"],
         )
 
     @staticmethod

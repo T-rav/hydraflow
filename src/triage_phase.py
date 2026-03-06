@@ -113,7 +113,18 @@ class TriagePhase:
                 )
             return 1
 
-        result = await self._triage.evaluate(issue)
+        try:
+            result = await self._triage.evaluate(issue)
+        except RuntimeError as exc:
+            # Infrastructure errors (empty LLM response, subprocess crash)
+            # should NOT escalate to HITL.  Leave the issue in the find queue
+            # so it gets retried on the next triage cycle.
+            logger.warning(
+                "Issue #%d triage skipped (infra error, will retry): %s",
+                issue.id,
+                exc,
+            )
+            return 0
 
         if self._config.dry_run:
             return 1

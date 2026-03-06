@@ -270,6 +270,29 @@ class TestTriagePhase:
         assert "Needs More Information" in comment
         assert "Missing required ADR sections" in comment
 
+    @pytest.mark.asyncio
+    async def test_triage_infra_error_does_not_escalate_to_hitl(
+        self,
+        config: HydraFlowConfig,
+    ) -> None:
+        """RuntimeError (empty LLM response) should NOT send the issue to HITL.
+
+        The issue should stay in the find queue for retry on the next cycle.
+        """
+        phase, _state, triage, prs, store, _stop = make_triage_phase(config)
+        issue = TaskFactory.create(id=99, title="Well-formed issue", body="A" * 200)
+
+        triage.evaluate = AsyncMock(
+            side_effect=RuntimeError("LLM returned empty response")
+        )
+        store.get_triageable = supply_once([issue])
+
+        await phase.triage_issues()
+
+        # Issue should NOT be escalated to HITL
+        prs.swap_pipeline_labels.assert_not_called()
+        prs.post_comment.assert_not_called()
+
 
 class TestTriagePhaseBatchScaling:
     """Pool respects max_triagers for concurrency control."""
