@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import socket
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -610,6 +612,41 @@ def reset_event_bus(event_bus):
     """
     event_bus.clear()
     yield
+
+
+# --- Dashboard Fixtures ---
+
+
+@dataclass(slots=True)
+class DashboardAppBundle:
+    app: Any
+    event_bus: Any
+    state: Any
+
+
+@pytest.fixture
+def dashboard_app(config: HydraFlowConfig, tmp_path: Path) -> DashboardAppBundle:
+    from dashboard import HydraFlowDashboard
+    from events import EventBus
+    from state import StateTracker
+
+    dashboard_state = StateTracker(tmp_path / "dashboard-state.json")
+    bus = EventBus()
+    dashboard = HydraFlowDashboard(config, bus, dashboard_state)
+    app = dashboard.create_app()
+
+    return DashboardAppBundle(app=app, event_bus=bus, state=dashboard_state)
+
+
+# --- Network Helpers ---
+
+
+@pytest.fixture
+def free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        yield sock.getsockname()[1]
 
 
 # --- Lint Scaffold Result Factory ---
