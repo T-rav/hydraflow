@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
+import json
 import os
+import stat
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -84,6 +87,43 @@ def dry_config(tmp_path: Path) -> HydraFlowConfig:
         worktree_base=tmp_path / "worktrees",
         state_file=tmp_path / "state.json",
     )
+
+
+@pytest.fixture
+def readonly_dir(tmp_path: Path) -> Path:
+    """Create a read-only directory for permission error simulations."""
+    target = tmp_path / "readonly"
+    target.mkdir()
+    (target / "sentinel.txt").write_text("locked")
+    original_mode = stat.S_IMODE(target.stat().st_mode)
+    try:
+        target.chmod(0o555)
+    except OSError as exc:
+        pytest.skip(f"platform does not support chmod read-only dirs: {exc}")
+
+    try:
+        yield target
+    finally:
+        with contextlib.suppress(OSError):
+            target.chmod(original_mode)
+
+
+@pytest.fixture
+def state_tracker_factory(tmp_path: Path):
+    """Return a factory for isolated StateTracker instances."""
+    from state import StateTracker
+
+    counter = 0
+
+    def factory(seed_data: dict[str, Any] | None = None) -> StateTracker:
+        nonlocal counter
+        path = tmp_path / f"state-{counter}.json"
+        counter += 1
+        if seed_data is not None:
+            path.write_text(json.dumps(seed_data))
+        return StateTracker(path)
+
+    return factory
 
 
 # --- Issue Factory ---
