@@ -244,6 +244,47 @@ async def test_install_hooks_docker_copies_hooks(monkeypatch, tmp_path: Path) ->
     assert mode & stat.S_IXOTH
 
 
+def test_memory_digest_concurrent_write_and_read(tmp_path: Path) -> None:
+    """Concurrent compaction writes and reads must never produce torn content."""
+    config = _make_config(tmp_path, max_memory_prompt_chars=4096)
+    digest_path = config.data_path("memory", "digest.md")
+    digest_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Payloads are distinguishable, complete markdown blocks.
+    payloads = [f"## Learnings\n\nlearning-{i}\n" * 10 for i in range(4)]
+    digest_path.write_text(payloads[0])
+
+    read_errors: list[BaseException] = []
+    write_errors: list[BaseException] = []
+
+    def writer(data: str) -> None:
+        for _ in range(20):
+            try:
+                atomic_write(digest_path, data)
+            except BaseException as exc:  # noqa: BLE001
+                write_errors.append(exc)
+
+    def reader() -> None:
+        for _ in range(40):
+            try:
+                result = load_memory_digest(config)
+                # Content must be one of the known payloads (not a mix / partial)
+                assert any(result.startswith(p[:30]) for p in payloads), (
+                    f"Torn read detected: {result[:80]!r}"
+                )
+            except BaseException as exc:  # noqa: BLE001
+                read_errors.append(exc)
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        for payload in payloads:
+            executor.submit(writer, payload)
+        for _ in range(4):
+            executor.submit(reader)
+
+    assert not write_errors, f"Write errors: {write_errors}"
+    assert not read_errors, f"Read errors: {read_errors}"
+
+
 def test_base_runner_save_transcript_creates_logs(tmp_path: Path) -> None:
     config = _make_config(tmp_path)
     runner = DummyRunner(config=config, event_bus=EventBus(), runner=MagicMock())
