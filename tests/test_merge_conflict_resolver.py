@@ -449,7 +449,7 @@ class TestFreshBranchRebuild:
 
     @pytest.mark.asyncio
     async def test_fresh_rebuild_uses_force_push(self, tmp_path: Path) -> None:
-        """After rebuild, merge_with_main should use force_push_branch."""
+        """After rebuild, merge_with_main should force push branch."""
         cfg = ConfigFactory.create(
             max_merge_conflict_fix_attempts=1,
             enable_fresh_branch_rebuild=True,
@@ -475,7 +475,6 @@ class TestFreshBranchRebuild:
         resolver._worktrees.create = AsyncMock(return_value=new_wt)
         resolver._prs.get_pr_diff = AsyncMock(return_value="diff content")
         resolver._prs.push_branch = AsyncMock(return_value=True)
-        resolver._prs.force_push_branch = AsyncMock(return_value=True)
 
         publish_fn = AsyncMock()
         escalate_fn = AsyncMock()
@@ -490,5 +489,5 @@ class TestFreshBranchRebuild:
         )
 
         assert result is True
-        resolver._prs.force_push_branch.assert_awaited_once()
-        resolver._prs.push_branch.assert_not_awaited()
+        resolver._prs.push_branch.assert_awaited_once()
+        assert resolver._prs.push_branch.await_args.kwargs["force"] is True

@@ -866,7 +866,7 @@ class TestFreshBranchRebuild:
         resolver.resolve_merge_conflicts = AsyncMock(
             return_value=ConflictResolutionResult(success=True, used_rebuild=True)
         )
-        prs.force_push_branch = AsyncMock(return_value=True)
+        prs.push_branch = AsyncMock(return_value=True)
 
         wt_dir = unsticker._config.worktree_path_for_issue(42)
         wt_dir.mkdir(parents=True)
@@ -875,8 +875,9 @@ class TestFreshBranchRebuild:
         stats = await unsticker.unstick([_make_hitl_item(42, pr=100, prUrl=pr_url)])
 
         assert stats["resolved"] == 1
-        # Should use force_push since rebuild was used
-        prs.force_push_branch.assert_awaited_once()
+        # Should use force push since rebuild was used
+        prs.push_branch.assert_awaited_once()
+        assert prs.push_branch.await_args.kwargs["force"] is True
 
     @pytest.mark.asyncio
     async def test_resolver_failure_releases_to_hitl(self, tmp_path: Path) -> None:

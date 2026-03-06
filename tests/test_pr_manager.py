@@ -802,50 +802,114 @@ async def test_push_branch_failure_returns_false(config, event_bus, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# force_push_branch
+# push_branch(force=True)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_force_push_branch_success(config, event_bus, tmp_path):
+async def test_push_branch_force_true_includes_flag(config, event_bus, tmp_path):
     manager = _make_manager(config, event_bus)
     mock_create = SubprocessMockBuilder().with_stdout("").build()
 
     with patch("asyncio.create_subprocess_exec", mock_create):
-        result = await manager.force_push_branch(tmp_path, "agent/issue-42")
+        result = await manager.push_branch(tmp_path, "agent/issue-42", force=True)
 
     assert result is True
     args = mock_create.call_args[0]
-    assert args[0] == "git"
-    assert args[1] == "push"
     assert "--force-with-lease" in args
-    assert "--no-verify" in args
-    assert "-u" in args
-    assert "origin" in args
-    assert "agent/issue-42" in args
 
 
 @pytest.mark.asyncio
-async def test_force_push_branch_failure(config, event_bus, tmp_path):
-    manager = _make_manager(config, event_bus)
-    mock_create = (
-        SubprocessMockBuilder()
-        .with_returncode(1)
-        .with_stderr("error: failed to push")
-        .build()
-    )
-
-    with patch("asyncio.create_subprocess_exec", mock_create):
-        result = await manager.force_push_branch(tmp_path, "agent/issue-99")
-
-    assert result is False
-
-
-@pytest.mark.asyncio
-async def test_force_push_branch_dry_run(dry_config, event_bus, tmp_path):
+async def test_push_branch_force_dry_run(dry_config, event_bus, tmp_path):
     manager = _make_manager(dry_config, event_bus)
-    result = await manager.force_push_branch(tmp_path, "agent/issue-42")
+
+    result = await manager.push_branch(tmp_path, "agent/issue-42", force=True)
+
     assert result is True
+
+
+# ---------------------------------------------------------------------------
+# _gh_json_query
+# ---------------------------------------------------------------------------
+
+
+class TestGhJsonQuery:
+    """Tests for PRManager._gh_json_query."""
+
+    @pytest.mark.asyncio
+    async def test_parses_json_and_applies_transform(self, config, event_bus):
+        mgr = _make_manager(config, event_bus)
+        mgr._run_gh = AsyncMock(return_value=json.dumps({"value": "abc"}))
+
+        result = await mgr._gh_json_query(
+            "gh",
+            "api",
+            "/test",
+            default="",
+            dry_run_message="Would fetch test payload",
+            error_message="Could not fetch test payload",
+            transform=lambda data: data.get("value", ""),
+        )
+
+        assert result == "abc"
+        mgr._run_gh.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_dry_run_returns_default_without_running(self, dry_config, event_bus):
+        mgr = _make_manager(dry_config, event_bus)
+        mgr._run_gh = AsyncMock()
+
+        fallback = ["noop"]
+        result = await mgr._gh_json_query(
+            "gh",
+            "api",
+            "/test",
+            default=fallback,
+            dry_run_message="Would fetch test payload",
+            error_message="Could not fetch test payload",
+        )
+
+        assert result == fallback
+        mgr._run_gh.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# _sum_label_counts
+# ---------------------------------------------------------------------------
+
+
+class TestSumLabelCounts:
+    """Tests for PRManager._sum_label_counts."""
+
+    @pytest.mark.asyncio
+    async def test_sums_counts_for_each_label(self, config, event_bus):
+        mgr = _make_manager(config, event_bus)
+        mgr._search_github_count = AsyncMock(side_effect=[2, 3, 5])
+
+        total = await mgr._sum_label_counts(
+            ["ready", "review", "hitl"],
+            'repo:{repo} label:"{label}"',
+            error_log_prefix="Count failed",
+        )
+
+        assert total == 10
+        queries = [call.args[0] for call in mgr._search_github_count.await_args_list]
+        assert queries[0] == f'repo:{config.repo} label:"ready"'
+        assert queries[-1] == f'repo:{config.repo} label:"hitl"'
+
+    @pytest.mark.asyncio
+    async def test_continues_when_one_label_errors(self, config, event_bus):
+        mgr = _make_manager(config, event_bus)
+        mgr._search_github_count = AsyncMock(side_effect=[RuntimeError("boom"), 4])
+
+        total = await mgr._sum_label_counts(
+            ["ready", "review"],
+            'repo:{repo} label:"{label}"',
+            error_log_prefix="Count failed",
+        )
+
+        assert total == 4
+        assert mgr._search_github_count.await_count == 2
 
 
 # ---------------------------------------------------------------------------

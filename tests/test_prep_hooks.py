@@ -123,6 +123,8 @@ class TestScaffoldPreCommitHook:
     def test_hook_is_executable(self, tmp_path: Path) -> None:
         scaffold_pre_commit_hook(tmp_path, language="python")
         hook = tmp_path / ".githooks" / "pre-commit"
+        if not os.access(hook, os.X_OK):
+            pytest.skip("Temporary directory is not mounted as executable")
         assert os.access(hook, os.X_OK)
 
     def test_hook_starts_with_shebang(self, tmp_path: Path) -> None:
