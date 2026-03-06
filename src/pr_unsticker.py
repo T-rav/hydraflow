@@ -768,7 +768,7 @@ If nothing novel, output exactly: NO_NEW_PATTERN"""
             ]
             cmd_input = None
         else:
-            cmd = [tool, "-p", "--model", model, prompt]
+            cmd = [tool, "-p", prompt, "--model", model]
             cmd_input = None
 
         env = make_clean_env(self._config.gh_token)

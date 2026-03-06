@@ -603,8 +603,8 @@ class TestSummarizeAndPublish:
         # Verify the prompt passed as CLI arg was truncated
         call_args = runner.run_simple.call_args
         cmd = call_args[0][0]
-        # Prompt is the last CLI arg
-        prompt_arg = cmd[-1]
+        # Prompt is right after -p (cmd[2])
+        prompt_arg = cmd[cmd.index("-p") + 1]
         assert len(prompt_arg) < 50_000
 
     @pytest.mark.asyncio
