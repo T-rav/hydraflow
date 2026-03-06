@@ -408,6 +408,66 @@ class TestIssueHistoryEndpoint:
         assert issue["issue_url"] == ""
 
     @pytest.mark.asyncio
+    async def test_issue_history_fallback_strips_github_url_prefix(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        import json
+
+        from dashboard_routes import create_router
+        from pr_manager import PRManager
+        from prompt_telemetry import PromptTelemetry
+
+        config.repo = "https://github.com/test-org/test-repo"
+        issue_number = 419
+        telemetry = PromptTelemetry(config)
+        telemetry.record(
+            source="implementer",
+            tool="codex",
+            model="gpt-5",
+            issue_number=issue_number,
+            pr_number=0,
+            session_id="sess-strip-prefix",
+            prompt_chars=10,
+            transcript_chars=5,
+            duration_seconds=0.1,
+            success=True,
+            stats={"total_tokens": 7, "input_tokens": 3, "output_tokens": 4},
+        )
+
+        pr_mgr = PRManager(config, event_bus)
+        router = create_router(
+            config=config,
+            event_bus=event_bus,
+            state=state,
+            pr_manager=pr_mgr,
+            get_orchestrator=lambda: None,
+            set_orchestrator=lambda o: None,
+            set_run_task=lambda t: None,
+            ui_dist_dir=tmp_path / "no-dist",
+            template_dir=tmp_path / "no-templates",
+        )
+        endpoint = next(
+            r.endpoint
+            for r in router.routes
+            if getattr(r, "path", "") == "/api/issues/history"
+        )
+
+        mock_fetcher = AsyncMock()
+        mock_fetcher.fetch_issue_by_number = AsyncMock(return_value=None)
+        with patch("dashboard_routes.IssueFetcher", return_value=mock_fetcher):
+            response = await endpoint(limit=100)
+
+        payload = json.loads(response.body)
+        issue = next(
+            (x for x in payload["items"] if x["issue_number"] == issue_number), None
+        )
+        assert issue is not None
+        assert (
+            issue["issue_url"]
+            == f"https://github.com/test-org/test-repo/issues/{issue_number}"
+        )
+
+    @pytest.mark.asyncio
     async def test_issue_history_uses_latest_status_not_highest_rank(
         self, config, event_bus: EventBus, state, tmp_path: Path
     ) -> None:
