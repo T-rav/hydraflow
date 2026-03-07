@@ -106,13 +106,12 @@ def test_supervisor_client_errors_chain_response(monkeypatch, tmp_path) -> None:
 
         monkeypatch.setattr(supervisor_client, "_send", _send)
 
-        with pytest.raises(RuntimeError) as exc_info:
+        with pytest.raises(supervisor_client.SupervisorResponseError) as exc_info:
             call()
 
-        cause = exc_info.value.__cause__
-        assert isinstance(cause, supervisor_client.SupervisorResponseError)
-        assert cause.action == action
-        assert cause.response["error"] == f"{action} failure"
+        exc = exc_info.value
+        assert exc.action == action
+        assert exc.response["error"] == f"{action} failure"
 
 
 def test_send_parses_newline_delimited_json(monkeypatch) -> None:

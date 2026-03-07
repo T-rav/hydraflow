@@ -1018,10 +1018,10 @@ class TestExecuteRelease:
         await mgr._execute_release(100, "test-job-cause")
 
         assert captured, "Expected failure to log an exception"
-        cause = captured[0].__cause__
-        assert isinstance(cause, epic.ReleaseEpicResultError)
-        assert cause.epic_number == 100
-        assert cause.result.get("error")
+        exc = captured[0]
+        assert isinstance(exc, epic.ReleaseEpicResultError)
+        assert exc.epic_number == 100
+        assert exc.result.get("error")
 
     @pytest.mark.asyncio
     async def test_cleans_up_job_id(self, tmp_path: Path) -> None:

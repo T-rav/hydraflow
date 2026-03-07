@@ -1056,9 +1056,7 @@ class EpicManager:
 
             result = await self.release_epic(epic_number)
             if "error" in result:
-                raise RuntimeError(result["error"]) from ReleaseEpicResultError(
-                    epic_number, result
-                )
+                raise ReleaseEpicResultError(epic_number, result)
 
             await self._bus.publish(
                 HydraFlowEvent(

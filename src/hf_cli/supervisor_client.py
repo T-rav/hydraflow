@@ -30,10 +30,8 @@ class SupervisorResponseError(RuntimeError):
 
 
 def _raise_response_error(action: str, response: dict[str, Any]) -> NoReturn:
-    """Raise a RuntimeError chained to the structured supervisor response error."""
-    error = response.get("error", "unknown error")
-    cause = SupervisorResponseError(action, response)
-    raise RuntimeError(error) from cause
+    """Raise a SupervisorResponseError for a failed supervisor response."""
+    raise SupervisorResponseError(action, response)
 
 
 def _read_port() -> int:
