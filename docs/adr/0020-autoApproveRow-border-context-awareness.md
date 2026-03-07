@@ -18,6 +18,11 @@ under a standalone `<h3>` section heading. The first `ToggleRow`'s `borderTop`
 now visually "underlines" the heading rather than separating two peer rows,
 because there is no preceding sibling content to separate from.
 
+> **Update (2026-03-06 / issue #1829):** The dedicated "Processes" sub-tab and
+> the `ProcessToggles` component were removed from the dashboard. This ADR
+> remains for historical context because the same extraction pattern can recur
+> elsewhere whenever embedded styles migrate into standalone layouts.
+
 This was identified during issue #1805 and accepted as intentional design in the
 current codebase, but it highlights a broader pattern worth documenting: styles
 designed for embedded/within-card contexts may produce unintended visual artifacts
