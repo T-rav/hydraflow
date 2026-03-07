@@ -15,7 +15,9 @@ class TestSupervisorResponseError:
         assert err.response is resp
 
     def test_message_includes_action_and_error(self) -> None:
-        err = supervisor_client.SupervisorResponseError("add_repo", {"error": "conflict"})
+        err = supervisor_client.SupervisorResponseError(
+            "add_repo", {"error": "conflict"}
+        )
         assert str(err) == "add_repo failed: conflict"
 
     def test_missing_error_field_falls_back_to_unknown(self) -> None:
@@ -50,7 +52,9 @@ def test_ping_returns_false_when_connection_fails(monkeypatch) -> None:
     assert supervisor_client.ping() is False
 
 
-def test_list_repos_raises_supervisor_response_error_on_error_response(monkeypatch) -> None:
+def test_list_repos_raises_supervisor_response_error_on_error_response(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(
         supervisor_client, "_send", lambda _request: {"status": "error", "error": "x"}
     )
@@ -87,7 +91,9 @@ def test_add_repo_includes_slug_in_payload(monkeypatch, tmp_path) -> None:
     assert captured["path"] == str(repo.resolve())
 
 
-def test_remove_repo_raises_supervisor_response_error_when_server_returns_error(monkeypatch) -> None:
+def test_remove_repo_raises_supervisor_response_error_when_server_returns_error(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(
         supervisor_client,
         "_send",
@@ -98,7 +104,9 @@ def test_remove_repo_raises_supervisor_response_error_when_server_returns_error(
         supervisor_client.remove_repo(slug="missing")
 
 
-def test_supervisor_client_errors_carry_structured_response(monkeypatch, tmp_path) -> None:
+def test_supervisor_client_errors_carry_structured_response(
+    monkeypatch, tmp_path
+) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
 
