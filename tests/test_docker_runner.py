@@ -1456,3 +1456,112 @@ class TestBuildMountsGitDir:
         mounts = runner._build_mounts(None)
 
         assert not any(v["bind"] == "/dot-git" for v in mounts.values())
+
+
+# ---------------------------------------------------------------------------
+# _fix_core_worktree
+# ---------------------------------------------------------------------------
+
+
+class TestFixCoreWorktree:
+    """Verify _fix_core_worktree unsets core.worktree on the right paths."""
+
+    @patch("subprocess.run")
+    def test_unsets_repo_root_only_when_cwd_is_none(self, mock_run: MagicMock) -> None:
+        runner, _ = _make_runner(repo_root=Path("/fake/repo"))
+        runner._fix_core_worktree(None)
+        assert mock_run.call_count == 1
+        assert mock_run.call_args_list[0][1]["cwd"] == "/fake/repo"
+
+    @patch("subprocess.run")
+    def test_unsets_both_repo_root_and_cwd(self, mock_run: MagicMock) -> None:
+        runner, _ = _make_runner(repo_root=Path("/fake/repo"))
+        runner._fix_core_worktree("/fake/worktree")
+        assert mock_run.call_count == 2
+        cwds = [c[1]["cwd"] for c in mock_run.call_args_list]
+        assert "/fake/repo" in cwds
+        assert "/fake/worktree" in cwds
+
+    @patch("subprocess.run")
+    def test_skips_duplicate_when_cwd_equals_repo_root(
+        self, mock_run: MagicMock
+    ) -> None:
+        runner, _ = _make_runner(repo_root=Path("/fake/repo"))
+        runner._fix_core_worktree("/fake/repo")
+        assert mock_run.call_count == 1
+
+    @patch("subprocess.run", side_effect=Exception("boom"))
+    def test_suppresses_errors(self, mock_run: MagicMock) -> None:
+        runner, _ = _make_runner(repo_root=Path("/fake/repo"))
+        runner._fix_core_worktree("/fake/worktree")
+
+
+# ---------------------------------------------------------------------------
+# DockerProcess on_exit callback
+# ---------------------------------------------------------------------------
+
+
+class TestDockerProcessOnExit:
+    """Verify the on_exit callback fires after wait() completes."""
+
+    @pytest.mark.asyncio
+    async def test_on_exit_called_after_wait(self) -> None:
+        container = MagicMock()
+        container.wait.return_value = {"StatusCode": 0}
+        socket = MagicMock()
+        socket.recv.return_value = b""
+        callback = MagicMock()
+
+        proc = DockerProcess(
+            container, socket, asyncio.get_event_loop(), on_exit=callback
+        )
+        code = await proc.wait()
+
+        assert code == 0
+        callback.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_no_callback_when_none(self) -> None:
+        container = MagicMock()
+        container.wait.return_value = {"StatusCode": 0}
+        socket = MagicMock()
+        socket.recv.return_value = b""
+
+        proc = DockerProcess(container, socket, asyncio.get_event_loop(), on_exit=None)
+        code = await proc.wait()
+        assert code == 0
+
+
+# ---------------------------------------------------------------------------
+# run_simple calls _fix_core_worktree in finally
+# ---------------------------------------------------------------------------
+
+
+class TestRunSimpleFixCoreWorktree:
+    """Verify run_simple invokes _fix_core_worktree after container exit."""
+
+    @pytest.mark.asyncio
+    async def test_called_after_successful_run(self) -> None:
+        runner, client = _make_runner()
+        container = client.containers.create.return_value
+        container.wait.return_value = {"StatusCode": 0}
+        container.logs.return_value = b"output"
+
+        with patch.object(runner, "_fix_core_worktree") as mock_fix:
+            result = await runner.run_simple(["echo", "hi"], cwd="/fake/worktree")
+
+        assert result.returncode == 0
+        mock_fix.assert_called_once_with("/fake/worktree")
+
+    @pytest.mark.asyncio
+    async def test_called_even_on_error(self) -> None:
+        runner, client = _make_runner()
+        container = client.containers.create.return_value
+        container.wait.return_value = {"StatusCode": 1}
+        container.logs.return_value = b"error"
+
+        with patch.object(runner, "_fix_core_worktree") as mock_fix:
+            result = await runner.run_simple(["false"], cwd="/fake/wt")
+
+        assert result.returncode == 1
+        mock_fix.assert_called_once_with("/fake/wt")

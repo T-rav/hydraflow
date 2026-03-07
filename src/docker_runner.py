@@ -12,7 +12,7 @@ import contextlib
 import logging
 import os
 import struct
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
@@ -248,10 +248,12 @@ class DockerProcess:
         container: ContainerLike,
         socket: DockerSocket,
         loop: asyncio.AbstractEventLoop,
+        on_exit: Callable[[], None] | None = None,
     ) -> None:
         self._container = container
         self._socket = socket
         self._loop = loop
+        self._on_exit = on_exit
         stdout_reader = DockerStdoutReader(socket, loop)
         self.stdin = DockerStdinWriter(socket)
         self.stdout = stdout_reader
@@ -267,6 +269,8 @@ class DockerProcess:
         result = await self._loop.run_in_executor(None, self._container.wait)
         code = int(result.get("StatusCode", 1))
         self.returncode = code
+        if self._on_exit is not None:
+            self._on_exit()
         return code
 
 
@@ -557,6 +561,7 @@ class DockerRunner:
                     cast(ContainerLike, container),
                     cast(DockerSocket, socket),
                     loop,
+                    on_exit=lambda: self._fix_core_worktree(cwd),
                 ),
             )
         except Exception:
@@ -646,6 +651,30 @@ class DockerRunner:
             with contextlib.suppress(Exception):
                 await loop.run_in_executor(None, lambda: container.remove(force=True))
             self._containers.discard(container)
+            self._fix_core_worktree(cwd)
+
+    def _fix_core_worktree(self, cwd: str | None) -> None:
+        """Unset ``core.worktree`` on the worktree and main repo after container exit.
+
+        Docker containers set ``GIT_WORK_TREE=/workspace`` which can cause git
+        to persist ``core.worktree=/workspace`` into the local git config.
+        This breaks all host-side git operations since ``/workspace`` doesn't
+        exist on the host.
+        """
+        import subprocess  # noqa: PLC0415
+
+        targets = [str(self._repo_root)]
+        if cwd and cwd != str(self._repo_root):
+            targets.append(cwd)
+        for path in targets:
+            with contextlib.suppress(Exception):
+                subprocess.run(
+                    ["git", "config", "--unset", "core.worktree"],
+                    cwd=path,
+                    capture_output=True,
+                    timeout=5,
+                    check=False,
+                )
 
     async def cleanup(self) -> None:
         """Remove all tracked containers."""
