@@ -760,6 +760,9 @@ class TestReviewFeedbackPassing:
             agent_run=simple_agent,
             create_pr_return=PRInfoFactory.create(),
         )
+        # On retry, find_open_pr_for_branch returns the existing PR (used by
+        # _handle_implementation_result to recover the PR on the retry path)
+        mock_prs.find_open_pr_for_branch.return_value = PRInfoFactory.create()
         # Set review feedback to simulate a retry cycle
         phase._state.set_review_feedback(42, "Fix error handling")
 
@@ -1482,6 +1485,7 @@ class TestHandleImplementationResult:
         )
 
         phase, _, mock_prs = make_implement_phase(config, [issue])
+        mock_prs.find_open_pr_for_branch.return_value = PRInfoFactory.create()
 
         returned = await phase._handle_implementation_result(issue, result, True)
 
@@ -1631,6 +1635,60 @@ class TestWorkerInner:
         result = await phase._worker_inner(0, issue, "agent/issue-42")
 
         assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_existing_non_draft_pr_skips_to_review(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Issue with existing open non-draft PR should skip implementation."""
+        issue = TaskFactory.create()
+        existing_pr = PRInfoFactory.create(number=99, draft=False)
+
+        agent_called = False
+
+        async def tracking_agent(
+            issue: Task,
+            wt_path: Path,
+            branch: str,
+            worker_id: int = 0,
+            review_feedback: str = "",
+        ) -> WorkerResult:
+            nonlocal agent_called
+            agent_called = True
+            return WorkerResultFactory.create(
+                issue_number=issue.id, worktree_path=str(wt_path)
+            )
+
+        phase, _, mock_prs = make_implement_phase(
+            config, [issue], agent_run=tracking_agent
+        )
+        mock_prs.find_open_pr_for_branch.return_value = existing_pr
+
+        result = await phase._worker_inner(0, issue, "agent/issue-42")
+
+        assert result.success is True
+        assert result.pr_info == existing_pr
+        assert not agent_called
+        mock_prs.transition.assert_awaited_once_with(issue.id, "review", pr_number=99)
+
+    @pytest.mark.asyncio
+    async def test_existing_draft_pr_does_not_skip(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Issue with a draft PR should proceed with normal implementation."""
+        issue = TaskFactory.create()
+        draft_pr = PRInfoFactory.create(number=99, draft=True)
+
+        phase, _, mock_prs = make_implement_phase(
+            config, [issue], create_pr_return=PRInfoFactory.create()
+        )
+        mock_prs.find_open_pr_for_branch.return_value = draft_pr
+
+        result = await phase._worker_inner(0, issue, "agent/issue-42")
+
+        assert result.success is True
+        # transition should be called from _handle_implementation_result, not the skip path
+        mock_prs.transition.assert_awaited()
 
 
 # ---------------------------------------------------------------------------
