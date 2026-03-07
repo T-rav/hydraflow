@@ -22,13 +22,15 @@ from base_background_loop import BaseBackgroundLoop
 from config import HydraFlowConfig
 from events import EventBus
 from execution import SubprocessRunner
-from models import StatusCallback, TranscriptEventData
+from models import PendingReport, StatusCallback, TranscriptEventData
 from pr_manager import PRManager
 from runner_utils import stream_claude_process
 from screenshot_scanner import scan_base64_for_secrets
 from state import StateTracker
 
 logger = logging.getLogger("hydraflow.report_issue_loop")
+
+_MAX_REPORT_ATTEMPTS = 5
 
 
 class ReportIssueLoop(BaseBackgroundLoop):
@@ -71,7 +73,7 @@ class ReportIssueLoop(BaseBackgroundLoop):
         if self._config.dry_run:
             return None
 
-        report = self._state.dequeue_report()
+        report = self._state.peek_report()
         if report is None:
             return None
 
@@ -158,20 +160,78 @@ class ReportIssueLoop(BaseBackgroundLoop):
             issue_number = await self._pr_manager.create_issue(
                 fallback_title, fallback_body, labels_list
             )
-        if issue_number <= 0:
-            logger.error(
-                "Report %s failed: issue was not created via agent or fallback",
-                report.id,
-            )
-            return {"processed": 0, "report_id": report.id, "error": True}
 
-        logger.info(
-            "Processed report %s as issue #%d: %s",
+        if issue_number > 0:
+            # Success — remove from queue
+            self._state.remove_report(report.id)
+            logger.info(
+                "Processed report %s as issue #%d: %s",
+                report.id,
+                issue_number,
+                fallback_title,
+            )
+            return {
+                "processed": 1,
+                "report_id": report.id,
+                "issue_number": issue_number,
+            }
+
+        # Failed — increment attempts and check cap
+        attempt_count = self._state.fail_report(report.id)
+        if attempt_count >= _MAX_REPORT_ATTEMPTS:
+            self._state.remove_report(report.id)
+            await self._escalate_failed_report(report)
+            logger.error(
+                "Report %s failed %d times — escalated to HITL",
+                report.id,
+                attempt_count,
+            )
+            return {
+                "processed": 0,
+                "report_id": report.id,
+                "error": True,
+                "escalated": True,
+            }
+
+        logger.warning(
+            "Report %s failed (attempt %d/%d) — will retry next cycle",
             report.id,
-            issue_number,
-            fallback_title,
+            attempt_count,
+            _MAX_REPORT_ATTEMPTS,
         )
-        return {"processed": 1, "report_id": report.id, "issue_number": issue_number}
+        return {"processed": 0, "report_id": report.id, "error": True}
+
+    async def _escalate_failed_report(self, report: PendingReport) -> None:
+        """Create a HITL issue with the raw report content for manual review."""
+        body = (
+            "## Bug Report — Processing Failed\n\n"
+            "This bug report could not be processed automatically after "
+            f"{_MAX_REPORT_ATTEMPTS} attempts. The raw input is preserved "
+            "below for manual review.\n\n"
+            f"**Report ID:** {report.id}\n"
+            f"**Created:** {report.created_at}\n\n"
+            "### Description\n\n"
+            f"{report.description}\n\n"
+        )
+        if report.environment:
+            body += "### Environment\n\n"
+            for key, value in report.environment.items():
+                body += f"- **{key}:** {value}\n"
+            body += "\n"
+        if report.screenshot_base64:
+            # Include a truncated indicator — the full base64 is too large for an issue
+            body += (
+                "### Screenshot\n\n"
+                f"Base64 screenshot attached ({len(report.screenshot_base64)} chars). "
+                "Could not be decoded during processing.\n"
+            )
+
+        labels = list(self._config.hitl_label)
+        await self._pr_manager.create_issue(
+            f"[Bug Report] Failed to process: {report.description[:80]}",
+            body,
+            labels,
+        )
 
     @staticmethod
     def _save_screenshot(b64_data: str) -> Path:

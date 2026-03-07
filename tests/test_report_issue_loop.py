@@ -85,8 +85,8 @@ class TestReportIssueLoopDoWork:
         mock_stream.assert_awaited_once()
         _pr.create_issue.assert_not_awaited()
         assert mock_stream.call_args[1]["gh_token"] == loop._config.gh_token
-        # Queue should be empty after processing
-        assert state.dequeue_report() is None
+        # Queue should be empty after successful processing
+        assert state.peek_report() is None
 
     @pytest.mark.asyncio
     async def test_screenshot_uploaded_before_agent(self, tmp_path: Path) -> None:
@@ -146,7 +146,7 @@ class TestReportIssueLoopDoWork:
     async def test_returns_error_when_agent_and_fallback_both_fail(
         self, tmp_path: Path
     ) -> None:
-        """When neither agent nor fallback creates an issue, report stays failed."""
+        """When neither agent nor fallback creates an issue, report stays in queue."""
         loop, _stop, state, pr_mgr = _make_loop(tmp_path)
         pr_mgr.create_issue.return_value = 0
         report = PendingReport(description="Still broken")
@@ -163,6 +163,10 @@ class TestReportIssueLoopDoWork:
         assert result["processed"] == 0
         assert result["report_id"] == report.id
         pr_mgr.create_issue.assert_awaited_once()
+        # Report should still be in the queue with incremented attempts
+        pending = state.get_pending_reports()
+        assert len(pending) == 1
+        assert pending[0].attempts == 1
 
     @pytest.mark.asyncio
     async def test_dry_run_returns_none(self, tmp_path: Path) -> None:
@@ -174,7 +178,7 @@ class TestReportIssueLoopDoWork:
         result = await loop._do_work()
         assert result is None
         # Report should still be in the queue
-        assert state.dequeue_report() is not None
+        assert state.peek_report() is not None
 
     @pytest.mark.asyncio
     async def test_prompt_includes_description(self, tmp_path: Path) -> None:
@@ -346,6 +350,129 @@ class TestReportIssueLoopDoWork:
         # Scan is disabled — screenshot should still be referenced in prompt
         prompt = mock_stream.call_args.kwargs.get("prompt", "")
         assert ".png" in prompt
+
+
+class TestReportRetryAndEscalation:
+    """Tests for report retry counting and HITL escalation."""
+
+    @pytest.mark.asyncio
+    async def test_failed_report_stays_in_queue(self, tmp_path: Path) -> None:
+        """A failed report remains in the queue for retry."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
+        pr_mgr.create_issue.return_value = 0
+        report = PendingReport(description="Retry me")
+        state.enqueue_report(report)
+
+        with patch(
+            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+        ) as mock_stream:
+            mock_stream.return_value = "no url"
+            await loop._do_work()
+
+        pending = state.get_pending_reports()
+        assert len(pending) == 1
+        assert pending[0].id == report.id
+        assert pending[0].attempts == 1
+
+    @pytest.mark.asyncio
+    async def test_attempt_counter_increments(self, tmp_path: Path) -> None:
+        """Each failure increments the attempt counter."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
+        pr_mgr.create_issue.return_value = 0
+        report = PendingReport(description="Keep trying")
+        state.enqueue_report(report)
+
+        with patch(
+            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+        ) as mock_stream:
+            mock_stream.return_value = "no url"
+            await loop._do_work()
+            await loop._do_work()
+            await loop._do_work()
+
+        pending = state.get_pending_reports()
+        assert len(pending) == 1
+        assert pending[0].attempts == 3
+
+    @pytest.mark.asyncio
+    async def test_escalates_to_hitl_after_max_attempts(self, tmp_path: Path) -> None:
+        """After 5 failures, report is removed and escalated to HITL."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
+        pr_mgr.create_issue.return_value = 0
+        report = PendingReport(
+            description="Persistent failure",
+            environment={"browser": "Chrome"},
+        )
+        state.enqueue_report(report)
+        # Pre-set to 4 attempts so next failure is the 5th
+        for _ in range(4):
+            state.fail_report(report.id)
+
+        with patch(
+            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+        ) as mock_stream:
+            mock_stream.return_value = "no url"
+            result = await loop._do_work()
+
+        assert result is not None
+        assert result["escalated"] is True
+        # Report should be removed from queue
+        assert state.peek_report() is None
+        # HITL issue should have been created with raw content
+        hitl_call = pr_mgr.create_issue.call_args_list[-1]
+        title = hitl_call[0][0]
+        body = hitl_call[0][1]
+        assert "[Bug Report]" in title
+        assert "Persistent failure" in body
+        assert "Chrome" in body
+
+    @pytest.mark.asyncio
+    async def test_success_after_retries_removes_from_queue(
+        self, tmp_path: Path
+    ) -> None:
+        """A report that succeeds after previous failures is removed from queue."""
+        loop, _stop, state, _pr = _make_loop(tmp_path)
+        report = PendingReport(description="Eventually works")
+        state.enqueue_report(report)
+        # Pre-set 2 failed attempts
+        state.fail_report(report.id)
+        state.fail_report(report.id)
+
+        with patch(
+            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+        ) as mock_stream:
+            mock_stream.return_value = "https://github.com/acme/repo/issues/99"
+            result = await loop._do_work()
+
+        assert result is not None
+        assert result["processed"] == 1
+        assert state.peek_report() is None
+
+    @pytest.mark.asyncio
+    async def test_escalated_report_includes_screenshot_indicator(
+        self, tmp_path: Path
+    ) -> None:
+        """Escalated HITL issue mentions the screenshot when present."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
+        pr_mgr.create_issue.return_value = 0
+        report = PendingReport(
+            description="Screenshot bug",
+            screenshot_base64="abc123" * 100,
+        )
+        state.enqueue_report(report)
+        for _ in range(4):
+            state.fail_report(report.id)
+
+        with patch(
+            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+        ) as mock_stream:
+            mock_stream.return_value = "no url"
+            await loop._do_work()
+
+        hitl_call = pr_mgr.create_issue.call_args_list[-1]
+        body = hitl_call[0][1]
+        assert "screenshot" in body.lower()
+        assert "600 chars" in body
 
 
 class TestReportIssueLoopInterval:
