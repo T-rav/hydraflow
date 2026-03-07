@@ -1640,6 +1640,24 @@ def create_router(
 
         return JSONResponse({"status": "ok", "updated": applied})
 
+    @router.post("/api/control/adr-auto-triage/reset")
+    async def reset_auto_triage_attempts(body: dict[str, Any] | None = None) -> JSONResponse:
+        """Clear all persisted ADR auto-triage attempt counters."""
+        slug = (body or {}).get("repo")
+        try:
+            _, resolved_state, _, _ = _resolve_runtime(slug)
+        except ValueError as exc:
+            return JSONResponse(
+                {"status": "error", "message": str(exc)}, status_code=404
+            )
+        if resolved_state is None:
+            return JSONResponse(
+                {"status": "error", "message": "State tracker unavailable"},
+                status_code=503,
+            )
+        resolved_state.reset_all_auto_triage_attempts()
+        return JSONResponse({"status": "ok"})
+
     # Known workers with human-friendly labels (pipeline loops + background)
     _bg_worker_defs = [
         (

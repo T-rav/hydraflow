@@ -16,6 +16,8 @@ const SUB_TABS = [
   { key: 'livestream', label: 'Livestream' },
 ]
 
+const AUTO_TRIAGE_ATTEMPT_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
 function relativeTime(isoString) {
   if (!isoString) return 'never'
   const diff = Date.now() - new Date(isoString).getTime()
@@ -290,6 +292,119 @@ function MemoryAutoApproveToggle() {
   )
 }
 
+function AdrAutoTriageToggle() {
+  const { config } = useHydraFlow()
+  const [localEnabled, setLocalEnabled] = useState(null)
+  const [localAttempts, setLocalAttempts] = useState(null)
+  const [resetting, setResetting] = useState(false)
+
+  const isEnabled = localEnabled !== null ? localEnabled : (config?.adr_auto_triage_enabled ?? false)
+  const maxAttempts = config?.adr_auto_triage_max_attempts ?? 3
+  const attemptValue = localAttempts !== null ? localAttempts : maxAttempts
+  const repoSlug = config?.repo
+
+  const handleToggle = useCallback(async () => {
+    const newValue = !isEnabled
+    setLocalEnabled(newValue)
+    try {
+      const resp = await fetch('/api/control/config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adr_auto_triage_enabled: newValue, persist: true }),
+      })
+      if (!resp.ok) {
+        setLocalEnabled(isEnabled)
+      }
+    } catch {
+      setLocalEnabled(isEnabled)
+    }
+  }, [isEnabled])
+
+  const handleAttemptsChange = useCallback(async (event) => {
+    const nextValue = parseInt(event.target.value, 10)
+    if (!Number.isInteger(nextValue)) {
+      return
+    }
+    const previousValue = attemptValue
+    setLocalAttempts(nextValue)
+    try {
+      const resp = await fetch('/api/control/config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adr_auto_triage_max_attempts: nextValue, persist: true }),
+      })
+      if (!resp.ok) {
+        setLocalAttempts(previousValue)
+      }
+    } catch {
+      setLocalAttempts(previousValue)
+    }
+  }, [attemptValue])
+
+  const handleReset = useCallback(async () => {
+    if (resetting) {
+      return
+    }
+    setResetting(true)
+    try {
+      const payload = repoSlug ? { repo: repoSlug } : {}
+      const resp = await fetch('/api/control/adr-auto-triage/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!resp.ok) {
+        // No-op; allow user to retry
+        setResetting(false)
+        return
+      }
+    } catch {
+      setResetting(false)
+      return
+    }
+    setResetting(false)
+  }, [repoSlug, resetting])
+
+  return (
+    <div style={styles.autoApproveRow}>
+      <div style={styles.autoApproveLabel}>
+        <span style={styles.autoApproveText}>Auto Triage</span>
+        <span style={styles.autoApproveHint}>
+          Route council feedback automatically
+        </span>
+        <label style={styles.autoTriageSelectLabel}>
+          Max attempts
+          <select
+            style={styles.autoTriageSelect}
+            value={attemptValue}
+            onChange={handleAttemptsChange}
+            data-testid="adr-auto-triage-max-attempts"
+          >
+            {AUTO_TRIAGE_ATTEMPT_OPTIONS.map((value) => (
+              <option key={value} value={value}>{value}</option>
+            ))}
+          </select>
+        </label>
+        <button
+          style={resetting ? styles.autoTriageResetButtonDisabled : styles.autoTriageResetButton}
+          onClick={handleReset}
+          disabled={resetting}
+          data-testid="adr-auto-triage-reset"
+        >
+          {resetting ? 'Resetting...' : 'Reset attempts'}
+        </button>
+      </div>
+      <button
+        style={isEnabled ? styles.toggleOn : styles.toggleOff}
+        onClick={handleToggle}
+        data-testid="adr-auto-triage-toggle"
+      >
+        {isEnabled ? 'On' : 'Off'}
+      </button>
+    </div>
+  )
+}
+
 function UnstickWorkersDropdown() {
   const { config } = useHydraFlow()
   const [localValue, setLocalValue] = useState(null)
@@ -372,6 +487,7 @@ export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onUpdateInter
                     onToggleBgWorker={onToggleBgWorker}
                     onUpdateInterval={onUpdateInterval}
                     events={events}
+                    extraContent={def.key === 'adr_reviewer' ? <AdrAutoTriageToggle /> : undefined}
                   />
                 )
               })}
@@ -679,6 +795,50 @@ const styles = {
   autoApproveHint: {
     fontSize: 11,
     color: theme.textMuted,
+  },
+  autoTriageSelectLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+    fontSize: 11,
+    color: theme.textMuted,
+  },
+  autoTriageSelect: {
+    padding: '2px 6px',
+    fontSize: 12,
+    border: `1px solid ${theme.border}`,
+    borderRadius: 6,
+    background: theme.surface,
+    color: theme.text,
+    cursor: 'pointer',
+    outline: 'none',
+  },
+  autoTriageResetButton: {
+    marginTop: 6,
+    padding: '4px 8px',
+    fontSize: 11,
+    fontWeight: 600,
+    border: `1px solid ${theme.border}`,
+    borderRadius: 6,
+    background: theme.surface,
+    color: theme.textMuted,
+    cursor: 'pointer',
+    alignSelf: 'flex-start',
+    transition: 'all 0.15s',
+  },
+  autoTriageResetButtonDisabled: {
+    marginTop: 6,
+    padding: '4px 8px',
+    fontSize: 11,
+    fontWeight: 600,
+    border: `1px solid ${theme.border}`,
+    borderRadius: 6,
+    background: theme.surface,
+    color: theme.textMuted,
+    cursor: 'not-allowed',
+    opacity: 0.6,
+    alignSelf: 'flex-start',
   },
   workersSelect: {
     padding: '2px 8px',

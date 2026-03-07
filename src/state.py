@@ -195,6 +195,34 @@ class StateTracker:
         self._data.hitl_causes.pop(str(issue_number), None)
         self.save()
 
+    # --- ADR auto-triage attempts ---
+
+    def get_auto_triage_attempt(self, adr_number: int) -> int:
+        """Return the recorded auto-triage attempts for *adr_number*."""
+        return self._data.adr_auto_triage_attempts.get(str(adr_number), 0)
+
+    def increment_auto_triage_attempt(self, adr_number: int) -> int:
+        """Increment and persist the attempt counter for *adr_number*."""
+        key = str(adr_number)
+        attempts = self._data.adr_auto_triage_attempts.get(key, 0) + 1
+        self._data.adr_auto_triage_attempts[key] = attempts
+        self.save()
+        return attempts
+
+    def reset_auto_triage_attempt(self, adr_number: int) -> None:
+        """Clear the attempt counter for *adr_number* if present."""
+        key = str(adr_number)
+        if key in self._data.adr_auto_triage_attempts:
+            self._data.adr_auto_triage_attempts.pop(key, None)
+            self.save()
+
+    def reset_all_auto_triage_attempts(self) -> None:
+        """Clear all persisted ADR auto-triage attempt counters."""
+        if not self._data.adr_auto_triage_attempts:
+            return
+        self._data.adr_auto_triage_attempts.clear()
+        self.save()
+
     # --- HITL summary cache ---
 
     def set_hitl_summary(self, issue_number: int, summary: str) -> None:

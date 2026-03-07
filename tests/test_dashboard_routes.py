@@ -1448,6 +1448,56 @@ class TestPatchConfigMaxTriagers:
         assert config.max_triagers == 3
 
 
+class TestAdrAutoTriageReset:
+    """Tests for POST /api/control/adr-auto-triage/reset."""
+
+    def _make_router(self, config, event_bus, state, tmp_path):
+        from dashboard_routes import create_router
+        from pr_manager import PRManager
+
+        pr_mgr = PRManager(config, event_bus)
+        return create_router(
+            config=config,
+            event_bus=event_bus,
+            state=state,
+            pr_manager=pr_mgr,
+            get_orchestrator=lambda: None,
+            set_orchestrator=lambda _: None,
+            set_run_task=lambda _: None,
+            ui_dist_dir=tmp_path / "no-dist",
+            template_dir=tmp_path / "no-templates",
+        )
+
+    def _find_endpoint(self, router, path):
+        for route in router.routes:
+            if (
+                hasattr(route, "path")
+                and route.path == path
+                and hasattr(route, "endpoint")
+            ):
+                return route.endpoint
+        return None
+
+    @pytest.mark.asyncio
+    async def test_reset_clears_attempts(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """POST reset should invoke the state's clearing hook."""
+        import json
+
+        router = self._make_router(config, event_bus, state, tmp_path)
+        reset_endpoint = self._find_endpoint(
+            router, "/api/control/adr-auto-triage/reset"
+        )
+        assert reset_endpoint is not None
+        state.reset_all_auto_triage_attempts = MagicMock()
+
+        response = await reset_endpoint({})
+        data = json.loads(response.body)
+        assert data["status"] == "ok"
+        state.reset_all_auto_triage_attempts.assert_called_once_with()
+
+
 class TestHITLEndpointCause:
     """Tests that /api/hitl includes the cause from state."""
 

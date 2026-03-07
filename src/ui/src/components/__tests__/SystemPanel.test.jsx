@@ -16,6 +16,12 @@ function defaultMockContext(overrides = {}) {
   const pipelineIssues = overrides.pipelineIssues || {}
   const workers = overrides.workers || {}
   const backgroundWorkers = overrides.backgroundWorkers || []
+  const config = overrides.config || {
+    repo: 'main',
+    memory_auto_approve: false,
+    adr_auto_triage_enabled: false,
+    adr_auto_triage_max_attempts: 3,
+  }
   return {
     pipelinePollerLastRun: null,
     orchestratorStatus: 'idle',
@@ -24,6 +30,7 @@ function defaultMockContext(overrides = {}) {
     metrics: null,
     metricsHistory: null,
     githubMetrics: null,
+    config,
     ...overrides,
   }
 }
@@ -256,18 +263,18 @@ describe('SystemPanel', () => {
       expect(screen.getByText('Pipeline Poller')).toBeInTheDocument()
       expect(screen.getByText('Memory Manager')).toBeInTheDocument()
       expect(screen.getByText('Metrics Munger')).toBeInTheDocument()
-      // Count On/Off buttons — should be non-system bg workers + memory auto-approve
+      // Count On/Off buttons — should be non-system bg workers + memory auto-approve + ADR auto-triage
       const allToggleButtons = [...screen.getAllByText('On'), ...screen.getAllByText('Off')]
       const nonSystemBgCount = BACKGROUND_WORKERS.filter(w => !w.system).length
-      expect(allToggleButtons.length).toBe(nonSystemBgCount + 1)
+      expect(allToggleButtons.length).toBe(nonSystemBgCount + 2)
     })
 
     it('does not show toggle buttons when onToggleBgWorker is not provided', () => {
       render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
-      // No worker toggle On buttons, but memory auto-approve shows Off
+      // No worker toggle On buttons, but memory auto-approve and auto-triage toggles show Off
       expect(screen.queryByText('On')).not.toBeInTheDocument()
       const offButtons = screen.getAllByText('Off')
-      expect(offButtons.length).toBe(1) // memory auto-approve only
+      expect(offButtons.length).toBe(2) // memory auto-approve + auto-triage
     })
 
     it('shows Off button for disabled workers when orchestrator running', () => {
@@ -315,8 +322,8 @@ describe('SystemPanel', () => {
       mockUseHydraFlow.mockReturnValue(defaultMockContext({ backgroundWorkers: disabledWorkers }))
       render(<SystemPanel backgroundWorkers={disabledWorkers} onToggleBgWorker={onToggle} />)
       const offButtons = screen.getAllByText('Off')
-      // 2 disabled workers + 1 memory auto-approve
-      expect(offButtons.length).toBe(3)
+      // 2 disabled workers + memory auto-approve + auto-triage
+      expect(offButtons.length).toBe(4)
     })
   })
 
@@ -341,6 +348,64 @@ describe('SystemPanel', () => {
       for (const card of otherCards) {
         expect(card).not.toContainElement(toggle)
       }
+    })
+  })
+
+  describe('ADR Auto-Triage toggle location', () => {
+    it('renders the auto-triage toggle inside the ADR Reviewer card', () => {
+      render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
+      const card = screen.getByTestId('worker-card-adr_reviewer')
+      expect(within(card).getByTestId('adr-auto-triage-toggle')).toBeInTheDocument()
+    })
+
+    it('renders the max attempt hint text', () => {
+      render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
+      expect(screen.getByText(/Route council feedback automatically/)).toBeInTheDocument()
+    })
+
+    it('renders the max attempt dropdown with the configured value', () => {
+      render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
+      const card = screen.getByTestId('worker-card-adr_reviewer')
+      const select = within(card).getByTestId('adr-auto-triage-max-attempts')
+      expect(select).toBeInTheDocument()
+      expect(select.value).toBe('3')
+    })
+
+    it('updates the config when selecting a new max attempt value', async () => {
+      const originalFetch = globalThis.fetch
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true })
+      globalThis.fetch = fetchMock
+      render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
+      const select = screen.getByTestId('adr-auto-triage-max-attempts')
+      fireEvent.change(select, { target: { value: '5' } })
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+      const [url, options] = fetchMock.mock.calls[0]
+      expect(url).toBe('/api/control/config')
+      expect(JSON.parse(options.body)).toEqual({
+        adr_auto_triage_max_attempts: 5,
+        persist: true,
+      })
+      globalThis.fetch = originalFetch
+    })
+
+    it('renders a reset attempts button inside the ADR Reviewer card', () => {
+      render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
+      const card = screen.getByTestId('worker-card-adr_reviewer')
+      expect(within(card).getByTestId('adr-auto-triage-reset')).toBeInTheDocument()
+    })
+
+    it('calls the reset endpoint when clicking reset attempts', async () => {
+      const originalFetch = globalThis.fetch
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true })
+      globalThis.fetch = fetchMock
+      render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
+      const resetButton = screen.getByTestId('adr-auto-triage-reset')
+      fireEvent.click(resetButton)
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+      const [url, options] = fetchMock.mock.calls[0]
+      expect(url).toBe('/api/control/adr-auto-triage/reset')
+      expect(JSON.parse(options.body)).toEqual({ repo: 'main' })
+      globalThis.fetch = originalFetch
     })
   })
 
@@ -809,4 +874,3 @@ describe('BackgroundWorkerCard schedule display', () => {
     expect(onUpdate).toHaveBeenCalledWith('pipeline_poller', 10)
   })
 })
-
