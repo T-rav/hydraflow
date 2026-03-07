@@ -17,16 +17,15 @@ function buildDisplayName(repo) {
   return 'Unnamed repo'
 }
 
-function statusStyles(isRunning) {
-  return {
-    width: 8,
-    height: 8,
-    borderRadius: '50%',
-    background: isRunning ? theme.green : theme.textMuted,
-    flexShrink: 0,
-    marginTop: 2,
-  }
+const statusDotBase = {
+  width: 8,
+  height: 8,
+  borderRadius: '50%',
+  flexShrink: 0,
+  marginTop: 2,
 }
+const statusDotRunning = { ...statusDotBase, background: theme.green }
+const statusDotStopped = { ...statusDotBase, background: theme.textMuted }
 
 export function RepoSelector({ onOpenRegister }) {
   const {
@@ -105,7 +104,7 @@ export function RepoSelector({ onOpenRegister }) {
           <button
             type="button"
             onClick={() => handleSelect(null)}
-            style={selectedRepoSlug == null ? styles.optionActive : styles.option}
+            style={selectedRepoSlug == null ? optionActiveStyle : optionStyle}
             role="option"
             aria-selected={selectedRepoSlug == null}
           >
@@ -121,12 +120,12 @@ export function RepoSelector({ onOpenRegister }) {
                 key={opt.key}
                 type="button"
                 onClick={() => handleSelect(opt.rawSlug)}
-                style={opt.filterSlug === selectedRepoSlug ? styles.optionActive : styles.option}
+                style={opt.filterSlug === selectedRepoSlug ? optionActiveStyle : optionStyle}
                 role="option"
                 aria-selected={opt.filterSlug === selectedRepoSlug}
               >
                 <span style={styles.optionLeft}>
-                  <span style={statusStyles(opt.isRunning)} />
+                  <span style={opt.isRunning ? statusDotRunning : statusDotStopped} />
                   <span>
                     <span style={styles.optionLabel}>{opt.label}</span>
                     {opt.subLabel && <span style={styles.optionSubLabel}>{opt.subLabel}</span>}
@@ -198,27 +197,13 @@ const styles = {
   optionList: {
     overflowY: 'auto',
   },
-  option: {
+  optionBase: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
     width: '100%',
     padding: '8px 10px',
     border: 'none',
-    background: 'transparent',
-    color: theme.text,
-    cursor: 'pointer',
-    textAlign: 'left',
-    gap: 12,
-  },
-  optionActive: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    width: '100%',
-    padding: '8px 10px',
-    border: 'none',
-    background: theme.accentSubtle,
     color: theme.text,
     cursor: 'pointer',
     textAlign: 'left',
@@ -270,3 +255,7 @@ const styles = {
 
 // Pre-computed trigger variant for open state
 const triggerOpen = { ...styles.trigger, border: `1px solid ${theme.accent}`, background: theme.surfaceInset }
+
+// Pre-computed option variants (active/inactive)
+const optionStyle = { ...styles.optionBase, background: 'transparent' }
+const optionActiveStyle = { ...styles.optionBase, background: theme.accentSubtle }
