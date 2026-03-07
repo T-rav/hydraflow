@@ -404,11 +404,13 @@ class MemorySyncWorker:
 
     async def _route_adr_candidates(self, issues: list[MemoryIssueData]) -> None:
         """Create ADR draft tasks from architecture-shift memory issues."""
+        from phase_utils import load_existing_adr_topics, normalize_adr_topic
+
         if self._prs is None:
             return
 
         seen = self._load_adr_source_ids()
-        existing_topics = self._load_existing_adr_topics()
+        existing_topics = load_existing_adr_topics(self._config.repo_root)
         batch_topics: set[str] = set()
         created = 0
         rejected = 0
@@ -425,7 +427,7 @@ class MemorySyncWorker:
             if not self._is_architecture_candidate(title, learning, body):
                 continue
 
-            topic_key = self._normalize_adr_topic(title)
+            topic_key = normalize_adr_topic(title)
             if topic_key in existing_topics or topic_key in batch_topics:
                 deduped += 1
                 seen.add(source_id)
@@ -488,42 +490,6 @@ class MemorySyncWorker:
     def _is_architecture_candidate(title: str, learning: str, body: str) -> bool:
         haystack = " ".join([title.lower(), learning.lower(), body.lower()])
         return any(keyword in haystack for keyword in _ADR_ARCH_KEYWORDS)
-
-    @staticmethod
-    def _normalize_adr_topic(title: str) -> str:
-        """Extract a normalized topic key from a memory/ADR title for dedup.
-
-        Strips prefixes like ``[Memory]``, ``[ADR] Draft decision from memory #N:``,
-        lowercases, and removes non-alphanumeric characters.
-        """
-        cleaned = re.sub(
-            r"^\[(?:Memory|ADR)\]\s*(?:Draft decision from memory #\d+:\s*)?",
-            "",
-            title,
-            flags=re.IGNORECASE,
-        ).strip()
-        return re.sub(r"[^a-z0-9]+", " ", cleaned.lower()).strip()
-
-    def _load_existing_adr_topics(self) -> set[str]:
-        """Scan ``docs/adr/`` files and return normalized topic keys.
-
-        This prevents creating ADR issues for topics already covered by
-        existing ADR documents on disk.
-        """
-        adr_dir = self._config.repo_root / "docs" / "adr"
-        topics: set[str] = set()
-        if not adr_dir.is_dir():
-            return topics
-        for path in adr_dir.glob("*.md"):
-            if path.name.lower() == "readme.md":
-                continue
-            stem = path.stem
-            # Strip leading number prefix like "0001-"
-            cleaned = re.sub(r"^\d+-", "", stem)
-            topic = re.sub(r"[^a-z0-9]+", " ", cleaned.lower()).strip()
-            if topic:
-                topics.add(topic)
-        return topics
 
     def _build_adr_task(
         self, source_issue: MemoryIssueData, learning: str, *, refine: bool = False

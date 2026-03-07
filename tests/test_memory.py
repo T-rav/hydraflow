@@ -992,31 +992,29 @@ class TestMemorySyncWorkerSync:
         prs.create_issue.assert_not_called()
 
     def test_normalize_adr_topic_strips_prefixes(self) -> None:
+        from phase_utils import normalize_adr_topic
+
         assert (
-            MemorySyncWorker._normalize_adr_topic(
-                "[Memory] ADR test policy — only structural tests"
-            )
+            normalize_adr_topic("[Memory] ADR test policy — only structural tests")
             == "adr test policy only structural tests"
         )
         assert (
-            MemorySyncWorker._normalize_adr_topic(
+            normalize_adr_topic(
                 "[ADR] Draft decision from memory #123: Worker topology shift"
             )
             == "worker topology shift"
         )
 
     def test_load_existing_adr_topics_reads_docs_adr(self, tmp_path: Path) -> None:
+        from phase_utils import load_existing_adr_topics
+
         adr_dir = tmp_path / "docs" / "adr"
         adr_dir.mkdir(parents=True)
         (adr_dir / "0001-five-concurrent-loops.md").write_text("# ADR\n")
         (adr_dir / "0002-labels-state-machine.md").write_text("# ADR\n")
         (adr_dir / "README.md").write_text("# Index\n")
 
-        config = ConfigFactory.create(repo_root=tmp_path)
-        state = MagicMock()
-        bus = MagicMock()
-        worker = MemorySyncWorker(config, state, bus)
-        topics = worker._load_existing_adr_topics()
+        topics = load_existing_adr_topics(tmp_path)
         assert "five concurrent loops" in topics
         assert "labels state machine" in topics
         assert len(topics) == 2  # README excluded

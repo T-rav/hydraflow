@@ -39,6 +39,8 @@ from models import (
 from phase_utils import (
     adr_validation_reasons,
     is_adr_issue_title,
+    load_existing_adr_topics,
+    normalize_adr_topic,
     publish_review_status,
     record_harness_failure,
     release_batch_in_flight,
@@ -215,6 +217,29 @@ class ReviewPhase:
 
     async def _review_single_adr(self, issue: Task) -> ReviewResult:
         """Validate ADR quality and either finalize or escalate to HITL."""
+        topic_key = normalize_adr_topic(issue.title)
+        existing = load_existing_adr_topics(self._config.repo_root)
+        if topic_key and topic_key in existing:
+            await self._transitioner.post_comment(
+                issue.id,
+                f"## Closing as Duplicate\n\n"
+                f"An ADR already exists for this topic in `docs/adr/`. "
+                f"Normalized topic: *{topic_key}*",
+            )
+            await self._transitioner.close_task(issue.id)
+            self._state.mark_issue(issue.id, "completed")
+            logger.info(
+                "ADR issue #%d closed as duplicate — topic %r exists in docs/adr/",
+                issue.id,
+                topic_key,
+            )
+            return ReviewResult(
+                pr_number=0,
+                issue_number=issue.id,
+                verdict=ReviewVerdict.APPROVE,
+                summary="Closed as duplicate ADR",
+                merged=True,
+            )
         reasons = adr_validation_reasons(issue.body)
         decision_detail = self._extract_adr_section(issue.body, "decision")
         if len(decision_detail.strip()) < 60:
