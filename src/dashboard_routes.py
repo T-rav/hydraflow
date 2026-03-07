@@ -794,18 +794,63 @@ def create_router(
             except ValueError:
                 return BGWorkerHealth.DISABLED
 
+        worker_count = len(worker_states)
         worker_errors = sorted(
             name
             for name, heartbeat in worker_states.items()
             if _normalise_worker_health(heartbeat.get("status")) == BGWorkerHealth.ERROR
         )
-        status = "ok"
         if orchestrator is None:
+            orchestrator_running = False
+        orchestrator_status = "missing"
+        if orchestrator is not None and orchestrator_running:
+            orchestrator_status = "running"
+        elif orchestrator is not None:
+            orchestrator_status = "idle"
+
+        worker_status = "disabled"
+        if worker_count > 0:
+            worker_status = "degraded" if worker_errors else "ok"
+
+        status = "ok"
+        if orchestrator_status == "missing":
             status = "starting"
-        elif not orchestrator_running:
+        elif orchestrator_status == "idle":
             status = "idle"
-        if worker_errors:
+        if worker_status == "degraded":
             status = "degraded"
+
+        def _is_loopback_host(host: str) -> bool:
+            host_lower = (host or "").lower()
+            return host_lower == "localhost" or host_lower.startswith("127.")
+
+        dashboard_binding = {
+            "host": config.dashboard_host,
+            "port": config.dashboard_port,
+        }
+        dashboard_public = not _is_loopback_host(config.dashboard_host)
+
+        checks = {
+            "orchestrator": {
+                "status": orchestrator_status,
+                "running": orchestrator_running,
+                "session_started_at": session_started_at,
+            },
+            "workers": {
+                "status": worker_status,
+                "count": worker_count,
+                "errors": worker_errors,
+            },
+            "dashboard": {
+                "status": "ok" if config.dashboard_enabled else "disabled",
+                "host": config.dashboard_host,
+                "port": config.dashboard_port,
+                "public": dashboard_public,
+            },
+        }
+        ready = checks["orchestrator"]["status"] == "running" and checks["workers"][
+            "status"
+        ] in {"ok", "disabled"}
         payload = {
             "status": status,
             "version": get_app_version(),
@@ -813,14 +858,13 @@ def create_router(
             "orchestrator_running": orchestrator_running,
             "active_issue_count": len(state.get_active_issue_numbers()),
             "active_worktrees": len(state.get_active_worktrees()),
-            "worker_count": len(worker_states),
+            "worker_count": worker_count,
             "worker_errors": worker_errors,
-            "dashboard": {
-                "host": config.dashboard_host,
-                "port": config.dashboard_port,
-            },
+            "dashboard": dashboard_binding,
             "session_started_at": session_started_at,
             "uptime_seconds": uptime_seconds,
+            "ready": ready,
+            "checks": checks,
         }
         return JSONResponse(payload)
 

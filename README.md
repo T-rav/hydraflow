@@ -247,8 +247,8 @@ make run
 Running HydraFlow as a 24/7 EC2 service is supported out-of-the-box:
 
 - `deploy/ec2/deploy-hydraflow.sh` bootstraps dependencies, syncs code, and restarts the orchestrator.
-- `deploy/ec2/hydraflow.service` keeps the process alive under systemd.
-- FastAPI exposes `GET /healthz` so load balancers or uptime monitors can watch liveness.
+- `deploy/ec2/hydraflow.service` keeps the process alive under systemd; the `install` helper renders it with `SERVICE_USER`, `SERVICE_GROUP`, `SERVICE_WORK_DIR`, and `SERVICE_LOG_FILE` overrides so non-/opt installs work without manual edits.
+- FastAPI exposes `GET /healthz` with a `ready` flag plus per-component `checks` (orchestrator/worker/dashboard) so load balancers or monitors can make decisions without extra parsing.
 - `/etc/hydraflow.env` (override with `RUNTIME_ENV_FILE`) is sourced automatically so manual `run` commands and systemd share credentials/config.
 - `deploy/ec2/deploy-hydraflow.sh install` copies the unit into `/etc/systemd/system` (or your custom `SYSTEMD_DIR`) and runs the required `systemctl enable --now` incantations.
 

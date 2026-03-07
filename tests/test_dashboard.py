@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 from events import EventBus, EventType, HydraFlowEvent
 from models import BGWorkerHealth, HITLItem, PRListItem
 from tests.conftest import EventFactory, make_orchestrator_mock, make_state
+from tests.helpers import ConfigFactory
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -189,6 +190,10 @@ class TestHealthRoute:
         assert payload["orchestrator_running"] is True
         assert payload["dashboard"]["port"] == config.dashboard_port
         assert payload["dashboard"]["host"] == config.dashboard_host
+        assert payload["ready"] is True
+        assert payload["checks"]["orchestrator"]["status"] == "running"
+        assert payload["checks"]["workers"]["status"] in {"ok", "disabled"}
+        assert payload["checks"]["dashboard"]["public"] is False
         assert payload["session_started_at"] == started_at.isoformat()
         assert isinstance(payload["uptime_seconds"], int)
         assert payload["uptime_seconds"] >= 300
@@ -219,6 +224,9 @@ class TestHealthRoute:
         payload = response.json()
         assert payload["status"] == "degraded"
         assert payload["worker_errors"] == ["memory_sync"]
+        assert payload["ready"] is False
+        assert payload["checks"]["workers"]["status"] == "degraded"
+        assert payload["checks"]["workers"]["errors"] == ["memory_sync"]
 
     def test_healthz_handles_missing_session_start(
         self, config: HydraFlowConfig, event_bus: EventBus, state
@@ -236,6 +244,29 @@ class TestHealthRoute:
 
         assert payload["session_started_at"] is None
         assert payload["uptime_seconds"] is None
+
+    def test_healthz_marks_dashboard_binding_public_flag(
+        self, config: HydraFlowConfig, event_bus: EventBus, state
+    ) -> None:
+        from fastapi.testclient import TestClient
+
+        from dashboard import HydraFlowDashboard
+
+        public_config = ConfigFactory.create(
+            dashboard_host="0.0.0.0",
+            dashboard_port=config.dashboard_port,
+        )
+        orch = make_orchestrator_mock(running=True)
+        dashboard = HydraFlowDashboard(
+            public_config, event_bus, state, orchestrator=orch
+        )
+        app = dashboard.create_app()
+
+        client = TestClient(app)
+        payload = client.get("/healthz").json()
+
+        assert payload["checks"]["dashboard"]["public"] is True
+        assert payload["ready"] is True
 
     def test_healthz_handles_invalid_session_start(
         self, config: HydraFlowConfig, event_bus: EventBus, state

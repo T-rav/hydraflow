@@ -23,6 +23,14 @@ RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-/etc/hydraflow.env}"
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
 SYSTEMCTL_BIN="${SYSTEMCTL_BIN:-systemctl}"
 SYSTEMCTL_ALLOW_USER="${SYSTEMCTL_ALLOW_USER:-0}"
+SERVICE_DESCRIPTION="${SERVICE_DESCRIPTION:-HydraFlow orchestrator and dashboard}"
+SERVICE_USER="${SERVICE_USER:-hydraflow}"
+SERVICE_GROUP="${SERVICE_GROUP:-${SERVICE_USER}}"
+SERVICE_RUNTIME_DIR="${SERVICE_RUNTIME_DIR:-hydraflow}"
+SERVICE_WORK_DIR="${SERVICE_WORK_DIR:-${HYDRAFLOW_ROOT}}"
+SERVICE_LOG_FILE="${SERVICE_LOG_FILE:-${LOG_DIR}/orchestrator.log}"
+SERVICE_EXEC_START="${SERVICE_EXEC_START:-${HYDRAFLOW_ROOT}/deploy/ec2/deploy-hydraflow.sh run}"
+UNIT_TEMPLATE="${UNIT_TEMPLATE:-${SCRIPT_DIR}/hydraflow.service}"
 
 log() {
   printf '[%s] %s\n' "$(date --iso-8601=seconds 2>/dev/null || date)" "$*"
@@ -49,6 +57,33 @@ ensure_repo() {
   if [[ ! -d "${HYDRAFLOW_ROOT}/.git" ]]; then
     fatal "HYDRAFLOW_ROOT (${HYDRAFLOW_ROOT}) does not contain a .git directory"
   fi
+}
+
+escape_sed_replacement() {
+  sed -e 's/[\\/|&]/\\&/g' <<<"$1"
+}
+
+render_systemd_unit() {
+  local template="$1"
+  local dest="$2"
+  if [[ ! -f "${template}" ]]; then
+    fatal "Missing systemd unit template at ${template}"
+  fi
+  local tmp
+  tmp="$(mktemp)"
+  sed \
+    -e "s|@SERVICE_DESCRIPTION@|$(escape_sed_replacement "${SERVICE_DESCRIPTION}")|g" \
+    -e "s|@SERVICE_USER@|$(escape_sed_replacement "${SERVICE_USER}")|g" \
+    -e "s|@SERVICE_GROUP@|$(escape_sed_replacement "${SERVICE_GROUP}")|g" \
+    -e "s|@WORKING_DIRECTORY@|$(escape_sed_replacement "${SERVICE_WORK_DIR}")|g" \
+    -e "s|@ENV_FILE@|$(escape_sed_replacement "${RUNTIME_ENV_FILE}")|g" \
+    -e "s|@HYDRAFLOW_HOME_DIR@|$(escape_sed_replacement "${HYDRAFLOW_HOME_DIR}")|g" \
+    -e "s|@RUNTIME_DIRECTORY@|$(escape_sed_replacement "${SERVICE_RUNTIME_DIR}")|g" \
+    -e "s|@EXEC_START@|$(escape_sed_replacement "${SERVICE_EXEC_START}")|g" \
+    -e "s|@LOG_PATH@|$(escape_sed_replacement "${SERVICE_LOG_FILE}")|g" \
+    "${template}" >"${tmp}"
+  mv "${tmp}" "${dest}"
+  chmod 0644 "${dest}"
 }
 
 uv_env_cmd() {
@@ -126,15 +161,13 @@ maybe_restart_service() {
 }
 
 install_systemd_unit() {
-  local src="${SCRIPT_DIR}/hydraflow.service"
+  local src="${UNIT_TEMPLATE}"
   local dest="${SYSTEMD_DIR}/${SERVICE_NAME}.service"
 
-  if [[ ! -f "${src}" ]]; then
-    fatal "Missing systemd unit template at ${src}"
-  fi
   ensure_dir "${SYSTEMD_DIR}"
-  cp "${src}" "${dest}"
-  log "Installed ${SERVICE_NAME}.service to ${dest}"
+  ensure_dir "$(dirname "${SERVICE_LOG_FILE}")"
+  render_systemd_unit "${src}" "${dest}"
+  log "Rendered ${SERVICE_NAME}.service to ${dest}"
 
   if ! command -v "${SYSTEMCTL_BIN}" >/dev/null 2>&1; then
     log "${SYSTEMCTL_BIN} not available; skipping systemd enable"

@@ -92,6 +92,26 @@ sudo deploy/ec2/deploy-hydraflow.sh install
 
 By default the unit is written to `/etc/systemd/system/hydraflow.service`; override this or the service name via `SYSTEMD_DIR=/custom/path deploy/ec2/deploy-hydraflow.sh install` and/or `SERVICE_NAME=my-hydraflow`.
 
+The installer renders the template with a handful of environment overrides so you rarely have to edit the unit by hand:
+
+- `SERVICE_USER` / `SERVICE_GROUP` — user/group that owns the process (default: `hydraflow`)
+- `SERVICE_WORK_DIR` — checkout path HydraFlow runs from (default: `HYDRAFLOW_ROOT`)
+- `SERVICE_LOG_FILE` — file used for both stdout/stderr (default: `${HYDRAFLOW_LOG_DIR:-/var/log/hydraflow}/orchestrator.log`)
+- `SERVICE_RUNTIME_DIR` — name for the systemd runtime dir (`RuntimeDirectory=`; default: `hydraflow`)
+- `RUNTIME_ENV_FILE` — EnvironmentFile path sourced before the service starts (default: `/etc/hydraflow.env`)
+- `SERVICE_EXEC_START` — command systemd executes (default: `<repo>/deploy/ec2/deploy-hydraflow.sh run`)
+
+Example for a non-root install under `/srv/hf`:
+
+```bash
+sudo SYSTEMD_DIR=/etc/systemd/system \
+     SERVICE_USER=ubuntu \
+     SERVICE_GROUP=ubuntu \
+     SERVICE_WORK_DIR=/srv/hf \
+     SERVICE_LOG_FILE=/srv/hf/logs/orchestrator.log \
+     deploy/ec2/deploy-hydraflow.sh install
+```
+
 The unit calls the deploy script’s `run` verb, so it inherits all of the script’s environment handling. Runtime environment is loaded from `/etc/hydraflow.env` (see Step 3). Logs are written to `/var/log/hydraflow/orchestrator.log`; watch them with:
 
 ```bash
@@ -106,6 +126,7 @@ FastAPI now exposes `GET /healthz`, which reports the orchestrator status, worke
 curl -s http://SERVER_IP:5555/healthz | jq
 {
   "status": "ok",
+  "ready": true,
   "version": "1.12.0",
   "session_started_at": "2026-03-07T12:29:56+00:00",
   "uptime_seconds": 960,
@@ -115,11 +136,22 @@ curl -s http://SERVER_IP:5555/healthz | jq
   "worker_count": 6,
   "worker_errors": [],
   "dashboard": {"host": "0.0.0.0", "port": 5555},
+  "checks": {
+    "orchestrator": {
+      "status": "running",
+      "running": true,
+      "session_started_at": "2026-03-07T12:29:56+00:00"
+    },
+    "workers": {"status": "ok", "count": 6, "errors": []},
+    "dashboard": {"status": "ok", "host": "0.0.0.0", "port": 5555, "public": true}
+  },
   "timestamp": "2026-03-07T12:34:56+00:00"
 }
 ```
 
-Return `200 OK` for “starting/idle/degraded” states, so you can point an ALB, Route 53 health check, or uptime monitor at `/healthz` without needing an auth token.
+`ready` flips to `false` whenever the orchestrator is missing/idle or any worker reports `degraded`, making it trivial for an ALB or uptime monitor to gate traffic without parsing internal details. `checks.dashboard.public` is `true` when `HYDRAFLOW_DASHBOARD_HOST` is not localhost/127.0.0.1, which is a quick sanity check that you actually bound to a public interface.
+
+The endpoint still returns `200 OK` for “starting/idle/degraded” states, so you can point an ALB, Route 53 health check, or uptime monitor at `/healthz` without needing an auth token. Alert when `ready=false` or when `worker_errors` is non-empty.
 
 `session_started_at` mirrors the orchestrator session boot time, while `uptime_seconds` is a wall-clock counter you can alert on if it resets unexpectedly.
 

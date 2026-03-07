@@ -1,23 +1,23 @@
 [Unit]
-Description=HydraFlow orchestrator and dashboard
+Description=@SERVICE_DESCRIPTION@
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=hydraflow
-Group=hydraflow
-WorkingDirectory=/opt/hydraflow
-EnvironmentFile=-/etc/hydraflow.env
-Environment=HYDRAFLOW_HOME_DIR=/var/lib/hydraflow
-RuntimeDirectory=hydraflow
-ExecStart=/opt/hydraflow/deploy/ec2/deploy-hydraflow.sh run
+User=@SERVICE_USER@
+Group=@SERVICE_GROUP@
+WorkingDirectory=@WORKING_DIRECTORY@
+EnvironmentFile=-@ENV_FILE@
+Environment=HYDRAFLOW_HOME_DIR=@HYDRAFLOW_HOME_DIR@
+RuntimeDirectory=@RUNTIME_DIRECTORY@
+ExecStart=@EXEC_START@
 Restart=always
 RestartSec=5
 TimeoutStopSec=60
 KillSignal=SIGINT
-StandardOutput=append:/var/log/hydraflow/orchestrator.log
-StandardError=append:/var/log/hydraflow/orchestrator.log
+StandardOutput=append:@LOG_PATH@
+StandardError=append:@LOG_PATH@
 LimitNOFILE=65535
 
 [Install]
