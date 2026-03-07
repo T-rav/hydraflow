@@ -36,5 +36,4 @@ and optionally **Alternatives considered** and **Related** links.
 ## Adding a new ADR
 
 Copy the template, increment the number, fill in the sections.
-Mark superseded ADRs by setting `**Status:** Superseded` and adding a
-`Superseded by: ADR-XXXX` entry in the Related section rather than deleting them.
+Mark superseded ADRs by setting `**Status:** Superseded` and adding a `Superseded by: ADR-XXXX` entry in the Related section rather than deleting them.
