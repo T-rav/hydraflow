@@ -30,12 +30,12 @@ def test_ping_returns_false_when_connection_fails(monkeypatch) -> None:
     assert supervisor_client.ping() is False
 
 
-def test_list_repos_raises_runtime_error_on_error_response(monkeypatch) -> None:
+def test_list_repos_raises_supervisor_response_error_on_error_response(monkeypatch) -> None:
     monkeypatch.setattr(
         supervisor_client, "_send", lambda _request: {"status": "error", "error": "x"}
     )
 
-    with pytest.raises(RuntimeError, match="x"):
+    with pytest.raises(supervisor_client.SupervisorResponseError, match="x"):
         supervisor_client.list_repos()
 
 
@@ -67,14 +67,14 @@ def test_add_repo_includes_slug_in_payload(monkeypatch, tmp_path) -> None:
     assert captured["path"] == str(repo.resolve())
 
 
-def test_remove_repo_raises_when_server_returns_error(monkeypatch) -> None:
+def test_remove_repo_raises_supervisor_response_error_when_server_returns_error(monkeypatch) -> None:
     monkeypatch.setattr(
         supervisor_client,
         "_send",
         lambda _request: {"status": "error", "error": "not found"},
     )
 
-    with pytest.raises(RuntimeError, match="not found"):
+    with pytest.raises(supervisor_client.SupervisorResponseError, match="not found"):
         supervisor_client.remove_repo(slug="missing")
 
 
@@ -112,6 +112,7 @@ def test_supervisor_client_errors_chain_response(monkeypatch, tmp_path) -> None:
         exc = exc_info.value
         assert exc.action == action
         assert exc.response["error"] == f"{action} failure"
+        assert str(exc) == f"{action} failed: {action} failure"
 
 
 def test_send_parses_newline_delimited_json(monkeypatch) -> None:
