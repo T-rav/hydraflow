@@ -2914,6 +2914,13 @@ def create_router(
             except Exception as exc:  # noqa: BLE001
                 logger.warning("remove_repo callback failed for %s: %s", slug, exc)
                 return JSONResponse({"error": "Failed to remove repo"}, status_code=500)
+            if repo_store is not None:
+                try:
+                    repo_store.remove(slug)
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "Failed to remove repo %s from store", slug, exc_info=True
+                    )
             return JSONResponse({"status": "removed", "slug": slug})
         if rt.running:
             await rt.stop()

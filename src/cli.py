@@ -1318,86 +1318,119 @@ def _run_replay(config: HydraFlowConfig, issue_number: int, latest_only: bool) -
 
 async def _run_main(config: HydraFlowConfig) -> None:
     """Launch the orchestrator, optionally with the dashboard."""
+    from repo_runtime import RepoRuntime, RepoRuntimeRegistry
+
     logger = logging.getLogger("hydraflow.cli")
     cli_explicit_fields = set(getattr(config, "cli_explicit_fields", frozenset()))
     default_slug = config.repo_slug if config.repo else None
+    registry = RepoRuntimeRegistry()
+    repo_store = RepoStore(config.data_root)
+
+    records = repo_store.list()
+    if default_slug and not any(rec.slug == default_slug for rec in records):
+        records.append(
+            RepoRecord(
+                slug=default_slug,
+                repo=config.repo,
+                path=str(config.repo_root),
+                auto_registered=True,
+            )
+        )
+        repo_store.upsert(records[-1])
+
+    def _clone_config_for_repo(record: RepoRecord) -> HydraFlowConfig:
+        repo_path = Path(record.path)
+        values = config.model_dump()
+        for key in (
+            "repo_root",
+            "repo",
+            "data_root",
+            "state_file",
+            "event_log_path",
+            "repo_config_file",
+        ):
+            values.pop(key, None)
+        values["repo_root"] = repo_path
+        values["repo"] = record.repo
+        values["config_file"] = config.config_file
+        clone = HydraFlowConfig(**values)
+        object.__setattr__(clone, "cli_explicit_fields", config.cli_explicit_fields)
+        repo_cfg_path = clone.repo_data_root / "config.json"
+        object.__setattr__(clone, "repo_config_file", repo_cfg_path)
+        _apply_repo_config_overlay(clone, cli_explicit_fields, path=repo_cfg_path)
+        return clone
+
+    async def _register_record(
+        record: RepoRecord, *, reuse_primary: bool = False
+    ) -> RepoRuntime | None:
+        try:
+            cfg = config if reuse_primary else _clone_config_for_repo(record)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to prepare config for repo %s: %s", record.slug, exc)
+            return None
+        try:
+            runtime = await registry.register(cfg)
+        except ValueError:
+            return registry.get(record.slug)
+        return runtime
+
+    async def _register_existing_records() -> dict[str, RepoRuntime]:
+        runtimes: dict[str, RepoRuntime] = {}
+        for rec in records:
+            reuse = bool(default_slug and rec.slug == default_slug)
+            runtime = await _register_record(rec, reuse_primary=reuse)
+            if runtime is not None:
+                runtimes[rec.slug] = runtime
+        return runtimes
+
+    runtimes = await _register_existing_records()
+
+    primary_runtime = None
+    if default_slug and default_slug in runtimes:
+        primary_runtime = runtimes[default_slug]
+    elif runtimes:
+        default_slug = next(iter(runtimes.keys()))
+        primary_runtime = runtimes[default_slug]
+
+    async def _register_repo_cb(
+        repo_path: Path, repo_name: str | None
+    ) -> tuple[RepoRecord, HydraFlowConfig]:
+        normalized = repo_path.expanduser().resolve()
+        repo_label = (repo_name or normalized.name or "repo").strip()
+        slug = repo_label.replace("/", "-")
+        if registry.get(slug):
+            raise ValueError(f"Repo '{slug}' already registered")
+        record = RepoRecord(slug=slug, repo=repo_label, path=str(normalized))
+        record = repo_store.upsert(record)
+        runtime = await _register_record(record)
+        if runtime is None:
+            raise ValueError(f"Failed to register repo '{slug}'")
+        return record, runtime.config
+
+    async def _remove_repo_cb(slug: str) -> bool:
+        target = registry.get(slug)
+        if target:
+            if target.running:
+                await target.stop()
+            registry.remove(slug)
+        removed = repo_store.remove(slug)
+        return removed
+
+    def _list_repos_cb() -> list[RepoRecord]:
+        return repo_store.list()
 
     if config.dashboard_enabled:
         from dashboard import HydraFlowDashboard
         from events import EventBus, EventLog, EventType, HydraFlowEvent
         from models import Phase
-        from repo_runtime import RepoRuntime, RepoRuntimeRegistry
-        from repo_store import RepoRecord, RepoStore
         from state import StateTracker
 
-        registry = RepoRuntimeRegistry()
-        repo_store = RepoStore(config.data_root)
-
-        records = repo_store.list()
-        if default_slug and not any(rec.slug == default_slug for rec in records):
-            records.append(
-                RepoRecord(
-                    slug=default_slug, repo=config.repo, path=str(config.repo_root)
-                )
-            )
-            repo_store.upsert(records[-1])
-
-        def _clone_config_for_repo(record: RepoRecord) -> HydraFlowConfig:
-            repo_path = Path(record.path)
-            values = config.model_dump()
-            for key in (
-                "repo_root",
-                "repo",
-                "data_root",
-                "state_file",
-                "event_log_path",
-                "repo_config_file",
-            ):
-                values.pop(key, None)
-            values["repo_root"] = repo_path
-            values["repo"] = record.repo
-            values["config_file"] = config.config_file
-            clone = HydraFlowConfig(**values)
-            object.__setattr__(clone, "cli_explicit_fields", config.cli_explicit_fields)
-            repo_cfg_path = clone.repo_data_root / "config.json"
-            object.__setattr__(clone, "repo_config_file", repo_cfg_path)
-            _apply_repo_config_overlay(clone, cli_explicit_fields, path=repo_cfg_path)
-            return clone
-
-        async def _register_record(
-            record: RepoRecord, *, reuse_primary: bool = False
-        ) -> RepoRuntime | None:
-            try:
-                cfg = config if reuse_primary else _clone_config_for_repo(record)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "Failed to prepare config for repo %s: %s", record.slug, exc
-                )
-                return None
-            try:
-                runtime = await registry.register(cfg)
-            except ValueError:
-                return registry.get(record.slug)
-            return runtime
-
-        async def _register_existing_records() -> dict[str, RepoRuntime]:
-            runtimes: dict[str, RepoRuntime] = {}
-            for rec in records:
-                reuse = bool(default_slug and rec.slug == default_slug)
-                runtime = await _register_record(rec, reuse_primary=reuse)
-                if runtime is not None:
-                    runtimes[rec.slug] = runtime
-            return runtimes
-
-        runtimes = await _register_existing_records()
-
-        primary_runtime = None
-        if default_slug and default_slug in runtimes:
-            primary_runtime = runtimes[default_slug]
-        elif runtimes:
-            primary_runtime = next(iter(runtimes.values()))
-
-        if primary_runtime is None:
+        if primary_runtime:
+            bus = primary_runtime.event_bus
+            state = primary_runtime.state
+            dash_config = primary_runtime.config
+            orchestrator = primary_runtime.orchestrator
+        else:
             event_log = EventLog(config.event_log_path)
             bus = EventBus(event_log=event_log)
             await bus.rotate_log(
@@ -1406,57 +1439,14 @@ async def _run_main(config: HydraFlowConfig) -> None:
             )
             await bus.load_history_from_disk()
             state = StateTracker(config.state_file)
-        else:
-            bus = primary_runtime.event_bus
-            state = primary_runtime.state
-
-        def _default_runtime() -> RepoRuntime | None:
-            if default_slug:
-                runtime = registry.get(default_slug)
-                if runtime:
-                    return runtime
-            slugs = getattr(registry, "slugs", [])
-            for slug in slugs:
-                runtime = registry.get(slug)
-                if runtime:
-                    return runtime
-            return None
-
-        def _get_orchestrator() -> RepoRuntime | None:
-            runtime = _default_runtime()
-            return runtime.orchestrator if runtime else None
-
-        async def _register_repo_cb(
-            repo_path: Path, repo_name: str | None
-        ) -> tuple[RepoRecord, HydraFlowConfig]:
-            normalized = repo_path.expanduser().resolve()
-            repo_label = (repo_name or normalized.name or "repo").strip()
-            slug = repo_label.replace("/", "-")
-            if registry.get(slug):
-                raise ValueError(f"Repo '{slug}' already registered")
-            record = RepoRecord(slug=slug, repo=repo_label, path=str(normalized))
-            record = repo_store.upsert(record)
-            runtime = await _register_record(record)
-            if runtime is None:
-                raise ValueError(f"Failed to register repo '{slug}'")
-            return record, runtime.config
-
-        async def _remove_repo_cb(slug: str) -> bool:
-            target = registry.get(slug)
-            if target:
-                if target.running:
-                    await target.stop()
-                registry.remove(slug)
-            removed = repo_store.remove(slug)
-            return removed
-
-        def _list_repos_cb() -> list[RepoRecord]:
-            return repo_store.list()
+            dash_config = config
+            orchestrator = None
 
         dashboard = HydraFlowDashboard(
-            config=config,
+            config=dash_config,
             event_bus=bus,
             state=state,
+            orchestrator=orchestrator,
             registry=registry,
             repo_store=repo_store,
             register_repo_cb=_register_repo_cb,
@@ -1488,15 +1478,19 @@ async def _run_main(config: HydraFlowConfig) -> None:
             await registry.stop_all()
             await dashboard.stop()
     else:
-        from repo_runtime import RepoRuntime
-
-        runtime = await RepoRuntime.create(config)
+        runtime = primary_runtime or await RepoRuntime.create(config)
+        for rt in registry.all:
+            if rt is not runtime:
+                await rt.start()
 
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, lambda: asyncio.create_task(runtime.stop()))
+            loop.add_signal_handler(sig, lambda: asyncio.create_task(registry.stop_all()))
 
-        await runtime.run()
+        try:
+            await runtime.run()
+        finally:
+            await registry.stop_all()
 
 
 def main(argv: list[str] | None = None) -> None:
