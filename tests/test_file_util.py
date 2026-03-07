@@ -126,6 +126,26 @@ class TestAppendJsonl:
             append_jsonl(target, "data")
         mock_fsync.assert_called_once()
 
+    def test_fsync_failure_propagates(self, tmp_path: Path) -> None:
+        target = tmp_path / "events.jsonl"
+        with (
+            patch("file_util.os.fsync", side_effect=OSError("fsync failed")),
+            pytest.raises(OSError, match="fsync failed"),
+        ):
+            append_jsonl(target, "data")
+
+    def test_existing_content_preserved_after_fsync_failure(self, tmp_path: Path) -> None:
+        target = tmp_path / "events.jsonl"
+        append_jsonl(target, '{"prior": true}')
+        with (
+            patch("file_util.os.fsync", side_effect=OSError("fsync failed")),
+            pytest.raises(OSError),
+        ):
+            append_jsonl(target, '{"new": true}')
+        # Prior content is intact; the failed write may or may not have flushed
+        content = target.read_text()
+        assert '{"prior": true}' in content
+
 
 class TestFileLock:
     """Tests for file_lock()."""

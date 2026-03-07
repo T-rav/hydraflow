@@ -821,6 +821,15 @@ async def test_push_branch_force_true_includes_flag(config, event_bus, tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_push_branch_dry_run(dry_config, event_bus, tmp_path):
+    manager = _make_manager(dry_config, event_bus)
+
+    result = await manager.push_branch(tmp_path, "agent/issue-42")
+
+    assert result is True
+
+
+@pytest.mark.asyncio
 async def test_push_branch_force_dry_run(dry_config, event_bus, tmp_path):
     manager = _make_manager(dry_config, event_bus)
 
