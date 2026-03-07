@@ -93,6 +93,8 @@ def dry_config(tmp_path: Path) -> HydraFlowConfig:
 @pytest.fixture
 def readonly_dir(tmp_path: Path) -> Iterator[Path]:
     """Create a read-only directory for permission error simulations."""
+    if os.getuid() == 0:
+        pytest.skip("read-only directory tests are unreliable when running as root")
     target = tmp_path / "readonly"
     target.mkdir()
     (target / "sentinel.txt").write_text("locked")

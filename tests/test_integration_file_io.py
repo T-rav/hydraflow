@@ -205,6 +205,9 @@ def test_worktree_env_setup_docker_copies_and_updates_gitignore(tmp_path: Path) 
     assert not env_dst.is_symlink()
     assert env_dst.read_text() == "TOKEN=abc"
 
+    settings_dst = wt_path / ".claude" / "settings.local.json"
+    assert settings_dst.read_text() == "{}"
+
     node_modules_dst = wt_path / "ui" / "node_modules"
     assert node_modules_dst.is_dir()
     assert not node_modules_dst.is_symlink()
