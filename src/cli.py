@@ -1411,12 +1411,18 @@ async def _run_main(config: HydraFlowConfig) -> None:
             await dashboard.stop()
     else:
         runtime = default_runtime or await RepoRuntime.create(config)
+        for rt in registry.all:
+            if rt is not runtime:
+                await rt.start()
 
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, lambda: asyncio.create_task(runtime.stop()))
+            loop.add_signal_handler(sig, lambda: asyncio.create_task(registry.stop_all()))
 
-        await runtime.run()
+        try:
+            await runtime.run()
+        finally:
+            await registry.stop_all()
 
 
 def main(argv: list[str] | None = None) -> None:
