@@ -1005,14 +1005,21 @@ class TestForceCommitE2E:
             capture_output=True,
         )
 
-        # Simulate Docker corruption: set core.worktree to /workspace
+        # Simulate Docker corruption: set core.worktree to a non-existent path
         subprocess.run(
-            ["git", "-C", str(repo), "config", "core.worktree", "/workspace"],
+            [
+                "git",
+                "-C",
+                str(repo),
+                "config",
+                "core.worktree",
+                "/nonexistent_worktree_path",
+            ],
             check=True,
             capture_output=True,
         )
 
-        # Verify corruption: git status sees nothing because /workspace doesn't exist
+        # Verify corruption: git status sees nothing because the path doesn't exist
         result = subprocess.run(
             ["git", "-C", str(repo), "status", "--porcelain"],
             capture_output=True,
