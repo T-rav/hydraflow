@@ -144,6 +144,8 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("visual_validation_enabled", "HYDRAFLOW_VISUAL_VALIDATION_ENABLED", True),
     ("release_on_epic_close", "HYDRAFLOW_RELEASE_ON_EPIC_CLOSE", False),
     ("adr_review_enabled", "HYDRAFLOW_ADR_REVIEW_ENABLED", False),
+    ("adr_auto_triage", "HYDRAFLOW_ADR_AUTO_TRIAGE", False),
+    ("adr_pre_review", "HYDRAFLOW_ADR_PRE_REVIEW", True),
     (
         "screenshot_redaction_enabled",
         "HYDRAFLOW_SCREENSHOT_REDACTION_ENABLED",
@@ -1007,6 +1009,14 @@ class HydraFlowConfig(BaseModel):
     adr_review_model: str = Field(
         default="sonnet",
         description="Model for the ADR council review orchestrator",
+    )
+    adr_auto_triage: bool = Field(
+        default=False,
+        description="Route fixable ADR council feedback back through pipeline instead of HITL",
+    )
+    adr_pre_review: bool = Field(
+        default=True,
+        description="Run pre-review validation on proposed ADRs before sending to council",
     )
 
     # Session retention

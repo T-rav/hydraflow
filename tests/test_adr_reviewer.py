@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from adr_reviewer import ADRCouncilReviewer
+from adr_reviewer import ADRCouncilReviewer, ADRPreReviewValidator
 from models import ADRCouncilResult, CouncilVerdict, CouncilVote
 from tests.conftest import TaskFactory
 from tests.helpers import ConfigFactory, make_triage_phase, supply_once
@@ -22,6 +22,8 @@ def _make_reviewer(
     adr_review_enabled: bool = True,
     adr_review_approval_threshold: int = 2,
     adr_review_max_rounds: int = 3,
+    adr_auto_triage: bool = False,
+    adr_pre_review: bool = True,
 ) -> ADRCouncilReviewer:
     """Build an ADRCouncilReviewer with test-friendly defaults."""
     config = ConfigFactory.create(
@@ -29,6 +31,8 @@ def _make_reviewer(
         adr_review_enabled=adr_review_enabled,
         adr_review_approval_threshold=adr_review_approval_threshold,
         adr_review_max_rounds=adr_review_max_rounds,
+        adr_auto_triage=adr_auto_triage,
+        adr_pre_review=adr_pre_review,
     )
     from events import EventBus
 
@@ -497,13 +501,19 @@ class TestVerdictRouting:
 
     @pytest.mark.asyncio
     async def test_reject_routes_to_triage_first(self, tmp_path: Path) -> None:
-        reviewer = _make_reviewer(tmp_path)
+        reviewer = _make_reviewer(tmp_path, adr_auto_triage=True)
         result = ADRCouncilResult(
             adr_number=1,
             adr_title="Test",
             final_decision="REJECT",
         )
-        stats = {"accepted": 0, "rejected": 0, "escalated": 0, "duplicates": 0}
+        stats = {
+            "accepted": 0,
+            "rejected": 0,
+            "escalated": 0,
+            "duplicates": 0,
+            "auto_triaged": 0,
+        }
 
         with (
             patch.object(
@@ -520,13 +530,19 @@ class TestVerdictRouting:
 
     @pytest.mark.asyncio
     async def test_request_changes_routes_to_triage_first(self, tmp_path: Path) -> None:
-        reviewer = _make_reviewer(tmp_path)
+        reviewer = _make_reviewer(tmp_path, adr_auto_triage=True)
         result = ADRCouncilResult(
             adr_number=1,
             adr_title="Test",
             final_decision="REQUEST_CHANGES",
         )
-        stats = {"accepted": 0, "rejected": 0, "escalated": 0, "duplicates": 0}
+        stats = {
+            "accepted": 0,
+            "rejected": 0,
+            "escalated": 0,
+            "duplicates": 0,
+            "auto_triaged": 0,
+        }
 
         with (
             patch.object(
@@ -577,13 +593,19 @@ class TestVerdictRouting:
 
     @pytest.mark.asyncio
     async def test_no_consensus_routes_to_triage_first(self, tmp_path: Path) -> None:
-        reviewer = _make_reviewer(tmp_path)
+        reviewer = _make_reviewer(tmp_path, adr_auto_triage=True)
         result = ADRCouncilResult(
             adr_number=1,
             adr_title="Test",
             final_decision="NO_CONSENSUS",
         )
-        stats = {"accepted": 0, "rejected": 0, "escalated": 0, "duplicates": 0}
+        stats = {
+            "accepted": 0,
+            "rejected": 0,
+            "escalated": 0,
+            "duplicates": 0,
+            "auto_triaged": 0,
+        }
 
         with (
             patch.object(
@@ -602,13 +624,19 @@ class TestVerdictRouting:
     async def test_triage_route_fallbacks_to_hitl_when_triage_fails(
         self, tmp_path: Path
     ) -> None:
-        reviewer = _make_reviewer(tmp_path)
+        reviewer = _make_reviewer(tmp_path, adr_auto_triage=True)
         result = ADRCouncilResult(
             adr_number=1,
             adr_title="Test",
             final_decision="REQUEST_CHANGES",
         )
-        stats = {"accepted": 0, "rejected": 0, "escalated": 0, "duplicates": 0}
+        stats = {
+            "accepted": 0,
+            "rejected": 0,
+            "escalated": 0,
+            "duplicates": 0,
+            "auto_triaged": 0,
+        }
 
         with (
             patch.object(
@@ -640,7 +668,13 @@ class TestVerdictRouting:
             adr_title="Test",
             final_decision="REQUEST_CHANGES",
         )
-        stats = {"accepted": 0, "rejected": 0, "escalated": 0, "duplicates": 0}
+        stats = {
+            "accepted": 0,
+            "rejected": 0,
+            "escalated": 0,
+            "duplicates": 0,
+            "auto_triaged": 0,
+        }
 
         with (
             patch.object(
@@ -1821,3 +1855,474 @@ class TestReviewProposedADRs:
         assert stats["rejected"] == 1
         assert stats["duplicates"] == 1
         assert stats["rounds_total"] == 4  # 1 + 2 + 1
+
+
+# --- Pre-review Validator tests ---
+
+
+class TestADRPreReviewValidator:
+    """Tests for ADRPreReviewValidator."""
+
+    def setup_method(self) -> None:
+        self.validator = ADRPreReviewValidator()
+
+    def test_valid_adr_passes(self) -> None:
+        content = """# ADR-0001: Use PostgreSQL
+
+**Status:** Proposed
+
+## Context
+
+We need a database.
+
+## Decision
+
+Use PostgreSQL.
+
+## Consequences
+
+We need to learn SQL.
+"""
+        result = self.validator.validate(1, content)
+        assert result.passed
+        assert result.issues == []
+
+    def test_missing_status_field(self) -> None:
+        content = """# ADR-0001: Use PostgreSQL
+
+## Context
+
+Some context.
+
+## Decision
+
+Some decision.
+
+## Consequences
+
+Some consequences.
+"""
+        result = self.validator.validate(1, content)
+        assert not result.passed
+        assert any(i.field == "status" and i.fixable for i in result.issues)
+
+    def test_invalid_status_value(self) -> None:
+        content = """# ADR-0001: Use PostgreSQL
+
+**Status:** Draft
+
+## Context
+
+Some context.
+
+## Decision
+
+Some decision.
+
+## Consequences
+
+Some consequences.
+"""
+        result = self.validator.validate(1, content)
+        assert not result.passed
+        issue = next(i for i in result.issues if i.field == "status")
+        assert not issue.fixable
+        assert "Draft" in issue.message
+
+    def test_missing_required_section(self) -> None:
+        content = """# ADR-0001: Use PostgreSQL
+
+**Status:** Proposed
+
+## Context
+
+Some context.
+
+## Decision
+
+Some decision.
+"""
+        result = self.validator.validate(1, content)
+        assert not result.passed
+        assert any(
+            i.field == "section" and "Consequences" in i.message for i in result.issues
+        )
+
+    def test_missing_title(self) -> None:
+        content = """**Status:** Proposed
+
+## Context
+
+Some context.
+
+## Decision
+
+Some decision.
+
+## Consequences
+
+Some consequences.
+"""
+        result = self.validator.validate(1, content)
+        assert not result.passed
+        assert any(i.field == "title" for i in result.issues)
+
+    def test_short_title(self) -> None:
+        content = """# Hi
+
+**Status:** Proposed
+
+## Context
+
+Some context.
+
+## Decision
+
+Some decision.
+
+## Consequences
+
+Some consequences.
+"""
+        result = self.validator.validate(1, content)
+        assert not result.passed
+        assert any(
+            i.field == "title" and "too short" in i.message for i in result.issues
+        )
+
+    def test_supersession_mention_without_section(self) -> None:
+        content = """# ADR-0002: Replace Redis
+
+**Status:** Proposed
+
+## Context
+
+This supersedes ADR-0001.
+
+## Decision
+
+Use Valkey instead.
+
+## Consequences
+
+Some consequences.
+"""
+        result = self.validator.validate(2, content)
+        assert not result.passed
+        issue = next(i for i in result.issues if i.field == "supersession")
+        assert issue.fixable
+
+    def test_superseded_status_without_reference(self) -> None:
+        content = """# ADR-0001: Use Redis
+
+**Status:** Superseded
+
+## Context
+
+Some context.
+
+## Decision
+
+Some decision.
+
+## Consequences
+
+Some consequences.
+"""
+        result = self.validator.validate(1, content)
+        assert not result.passed
+        issue = next(i for i in result.issues if i.field == "supersession")
+        assert not issue.fixable
+
+    def test_has_fixable_only(self) -> None:
+        # Missing status (fixable) + missing Consequences section (fixable)
+        content = """# ADR-0001: Use PostgreSQL
+
+## Context
+
+Some context.
+
+## Decision
+
+Some decision.
+"""
+        result = self.validator.validate(1, content)
+        assert not result.passed
+        assert result.has_fixable_only
+
+    def test_mixed_fixable_and_non_fixable(self) -> None:
+        # Missing section (fixable) + invalid status (non-fixable)
+        content = """# ADR-0001: Use PostgreSQL
+
+**Status:** Draft
+
+## Context
+
+Some context.
+
+## Decision
+
+Some decision.
+"""
+        result = self.validator.validate(1, content)
+        assert not result.passed
+        assert not result.has_fixable_only
+
+    def test_adr_path_stored(self) -> None:
+        content = """# ADR-0001: Use PostgreSQL
+
+**Status:** Proposed
+
+## Context
+
+Context.
+
+## Decision
+
+Decision.
+
+## Consequences
+
+Consequences.
+"""
+        result = self.validator.validate(1, content, adr_path="/docs/adr/0001.md")
+        assert result.adr_path == "/docs/adr/0001.md"
+
+
+class TestPreReviewIntegration:
+    """Tests for pre-review validation integrated in review_proposed_adrs."""
+
+    @pytest.mark.asyncio
+    async def test_pre_review_blocks_invalid_adr(self, tmp_path: Path) -> None:
+        """ADRs failing pre-review should not reach the council."""
+        reviewer = _make_reviewer(tmp_path, adr_pre_review=True)
+        adr_dir = tmp_path / "repo" / "docs" / "adr"
+        # Write an ADR missing the Consequences section
+        adr_dir.mkdir(parents=True, exist_ok=True)
+        (adr_dir / "0001-bad-adr.md").write_text(
+            "# ADR-0001: Bad ADR\n\n"
+            "**Status:** Proposed\n\n"
+            "## Context\n\nContext.\n\n"
+            "## Decision\n\nDecision.\n"
+        )
+
+        with (
+            patch.object(
+                reviewer, "_run_council_session", new_callable=AsyncMock
+            ) as mock_council,
+            patch.object(
+                reviewer._prs, "create_issue", new_callable=AsyncMock
+            ) as mock_issue,
+        ):
+            mock_issue.return_value = 0  # HITL issue (no auto-triage)
+            stats = await reviewer.review_proposed_adrs()
+
+        mock_council.assert_not_called()
+        assert stats["pre_review_blocked"] == 1
+        assert stats["reviewed"] == 0
+
+    @pytest.mark.asyncio
+    async def test_pre_review_disabled_skips_validation(self, tmp_path: Path) -> None:
+        """When pre-review is disabled, all ADRs go to council."""
+        reviewer = _make_reviewer(tmp_path, adr_pre_review=False)
+        adr_dir = tmp_path / "repo" / "docs" / "adr"
+        adr_dir.mkdir(parents=True, exist_ok=True)
+        # Missing Consequences but pre-review is off
+        (adr_dir / "0001-test.md").write_text(
+            "# ADR-0001: Test\n\n"
+            "**Status:** Proposed\n\n"
+            "## Context\n\nContext.\n\n"
+            "## Decision\n\nDecision.\n"
+        )
+
+        mock_result = ADRCouncilResult(
+            adr_number=1, adr_title="Test", final_decision="ACCEPT"
+        )
+        with (
+            patch.object(
+                reviewer,
+                "_run_council_session",
+                new_callable=AsyncMock,
+                return_value=mock_result,
+            ) as mock_council,
+            patch.object(reviewer, "_accept_adr", new_callable=AsyncMock),
+        ):
+            stats = await reviewer.review_proposed_adrs()
+
+        mock_council.assert_called_once()
+        assert stats["reviewed"] == 1
+        assert stats["pre_review_blocked"] == 0
+
+    @pytest.mark.asyncio
+    async def test_pre_review_auto_triage_fixable(self, tmp_path: Path) -> None:
+        """Fixable pre-review issues route to triage when auto-triage is on."""
+        reviewer = _make_reviewer(tmp_path, adr_pre_review=True, adr_auto_triage=True)
+        adr_dir = tmp_path / "repo" / "docs" / "adr"
+        adr_dir.mkdir(parents=True, exist_ok=True)
+        # Has Status: Proposed (found by scanner) but missing Consequences (fixable)
+        # and mentions superseding without ## Supersession section (fixable)
+        (adr_dir / "0001-test.md").write_text(
+            "# ADR-0001: Test ADR\n\n"
+            "**Status:** Proposed\n\n"
+            "## Context\n\nThis supersedes ADR-0000.\n\n"
+            "## Decision\n\nDecision.\n"
+        )
+
+        reviewer._prs.create_issue = AsyncMock(return_value=99)
+        stats = await reviewer.review_proposed_adrs()
+
+        assert stats["pre_review_blocked"] == 1
+        assert stats["auto_triaged"] == 1
+        # Verify the triage issue was created with find_label, not hitl_label
+        call_args = reviewer._prs.create_issue.call_args
+        assert "fix validation issues" in call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_pre_review_hitl_non_fixable(self, tmp_path: Path) -> None:
+        """Non-fixable pre-review issues escalate to HITL even with auto-triage."""
+        reviewer = _make_reviewer(tmp_path, adr_pre_review=True, adr_auto_triage=True)
+        adr_dir = tmp_path / "repo" / "docs" / "adr"
+        adr_dir.mkdir(parents=True, exist_ok=True)
+        # Status: Proposed so it's found, but title too short (non-fixable)
+        (adr_dir / "0001-test.md").write_text(
+            "# Hi\n\n"
+            "**Status:** Proposed\n\n"
+            "## Context\n\nContext.\n\n"
+            "## Decision\n\nDecision.\n\n"
+            "## Consequences\n\nConsequences.\n"
+        )
+
+        reviewer._prs.create_issue = AsyncMock(return_value=99)
+        stats = await reviewer.review_proposed_adrs()
+
+        assert stats["pre_review_blocked"] == 1
+        assert stats["auto_triaged"] == 0
+        # Should be HITL issue
+        call_args = reviewer._prs.create_issue.call_args
+        assert "validation failed" in call_args[0][0]
+
+
+class TestAutoTriageCouncilFeedback:
+    """Tests for auto-triage of council feedback."""
+
+    @pytest.mark.asyncio
+    async def test_auto_triage_routes_to_triage(self, tmp_path: Path) -> None:
+        """With auto-triage on, council REQUEST_CHANGES routes to triage."""
+        reviewer = _make_reviewer(tmp_path, adr_pre_review=False, adr_auto_triage=True)
+        result = ADRCouncilResult(
+            adr_number=1,
+            adr_title="Test",
+            final_decision="REQUEST_CHANGES",
+            summary="Needs work",
+        )
+        adr_dir = tmp_path / "repo" / "docs" / "adr"
+        adr_path = adr_dir / "0001-test.md"
+        adr_dir.mkdir(parents=True, exist_ok=True)
+        adr_path.write_text("# Test\n\n**Status:** Proposed\n")
+
+        reviewer._prs.create_issue = AsyncMock(return_value=42)
+        stats = {
+            "reviewed": 0,
+            "accepted": 0,
+            "rejected": 0,
+            "escalated": 0,
+            "duplicates": 0,
+            "rounds_total": 0,
+            "pre_review_blocked": 0,
+            "auto_triaged": 0,
+        }
+
+        with patch.object(
+            reviewer,
+            "_attempt_clerk_amend_and_revote",
+            new_callable=AsyncMock,
+            return_value=False,
+        ):
+            await reviewer._route_result(result, adr_path, adr_dir, stats)
+
+        assert stats["auto_triaged"] == 1
+        assert stats["escalated"] == 1
+
+    @pytest.mark.asyncio
+    async def test_no_auto_triage_routes_to_hitl(self, tmp_path: Path) -> None:
+        """With auto-triage off, council REQUEST_CHANGES escalates to HITL."""
+        reviewer = _make_reviewer(tmp_path, adr_pre_review=False, adr_auto_triage=False)
+        result = ADRCouncilResult(
+            adr_number=1,
+            adr_title="Test",
+            final_decision="REQUEST_CHANGES",
+            summary="Needs work",
+        )
+        adr_dir = tmp_path / "repo" / "docs" / "adr"
+        adr_path = adr_dir / "0001-test.md"
+        adr_dir.mkdir(parents=True, exist_ok=True)
+        adr_path.write_text("# Test\n\n**Status:** Proposed\n")
+
+        stats = {
+            "reviewed": 0,
+            "accepted": 0,
+            "rejected": 0,
+            "escalated": 0,
+            "duplicates": 0,
+            "rounds_total": 0,
+            "pre_review_blocked": 0,
+            "auto_triaged": 0,
+        }
+
+        with (
+            patch.object(
+                reviewer,
+                "_attempt_clerk_amend_and_revote",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch.object(
+                reviewer,
+                "_escalate_to_hitl",
+                new_callable=AsyncMock,
+            ) as mock_hitl,
+        ):
+            await reviewer._route_result(result, adr_path, adr_dir, stats)
+
+        mock_hitl.assert_called_once()
+        assert stats["auto_triaged"] == 0
+
+    @pytest.mark.asyncio
+    async def test_auto_triage_fallback_to_hitl_on_failure(
+        self, tmp_path: Path
+    ) -> None:
+        """When auto-triage fails to create issue, fall back to HITL."""
+        reviewer = _make_reviewer(tmp_path, adr_pre_review=False, adr_auto_triage=True)
+        result = ADRCouncilResult(
+            adr_number=1,
+            adr_title="Test",
+            final_decision="NO_CONSENSUS",
+            summary="Deadlocked",
+        )
+        adr_dir = tmp_path / "repo" / "docs" / "adr"
+        adr_path = adr_dir / "0001-test.md"
+        adr_dir.mkdir(parents=True, exist_ok=True)
+        adr_path.write_text("# Test\n\n**Status:** Proposed\n")
+
+        # Triage routing fails
+        reviewer._prs.create_issue = AsyncMock(return_value=-1)
+        stats = {
+            "reviewed": 0,
+            "accepted": 0,
+            "rejected": 0,
+            "escalated": 0,
+            "duplicates": 0,
+            "rounds_total": 0,
+            "pre_review_blocked": 0,
+            "auto_triaged": 0,
+        }
+
+        with patch.object(
+            reviewer,
+            "_escalate_to_hitl",
+            new_callable=AsyncMock,
+        ) as mock_hitl:
+            await reviewer._route_result(result, adr_path, adr_dir, stats)
+
+        mock_hitl.assert_called_once()
+        assert stats["auto_triaged"] == 0

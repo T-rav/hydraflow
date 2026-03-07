@@ -8,7 +8,13 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from models import ADRCouncilResult, CouncilVerdict, CouncilVote
+from models import (
+    ADRCouncilResult,
+    ADRValidationIssue,
+    ADRValidationResult,
+    CouncilVerdict,
+    CouncilVote,
+)
 from subprocess_util import make_clean_env, run_subprocess
 
 if TYPE_CHECKING:
@@ -25,6 +31,113 @@ _ADR_FILE_RE = re.compile(r"^(\d{4})-.*\.md$")
 _DUPLICATE_THRESHOLD = 0.7
 
 
+_REQUIRED_SECTIONS = ("## context", "## decision", "## consequences")
+_VALID_STATUSES = {"proposed", "accepted", "superseded", "deprecated", "rejected"}
+_SUPERSEDES_RE = re.compile(r"supersed(?:es?|ing)\s+ADR[- ]?(\d{4})", re.IGNORECASE)
+
+
+class ADRPreReviewValidator:
+    """Catch common ADR structural issues before sending to the council."""
+
+    def validate(
+        self, adr_number: int, content: str, adr_path: str = ""
+    ) -> ADRValidationResult:
+        """Run all pre-review checks on an ADR and return validation result."""
+        issues: list[ADRValidationIssue] = []
+        self._check_status_field(content, issues)
+        self._check_required_sections(content, issues)
+        self._check_title(content, issues)
+        self._check_supersession(content, issues)
+        return ADRValidationResult(
+            adr_number=adr_number,
+            adr_path=adr_path,
+            issues=issues,
+        )
+
+    def _check_status_field(
+        self, content: str, issues: list[ADRValidationIssue]
+    ) -> None:
+        match = _STATUS_RE.search(content)
+        if not match:
+            issues.append(
+                ADRValidationIssue(
+                    field="status",
+                    message="Missing **Status:** field",
+                    fixable=True,
+                )
+            )
+            return
+        status = match.group(1).lower()
+        if status not in _VALID_STATUSES:
+            issues.append(
+                ADRValidationIssue(
+                    field="status",
+                    message=f"Invalid status '{match.group(1)}'; expected one of: {', '.join(sorted(_VALID_STATUSES))}",
+                    fixable=False,
+                )
+            )
+
+    def _check_required_sections(
+        self, content: str, issues: list[ADRValidationIssue]
+    ) -> None:
+        lowered = content.lower()
+        for section in _REQUIRED_SECTIONS:
+            if section not in lowered:
+                label = section.replace("## ", "").capitalize()
+                issues.append(
+                    ADRValidationIssue(
+                        field="section",
+                        message=f"Missing required section: {label}",
+                        fixable=True,
+                    )
+                )
+
+    def _check_title(self, content: str, issues: list[ADRValidationIssue]) -> None:
+        match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
+        if not match:
+            issues.append(
+                ADRValidationIssue(
+                    field="title",
+                    message="Missing H1 title heading",
+                    fixable=False,
+                )
+            )
+        elif len(match.group(1).strip()) < 5:
+            issues.append(
+                ADRValidationIssue(
+                    field="title",
+                    message="Title is too short (less than 5 characters)",
+                    fixable=False,
+                )
+            )
+
+    def _check_supersession(
+        self, content: str, issues: list[ADRValidationIssue]
+    ) -> None:
+        lowered = content.lower()
+        has_supersedes_mention = _SUPERSEDES_RE.search(content) is not None
+        status_match = _STATUS_RE.search(content)
+        status = status_match.group(1).lower() if status_match else ""
+
+        if has_supersedes_mention and "## supersession" not in lowered:
+            issues.append(
+                ADRValidationIssue(
+                    field="supersession",
+                    message="ADR mentions superseding another ADR but has no ## Supersession section",
+                    fixable=True,
+                )
+            )
+
+        if status == "superseded" and not has_supersedes_mention:
+            issues.append(
+                ADRValidationIssue(
+                    field="supersession",
+                    message="Status is 'Superseded' but no superseding ADR is referenced",
+                    fixable=False,
+                )
+            )
+
+
 class ADRCouncilReviewer:
     """Runs a multi-agent council review on proposed ADRs."""
 
@@ -39,6 +152,7 @@ class ADRCouncilReviewer:
         self._bus = event_bus
         self._prs = pr_manager
         self._runner = runner
+        self._validator = ADRPreReviewValidator()
 
     async def review_proposed_adrs(self) -> dict[str, int]:
         """Scan for proposed ADRs and run council reviews.
@@ -65,6 +179,8 @@ class ADRCouncilReviewer:
             "escalated": 0,
             "duplicates": 0,
             "rounds_total": 0,
+            "pre_review_blocked": 0,
+            "auto_triaged": 0,
         }
 
         for adr_number, adr_path, adr_content in proposed:
@@ -74,6 +190,15 @@ class ADRCouncilReviewer:
                 else adr_path.stem
             )
             logger.info("Reviewing ADR-%04d: %s", adr_number, adr_title)
+
+            if self._config.adr_pre_review:
+                validation = self._validator.validate(
+                    adr_number, adr_content, str(adr_path)
+                )
+                if not validation.passed:
+                    stats["pre_review_blocked"] += 1
+                    await self._handle_pre_review_failure(validation, adr_title, stats)
+                    continue
 
             duplicates = self._detect_duplicates(adr_number, adr_content, all_adrs)
             duplicate_context = self._build_duplicate_context(duplicates)
@@ -88,6 +213,69 @@ class ADRCouncilReviewer:
 
         logger.info("ADR review complete: %s", stats)
         return stats
+
+    async def _handle_pre_review_failure(
+        self,
+        validation: ADRValidationResult,
+        adr_title: str,
+        stats: dict[str, int],
+    ) -> None:
+        """Handle an ADR that failed pre-review validation."""
+        issue_list = "\n".join(
+            f"- {'[fixable] ' if i.fixable else ''}{i.message}"
+            for i in validation.issues
+        )
+        logger.info(
+            "ADR-%04d failed pre-review validation:\n%s",
+            validation.adr_number,
+            issue_list,
+        )
+
+        if self._config.adr_auto_triage and validation.has_fixable_only:
+            title = f"[ADR Pre-review] ADR-{validation.adr_number:04d}: fix validation issues"
+            if len(title) > 70:
+                title = title[:67] + "..."
+            body = (
+                "## Context\n\n"
+                "Pre-review validation found fixable issues in this ADR.\n\n"
+                f"**ADR:** ADR-{validation.adr_number:04d} — {adr_title}\n\n"
+                "## Validation Issues\n\n"
+                f"{issue_list}\n\n"
+                "## Requested Follow-Up\n\n"
+                "Fix the listed issues and re-submit the ADR for council review.\n\n"
+                "---\n"
+                "Generated by HydraFlow ADR Pre-review Validator"
+            )
+            try:
+                issue_number = await self._prs.create_issue(
+                    title, body, labels=list(self._config.find_label)
+                )
+                if issue_number > 0:
+                    logger.info(
+                        "ADR-%04d auto-triaged to issue #%d for fixable validation issues",
+                        validation.adr_number,
+                        issue_number,
+                    )
+                    stats["auto_triaged"] += 1
+                    return
+            except Exception:
+                logger.exception(
+                    "ADR-%04d auto-triage failed; falling back to HITL",
+                    validation.adr_number,
+                )
+
+        title = f"[ADR Pre-review] ADR-{validation.adr_number:04d}: validation failed"
+        if len(title) > 70:
+            title = title[:67] + "..."
+        body = (
+            "## ADR Pre-review Validation Failed\n\n"
+            f"**ADR:** ADR-{validation.adr_number:04d} — {adr_title}\n\n"
+            "## Validation Issues\n\n"
+            f"{issue_list}\n\n"
+            "---\n"
+            "Generated by HydraFlow ADR Pre-review Validator"
+        )
+        await self._prs.create_issue(title, body, labels=list(self._config.hitl_label))
 
     def _find_proposed_adrs(self, adr_dir: Path) -> list[tuple[int, Path, str]]:
         """Find ADR files with Status: Proposed."""
@@ -445,9 +633,7 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
             await self._accept_adr(result, adr_path, adr_dir)
             stats["accepted"] += 1
         elif result.final_decision == "REJECT":
-            routed = await self._route_to_triage(result, reason="rejected")
-            if not routed:
-                await self._escalate_to_hitl(result, reason="rejected")
+            await self._triage_or_hitl(result, reason="rejected", stats=stats)
             stats["rejected"] += 1
         elif result.final_decision == "REQUEST_CHANGES":
             # Attempt a single clerk-assisted amendment + re-review pass before
@@ -460,15 +646,26 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
             if auto_accepted:
                 stats["accepted"] += 1
                 return
-            routed = await self._route_to_triage(result, reason="changes_requested")
-            if not routed:
-                await self._escalate_to_hitl(result, reason="changes_requested")
+            await self._triage_or_hitl(result, reason="changes_requested", stats=stats)
             stats["escalated"] += 1
         else:
-            routed = await self._route_to_triage(result, reason="no_consensus")
-            if not routed:
-                await self._escalate_to_hitl(result, reason="no_consensus")
+            await self._triage_or_hitl(result, reason="no_consensus", stats=stats)
             stats["escalated"] += 1
+
+    async def _triage_or_hitl(
+        self,
+        result: ADRCouncilResult,
+        *,
+        reason: str,
+        stats: dict[str, int],
+    ) -> None:
+        """Route to triage (if auto-triage enabled) or escalate to HITL."""
+        if self._config.adr_auto_triage:
+            routed = await self._route_to_triage(result, reason=reason)
+            if routed:
+                stats["auto_triaged"] += 1
+                return
+        await self._escalate_to_hitl(result, reason=reason)
 
     async def _route_to_triage(self, result: ADRCouncilResult, *, reason: str) -> bool:
         """Create a follow-up issue in triage so normal plan/fix flow can run.
