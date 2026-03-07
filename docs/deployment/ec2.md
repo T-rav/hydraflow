@@ -149,6 +149,20 @@ curl -s http://SERVER_IP:5555/healthz | jq
 }
 ```
 
+You can run the same check locally with the deploy helper:
+
+```bash
+# Loads HYDRAFLOW_DASHBOARD_HOST/HYDRAFLOW_DASHBOARD_PORT from /etc/hydraflow.env
+deploy/ec2/deploy-hydraflow.sh health
+
+# Fail the command when ready=false (perfect for cron or ALB health checks)
+HEALTHCHECK_REQUIRE_READY=1 deploy/ec2/deploy-hydraflow.sh health
+
+# Override the target URL or curl binary if needed
+deploy/ec2/deploy-hydraflow.sh health https://hydraflow.example.com/healthz
+HEALTHCHECK_URL=https://internal-lb/healthz CURL_BIN=/usr/local/bin/curl deploy/ec2/deploy-hydraflow.sh health
+```
+
 `ready` flips to `false` whenever the orchestrator is missing/idle or any worker reports `degraded`, making it trivial for an ALB or uptime monitor to gate traffic without parsing internal details. `checks.dashboard.public` is `true` when `HYDRAFLOW_DASHBOARD_HOST` is not localhost/127.0.0.1, which is a quick sanity check that you actually bound to a public interface.
 
 The endpoint still returns `200 OK` for “starting/idle/degraded” states, so you can point an ALB, Route 53 health check, or uptime monitor at `/healthz` without needing an auth token. Alert when `ready=false` or when `worker_errors` is non-empty.

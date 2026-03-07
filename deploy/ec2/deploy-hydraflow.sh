@@ -15,6 +15,7 @@ UV_CACHE_DIR="${UV_CACHE_DIR:-${HYDRAFLOW_ROOT}/.uv-cache}"
 HYDRAFLOW_HOME_DIR="${HYDRAFLOW_HOME_DIR:-/var/lib/hydraflow}"
 LOG_DIR="${HYDRAFLOW_LOG_DIR:-/var/log/hydraflow}"
 UV_BIN="${UV_BIN:-uv}"
+CURL_BIN="${CURL_BIN:-curl}"
 GIT_REMOTE="${GIT_REMOTE:-origin}"
 GIT_BRANCH="${GIT_BRANCH:-main}"
 SERVICE_NAME="${SERVICE_NAME:-hydraflow}"
@@ -31,6 +32,8 @@ SERVICE_WORK_DIR="${SERVICE_WORK_DIR:-${HYDRAFLOW_ROOT}}"
 SERVICE_LOG_FILE="${SERVICE_LOG_FILE:-${LOG_DIR}/orchestrator.log}"
 SERVICE_EXEC_START="${SERVICE_EXEC_START:-${HYDRAFLOW_ROOT}/deploy/ec2/deploy-hydraflow.sh run}"
 UNIT_TEMPLATE="${UNIT_TEMPLATE:-${SCRIPT_DIR}/hydraflow.service}"
+HEALTHCHECK_URL="${HEALTHCHECK_URL:-}"
+HEALTHCHECK_REQUIRE_READY="${HEALTHCHECK_REQUIRE_READY:-0}"
 
 log() {
   printf '[%s] %s\n' "$(date --iso-8601=seconds 2>/dev/null || date)" "$*"
@@ -196,6 +199,58 @@ run_cli() {
     "${UV_BIN}" run --active python -m cli "${EXTRA_ARGS[@]}")
 }
 
+extract_health_field() {
+  local key="$1"
+  python3 -c '
+import json
+import sys
+
+payload = json.load(sys.stdin)
+key = sys.argv[1]
+value = payload.get(key)
+if isinstance(value, bool):
+    print("true" if value else "false")
+elif value is None:
+    print()
+else:
+    print(value)
+' "${key}"
+}
+
+health_check() {
+  local override_url="${1:-}"
+  load_runtime_env "${RUNTIME_ENV_FILE}"
+  local host="${HYDRAFLOW_DASHBOARD_HOST:-127.0.0.1}"
+  local port="${HYDRAFLOW_DASHBOARD_PORT:-5555}"
+  local url="${override_url:-${HEALTHCHECK_URL:-}}"
+  if [[ -z "${url}" ]]; then
+    url="http://${host}:${port}/healthz"
+  fi
+  local curl_cmd="${CURL_BIN}"
+  if [[ "${curl_cmd}" == */* ]]; then
+    if [[ ! -x "${curl_cmd}" ]]; then
+      fatal "Missing curl implementation: ${curl_cmd}"
+    fi
+  else
+    if ! curl_cmd="$(command -v "${curl_cmd}")"; then
+      fatal "Missing curl implementation: ${curl_cmd}"
+    fi
+  fi
+  log "Checking health endpoint at ${url}"
+  local response ready status
+  if ! response="$(${curl_cmd} -fsS "${url}")"; then
+    fatal "Failed to fetch ${url}"
+  fi
+  ready="$(printf '%s\n' "${response}" | extract_health_field ready)"
+  status="$(printf '%s\n' "${response}" | extract_health_field status)"
+  log "Health status=${status:-unknown} ready=${ready:-unknown}"
+  printf '%s\n' "${response}"
+  local require_ready="${HEALTHCHECK_REQUIRE_READY,,}"
+  if [[ "${require_ready}" =~ ^(1|true|yes)$ && "${ready}" != "true" ]]; then
+    fatal "Service is not ready (ready=${ready:-unset})"
+  fi
+}
+
 case "${ACTION}" in
   bootstrap)
     check_requirements
@@ -225,17 +280,21 @@ case "${ACTION}" in
       fatal "${SYSTEMCTL_BIN} is not available on this host"
     fi
     ;;
+  health)
+    health_check "${EXTRA_ARGS[@]:-}"
+    ;;
   install)
     install_systemd_unit
     ;;
   *)
     cat <<USAGE
-Usage: ${0##*/} [bootstrap|deploy|run|status|install] [-- additional cli args]
+Usage: ${0##*/} [bootstrap|deploy|run|status|health|install] [-- additional cli args]
 
 bootstrap : Prepare dependencies, copy .env.sample, and build UI assets.
 deploy    : Update git checkout, rebuild assets, and restart the systemd unit.
 run       : Execute python -m cli with the provided arguments.
 status    : Show the hydraflow systemd unit status.
+health    : Query /healthz (optionally fail when not ready).
 install   : Copy the systemd unit into ${SYSTEMD_DIR} and enable it.
 USAGE
     exit 1
