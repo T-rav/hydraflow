@@ -1319,6 +1319,7 @@ def _run_replay(config: HydraFlowConfig, issue_number: int, latest_only: bool) -
 async def _run_main(config: HydraFlowConfig) -> None:
     """Launch the orchestrator, optionally with the dashboard."""
     from repo_runtime import RepoRuntime, RepoRuntimeRegistry
+    from repo_store import RepoRecord, RepoStore
 
     logger = logging.getLogger("hydraflow.cli")
     cli_explicit_fields = set(getattr(config, "cli_explicit_fields", frozenset()))

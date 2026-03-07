@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Any
 
-from fastapi import APIRouter, Body, Query, Response, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Body, HTTPException, Query, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import ValidationError
 
@@ -547,12 +547,10 @@ def create_router(
         if registry is not None and target:
             rt: RepoRuntime | None = registry.get(target)
             if rt is None:
-                msg = f"Unknown repo: {target}"
-                raise ValueError(msg)
+                raise HTTPException(status_code=404, detail=f"Unknown repo: {target}")
             return rt.config, rt.state, rt.event_bus, lambda: rt.orchestrator
         if registry is not None and slug:
-            msg = f"Unknown repo: {slug}"
-            raise ValueError(msg)
+            raise HTTPException(status_code=404, detail=f"Unknown repo: {slug}")
         return config, state, event_bus, get_orchestrator
 
     def _pr_manager_for(cfg: HydraFlowConfig, bus: EventBus) -> PRManager:
@@ -1643,15 +1641,25 @@ def create_router(
     }
 
     @router.patch("/api/control/config")
-    async def patch_config(body: dict[str, Any]) -> JSONResponse:
-        """Update runtime config fields. Pass ``persist: true`` to save to disk."""
+    async def patch_config(
+        body: dict[str, Any],
+        repo: RepoSlugParam = None,
+    ) -> JSONResponse:
+        """Update runtime config fields. Pass ``persist: true`` to save to disk.
+
+        When *repo* is provided, updates are scoped to that runtime's config and
+        persisted as overrides in the repo store.
+        """
         persist = body.pop("persist", False)
+        target_repo = repo or default_repo_slug
+        _cfg, _state, _bus, _get_orch = _resolve_runtime(target_repo)
+
         updates: dict[str, Any] = {}
 
         for key, value in body.items():
             if key not in _MUTABLE_FIELDS:
                 continue
-            if not hasattr(config, key):
+            if not hasattr(_cfg, key):
                 continue
             updates[key] = value
 
@@ -1659,7 +1667,7 @@ def create_router(
             return JSONResponse({"status": "ok", "updated": {}})
 
         # Validate updates through Pydantic field constraints
-        test_values = config.model_dump()
+        test_values = _cfg.model_dump()
         test_values.update(updates)
         try:
             validated = HydraFlowConfig.model_validate(test_values)
@@ -1677,11 +1685,13 @@ def create_router(
         applied: dict[str, Any] = {}
         for key in updates:
             validated_value = getattr(validated, key)
-            object.__setattr__(config, key, validated_value)
+            object.__setattr__(_cfg, key, validated_value)
             applied[key] = validated_value
 
-        if persist and applied:
-            save_config_file(config.config_file, applied)
+        if target_repo and repo_store is not None and applied:
+            repo_store.update_overrides(target_repo, applied)
+        elif persist and applied:
+            save_config_file(_cfg.config_file, applied)
 
         return JSONResponse({"status": "ok", "updated": applied})
 
@@ -2914,13 +2924,6 @@ def create_router(
             except Exception as exc:  # noqa: BLE001
                 logger.warning("remove_repo callback failed for %s: %s", slug, exc)
                 return JSONResponse({"error": "Failed to remove repo"}, status_code=500)
-            if repo_store is not None:
-                try:
-                    repo_store.remove(slug)
-                except Exception:  # noqa: BLE001
-                    logger.warning(
-                        "Failed to remove repo %s from store", slug, exc_info=True
-                    )
             return JSONResponse({"status": "removed", "slug": slug})
         if rt.running:
             await rt.stop()
