@@ -1316,6 +1316,7 @@ async def _run_main(config: HydraFlowConfig) -> None:
         from dashboard import HydraFlowDashboard
         from events import EventBus, EventLog, EventType, HydraFlowEvent
         from models import Phase
+        from repo_runtime import RepoRuntimeRegistry
         from state import StateTracker
 
         event_log = EventLog(config.event_log_path)
@@ -1327,10 +1328,12 @@ async def _run_main(config: HydraFlowConfig) -> None:
         await bus.load_history_from_disk()
         state = StateTracker(config.state_file)
 
+        registry = RepoRuntimeRegistry()
         dashboard = HydraFlowDashboard(
             config=config,
             event_bus=bus,
             state=state,
+            registry=registry,
         )
         await dashboard.start()
 
@@ -1350,6 +1353,7 @@ async def _run_main(config: HydraFlowConfig) -> None:
         try:
             await stop_event.wait()
         finally:
+            await registry.stop_all()
             if dashboard._orchestrator and dashboard._orchestrator.running:
                 await dashboard._orchestrator.stop()
             await dashboard.stop()
