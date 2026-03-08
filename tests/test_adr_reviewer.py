@@ -562,7 +562,8 @@ class TestVerdictRouting:
             mock_clerk.assert_awaited_once()
             mock_triage.assert_awaited_once_with(result, reason="changes_requested")
             mock_hitl.assert_not_awaited()
-        assert stats["escalated"] == 1
+        assert stats["escalated"] == 0
+        assert stats["auto_triaged"] == 1
 
     @pytest.mark.asyncio
     async def test_duplicate_takes_priority(self, tmp_path: Path) -> None:
@@ -618,7 +619,8 @@ class TestVerdictRouting:
             await reviewer._route_result(result, MagicMock(), MagicMock(), stats)
             mock_triage.assert_awaited_once_with(result, reason="no_consensus")
             mock_hitl.assert_not_awaited()
-        assert stats["escalated"] == 1
+        assert stats["escalated"] == 0
+        assert stats["auto_triaged"] == 1
 
     @pytest.mark.asyncio
     async def test_triage_route_fallbacks_to_hitl_when_triage_fails(
