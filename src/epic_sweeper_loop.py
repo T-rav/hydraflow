@@ -63,6 +63,11 @@ class EpicSweeperLoop(BaseBackgroundLoop):
         epics = await self._fetcher.fetch_issues_by_labels(
             self._config.epic_label, limit=50
         )
+        if len(epics) == 50:
+            logger.warning(
+                "Epic sweeper fetched exactly 50 epics — result may be truncated;"
+                " some epics may not be swept this cycle"
+            )
         swept = 0
         checked = 0
         for epic in epics:

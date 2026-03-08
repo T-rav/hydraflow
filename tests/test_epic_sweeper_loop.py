@@ -96,15 +96,13 @@ class TestEpicSweeperLoop:
 class TestCheckboxParsing:
     """Sub-issue extraction from body checkboxes."""
 
-    @pytest.mark.asyncio
-    async def test_collects_from_body_checkboxes(self, tmp_path: Path) -> None:
+    def test_collects_from_body_checkboxes(self, tmp_path: Path) -> None:
         loop, *_ = _make_loop(tmp_path)
         body = "- [ ] #10 — Feature A\n- [x] #20 — Feature B\n- [ ] #30 — Feature C"
         refs = loop._collect_sub_issues(1, body)
         assert refs == [10, 20, 30]
 
-    @pytest.mark.asyncio
-    async def test_collects_from_epic_state(self, tmp_path: Path) -> None:
+    def test_collects_from_epic_state(self, tmp_path: Path) -> None:
         loop, _, _, state = _make_loop(tmp_path)
         from models import EpicState
 
@@ -113,8 +111,7 @@ class TestCheckboxParsing:
         refs = loop._collect_sub_issues(1, "")
         assert refs == [5, 15]
 
-    @pytest.mark.asyncio
-    async def test_merges_body_and_state_deduped(self, tmp_path: Path) -> None:
+    def test_merges_body_and_state_deduped(self, tmp_path: Path) -> None:
         loop, _, _, state = _make_loop(tmp_path)
         from models import EpicState
 
@@ -124,8 +121,7 @@ class TestCheckboxParsing:
         refs = loop._collect_sub_issues(1, body)
         assert refs == [10, 25, 30]
 
-    @pytest.mark.asyncio
-    async def test_no_refs_returns_empty(self, tmp_path: Path) -> None:
+    def test_no_refs_returns_empty(self, tmp_path: Path) -> None:
         loop, *_ = _make_loop(tmp_path)
         refs = loop._collect_sub_issues(1, "No issue refs here")
         assert refs == []
@@ -165,7 +161,9 @@ class TestAllClosedDetection:
         prs.close_issue.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_missing_sub_issue_skips(self, tmp_path: Path) -> None:
+    async def test_missing_sub_issue_skips(self, tmp_path: Path, caplog) -> None:
+        import logging
+
         loop, fetcher, prs, _ = _make_loop(tmp_path)
         epic = _make_epic(100, "- [ ] #10\n- [ ] #999")
         fetcher.fetch_issues_by_labels = AsyncMock(return_value=[epic])
@@ -176,9 +174,13 @@ class TestAllClosedDetection:
             return None  # #999 not found
 
         fetcher.fetch_issue_by_number = AsyncMock(side_effect=side_effect)
-        result = await loop._do_work()
+        with caplog.at_level(logging.WARNING, logger="hydraflow.epic_sweeper_loop"):
+            result = await loop._do_work()
         assert result["swept"] == 0
         prs.close_issue.assert_not_called()
+        assert any(
+            "999" in r.message and r.levelno == logging.WARNING for r in caplog.records
+        )
 
 
 class TestBodyUpdate:
