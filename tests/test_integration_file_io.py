@@ -15,6 +15,7 @@ import threading
 import time
 from pathlib import Path
 
+from events import EventBus
 from file_util import append_jsonl, atomic_write, file_lock
 from state import StateTracker
 from tests.helpers import ConfigFactory
@@ -197,7 +198,7 @@ class TestStateTrackerIntegration:
         tracker.save()
 
         assert state_file.exists()
-        assert json.loads(state_file.read_text())
+        assert json.loads(state_file.read_text())["processed_issues"]["1"] == "test"
 
     def test_rapid_save_cycles(self, tmp_path: Path) -> None:
         """Rapid save cycles should produce consistent state."""
@@ -441,10 +442,7 @@ class TestMemoryDigestIntegration:
 
         config = ConfigFactory.create(repo_root=tmp_path)
         state = StateTracker(tmp_path / "state.json")
-        from events import EventBus
-
         bus = EventBus()
-
         worker = MemorySyncWorker(config, state, bus)
 
         # Write items manually (simulating what sync does)
@@ -467,10 +465,7 @@ class TestMemoryDigestIntegration:
 
         config = ConfigFactory.create(repo_root=tmp_path)
         state = StateTracker(tmp_path / "state.json")
-        from events import EventBus
-
         bus = EventBus()
-
         worker = MemorySyncWorker(config, state, bus)
 
         # Save some source IDs
@@ -486,10 +481,7 @@ class TestMemoryDigestIntegration:
 
         config = ConfigFactory.create(repo_root=tmp_path)
         state = StateTracker(tmp_path / "state.json")
-        from events import EventBus
-
         bus = EventBus()
-
         worker = MemorySyncWorker(config, state, bus)
         assert worker._load_adr_source_ids() == set()
 
@@ -499,10 +491,7 @@ class TestMemoryDigestIntegration:
 
         config = ConfigFactory.create(repo_root=tmp_path)
         state = StateTracker(tmp_path / "state.json")
-        from events import EventBus
-
         bus = EventBus()
-
         worker = MemorySyncWorker(config, state, bus)
         worker._write_digest("## Test Digest\ncontent here\n")
 
