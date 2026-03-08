@@ -564,12 +564,12 @@ class TestManifestStateTracking:
         assert last_updated is None
 
     def test_state__manifest_state_persists(self, tmp_path: Path) -> None:
-        state_file = tmp_path / "state.json"
-        state = StateTracker(state_file)
+        dolt_path = tmp_path / "dolt_db"
+        state = StateTracker(dolt_path)
         state.update_manifest_state("hash456")
 
         # Reload from disk
-        state2 = StateTracker(state_file)
+        state2 = StateTracker(dolt_path)
         manifest_hash, last_updated = state2.get_manifest_state()
         assert manifest_hash == "hash456"
         assert last_updated is not None

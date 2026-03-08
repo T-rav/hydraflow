@@ -169,47 +169,36 @@ def extract_categories(summary: str) -> list[str]:
 
 
 class ReviewInsightStore:
-    """File-backed store for review records and proposed-category tracking."""
+    """Dolt-backed store for review records and proposed-category tracking."""
 
     def __init__(self, memory_dir: Path, state: Any | None = None) -> None:
         self._memory_dir = memory_dir
-        self._reviews_path = memory_dir / "reviews.jsonl"
         self._proposed_path = memory_dir / "proposed_categories.json"
         self._state = state
 
     def append_review(self, record: ReviewRecord) -> None:
-        """Append *record* as a JSON line to ``reviews.jsonl``."""
-        try:
-            from file_util import append_jsonl  # noqa: PLC0415
-
-            append_jsonl(self._reviews_path, record.model_dump_json())
-        except OSError:
-            logger.warning(
-                "Could not append review to %s",
-                self._reviews_path,
-                exc_info=True,
-            )
-
-        # Dual-write to Dolt when available
+        """Append *record* to Dolt."""
         if self._state and hasattr(self._state, "append_review_record"):
             try:
                 self._state.append_review_record(record.model_dump())
             except Exception:  # noqa: BLE001
-                logger.debug("Dolt review record write failed", exc_info=True)
+                logger.warning("Dolt review record write failed", exc_info=True)
 
     def load_recent(self, n: int = 10) -> list[ReviewRecord]:
-        """Load the last *n* review records from disk."""
-        if not self._reviews_path.exists():
-            return []
-        lines = self._reviews_path.read_text().strip().splitlines()
-        tail = lines[-n:] if len(lines) > n else lines
-        records: list[ReviewRecord] = []
-        for line in tail:
+        """Load the last *n* review records from Dolt."""
+        if self._state and hasattr(self._state, "load_recent_review_records"):
             try:
-                records.append(ReviewRecord.model_validate_json(line))
+                rows = self._state.load_recent_review_records(n)
+                records: list[ReviewRecord] = []
+                for row in rows:
+                    try:
+                        records.append(ReviewRecord.model_validate(row))
+                    except Exception:  # noqa: BLE001
+                        logger.warning("Skipping malformed review record")
+                return records
             except Exception:  # noqa: BLE001
-                logger.warning("Skipping malformed review record: %s", line[:80])
-        return records
+                logger.debug("Dolt review records load failed", exc_info=True)
+        return []
 
     def get_proposed_categories(self) -> set[str]:
         """Return the set of categories that already have filed proposals."""

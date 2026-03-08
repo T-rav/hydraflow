@@ -33,7 +33,7 @@ def _make_loop(
     """Build a WorkspaceGCLoop with test-friendly defaults."""
     deps = make_bg_loop_deps(tmp_path, enabled=enabled, worktree_gc_interval=interval)
 
-    state = StateTracker(deps.config.state_file)
+    state = StateTracker(deps.config.dolt_path)
     for num, path in (active_worktrees or {}).items():
         state.set_worktree(num, path)
     if active_issue_numbers:

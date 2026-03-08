@@ -38,7 +38,7 @@ def _make_handler(
     update_bg_worker_status=None,
 ) -> PostMergeHandler:
     """Build a PostMergeHandler with standard mock dependencies."""
-    state = StateTracker(config.state_file)
+    state = StateTracker(config.dolt_path)
     return PostMergeHandler(
         config=config,
         state=state,
@@ -802,7 +802,7 @@ class TestSafeHookFailureVisibility:
         self, config: HydraFlowConfig
     ) -> None:
         """When a hook fails, failure should be recorded in state."""
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         handler = PostMergeHandler(
             config=config,
             state=state,
@@ -833,7 +833,7 @@ class TestSafeHookFailureVisibility:
         from events import EventType
 
         bus = EventBus()
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         handler = PostMergeHandler(
             config=config,
             state=state,
@@ -862,7 +862,7 @@ class TestSafeHookFailureVisibility:
     ) -> None:
         """When a hook fails, a comment should be posted on the issue."""
         prs = AsyncMock()
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         handler = PostMergeHandler(
             config=config,
             state=state,
@@ -894,7 +894,7 @@ class TestMergeOutcomeRecording:
         """Successful merge should record a MERGED outcome in state."""
         from models import IssueOutcomeType
 
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         handler = PostMergeHandler(
             config=config,
             state=state,
@@ -1054,7 +1054,7 @@ class TestVisualGateInHandleApproved:
             visual_gate_enabled=True,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         handler = _make_handler(cfg)
         handler._prs.merge_pr = AsyncMock(return_value=True)
@@ -1085,7 +1085,7 @@ class TestVisualGateInHandleApproved:
             visual_gate_enabled=True,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         handler = _make_handler(cfg)
         handler._prs.merge_pr = AsyncMock(return_value=True)
@@ -1117,7 +1117,7 @@ class TestVisualGateInHandleApproved:
             visual_gate_enabled=True,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         handler = _make_handler(cfg)
         handler._prs.merge_pr = AsyncMock(return_value=True)
@@ -1147,7 +1147,7 @@ class TestVisualGateInHandleApproved:
             visual_gate_enabled=True,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         handler = _make_handler(cfg)
         handler._prs.merge_pr = AsyncMock(return_value=True)

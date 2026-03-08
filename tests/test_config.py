@@ -321,7 +321,7 @@ class TestHydraFlowConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
 
         # Assert
@@ -331,7 +331,7 @@ class TestHydraFlowConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.batch_size == 15
 
@@ -339,7 +339,7 @@ class TestHydraFlowConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         # repo is auto-detected from git remote; in non-git dirs it falls back to ""
         assert isinstance(cfg.repo, str)
@@ -348,7 +348,7 @@ class TestHydraFlowConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_workers == 1
 
@@ -356,7 +356,7 @@ class TestHydraFlowConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.improve_label == ["hydraflow-improve"]
 
@@ -364,7 +364,7 @@ class TestHydraFlowConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.find_label == ["hydraflow-find"]
 
@@ -372,7 +372,7 @@ class TestHydraFlowConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_planners == 1
 
@@ -380,7 +380,7 @@ class TestHydraFlowConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_reviewers == 1
 
@@ -388,7 +388,7 @@ class TestHydraFlowConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_triagers == 1
 
@@ -400,7 +400,7 @@ class TestHydraFlowConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_triagers == 1
 
@@ -412,7 +412,7 @@ class TestHydraFlowConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_workers == 1
 
@@ -424,7 +424,7 @@ class TestHydraFlowConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_reviewers == 1
 
@@ -436,7 +436,7 @@ class TestHydraFlowConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_planners == 1
 
@@ -444,7 +444,7 @@ class TestHydraFlowConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_hitl_workers == 1
 
@@ -456,7 +456,7 @@ class TestHydraFlowConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_hitl_workers == 1
 
@@ -464,7 +464,7 @@ class TestHydraFlowConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.hitl_active_label == ["hydraflow-hitl-active"]
 
@@ -472,7 +472,7 @@ class TestHydraFlowConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.model == "opus"
 
@@ -480,7 +480,7 @@ class TestHydraFlowConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.review_model == "sonnet"
 
@@ -488,7 +488,7 @@ class TestHydraFlowConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.main_branch == "main"
 
@@ -496,7 +496,7 @@ class TestHydraFlowConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.dashboard_port == 5555
 
@@ -504,7 +504,7 @@ class TestHydraFlowConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.dashboard_enabled is True
 
@@ -512,7 +512,7 @@ class TestHydraFlowConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.dry_run is False
 
@@ -520,7 +520,7 @@ class TestHydraFlowConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.inject_runtime_logs is False
 
@@ -528,7 +528,7 @@ class TestHydraFlowConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_runtime_log_chars == 8_000
 
@@ -536,7 +536,7 @@ class TestHydraFlowConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_ci_log_chars == 12_000
 
@@ -555,7 +555,7 @@ class TestHydraFlowConfigCustomValues:
             ready_label=["sprint"],
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
 
         # Assert
@@ -566,7 +566,7 @@ class TestHydraFlowConfigCustomValues:
             batch_size=10,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.batch_size == 10
 
@@ -575,7 +575,7 @@ class TestHydraFlowConfigCustomValues:
             repo="myorg/myrepo",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.repo == "myorg/myrepo"
 
@@ -584,7 +584,7 @@ class TestHydraFlowConfigCustomValues:
             max_workers=3,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_workers == 3
 
@@ -593,7 +593,7 @@ class TestHydraFlowConfigCustomValues:
             model="haiku",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.model == "haiku"
 
@@ -602,7 +602,7 @@ class TestHydraFlowConfigCustomValues:
             review_model="sonnet",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.review_model == "sonnet"
 
@@ -611,7 +611,7 @@ class TestHydraFlowConfigCustomValues:
             main_branch="develop",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.main_branch == "develop"
 
@@ -620,7 +620,7 @@ class TestHydraFlowConfigCustomValues:
             dashboard_port=8080,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.dashboard_port == 8080
 
@@ -629,7 +629,7 @@ class TestHydraFlowConfigCustomValues:
             dashboard_enabled=False,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.dashboard_enabled is False
 
@@ -638,7 +638,7 @@ class TestHydraFlowConfigCustomValues:
             max_hitl_workers=3,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_hitl_workers == 3
 
@@ -647,7 +647,7 @@ class TestHydraFlowConfigCustomValues:
             hitl_active_label=["custom-active"],
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.hitl_active_label == ["custom-active"]
 
@@ -656,7 +656,7 @@ class TestHydraFlowConfigCustomValues:
             improve_label=["my-improve"],
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.improve_label == ["my-improve"]
 
@@ -665,7 +665,7 @@ class TestHydraFlowConfigCustomValues:
             dry_run=True,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.dry_run is True
 
@@ -687,7 +687,7 @@ class TestHydraFlowConfigPathResolution:
         cfg = HydraFlowConfig(
             repo_root=explicit_root,
             worktree_base=explicit_root / "wt",
-            state_file=explicit_root / "state.json",
+            dolt_path=explicit_root / "dolt",
         )
 
         # Assert
@@ -702,26 +702,26 @@ class TestHydraFlowConfigPathResolution:
         cfg = HydraFlowConfig(
             repo_root=explicit_root,
             worktree_base=explicit_wt,
-            state_file=explicit_root / "state.json",
+            dolt_path=explicit_root / "dolt",
         )
 
         # Assert
         assert cfg.worktree_base == explicit_wt
 
-    def test_explicit_state_file_is_preserved(self, tmp_path: Path) -> None:
+    def test_explicit_dolt_path_is_preserved(self, tmp_path: Path) -> None:
         # Arrange
         explicit_root = tmp_path / "repo"
-        explicit_state = tmp_path / "custom-state.json"
+        explicit_dolt = tmp_path / "custom-dolt"
 
         # Act
         cfg = HydraFlowConfig(
             repo_root=explicit_root,
             worktree_base=explicit_root / "wt",
-            state_file=explicit_state,
+            dolt_path=explicit_dolt,
         )
 
         # Assert
-        assert cfg.state_file == explicit_state
+        assert cfg.dolt_path == explicit_dolt
 
     def test_default_worktree_base_derived_from_repo_root(self, tmp_path: Path) -> None:
         """When worktree_base is left as Path('.'), it should default to ~/.hydraflow/worktrees."""
@@ -730,7 +730,7 @@ class TestHydraFlowConfigPathResolution:
         git_root.mkdir()
         (git_root / ".git").mkdir()
 
-        # Act – pass repo_root explicitly but leave worktree_base and state_file at their defaults (Path("."))
+        # Act – pass repo_root explicitly but leave worktree_base and dolt_path at their defaults (Path("."))
         cfg = HydraFlowConfig(repo_root=git_root)
 
         # Assert
@@ -738,8 +738,8 @@ class TestHydraFlowConfigPathResolution:
             cfg.worktree_base == Path("~/.hydraflow/worktrees").expanduser().resolve()
         )
 
-    def test_default_state_file_derived_from_repo_root(self, tmp_path: Path) -> None:
-        """state_file should resolve to repo_root / '.hydraflow/<slug>/state.json'."""
+    def test_default_dolt_path_derived_from_repo_root(self, tmp_path: Path) -> None:
+        """dolt_path should resolve to repo_root / '.hydraflow/<slug>/dolt'."""
         # Arrange
         git_root = tmp_path / "hydra"
         git_root.mkdir()
@@ -749,7 +749,7 @@ class TestHydraFlowConfigPathResolution:
         cfg = HydraFlowConfig(repo_root=git_root, repo="org/my-repo")
 
         # Assert
-        assert cfg.state_file == git_root / ".hydraflow" / "org-my-repo" / "state.json"
+        assert cfg.dolt_path == git_root / ".hydraflow" / "org-my-repo" / "dolt"
 
     def test_auto_detected_repo_root_is_absolute(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -785,10 +785,10 @@ class TestHydraFlowConfigPathResolution:
             cfg.worktree_base == Path("~/.hydraflow/worktrees").expanduser().resolve()
         )
 
-    def test_auto_detected_state_file_named_hydraflow_state_json(
+    def test_auto_detected_dolt_path_named_dolt(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Auto-derived state_file should be inside .hydraflow/<slug>/ and named 'state.json'."""
+        """Auto-derived dolt_path should be inside .hydraflow/<slug>/ and named 'dolt'."""
         # Arrange
         git_root = tmp_path / "repo"
         git_root.mkdir()
@@ -799,9 +799,9 @@ class TestHydraFlowConfigPathResolution:
         cfg = HydraFlowConfig()
 
         # Assert
-        assert cfg.state_file.name == "state.json"
-        # state_file is at .hydraflow/<repo_slug>/state.json
-        assert cfg.state_file.parent.parent.name == ".hydraflow"
+        assert cfg.dolt_path.name == "dolt"
+        # dolt_path is at .hydraflow/<repo_slug>/dolt
+        assert cfg.dolt_path.parent.parent.name == ".hydraflow"
 
 
 # ---------------------------------------------------------------------------
@@ -819,7 +819,7 @@ class TestHydraFlowConfigValidationConstraints:
             batch_size=1,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.batch_size == 1
 
@@ -828,7 +828,7 @@ class TestHydraFlowConfigValidationConstraints:
             batch_size=50,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.batch_size == 50
 
@@ -838,7 +838,7 @@ class TestHydraFlowConfigValidationConstraints:
                 batch_size=0,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_batch_size_above_maximum_raises(self, tmp_path: Path) -> None:
@@ -847,7 +847,7 @@ class TestHydraFlowConfigValidationConstraints:
                 batch_size=51,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     # max_workers: ge=1, le=10
@@ -857,7 +857,7 @@ class TestHydraFlowConfigValidationConstraints:
             max_workers=1,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_workers == 1
 
@@ -866,7 +866,7 @@ class TestHydraFlowConfigValidationConstraints:
             max_workers=10,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_workers == 10
 
@@ -876,7 +876,7 @@ class TestHydraFlowConfigValidationConstraints:
                 max_workers=0,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_max_workers_above_maximum_raises(self, tmp_path: Path) -> None:
@@ -885,7 +885,7 @@ class TestHydraFlowConfigValidationConstraints:
                 max_workers=11,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     # max_triagers: ge=1, le=10
@@ -895,7 +895,7 @@ class TestHydraFlowConfigValidationConstraints:
             max_triagers=1,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_triagers == 1
 
@@ -904,7 +904,7 @@ class TestHydraFlowConfigValidationConstraints:
             max_triagers=10,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_triagers == 10
 
@@ -914,7 +914,7 @@ class TestHydraFlowConfigValidationConstraints:
                 max_triagers=0,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_max_triagers_above_maximum_raises(self, tmp_path: Path) -> None:
@@ -923,7 +923,7 @@ class TestHydraFlowConfigValidationConstraints:
                 max_triagers=11,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     # max_planners: ge=1, le=10
@@ -933,7 +933,7 @@ class TestHydraFlowConfigValidationConstraints:
             max_planners=1,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_planners == 1
 
@@ -942,7 +942,7 @@ class TestHydraFlowConfigValidationConstraints:
             max_planners=10,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_planners == 10
 
@@ -952,7 +952,7 @@ class TestHydraFlowConfigValidationConstraints:
                 max_planners=0,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_max_planners_above_maximum_raises(self, tmp_path: Path) -> None:
@@ -961,7 +961,7 @@ class TestHydraFlowConfigValidationConstraints:
                 max_planners=11,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     # max_reviewers: ge=1, le=10
@@ -971,7 +971,7 @@ class TestHydraFlowConfigValidationConstraints:
             max_reviewers=1,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_reviewers == 1
 
@@ -980,7 +980,7 @@ class TestHydraFlowConfigValidationConstraints:
             max_reviewers=10,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_reviewers == 10
 
@@ -990,7 +990,7 @@ class TestHydraFlowConfigValidationConstraints:
                 max_reviewers=0,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_max_reviewers_above_maximum_raises(self, tmp_path: Path) -> None:
@@ -999,7 +999,7 @@ class TestHydraFlowConfigValidationConstraints:
                 max_reviewers=11,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     # max_hitl_workers: ge=1, le=5
@@ -1009,7 +1009,7 @@ class TestHydraFlowConfigValidationConstraints:
             max_hitl_workers=1,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_hitl_workers == 1
 
@@ -1018,7 +1018,7 @@ class TestHydraFlowConfigValidationConstraints:
             max_hitl_workers=5,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_hitl_workers == 5
 
@@ -1028,7 +1028,7 @@ class TestHydraFlowConfigValidationConstraints:
                 max_hitl_workers=0,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_max_hitl_workers_above_maximum_raises(self, tmp_path: Path) -> None:
@@ -1037,7 +1037,7 @@ class TestHydraFlowConfigValidationConstraints:
                 max_hitl_workers=6,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     # dashboard_port: ge=1024, le=65535
@@ -1047,7 +1047,7 @@ class TestHydraFlowConfigValidationConstraints:
             dashboard_port=1024,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.dashboard_port == 1024
 
@@ -1056,7 +1056,7 @@ class TestHydraFlowConfigValidationConstraints:
             dashboard_port=65535,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.dashboard_port == 65535
 
@@ -1066,7 +1066,7 @@ class TestHydraFlowConfigValidationConstraints:
                 dashboard_port=1023,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_dashboard_port_above_maximum_raises(self, tmp_path: Path) -> None:
@@ -1075,7 +1075,7 @@ class TestHydraFlowConfigValidationConstraints:
                 dashboard_port=65536,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     # ci_check_timeout: ge=30, le=3600
@@ -1084,7 +1084,7 @@ class TestHydraFlowConfigValidationConstraints:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.ci_check_timeout == 600
 
@@ -1093,7 +1093,7 @@ class TestHydraFlowConfigValidationConstraints:
             ci_check_timeout=30,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.ci_check_timeout == 30
 
@@ -1103,7 +1103,7 @@ class TestHydraFlowConfigValidationConstraints:
                 ci_check_timeout=29,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     # ci_poll_interval: ge=5, le=120
@@ -1112,7 +1112,7 @@ class TestHydraFlowConfigValidationConstraints:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.ci_poll_interval == 30
 
@@ -1121,7 +1121,7 @@ class TestHydraFlowConfigValidationConstraints:
             ci_poll_interval=5,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.ci_poll_interval == 5
 
@@ -1131,7 +1131,7 @@ class TestHydraFlowConfigValidationConstraints:
                 ci_poll_interval=4,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     # max_ci_fix_attempts: ge=0, le=5
@@ -1140,7 +1140,7 @@ class TestHydraFlowConfigValidationConstraints:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_ci_fix_attempts == 2
 
@@ -1149,7 +1149,7 @@ class TestHydraFlowConfigValidationConstraints:
             max_ci_fix_attempts=0,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_ci_fix_attempts == 0
 
@@ -1159,7 +1159,7 @@ class TestHydraFlowConfigValidationConstraints:
                 max_ci_fix_attempts=6,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     # max_review_fix_attempts: ge=0, le=5
@@ -1168,7 +1168,7 @@ class TestHydraFlowConfigValidationConstraints:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_review_fix_attempts == 2
 
@@ -1177,7 +1177,7 @@ class TestHydraFlowConfigValidationConstraints:
             max_review_fix_attempts=4,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_review_fix_attempts == 4
 
@@ -1187,7 +1187,7 @@ class TestHydraFlowConfigValidationConstraints:
                 max_review_fix_attempts=6,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     # max_pre_quality_review_attempts: ge=0, le=5
@@ -1196,7 +1196,7 @@ class TestHydraFlowConfigValidationConstraints:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_pre_quality_review_attempts == 3
 
@@ -1205,7 +1205,7 @@ class TestHydraFlowConfigValidationConstraints:
             max_pre_quality_review_attempts=3,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_pre_quality_review_attempts == 3
 
@@ -1217,7 +1217,7 @@ class TestHydraFlowConfigValidationConstraints:
                 max_pre_quality_review_attempts=6,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     # min_review_findings: ge=0, le=20
@@ -1226,7 +1226,7 @@ class TestHydraFlowConfigValidationConstraints:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.min_review_findings == 3
 
@@ -1235,7 +1235,7 @@ class TestHydraFlowConfigValidationConstraints:
             min_review_findings=5,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.min_review_findings == 5
 
@@ -1245,7 +1245,7 @@ class TestHydraFlowConfigValidationConstraints:
                 min_review_findings=21,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     # min_plan_words: ge=50, le=2000
@@ -1254,7 +1254,7 @@ class TestHydraFlowConfigValidationConstraints:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.min_plan_words == 200
 
@@ -1263,7 +1263,7 @@ class TestHydraFlowConfigValidationConstraints:
             min_plan_words=100,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.min_plan_words == 100
 
@@ -1273,7 +1273,7 @@ class TestHydraFlowConfigValidationConstraints:
                 min_plan_words=49,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_min_plan_words_above_maximum_raises(self, tmp_path: Path) -> None:
@@ -1282,7 +1282,7 @@ class TestHydraFlowConfigValidationConstraints:
                 min_plan_words=2001,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     # max_merge_conflict_fix_attempts: ge=0, le=5
@@ -1291,7 +1291,7 @@ class TestHydraFlowConfigValidationConstraints:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_merge_conflict_fix_attempts == 3
 
@@ -1300,7 +1300,7 @@ class TestHydraFlowConfigValidationConstraints:
             max_merge_conflict_fix_attempts=1,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_merge_conflict_fix_attempts == 1
 
@@ -1309,7 +1309,7 @@ class TestHydraFlowConfigValidationConstraints:
             max_merge_conflict_fix_attempts=0,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_merge_conflict_fix_attempts == 0
 
@@ -1321,7 +1321,7 @@ class TestHydraFlowConfigValidationConstraints:
                 max_merge_conflict_fix_attempts=6,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     # max_new_files_warning: ge=1, le=20
@@ -1330,7 +1330,7 @@ class TestHydraFlowConfigValidationConstraints:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_new_files_warning == 5
 
@@ -1339,7 +1339,7 @@ class TestHydraFlowConfigValidationConstraints:
             max_new_files_warning=10,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_new_files_warning == 10
 
@@ -1349,7 +1349,7 @@ class TestHydraFlowConfigValidationConstraints:
                 max_new_files_warning=0,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_max_new_files_warning_above_maximum_raises(self, tmp_path: Path) -> None:
@@ -1358,7 +1358,7 @@ class TestHydraFlowConfigValidationConstraints:
                 max_new_files_warning=21,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
 
@@ -1379,7 +1379,7 @@ class TestHydraFlowConfigGhToken:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.gh_token == ""
 
@@ -1388,7 +1388,7 @@ class TestHydraFlowConfigGhToken:
             gh_token="ghp_explicit123",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.gh_token == "ghp_explicit123"
 
@@ -1399,7 +1399,7 @@ class TestHydraFlowConfigGhToken:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.gh_token == "ghp_from_env"
 
@@ -1411,7 +1411,7 @@ class TestHydraFlowConfigGhToken:
             gh_token="ghp_explicit",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.gh_token == "ghp_explicit"
 
@@ -1425,7 +1425,7 @@ class TestHydraFlowConfigGhToken:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.gh_token == "ghp_from_dotenv"
 
@@ -1441,7 +1441,7 @@ class TestHydraFlowConfigGhToken:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.gh_token == "ghp_from_dotenv"
 
@@ -1477,7 +1477,7 @@ class TestHydraFlowConfigGitIdentity(GitIdentityEnvMixin):
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.git_user_name == ""
 
@@ -1488,7 +1488,7 @@ class TestHydraFlowConfigGitIdentity(GitIdentityEnvMixin):
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.git_user_email == ""
 
@@ -1497,7 +1497,7 @@ class TestHydraFlowConfigGitIdentity(GitIdentityEnvMixin):
             git_user_name="Bot",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.git_user_name == "Bot"
 
@@ -1506,7 +1506,7 @@ class TestHydraFlowConfigGitIdentity(GitIdentityEnvMixin):
             git_user_email="bot@example.com",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.git_user_email == "bot@example.com"
 
@@ -1518,7 +1518,7 @@ class TestHydraFlowConfigGitIdentity(GitIdentityEnvMixin):
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.git_user_name == "EnvBot"
 
@@ -1530,7 +1530,7 @@ class TestHydraFlowConfigGitIdentity(GitIdentityEnvMixin):
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.git_user_email == "env@example.com"
 
@@ -1543,7 +1543,7 @@ class TestHydraFlowConfigGitIdentity(GitIdentityEnvMixin):
             git_user_name="ExplicitBot",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.git_user_name == "ExplicitBot"
 
@@ -1556,7 +1556,7 @@ class TestHydraFlowConfigGitIdentity(GitIdentityEnvMixin):
             git_user_email="explicit@example.com",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.git_user_email == "explicit@example.com"
 
@@ -1571,7 +1571,7 @@ class TestHydraFlowConfigGitIdentity(GitIdentityEnvMixin):
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.git_user_name == "Dotenv Bot"
         assert cfg.git_user_email == "dotenv-bot@example.com"
@@ -1587,7 +1587,7 @@ class TestHydraFlowConfigGitIdentity(GitIdentityEnvMixin):
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.git_user_name == "Dotenv Bot"
         assert cfg.git_user_email == "dotenv-bot@example.com"
@@ -1608,7 +1608,7 @@ class TestHydraFlowConfigHitlActiveLabel:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.hitl_active_label == ["custom-active"]
 
@@ -1620,7 +1620,7 @@ class TestHydraFlowConfigHitlActiveLabel:
             hitl_active_label=["explicit-active"],
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.hitl_active_label == ["explicit-active"]
 
@@ -1637,7 +1637,7 @@ class TestHydraFlowConfigDupLabel:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.dup_label == ["hydraflow-dup"]
 
@@ -1646,7 +1646,7 @@ class TestHydraFlowConfigDupLabel:
             dup_label=["my-dup"],
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.dup_label == ["my-dup"]
 
@@ -1657,7 +1657,7 @@ class TestHydraFlowConfigDupLabel:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.dup_label == ["custom-dup"]
 
@@ -1669,7 +1669,7 @@ class TestHydraFlowConfigDupLabel:
             dup_label=["explicit-dup"],
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.dup_label == ["explicit-dup"]
 
@@ -1684,7 +1684,7 @@ class TestHydraFlowConfigImproveLabel:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.improve_label == ["custom-improve"]
 
@@ -1696,7 +1696,7 @@ class TestHydraFlowConfigImproveLabel:
             improve_label=["explicit-improve"],
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.improve_label == ["explicit-improve"]
 
@@ -1708,7 +1708,7 @@ class TestHydraFlowConfigEpicChildLabel:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.epic_child_label == ["hydraflow-epic-child"]
 
@@ -1717,7 +1717,7 @@ class TestHydraFlowConfigEpicChildLabel:
             epic_child_label=["my-epic-child"],
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.epic_child_label == ["my-epic-child"]
 
@@ -1728,7 +1728,7 @@ class TestHydraFlowConfigEpicChildLabel:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.epic_child_label == ["custom-epic-child"]
 
@@ -1740,7 +1740,7 @@ class TestHydraFlowConfigEpicChildLabel:
             epic_child_label=["explicit-epic-child"],
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.epic_child_label == ["explicit-epic-child"]
 
@@ -1757,7 +1757,7 @@ class TestHydraFlowConfigMinPlanWords:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.min_plan_words == 200
 
@@ -1768,7 +1768,7 @@ class TestHydraFlowConfigMinPlanWords:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.min_plan_words == 300
 
@@ -1780,7 +1780,7 @@ class TestHydraFlowConfigMinPlanWords:
             min_plan_words=100,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.min_plan_words == 100
 
@@ -1800,7 +1800,7 @@ class TestHydraFlowConfigMaxReviewFixAttempts:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_review_fix_attempts == 4
 
@@ -1812,7 +1812,7 @@ class TestHydraFlowConfigMaxReviewFixAttempts:
             max_review_fix_attempts=1,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_review_fix_attempts == 1
 
@@ -1827,7 +1827,7 @@ class TestHydraFlowConfigMaxPreQualityReviewAttempts:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_pre_quality_review_attempts == 4
 
@@ -1839,7 +1839,7 @@ class TestHydraFlowConfigMaxPreQualityReviewAttempts:
             max_pre_quality_review_attempts=2,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_pre_quality_review_attempts == 2
 
@@ -1859,7 +1859,7 @@ class TestHydraFlowConfigMinReviewFindings:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.min_review_findings == 5
 
@@ -1871,7 +1871,7 @@ class TestHydraFlowConfigMinReviewFindings:
             min_review_findings=1,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.min_review_findings == 1
 
@@ -1891,7 +1891,7 @@ class TestHydraFlowConfigMaxMergeConflictFixAttempts:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_merge_conflict_fix_attempts == 5
 
@@ -1903,7 +1903,7 @@ class TestHydraFlowConfigMaxMergeConflictFixAttempts:
             max_merge_conflict_fix_attempts=1,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_merge_conflict_fix_attempts == 1
 
@@ -1914,7 +1914,7 @@ class TestHydraFlowConfigMaxMergeConflictFixAttempts:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_merge_conflict_fix_attempts == 3
 
@@ -1926,7 +1926,7 @@ class TestHydraFlowConfigLitePlanLabels:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.lite_plan_labels == ["bug", "typo", "docs"]
 
@@ -1937,7 +1937,7 @@ class TestHydraFlowConfigLitePlanLabels:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.lite_plan_labels == ["hotfix", "patch"]
 
@@ -1949,7 +1949,7 @@ class TestHydraFlowConfigLitePlanLabels:
             lite_plan_labels=["custom"],
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.lite_plan_labels == ["custom"]
 
@@ -1966,7 +1966,7 @@ class TestHydraFlowConfigImproveLabelAndMemoryLabel:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.improve_label == ["hydraflow-improve"]
 
@@ -1974,7 +1974,7 @@ class TestHydraFlowConfigImproveLabelAndMemoryLabel:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.memory_label == ["hydraflow-memory"]
 
@@ -1982,7 +1982,7 @@ class TestHydraFlowConfigImproveLabelAndMemoryLabel:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.transcript_label == ["hydraflow-transcript"]
 
@@ -1993,7 +1993,7 @@ class TestHydraFlowConfigImproveLabelAndMemoryLabel:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.improve_label == ["custom-improve"]
 
@@ -2004,7 +2004,7 @@ class TestHydraFlowConfigImproveLabelAndMemoryLabel:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.memory_label == ["custom-memory"]
 
@@ -2015,7 +2015,7 @@ class TestHydraFlowConfigImproveLabelAndMemoryLabel:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.transcript_label == ["custom-transcript"]
 
@@ -2027,7 +2027,7 @@ class TestHydraFlowConfigImproveLabelAndMemoryLabel:
             improve_label=["explicit-improve"],
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.improve_label == ["explicit-improve"]
 
@@ -2039,7 +2039,7 @@ class TestHydraFlowConfigImproveLabelAndMemoryLabel:
             memory_label=["explicit-memory"],
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.memory_label == ["explicit-memory"]
 
@@ -2051,7 +2051,7 @@ class TestHydraFlowConfigImproveLabelAndMemoryLabel:
             transcript_label=["explicit-transcript"],
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.transcript_label == ["explicit-transcript"]
 
@@ -2059,7 +2059,7 @@ class TestHydraFlowConfigImproveLabelAndMemoryLabel:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.metrics_label == ["hydraflow-metrics"]
 
@@ -2068,7 +2068,7 @@ class TestHydraFlowConfigImproveLabelAndMemoryLabel:
             metrics_label=["custom-metrics"],
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.metrics_label == ["custom-metrics"]
 
@@ -2079,7 +2079,7 @@ class TestHydraFlowConfigImproveLabelAndMemoryLabel:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.metrics_label == ["env-metrics"]
 
@@ -2087,7 +2087,7 @@ class TestHydraFlowConfigImproveLabelAndMemoryLabel:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.metrics_sync_interval == 7200
 
@@ -2098,7 +2098,7 @@ class TestHydraFlowConfigImproveLabelAndMemoryLabel:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.metrics_sync_interval == 120
 
@@ -2106,7 +2106,7 @@ class TestHydraFlowConfigImproveLabelAndMemoryLabel:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.pr_unstick_interval == 3600
 
@@ -2114,7 +2114,7 @@ class TestHydraFlowConfigImproveLabelAndMemoryLabel:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.pr_unstick_batch_size == 10
 
@@ -2125,7 +2125,7 @@ class TestHydraFlowConfigImproveLabelAndMemoryLabel:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.pr_unstick_interval == 1800
 
@@ -2136,7 +2136,7 @@ class TestHydraFlowConfigImproveLabelAndMemoryLabel:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.pr_unstick_batch_size == 5
 
@@ -2153,7 +2153,7 @@ class TestBranchForIssue:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.branch_for_issue(42) == "agent/issue-42"
 
@@ -2161,7 +2161,7 @@ class TestBranchForIssue:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.branch_for_issue(1) == "agent/issue-1"
 
@@ -2169,7 +2169,7 @@ class TestBranchForIssue:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.branch_for_issue(99999) == "agent/issue-99999"
 
@@ -2182,7 +2182,7 @@ class TestWorktreePathForIssue:
             repo="org/my-repo",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert (
             cfg.worktree_path_for_issue(42)
@@ -2194,7 +2194,7 @@ class TestWorktreePathForIssue:
             repo="org/my-repo",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert (
             cfg.worktree_path_for_issue(1)
@@ -2207,7 +2207,7 @@ class TestWorktreePathForIssue:
             repo="org/proj",
             repo_root=tmp_path,
             worktree_base=custom_base,
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.worktree_path_for_issue(7) == custom_base / "org-proj" / "issue-7"
 
@@ -2216,7 +2216,7 @@ class TestWorktreePathForIssue:
             repo="acme/widgets",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.repo_slug == "acme-widgets"
 
@@ -2229,7 +2229,7 @@ class TestWorktreePathForIssue:
             repo="",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.repo_slug == tmp_path.name
 
@@ -2246,7 +2246,7 @@ class TestHydraFlowConfigThresholds:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.quality_fix_rate_threshold == pytest.approx(0.5)
 
@@ -2254,7 +2254,7 @@ class TestHydraFlowConfigThresholds:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.approval_rate_threshold == pytest.approx(0.5)
 
@@ -2262,7 +2262,7 @@ class TestHydraFlowConfigThresholds:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.hitl_rate_threshold == pytest.approx(0.2)
 
@@ -2271,7 +2271,7 @@ class TestHydraFlowConfigThresholds:
             quality_fix_rate_threshold=0.8,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.quality_fix_rate_threshold == pytest.approx(0.8)
 
@@ -2280,7 +2280,7 @@ class TestHydraFlowConfigThresholds:
             approval_rate_threshold=0.7,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.approval_rate_threshold == pytest.approx(0.7)
 
@@ -2289,7 +2289,7 @@ class TestHydraFlowConfigThresholds:
             hitl_rate_threshold=0.1,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.hitl_rate_threshold == pytest.approx(0.1)
 
@@ -2299,7 +2299,7 @@ class TestHydraFlowConfigThresholds:
                 quality_fix_rate_threshold=-0.1,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_threshold_above_one_raises(self, tmp_path: Path) -> None:
@@ -2308,7 +2308,7 @@ class TestHydraFlowConfigThresholds:
                 quality_fix_rate_threshold=1.1,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_threshold_boundary_zero(self, tmp_path: Path) -> None:
@@ -2316,7 +2316,7 @@ class TestHydraFlowConfigThresholds:
             quality_fix_rate_threshold=0.0,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.quality_fix_rate_threshold == pytest.approx(0.0)
 
@@ -2325,7 +2325,7 @@ class TestHydraFlowConfigThresholds:
             quality_fix_rate_threshold=1.0,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.quality_fix_rate_threshold == pytest.approx(1.0)
 
@@ -2342,7 +2342,7 @@ class TestHydraFlowConfigTestCommand:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.test_command == "make test"
 
@@ -2351,7 +2351,7 @@ class TestHydraFlowConfigTestCommand:
             test_command="npm test",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.test_command == "npm test"
 
@@ -2362,7 +2362,7 @@ class TestHydraFlowConfigTestCommand:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.test_command == "pytest -x"
 
@@ -2374,7 +2374,7 @@ class TestHydraFlowConfigTestCommand:
             test_command="cargo test",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.test_command == "cargo test"
 
@@ -2391,7 +2391,7 @@ class TestHydraFlowConfigMaxIssueBodyChars:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_issue_body_chars == 10_000
 
@@ -2400,7 +2400,7 @@ class TestHydraFlowConfigMaxIssueBodyChars:
             max_issue_body_chars=5_000,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_issue_body_chars == 5_000
 
@@ -2412,7 +2412,7 @@ class TestHydraFlowConfigMaxIssueBodyChars:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_issue_body_chars == 20_000
 
@@ -2425,7 +2425,7 @@ class TestHydraFlowConfigMaxIssueBodyChars:
             max_issue_body_chars=5_000,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_issue_body_chars == 5_000
 
@@ -2442,7 +2442,7 @@ class TestHydraFlowConfigMaxReviewDiffChars:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_review_diff_chars == 15_000
 
@@ -2451,7 +2451,7 @@ class TestHydraFlowConfigMaxReviewDiffChars:
             max_review_diff_chars=30_000,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_review_diff_chars == 30_000
 
@@ -2463,7 +2463,7 @@ class TestHydraFlowConfigMaxReviewDiffChars:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_review_diff_chars == 50_000
 
@@ -2476,7 +2476,7 @@ class TestHydraFlowConfigMaxReviewDiffChars:
             max_review_diff_chars=25_000,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_review_diff_chars == 25_000
 
@@ -2503,7 +2503,7 @@ class TestResolveDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.repo == "env-org/env-repo"
 
@@ -2515,7 +2515,7 @@ class TestResolveDefaults:
             repo="explicit-org/explicit-repo",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.repo == "explicit-org/explicit-repo"
 
@@ -2526,7 +2526,7 @@ class TestResolveDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.data_poll_interval == 120
 
@@ -2538,7 +2538,7 @@ class TestMaxIssueAttempts:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_issue_attempts == 3
 
@@ -2549,7 +2549,7 @@ class TestMaxIssueAttempts:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_issue_attempts == 5
 
@@ -2561,7 +2561,7 @@ class TestMaxIssueAttempts:
             max_issue_attempts=4,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_issue_attempts == 4
 
@@ -2573,7 +2573,7 @@ class TestUpdatedIntervalDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.memory_sync_interval == 3600
 
@@ -2581,7 +2581,7 @@ class TestUpdatedIntervalDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.metrics_sync_interval == 7200
 
@@ -2589,7 +2589,7 @@ class TestUpdatedIntervalDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
             memory_sync_interval=14400,
         )
         assert cfg.memory_sync_interval == 14400
@@ -2598,7 +2598,7 @@ class TestUpdatedIntervalDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
             metrics_sync_interval=14400,
         )
         assert cfg.metrics_sync_interval == 14400
@@ -2610,7 +2610,7 @@ class TestUpdatedIntervalDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.memory_sync_interval == 900
 
@@ -2621,7 +2621,7 @@ class TestUpdatedIntervalDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.metrics_sync_interval == 1800
 
@@ -2638,7 +2638,7 @@ class TestTranscriptSummarizationConfig:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.transcript_summarization_enabled is True
 
@@ -2646,7 +2646,7 @@ class TestTranscriptSummarizationConfig:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.transcript_summary_model == "haiku"
 
@@ -2654,7 +2654,7 @@ class TestTranscriptSummarizationConfig:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_transcript_summary_chars == 50_000
 
@@ -2665,7 +2665,7 @@ class TestTranscriptSummarizationConfig:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.transcript_summarization_enabled is False
 
@@ -2676,7 +2676,7 @@ class TestTranscriptSummarizationConfig:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.transcript_summarization_enabled is False
 
@@ -2687,7 +2687,7 @@ class TestTranscriptSummarizationConfig:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.transcript_summary_model == "sonnet"
 
@@ -2698,7 +2698,7 @@ class TestTranscriptSummarizationConfig:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.max_transcript_summary_chars == 20_000
 
@@ -2711,7 +2711,7 @@ class TestTranscriptSummarizationConfig:
                 max_transcript_summary_chars=1000,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_max_chars_validation_max(self, tmp_path: Path) -> None:
@@ -2723,7 +2723,7 @@ class TestTranscriptSummarizationConfig:
                 max_transcript_summary_chars=1_000_000,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_explicit_value_overrides_env_var(
@@ -2734,7 +2734,7 @@ class TestTranscriptSummarizationConfig:
             transcript_summary_model="opus",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         # Explicit "opus" != default "haiku", so env var should NOT override
         assert cfg.transcript_summary_model == "opus"
@@ -2767,7 +2767,7 @@ class TestEnvVarOverrideTable:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert getattr(cfg, field) == override_value
 
@@ -2792,7 +2792,7 @@ class TestEnvVarOverrideTable:
             **{field: explicit},  # type: ignore[arg-type]
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert getattr(cfg, field) == explicit
 
@@ -2814,7 +2814,7 @@ class TestEnvVarOverrideTable:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert getattr(cfg, field) == default
 
@@ -2836,7 +2836,7 @@ class TestEnvVarOverrideTable:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert getattr(cfg, field) == "custom-value"
 
@@ -2866,7 +2866,7 @@ class TestEnvVarOverrideTable:
             **{field: explicit},  # type: ignore[arg-type]
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert getattr(cfg, field) == explicit
 
@@ -2889,7 +2889,7 @@ class TestEnvVarOverrideTable:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert getattr(cfg, field) == pytest.approx(override_value)
 
@@ -2913,7 +2913,7 @@ class TestEnvVarOverrideTable:
             **{field: explicit},  # type: ignore[arg-type]
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert getattr(cfg, field) == pytest.approx(explicit)
 
@@ -2935,7 +2935,7 @@ class TestEnvVarOverrideTable:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert getattr(cfg, field) == pytest.approx(default)
 
@@ -2957,7 +2957,7 @@ class TestEnvVarOverrideTable:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert getattr(cfg, field) is False
 
@@ -2980,7 +2980,7 @@ class TestEnvVarOverrideTable:
             cfg = HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
             assert getattr(cfg, field) is True, f"'{truthy}' should parse as True"
 
@@ -3003,7 +3003,7 @@ class TestEnvVarOverrideTable:
             cfg = HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
             assert getattr(cfg, field) is False, f"'{falsy}' should parse as False"
 
@@ -3029,7 +3029,7 @@ class TestEnvVarOverrideTable:
             **{field: explicit},  # type: ignore[arg-type]
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert getattr(cfg, field) is explicit
 
@@ -3059,7 +3059,7 @@ class TestEnvVarOverrideTable:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert getattr(cfg, field) == non_default
 
@@ -3090,7 +3090,7 @@ class TestEnvVarOverrideTable:
             **{field: non_default},  # type: ignore[arg-type]
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert getattr(cfg, field) == non_default
 
@@ -3114,7 +3114,7 @@ class TestEnvVarOverrideTable:
             cfg = HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
         assert getattr(cfg, field) == default
         assert env_key in caplog.text, "Expected warning to name the invalid env var"
@@ -3207,7 +3207,7 @@ class TestDockerConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.execution_mode == "host"
 
@@ -3215,7 +3215,7 @@ class TestDockerConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_image == "ghcr.io/t-rav/hydraflow-agent:latest"
 
@@ -3223,7 +3223,7 @@ class TestDockerConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_cpu_limit == pytest.approx(2.0)
 
@@ -3231,7 +3231,7 @@ class TestDockerConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_memory_limit == "4g"
 
@@ -3239,7 +3239,7 @@ class TestDockerConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_pids_limit == 256
 
@@ -3247,7 +3247,7 @@ class TestDockerConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_tmp_size == "1g"
 
@@ -3255,7 +3255,7 @@ class TestDockerConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_network_mode == "bridge"
 
@@ -3263,7 +3263,7 @@ class TestDockerConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_spawn_delay == pytest.approx(2.0)
 
@@ -3271,7 +3271,7 @@ class TestDockerConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_read_only_root is True
 
@@ -3279,7 +3279,7 @@ class TestDockerConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_no_new_privileges is True
 
@@ -3302,7 +3302,7 @@ class TestDockerConfigCustomValues:
             execution_mode="docker",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.execution_mode == "docker"
 
@@ -3311,7 +3311,7 @@ class TestDockerConfigCustomValues:
             docker_image="my-registry/my-image:v1",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_image == "my-registry/my-image:v1"
 
@@ -3320,7 +3320,7 @@ class TestDockerConfigCustomValues:
             docker_cpu_limit=4.0,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_cpu_limit == pytest.approx(4.0)
 
@@ -3329,7 +3329,7 @@ class TestDockerConfigCustomValues:
             docker_memory_limit="8g",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_memory_limit == "8g"
 
@@ -3338,7 +3338,7 @@ class TestDockerConfigCustomValues:
             docker_network_mode="none",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_network_mode == "none"
 
@@ -3347,7 +3347,7 @@ class TestDockerConfigCustomValues:
             docker_spawn_delay=5.0,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_spawn_delay == pytest.approx(5.0)
 
@@ -3356,7 +3356,7 @@ class TestDockerConfigCustomValues:
             docker_read_only_root=False,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_read_only_root is False
 
@@ -3365,7 +3365,7 @@ class TestDockerConfigCustomValues:
             docker_no_new_privileges=False,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_no_new_privileges is False
 
@@ -3387,7 +3387,7 @@ class TestDockerConfigValidation(GitIdentityEnvMixin):
                 execution_mode="kubernetes",  # type: ignore[arg-type]
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_invalid_docker_network_mode_raises(self, tmp_path: Path) -> None:
@@ -3399,7 +3399,7 @@ class TestDockerConfigValidation(GitIdentityEnvMixin):
                 docker_network_mode="overlay",  # type: ignore[arg-type]
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_docker_cpu_limit_below_minimum_raises(self, tmp_path: Path) -> None:
@@ -3410,7 +3410,7 @@ class TestDockerConfigValidation(GitIdentityEnvMixin):
                 docker_cpu_limit=0.1,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_docker_cpu_limit_above_maximum_raises(self, tmp_path: Path) -> None:
@@ -3421,7 +3421,7 @@ class TestDockerConfigValidation(GitIdentityEnvMixin):
                 docker_cpu_limit=32.0,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_docker_cpu_limit_minimum_boundary(self, tmp_path: Path) -> None:
@@ -3429,7 +3429,7 @@ class TestDockerConfigValidation(GitIdentityEnvMixin):
             docker_cpu_limit=0.5,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_cpu_limit == pytest.approx(0.5)
 
@@ -3438,7 +3438,7 @@ class TestDockerConfigValidation(GitIdentityEnvMixin):
             docker_cpu_limit=16.0,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_cpu_limit == pytest.approx(16.0)
 
@@ -3450,7 +3450,7 @@ class TestDockerConfigValidation(GitIdentityEnvMixin):
                 docker_spawn_delay=-1.0,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_docker_spawn_delay_above_maximum_raises(self, tmp_path: Path) -> None:
@@ -3461,7 +3461,7 @@ class TestDockerConfigValidation(GitIdentityEnvMixin):
                 docker_spawn_delay=60.0,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_docker_spawn_delay_minimum_boundary(self, tmp_path: Path) -> None:
@@ -3469,7 +3469,7 @@ class TestDockerConfigValidation(GitIdentityEnvMixin):
             docker_spawn_delay=0.0,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_spawn_delay == pytest.approx(0.0)
 
@@ -3478,7 +3478,7 @@ class TestDockerConfigValidation(GitIdentityEnvMixin):
             docker_spawn_delay=30.0,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_spawn_delay == pytest.approx(30.0)
 
@@ -3490,7 +3490,7 @@ class TestDockerConfigValidation(GitIdentityEnvMixin):
                 docker_pids_limit=15,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_docker_pids_limit_above_maximum_raises(self, tmp_path: Path) -> None:
@@ -3501,7 +3501,7 @@ class TestDockerConfigValidation(GitIdentityEnvMixin):
                 docker_pids_limit=4097,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_docker_pids_limit_minimum_boundary(self, tmp_path: Path) -> None:
@@ -3509,7 +3509,7 @@ class TestDockerConfigValidation(GitIdentityEnvMixin):
             docker_pids_limit=16,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_pids_limit == 16
 
@@ -3518,7 +3518,7 @@ class TestDockerConfigValidation(GitIdentityEnvMixin):
             docker_pids_limit=4096,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_pids_limit == 4096
 
@@ -3528,7 +3528,7 @@ class TestDockerConfigValidation(GitIdentityEnvMixin):
                 docker_memory_limit="4gb",
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_docker_memory_limit_invalid_text_rejected(self, tmp_path: Path) -> None:
@@ -3537,7 +3537,7 @@ class TestDockerConfigValidation(GitIdentityEnvMixin):
                 docker_memory_limit="lots",
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_docker_tmp_size_invalid_rejected(self, tmp_path: Path) -> None:
@@ -3546,7 +3546,7 @@ class TestDockerConfigValidation(GitIdentityEnvMixin):
                 docker_tmp_size="big",
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_docker_not_available_raises(
@@ -3561,7 +3561,7 @@ class TestDockerConfigValidation(GitIdentityEnvMixin):
                 execution_mode="docker",
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_docker_available_passes(
@@ -3575,7 +3575,7 @@ class TestDockerConfigValidation(GitIdentityEnvMixin):
             execution_mode="docker",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.execution_mode == "docker"
 
@@ -3585,7 +3585,7 @@ class TestDockerConfigValidation(GitIdentityEnvMixin):
             execution_mode="host",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.execution_mode == "host"
 
@@ -3608,7 +3608,7 @@ class TestDockerConfigValidation(GitIdentityEnvMixin):
                 execution_mode="docker",
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
         warnings = "\n".join(rec.getMessage() for rec in caplog.records)
         assert "without GH token configured" in warnings
@@ -3633,7 +3633,7 @@ class TestDockerConfigValidation(GitIdentityEnvMixin):
                 git_user_email="",
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
         warnings = "\n".join(rec.getMessage() for rec in caplog.records)
         assert "git identity is incomplete" in warnings
@@ -3652,7 +3652,7 @@ class TestDockerSizeNotationValidator:
             docker_memory_limit="512m",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_memory_limit == "512m"
 
@@ -3661,7 +3661,7 @@ class TestDockerSizeNotationValidator:
             docker_memory_limit="1024k",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_memory_limit == "1024k"
 
@@ -3670,7 +3670,7 @@ class TestDockerSizeNotationValidator:
             docker_memory_limit="100b",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_memory_limit == "100b"
 
@@ -3680,7 +3680,7 @@ class TestDockerSizeNotationValidator:
             docker_memory_limit="4G",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_memory_limit == "4G"
 
@@ -3689,7 +3689,7 @@ class TestDockerSizeNotationValidator:
             docker_memory_limit="512M",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_memory_limit == "512M"
 
@@ -3699,7 +3699,7 @@ class TestDockerSizeNotationValidator:
             docker_tmp_size="512m",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_tmp_size == "512m"
 
@@ -3709,7 +3709,7 @@ class TestDockerSizeNotationValidator:
                 docker_memory_limit="",
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_invalid_digits_only(self, tmp_path: Path) -> None:
@@ -3718,7 +3718,7 @@ class TestDockerSizeNotationValidator:
                 docker_memory_limit="4",
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_invalid_unit_only(self, tmp_path: Path) -> None:
@@ -3727,7 +3727,7 @@ class TestDockerSizeNotationValidator:
                 docker_memory_limit="g",
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_valid_size_4g(self, tmp_path: Path) -> None:
@@ -3735,7 +3735,7 @@ class TestDockerSizeNotationValidator:
             docker_memory_limit="4g",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_memory_limit == "4g"
 
@@ -3746,7 +3746,7 @@ class TestDockerSizeNotationValidator:
                 docker_memory_limit="4gb",
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_invalid_size_alpha_only(self, tmp_path: Path) -> None:
@@ -3755,7 +3755,7 @@ class TestDockerSizeNotationValidator:
                 docker_memory_limit="abc",
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
 
@@ -3777,7 +3777,7 @@ class TestDockerConfigEnvVarOverrides:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.execution_mode == "docker"
 
@@ -3788,7 +3788,7 @@ class TestDockerConfigEnvVarOverrides:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_image == "custom/image:v2"
 
@@ -3799,7 +3799,7 @@ class TestDockerConfigEnvVarOverrides:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_memory_limit == "16g"
 
@@ -3810,7 +3810,7 @@ class TestDockerConfigEnvVarOverrides:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_network_mode == "none"
 
@@ -3821,7 +3821,7 @@ class TestDockerConfigEnvVarOverrides:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_cpu_limit == pytest.approx(8.0)
 
@@ -3832,7 +3832,7 @@ class TestDockerConfigEnvVarOverrides:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_spawn_delay == pytest.approx(5.0)
 
@@ -3843,7 +3843,7 @@ class TestDockerConfigEnvVarOverrides:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_read_only_root is False
 
@@ -3854,7 +3854,7 @@ class TestDockerConfigEnvVarOverrides:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_no_new_privileges is False
 
@@ -3870,7 +3870,7 @@ class TestDockerConfigEnvVarOverrides:
             HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_docker_cpu_limit_env_override_out_of_range_ignored(
@@ -3881,7 +3881,7 @@ class TestDockerConfigEnvVarOverrides:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_cpu_limit == pytest.approx(2.0)  # unchanged default
 
@@ -3893,7 +3893,7 @@ class TestDockerConfigEnvVarOverrides:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_spawn_delay == pytest.approx(2.0)  # unchanged default
 
@@ -3904,7 +3904,7 @@ class TestDockerConfigEnvVarOverrides:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_pids_limit == 512
 
@@ -3916,7 +3916,7 @@ class TestDockerConfigEnvVarOverrides:
             HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_pids_limit_env_override_above_maximum_raises(
@@ -3927,7 +3927,7 @@ class TestDockerConfigEnvVarOverrides:
             HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_pids_limit_env_override_invalid_value_logs_warning(
@@ -3941,7 +3941,7 @@ class TestDockerConfigEnvVarOverrides:
             cfg = HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
         assert cfg.docker_pids_limit == 256
@@ -3954,7 +3954,7 @@ class TestDockerConfigEnvVarOverrides:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_tmp_size == "2g"
 
@@ -3967,7 +3967,7 @@ class TestDockerConfigEnvVarOverrides:
             HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_tmp_size_env_override_invalid_value_rejected(
@@ -3979,7 +3979,7 @@ class TestDockerConfigEnvVarOverrides:
             HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_execution_mode_default_value_overridden_by_env(
@@ -3999,7 +3999,7 @@ class TestDockerConfigEnvVarOverrides:
             execution_mode="host",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.execution_mode == "docker"
 
@@ -4016,7 +4016,7 @@ class TestDockerConfig:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_image == "ghcr.io/t-rav/hydraflow-agent:latest"
 
@@ -4024,7 +4024,7 @@ class TestDockerConfig:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_spawn_delay == 2.0
 
@@ -4032,7 +4032,7 @@ class TestDockerConfig:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_network == ""
 
@@ -4040,7 +4040,7 @@ class TestDockerConfig:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_extra_mounts == []
 
@@ -4051,7 +4051,7 @@ class TestDockerConfig:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_spawn_delay == 2.0  # default preserved
 
@@ -4062,7 +4062,7 @@ class TestDockerConfig:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.docker_network == "hydra-net"
 
@@ -4073,7 +4073,7 @@ class TestDockerConfig:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
             docker_network="explicit-net",
         )
         assert cfg.docker_network == "explicit-net"
@@ -4082,7 +4082,7 @@ class TestDockerConfig:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
             docker_image="hydra-agent:latest",
             docker_spawn_delay=3.5,
             docker_network="my-network",
@@ -4100,7 +4100,7 @@ class TestDockerConfig:
             HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
                 docker_spawn_delay=-1.0,
             )
 
@@ -4111,7 +4111,7 @@ class TestDockerConfig:
             HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
                 docker_spawn_delay=31.0,
             )
 
@@ -4121,7 +4121,7 @@ class TestAgentToolFields:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.implementation_tool == "claude"
         assert cfg.review_tool == "claude"
@@ -4148,7 +4148,7 @@ class TestAgentToolFields:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.implementation_tool == "codex"
         assert cfg.model == "gpt-5-codex"
@@ -4178,7 +4178,7 @@ class TestAgentToolFields:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.implementation_tool == "pi"
         assert cfg.review_tool == "pi"
@@ -4197,7 +4197,7 @@ class TestAgentToolFields:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
             system_tool="codex",
             background_tool="codex",
         )
@@ -4217,7 +4217,7 @@ class TestAgentToolFields:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
             system_model="gpt-5-codex",
             background_model="gpt-5-codex",
         )
@@ -4237,7 +4237,7 @@ class TestAgentToolFields:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
             system_tool="codex",
             background_tool="codex",
             system_model="gpt-5-codex",
@@ -4260,7 +4260,7 @@ class TestTieringFields:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.subskill_tool == "claude"
         assert cfg.subskill_model == "haiku"
@@ -4310,7 +4310,7 @@ class TestLabelValidation:
                 **{field: []},  # type: ignore[arg-type]
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
             )
 
     def test_label_env_var_empty_string_does_not_override(
@@ -4321,7 +4321,7 @@ class TestLabelValidation:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.ready_label == ["hydraflow-ready"]
 
@@ -4452,7 +4452,7 @@ class TestDirectoryProperties:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.log_dir == tmp_path / ".hydraflow" / "logs"
 
@@ -4463,7 +4463,7 @@ class TestDirectoryProperties:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.plans_dir == tmp_path / ".hydraflow" / "plans"
 
@@ -4474,7 +4474,7 @@ class TestDirectoryProperties:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.memory_dir == tmp_path / ".hydraflow" / "memory"
 
@@ -4485,7 +4485,7 @@ class TestDirectoryProperties:
         cfg = HydraFlowConfig(
             repo_root=custom_root,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.log_dir.parent.parent == custom_root
         assert cfg.plans_dir.parent.parent == custom_root
@@ -4505,7 +4505,7 @@ class TestTimeoutAndLimitFields:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.quality_timeout == 3600
 
@@ -4514,7 +4514,7 @@ class TestTimeoutAndLimitFields:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.git_command_timeout == 30
 
@@ -4523,7 +4523,7 @@ class TestTimeoutAndLimitFields:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.summarizer_timeout == 120
 
@@ -4532,7 +4532,7 @@ class TestTimeoutAndLimitFields:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.error_output_max_chars == 3000
 
@@ -4541,7 +4541,7 @@ class TestTimeoutAndLimitFields:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
             quality_timeout=1800,
         )
         assert cfg.quality_timeout == 1800
@@ -4551,7 +4551,7 @@ class TestTimeoutAndLimitFields:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
             git_command_timeout=60,
         )
         assert cfg.git_command_timeout == 60
@@ -4561,7 +4561,7 @@ class TestTimeoutAndLimitFields:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
             summarizer_timeout=300,
         )
         assert cfg.summarizer_timeout == 300
@@ -4571,7 +4571,7 @@ class TestTimeoutAndLimitFields:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
             error_output_max_chars=5000,
         )
         assert cfg.error_output_max_chars == 5000
@@ -4582,7 +4582,7 @@ class TestTimeoutAndLimitFields:
             HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
                 quality_timeout=10,
             )
 
@@ -4592,7 +4592,7 @@ class TestTimeoutAndLimitFields:
             HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
                 quality_timeout=10000,
             )
 
@@ -4602,7 +4602,7 @@ class TestTimeoutAndLimitFields:
             HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
                 git_command_timeout=1,
             )
 
@@ -4612,7 +4612,7 @@ class TestTimeoutAndLimitFields:
             HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
                 summarizer_timeout=5,
             )
 
@@ -4624,7 +4624,7 @@ class TestTimeoutAndLimitFields:
             HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
                 error_output_max_chars=100,
             )
 
@@ -4634,7 +4634,7 @@ class TestTimeoutAndLimitFields:
             HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
                 git_command_timeout=300,
             )
 
@@ -4644,7 +4644,7 @@ class TestTimeoutAndLimitFields:
             HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
                 summarizer_timeout=1200,
             )
 
@@ -4656,7 +4656,7 @@ class TestTimeoutAndLimitFields:
             HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt",
                 error_output_max_chars=50_000,
             )
 
@@ -4673,7 +4673,7 @@ class TestUnstickConfigFields:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.unstick_auto_merge is True
 
@@ -4681,7 +4681,7 @@ class TestUnstickConfigFields:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.unstick_all_causes is True
 
@@ -4692,7 +4692,7 @@ class TestUnstickConfigFields:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.unstick_auto_merge is False
 
@@ -4703,7 +4703,7 @@ class TestUnstickConfigFields:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt",
         )
         assert cfg.unstick_all_causes is False
 
@@ -4794,11 +4794,11 @@ class TestLabelsMustNotBeEmpty:
 class TestNamespaceRepoPaths:
     """Tests for repo-scoped persistence path namespacing."""
 
-    def test_state_file_namespaced_by_repo_slug(self, tmp_path: Path) -> None:
-        """Default state_file should be under data_root/<slug>/."""
+    def test_dolt_path_namespaced_by_repo_slug(self, tmp_path: Path) -> None:
+        """Default dolt_path should be under data_root/<slug>/."""
         cfg = HydraFlowConfig(repo_root=tmp_path, repo="acme/widgets")
-        expected = tmp_path / ".hydraflow" / "acme-widgets" / "state.json"
-        assert cfg.state_file == expected
+        expected = tmp_path / ".hydraflow" / "acme-widgets" / "dolt"
+        assert cfg.dolt_path == expected
 
     def test_event_log_namespaced_by_repo_slug(self, tmp_path: Path) -> None:
         """Default event_log_path should be under data_root/<slug>/."""
@@ -4819,13 +4819,13 @@ class TestNamespaceRepoPaths:
         # config_file was explicitly set to the flat path, so it stays (not scoped)
         assert cfg.config_file == explicit_cfg.resolve()
 
-    def test_explicit_state_file_not_namespaced(self, tmp_path: Path) -> None:
-        """Explicitly-set state_file should not be repo-scoped."""
-        custom = tmp_path / "custom" / "state.json"
+    def test_explicit_dolt_path_not_namespaced(self, tmp_path: Path) -> None:
+        """Explicitly-set dolt_path should not be repo-scoped."""
+        custom = tmp_path / "custom" / "dolt"
         cfg = HydraFlowConfig(
-            repo_root=tmp_path, repo="acme/widgets", state_file=custom
+            repo_root=tmp_path, repo="acme/widgets", dolt_path=custom
         )
-        assert cfg.state_file == custom.resolve()
+        assert cfg.dolt_path == custom.resolve()
 
     def test_explicit_event_log_not_namespaced(self, tmp_path: Path) -> None:
         """Explicitly-set event_log_path should not be repo-scoped."""
@@ -4840,49 +4840,13 @@ class TestNamespaceRepoPaths:
         cfg = HydraFlowConfig(repo_root=tmp_path, repo="acme/widgets")
         assert cfg.repo_data_root == tmp_path / ".hydraflow" / "acme-widgets"
 
-    def test_two_repos_get_separate_state_files(self, tmp_path: Path) -> None:
-        """Two configs with different repos should have different state files."""
+    def test_two_repos_get_separate_dolt_paths(self, tmp_path: Path) -> None:
+        """Two configs with different repos should have different dolt paths."""
         cfg_a = HydraFlowConfig(repo_root=tmp_path, repo="org/alpha")
         cfg_b = HydraFlowConfig(repo_root=tmp_path, repo="org/beta")
-        assert cfg_a.state_file != cfg_b.state_file
-        assert "org-alpha" in str(cfg_a.state_file)
-        assert "org-beta" in str(cfg_b.state_file)
-
-    def test_legacy_state_file_migrated(self, tmp_path: Path) -> None:
-        """If legacy flat state.json exists, it should be copied to scoped path."""
-        data_root = tmp_path / ".hydraflow"
-        data_root.mkdir()
-        legacy_state = data_root / "state.json"
-        legacy_state.write_text('{"processed_issues": [1, 2]}')
-
-        cfg = HydraFlowConfig(repo_root=tmp_path, repo="acme/widgets")
-        assert cfg.state_file.exists()
-        assert cfg.state_file.read_text() == '{"processed_issues": [1, 2]}'
-
-    def test_legacy_sessions_migrated(self, tmp_path: Path) -> None:
-        """If legacy flat sessions.jsonl exists, it should be copied."""
-        data_root = tmp_path / ".hydraflow"
-        data_root.mkdir()
-        flat_sessions = data_root / "sessions.jsonl"
-        flat_sessions.write_text('{"id":"s1"}\n')
-
-        cfg = HydraFlowConfig(repo_root=tmp_path, repo="acme/widgets")
-        scoped_sessions = cfg.state_file.parent / "sessions.jsonl"
-        assert scoped_sessions.exists()
-        assert scoped_sessions.read_text() == '{"id":"s1"}\n'
-
-    def test_no_migration_when_scoped_already_exists(self, tmp_path: Path) -> None:
-        """If scoped state already exists, legacy file should not overwrite it."""
-        data_root = tmp_path / ".hydraflow"
-        data_root.mkdir()
-        legacy_state = data_root / "state.json"
-        legacy_state.write_text('{"old": true}')
-        scoped_dir = data_root / "acme-widgets"
-        scoped_dir.mkdir(parents=True)
-        (scoped_dir / "state.json").write_text('{"new": true}')
-
-        cfg = HydraFlowConfig(repo_root=tmp_path, repo="acme/widgets")
-        assert cfg.state_file.read_text() == '{"new": true}'
+        assert cfg_a.dolt_path != cfg_b.dolt_path
+        assert "org-alpha" in str(cfg_a.dolt_path)
+        assert "org-beta" in str(cfg_b.dolt_path)
 
     def test_no_migration_when_scoped_event_log_already_exists(
         self, tmp_path: Path
@@ -4910,15 +4874,15 @@ class TestTwoPhasePathResolution:
 
     The resolve_defaults validator must resolve base paths (repo_root, worktree_base,
     data_root) before resolving the repo slug, and resolve the repo slug before
-    computing repo-scoped paths (state_file, event_log_path).
+    computing repo-scoped paths (dolt_path, event_log_path).
     """
 
-    def test_state_file_never_flat_when_repo_available(self, tmp_path: Path) -> None:
-        """state_file must be repo-scoped, never flat data_root/state.json."""
+    def test_dolt_path_never_flat_when_repo_available(self, tmp_path: Path) -> None:
+        """dolt_path must be repo-scoped, never flat data_root/dolt."""
         cfg = HydraFlowConfig(repo_root=tmp_path, repo="acme/widgets")
-        flat_default = cfg.data_root / "state.json"
-        assert cfg.state_file != flat_default
-        assert cfg.repo_slug in str(cfg.state_file)
+        flat_default = cfg.data_root / "dolt"
+        assert cfg.dolt_path != flat_default
+        assert cfg.repo_slug in str(cfg.dolt_path)
 
     def test_event_log_never_flat_when_repo_available(self, tmp_path: Path) -> None:
         """event_log_path must be repo-scoped, never flat data_root/events.jsonl."""
@@ -4937,7 +4901,7 @@ class TestTwoPhasePathResolution:
         assert cfg.repo_root.is_absolute()
         assert cfg.data_root.is_absolute()
         # And repo-scoped paths should use the resolved data_root
-        assert str(cfg.state_file).startswith(str(cfg.data_root))
+        assert str(cfg.dolt_path).startswith(str(cfg.data_root))
 
     def test_no_repo_falls_back_to_directory_name_scoped_paths(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -4948,57 +4912,22 @@ class TestTwoPhasePathResolution:
         cfg = HydraFlowConfig(repo_root=tmp_path)
         # repo_slug falls back to repo_root.name
         assert cfg.repo_slug == tmp_path.name
-        expected_state = cfg.data_root / tmp_path.name / "state.json"
-        assert cfg.state_file == expected_state
+        expected_dolt = cfg.data_root / tmp_path.name / "dolt"
+        assert cfg.dolt_path == expected_dolt
 
     def test_env_detected_repo_scopes_paths(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Repo detected from env var should scope state_file and event_log_path."""
+        """Repo detected from env var should scope dolt_path and event_log_path."""
         monkeypatch.setenv("HYDRAFLOW_GITHUB_REPO", "env-org/env-repo")
         cfg = HydraFlowConfig(repo_root=tmp_path)
-        assert "env-org-env-repo" in str(cfg.state_file)
+        assert "env-org-env-repo" in str(cfg.dolt_path)
         assert "env-org-env-repo" in str(cfg.event_log_path)
 
     def test_config_file_stays_none_when_not_explicit(self, tmp_path: Path) -> None:
         """config_file should remain None when not explicitly provided."""
         cfg = HydraFlowConfig(repo_root=tmp_path, repo="acme/widgets")
         assert cfg.config_file is None
-
-    def test_sessions_not_migrated_when_state_file_explicit(
-        self, tmp_path: Path
-    ) -> None:
-        """sessions.jsonl should not be migrated into a custom state_file parent dir."""
-        data_root = tmp_path / ".hydraflow"
-        data_root.mkdir()
-        (data_root / "sessions.jsonl").write_text('{"id":"s1"}\n')
-        custom_state = tmp_path / "custom" / "state.json"
-
-        cfg = HydraFlowConfig(
-            repo_root=tmp_path, repo="acme/widgets", state_file=custom_state
-        )
-        # sessions.jsonl must NOT appear next to the explicit state_file
-        assert not (cfg.state_file.parent / "sessions.jsonl").exists()
-
-    def test_migration_copy_failure_does_not_raise(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A shutil.copy2 failure during migration should log a warning, not raise."""
-        import shutil
-
-        data_root = tmp_path / ".hydraflow"
-        data_root.mkdir()
-        (data_root / "state.json").write_text('{"processed_issues": []}')
-
-        def fail_copy(src: object, dst: object, **kw: object) -> None:
-            raise OSError("permission denied")
-
-        monkeypatch.setattr(shutil, "copy2", fail_copy)
-
-        # Should not raise; config must still instantiate successfully.
-        cfg = HydraFlowConfig(repo_root=tmp_path, repo="acme/widgets")
-        assert cfg.state_file == data_root / "acme-widgets" / "state.json"
-        assert not cfg.state_file.exists()  # copy failed, file was not created
 
     def test_legacy_event_log_migrated(self, tmp_path: Path) -> None:
         """If legacy flat events.jsonl exists, it should be copied to scoped path."""
@@ -5041,32 +4970,7 @@ class TestTwoPhasePathResolution:
 
         cfg = HydraFlowConfig(repo_root=tmp_path, repo="org/project")
         assert cfg.data_root == custom_home.resolve()
-        assert str(cfg.state_file).startswith(str(custom_home.resolve()))
-        assert "org-project" in str(cfg.state_file)
+        assert str(cfg.dolt_path).startswith(str(custom_home.resolve()))
+        assert "org-project" in str(cfg.dolt_path)
 
-    def test_sessions_migration_copy_failure_does_not_raise(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A shutil.copy2 failure migrating sessions.jsonl should log, not raise."""
-        import shutil
 
-        data_root = tmp_path / ".hydraflow"
-        data_root.mkdir()
-        (data_root / "sessions.jsonl").write_text('{"id":"s1"}\n')
-
-        original_copy2 = shutil.copy2
-        call_count = 0
-
-        def selective_fail(src: object, dst: object, **kw: object) -> None:
-            nonlocal call_count
-            call_count += 1
-            # Let state_file and event_log migrations succeed, fail on sessions
-            if "sessions.jsonl" in str(dst):
-                raise OSError("permission denied")
-            return original_copy2(src, dst, **kw)  # type: ignore[arg-type]
-
-        monkeypatch.setattr(shutil, "copy2", selective_fail)
-
-        cfg = HydraFlowConfig(repo_root=tmp_path, repo="acme/widgets")
-        scoped_sessions = cfg.state_file.parent / "sessions.jsonl"
-        assert not scoped_sessions.exists()  # copy failed

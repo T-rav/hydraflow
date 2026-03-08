@@ -113,46 +113,54 @@ class TestExtractCategories:
 
 
 class TestReviewInsightStore:
-    """Tests for ReviewInsightStore persistence."""
+    """Tests for ReviewInsightStore persistence via Dolt state."""
 
-    def test_append_creates_file(self, tmp_path: Path) -> None:
-        store = ReviewInsightStore(tmp_path / "memory")
+    def test_append_stores_record(self, tmp_path: Path) -> None:
+        from tests.helpers import InMemoryState
+
+        state = InMemoryState()
+        store = ReviewInsightStore(tmp_path / "memory", state=state)
         record = _make_record(categories=["missing_tests"])
         store.append_review(record)
 
-        reviews_path = tmp_path / "memory" / "reviews.jsonl"
-        assert reviews_path.exists()
-        lines = reviews_path.read_text().strip().splitlines()
-        assert len(lines) == 1
+        assert len(state._review_records) == 1
 
     def test_append_multiple_records(self, tmp_path: Path) -> None:
-        store = ReviewInsightStore(tmp_path / "memory")
+        from tests.helpers import InMemoryState
+
+        state = InMemoryState()
+        store = ReviewInsightStore(tmp_path / "memory", state=state)
         for i in range(3):
             store.append_review(_make_record(pr_number=100 + i))
 
-        reviews_path = tmp_path / "memory" / "reviews.jsonl"
-        lines = reviews_path.read_text().strip().splitlines()
-        assert len(lines) == 3
+        assert len(state._review_records) == 3
 
     def test_load_recent_returns_tail(self, tmp_path: Path) -> None:
-        store = ReviewInsightStore(tmp_path / "memory")
+        from tests.helpers import InMemoryState
+
+        state = InMemoryState()
+        store = ReviewInsightStore(tmp_path / "memory", state=state)
         for i in range(15):
             store.append_review(_make_record(pr_number=100 + i))
 
         recent = store.load_recent(5)
         assert len(recent) == 5
-        assert recent[0].pr_number == 110
-        assert recent[-1].pr_number == 114
+        # Newest first from Dolt
+        assert recent[0].pr_number == 114
+        assert recent[-1].pr_number == 110
 
     def test_load_recent_returns_all_when_fewer(self, tmp_path: Path) -> None:
-        store = ReviewInsightStore(tmp_path / "memory")
+        from tests.helpers import InMemoryState
+
+        state = InMemoryState()
+        store = ReviewInsightStore(tmp_path / "memory", state=state)
         for i in range(3):
             store.append_review(_make_record(pr_number=100 + i))
 
         recent = store.load_recent(10)
         assert len(recent) == 3
 
-    def test_load_recent_handles_missing_file(self, tmp_path: Path) -> None:
+    def test_load_recent_handles_no_state(self, tmp_path: Path) -> None:
         store = ReviewInsightStore(tmp_path / "memory")
         assert store.load_recent() == []
 
@@ -184,19 +192,10 @@ class TestReviewInsightStore:
         store = ReviewInsightStore(memory_dir)
         assert store.get_proposed_categories() == set()
 
-    def test_load_recent_skips_malformed_lines(self, tmp_path: Path) -> None:
-        memory_dir = tmp_path / "memory"
-        memory_dir.mkdir(parents=True)
-        reviews_path = memory_dir / "reviews.jsonl"
-
-        # Write one valid and one invalid line
-        valid = _make_record(pr_number=101)
-        reviews_path.write_text(valid.model_dump_json() + "\n" + "not valid json\n")
-
-        store = ReviewInsightStore(memory_dir)
+    def test_load_recent_no_state_returns_empty(self, tmp_path: Path) -> None:
+        store = ReviewInsightStore(tmp_path / "memory")
         records = store.load_recent()
-        assert len(records) == 1
-        assert records[0].pr_number == 101
+        assert len(records) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -390,41 +389,30 @@ class TestReviewRecord:
 # ---------------------------------------------------------------------------
 
 
-class TestAppendReviewOSError:
-    """Verify ReviewInsightStore.append_review catches OSError gracefully."""
+class TestAppendReviewErrorHandling:
+    """Verify ReviewInsightStore.append_review catches state errors gracefully."""
 
-    def test_append_review_logs_warning_on_oserror(self, tmp_path, caplog) -> None:
-        """When the reviews file can't be written, log warning and don't raise."""
+    def test_append_review_logs_warning_on_state_error(self, tmp_path, caplog) -> None:
+        """When the state write fails, log warning and don't raise."""
         import logging
-        from unittest.mock import patch
+        from unittest.mock import MagicMock
 
-        store = ReviewInsightStore(tmp_path / "memory")
+        state = MagicMock()
+        state.append_review_record.side_effect = RuntimeError("db error")
+
+        store = ReviewInsightStore(tmp_path / "memory", state=state)
         record = _make_record(categories=["missing_tests"])
 
-        with (
-            patch("file_util.open", side_effect=OSError("disk full")),
-            caplog.at_level(logging.WARNING, logger="hydraflow.review_insights"),
-        ):
+        with caplog.at_level(logging.WARNING, logger="hydraflow.review_insights"):
             store.append_review(record)  # should not raise
 
-        assert "Could not append review" in caplog.text
+        assert "Dolt review record write failed" in caplog.text
 
-    def test_append_review_handles_mkdir_failure(self, tmp_path, caplog) -> None:
-        """When mkdir fails with PermissionError, log warning and don't raise."""
-        import logging
-        from pathlib import Path
-        from unittest.mock import patch
-
+    def test_append_review_without_state_is_noop(self, tmp_path) -> None:
+        """When no state is provided, append_review is a no-op."""
         store = ReviewInsightStore(tmp_path / "memory")
         record = _make_record(categories=["security"])
-
-        with (
-            patch.object(Path, "mkdir", side_effect=PermissionError("not allowed")),
-            caplog.at_level(logging.WARNING, logger="hydraflow.review_insights"),
-        ):
-            store.append_review(record)  # should not raise
-
-        assert "Could not append review" in caplog.text
+        store.append_review(record)  # should not raise
 
 
 # ---------------------------------------------------------------------------

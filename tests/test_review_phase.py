@@ -895,7 +895,7 @@ class TestWaitAndFixCI:
             max_ci_fix_attempts=2,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg)
         issue = TaskFactory.create()
@@ -929,7 +929,7 @@ class TestWaitAndFixCI:
             max_ci_fix_attempts=1,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg)
         issue = TaskFactory.create()
@@ -972,7 +972,7 @@ class TestWaitAndFixCI:
             max_ci_fix_attempts=0,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg)
         issue = TaskFactory.create()
@@ -1006,7 +1006,7 @@ class TestWaitAndFixCI:
             max_ci_fix_attempts=2,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg)
         issue = TaskFactory.create()
@@ -1042,7 +1042,7 @@ class TestWaitAndFixCI:
             max_ci_fix_attempts=2,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg)
         issue = TaskFactory.create()
@@ -1098,7 +1098,7 @@ class TestWaitAndFixCI:
             max_ci_fix_attempts=3,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg)
         issue = TaskFactory.create()
@@ -1144,7 +1144,7 @@ class TestWaitAndFixCI:
             max_ci_fix_attempts=1,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg)
         issue = TaskFactory.create()
@@ -1190,7 +1190,7 @@ class TestWaitAndFixCI:
             max_ci_fix_attempts=1,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg)
         issue = TaskFactory.create()
@@ -1233,7 +1233,7 @@ class TestWaitAndFixCI:
             max_ci_fix_attempts=1,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg)
         issue = TaskFactory.create()
@@ -1283,7 +1283,7 @@ class TestReviewPostMortemMemoryFiling:
             max_ci_fix_attempts=1,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg)
         issue = TaskFactory.create()
@@ -1328,7 +1328,7 @@ class TestReviewPostMortemMemoryFiling:
             max_ci_fix_attempts=1,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg)
         issue = TaskFactory.create()
@@ -1371,7 +1371,7 @@ class TestReviewPostMortemMemoryFiling:
             max_review_fix_attempts=1,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg)
         issue = TaskFactory.create()
@@ -1521,7 +1521,7 @@ class TestResolveMergeConflicts:
             enable_fresh_branch_rebuild=False,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         mock_agents = AsyncMock()
         mock_agents._execute = AsyncMock(return_value="transcript")
@@ -1622,7 +1622,7 @@ class TestResolveMergeConflicts:
             enable_fresh_branch_rebuild=False,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         mock_agents = AsyncMock()
         mock_agents._execute = AsyncMock(return_value="transcript")
@@ -1651,7 +1651,7 @@ class TestResolveMergeConflicts:
             enable_fresh_branch_rebuild=False,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         mock_agents = AsyncMock()
         phase = make_review_phase(cfg, agents=mock_agents)
@@ -2262,7 +2262,7 @@ class TestLifecycleMetricRecording:
             max_ci_fix_attempts=1,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg)
         issue = TaskFactory.create()
@@ -2305,7 +2305,7 @@ class TestLifecycleMetricRecording:
             max_ci_fix_attempts=2,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg)
         issue = TaskFactory.create()
@@ -2827,7 +2827,7 @@ class TestGranularReviewStatusEvents:
             max_ci_fix_attempts=2,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, event_bus=event_bus)
         issue = TaskFactory.create()
@@ -2866,7 +2866,7 @@ class TestGranularReviewStatusEvents:
             max_ci_fix_attempts=2,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, event_bus=event_bus)
         issue = TaskFactory.create()
@@ -2925,7 +2925,7 @@ class TestGranularReviewStatusEvents:
             max_ci_fix_attempts=1,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, event_bus=event_bus)
         issue = TaskFactory.create()
@@ -3080,7 +3080,7 @@ class TestHITLEscalationEvents:
             max_ci_fix_attempts=1,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, event_bus=event_bus)
         issue = TaskFactory.create()
@@ -5123,7 +5123,7 @@ class TestHandleRejectedReview:
             max_review_fix_attempts=2,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         phase = make_review_phase(config)
         pr = PRInfoFactory.create()
@@ -5156,7 +5156,7 @@ class TestHandleRejectedReview:
             max_review_fix_attempts=2,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         phase = make_review_phase(config, event_bus=event_bus)
         pr = PRInfoFactory.create()
@@ -5187,7 +5187,7 @@ class TestHandleRejectedReview:
             max_review_fix_attempts=1,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         phase = make_review_phase(config)
         pr = PRInfoFactory.create()
@@ -5241,7 +5241,7 @@ class TestHandleRejectedReview:
             max_review_fix_attempts=1,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         phase = make_review_phase(config)
         pr = PRInfoFactory.create()
@@ -5282,7 +5282,7 @@ class TestWaitAndFixCIEdgeCases:
             max_ci_fix_attempts=2,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg)
         issue = TaskFactory.create(id=42)
@@ -5326,7 +5326,7 @@ class TestWaitAndFixCIEdgeCases:
             max_ci_fix_attempts=2,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg)
         issue = TaskFactory.create(id=42)

@@ -29,7 +29,7 @@ def _make_config(tmp_path: Path, slug: str):
         repo=f"owner/{slug}",
         repo_root=base / "repo",
         worktree_base=base / "worktrees",
-        state_file=base / "state.json",
+        dolt_path=base / "dolt_db",
     )
 
 
@@ -54,15 +54,15 @@ def _make_session(
 
 
 class TestStateIsolation:
-    def test_isolated_state_files_no_cross_contamination(self, tmp_path: Path) -> None:
+    def test_isolated_dolt_paths_no_cross_contamination(self, tmp_path: Path) -> None:
         """Two StateTrackers with separate files should not share data."""
         from state import StateTracker
 
         alpha_cfg = _make_config(tmp_path, "repo-alpha")
         beta_cfg = _make_config(tmp_path, "repo-beta")
 
-        alpha_state = StateTracker(alpha_cfg.state_file)
-        beta_state = StateTracker(beta_cfg.state_file)
+        alpha_state = StateTracker(alpha_cfg.dolt_path)
+        beta_state = StateTracker(beta_cfg.dolt_path)
 
         alpha_state.mark_issue(10, "merged")
         alpha_state.mark_issue(20, "merged")
@@ -155,7 +155,7 @@ class TestSessionScoping:
 
 
 class TestWorkerIntervalIndependence:
-    def test_intervals_isolated_per_state_file(self, tmp_path: Path) -> None:
+    def test_intervals_isolated_per_dolt_path(self, tmp_path: Path) -> None:
         """Worker intervals should be per-state-file, not shared."""
         from state import StateTracker
 
@@ -175,7 +175,7 @@ class TestWorkerIntervalIndependence:
 
 
 class TestActiveIssuesIndependence:
-    def test_active_issues_isolated_per_state_file(self, tmp_path: Path) -> None:
+    def test_active_issues_isolated_per_dolt_path(self, tmp_path: Path) -> None:
         """Active issue lists should be per-state-file."""
         from state import StateTracker
 

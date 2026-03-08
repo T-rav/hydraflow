@@ -52,44 +52,23 @@ class TroubleshootingPattern(BaseModel):
 
 
 class TroubleshootingPatternStore:
-    """JSONL-backed store for learned troubleshooting patterns."""
+    """Dolt-backed store for learned troubleshooting patterns."""
 
     def __init__(self, memory_dir: Path, state: Any | None = None) -> None:
         self._memory_dir = memory_dir
-        self._path = memory_dir / "troubleshooting_patterns.jsonl"
         self._state = state
 
     def append_pattern(self, pattern: TroubleshootingPattern) -> None:
-        """Append or merge *pattern* into the store.
+        """Append or merge *pattern* into Dolt.
 
         Deduplicates by ``(language, pattern_name)`` — on collision the
         existing record's frequency and source_issues are merged.
         """
-        all_patterns = self._load_all()
-        key = (pattern.language.lower(), pattern.pattern_name.lower())
-        merged = False
-
-        for i, existing in enumerate(all_patterns):
-            if (existing.language.lower(), existing.pattern_name.lower()) == key:
-                existing.frequency += pattern.frequency
-                existing.source_issues = sorted(
-                    set(existing.source_issues) | set(pattern.source_issues)
-                )
-                all_patterns[i] = existing
-                merged = True
-                break
-
-        if not merged:
-            all_patterns.append(pattern)
-
-        self._write_all(all_patterns)
-
-        # Dual-write to Dolt when available
         if self._state and hasattr(self._state, "append_troubleshooting_pattern"):
             try:
                 self._state.append_troubleshooting_pattern(pattern.model_dump())
             except Exception:  # noqa: BLE001
-                logger.debug("Dolt troubleshooting pattern write failed", exc_info=True)
+                logger.warning("Dolt troubleshooting pattern write failed", exc_info=True)
 
     def load_patterns(
         self, *, language: str | None = None, limit: int | None = 10
@@ -98,7 +77,6 @@ class TroubleshootingPatternStore:
 
         Returns up to *limit* patterns sorted by frequency descending.
         Pass ``limit=None`` to return all patterns without a cap.
-        Tries Dolt first when available, falls back to file.
         """
         if self._state and hasattr(self._state, "load_troubleshooting_patterns"):
             try:
@@ -112,72 +90,18 @@ class TroubleshootingPatternStore:
                             patterns.append(TroubleshootingPattern.model_validate(row))
                         except Exception:  # noqa: BLE001
                             continue
-                    if patterns:
-                        return patterns
+                    return patterns
             except Exception:  # noqa: BLE001
-                logger.debug(
-                    "Dolt troubleshooting load failed, falling back", exc_info=True
-                )
-
-        all_patterns = self._load_all()
-        if language:
-            lang_lower = language.lower()
-            all_patterns = [
-                p
-                for p in all_patterns
-                if p.language.lower() == lang_lower or p.language.lower() == "general"
-            ]
-        all_patterns.sort(key=lambda p: p.frequency, reverse=True)
-        return all_patterns if limit is None else all_patterns[:limit]
+                logger.debug("Dolt troubleshooting load failed", exc_info=True)
+        return []
 
     def increment_frequency(self, language: str, pattern_name: str) -> None:
         """Bump the frequency counter for an existing pattern."""
-        all_patterns = self._load_all()
-        key = (language.lower(), pattern_name.lower())
-        for i, existing in enumerate(all_patterns):
-            if (existing.language.lower(), existing.pattern_name.lower()) == key:
-                existing.frequency += 1
-                all_patterns[i] = existing
-                self._write_all(all_patterns)
-                return
-
-    # -- internal ---------------------------------------------------------
-
-    def _load_all(self) -> list[TroubleshootingPattern]:
-        if not self._path.exists():
-            return []
-        try:
-            lines = self._path.read_text().strip().splitlines()
-        except OSError:
-            return []
-        patterns: list[TroubleshootingPattern] = []
-        for line in lines:
-            if not line.strip():
-                continue
+        if self._state and hasattr(self._state, "increment_troubleshooting_frequency"):
             try:
-                patterns.append(TroubleshootingPattern.model_validate_json(line))
+                self._state.increment_troubleshooting_frequency(language, pattern_name)
             except Exception:  # noqa: BLE001
-                logger.warning(
-                    "Skipping malformed troubleshooting pattern: %s", line[:80]
-                )
-        return patterns
-
-    def _write_all(self, patterns: list[TroubleshootingPattern]) -> None:
-        try:
-            import os  # noqa: PLC0415
-
-            self._memory_dir.mkdir(parents=True, exist_ok=True)
-            with self._path.open("w") as f:
-                for p in patterns:
-                    f.write(p.model_dump_json() + "\n")
-                f.flush()
-                os.fsync(f.fileno())
-        except OSError:
-            logger.warning(
-                "Could not write troubleshooting patterns to %s",
-                self._path,
-                exc_info=True,
-            )
+                logger.debug("Dolt troubleshooting increment failed", exc_info=True)
 
 
 # ---------------------------------------------------------------------------

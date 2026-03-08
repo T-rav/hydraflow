@@ -452,7 +452,7 @@ class TestWorktreeCreationFailure:
         from state import StateTracker
 
         issue = TaskFactory.create(id=99)
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         state.set_review_feedback(99, "Fix the scope creep")
 
         phase, mock_wt, _ = make_implement_phase(config, [issue])
@@ -1192,7 +1192,7 @@ class TestRetryCapEscalation:
             max_issue_attempts=3,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         issue = TaskFactory.create()
         phase, _, _ = make_implement_phase(config, [issue])
@@ -1215,7 +1215,7 @@ class TestRetryCapEscalation:
             max_issue_attempts=2,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         issue = TaskFactory.create()
 
@@ -1271,7 +1271,7 @@ class TestRetryCapEscalation:
             max_issue_attempts=3,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         issue = TaskFactory.create()
         phase, _, _ = make_implement_phase(config, [issue])
@@ -1369,7 +1369,7 @@ class TestCheckAttemptCap:
             max_issue_attempts=3,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         issue = TaskFactory.create()
         phase, _, _ = make_implement_phase(config, [issue])
@@ -1387,7 +1387,7 @@ class TestCheckAttemptCap:
             max_issue_attempts=3,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         issue = TaskFactory.create()
         phase, _, _ = make_implement_phase(config, [issue])
@@ -1409,7 +1409,7 @@ class TestCheckAttemptCap:
             max_issue_attempts=2,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         issue = TaskFactory.create()
         phase, _, _ = make_implement_phase(config, [issue])
@@ -1433,7 +1433,7 @@ class TestCheckAttemptCap:
             max_issue_attempts=2,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         issue = TaskFactory.create()
         phase, _, _ = make_implement_phase(config, [issue])
@@ -1455,7 +1455,7 @@ class TestCheckAttemptCap:
             max_issue_attempts=2,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         issue = TaskFactory.create()
         phase, _, mock_prs = make_implement_phase(config, [issue])
@@ -1739,7 +1739,7 @@ class TestWorkerInner:
             max_issue_attempts=1,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         issue = TaskFactory.create()
 

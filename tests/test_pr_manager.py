@@ -125,7 +125,7 @@ async def test_post_comment_calls_gh_issue_comment(event_bus, tmp_path):
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     mock_create = SubprocessMockBuilder().with_stdout("").build()
@@ -164,7 +164,7 @@ async def test_post_comment_handles_error(event_bus, tmp_path):
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     mock_create = (
@@ -191,7 +191,7 @@ async def test_post_pr_comment_calls_gh_pr_comment(event_bus, tmp_path):
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     mock_create = SubprocessMockBuilder().with_stdout("").build()
@@ -229,7 +229,7 @@ async def test_post_pr_comment_handles_error(event_bus, tmp_path):
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     mock_create = (
@@ -256,7 +256,7 @@ async def test_submit_review_approve_calls_correct_flag(event_bus, tmp_path):
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     mock_create = SubprocessMockBuilder().with_stdout("").build()
@@ -286,7 +286,7 @@ async def test_submit_review_request_changes_calls_correct_flag(event_bus, tmp_p
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     mock_create = SubprocessMockBuilder().with_stdout("").build()
@@ -312,7 +312,7 @@ async def test_submit_review_comment_calls_correct_flag(event_bus, tmp_path):
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     mock_create = SubprocessMockBuilder().with_stdout("").build()
@@ -349,7 +349,7 @@ async def test_submit_review_failure_returns_false(event_bus, tmp_path):
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     mock_create = (
@@ -377,7 +377,7 @@ async def test_submit_review_raises_self_review_error_on_request_changes_own_pr(
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     mock_create = (
@@ -406,7 +406,7 @@ async def test_submit_review_raises_self_review_error_on_approve_own_pr(
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     mock_create = (
@@ -432,7 +432,7 @@ async def test_submit_review_returns_false_on_generic_error(event_bus, tmp_path)
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     mock_create = (
@@ -460,7 +460,7 @@ async def test_create_issue_calls_gh_issue_create(event_bus, tmp_path):
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     issue_url = "https://github.com/test-org/test-repo/issues/99"
@@ -481,7 +481,7 @@ async def test_create_issue_passes_correct_gh_args(config, event_bus, tmp_path):
         repo=config.repo,
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     issue_url = "https://github.com/test-org/test-repo/issues/99"
@@ -505,7 +505,7 @@ async def test_create_issue_publishes_event(event_bus, tmp_path):
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     issue_url = "https://github.com/test-org/test-repo/issues/55"
@@ -540,7 +540,7 @@ async def test_create_issue_failure_returns_zero(event_bus, tmp_path):
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     mock_create = (
@@ -561,7 +561,7 @@ async def test_create_issue_no_labels(event_bus, tmp_path):
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     issue_url = "https://github.com/test-org/test-repo/issues/10"
@@ -588,7 +588,7 @@ class TestUploadScreenshotGist:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             dry_run=True,
         )
         mgr = _make_manager(cfg, event_bus)
@@ -602,7 +602,7 @@ class TestUploadScreenshotGist:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         gist_url = "https://gist.github.com/testuser/abc123"
@@ -624,7 +624,7 @@ class TestUploadScreenshotGist:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         gist_url = "https://gist.github.com/user/def456"
@@ -646,7 +646,7 @@ class TestUploadScreenshotGist:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mock_exec = SubprocessMockBuilder().with_returncode(1).build()
@@ -661,7 +661,7 @@ class TestUploadScreenshotGist:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mock_exec = SubprocessMockBuilder().with_stdout("unexpected output").build()
@@ -679,7 +679,7 @@ class TestUploadScreenshotGist:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             screenshot_gist_public=False,
         )
         mgr = _make_manager(cfg, event_bus)
@@ -701,7 +701,7 @@ class TestUploadScreenshotGist:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             screenshot_gist_public=True,
         )
         mgr = _make_manager(cfg, event_bus)
@@ -722,7 +722,7 @@ class TestUploadScreenshotGist:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         png_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII="
@@ -744,7 +744,7 @@ class TestUploadScreenshotGist:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mgr._run_gh = AsyncMock()
@@ -768,7 +768,7 @@ class TestGhJsonQuery:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mgr._run_gh = AsyncMock(return_value='{"value": 42}')
@@ -810,7 +810,7 @@ class TestGhJsonQuery:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mgr._run_gh = AsyncMock(side_effect=RuntimeError("boom"))
@@ -834,7 +834,7 @@ class TestGhJsonQuery:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mgr._run_gh = AsyncMock(side_effect=RuntimeError("traceable error"))
@@ -861,7 +861,7 @@ class TestGhJsonQuery:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mgr._run_gh = AsyncMock(side_effect=RuntimeError("minor error"))
@@ -1502,7 +1502,7 @@ async def test_get_pr_checks_returns_parsed_json(event_bus, tmp_path):
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     checks_json = '[{"name":"ci","state":"SUCCESS"}]'
@@ -1521,7 +1521,7 @@ async def test_get_pr_checks_returns_empty_on_failure(event_bus, tmp_path):
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     mock_create = (
@@ -1559,7 +1559,7 @@ async def test_wait_for_ci_passes_when_all_succeed(event_bus, tmp_path):
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     stop = asyncio.Event()
@@ -1586,7 +1586,7 @@ async def test_wait_for_ci_fails_on_failure(event_bus, tmp_path):
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     stop = asyncio.Event()
@@ -1613,7 +1613,7 @@ async def test_wait_for_ci_passes_when_no_checks(event_bus, tmp_path):
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     stop = asyncio.Event()
@@ -1636,7 +1636,7 @@ async def test_wait_for_ci_respects_stop_event(event_bus, tmp_path):
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     stop = asyncio.Event()
@@ -1674,7 +1674,7 @@ async def test_wait_for_ci_already_complete_returns_immediately(event_bus, tmp_p
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     stop = asyncio.Event()
@@ -1696,7 +1696,7 @@ async def test_wait_for_ci_publishes_ci_check_events(event_bus, tmp_path):
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     stop = asyncio.Event()
@@ -1726,7 +1726,7 @@ class TestSumLabelCounts:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(side_effect=[3, 7])
@@ -1748,7 +1748,7 @@ class TestSumLabelCounts:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(
@@ -1770,7 +1770,7 @@ class TestSumLabelCounts:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(side_effect=RuntimeError("network error"))
@@ -1790,7 +1790,7 @@ class TestSumLabelCounts:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock()
@@ -1817,7 +1817,7 @@ async def test_ensure_labels_exist_creates_all_hydraflow_labels(event_bus, tmp_p
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
 
@@ -1872,7 +1872,7 @@ async def test_ensure_labels_exist_uses_config_label_names(config, event_bus, tm
         epic_child_label=["custom-epic-child"],
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
 
@@ -1939,7 +1939,7 @@ async def test_ensure_labels_exist_handles_individual_failures(event_bus, tmp_pa
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
 
@@ -2063,7 +2063,7 @@ async def test_run_with_body_file_writes_temp_file(event_bus, tmp_path):
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     mock_create = SubprocessMockBuilder().with_stdout("ok").build()
@@ -2095,7 +2095,7 @@ async def test_run_with_body_file_cleans_up_temp_file(event_bus, tmp_path):
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     mock_create = SubprocessMockBuilder().with_stdout("ok").build()
@@ -2128,7 +2128,7 @@ async def test_run_with_body_file_cleans_up_on_error(event_bus, tmp_path):
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     mock_create = SubprocessMockBuilder().with_returncode(1).with_stderr("fail").build()
@@ -2169,7 +2169,7 @@ async def test_post_comment_chunks_large_body(event_bus, tmp_path):
     cfg = ConfigFactory.create(
         repo_root=tmp_path,
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     mgr = _make_manager(cfg, event_bus)
     mock_create = SubprocessMockBuilder().with_stdout("").build()
@@ -2205,7 +2205,7 @@ class TestListOpenPrs:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
 
@@ -2240,7 +2240,7 @@ class TestListOpenPrs:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
 
@@ -2271,7 +2271,7 @@ class TestListOpenPrs:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
 
@@ -2300,7 +2300,7 @@ class TestListOpenPrs:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
 
@@ -2328,7 +2328,7 @@ class TestListOpenPrs:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mock_create = (
@@ -2365,7 +2365,7 @@ class TestListHitlItems:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mock_create = SubprocessMockBuilder().with_stdout("[]").build()
@@ -2382,7 +2382,7 @@ class TestListHitlItems:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
 
@@ -2431,7 +2431,7 @@ class TestListHitlItems:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         captured: list[tuple[str, ...]] = []
@@ -2455,7 +2455,7 @@ class TestListHitlItems:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
 
@@ -2492,7 +2492,7 @@ class TestListHitlItems:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
 
@@ -2517,7 +2517,7 @@ class TestListHitlItems:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mock_create = (
@@ -2550,7 +2550,7 @@ class TestListHitlItems:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
 
@@ -2654,7 +2654,7 @@ class TestRetryWrapperUsage:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         with patch(
@@ -2686,7 +2686,7 @@ class TestRetryWrapperUsage:
             gh_max_retries=5,
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         with patch(
@@ -2712,7 +2712,7 @@ class TestGetLabelCounts:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
 
@@ -2748,7 +2748,7 @@ class TestGetLabelCounts:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
 
@@ -2776,7 +2776,7 @@ class TestGetLabelCounts:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
 
@@ -3007,7 +3007,7 @@ class TestCommentHelper:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mock_create = SubprocessMockBuilder().with_stdout("").build()
@@ -3025,7 +3025,7 @@ class TestCommentHelper:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mock_create = SubprocessMockBuilder().with_stdout("").build()
@@ -3055,7 +3055,7 @@ class TestCommentHelper:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mock_create = (
@@ -3237,7 +3237,7 @@ class TestCountHelpers:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(side_effect=[5, 7])
@@ -3256,7 +3256,7 @@ class TestCountHelpers:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(side_effect=RuntimeError("network error"))
@@ -3272,7 +3272,7 @@ class TestCountHelpers:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(side_effect=RuntimeError("network error"))
@@ -3289,7 +3289,7 @@ class TestCountHelpers:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(side_effect=ValueError("bad parse"))
@@ -3303,7 +3303,7 @@ class TestCountHelpers:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(side_effect=[7, 8])
@@ -3317,7 +3317,7 @@ class TestCountHelpers:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(side_effect=RuntimeError("network error"))
@@ -3331,7 +3331,7 @@ class TestCountHelpers:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(side_effect=RuntimeError("network error"))
@@ -3346,7 +3346,7 @@ class TestCountHelpers:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(side_effect=ValueError("bad parse"))
@@ -3358,7 +3358,7 @@ class TestCountHelpers:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(return_value=12)
@@ -3372,7 +3372,7 @@ class TestCountHelpers:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(side_effect=RuntimeError("network error"))
@@ -3386,7 +3386,7 @@ class TestCountHelpers:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(side_effect=RuntimeError("network error"))
@@ -3401,7 +3401,7 @@ class TestCountHelpers:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(side_effect=ValueError("bad parse"))
@@ -3415,7 +3415,7 @@ class TestCountHelpers:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         captured_queries: list[str] = []
@@ -3438,7 +3438,7 @@ class TestCountHelpers:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         captured_queries: list[str] = []
@@ -3459,7 +3459,7 @@ class TestCountHelpers:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         captured_queries: list[str] = []
@@ -3846,7 +3846,7 @@ class TestListHitlItemsExceptionHandling:
             repo=config.repo,
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mock_create = (
@@ -3876,7 +3876,7 @@ class TestListHitlItemsExceptionHandling:
             repo=config.repo,
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
 
@@ -3931,7 +3931,7 @@ class TestListHitlItemsExceptionHandling:
             repo=config.repo,
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
 
@@ -4005,7 +4005,7 @@ class TestGetPrHeadSha:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         response = '{"headRefOid":"abc123def456789"}'
@@ -4022,7 +4022,7 @@ class TestGetPrHeadSha:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mock_create = (
@@ -4061,7 +4061,7 @@ class TestGetPrReviews:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         response = json.dumps(
@@ -4089,7 +4089,7 @@ class TestGetPrReviews:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mock_create = (
@@ -4128,7 +4128,7 @@ class TestGetPrMergeable:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mock_create = SubprocessMockBuilder().with_stdout("true\n").build()
@@ -4144,7 +4144,7 @@ class TestGetPrMergeable:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mock_create = SubprocessMockBuilder().with_stdout("false\n").build()
@@ -4160,7 +4160,7 @@ class TestGetPrMergeable:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mock_create = SubprocessMockBuilder().with_stdout("null\n").build()
@@ -4176,7 +4176,7 @@ class TestGetPrMergeable:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mock_create = (
@@ -4215,7 +4215,7 @@ class TestGetPrComments:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         response = json.dumps(
@@ -4241,7 +4241,7 @@ class TestGetPrComments:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mgr = _make_manager(cfg, event_bus)
         mock_create = (

@@ -59,12 +59,12 @@ class TestStateInterruptedIssues:
     def test_interrupted_issues_persist_across_load(self, tmp_path: Path) -> None:
         from state import StateTracker
 
-        state_file = tmp_path / "state.json"
-        tracker1 = StateTracker(state_file)
+        dolt_path = tmp_path / "dolt_db"
+        tracker1 = StateTracker(dolt_path)
         tracker1.set_interrupted_issues({5: "plan", 10: "implement"})
 
         # Load from disk in a new instance
-        tracker2 = StateTracker(state_file)
+        tracker2 = StateTracker(dolt_path)
         assert tracker2.get_interrupted_issues() == {5: "plan", 10: "implement"}
 
     def test_interrupted_issues_int_key_conversion(self, tmp_path: Path) -> None:
@@ -89,7 +89,7 @@ def _make_orchestrator(tmp_path: Path) -> HydraFlowOrchestrator:
     config = ConfigFactory.create(
         repo_root=tmp_path / "repo",
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     (tmp_path / "repo").mkdir(parents=True, exist_ok=True)
     (tmp_path / "worktrees").mkdir(parents=True, exist_ok=True)

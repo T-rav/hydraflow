@@ -43,7 +43,7 @@ class TestWaitAndFixCI:
             max_ci_fix_attempts=2,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         issue = TaskFactory.create()
@@ -66,7 +66,7 @@ class TestWaitAndFixCI:
             max_ci_fix_attempts=1,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         issue = TaskFactory.create()
@@ -97,7 +97,7 @@ class TestWaitAndFixCI:
             max_ci_fix_attempts=0,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         issue = TaskFactory.create()
@@ -120,7 +120,7 @@ class TestWaitAndFixCI:
             max_ci_fix_attempts=2,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         issue = TaskFactory.create()
@@ -148,7 +148,7 @@ class TestWaitAndFixCI:
             max_ci_fix_attempts=2,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         issue = TaskFactory.create()
@@ -193,7 +193,7 @@ class TestWaitAndFixCI:
             max_ci_fix_attempts=3,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         issue = TaskFactory.create()
@@ -227,7 +227,7 @@ class TestWaitAndFixCI:
             max_ci_fix_attempts=1,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         issue = TaskFactory.create()
@@ -261,7 +261,7 @@ class TestWaitAndFixCI:
             max_ci_fix_attempts=1,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         issue = TaskFactory.create()
@@ -292,7 +292,7 @@ class TestWaitAndFixCI:
             max_ci_fix_attempts=1,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         issue = TaskFactory.create()
@@ -330,7 +330,7 @@ class TestWaitAndFixCIEdgeCases:
             max_ci_fix_attempts=2,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         issue = TaskFactory.create(id=42)
@@ -363,7 +363,7 @@ class TestWaitAndFixCIEdgeCases:
             max_ci_fix_attempts=2,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         issue = TaskFactory.create(id=42)
@@ -402,7 +402,7 @@ class TestWaitAndFixCIWithLogs:
             max_ci_fix_attempts=1,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         phase = make_review_phase(config, default_mocks=True)
         pr = PRInfoFactory.create()
@@ -459,7 +459,7 @@ class TestWaitAndFixCIWithLogs:
             max_ci_fix_attempts=1,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
 
         await phase.wait_and_fix_ci(pr, issue, wt, result, 0)
@@ -482,7 +482,7 @@ class TestCodeScanningAlertsFetch:
             code_scanning_enabled=False,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         pr = PRInfoFactory.create()
@@ -497,7 +497,7 @@ class TestCodeScanningAlertsFetch:
             code_scanning_enabled=True,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         pr = PRInfoFactory.create()
@@ -515,7 +515,7 @@ class TestCodeScanningAlertsFetch:
             code_scanning_enabled=True,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         pr = PRInfoFactory.create()
@@ -532,7 +532,7 @@ class TestCodeScanningAlertsFetch:
             code_scanning_enabled=True,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         pr = PRInfoFactory.create()
@@ -555,7 +555,7 @@ class TestCodeScanningAlertThreading:
             code_scanning_enabled=True,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         issue = TaskFactory.create()
@@ -578,7 +578,7 @@ class TestCodeScanningAlertThreading:
             max_ci_fix_attempts=1,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         issue = TaskFactory.create()
@@ -616,7 +616,7 @@ class TestVisualGate:
             visual_gate_enabled=False,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         pr = PRInfoFactory.create()
@@ -637,7 +637,7 @@ class TestVisualGate:
             visual_gate_bypass=True,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         phase._bus.publish = AsyncMock()
@@ -664,7 +664,7 @@ class TestVisualGate:
             visual_gate_bypass=False,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         phase._bus.publish = AsyncMock()
@@ -687,7 +687,7 @@ class TestVisualGate:
             visual_gate_enabled=True,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         phase._bus.publish = AsyncMock()
@@ -714,7 +714,7 @@ class TestVisualGate:
             visual_gate_enabled=True,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         phase._post_merge.handle_approved = AsyncMock()
@@ -740,7 +740,7 @@ class TestVisualGate:
             visual_gate_bypass=False,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         phase._bus.publish = AsyncMock()
@@ -769,7 +769,7 @@ class TestVisualGate:
             visual_gate_bypass=False,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         phase._bus.publish = AsyncMock()
@@ -794,7 +794,7 @@ class TestVisualGate:
             visual_gate_bypass=False,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         phase._bus.publish = AsyncMock()
@@ -825,7 +825,7 @@ class TestVisualGate:
             visual_gate_bypass=False,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         phase._bus.publish = AsyncMock()

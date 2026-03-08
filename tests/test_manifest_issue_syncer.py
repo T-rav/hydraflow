@@ -20,7 +20,7 @@ def _issues_payload(entries: list[dict]) -> str:
 @pytest.mark.asyncio
 async def test_manifest_issue_syncer_posts_comment(tmp_path: Path, monkeypatch) -> None:
     config = ConfigFactory.create(repo_root=tmp_path, git_user_name="tester")
-    state = StateTracker(config.state_file)
+    state = StateTracker(config.dolt_path)
     prs = MagicMock()
     prs.create_issue = AsyncMock(return_value=123)
     prs.post_comment = AsyncMock()
@@ -43,7 +43,7 @@ async def test_manifest_issue_syncer_posts_comment(tmp_path: Path, monkeypatch) 
 @pytest.mark.asyncio
 async def test_manifest_issue_syncer_reuses_existing_issue(tmp_path: Path, monkeypatch):
     config = ConfigFactory.create(repo_root=tmp_path, git_user_name="tester")
-    state = StateTracker(config.state_file)
+    state = StateTracker(config.dolt_path)
     prs = MagicMock()
     prs.create_issue = AsyncMock()
     prs.post_comment = AsyncMock()
@@ -78,7 +78,7 @@ async def test_manifest_issue_syncer_creates_when_owner_missing(
     tmp_path: Path, monkeypatch
 ):
     config = ConfigFactory.create(repo_root=tmp_path, git_user_name="tester")
-    state = StateTracker(config.state_file)
+    state = StateTracker(config.dolt_path)
     prs = MagicMock()
     prs.create_issue = AsyncMock(return_value=200)
     prs.post_comment = AsyncMock()
@@ -111,7 +111,7 @@ async def test_manifest_issue_syncer_creates_when_owner_missing(
 @pytest.mark.asyncio
 async def test_manifest_issue_syncer_skips_when_hash_matches(tmp_path: Path) -> None:
     config = ConfigFactory.create(repo_root=tmp_path, git_user_name="tester")
-    state = StateTracker(config.state_file)
+    state = StateTracker(config.dolt_path)
     state.set_manifest_issue_number(55)
     state.set_manifest_snapshot_hash("hash123")
     prs = MagicMock()

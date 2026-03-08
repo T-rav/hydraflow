@@ -1659,6 +1659,14 @@ class DoltStore:
         rows = self.db.fetchall("SELECT stat_key, data_json FROM inference_stats")
         return {r[0]: self._json_loads(r[1]) for r in rows if r[1]}
 
+    def load_all_inference_stats_by_prefix(self, prefix: str) -> dict[str, Any]:
+        """Load all inference stats whose key starts with *prefix*."""
+        rows = self.db.fetchall(
+            "SELECT stat_key, data_json FROM inference_stats WHERE stat_key LIKE %s",
+            (prefix + "%",),
+        )
+        return {r[0]: self._json_loads(r[1]) for r in rows if r[1]}
+
     # ------------------------------------------------------------------
     # Model pricing
     # ------------------------------------------------------------------

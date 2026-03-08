@@ -881,7 +881,7 @@ class TestDisabledWorkerPersistenceAcrossRestart:
         state = StateTracker(state_path)
         assert state.get_disabled_workers() == set()
 
-    def test_corrupt_state_file_disabled_workers_defaults_on_restart(
+    def test_corrupt_dolt_disabled_workers_defaults_on_restart(
         self, config, event_bus: EventBus, tmp_path: Path
     ) -> None:
         """After a corrupt state file, orchestrator should start with no disabled workers."""

@@ -1491,15 +1491,15 @@ class TestContextSeed:
     def test_seed_creates_manifest_digest_and_metrics_cache(
         self, tmp_path: Path
     ) -> None:
-        state_file = tmp_path / ".hydraflow" / "state.json"
-        config = ConfigFactory.create(repo_root=tmp_path, state_file=state_file)
+        dolt_path = tmp_path / ".hydraflow" / "dolt_db"
+        config = ConfigFactory.create(repo_root=tmp_path, dolt_path=dolt_path)
 
         log_lines = _seed_context_assets(config)
 
         manifest_path = tmp_path / ".hydraflow" / "manifest" / "manifest.md"
         digest_path = tmp_path / ".hydraflow" / "memory" / "digest.md"
         repo_slug = config.repo.replace("/", "-") if config.repo else "unknown"
-        metrics_file = state_file.parent / "metrics" / repo_slug / "snapshots.jsonl"
+        metrics_file = dolt_path.parent / "metrics" / repo_slug / "snapshots.jsonl"
 
         assert manifest_path.is_file()
         assert digest_path.is_file()
@@ -1508,9 +1508,9 @@ class TestContextSeed:
         assert "Seeded during prep" in digest_path.read_text()
 
     def test_seed_skipped_in_dry_run(self, tmp_path: Path) -> None:
-        state_file = tmp_path / ".hydraflow" / "state.json"
+        dolt_path = tmp_path / ".hydraflow" / "dolt_db"
         config = ConfigFactory.create(
-            repo_root=tmp_path, dry_run=True, state_file=state_file
+            repo_root=tmp_path, dry_run=True, dolt_path=dolt_path
         )
 
         log_lines = _seed_context_assets(config)
@@ -1519,13 +1519,13 @@ class TestContextSeed:
         assert "- Context seed skipped" in log_lines[0]
 
     def test_seed_does_not_overwrite_existing_files(self, tmp_path: Path) -> None:
-        state_file = tmp_path / ".hydraflow" / "state.json"
-        config = ConfigFactory.create(repo_root=tmp_path, state_file=state_file)
+        dolt_path = tmp_path / ".hydraflow" / "dolt_db"
+        config = ConfigFactory.create(repo_root=tmp_path, dolt_path=dolt_path)
         _seed_context_assets(config)
 
         digest_path = tmp_path / ".hydraflow" / "memory" / "digest.md"
         metrics_file = (
-            state_file.parent
+            dolt_path.parent
             / "metrics"
             / config.repo.replace("/", "-")
             / "snapshots.jsonl"

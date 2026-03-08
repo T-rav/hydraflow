@@ -2651,13 +2651,15 @@ def create_router(
         """Return aggregated retrospective stats and recent entries."""
         from retrospective import RetrospectiveEntry
 
-        retro_path = config.data_path("memory", "retrospectives.jsonl")
         entries: list[RetrospectiveEntry] = []
-        if retro_path.exists():
-            for line in retro_path.read_text().strip().splitlines():
-                with contextlib.suppress(Exception):
-                    entries.append(RetrospectiveEntry.model_validate_json(line))
-        entries = entries[-config.retrospective_window :]
+        if state and hasattr(state, "load_recent_retrospectives"):
+            try:
+                rows = state.load_recent_retrospectives(config.retrospective_window)
+                for row in rows:
+                    with contextlib.suppress(Exception):
+                        entries.append(RetrospectiveEntry.model_validate(row))
+            except Exception:  # noqa: BLE001
+                pass
 
         if not entries:
             return JSONResponse(

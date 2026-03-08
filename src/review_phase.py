@@ -114,7 +114,7 @@ class ReviewPhase:
         self._bus = event_bus or EventBus()
         self._update_bg_worker_status = update_bg_worker_status
         self._harness_insights = harness_insights
-        self._insights = ReviewInsightStore(config.memory_dir)
+        self._insights = ReviewInsightStore(config.memory_dir, state=state)
         self._active_issues: set[int] = set()
         self._active_issues_lock = asyncio.Lock()
         self._conflict_resolver = conflict_resolver or MergeConflictResolver(

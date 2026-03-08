@@ -897,12 +897,10 @@ class HydraFlowConfig(BaseModel):
         default=Path("."),
         description="Directory for persistent HydraFlow data (.hydraflow)",
     )
-    state_file: Path = Field(default=Path("."), description="Path to state JSON file")
-
-    # Dolt backend (optional)
-    dolt_path: Path | None = Field(
-        default=None,
-        description="Path to Dolt database directory (enables Dolt backend when set)",
+    # Dolt backend (always-on data layer)
+    dolt_path: Path = Field(
+        default=Path("."),
+        description="Path to Dolt database directory",
     )
     dolt_port: int = Field(default=3307, description="Port for Dolt SQL server")
 
@@ -1223,6 +1221,11 @@ class HydraFlowConfig(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
     @property
+    def state_file(self) -> Path:
+        """Backward-compatible alias — returns ``dolt_path``."""
+        return self.dolt_path
+
+    @property
     def all_pipeline_labels(self) -> list[str]:
         """Return a flat list of every pipeline-stage label (for cleanup)."""
         result: list[str] = []
@@ -1306,7 +1309,7 @@ class HydraFlowConfig(BaseModel):
         Resolution order (two-phase path resolution):
           1. ``_resolve_base_paths`` — repo_root, worktree_base, data_root
           2. ``_resolve_repo_and_identity`` — repo slug, gh_token, git identity
-          3. ``_resolve_repo_scoped_paths`` — state_file, event_log_path, config_file
+          3. ``_resolve_repo_scoped_paths`` — dolt_path, event_log_path, config_file
 
         Base paths are resolved first because repo detection depends on repo_root,
         and repo-scoped paths depend on both data_root and the repo slug.
@@ -1508,7 +1511,7 @@ def _resolve_repo_and_identity(config: HydraFlowConfig) -> None:
 
 
 def _resolve_repo_scoped_paths(config: HydraFlowConfig) -> None:
-    """Resolve state_file, event_log_path, and config_file under repo-scoped dirs.
+    """Resolve dolt_path, event_log_path, and config_file under repo-scoped dirs.
 
     Called after both ``_resolve_base_paths`` (which provides ``data_root``) and
     ``_resolve_repo_and_identity`` (which provides the repo slug).  Default paths
@@ -1530,23 +1533,6 @@ def _resolve_repo_scoped_paths(config: HydraFlowConfig) -> None:
     # reached when repo_root is the filesystem root ("/").
     repo_dir = data_root / slug if slug else data_root
 
-    # --- state_file ---
-    if "state_file" not in explicit:
-        target = repo_dir / "state.json"
-        if slug:
-            flat = data_root / "state.json"
-            if not target.exists() and flat.exists():
-                try:
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(flat, target)
-                except OSError as exc:
-                    logger.warning("Failed to migrate %s → %s: %s", flat, target, exc)
-        object.__setattr__(config, "state_file", target)
-    else:
-        object.__setattr__(
-            config, "state_file", config.state_file.expanduser().resolve()
-        )
-
     # --- event_log_path ---
     if "event_log_path" not in explicit:
         target = repo_dir / "events.jsonl"
@@ -1565,7 +1551,9 @@ def _resolve_repo_scoped_paths(config: HydraFlowConfig) -> None:
         )
 
     # --- dolt_path ---
-    if "dolt_path" in explicit and config.dolt_path is not None:
+    if "dolt_path" not in explicit:
+        object.__setattr__(config, "dolt_path", repo_dir / "dolt")
+    else:
         object.__setattr__(config, "dolt_path", config.dolt_path.expanduser().resolve())
 
     # --- config_file ---
@@ -1575,24 +1563,6 @@ def _resolve_repo_scoped_paths(config: HydraFlowConfig) -> None:
             config, "config_file", config.config_file.expanduser().resolve()
         )
 
-    # --- sessions.jsonl (derived from state_file parent, migrate if needed) ---
-    # Only migrate when state_file is at its default location; skip when the user
-    # has pointed state_file at a custom path to avoid copying into arbitrary dirs.
-    if "state_file" not in explicit:
-        flat_sessions = data_root / "sessions.jsonl"
-        scoped_sessions = config.state_file.parent / "sessions.jsonl"
-        if (
-            scoped_sessions != flat_sessions
-            and not scoped_sessions.exists()
-            and flat_sessions.exists()
-        ):
-            try:
-                scoped_sessions.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(flat_sessions, scoped_sessions)
-            except OSError as exc:
-                logger.warning(
-                    "Failed to migrate %s → %s: %s", flat_sessions, scoped_sessions, exc
-                )
 
 
 def _dotenv_lookup(repo_root: Path, *keys: str) -> str:

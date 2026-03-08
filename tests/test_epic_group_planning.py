@@ -65,7 +65,7 @@ def _make_phase(
 
     Returns (phase, planners_mock, prs_mock, store, stop_event).
     """
-    state = StateTracker(config.state_file)
+    state = StateTracker(config.dolt_path)
     bus = EventBus()
     fetcher = AsyncMock()
     store = IssueStore(config, fetcher, bus)
@@ -303,7 +303,7 @@ class TestPlanEpicGroup:
         cfg = ConfigFactory.create(
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         # Override the iteration limit
         object.__setattr__(cfg, "epic_gap_review_max_iterations", 1)
@@ -525,7 +525,7 @@ class TestPlanIssuesMixedEpicAndStandalone:
         cfg = ConfigFactory.create(
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         # epic_group_planning defaults to False in ConfigFactory
 

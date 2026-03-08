@@ -9,6 +9,54 @@ from prompt_telemetry import PromptTelemetry, _as_float, parse_command_tool_mode
 from tests.helpers import ConfigFactory
 
 
+class _InMemoryState:
+    """Lightweight in-memory mock that supports the state methods used by PromptTelemetry."""
+
+    def __init__(self):
+        self._inferences: list[dict] = []
+        self._stats: dict[str, dict] = {}
+        self._model_pricing: list[dict] = []
+
+    def append_inference(self, record: dict) -> None:
+        self._inferences.append(record)
+
+    def save_inference_stats(self, key: str, data: dict) -> None:
+        self._stats[key] = data
+
+    def load_inference_stats(self, key: str) -> dict | None:
+        return self._stats.get(key)
+
+    def count_inferences(self) -> int:
+        return len(self._inferences)
+
+    def load_recent_inferences(self, limit: int = 100) -> list[dict]:
+        # Return newest first (like DoltStore)
+        return list(reversed(self._inferences))[:limit]
+
+    def load_all_inference_stats_by_prefix(self, prefix: str) -> dict[str, dict]:
+        return {k: v for k, v in self._stats.items() if k.startswith(prefix)}
+
+    def load_all_model_pricing(self) -> list[dict]:
+        return self._model_pricing
+
+
+def _make_telemetry(tmp_path, pricing_models=None):
+    """Create a PromptTelemetry with an in-memory state backend.
+
+    *pricing_models* is an optional dict of ``{model_id: {field: value}}``
+    entries to seed the in-memory pricing table.
+    """
+    config = ConfigFactory.create(repo_root=tmp_path)
+    state = _InMemoryState()
+    if pricing_models:
+        for model_id, fields in pricing_models.items():
+            row = {"model_id": model_id, **fields}
+            state._model_pricing.append(row)
+    pricing = ModelPricingTable(state=state)
+    telemetry = PromptTelemetry(config, pricing=pricing, state=state)
+    return telemetry, state
+
+
 class TestParseCommandToolModel:
     def test_parses_claude_model(self, tmp_path):
         tool, model = parse_command_tool_model(
@@ -34,8 +82,7 @@ class TestParseCommandToolModel:
 
 class TestPromptTelemetry:
     def test_record_writes_inference_and_pr_rollup(self, tmp_path):
-        config = ConfigFactory.create(repo_root=tmp_path)
-        telemetry = PromptTelemetry(config)
+        telemetry, state = _make_telemetry(tmp_path)
 
         telemetry.record(
             source="reviewer",
@@ -58,14 +105,9 @@ class TestPromptTelemetry:
             },
         )
 
-        inf_file = config.data_path("metrics", "prompt", "inferences.jsonl")
-        pr_file = config.data_path("metrics", "prompt", "pr_stats.json")
-        assert inf_file.exists()
-        assert pr_file.exists()
-
-        rows = [ln for ln in inf_file.read_text().splitlines() if ln.strip()]
-        assert len(rows) == 1
-        row = json.loads(rows[0])
+        # Verify inference was appended
+        assert len(state._inferences) == 1
+        row = state._inferences[0]
         assert row["source"] == "reviewer"
         assert row["pr_number"] == 101
         assert row["session_id"] == "sess-1"
@@ -77,25 +119,34 @@ class TestPromptTelemetry:
         assert row["token_estimation_mode"] == "model-aware-chars-per-token"
         assert row["token_estimation_confidence"] in {"low", "medium"}
 
-        rollup = json.loads(pr_file.read_text())
-        pr = rollup["prs"]["101"]
+        # Verify PR rollup stats
+        pr = state.load_inference_stats("pr:101")
+        assert pr is not None
         assert pr["inference_calls"] == 1
         assert pr["history_chars_saved"] == 100
         assert pr["context_chars_saved"] == 300
         assert pr["actual_usage_calls"] == 0
 
-        lifetime = rollup["lifetime"]
+        lifetime = state.load_inference_stats("lifetime")
+        assert lifetime is not None
         assert lifetime["inference_calls"] == 1
         assert lifetime["total_tokens"] == row["total_tokens"]
-        session = rollup["sessions"]["sess-1"]
+
+        session = state.load_inference_stats("session:sess-1")
+        assert session is not None
         assert session["inference_calls"] == 1
         assert session["total_tokens"] == row["total_tokens"]
-        assert rollup["issues"]["42"]["inference_calls"] == 1
-        assert rollup["sources"]["reviewer"]["inference_calls"] == 1
+
+        issue = state.load_inference_stats("issue:42")
+        assert issue is not None
+        assert issue["inference_calls"] == 1
+
+        source = state.load_inference_stats("source:reviewer")
+        assert source is not None
+        assert source["inference_calls"] == 1
 
     def test_record_prefers_actual_usage_when_available(self, tmp_path):
-        config = ConfigFactory.create(repo_root=tmp_path)
-        telemetry = PromptTelemetry(config)
+        telemetry, state = _make_telemetry(tmp_path)
 
         telemetry.record(
             source="implementer",
@@ -111,25 +162,25 @@ class TestPromptTelemetry:
             stats={"input_tokens": 123, "output_tokens": 77, "total_tokens": 200},
         )
 
-        inf_file = config.data_path("metrics", "prompt", "inferences.jsonl")
-        row = json.loads(inf_file.read_text().strip())
+        row = state._inferences[0]
         assert row["token_source"] == "actual"
         assert row["input_tokens"] == 123
         assert row["output_tokens"] == 77
         assert row["total_tokens"] == 200
 
-        pr_file = config.data_path("metrics", "prompt", "pr_stats.json")
-        rollup = json.loads(pr_file.read_text())
-        pr = rollup["prs"]["202"]
+        pr = state.load_inference_stats("pr:202")
         assert pr["total_tokens"] == 200
         assert pr["actual_usage_calls"] == 1
         assert pr["usage_unavailable_calls"] == 0
-        assert rollup["lifetime"]["total_tokens"] == 200
-        assert rollup["sessions"]["sess-2"]["total_tokens"] == 200
+
+        lifetime = state.load_inference_stats("lifetime")
+        assert lifetime["total_tokens"] == 200
+
+        session = state.load_inference_stats("session:sess-2")
+        assert session["total_tokens"] == 200
 
     def test_record_marks_usage_unavailable_when_backend_reports_none(self, tmp_path):
-        config = ConfigFactory.create(repo_root=tmp_path)
-        telemetry = PromptTelemetry(config)
+        telemetry, state = _make_telemetry(tmp_path)
 
         telemetry.record(
             source="triage",
@@ -151,20 +202,16 @@ class TestPromptTelemetry:
             },
         )
 
-        inf_file = config.data_path("metrics", "prompt", "inferences.jsonl")
-        row = json.loads(inf_file.read_text().strip())
+        row = state._inferences[0]
         assert row["usage_status"] == "unavailable"
         assert row["usage_available"] is False
         assert isinstance(row["raw_usage"], list)
 
-        rollup = json.loads(
-            config.data_path("metrics", "prompt", "pr_stats.json").read_text()
-        )
-        assert rollup["lifetime"]["usage_unavailable_calls"] == 1
+        lifetime = state.load_inference_stats("lifetime")
+        assert lifetime["usage_unavailable_calls"] == 1
 
     def test_get_session_and_lifetime_totals(self, tmp_path):
-        config = ConfigFactory.create(repo_root=tmp_path)
-        telemetry = PromptTelemetry(config)
+        telemetry, state = _make_telemetry(tmp_path)
         telemetry.record(
             source="planner",
             tool="claude",
@@ -198,8 +245,7 @@ class TestPromptTelemetry:
         assert telemetry.get_source_totals()["reviewer"]["total_tokens"] == 70
 
     def test_load_inferences_reads_recent_rows(self, tmp_path):
-        config = ConfigFactory.create(repo_root=tmp_path)
-        telemetry = PromptTelemetry(config)
+        telemetry, state = _make_telemetry(tmp_path)
         telemetry.record(
             source="planner",
             tool="claude",
@@ -232,8 +278,7 @@ class TestPromptTelemetry:
         assert rows[0]["issue_number"] == 11
 
     def test_failed_empty_run_does_not_estimate_tokens(self, tmp_path):
-        config = ConfigFactory.create(repo_root=tmp_path)
-        telemetry = PromptTelemetry(config)
+        telemetry, state = _make_telemetry(tmp_path)
         telemetry.record(
             source="implementer",
             tool="codex",
@@ -248,16 +293,14 @@ class TestPromptTelemetry:
             stats={},
         )
 
-        inf_file = config.data_path("metrics", "prompt", "inferences.jsonl")
-        row = json.loads(inf_file.read_text().strip())
+        row = state._inferences[0]
         assert row["status"] == "failed"
         assert row["token_source"] == "estimated"
         assert row["total_est_tokens"] == 0
         assert row["total_tokens"] == 0
 
     def test_record_prefers_explicit_pruned_counter_and_section_chars(self, tmp_path):
-        config = ConfigFactory.create(repo_root=tmp_path)
-        telemetry = PromptTelemetry(config)
+        telemetry, state = _make_telemetry(tmp_path)
         telemetry.record(
             source="planner",
             tool="claude",
@@ -278,18 +321,15 @@ class TestPromptTelemetry:
                 "section_chars": {"issue_body_before": 1000, "issue_body_after": 700},
             },
         )
-        inf_file = config.data_path("metrics", "prompt", "inferences.jsonl")
-        row = json.loads(inf_file.read_text().strip())
+        row = state._inferences[0]
         assert row["pruned_chars_total"] == 123
         assert row["section_chars"]["issue_body_before"] == 1000
 
-        pr_file = config.data_path("metrics", "prompt", "pr_stats.json")
-        rollup = json.loads(pr_file.read_text())
-        assert rollup["prs"]["500"]["pruned_chars_total"] == 123
+        pr = state.load_inference_stats("pr:500")
+        assert pr["pruned_chars_total"] == 123
 
     def test_record_derives_pruned_counter_when_explicit_missing(self, tmp_path):
-        config = ConfigFactory.create(repo_root=tmp_path)
-        telemetry = PromptTelemetry(config)
+        telemetry, state = _make_telemetry(tmp_path)
         telemetry.record(
             source="planner",
             tool="claude",
@@ -308,18 +348,15 @@ class TestPromptTelemetry:
                 "context_chars_after": 1800,
             },
         )
-        inf_file = config.data_path("metrics", "prompt", "inferences.jsonl")
-        row = json.loads(inf_file.read_text().strip())
+        row = state._inferences[0]
         assert row["pruned_chars_total"] == 500
 
     def test_get_mtime_returns_zero_when_no_file(self, tmp_path):
-        config = ConfigFactory.create(repo_root=tmp_path)
-        telemetry = PromptTelemetry(config)
+        telemetry, state = _make_telemetry(tmp_path)
         assert telemetry.get_mtime() == 0.0
 
     def test_get_mtime_returns_positive_after_record(self, tmp_path):
-        config = ConfigFactory.create(repo_root=tmp_path)
-        telemetry = PromptTelemetry(config)
+        telemetry, state = _make_telemetry(tmp_path)
         telemetry.record(
             source="planner",
             tool="claude",
@@ -337,24 +374,16 @@ class TestPromptTelemetry:
         assert mtime > 0.0
 
     def test_record_includes_estimated_cost_for_known_model(self, tmp_path):
-        pricing_path = tmp_path / "pricing.json"
-        pricing_path.write_text(
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "models": {
-                        "claude-sonnet-4-20250514": {
-                            "input_cost_per_million": 3.0,
-                            "output_cost_per_million": 15.0,
-                            "aliases": ["sonnet"],
-                        }
-                    },
+        telemetry, state = _make_telemetry(
+            tmp_path,
+            pricing_models={
+                "claude-sonnet-4-20250514": {
+                    "input_cost_per_million": 3.0,
+                    "output_cost_per_million": 15.0,
+                    "aliases": ["sonnet"],
                 }
-            )
+            },
         )
-        config = ConfigFactory.create(repo_root=tmp_path)
-        pricing = ModelPricingTable(pricing_path)
-        telemetry = PromptTelemetry(config, pricing=pricing)
         telemetry.record(
             source="reviewer",
             tool="claude",
@@ -368,26 +397,14 @@ class TestPromptTelemetry:
             success=True,
             stats={"input_tokens": 1000, "output_tokens": 500},
         )
-        inf_file = config.data_path("metrics", "prompt", "inferences.jsonl")
-        row = json.loads(inf_file.read_text().strip())
+        row = state._inferences[0]
         assert row["estimated_cost_usd"] is not None
         assert row["estimated_cost_usd"] > 0
         expected = (3.0 * 1000 + 15.0 * 500) / 1_000_000
         assert abs(row["estimated_cost_usd"] - expected) < 1e-6
 
     def test_record_cost_none_for_unknown_model(self, tmp_path):
-        pricing_path = tmp_path / "pricing.json"
-        pricing_path.write_text(
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "models": {},
-                }
-            )
-        )
-        config = ConfigFactory.create(repo_root=tmp_path)
-        pricing = ModelPricingTable(pricing_path)
-        telemetry = PromptTelemetry(config, pricing=pricing)
+        telemetry, state = _make_telemetry(tmp_path, pricing_models={})
         telemetry.record(
             source="reviewer",
             tool="claude",
@@ -401,29 +418,20 @@ class TestPromptTelemetry:
             success=True,
             stats={},
         )
-        inf_file = config.data_path("metrics", "prompt", "inferences.jsonl")
-        row = json.loads(inf_file.read_text().strip())
+        row = state._inferences[0]
         assert row["estimated_cost_usd"] is None
 
     def test_cost_accumulates_across_records(self, tmp_path):
-        pricing_path = tmp_path / "pricing.json"
-        pricing_path.write_text(
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "models": {
-                        "claude-opus-4-20250514": {
-                            "input_cost_per_million": 15.0,
-                            "output_cost_per_million": 75.0,
-                            "aliases": ["opus"],
-                        }
-                    },
+        telemetry, state = _make_telemetry(
+            tmp_path,
+            pricing_models={
+                "claude-opus-4-20250514": {
+                    "input_cost_per_million": 15.0,
+                    "output_cost_per_million": 75.0,
+                    "aliases": ["opus"],
                 }
-            )
+            },
         )
-        config = ConfigFactory.create(repo_root=tmp_path)
-        pricing = ModelPricingTable(pricing_path)
-        telemetry = PromptTelemetry(config, pricing=pricing)
         for _ in range(3):
             telemetry.record(
                 source="implementer",
@@ -438,9 +446,8 @@ class TestPromptTelemetry:
                 success=True,
                 stats={"input_tokens": 1000, "output_tokens": 200},
             )
-        pr_file = config.data_path("metrics", "prompt", "pr_stats.json")
-        rollup = json.loads(pr_file.read_text())
-        pr_cost = rollup["prs"]["700"]["estimated_cost_usd"]
+        pr = state.load_inference_stats("pr:700")
+        pr_cost = pr["estimated_cost_usd"]
         single_cost = (15.0 * 1000 + 75.0 * 200) / 1_000_000
         assert abs(pr_cost - round(single_cost * 3, 6)) < 1e-6
 

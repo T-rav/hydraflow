@@ -1296,7 +1296,7 @@ class TestControlStatusMemoryAutoApprove:
         cfg = ConfigFactory.create(
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             memory_auto_approve=True,
         )
         router = self._make_router(cfg, event_bus, state, tmp_path)
@@ -1368,7 +1368,7 @@ class TestPatchConfigMemoryAutoApprove:
         cfg = ConfigFactory.create(
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             memory_auto_approve=True,
         )
         router = self._make_router(cfg, event_bus, state, tmp_path)
@@ -1998,12 +1998,12 @@ class TestHITLEndpointCause:
 
         cfg = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             memory_auto_approve=True,
             transcript_summarization_enabled=False,
             gh_token="",
         )
-        st = StateTracker(cfg.state_file)
+        st = StateTracker(cfg.dolt_path)
         pr_mgr = PRManager(cfg, event_bus)
 
         router = create_router(

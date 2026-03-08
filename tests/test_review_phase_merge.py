@@ -146,7 +146,7 @@ class TestResolveMergeConflicts:
             enable_fresh_branch_rebuild=False,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         mock_agents = AsyncMock()
         mock_agents._execute = AsyncMock(return_value="transcript")
@@ -251,7 +251,7 @@ class TestResolveMergeConflicts:
             enable_fresh_branch_rebuild=False,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         mock_agents = AsyncMock()
         mock_agents._execute = AsyncMock(return_value="transcript")
@@ -281,7 +281,7 @@ class TestResolveMergeConflicts:
             enable_fresh_branch_rebuild=False,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         mock_agents = AsyncMock()
         phase = make_review_phase(cfg)

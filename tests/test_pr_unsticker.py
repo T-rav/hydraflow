@@ -23,7 +23,7 @@ def _make_config(tmp_path: Path, **overrides) -> MagicMock:
     return ConfigFactory.create(
         repo_root=tmp_path / "repo",
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
         **overrides,
     )
 

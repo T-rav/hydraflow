@@ -84,7 +84,7 @@ class TestPatchConfigEndpoint:
         cfg = ConfigFactory.create(
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         # Set config_file path on config
         object.__setattr__(cfg, "config_file", config_path)
@@ -158,7 +158,7 @@ class TestPatchConfigEndpoint:
         cfg = ConfigFactory.create(
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         object.__setattr__(cfg, "config_file", config_path)
         router = _make_router(cfg, event_bus, state, tmp_path)

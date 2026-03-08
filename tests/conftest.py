@@ -92,7 +92,7 @@ def config(tmp_path: Path) -> HydraFlowConfig:
     return ConfigFactory.create(
         repo_root=tmp_path / "repo",
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
 
 
@@ -103,7 +103,7 @@ def dry_config(tmp_path: Path) -> HydraFlowConfig:
         dry_run=True,
         repo_root=tmp_path / "repo",
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
 
 
@@ -599,7 +599,7 @@ class CIScaffoldResultFactory:
 def state(tmp_path: Path):
     from state import StateTracker
 
-    return StateTracker(tmp_path / "state.json")
+    return StateTracker(tmp_path / "dolt_db")
 
 
 # --- State Factory ---
@@ -609,7 +609,7 @@ def make_state(tmp_path: Path) -> StateTracker:
     """Create a StateTracker backed by a temp file."""
     from state import StateTracker as ST
 
-    return ST(tmp_path / "state.json")
+    return ST(tmp_path / "dolt_db")
 
 
 # --- Event Bus Fixture ---

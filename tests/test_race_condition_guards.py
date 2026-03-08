@@ -353,7 +353,7 @@ def _make_orchestrator(tmp_path):
     config = ConfigFactory.create(
         repo_root=tmp_path / "repo",
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     (tmp_path / "repo").mkdir(parents=True, exist_ok=True)
     return HydraFlowOrchestrator(config)

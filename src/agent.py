@@ -7,7 +7,7 @@ import logging
 import re
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
@@ -85,9 +85,10 @@ Run through this checklist before your final commit:
         config: HydraFlowConfig,
         event_bus: EventBus,
         runner: SubprocessRunner | None = None,
+        state: Any | None = None,
     ) -> None:
         super().__init__(config, event_bus, runner)
-        self._insights = ReviewInsightStore(config.memory_dir)
+        self._insights = ReviewInsightStore(config.memory_dir, state=state)
 
     async def run(
         self,

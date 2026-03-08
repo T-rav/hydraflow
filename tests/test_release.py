@@ -165,11 +165,11 @@ class TestReleaseStateTracking:
         assert "20" in all_releases
 
     def test_release_persists_across_load(self, tmp_path: Path) -> None:
-        state_file = tmp_path / "state.json"
-        state = StateTracker(state_file)
+        dolt_path = tmp_path / "dolt_db"
+        state = StateTracker(dolt_path)
         state.upsert_release(Release(version="1.0.0", epic_number=100, tag="v1.0.0"))
         # Reload state from disk
-        state2 = StateTracker(state_file)
+        state2 = StateTracker(dolt_path)
         got = state2.get_release(100)
         assert got is not None
         assert got.version == "1.0.0"

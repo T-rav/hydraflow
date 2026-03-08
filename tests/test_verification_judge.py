@@ -157,7 +157,7 @@ class TestBuildCommand:
             review_model="gpt-5-codex",
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         judge = _make_judge(cfg)
         cmd = judge._build_command()
@@ -1112,7 +1112,7 @@ class TestReviewPhaseWiring:
         from review_phase import ReviewPhase
         from state import StateTracker
 
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         stop_event = asyncio.Event()
 
         mock_wt = AsyncMock()
@@ -1176,7 +1176,7 @@ class TestReviewPhaseWiring:
         from review_phase import ReviewPhase
         from state import StateTracker
 
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         stop_event = asyncio.Event()
 
         mock_wt = AsyncMock()

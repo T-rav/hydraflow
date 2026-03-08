@@ -1257,7 +1257,7 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
 
 async def _run_clean(config: HydraFlowConfig) -> None:
     """Remove all worktrees and reset state."""
-    from state import StateTracker
+    from dolt.store import DoltStore
     from workspace import WorkspaceManager
 
     logger = logging.getLogger("hydraflow")
@@ -1266,7 +1266,7 @@ async def _run_clean(config: HydraFlowConfig) -> None:
     wt_mgr = WorkspaceManager(config)
     await wt_mgr.destroy_all()
 
-    state = StateTracker(config.state_file)
+    state = DoltStore(config.dolt_path, port=config.dolt_port)
     state.reset()
 
     logger.info("Cleanup complete")
@@ -1314,9 +1314,9 @@ async def _run_main(config: HydraFlowConfig) -> None:
     """Launch the orchestrator, optionally with the dashboard."""
     if config.dashboard_enabled:
         from dashboard import HydraFlowDashboard
+        from dolt.store import DoltStore
         from events import EventBus, EventLog, EventType, HydraFlowEvent
         from models import Phase
-        from state import StateTracker
 
         event_log = EventLog(config.event_log_path)
         bus = EventBus(event_log=event_log)
@@ -1325,7 +1325,7 @@ async def _run_main(config: HydraFlowConfig) -> None:
             config.event_log_retention_days,
         )
         await bus.load_history_from_disk()
-        state = StateTracker(config.state_file)
+        state = DoltStore(config.dolt_path, port=config.dolt_port)
 
         dashboard = HydraFlowDashboard(
             config=config,

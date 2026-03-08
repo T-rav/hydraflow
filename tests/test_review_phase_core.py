@@ -1533,7 +1533,7 @@ class TestHandleRejectedReview:
             max_review_fix_attempts=2,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         phase = make_review_phase(config)
         pr = PRInfoFactory.create()
@@ -1566,7 +1566,7 @@ class TestHandleRejectedReview:
             max_review_fix_attempts=2,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         phase = make_review_phase(config, event_bus=event_bus)
         pr = PRInfoFactory.create()
@@ -1597,7 +1597,7 @@ class TestHandleRejectedReview:
             max_review_fix_attempts=1,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         phase = make_review_phase(config)
         pr = PRInfoFactory.create()

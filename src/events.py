@@ -295,7 +295,7 @@ class EventBus:
             task.add_done_callback(self._pending_persists.discard)
             task.add_done_callback(_log_persist_failure)
 
-        # Dual-write to Dolt when available
+        # Write to Dolt
         if self._state and hasattr(self._state, "append_event"):
             try:
                 self._state.append_event(event.model_dump())

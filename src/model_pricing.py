@@ -51,12 +51,11 @@ class ModelPricingTable:
         self._state = state
 
     def _load(self) -> None:
-        """Parse the pricing JSON and build lookup tables."""
+        """Load pricing from Dolt via the state object."""
         if self._loaded:
             return
         self._loaded = True
 
-        # Try Dolt first
         if self._state and hasattr(self._state, "load_all_model_pricing"):
             try:
                 rows = self._state.load_all_model_pricing()
@@ -64,45 +63,7 @@ class ModelPricingTable:
                     self._load_from_dolt_rows(rows)
                     return
             except Exception:  # noqa: BLE001
-                logger.debug("Dolt pricing load failed, falling back", exc_info=True)
-
-        if not self._path.is_file():
-            logger.warning("Model pricing asset not found: %s", self._path)
-            return
-        try:
-            raw = json.loads(self._path.read_text())
-        except (json.JSONDecodeError, OSError):
-            logger.warning(
-                "Failed to load model pricing from %s", self._path, exc_info=True
-            )
-            return
-        if not isinstance(raw, dict):
-            return
-        models = raw.get("models", {})
-        if not isinstance(models, dict):
-            return
-        for model_id, entry in models.items():
-            if not isinstance(entry, dict):
-                continue
-            if not _REQUIRED_COST_FIELDS.issubset(entry):
-                logger.warning(
-                    "Skipping model %r — missing required cost fields", model_id
-                )
-                continue
-            rate = ModelRate(
-                input_cost_per_million=float(entry["input_cost_per_million"]),
-                output_cost_per_million=float(entry["output_cost_per_million"]),
-                cache_write_cost_per_million=float(
-                    entry.get("cache_write_cost_per_million", 0.0)
-                ),
-                cache_read_cost_per_million=float(
-                    entry.get("cache_read_cost_per_million", 0.0)
-                ),
-            )
-            self._rates[model_id] = rate
-            for alias in entry.get("aliases", []):
-                if isinstance(alias, str):
-                    self._aliases[alias.lower()] = model_id
+                logger.debug("Dolt pricing load failed", exc_info=True)
 
     def get_rate(self, model: str) -> ModelRate | None:
         """Look up pricing for *model* by exact ID or alias."""

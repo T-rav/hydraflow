@@ -89,7 +89,7 @@ def test_build_command_supports_codex_backend(tmp_path):
         review_model="gpt-5-codex",
         repo_root=tmp_path / "repo",
         worktree_base=tmp_path / "wt",
-        state_file=tmp_path / "s.json",
+        dolt_path=tmp_path / "dolt_db",
     )
     runner = _make_runner(cfg, None)
     cmd = runner._build_command(tmp_path)
@@ -1371,7 +1371,7 @@ class TestRunPrecheckContext:
             max_subskill_attempts=1,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         runner = _make_runner(cfg, event_bus)
 

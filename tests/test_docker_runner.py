@@ -1055,7 +1055,7 @@ class TestGetDockerRunner:
         cfg = HydraFlowConfig(
             repo_root=repo_root,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
             execution_mode="docker",
             docker_image="hydra:latest",
         ).resolve_defaults()

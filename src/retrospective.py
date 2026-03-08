@@ -52,7 +52,6 @@ class RetrospectiveCollector:
         self._config = config
         self._state = state
         self._prs = prs
-        self._retro_path = config.data_path("memory", "retrospectives.jsonl")
         self._filed_patterns_path = config.data_path("memory", "filed_patterns.json")
 
     async def record(
@@ -203,39 +202,28 @@ class RetrospectiveCollector:
         return PlanAccuracyResult(accuracy=accuracy, unplanned=unplanned, missed=missed)
 
     def _append_entry(self, entry: RetrospectiveEntry) -> None:
-        """Append a JSON line to the retrospective log."""
-        try:
-            from file_util import append_jsonl  # noqa: PLC0415
-
-            append_jsonl(self._retro_path, entry.model_dump_json())
-        except OSError:
-            logger.warning(
-                "Could not append to retrospective log %s",
-                self._retro_path,
-                exc_info=True,
-            )
-
-        # Dual-write to Dolt when available
+        """Append a retrospective entry to Dolt."""
         if hasattr(self._state, "append_retrospective"):
             try:
                 self._state.append_retrospective(entry.model_dump())
             except Exception:  # noqa: BLE001
-                logger.debug("Dolt retrospective write failed", exc_info=True)
+                logger.warning("Dolt retrospective write failed", exc_info=True)
 
     def _load_recent(self, n: int) -> list[RetrospectiveEntry]:
-        """Load the last *n* entries from the retrospective log."""
-        if not self._retro_path.exists():
-            return []
-        try:
-            lines = self._retro_path.read_text().strip().splitlines()
-            entries: list[RetrospectiveEntry] = []
-            for line in lines[-n:]:
-                if line.strip():
-                    entries.append(RetrospectiveEntry.model_validate_json(line))
-            return entries
-        except (OSError, json.JSONDecodeError):
-            logger.warning("Could not load retrospective log", exc_info=True)
-            return []
+        """Load the last *n* entries from Dolt."""
+        if hasattr(self._state, "load_recent_retrospectives"):
+            try:
+                rows = self._state.load_recent_retrospectives(n)
+                entries: list[RetrospectiveEntry] = []
+                for row in rows:
+                    try:
+                        entries.append(RetrospectiveEntry.model_validate(row))
+                    except Exception:  # noqa: BLE001
+                        continue
+                return entries
+            except Exception:  # noqa: BLE001
+                logger.warning("Could not load retrospectives from Dolt", exc_info=True)
+        return []
 
     async def _detect_patterns(self, entries: list[RetrospectiveEntry]) -> None:
         """Scan recent entries for patterns and file improvement proposals."""

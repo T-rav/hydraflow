@@ -536,7 +536,7 @@ class TestConstructorInjection:
         assert orch._bus is event_bus
 
     def test_uses_provided_state(self, config: HydraFlowConfig) -> None:
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         orch = HydraFlowOrchestrator(config, state=state)
         assert orch._state is state
 
@@ -3270,7 +3270,7 @@ class TestUpdateBgWorkerStatus:
         assert persisted["memory_sync"]["status"] == "ok"
 
     def test_restore_bg_worker_states(self, config: HydraFlowConfig) -> None:
-        tracker = StateTracker(config.state_file)
+        tracker = StateTracker(config.dolt_path)
         tracker.set_bg_worker_state(
             "memory_sync",
             BackgroundWorkerState(

@@ -323,7 +323,7 @@ class TestPostMergeVisualDecisionEnforcement:
         from post_merge_handler import PostMergeHandler
         from state import StateTracker
 
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         return PostMergeHandler(
             config=config,
             state=state,
@@ -490,7 +490,7 @@ class TestReviewPhaseVisualValidation:
         from workspace import WorkspaceManager
 
         config = ConfigFactory.create()
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         phase = ReviewPhase(
             config=config,
             state=state,
@@ -520,7 +520,7 @@ class TestReviewPhaseVisualValidation:
         from workspace import WorkspaceManager
 
         config = ConfigFactory.create(visual_validation_enabled=False)
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         phase = ReviewPhase(
             config=config,
             state=state,

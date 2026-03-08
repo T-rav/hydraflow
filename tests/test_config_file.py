@@ -153,7 +153,7 @@ class TestConfigFileMergePriority:
             **file_values,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
 
         assert cfg.max_workers == 7
@@ -171,7 +171,7 @@ class TestConfigFileMergePriority:
             **file_values,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
 
         assert cfg.max_workers == 2
@@ -187,7 +187,7 @@ class TestConfigFileMergePriority:
             **file_values,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
 
         assert cfg.max_workers == 1  # Default
@@ -203,7 +203,7 @@ class TestConfigFileMergePriority:
             **file_values,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
 
         assert cfg.docker_cpu_limit == pytest.approx(5.0)

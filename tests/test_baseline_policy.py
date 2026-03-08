@@ -25,7 +25,7 @@ from tests.helpers import ConfigFactory
 def config(tmp_path: Path):
     return ConfigFactory.create(
         repo_root=tmp_path / "repo",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
         baseline_approval_required=True,
         baseline_approvers=["alice", "bob"],
         baseline_snapshot_patterns=[
@@ -145,7 +145,7 @@ class TestDetectBaselineChanges:
     def test_custom_patterns(self, tmp_path: Path):
         cfg = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             baseline_snapshot_patterns=["*.golden"],
         )
         st = StateTracker(tmp_path / "state.json")
@@ -218,7 +218,7 @@ class TestCheckApproval:
     async def test_approval_not_required_by_policy(self, tmp_path: Path):
         cfg = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             baseline_approval_required=False,
         )
         st = StateTracker(tmp_path / "state.json")
@@ -237,7 +237,7 @@ class TestCheckApproval:
         """Audit trail must be written even when approval is not required."""
         cfg = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             baseline_approval_required=False,
         )
         st = StateTracker(tmp_path / "state.json")
@@ -261,7 +261,7 @@ class TestCheckApproval:
         """BASELINE_UPDATE event must be published even when approval is not required."""
         cfg = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             baseline_approval_required=False,
         )
         st = StateTracker(tmp_path / "state.json")
@@ -286,7 +286,7 @@ class TestCheckApproval:
         """Second baseline record when approval not required should use UPDATE type."""
         cfg = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             baseline_approval_required=False,
         )
         st = StateTracker(tmp_path / "state.json")
@@ -313,7 +313,7 @@ class TestCheckApproval:
         """When baseline_approvers is empty, any PR approver is accepted."""
         cfg = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             baseline_approval_required=True,
             baseline_approvers=[],
         )
@@ -527,7 +527,7 @@ class TestRollback:
         """When baseline_approvers is empty, any approver can trigger a rollback."""
         cfg = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             baseline_approval_required=True,
             baseline_approvers=[],
         )
@@ -757,7 +757,7 @@ class TestConfigFields:
     def test_baseline_config_has_expected_defaults(self, tmp_path: Path):
         cfg = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.baseline_approval_required is True
         assert cfg.baseline_approvers == []
@@ -767,7 +767,7 @@ class TestConfigFields:
     def test_custom_values(self, tmp_path: Path):
         cfg = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             baseline_approval_required=False,
             baseline_approvers=["alice"],
             baseline_snapshot_patterns=["*.golden"],

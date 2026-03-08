@@ -686,7 +686,7 @@ class TestRunPrecheckContext:
             debug_escalation_enabled=False,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         gen, _ = _make_generator(cfg, event_bus)
         issue = IssueFactory.create()
@@ -715,7 +715,7 @@ class TestRunPrecheckContext:
             debug_escalation_enabled=False,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         gen, _ = _make_generator(cfg, event_bus)
         issue = IssueFactory.create()
@@ -758,7 +758,7 @@ class TestRunPrecheckContext:
             debug_escalation_enabled=False,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         gen, _ = _make_generator(cfg, event_bus)
         issue = IssueFactory.create()

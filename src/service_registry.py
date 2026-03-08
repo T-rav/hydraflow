@@ -133,7 +133,7 @@ def build_services(
     # Core runners
     worktrees = WorkspaceManager(config)
     subprocess_runner = get_docker_runner(config)
-    agents = AgentRunner(config, event_bus, runner=subprocess_runner)
+    agents = AgentRunner(config, event_bus, runner=subprocess_runner, state=state)
     planners = PlannerRunner(config, event_bus, runner=subprocess_runner)
     prs = PRManager(config, event_bus)
     manifest_syncer = ManifestIssueSyncer(config, state, prs)
@@ -153,10 +153,10 @@ def build_services(
     store.set_crate_manager(crate_manager)
 
     # Harness insight store (shared across phases)
-    harness_insights = HarnessInsightStore(config.data_path("memory"))
+    harness_insights = HarnessInsightStore(config.data_path("memory"), state=state)
 
     # Troubleshooting pattern store (CI timeout feedback loop)
-    troubleshooting_store = TroubleshootingPatternStore(config.data_path("memory"))
+    troubleshooting_store = TroubleshootingPatternStore(config.data_path("memory"), state=state)
 
     # Epic management
     epic_checker = EpicCompletionChecker(config, prs, fetcher, state=state)

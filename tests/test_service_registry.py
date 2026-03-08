@@ -39,7 +39,7 @@ class TestBuildServices:
     def test_returns_service_registry(self, config: HydraFlowConfig) -> None:
         """build_services should return a ServiceRegistry instance."""
         bus = EventBus()
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         stop_event = asyncio.Event()
         callbacks = _make_callbacks()
 
@@ -50,7 +50,7 @@ class TestBuildServices:
     def test_all_fields_are_set(self, config: HydraFlowConfig) -> None:
         """All ServiceRegistry fields should be non-None."""
         bus = EventBus()
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         stop_event = asyncio.Event()
         callbacks = _make_callbacks()
 
@@ -62,7 +62,7 @@ class TestBuildServices:
     def test_agents_runner_is_shared(self, config: HydraFlowConfig) -> None:
         """Agents, planners, reviewers, and HITL runner should share the subprocess runner."""
         bus = EventBus()
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         stop_event = asyncio.Event()
         callbacks = _make_callbacks()
 
@@ -80,7 +80,7 @@ class TestBuildServices:
     def test_store_uses_fetcher(self, config: HydraFlowConfig) -> None:
         """IssueStore should be initialized with the fetcher."""
         bus = EventBus()
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         stop_event = asyncio.Event()
         callbacks = _make_callbacks()
 
@@ -94,7 +94,7 @@ class TestBuildServices:
     def test_uses_get_docker_runner(self, config: HydraFlowConfig) -> None:
         """build_services should use get_docker_runner to create the subprocess runner."""
         bus = EventBus()
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         stop_event = asyncio.Event()
         callbacks = _make_callbacks()
 
@@ -153,7 +153,7 @@ class TestServiceRegistryWiring:
         config: HydraFlowConfig,
     ) -> tuple[ServiceRegistry, EventBus, StateTracker, asyncio.Event]:
         bus = EventBus()
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         stop_event = asyncio.Event()
         callbacks = _make_callbacks()
         registry = build_services(config, bus, state, stop_event, callbacks)

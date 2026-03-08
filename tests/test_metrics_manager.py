@@ -385,7 +385,7 @@ class TestFetchHistory:
     ) -> None:
         """Returns empty list when no metrics issue and no local cache exist."""
         mgr, _, _, _ = make_manager(
-            state, event_bus, state_file=tmp_path / "state.json"
+            state, event_bus, dolt_path=tmp_path / "dolt_db"
         )
         result = await mgr.fetch_history_from_issue()
         assert result == []
@@ -436,7 +436,7 @@ class TestFetchHistory:
     ) -> None:
         """Falls back to local cache when GitHub API fails."""
         mgr, state, _, _ = make_manager(
-            state, event_bus, state_file=tmp_path / "state.json"
+            state, event_bus, dolt_path=tmp_path / "dolt_db"
         )
         state.set_metrics_issue_number(42)
 
@@ -478,7 +478,7 @@ class TestFetchHistory:
     ) -> None:
         """Falls back to local cache when no metrics issue number is configured."""
         mgr, _, _, _ = make_manager(
-            state, event_bus, state_file=tmp_path / "state.json"
+            state, event_bus, dolt_path=tmp_path / "dolt_db"
         )
         # No issue number set — should return local cache
         snap = MetricsSnapshot(timestamp="2025-03-01T00:00:00", prs_merged=3)
@@ -498,7 +498,7 @@ class TestLocalCache:
     def test_save_creates_cache_file(self, state, event_bus, tmp_path) -> None:
         """_save_to_local_cache creates the JSONL file and parent directories."""
         mgr, _, _, _ = make_manager(
-            state, event_bus, state_file=tmp_path / "state.json"
+            state, event_bus, dolt_path=tmp_path / "dolt_db"
         )
         snap = MetricsSnapshot(timestamp="2025-01-01T00:00:00")
         mgr._save_to_local_cache(snap)
@@ -509,7 +509,7 @@ class TestLocalCache:
     def test_save_appends_to_cache(self, state, event_bus, tmp_path) -> None:
         """Multiple saves append to the same JSONL file."""
         mgr, _, _, _ = make_manager(
-            state, event_bus, state_file=tmp_path / "state.json"
+            state, event_bus, dolt_path=tmp_path / "dolt_db"
         )
         mgr._save_to_local_cache(MetricsSnapshot(timestamp="2025-01-01T00:00:00"))
         mgr._save_to_local_cache(MetricsSnapshot(timestamp="2025-01-02T00:00:00"))
@@ -523,7 +523,7 @@ class TestLocalCache:
     ) -> None:
         """load_local_history reads back saved snapshots."""
         mgr, _, _, _ = make_manager(
-            state, event_bus, state_file=tmp_path / "state.json"
+            state, event_bus, dolt_path=tmp_path / "dolt_db"
         )
         mgr._save_to_local_cache(
             MetricsSnapshot(timestamp="2025-01-01T00:00:00", issues_completed=1)
@@ -542,7 +542,7 @@ class TestLocalCache:
     ) -> None:
         """load_local_history returns empty list when no cache file exists."""
         mgr, _, _, _ = make_manager(
-            state, event_bus, state_file=tmp_path / "state.json"
+            state, event_bus, dolt_path=tmp_path / "dolt_db"
         )
         result = mgr.load_local_history()
         assert result == []
@@ -552,7 +552,7 @@ class TestLocalCache:
     ) -> None:
         """load_local_history caps results at the given limit."""
         mgr, _, _, _ = make_manager(
-            state, event_bus, state_file=tmp_path / "state.json"
+            state, event_bus, dolt_path=tmp_path / "dolt_db"
         )
         for i in range(5):
             mgr._save_to_local_cache(
@@ -571,7 +571,7 @@ class TestLocalCache:
         import logging
 
         mgr, _, _, _ = make_manager(
-            state, event_bus, state_file=tmp_path / "state.json"
+            state, event_bus, dolt_path=tmp_path / "dolt_db"
         )
         cache_dir = tmp_path / "metrics" / "test-owner-test-repo"
         cache_dir.mkdir(parents=True)
@@ -593,7 +593,7 @@ class TestLocalCache:
     def test_cache_dir_uses_repo_slug(self, state, event_bus, tmp_path) -> None:
         """Cache directory path is based on repo slug."""
         mgr, _, _, _ = make_manager(
-            state, event_bus, state_file=tmp_path / "state.json"
+            state, event_bus, dolt_path=tmp_path / "dolt_db"
         )
         assert mgr._cache_dir == tmp_path / "metrics" / "test-owner-test-repo"
 
@@ -601,7 +601,7 @@ class TestLocalCache:
     async def test_sync_writes_to_local_cache(self, state, event_bus, tmp_path) -> None:
         """sync() writes snapshot to local cache before posting to GitHub."""
         mgr, state, _, _ = make_manager(
-            state, event_bus, state_file=tmp_path / "state.json"
+            state, event_bus, dolt_path=tmp_path / "dolt_db"
         )
         state.record_issue_completed()
 
@@ -622,7 +622,7 @@ class TestLocalCache:
         import logging
 
         mgr, state, _, _ = make_manager(
-            state, event_bus, state_file=tmp_path / "state.json"
+            state, event_bus, dolt_path=tmp_path / "dolt_db"
         )
         state.record_issue_completed()
 
@@ -643,7 +643,7 @@ class TestLocalCache:
         import logging
 
         mgr, state, _, _ = make_manager(
-            state, event_bus, state_file=tmp_path / "state.json"
+            state, event_bus, dolt_path=tmp_path / "dolt_db"
         )
         state.record_issue_completed()
 

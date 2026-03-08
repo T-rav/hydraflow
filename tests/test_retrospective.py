@@ -18,8 +18,8 @@ if TYPE_CHECKING:
 
 from models import ReviewVerdict
 from retrospective import RetrospectiveCollector, RetrospectiveEntry
-from state import StateTracker
 from tests.conftest import ReviewResultFactory
+from tests.helpers import InMemoryState
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -31,9 +31,9 @@ def _make_collector(
     *,
     diff_names: list[str] | None = None,
     create_issue_return: int = 0,
-) -> tuple[RetrospectiveCollector, AsyncMock, StateTracker]:
-    """Build a RetrospectiveCollector with mocked PRManager."""
-    state = StateTracker(config.state_file)
+) -> tuple[RetrospectiveCollector, AsyncMock, InMemoryState]:
+    """Build a RetrospectiveCollector with an in-memory state."""
+    state = InMemoryState()
     mock_prs = AsyncMock()
     mock_prs.get_pr_diff_names = AsyncMock(return_value=diff_names or [])
     mock_prs.create_issue = AsyncMock(return_value=create_issue_return)
@@ -50,14 +50,11 @@ def _write_plan(config: HydraFlowConfig, issue_number: int, content: str) -> Non
 
 
 def _write_retro_entries(
-    config: HydraFlowConfig, entries: list[RetrospectiveEntry]
+    state: InMemoryState, entries: list[RetrospectiveEntry]
 ) -> None:
-    """Write retrospective entries to the JSONL file."""
-    retro_path = config.repo_root / ".hydraflow" / "memory" / "retrospectives.jsonl"
-    retro_path.parent.mkdir(parents=True, exist_ok=True)
-    with retro_path.open("w") as f:
-        for entry in entries:
-            f.write(entry.model_dump_json() + "\n")
+    """Write retrospective entries to the in-memory state."""
+    for entry in entries:
+        state.append_retrospective(entry.model_dump())
 
 
 # ---------------------------------------------------------------------------
@@ -190,9 +187,9 @@ class TestComputeAccuracy:
 # ---------------------------------------------------------------------------
 
 
-class TestJSONLStorage:
-    def test_append_creates_directory_and_file(self, config: HydraFlowConfig) -> None:
-        collector, _, _ = _make_collector(config)
+class TestDoltStorage:
+    def test_append_stores_entry(self, config: HydraFlowConfig) -> None:
+        collector, _, state = _make_collector(config)
         entry = RetrospectiveEntry(
             issue_number=42,
             pr_number=101,
@@ -200,11 +197,10 @@ class TestJSONLStorage:
         )
         collector._append_entry(entry)
 
-        retro_path = config.repo_root / ".hydraflow" / "memory" / "retrospectives.jsonl"
-        assert retro_path.exists()
+        assert len(state._retrospectives) == 1
 
-    def test_append_writes_valid_jsonl(self, config: HydraFlowConfig) -> None:
-        collector, _, _ = _make_collector(config)
+    def test_append_writes_valid_data(self, config: HydraFlowConfig) -> None:
+        collector, _, state = _make_collector(config)
         entry = RetrospectiveEntry(
             issue_number=42,
             pr_number=101,
@@ -213,15 +209,13 @@ class TestJSONLStorage:
         )
         collector._append_entry(entry)
 
-        retro_path = config.repo_root / ".hydraflow" / "memory" / "retrospectives.jsonl"
-        lines = retro_path.read_text().strip().splitlines()
-        assert len(lines) == 1
-        data = json.loads(lines[0])
+        assert len(state._retrospectives) == 1
+        data = state._retrospectives[0]
         assert data["issue_number"] == 42
         assert data["plan_accuracy_pct"] == 85.0
 
-    def test_append_to_existing_file(self, config: HydraFlowConfig) -> None:
-        collector, _, _ = _make_collector(config)
+    def test_append_multiple_entries(self, config: HydraFlowConfig) -> None:
+        collector, _, state = _make_collector(config)
         for i in range(3):
             entry = RetrospectiveEntry(
                 issue_number=i,
@@ -230,12 +224,10 @@ class TestJSONLStorage:
             )
             collector._append_entry(entry)
 
-        retro_path = config.repo_root / ".hydraflow" / "memory" / "retrospectives.jsonl"
-        lines = retro_path.read_text().strip().splitlines()
-        assert len(lines) == 3
+        assert len(state._retrospectives) == 3
 
     def test_load_recent_returns_correct_count(self, config: HydraFlowConfig) -> None:
-        collector, _, _ = _make_collector(config)
+        collector, _, state = _make_collector(config)
         entries = [
             RetrospectiveEntry(
                 issue_number=i,
@@ -244,14 +236,15 @@ class TestJSONLStorage:
             )
             for i in range(5)
         ]
-        _write_retro_entries(config, entries)
+        _write_retro_entries(state, entries)
 
         result = collector._load_recent(3)
         assert len(result) == 3
-        assert result[0].issue_number == 2  # last 3 entries
+        # Newest first from Dolt
+        assert result[0].issue_number == 4
 
     def test_load_recent_with_fewer_entries(self, config: HydraFlowConfig) -> None:
-        collector, _, _ = _make_collector(config)
+        collector, _, state = _make_collector(config)
         entries = [
             RetrospectiveEntry(
                 issue_number=1,
@@ -259,7 +252,7 @@ class TestJSONLStorage:
                 timestamp="2026-02-20T10:30:00Z",
             )
         ]
-        _write_retro_entries(config, entries)
+        _write_retro_entries(state, entries)
 
         result = collector._load_recent(10)
         assert len(result) == 1
@@ -302,12 +295,8 @@ class TestRecord:
         )
         await collector.record(42, 101, review)
 
-        retro_path = config.repo_root / ".hydraflow" / "memory" / "retrospectives.jsonl"
-        assert retro_path.exists()
-        lines = retro_path.read_text().strip().splitlines()
-        assert len(lines) == 1
-
-        data = json.loads(lines[0])
+        assert len(state._retrospectives) == 1
+        data = state._retrospectives[0]
         assert data["issue_number"] == 42
         assert data["pr_number"] == 101
         assert data["planned_files"] == ["src/foo.py", "tests/test_foo.py"]
@@ -326,29 +315,27 @@ class TestRecord:
     @pytest.mark.asyncio
     async def test_record_when_plan_missing(self, config: HydraFlowConfig) -> None:
         """When plan file doesn't exist, should still record with empty planned_files."""
-        collector, _, _ = _make_collector(config, diff_names=["src/foo.py"])
+        collector, _, state = _make_collector(config, diff_names=["src/foo.py"])
 
         review = ReviewResultFactory.create(merged=True)
         await collector.record(42, 101, review)
 
-        retro_path = config.repo_root / ".hydraflow" / "memory" / "retrospectives.jsonl"
-        lines = retro_path.read_text().strip().splitlines()
-        data = json.loads(lines[0])
+        assert len(state._retrospectives) == 1
+        data = state._retrospectives[0]
         assert data["planned_files"] == []
         assert data["plan_accuracy_pct"] == 0.0
 
     @pytest.mark.asyncio
     async def test_record_when_diff_fails(self, config: HydraFlowConfig) -> None:
         """When gh pr diff fails, should record with empty actual_files."""
-        collector, _, _ = _make_collector(config, diff_names=[])
+        collector, _, state = _make_collector(config, diff_names=[])
 
         _write_plan(config, 42, "## Files to Modify\n\n- `src/foo.py`\n")
         review = ReviewResultFactory.create(merged=True)
         await collector.record(42, 101, review)
 
-        retro_path = config.repo_root / ".hydraflow" / "memory" / "retrospectives.jsonl"
-        lines = retro_path.read_text().strip().splitlines()
-        data = json.loads(lines[0])
+        assert len(state._retrospectives) == 1
+        data = state._retrospectives[0]
         assert data["actual_files"] == []
         assert data["missed_files"] == ["src/foo.py"]
 
@@ -357,14 +344,13 @@ class TestRecord:
         self, config: HydraFlowConfig
     ) -> None:
         """When worker metadata not in state, should use defaults."""
-        collector, _, _ = _make_collector(config, diff_names=["src/foo.py"])
+        collector, _, state = _make_collector(config, diff_names=["src/foo.py"])
 
         review = ReviewResultFactory.create(merged=True)
         await collector.record(42, 101, review)
 
-        retro_path = config.repo_root / ".hydraflow" / "memory" / "retrospectives.jsonl"
-        lines = retro_path.read_text().strip().splitlines()
-        data = json.loads(lines[0])
+        assert len(state._retrospectives) == 1
+        data = state._retrospectives[0]
         assert data["quality_fix_rounds"] == 0
         assert data["duration_seconds"] == 0.0
 
@@ -752,47 +738,46 @@ class TestFileImprovementIssueSetsOrigin:
 # ---------------------------------------------------------------------------
 
 
-class TestAppendEntryOSError:
-    """Verify RetrospectiveCollector._append_entry catches OSError gracefully."""
+class TestAppendEntryErrorHandling:
+    """Verify RetrospectiveCollector._append_entry catches state errors gracefully."""
 
-    def test_append_entry_logs_warning_on_oserror(
+    def test_append_entry_logs_warning_on_state_error(
         self, config: HydraFlowConfig, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """When the retro log can't be written, log warning and don't raise."""
+        """When the state write fails, log warning and don't raise."""
         import logging
+        from unittest.mock import MagicMock
 
-        collector, _, _ = _make_collector(config)
+        state = MagicMock()
+        state.append_retrospective.side_effect = RuntimeError("db error")
+        mock_prs = AsyncMock()
+        mock_prs.get_pr_diff_names = AsyncMock(return_value=[])
+        mock_prs.create_issue = AsyncMock(return_value=0)
+        collector = RetrospectiveCollector(config, state, mock_prs)
+
         entry = RetrospectiveEntry(
             issue_number=42,
             pr_number=100,
             timestamp="2026-02-20T10:30:00Z",
         )
 
-        with (
-            patch("file_util.open", side_effect=OSError("disk full")),
-            caplog.at_level(logging.WARNING, logger="hydraflow.retrospective"),
-        ):
+        with caplog.at_level(logging.WARNING, logger="hydraflow.retrospective"):
             collector._append_entry(entry)  # should not raise
 
-        assert "Could not append to retrospective log" in caplog.text
+        assert "Dolt retrospective write failed" in caplog.text
 
-    def test_append_entry_handles_mkdir_failure(
-        self, config: HydraFlowConfig, caplog: pytest.LogCaptureFixture
+    def test_append_entry_without_state_method_is_noop(
+        self, config: HydraFlowConfig
     ) -> None:
-        """When mkdir fails with PermissionError, log warning and don't raise."""
-        import logging
-
-        collector, _, _ = _make_collector(config)
+        """When state lacks append_retrospective, append_entry is a no-op."""
+        mock_prs = AsyncMock()
+        mock_prs.get_pr_diff_names = AsyncMock(return_value=[])
+        mock_prs.create_issue = AsyncMock(return_value=0)
+        state = object()  # state without append_retrospective
+        collector = RetrospectiveCollector(config, state, mock_prs)
         entry = RetrospectiveEntry(
             issue_number=42,
             pr_number=100,
             timestamp="2026-02-20T10:30:00Z",
         )
-
-        with (
-            patch.object(Path, "mkdir", side_effect=PermissionError("not allowed")),
-            caplog.at_level(logging.WARNING, logger="hydraflow.retrospective"),
-        ):
-            collector._append_entry(entry)  # should not raise
-
-        assert "Could not append to retrospective log" in caplog.text
+        collector._append_entry(entry)  # should not raise

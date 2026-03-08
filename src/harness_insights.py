@@ -134,50 +134,36 @@ def extract_subcategories(details: str) -> list[str]:
 
 
 class HarnessInsightStore:
-    """File-backed store for pipeline failure records and proposed-pattern tracking."""
+    """Dolt-backed store for pipeline failure records and proposed-pattern tracking."""
 
     def __init__(self, memory_dir: Path, state: Any | None = None) -> None:
         self._memory_dir = memory_dir
-        self._failures_path = memory_dir / "harness_failures.jsonl"
         self._proposed_path = memory_dir / "harness_proposed.json"
         self._state = state
 
     def append_failure(self, record: FailureRecord) -> None:
-        """Append *record* as a JSON line to ``harness_failures.jsonl``."""
-        try:
-            from file_util import append_jsonl  # noqa: PLC0415
-
-            append_jsonl(self._failures_path, record.model_dump_json())
-        except OSError:
-            logger.warning(
-                "Could not append failure to %s",
-                self._failures_path,
-                exc_info=True,
-            )
-
-        # Dual-write to Dolt when available
+        """Append *record* to Dolt."""
         if self._state and hasattr(self._state, "append_harness_failure"):
             try:
                 self._state.append_harness_failure(record.model_dump())
             except Exception:  # noqa: BLE001
-                logger.debug("Dolt harness failure write failed", exc_info=True)
+                logger.warning("Dolt harness failure write failed", exc_info=True)
 
     def load_recent(self, n: int = 20) -> list[FailureRecord]:
-        """Load the last *n* failure records from disk."""
-        if not self._failures_path.exists():
-            return []
-        try:
-            lines = self._failures_path.read_text().strip().splitlines()
-        except OSError:
-            return []
-        tail = lines[-n:] if len(lines) > n else lines
-        records: list[FailureRecord] = []
-        for line in tail:
+        """Load the last *n* failure records from Dolt."""
+        if self._state and hasattr(self._state, "load_recent_harness_failures"):
             try:
-                records.append(FailureRecord.model_validate_json(line))
+                rows = self._state.load_recent_harness_failures(n)
+                records: list[FailureRecord] = []
+                for row in rows:
+                    try:
+                        records.append(FailureRecord.model_validate(row))
+                    except Exception:  # noqa: BLE001
+                        logger.warning("Skipping malformed harness record")
+                return records
             except Exception:  # noqa: BLE001
-                logger.warning("Skipping malformed harness record: %s", line[:80])
-        return records
+                logger.debug("Dolt harness failure load failed", exc_info=True)
+        return []
 
     def get_proposed_patterns(self) -> set[str]:
         """Return the set of pattern keys that already have filed proposals."""

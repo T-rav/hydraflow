@@ -251,7 +251,7 @@ class MemorySyncWorker:
         current_ids = sorted(i["number"] for i in issues)
         prev_ids, prev_hash, _ = self._state.get_memory_state()
 
-        # Dual-write memory state to Dolt when available
+        # Write memory state to Dolt
         if hasattr(self._state, "set_memory_state"):
             try:
                 self._state.set_memory_state(current_ids, prev_hash)

@@ -127,7 +127,7 @@ class TestBuildCommand:
             model="gpt-5-codex",
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         runner = AgentRunner(cfg, event_bus)
         cmd = runner._build_command(tmp_path)
@@ -308,8 +308,12 @@ class TestBuildPrompt:
     ) -> None:
         """Prompt should include Common Review Feedback when review data exists."""
         from review_insights import ReviewInsightStore, ReviewRecord
+        from tests.helpers import InMemoryState
 
-        store = ReviewInsightStore(config.repo_root / ".hydraflow" / "memory")
+        mem_state = InMemoryState()
+        store = ReviewInsightStore(
+            config.repo_root / ".hydraflow" / "memory", state=mem_state
+        )
         for i in range(4):
             store.append_review(
                 ReviewRecord(
@@ -323,7 +327,7 @@ class TestBuildPrompt:
                 )
             )
 
-        runner = AgentRunner(config, event_bus)
+        runner = AgentRunner(config, event_bus, state=mem_state)
         prompt = runner._build_prompt(issue)
         assert "## Common Review Feedback" in prompt
         assert "Missing or insufficient test coverage" in prompt
@@ -1204,7 +1208,7 @@ class TestPreQualityReviewLoop:
             max_pre_quality_review_attempts=2,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         runner = AgentRunner(cfg, event_bus)
         with (
@@ -1309,7 +1313,7 @@ class TestPreQualityReviewLoop:
             max_quality_fix_attempts=0,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         runner = AgentRunner(cfg, event_bus)
 
@@ -1701,7 +1705,7 @@ class TestQualityFixLoop:
             max_quality_fix_attempts=3,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         runner = AgentRunner(cfg, event_bus)
 
@@ -1764,7 +1768,7 @@ class TestQualityFixLoop:
             max_quality_fix_attempts=0,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         runner = AgentRunner(cfg, event_bus)
 
@@ -2540,7 +2544,7 @@ class TestBuildPromptFallbackAndTruncation:
             test_command="npm test",
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         (tmp_path / "repo").mkdir(parents=True, exist_ok=True)
         issue = Task(

@@ -27,10 +27,10 @@ def _make_manager(
 
     config = ConfigFactory.create(
         repo_root=tmp_path / "repo",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
         **config_kw,
     )
-    state = StateTracker(config.state_file)
+    state = StateTracker(config.dolt_path)
     bus = EventBus()
     prs = AsyncMock()
     fetcher = AsyncMock()

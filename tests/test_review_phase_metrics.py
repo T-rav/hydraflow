@@ -191,7 +191,7 @@ class TestLifecycleMetricRecording:
             max_ci_fix_attempts=1,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         issue = TaskFactory.create()
@@ -224,7 +224,7 @@ class TestLifecycleMetricRecording:
             max_ci_fix_attempts=2,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True)
         issue = TaskFactory.create()
@@ -627,7 +627,7 @@ class TestGranularReviewStatusEvents:
             max_ci_fix_attempts=2,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True, event_bus=event_bus)
         issue = TaskFactory.create()
@@ -657,7 +657,7 @@ class TestGranularReviewStatusEvents:
             max_ci_fix_attempts=2,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True, event_bus=event_bus)
         issue = TaskFactory.create()
@@ -707,7 +707,7 @@ class TestGranularReviewStatusEvents:
             max_ci_fix_attempts=1,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, default_mocks=True, event_bus=event_bus)
         issue = TaskFactory.create()

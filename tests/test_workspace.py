@@ -1366,7 +1366,7 @@ class TestSetupNodeModules:
         cfg = ConfigFactory.create(
             repo_root=repo_root,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             ui_dirs=["frontend", "admin"],
         )
         manager = WorkspaceManager(cfg)
@@ -1413,7 +1413,7 @@ class TestConfigureGitIdentity:
             git_user_email="bot@example.com",
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         manager = WorkspaceManager(cfg)
         success_proc = make_proc(returncode=0)
@@ -1440,7 +1440,7 @@ class TestConfigureGitIdentity:
         cfg = ConfigFactory.create(
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         manager = WorkspaceManager(cfg)
 
@@ -1463,7 +1463,7 @@ class TestConfigureGitIdentity:
             git_user_email="",
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         manager = WorkspaceManager(cfg)
         success_proc = make_proc(returncode=0)
@@ -1491,7 +1491,7 @@ class TestConfigureGitIdentity:
             git_user_email="bot@example.com",
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         manager = WorkspaceManager(cfg)
         success_proc = make_proc(returncode=0)
@@ -1515,7 +1515,7 @@ class TestConfigureGitIdentity:
             git_user_email="bot@example.com",
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         manager = WorkspaceManager(cfg)
         fail_proc = make_proc(returncode=1, stderr=b"fatal: config error")
@@ -1534,7 +1534,7 @@ class TestConfigureGitIdentity:
             git_user_email="bot@example.com",
             repo_root=tmp_path,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         manager = WorkspaceManager(cfg)
         cfg.worktree_base.mkdir(parents=True, exist_ok=True)
@@ -2485,7 +2485,7 @@ class TestDetectUiDirs:
         cfg = ConfigFactory.create(
             repo_root=repo_root,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         manager = WorkspaceManager(cfg)
 
@@ -2508,7 +2508,7 @@ class TestDetectUiDirs:
         cfg = ConfigFactory.create(
             repo_root=repo_root,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         manager = WorkspaceManager(cfg)
 
@@ -2526,7 +2526,7 @@ class TestDetectUiDirs:
         cfg = ConfigFactory.create(
             repo_root=repo_root,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         manager = WorkspaceManager(cfg)
 
@@ -2544,7 +2544,7 @@ class TestDetectUiDirs:
         cfg = ConfigFactory.create(
             repo_root=repo_root,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         manager = WorkspaceManager(cfg)
 
@@ -2561,7 +2561,7 @@ class TestDetectUiDirs:
         cfg = ConfigFactory.create(
             repo_root=repo_root,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             ui_dirs=["custom/ui", "other/frontend"],
         )
         manager = WorkspaceManager(cfg)
@@ -2580,7 +2580,7 @@ class TestDetectUiDirs:
         cfg = ConfigFactory.create(
             repo_root=repo_root,
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             ui_dirs=["old/ui"],
         )
         manager = WorkspaceManager(cfg)

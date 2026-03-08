@@ -83,7 +83,7 @@ def _config(tmp_path):
     return ConfigFactory.create(
         repo_root=tmp_path / "repo",
         worktree_base=tmp_path / "worktrees",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
         poll_interval=5,
         data_poll_interval=10,
     )

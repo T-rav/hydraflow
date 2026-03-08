@@ -23,11 +23,11 @@ logger = logging.getLogger("hydraflow.metrics_manager")
 def get_metrics_cache_dir(config: HydraFlowConfig) -> Path:
     """Return the local metrics cache directory for a given config.
 
-    Path: ``<state_dir>/metrics/{repo_slug}/`` where *repo_slug* is the repo
+    Path: ``<data_root>/<repo_slug>/metrics/`` where *repo_slug* is the repo
     name with ``/`` replaced by ``-`` (e.g. ``owner/repo`` → ``owner-repo``).
     """
     repo_slug = config.repo.replace("/", "-") or "unknown"
-    return config.state_file.parent / "metrics" / repo_slug
+    return config.data_root / repo_slug / "metrics"
 
 
 class MetricsManager:
@@ -57,11 +57,6 @@ class MetricsManager:
         """Return the most recent in-memory snapshot."""
         return self._latest_snapshot
 
-    @property
-    def _cache_dir(self) -> Path:
-        """Return the local metrics cache directory for the current repo."""
-        return get_metrics_cache_dir(self._config)
-
     async def sync(self, queue_stats: QueueStats | None = None) -> MetricsSyncResult:
         """Aggregate, snapshot, and persist metrics. Returns status details."""
         snapshot = await self._build_snapshot(queue_stats)
@@ -80,10 +75,7 @@ class MetricsManager:
                 "timestamp": snapshot.timestamp,
             }
 
-        # Always write to local cache first
-        self._save_to_local_cache(snapshot)
-
-        # Dual-write to Dolt when available
+        # Write to Dolt
         if hasattr(self._state, "record_metrics_snapshot"):
             try:
                 self._state.record_metrics_snapshot(snapshot.model_dump())
@@ -132,28 +124,10 @@ class MetricsManager:
             "timestamp": snapshot.timestamp,
         }
 
-    def _save_to_local_cache(self, snapshot: MetricsSnapshot) -> None:
-        """Append a snapshot to the local JSONL cache file."""
-        cache_dir = self._cache_dir
-        snapshots_file = cache_dir / "snapshots.jsonl"
-        try:
-            from file_util import append_jsonl  # noqa: PLC0415
-
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            append_jsonl(snapshots_file, snapshot.model_dump_json())
-            logger.debug("Metrics snapshot cached locally at %s", snapshots_file)
-        except OSError:
-            logger.warning(
-                "Failed to write metrics cache to %s",
-                snapshots_file,
-                exc_info=True,
-            )
-
     def load_local_history(self, limit: int = 100) -> list[MetricsSnapshot]:
-        """Load metrics snapshots from local disk cache.
+        """Load metrics snapshots from Dolt.
 
         Returns up to *limit* snapshots, oldest-first.
-        Tries Dolt first when available, falls back to file.
         """
         if hasattr(self._state, "get_metrics_history"):
             try:
@@ -165,32 +139,10 @@ class MetricsManager:
                             snapshots.append(MetricsSnapshot.model_validate(row))
                         except ValidationError:
                             continue
-                    if snapshots:
-                        return snapshots
+                    return snapshots
             except Exception:  # noqa: BLE001
-                logger.debug("Dolt metrics history load failed, falling back", exc_info=True)
-
-        snapshots_file = self._cache_dir / "snapshots.jsonl"
-        if not snapshots_file.exists():
-            return []
-
-        snapshots: list[MetricsSnapshot] = []
-        with open(snapshots_file) as f:
-            for raw_line in f:
-                stripped = raw_line.strip()
-                if not stripped:
-                    continue
-                try:
-                    snapshots.append(MetricsSnapshot.model_validate_json(stripped))
-                except ValidationError:
-                    logger.debug(
-                        "Skipping corrupt metrics snapshot line",
-                        exc_info=True,
-                    )
-                    continue
-
-        # Return oldest-first, capped at limit
-        return snapshots[-limit:]
+                logger.debug("Dolt metrics history load failed", exc_info=True)
+        return []
 
     async def _build_snapshot(
         self, queue_stats: QueueStats | None = None

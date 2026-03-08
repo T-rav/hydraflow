@@ -33,7 +33,7 @@ class TestDockerImageConfig:
             docker_image="explicit/image:v1",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_image == "explicit/image:v1"
 
@@ -45,6 +45,6 @@ class TestDockerImageConfig:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_image == DEFAULT_DOCKER_IMAGE

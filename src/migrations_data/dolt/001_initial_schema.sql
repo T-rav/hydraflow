@@ -163,8 +163,8 @@ CREATE TABLE IF NOT EXISTS model_pricing (
 );
 
 CREATE TABLE IF NOT EXISTS epic_states (
-    epic_number INT PRIMARY KEY,
-    data_json TEXT
+    epic_id VARCHAR(128) PRIMARY KEY,
+    state_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS releases (

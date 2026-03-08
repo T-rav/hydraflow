@@ -120,7 +120,7 @@ class TestHITLEscalationEvents:
             max_ci_fix_attempts=1,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg, event_bus=event_bus)
         issue = TaskFactory.create()
@@ -556,7 +556,7 @@ class TestAdversarialReview:
             min_review_findings=0,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg)
         issue = TaskFactory.create()
@@ -1124,7 +1124,7 @@ class TestRunVisualValidation:
             visual_validation_enabled=False,
             repo_root=config.repo_root,
             worktree_base=config.worktree_base,
-            state_file=config.state_file,
+            dolt_path=config.dolt_path,
         )
         phase = make_review_phase(cfg)
         pr = PRInfoFactory.create()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import shutil
 from collections.abc import Callable, Coroutine
 from contextlib import ExitStack
@@ -15,6 +16,178 @@ if TYPE_CHECKING:
     from events import HydraFlowEvent
     from models import QueueStats, Task
     from workspace import WorkspaceManager
+
+
+class InMemoryState:
+    """Lightweight in-memory state backend for tests.
+
+    Implements all the methods that stores/telemetry call on a state object,
+    backed by plain Python dicts. No Dolt or file I/O required.
+    """
+
+    def __init__(self) -> None:
+        self._inferences: list[dict[str, Any]] = []
+        self._inference_stats: dict[str, dict[str, Any]] = {}
+        self._model_pricing: list[dict[str, Any]] = []
+        self._retrospectives: list[dict[str, Any]] = []
+        self._review_records: list[dict[str, Any]] = []
+        self._harness_failures: list[dict[str, Any]] = []
+        self._troubleshooting: list[dict[str, Any]] = []
+        self._events: list[dict[str, Any]] = []
+        self._issue_fields: dict[int, dict[str, Any]] = {}
+        self._pr_statuses: dict[int, str] = {}
+
+    # --- Inference telemetry ---
+    def append_inference(self, record: dict[str, Any]) -> None:
+        self._inferences.append(record)
+
+    def save_inference_stats(self, key: str, data: dict[str, Any]) -> None:
+        self._inference_stats[key] = data
+
+    def load_inference_stats(self, key: str) -> dict[str, Any] | None:
+        return self._inference_stats.get(key)
+
+    def count_inferences(self) -> int:
+        return len(self._inferences)
+
+    def load_recent_inferences(self, limit: int = 100) -> list[dict[str, Any]]:
+        return list(reversed(self._inferences))[:limit]
+
+    def load_all_inference_stats_by_prefix(self, prefix: str) -> dict[str, Any]:
+        return {k: v for k, v in self._inference_stats.items() if k.startswith(prefix)}
+
+    # --- Model pricing ---
+    def load_all_model_pricing(self) -> list[dict[str, Any]]:
+        return self._model_pricing
+
+    def upsert_model_pricing(self, model_id: str, **fields: Any) -> None:
+        for row in self._model_pricing:
+            if row.get("model_id") == model_id:
+                row.update(fields)
+                return
+        self._model_pricing.append({"model_id": model_id, **fields})
+
+    # --- Retrospectives ---
+    def append_retrospective(self, record: dict[str, Any]) -> None:
+        self._retrospectives.append(record)
+
+    def load_recent_retrospectives(self, limit: int = 10) -> list[dict[str, Any]]:
+        return list(reversed(self._retrospectives))[:limit]
+
+    # --- Review records ---
+    def append_review_record(self, record: dict[str, Any]) -> None:
+        self._review_records.append(record)
+
+    def load_recent_review_records(self, limit: int = 10) -> list[dict[str, Any]]:
+        return list(reversed(self._review_records))[:limit]
+
+    # --- Harness failures ---
+    def append_harness_failure(self, record: dict[str, Any]) -> None:
+        self._harness_failures.append(record)
+
+    def load_recent_harness_failures(self, limit: int = 10) -> list[dict[str, Any]]:
+        return list(reversed(self._harness_failures))[:limit]
+
+    # --- Troubleshooting patterns ---
+    def append_troubleshooting_pattern(self, record: dict[str, Any]) -> None:
+        self._troubleshooting.append(record)
+
+    def load_troubleshooting_patterns(self) -> list[dict[str, Any]]:
+        return list(self._troubleshooting)
+
+    def increment_troubleshooting_frequency(self, pattern_id: str) -> None:
+        for p in self._troubleshooting:
+            if p.get("id") == pattern_id:
+                p["frequency"] = p.get("frequency", 0) + 1
+                return
+
+    # --- Events ---
+    def append_event(self, event: dict[str, Any]) -> None:
+        self._events.append(event)
+
+    # --- Issue/PR tracking (mirrors DoltStore issue fields) ---
+
+    def mark_issue(self, issue_number: int, status: str) -> None:
+        self._issue_fields.setdefault(issue_number, {})["_status"] = status
+
+    def mark_pr(self, pr_number: int, status: str) -> None:
+        self._pr_statuses[pr_number] = status
+
+    def set_worker_result_meta(self, issue_number: int, meta: Any) -> None:
+        self._issue_fields.setdefault(issue_number, {})["_worker_result_meta"] = meta
+
+    def get_worker_result_meta(self, issue_number: int) -> dict[str, Any]:
+        return self._issue_fields.get(issue_number, {}).get("_worker_result_meta", {})
+
+    def set_hitl_origin(self, issue_number: int, label: str) -> None:
+        self._issue_fields.setdefault(issue_number, {})["_hitl_origin"] = label
+
+    def get_hitl_origin(self, issue_number: int) -> str | None:
+        return self._issue_fields.get(issue_number, {}).get("_hitl_origin")
+
+    def set_hitl_cause(self, issue_number: int, cause: str) -> None:
+        self._issue_fields.setdefault(issue_number, {})["_hitl_cause"] = cause
+
+    def get_hitl_cause(self, issue_number: int) -> str | None:
+        return self._issue_fields.get(issue_number, {}).get("_hitl_cause")
+
+    def get_review_attempts(self, issue_number: int) -> int:
+        return self._issue_fields.get(issue_number, {}).get("_review_attempts", 0)
+
+    def set_review_attempt(self, issue_number: int, count: int) -> None:
+        self._issue_fields.setdefault(issue_number, {})["_review_attempts"] = count
+
+    def get_issue_attempts(self, issue_number: int) -> int:
+        return self._issue_fields.get(issue_number, {}).get("_issue_attempts", 0)
+
+    def set_issue_attempt(self, issue_number: int, count: int) -> None:
+        self._issue_fields.setdefault(issue_number, {})["_issue_attempts"] = count
+
+    def set_review_feedback(self, issue_number: int, feedback: str) -> None:
+        self._issue_fields.setdefault(issue_number, {})["_review_feedback"] = feedback
+
+    def get_review_feedback(self, issue_number: int) -> str | None:
+        return self._issue_fields.get(issue_number, {}).get("_review_feedback")
+
+    def get_active_worktrees(self) -> dict[int, str]:
+        return {
+            k: v["_worktree"]
+            for k, v in self._issue_fields.items()
+            if "_worktree" in v
+        }
+
+    def set_active_worktree(self, issue_number: int, path: str) -> None:
+        self._issue_fields.setdefault(issue_number, {})["_worktree"] = path
+
+    def remove_active_worktree(self, issue_number: int) -> None:
+        self._issue_fields.get(issue_number, {}).pop("_worktree", None)
+
+    def set_active_branch(self, issue_number: int, branch: str) -> None:
+        self._issue_fields.setdefault(issue_number, {})["_branch"] = branch
+
+    def get_active_branch(self, issue_number: int) -> str | None:
+        return self._issue_fields.get(issue_number, {}).get("_branch")
+
+    def get_issue_status(self, issue_number: int) -> str | None:
+        return self._issue_fields.get(issue_number, {}).get("_status")
+
+    def save(self) -> None:
+        """No-op for compat."""
+
+    def load(self) -> dict[str, Any]:
+        return self.to_dict()
+
+    def to_dict(self) -> dict[str, Any]:
+        processed_issues: dict[str, str] = {}
+        for inum, fields in self._issue_fields.items():
+            if "_status" in fields:
+                processed_issues[str(inum)] = fields["_status"]
+        return {
+            "processed_issues": processed_issues,
+            "reviewed_prs": {str(k): v for k, v in self._pr_statuses.items()},
+            "active_worktrees": {},
+            "active_branches": {},
+        }
 
 
 @dataclass
@@ -260,7 +433,7 @@ class ConfigFactory:
         max_review_diff_chars: int = 15_000,
         repo_root: Path | None = None,
         worktree_base: Path | None = None,
-        state_file: Path | None = None,
+        dolt_path: Path | None = None,
         event_log_path: Path | None = None,
         config_file: Path | None = None,
         memory_compaction_model: str = "haiku",
@@ -464,7 +637,7 @@ class ConfigFactory:
                 max_review_diff_chars=max_review_diff_chars,
                 repo_root=root,
                 worktree_base=worktree_base or root.parent / "test-worktrees",
-                state_file=state_file or root / ".hydraflow-state.json",
+                dolt_path=dolt_path or root / "_dolt",
                 event_log_path=event_log_path or root / ".hydraflow-events.jsonl",
                 memory_compaction_model=memory_compaction_model,
                 memory_compaction_tool=memory_compaction_tool,
@@ -595,7 +768,7 @@ class PipelineHarness:
         self.config = config or ConfigFactory.create(
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             max_workers=1,
             max_planners=1,
             max_reviewers=1,
@@ -606,7 +779,7 @@ class PipelineHarness:
         self._ensure_test_dirs()
 
         self.bus = EventBus()
-        self.state = StateTracker(self.config.state_file)
+        self.state = StateTracker(self.config.dolt_path)
         self.fetcher = AsyncMock()
         self.store = IssueStore(self.config, self.fetcher, self.bus)
         self.stop_event = asyncio.Event()
@@ -700,7 +873,7 @@ class PipelineHarness:
         paths = {
             self.config.repo_root,
             self.config.worktree_base,
-            self.config.state_file.parent,
+            self.config.dolt_path.parent,
             self.config.data_root,
             self.config.plans_dir,
             self.config.memory_dir,
@@ -899,7 +1072,7 @@ def make_docker_manager(tmp_path: Path) -> WorkspaceManager:
             execution_mode="docker",
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
     return WorkspaceManager(cfg)
 
@@ -960,7 +1133,7 @@ def make_plan_phase(
     from plan_phase import PlanPhase
     from state import StateTracker
 
-    state = StateTracker(config.state_file)
+    state = StateTracker(config.dolt_path)
     bus = EventBus()
     fetcher = AsyncMock()
     store = IssueStore(config, fetcher, bus)
@@ -1008,7 +1181,7 @@ def make_implement_phase(
     from state import StateTracker
     from tests.conftest import PRInfoFactory, WorkerResultFactory
 
-    state = StateTracker(config.state_file)
+    state = StateTracker(config.dolt_path)
     stop_event = asyncio.Event()
 
     if agent_run is None:
@@ -1086,7 +1259,7 @@ def make_hitl_phase(config):
     from issue_store import IssueStore
     from state import StateTracker
 
-    state = StateTracker(config.state_file)
+    state = StateTracker(config.dolt_path)
     bus = EventBus()
     fetcher_mock = AsyncMock()
     store = IssueStore(config, AsyncMock(), bus)
@@ -1127,7 +1300,7 @@ def make_triage_phase(config):
     from state import StateTracker
     from triage_phase import TriagePhase
 
-    state = StateTracker(config.state_file)
+    state = StateTracker(config.dolt_path)
     bus = EventBus()
     fetcher = AsyncMock()
     store = IssueStore(config, fetcher, bus)
@@ -1152,7 +1325,7 @@ def make_conflict_resolver(config, *, agents=None):
     from merge_conflict_resolver import MergeConflictResolver
     from state import StateTracker
 
-    state = StateTracker(config.state_file)
+    state = StateTracker(config.dolt_path)
     return MergeConflictResolver(
         config=config,
         worktrees=AsyncMock(),
@@ -1201,7 +1374,7 @@ def make_review_phase(
     from review_phase import ReviewPhase
     from state import StateTracker
 
-    state = StateTracker(config.state_file)
+    state = StateTracker(config.dolt_path)
     stop_event = asyncio.Event()
 
     mock_wt = AsyncMock()

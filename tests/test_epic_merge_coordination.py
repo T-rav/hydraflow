@@ -327,10 +327,10 @@ def _make_manager(tmp_path: Path, **config_kw):
 
     config = ConfigFactory.create(
         repo_root=tmp_path / "repo",
-        state_file=tmp_path / "state.json",
+        dolt_path=tmp_path / "dolt_db",
         **config_kw,
     )
-    state = StateTracker(config.state_file)
+    state = StateTracker(config.dolt_path)
     bus = EventBus()
     prs = AsyncMock()
     fetcher = AsyncMock()
@@ -885,10 +885,10 @@ class TestPostMergeHandlerDeferMerge:
 
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             epic_merge_strategy=epic_merge_strategy,
         )
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         prs = AsyncMock()
         bus = EventBus()
         fetcher = AsyncMock()
@@ -973,10 +973,10 @@ class TestTriageParentEpicEnrichment:
 
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             epic_merge_strategy=epic_merge_strategy,
         )
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         bus = EventBus()
         prs = AsyncMock()
         fetcher = AsyncMock()
@@ -1026,9 +1026,9 @@ class TestTriageParentEpicEnrichment:
 
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         bus = EventBus()
         prs = AsyncMock()
         store = MagicMock()

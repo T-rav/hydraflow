@@ -1,13 +1,15 @@
-"""Manages Dolt sql-server process and MySQL connection."""
+"""Dolt database connection using CLI-embedded mode (no server required)."""
 
 from __future__ import annotations
 
+import json
+import logging
+import re
 import subprocess
-import time
 from pathlib import Path
+from typing import Any
 
-import mysql.connector
-
+logger = logging.getLogger("hydraflow.dolt.connection")
 
 _SINGLETON_TABLES = (
     "lifetime_stats",
@@ -24,40 +26,30 @@ _SCHEMA_PATH = (
 
 
 class DoltConnection:
-    """Manages a Dolt sql-server child process and MySQL connection."""
+    """Embedded Dolt connection using ``dolt sql`` CLI — no server required.
+
+    All queries run via ``dolt sql -q`` subprocess calls against the local
+    Dolt repository directory. This is simpler, faster to start, and works
+    without port management or MySQL client libraries.
+    """
 
     def __init__(self, dolt_dir: Path, *, port: int = 3307) -> None:
         self.dolt_dir = dolt_dir
+        # port is accepted for API compat but unused in CLI mode
         self.port = port
-        self._server_proc: subprocess.Popen | None = None  # type: ignore[type-arg]
-        self._conn: mysql.connector.MySQLConnection | None = None  # type: ignore[attr-defined]
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     def start(self) -> None:
-        """Init repo, start server, apply schema, seed singleton rows."""
+        """Init repo, apply schema, seed singleton rows."""
         self._init_repo()
-        self._start_server()
         self._ensure_schema()
         self._ensure_singleton_rows()
 
     def close(self) -> None:
-        """Close connection and terminate server."""
-        if self._conn is not None:
-            try:
-                self._conn.close()
-            except Exception:
-                pass
-            self._conn = None
-        if self._server_proc is not None:
-            try:
-                self._server_proc.terminate()
-                self._server_proc.wait(timeout=5)
-            except Exception:
-                pass
-            self._server_proc = None
+        """No-op — CLI mode has no persistent connection."""
 
     # ------------------------------------------------------------------
     # Internal setup
@@ -79,117 +71,153 @@ class DoltConnection:
             raise RuntimeError(
                 f"dolt init failed (rc={result.returncode}): {result.stderr.strip()}"
             )
-
-    def _start_server(self) -> None:
-        """Start ``dolt sql-server``, wait for connection, create database."""
-        self._server_proc = subprocess.Popen(
-            [
-                "dolt",
-                "sql-server",
-                "--port",
-                str(self.port),
-                "--host",
-                "127.0.0.1",
-            ],
-            cwd=self.dolt_dir,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-
-        # Wait for the server to accept connections.
-        last_err: Exception | None = None
-        for _ in range(30):
-            try:
-                conn = mysql.connector.connect(
-                    host="127.0.0.1",
-                    port=self.port,
-                    user="root",
-                )
-                # Create the hydraflow database if it doesn't exist.
-                cur = conn.cursor()
-                cur.execute("CREATE DATABASE IF NOT EXISTS hydraflow")
-                cur.close()
-                conn.close()
-                break
-            except Exception as exc:
-                last_err = exc
-                time.sleep(0.5)
-        else:
-            raise RuntimeError(
-                f"Could not connect to Dolt server after 30 retries: {last_err}"
-            )
-
-        # Now connect to the hydraflow database with autocommit.
-        self._conn = mysql.connector.connect(
-            host="127.0.0.1",
-            port=self.port,
-            user="root",
-            database="hydraflow",
-            autocommit=True,
-        )
+        logger.info("Initialised Dolt repo at %s", self.dolt_dir)
 
     def _ensure_schema(self) -> None:
         """Read and execute the initial schema migration."""
         if not _SCHEMA_PATH.exists():
             return
         sql = _SCHEMA_PATH.read_text()
-        cur = self.cursor()
         for statement in sql.split(";"):
-            statement = statement.strip()
-            if statement:
-                cur.execute(statement)
-        cur.close()
+            stmt = statement.strip()
+            if stmt:
+                self._exec_sql(stmt)
 
     def _ensure_singleton_rows(self) -> None:
         """Insert default singleton rows if missing."""
-        cur = self.cursor()
         for table in _SINGLETON_TABLES:
-            cur.execute(f"INSERT IGNORE INTO {table} (id) VALUES (1)")  # noqa: S608
-        cur.close()
+            self._exec_sql(f"INSERT IGNORE INTO {table} (id) VALUES (1)")
+
+    # ------------------------------------------------------------------
+    # Low-level SQL execution
+    # ------------------------------------------------------------------
+
+    def _exec_sql(self, query: str, params: tuple[Any, ...] | None = None) -> str:
+        """Execute SQL via ``dolt sql -q`` and return raw stdout.
+
+        Parameters are interpolated safely using Python string formatting
+        with proper escaping for SQL values.
+        """
+        final_query = self._interpolate(query, params) if params else query
+        result = subprocess.run(
+            ["dolt", "sql", "-q", final_query, "-r", "json"],
+            cwd=self.dolt_dir,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.strip()
+            # Ignore "nothing to commit" errors
+            if "nothing to commit" in stderr.lower():
+                return "[]"
+            raise RuntimeError(f"dolt sql failed: {stderr}\nQuery: {final_query}")
+        return result.stdout
+
+    @staticmethod
+    def _interpolate(query: str, params: tuple[Any, ...]) -> str:
+        """Replace %s placeholders with properly escaped SQL values."""
+        parts = query.split("%s")
+        if len(parts) - 1 != len(params):
+            raise ValueError(
+                f"Parameter count mismatch: {len(parts) - 1} placeholders, "
+                f"{len(params)} params"
+            )
+        result = parts[0]
+        for i, param in enumerate(params):
+            result += _sql_escape(param) + parts[i + 1]
+        return result
 
     # ------------------------------------------------------------------
     # Query helpers
     # ------------------------------------------------------------------
 
-    def cursor(self) -> mysql.connector.cursor.MySQLCursor:
-        """Return a cursor, reconnecting if needed."""
-        if self._conn is None or not self._conn.is_connected():
-            self._conn = mysql.connector.connect(
-                host="127.0.0.1",
-                port=self.port,
-                user="root",
-                database="hydraflow",
-                autocommit=True,
-            )
-        return self._conn.cursor()
-
     def fetchone(
-        self, query: str, params: tuple | None = None  # type: ignore[type-arg]
-    ) -> tuple | None:  # type: ignore[type-arg]
-        """Execute *query* and return a single row."""
-        cur = self.cursor()
-        cur.execute(query, params or ())
-        row = cur.fetchone()
-        cur.close()
-        return row
+        self, query: str, params: tuple[Any, ...] | None = None
+    ) -> tuple[Any, ...] | None:
+        """Execute *query* and return a single row as a tuple, or None."""
+        rows = self._query_rows(query, params)
+        if not rows:
+            return None
+        row = rows[0]
+        col_order = self._parse_select_columns(query)
+        return self._row_to_tuple(row, col_order)
 
     def fetchall(
-        self, query: str, params: tuple | None = None  # type: ignore[type-arg]
-    ) -> list[tuple]:  # type: ignore[type-arg]
-        """Execute *query* and return all rows."""
-        cur = self.cursor()
-        cur.execute(query, params or ())
-        rows = cur.fetchall()
-        cur.close()
-        return rows
+        self, query: str, params: tuple[Any, ...] | None = None
+    ) -> list[tuple[Any, ...]]:
+        """Execute *query* and return all rows as list of tuples."""
+        rows = self._query_rows(query, params)
+        col_order = self._parse_select_columns(query)
+        return [self._row_to_tuple(r, col_order) for r in rows]
+
+    def fetchall_dicts(
+        self, query: str, params: tuple[Any, ...] | None = None
+    ) -> list[dict[str, Any]]:
+        """Execute *query* and return all rows as list of dicts."""
+        return self._query_rows(query, params)
 
     def execute(
-        self, query: str, params: tuple | None = None  # type: ignore[type-arg]
+        self, query: str, params: tuple[Any, ...] | None = None
     ) -> None:
-        """Execute a write query."""
-        cur = self.cursor()
-        cur.execute(query, params or ())
-        cur.close()
+        """Execute a write query (INSERT, UPDATE, DELETE)."""
+        self._exec_sql(query, params)
+
+    def cursor(self) -> DoltCLICursor:
+        """Return a cursor-like object for compat with code expecting cursors."""
+        return DoltCLICursor(self)
+
+    @staticmethod
+    def _parse_select_columns(query: str) -> list[str] | None:
+        """Parse column names from a SELECT query to preserve ordering.
+
+        Returns a list of column names if the query is a simple SELECT,
+        or None for ``SELECT *`` / unparseable queries.
+        """
+        m = re.match(r"\s*SELECT\s+(.+?)\s+FROM\s+", query, re.IGNORECASE | re.DOTALL)
+        if not m:
+            return None
+        col_expr = m.group(1).strip()
+        if col_expr == "*":
+            return None
+        # Split on commas, strip whitespace, handle aliased columns
+        cols = []
+        for part in col_expr.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            # Handle "expr AS alias" — use the alias
+            alias_match = re.search(r"\bAS\s+(\w+)\s*$", part, re.IGNORECASE)
+            if alias_match:
+                cols.append(alias_match.group(1))
+            else:
+                # Take the last word (handles "table.column")
+                cols.append(part.split(".")[-1].strip())
+        return cols if cols else None
+
+    @staticmethod
+    def _row_to_tuple(row: dict[str, Any], col_order: list[str] | None) -> tuple[Any, ...]:
+        """Convert a dict row to a tuple respecting *col_order*."""
+        if col_order:
+            return tuple(row.get(c) for c in col_order)
+        return tuple(row.values())
+
+    def _query_rows(
+        self, query: str, params: tuple[Any, ...] | None = None
+    ) -> list[dict[str, Any]]:
+        """Execute a SELECT and parse JSON output into list of dicts."""
+        raw = self._exec_sql(query, params)
+        if not raw.strip():
+            return []
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+        # dolt sql -r json returns {"rows": [...]} for SELECT queries
+        if isinstance(data, dict) and "rows" in data:
+            return data["rows"]
+        if isinstance(data, list):
+            return data
+        return []
 
     # ------------------------------------------------------------------
     # Dolt version-control helpers
@@ -197,17 +225,90 @@ class DoltConnection:
 
     def commit(self, message: str) -> None:
         """Stage all changes and create a Dolt commit."""
-        self.execute("CALL DOLT_ADD('-A')")
-        self.execute("CALL DOLT_COMMIT(%s)", (message,))
+        self._exec_sql("CALL DOLT_ADD('-A')")
+        try:
+            self._exec_sql(f"CALL DOLT_COMMIT('-m', {_sql_escape(message)})")
+        except RuntimeError as e:
+            if "nothing to commit" not in str(e).lower():
+                raise
 
     def tag(self, tag_name: str, message: str) -> None:
         """Create a Dolt tag."""
-        self.execute("CALL DOLT_TAG(%s, %s)", (tag_name, message))
+        self._exec_sql(
+            f"CALL DOLT_TAG({_sql_escape(tag_name)}, '-m', {_sql_escape(message)})"
+        )
 
     def diff(
         self, from_ref: str, to_ref: str, table: str
-    ) -> list[tuple]:  # type: ignore[type-arg]
+    ) -> list[dict[str, Any]]:
         """Return the diff between two refs for a table."""
-        return self.fetchall(
+        return self._query_rows(
             "SELECT * FROM DOLT_DIFF(%s, %s, %s)", (from_ref, to_ref, table)
         )
+
+
+class DoltCLICursor:
+    """Minimal cursor-like wrapper for DoltConnection CLI mode.
+
+    Supports execute/fetchone/fetchall/close for compat with code
+    that was written for mysql.connector cursors.
+    """
+
+    def __init__(self, conn: DoltConnection) -> None:
+        self._conn = conn
+        self._last_rows: list[dict[str, Any]] = []
+        self.description: list[tuple[str, ...]] | None = None
+
+    def execute(self, query: str, params: tuple[Any, ...] | None = None) -> None:
+        raw = self._conn._exec_sql(query, params)
+        if not raw.strip():
+            self._last_rows = []
+            self.description = None
+            return
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            self._last_rows = []
+            self.description = None
+            return
+        if isinstance(data, dict) and "rows" in data:
+            self._last_rows = data["rows"]
+        elif isinstance(data, list):
+            self._last_rows = data
+        else:
+            self._last_rows = []
+        if self._last_rows:
+            self.description = [(k,) for k in self._last_rows[0].keys()]
+        else:
+            self.description = None
+
+    def fetchone(self) -> tuple[Any, ...] | None:
+        if not self._last_rows:
+            return None
+        row = self._last_rows.pop(0)
+        return tuple(row.values())
+
+    def fetchall(self) -> list[tuple[Any, ...]]:
+        rows = [tuple(r.values()) for r in self._last_rows]
+        self._last_rows = []
+        return rows
+
+    def close(self) -> None:
+        self._last_rows = []
+        self.description = None
+
+
+def _sql_escape(value: Any) -> str:
+    """Escape a Python value for safe inclusion in a SQL string."""
+    if value is None:
+        return "NULL"
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    if isinstance(value, int | float):
+        return str(value)
+    s = str(value)
+    # Escape single quotes by doubling them
+    s = s.replace("'", "''")
+    # Escape backslashes
+    s = s.replace("\\", "\\\\")
+    return f"'{s}'"

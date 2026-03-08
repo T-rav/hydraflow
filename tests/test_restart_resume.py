@@ -44,12 +44,12 @@ class TestWorkerIntervalPersistence:
         """Custom worker intervals should persist across StateTracker recreation."""
         from state import StateTracker
 
-        state_file = tmp_path / "state.json"
-        st1 = StateTracker(state_file)
+        dolt_path = tmp_path / "dolt_db"
+        st1 = StateTracker(dolt_path)
         st1.set_worker_intervals({"plan": 45, "implement": 120, "review": 60})
 
         # Simulate restart: create new StateTracker on same file
-        st2 = StateTracker(state_file)
+        st2 = StateTracker(dolt_path)
         intervals = st2.get_worker_intervals()
 
         assert intervals["plan"] == 45
@@ -67,11 +67,11 @@ class TestActiveIssueCrashRecovery:
         """Active issue numbers should persist across restarts."""
         from state import StateTracker
 
-        state_file = tmp_path / "state.json"
-        st1 = StateTracker(state_file)
+        dolt_path = tmp_path / "dolt_db"
+        st1 = StateTracker(dolt_path)
         st1.set_active_issue_numbers([10, 20, 30])
 
-        st2 = StateTracker(state_file)
+        st2 = StateTracker(dolt_path)
         numbers = st2.get_active_issue_numbers()
 
         assert set(numbers) == {10, 20, 30}
@@ -80,12 +80,12 @@ class TestActiveIssueCrashRecovery:
         """An explicitly empty active list should stay empty after restart."""
         from state import StateTracker
 
-        state_file = tmp_path / "state.json"
-        st1 = StateTracker(state_file)
+        dolt_path = tmp_path / "dolt_db"
+        st1 = StateTracker(dolt_path)
         st1.set_active_issue_numbers([10, 20])
         st1.set_active_issue_numbers([])
 
-        st2 = StateTracker(state_file)
+        st2 = StateTracker(dolt_path)
         assert st2.get_active_issue_numbers() == []
 
 
@@ -99,15 +99,15 @@ class TestSessionContinuity:
         """Sessions saved before restart should be loadable after restart."""
         from state import StateTracker
 
-        state_file = tmp_path / "state.json"
-        st1 = StateTracker(state_file)
+        dolt_path = tmp_path / "dolt_db"
+        st1 = StateTracker(dolt_path)
 
         st1.save_session(_make_session("owner/repo-alpha", "sess-1", succeeded=3))
         st1.save_session(_make_session("owner/repo-alpha", "sess-2", succeeded=5))
         st1.save_session(_make_session("owner/repo-beta", "sess-3", succeeded=2))
 
         # Simulate restart
-        st2 = StateTracker(state_file)
+        st2 = StateTracker(dolt_path)
 
         alpha_sessions = st2.load_sessions(repo="owner/repo-alpha")
         beta_sessions = st2.load_sessions(repo="owner/repo-beta")
@@ -121,15 +121,15 @@ class TestSessionContinuity:
         """Session fields should be preserved exactly across restart."""
         from state import StateTracker
 
-        state_file = tmp_path / "state.json"
+        dolt_path = tmp_path / "dolt_db"
         original = _make_session("owner/repo-alpha", "detailed-sess", succeeded=7)
         original.issues_processed = [10, 20, 30, 40, 50, 60, 70]
         original.issues_failed = 2
 
-        st1 = StateTracker(state_file)
+        st1 = StateTracker(dolt_path)
         st1.save_session(original)
 
-        st2 = StateTracker(state_file)
+        st2 = StateTracker(dolt_path)
         loaded = st2.load_sessions(repo="owner/repo-alpha")
 
         assert len(loaded) == 1
@@ -150,8 +150,8 @@ class TestLifetimeStatsPersistence:
         """Lifetime stats should survive restart with exact values."""
         from state import StateTracker
 
-        state_file = tmp_path / "state.json"
-        st1 = StateTracker(state_file)
+        dolt_path = tmp_path / "dolt_db"
+        st1 = StateTracker(dolt_path)
 
         for _ in range(15):
             st1.record_issue_completed()
@@ -161,7 +161,7 @@ class TestLifetimeStatsPersistence:
             st1.record_hitl_escalation()
 
         # Simulate restart
-        st2 = StateTracker(state_file)
+        st2 = StateTracker(dolt_path)
         restored = st2.get_lifetime_stats()
 
         assert restored.issues_completed == 15
@@ -172,12 +172,12 @@ class TestLifetimeStatsPersistence:
         """A fresh state should have all-zero lifetime stats after restart."""
         from state import StateTracker
 
-        state_file = tmp_path / "state.json"
-        st1 = StateTracker(state_file)
+        dolt_path = tmp_path / "dolt_db"
+        st1 = StateTracker(dolt_path)
         # Force a save by marking an issue
         st1.mark_issue(9999, "merged")
 
-        st2 = StateTracker(state_file)
+        st2 = StateTracker(dolt_path)
         stats = st2.get_lifetime_stats()
 
         assert stats.issues_completed == 0
@@ -194,12 +194,12 @@ class TestProcessedIssuesPersistence:
         """Processed issue records should persist across restarts."""
         from state import StateTracker
 
-        state_file = tmp_path / "state.json"
-        st1 = StateTracker(state_file)
+        dolt_path = tmp_path / "dolt_db"
+        st1 = StateTracker(dolt_path)
         st1.mark_issue(42, "merged")
         st1.mark_issue(99, "failed")
 
-        st2 = StateTracker(state_file)
+        st2 = StateTracker(dolt_path)
         data = st2.load()
         processed = data.get("processed_issues", {})
 
@@ -217,23 +217,23 @@ class TestWorkerEnabledPersistence:
         """Disabled worker set should persist across StateTracker recreation."""
         from state import StateTracker
 
-        state_file = tmp_path / "state.json"
-        st1 = StateTracker(state_file)
+        dolt_path = tmp_path / "dolt_db"
+        st1 = StateTracker(dolt_path)
         st1.set_disabled_workers({"memory_sync", "metrics"})
 
-        st2 = StateTracker(state_file)
+        st2 = StateTracker(dolt_path)
         assert st2.get_disabled_workers() == {"memory_sync", "metrics"}
 
     def test_empty_disabled_workers_after_reenabling(self, tmp_path: Path) -> None:
         """Re-enabling all workers should persist as empty set."""
         from state import StateTracker
 
-        state_file = tmp_path / "state.json"
-        st1 = StateTracker(state_file)
+        dolt_path = tmp_path / "dolt_db"
+        st1 = StateTracker(dolt_path)
         st1.set_disabled_workers({"memory_sync"})
         st1.set_disabled_workers(set())
 
-        st2 = StateTracker(state_file)
+        st2 = StateTracker(dolt_path)
         assert st2.get_disabled_workers() == set()
 
     def test_disabled_workers_coexist_with_worker_intervals(
@@ -242,11 +242,11 @@ class TestWorkerEnabledPersistence:
         """Disabled workers and custom intervals should both persist independently."""
         from state import StateTracker
 
-        state_file = tmp_path / "state.json"
-        st1 = StateTracker(state_file)
+        dolt_path = tmp_path / "dolt_db"
+        st1 = StateTracker(dolt_path)
         st1.set_disabled_workers({"memory_sync"})
         st1.set_worker_intervals({"memory_sync": 7200})
 
-        st2 = StateTracker(state_file)
+        st2 = StateTracker(dolt_path)
         assert st2.get_disabled_workers() == {"memory_sync"}
         assert st2.get_worker_intervals() == {"memory_sync": 7200}

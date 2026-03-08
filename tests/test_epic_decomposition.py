@@ -123,7 +123,7 @@ class TestMaybeDecompose:
         from state import StateTracker
         from triage_phase import TriagePhase
 
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         bus = EventBus()
         store = MagicMock(spec=IssueStore)
         prs = AsyncMock()
@@ -156,7 +156,7 @@ class TestMaybeDecompose:
     async def test_skips_when_no_epic_manager(self, tmp_path: Path) -> None:
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             epic_auto_decompose=True,
         )
         phase, _, prs, _ = self._make_phase(config, epic_manager=None)
@@ -170,7 +170,7 @@ class TestMaybeDecompose:
     async def test_skips_low_complexity(self, tmp_path: Path) -> None:
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             epic_auto_decompose=True,
             epic_decompose_complexity_threshold=8,
         )
@@ -186,7 +186,7 @@ class TestMaybeDecompose:
     async def test_decomposes_high_complexity(self, tmp_path: Path) -> None:
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             epic_auto_decompose=True,
             epic_decompose_complexity_threshold=8,
         )
@@ -235,7 +235,7 @@ class TestMaybeDecompose:
     async def test_skips_when_decomposition_declined(self, tmp_path: Path) -> None:
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             epic_auto_decompose=True,
             epic_decompose_complexity_threshold=8,
         )
@@ -261,7 +261,7 @@ class TestMaybeDecompose:
     async def test_skips_when_too_few_children(self, tmp_path: Path) -> None:
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             epic_auto_decompose=True,
             epic_decompose_complexity_threshold=8,
         )

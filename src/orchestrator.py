@@ -28,8 +28,8 @@ from phase_utils import (
     release_batch_in_flight,
     safe_file_memory_suggestion,
 )
+from dolt.store import DoltStore
 from service_registry import OrchestratorCallbacks, build_services
-from state import StateTracker
 from subprocess_util import (
     AuthenticationError,
     CreditExhaustedError,
@@ -61,18 +61,11 @@ class HydraFlowOrchestrator:
         self,
         config: HydraFlowConfig,
         event_bus: EventBus | None = None,
-        state: StateTracker | None = None,
+        state: DoltStore | None = None,
     ) -> None:
         self._config = config
         self._bus = event_bus or EventBus()
-        if state:
-            self._state = state
-        elif config.dolt_path is not None:
-            from dolt.store import DoltStore  # noqa: PLC0415
-
-            self._state = DoltStore(config.dolt_path, port=config.dolt_port)
-        else:
-            self._state = StateTracker(config.state_file)
+        self._state = state or DoltStore(config.dolt_path, port=config.dolt_port)
         self._dashboard: object | None = None
         # Pending human-input requests: {issue_number: question}
         self._human_input_requests: dict[int, str] = {}

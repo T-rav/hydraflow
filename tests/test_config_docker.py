@@ -21,7 +21,7 @@ class TestDockerConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.execution_mode == "host"
 
@@ -29,7 +29,7 @@ class TestDockerConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_image == "ghcr.io/t-rav/hydraflow-agent:latest"
 
@@ -37,7 +37,7 @@ class TestDockerConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_cpu_limit == pytest.approx(2.0)
 
@@ -45,7 +45,7 @@ class TestDockerConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_memory_limit == "4g"
 
@@ -53,7 +53,7 @@ class TestDockerConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_pids_limit == 256
 
@@ -61,7 +61,7 @@ class TestDockerConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_tmp_size == "1g"
 
@@ -69,7 +69,7 @@ class TestDockerConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_network_mode == "bridge"
 
@@ -77,7 +77,7 @@ class TestDockerConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_spawn_delay == pytest.approx(2.0)
 
@@ -85,7 +85,7 @@ class TestDockerConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_read_only_root is True
 
@@ -93,7 +93,7 @@ class TestDockerConfigDefaults:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_no_new_privileges is True
 
@@ -116,7 +116,7 @@ class TestDockerConfigCustomValues:
             execution_mode="docker",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.execution_mode == "docker"
 
@@ -125,7 +125,7 @@ class TestDockerConfigCustomValues:
             docker_image="my-registry/my-image:v1",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_image == "my-registry/my-image:v1"
 
@@ -134,7 +134,7 @@ class TestDockerConfigCustomValues:
             docker_cpu_limit=4.0,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_cpu_limit == pytest.approx(4.0)
 
@@ -143,7 +143,7 @@ class TestDockerConfigCustomValues:
             docker_memory_limit="8g",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_memory_limit == "8g"
 
@@ -152,7 +152,7 @@ class TestDockerConfigCustomValues:
             docker_network_mode="none",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_network_mode == "none"
 
@@ -161,7 +161,7 @@ class TestDockerConfigCustomValues:
             docker_spawn_delay=5.0,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_spawn_delay == pytest.approx(5.0)
 
@@ -170,7 +170,7 @@ class TestDockerConfigCustomValues:
             docker_read_only_root=False,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_read_only_root is False
 
@@ -179,7 +179,7 @@ class TestDockerConfigCustomValues:
             docker_no_new_privileges=False,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_no_new_privileges is False
 
@@ -201,7 +201,7 @@ class TestDockerConfigValidation:
                 execution_mode="kubernetes",  # type: ignore[arg-type]
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt_db",
             )
 
     def test_invalid_docker_network_mode_raises(self, tmp_path: Path) -> None:
@@ -213,7 +213,7 @@ class TestDockerConfigValidation:
                 docker_network_mode="overlay",  # type: ignore[arg-type]
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt_db",
             )
 
     def test_docker_cpu_limit_below_minimum_raises(self, tmp_path: Path) -> None:
@@ -224,7 +224,7 @@ class TestDockerConfigValidation:
                 docker_cpu_limit=0.1,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt_db",
             )
 
     def test_docker_cpu_limit_above_maximum_raises(self, tmp_path: Path) -> None:
@@ -235,7 +235,7 @@ class TestDockerConfigValidation:
                 docker_cpu_limit=32.0,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt_db",
             )
 
     def test_docker_cpu_limit_minimum_boundary(self, tmp_path: Path) -> None:
@@ -243,7 +243,7 @@ class TestDockerConfigValidation:
             docker_cpu_limit=0.5,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_cpu_limit == pytest.approx(0.5)
 
@@ -252,7 +252,7 @@ class TestDockerConfigValidation:
             docker_cpu_limit=16.0,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_cpu_limit == pytest.approx(16.0)
 
@@ -264,7 +264,7 @@ class TestDockerConfigValidation:
                 docker_spawn_delay=-1.0,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt_db",
             )
 
     def test_docker_spawn_delay_above_maximum_raises(self, tmp_path: Path) -> None:
@@ -275,7 +275,7 @@ class TestDockerConfigValidation:
                 docker_spawn_delay=60.0,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt_db",
             )
 
     def test_docker_spawn_delay_minimum_boundary(self, tmp_path: Path) -> None:
@@ -283,7 +283,7 @@ class TestDockerConfigValidation:
             docker_spawn_delay=0.0,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_spawn_delay == pytest.approx(0.0)
 
@@ -292,7 +292,7 @@ class TestDockerConfigValidation:
             docker_spawn_delay=30.0,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_spawn_delay == pytest.approx(30.0)
 
@@ -304,7 +304,7 @@ class TestDockerConfigValidation:
                 docker_pids_limit=15,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt_db",
             )
 
     def test_docker_pids_limit_above_maximum_raises(self, tmp_path: Path) -> None:
@@ -315,7 +315,7 @@ class TestDockerConfigValidation:
                 docker_pids_limit=4097,
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt_db",
             )
 
     def test_docker_pids_limit_minimum_boundary(self, tmp_path: Path) -> None:
@@ -323,7 +323,7 @@ class TestDockerConfigValidation:
             docker_pids_limit=16,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_pids_limit == 16
 
@@ -332,7 +332,7 @@ class TestDockerConfigValidation:
             docker_pids_limit=4096,
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_pids_limit == 4096
 
@@ -342,7 +342,7 @@ class TestDockerConfigValidation:
                 docker_memory_limit="4gb",
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt_db",
             )
 
     def test_docker_memory_limit_invalid_text_rejected(self, tmp_path: Path) -> None:
@@ -351,7 +351,7 @@ class TestDockerConfigValidation:
                 docker_memory_limit="lots",
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt_db",
             )
 
     def test_docker_tmp_size_invalid_rejected(self, tmp_path: Path) -> None:
@@ -360,7 +360,7 @@ class TestDockerConfigValidation:
                 docker_tmp_size="big",
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt_db",
             )
 
     def test_docker_not_available_raises(
@@ -375,7 +375,7 @@ class TestDockerConfigValidation:
                 execution_mode="docker",
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt_db",
             )
 
     def test_docker_available_passes(
@@ -389,7 +389,7 @@ class TestDockerConfigValidation:
             execution_mode="docker",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.execution_mode == "docker"
 
@@ -399,7 +399,7 @@ class TestDockerConfigValidation:
             execution_mode="host",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.execution_mode == "host"
 
@@ -422,7 +422,7 @@ class TestDockerConfigEnvVarOverrides:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.execution_mode == "docker"
 
@@ -433,7 +433,7 @@ class TestDockerConfigEnvVarOverrides:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_image == "custom/image:v2"
 
@@ -444,7 +444,7 @@ class TestDockerConfigEnvVarOverrides:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_memory_limit == "16g"
 
@@ -455,7 +455,7 @@ class TestDockerConfigEnvVarOverrides:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_network_mode == "none"
 
@@ -466,7 +466,7 @@ class TestDockerConfigEnvVarOverrides:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_cpu_limit == pytest.approx(8.0)
 
@@ -477,7 +477,7 @@ class TestDockerConfigEnvVarOverrides:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_spawn_delay == pytest.approx(5.0)
 
@@ -488,7 +488,7 @@ class TestDockerConfigEnvVarOverrides:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_read_only_root is False
 
@@ -499,7 +499,7 @@ class TestDockerConfigEnvVarOverrides:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_no_new_privileges is False
 
@@ -515,7 +515,7 @@ class TestDockerConfigEnvVarOverrides:
             HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt_db",
             )
 
     def test_docker_cpu_limit_env_override_out_of_range_ignored(
@@ -526,7 +526,7 @@ class TestDockerConfigEnvVarOverrides:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_cpu_limit == pytest.approx(2.0)  # unchanged default
 
@@ -538,7 +538,7 @@ class TestDockerConfigEnvVarOverrides:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_spawn_delay == pytest.approx(2.0)  # unchanged default
 
@@ -549,7 +549,7 @@ class TestDockerConfigEnvVarOverrides:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_pids_limit == 512
 
@@ -561,7 +561,7 @@ class TestDockerConfigEnvVarOverrides:
             HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt_db",
             )
 
     def test_pids_limit_env_override_above_maximum_raises(
@@ -572,7 +572,7 @@ class TestDockerConfigEnvVarOverrides:
             HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt_db",
             )
 
     def test_tmp_size_env_override(
@@ -582,7 +582,7 @@ class TestDockerConfigEnvVarOverrides:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_tmp_size == "2g"
 
@@ -595,7 +595,7 @@ class TestDockerConfigEnvVarOverrides:
             HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt_db",
             )
 
     def test_tmp_size_env_override_invalid_value_rejected(
@@ -607,7 +607,7 @@ class TestDockerConfigEnvVarOverrides:
             HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt_db",
             )
 
     def test_execution_mode_default_value_overridden_by_env(
@@ -627,7 +627,7 @@ class TestDockerConfigEnvVarOverrides:
             execution_mode="host",
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.execution_mode == "docker"
 
@@ -644,7 +644,7 @@ class TestDockerConfig:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_image == "ghcr.io/t-rav/hydraflow-agent:latest"
 
@@ -652,7 +652,7 @@ class TestDockerConfig:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_spawn_delay == 2.0
 
@@ -660,7 +660,7 @@ class TestDockerConfig:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_network == ""
 
@@ -668,7 +668,7 @@ class TestDockerConfig:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_extra_mounts == []
 
@@ -683,7 +683,7 @@ class TestDockerConfig:
             cfg = HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt_db",
             )
         assert cfg.docker_image == "hydra:v2"
         assert "Deprecated env var HYDRA_DOCKER_IMAGE" in caplog.text
@@ -699,7 +699,7 @@ class TestDockerConfig:
             cfg = HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt_db",
             )
         assert cfg.docker_spawn_delay == 5.0
         assert "Deprecated env var HYDRA_DOCKER_SPAWN_DELAY" in caplog.text
@@ -711,7 +711,7 @@ class TestDockerConfig:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_spawn_delay == 2.0  # default preserved
 
@@ -722,7 +722,7 @@ class TestDockerConfig:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.docker_network == "hydra-net"
 
@@ -733,7 +733,7 @@ class TestDockerConfig:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
             docker_network="explicit-net",
         )
         assert cfg.docker_network == "explicit-net"
@@ -749,7 +749,7 @@ class TestDockerConfig:
             cfg = HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt_db",
             )
         assert cfg.docker_network == "my-net"
         assert "Deprecated env var HYDRA_DOCKER_NETWORK" in caplog.text
@@ -758,7 +758,7 @@ class TestDockerConfig:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
             docker_image="hydra-agent:latest",
             docker_spawn_delay=3.5,
             docker_network="my-network",
@@ -776,7 +776,7 @@ class TestDockerConfig:
             HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt_db",
                 docker_spawn_delay=-1.0,
             )
 
@@ -787,7 +787,7 @@ class TestDockerConfig:
             HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt_db",
                 docker_spawn_delay=31.0,
             )
 
@@ -815,7 +815,7 @@ class TestDockerEnabledDeprecation:
             cfg = HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt_db",
             )
         assert cfg.execution_mode == "docker"
         assert "HYDRAFLOW_DOCKER_ENABLED" in caplog.text
@@ -829,7 +829,7 @@ class TestDockerEnabledDeprecation:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.execution_mode == "host"
 
@@ -844,7 +844,7 @@ class TestDockerEnabledDeprecation:
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         assert cfg.execution_mode == "host"
 
@@ -863,6 +863,6 @@ class TestDockerEnabledDeprecation:
             cfg = HydraFlowConfig(
                 repo_root=tmp_path,
                 worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
+                dolt_path=tmp_path / "dolt_db",
             )
         assert cfg.execution_mode == "docker"

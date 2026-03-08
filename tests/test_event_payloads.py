@@ -223,8 +223,8 @@ class TestWorkerResultMeta:
 
         from state import StateTracker
 
-        state_file = Path(str(tmp_path)) / "state.json"
-        tracker = StateTracker(state_file)
+        dolt_path = Path(str(tmp_path)) / "dolt_db"
+        tracker = StateTracker(dolt_path)
 
         meta: WorkerResultMeta = {
             "quality_fix_attempts": 2,

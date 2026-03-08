@@ -1250,8 +1250,8 @@ class TestMemoryState:
     def test_update_and_get_memory_state(self, tmp_path: Path) -> None:
         from state import StateTracker
 
-        state_file = tmp_path / "state.json"
-        tracker = StateTracker(state_file)
+        dolt_path = tmp_path / "dolt_db"
+        tracker = StateTracker(dolt_path)
 
         tracker.update_memory_state([1, 2, 3], "abc123")
 
@@ -1263,8 +1263,8 @@ class TestMemoryState:
     def test_get_memory_state_defaults(self, tmp_path: Path) -> None:
         from state import StateTracker
 
-        state_file = tmp_path / "state.json"
-        tracker = StateTracker(state_file)
+        dolt_path = tmp_path / "dolt_db"
+        tracker = StateTracker(dolt_path)
 
         ids, hash_val, last_synced = tracker.get_memory_state()
         assert ids == []
@@ -1274,12 +1274,12 @@ class TestMemoryState:
     def test_memory_state_persists_to_disk(self, tmp_path: Path) -> None:
         from state import StateTracker
 
-        state_file = tmp_path / "state.json"
-        tracker = StateTracker(state_file)
+        dolt_path = tmp_path / "dolt_db"
+        tracker = StateTracker(dolt_path)
         tracker.update_memory_state([10, 20], "hash1")
 
         # Reload from disk
-        tracker2 = StateTracker(state_file)
+        tracker2 = StateTracker(dolt_path)
         ids, hash_val, last_synced = tracker2.get_memory_state()
         assert ids == [10, 20]
         assert hash_val == "hash1"
@@ -1680,9 +1680,9 @@ class TestFileSuggestionSetsOrigin:
         """When a knowledge memory suggestion is filed, no HITL state should be set."""
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         mock_prs = AsyncMock()
         mock_prs.create_issue = AsyncMock(return_value=99)
 
@@ -1716,9 +1716,9 @@ class TestFileSuggestionSetsOrigin:
         """When create_issue returns 0, no hitl_origin should be set."""
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         mock_prs = AsyncMock()
         mock_prs.create_issue = AsyncMock(return_value=0)
 
@@ -1749,9 +1749,9 @@ class TestFileMemorySuggestionRouting:
         """Knowledge type should NOT set HITL state and should use improve label only."""
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         mock_prs = AsyncMock()
         mock_prs.create_issue = AsyncMock(return_value=100)
 
@@ -1786,9 +1786,9 @@ class TestFileMemorySuggestionRouting:
         """Config type should use actionable cause, HITL routing, and both labels."""
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         mock_prs = AsyncMock()
         mock_prs.create_issue = AsyncMock(return_value=101)
 
@@ -1821,9 +1821,9 @@ class TestFileMemorySuggestionRouting:
         """Instruction type should use actionable cause and both labels."""
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         mock_prs = AsyncMock()
         mock_prs.create_issue = AsyncMock(return_value=102)
 
@@ -1853,9 +1853,9 @@ class TestFileMemorySuggestionRouting:
         """Code type should use actionable cause and both labels."""
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         mock_prs = AsyncMock()
         mock_prs.create_issue = AsyncMock(return_value=103)
 
@@ -1885,9 +1885,9 @@ class TestFileMemorySuggestionRouting:
         """When type is missing, should default to knowledge (no HITL)."""
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         mock_prs = AsyncMock()
         mock_prs.create_issue = AsyncMock(return_value=104)
 
@@ -1932,9 +1932,9 @@ class TestFileMemorySuggestionLabelRouting:
         """Knowledge type issues receive improve label but NOT hitl label."""
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         mock_prs = AsyncMock()
         mock_prs.create_issue = AsyncMock(return_value=200)
 
@@ -1958,9 +1958,9 @@ class TestFileMemorySuggestionLabelRouting:
         """Actionable type issues receive both improve and hitl labels."""
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         mock_prs = AsyncMock()
         mock_prs.create_issue = AsyncMock(return_value=201)
 
@@ -1984,7 +1984,7 @@ class TestFileMemorySuggestionLabelRouting:
         """Knowledge and actionable types must produce different label sets."""
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
 
         # File a knowledge suggestion
@@ -2027,9 +2027,9 @@ class TestFileMemorySuggestionLabelRouting:
         """Knowledge type must not call set_hitl_origin or set_hitl_cause."""
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         mock_prs = AsyncMock()
         mock_prs.create_issue = AsyncMock(return_value=400)
 
@@ -2053,9 +2053,9 @@ class TestFileMemorySuggestionLabelRouting:
         """Actionable type must set both hitl_origin and hitl_cause."""
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         mock_prs = AsyncMock()
         mock_prs.create_issue = AsyncMock(return_value=401)
 
@@ -2085,10 +2085,10 @@ class TestFileMemorySuggestionAutoApprove:
         """When memory_auto_approve is True, issue is created with memory_label only."""
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             memory_auto_approve=True,
         )
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         mock_prs = AsyncMock()
         mock_prs.create_issue = AsyncMock(return_value=77)
 
@@ -2117,10 +2117,10 @@ class TestFileMemorySuggestionAutoApprove:
         """When memory_auto_approve is True, no hitl_origin or hitl_cause is set."""
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             memory_auto_approve=True,
         )
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         mock_prs = AsyncMock()
         mock_prs.create_issue = AsyncMock(return_value=77)
 
@@ -2147,10 +2147,10 @@ class TestFileMemorySuggestionAutoApprove:
         """When auto_approve=False and type is knowledge (default), improve-only flow."""
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             memory_auto_approve=False,
         )
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         mock_prs = AsyncMock()
         mock_prs.create_issue = AsyncMock(return_value=88)
 
@@ -2178,10 +2178,10 @@ class TestFileMemorySuggestionAutoApprove:
         """When transcript has no suggestion, auto-approve mode is a no-op."""
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             memory_auto_approve=True,
         )
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         mock_prs = AsyncMock()
         mock_prs.create_issue = AsyncMock(return_value=0)
 
@@ -2200,10 +2200,10 @@ class TestFileMemorySuggestionAutoApprove:
         """When auto-approve is on but create_issue returns 0, nothing crashes."""
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             memory_auto_approve=True,
         )
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         mock_prs = AsyncMock()
         mock_prs.create_issue = AsyncMock(return_value=0)
 
@@ -2230,10 +2230,10 @@ class TestFileMemorySuggestionAutoApprove:
         """Actionable type (config) with auto_approve=True gets memory_label only."""
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             memory_auto_approve=True,
         )
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         mock_prs = AsyncMock()
         mock_prs.create_issue = AsyncMock(return_value=90)
 
@@ -2262,10 +2262,10 @@ class TestFileMemorySuggestionAutoApprove:
         """Instruction type with auto_approve=True sets no HITL state."""
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
             memory_auto_approve=True,
         )
-        state = StateTracker(config.state_file)
+        state = StateTracker(config.dolt_path)
         mock_prs = AsyncMock()
         mock_prs.create_issue = AsyncMock(return_value=91)
 

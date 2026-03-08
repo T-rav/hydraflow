@@ -328,7 +328,7 @@ class TestFreshBranchRebuild:
             enable_fresh_branch_rebuild=True,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mock_agents = AsyncMock()
         mock_agents._execute = AsyncMock(return_value="transcript")
@@ -365,7 +365,7 @@ class TestFreshBranchRebuild:
             enable_fresh_branch_rebuild=True,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mock_agents = AsyncMock()
         mock_agents._execute = AsyncMock(return_value="rebuilt transcript")
@@ -397,7 +397,7 @@ class TestFreshBranchRebuild:
             enable_fresh_branch_rebuild=False,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mock_agents = AsyncMock()
         resolver = make_conflict_resolver(cfg, agents=mock_agents)
@@ -416,7 +416,7 @@ class TestFreshBranchRebuild:
             enable_fresh_branch_rebuild=True,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         resolver = make_conflict_resolver(cfg, agents=None)
         pr = PRInfoFactory.create()
@@ -433,7 +433,7 @@ class TestFreshBranchRebuild:
             enable_fresh_branch_rebuild=True,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mock_agents = AsyncMock()
         resolver = make_conflict_resolver(cfg, agents=mock_agents)
@@ -455,7 +455,7 @@ class TestFreshBranchRebuild:
             enable_fresh_branch_rebuild=True,
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "worktrees",
-            state_file=tmp_path / "state.json",
+            dolt_path=tmp_path / "dolt_db",
         )
         mock_agents = AsyncMock()
         mock_agents._execute = AsyncMock(return_value="transcript")

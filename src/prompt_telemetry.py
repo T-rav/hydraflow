@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import UTC, datetime
 from typing import Any
 
 from config import HydraFlowConfig
-from file_util import append_jsonl, atomic_write, file_lock
 from model_pricing import ModelPricingTable, load_pricing
 
 logger = logging.getLogger("hydraflow.prompt_telemetry")
@@ -36,19 +34,15 @@ def _estimate_tokens(chars: int, model: str) -> tuple[int, float, str]:
 
 
 class PromptTelemetry:
-    """Writes prompt/inference metrics to filesystem-backed JSON artifacts."""
+    """Writes prompt/inference metrics to Dolt via the state object."""
 
     def __init__(
         self,
         config: HydraFlowConfig,
         pricing: ModelPricingTable | None = None,
-        state: Any | None = None,
+        state: Any = None,
     ) -> None:
         self._config = config
-        self._dir = config.data_path("metrics", "prompt")
-        self._inferences_file = self._dir / "inferences.jsonl"
-        self._pr_stats_file = self._dir / "pr_stats.json"
-        self._lock_file = self._dir / ".lock"
         self._pricing = pricing or load_pricing()
         self._state = state
 
@@ -200,131 +194,77 @@ class PromptTelemetry:
             if cleaned_raw:
                 record["raw_usage"] = cleaned_raw
 
-        try:
-            self._dir.mkdir(parents=True, exist_ok=True)
-            with file_lock(self._lock_file):
-                append_jsonl(self._inferences_file, json.dumps(record, sort_keys=True))
-                self._update_pr_stats(record)
-        except OSError:
-            logger.warning(
-                "Could not write prompt telemetry to %s",
-                self._inferences_file,
-                exc_info=True,
-            )
-
         if self._state and hasattr(self._state, "append_inference"):
             try:
                 self._state.append_inference(record)
             except Exception:  # noqa: BLE001
                 logger.debug("Dolt inference write failed", exc_info=True)
 
-    def _update_pr_stats(self, record: dict[str, object]) -> None:
-        data = self._load_pr_stats()
-        lifetime = _get_or_init_dict(data, "lifetime", _new_counter())
-        self._accumulate_counter(lifetime, record)
+        # Update aggregate stats via state
+        if self._state and hasattr(self._state, "save_inference_stats"):
+            try:
+                self._update_stats_via_state(record)
+            except Exception:  # noqa: BLE001
+                logger.debug("Dolt inference stats write failed", exc_info=True)
 
-        sessions = _get_or_init_dict(data, "sessions", {})
+    def _update_stats_via_state(self, record: dict[str, object]) -> None:
+        """Update aggregate per-PR/session/issue stats through the state object."""
+        # Lifetime stats
+        lifetime = self._state.load_inference_stats("lifetime") or _new_counter()
+        self._accumulate_counter(lifetime, record)
+        self._state.save_inference_stats("lifetime", lifetime)
+
+        # Session stats
         session_id = str(record.get("session_id", "")).strip()
         if session_id:
-            sess_entry = _get_or_init_dict(sessions, session_id, _new_counter())
-            self._accumulate_counter(sess_entry, record)
+            sess = self._state.load_inference_stats(f"session:{session_id}") or _new_counter()
+            self._accumulate_counter(sess, record)
+            self._state.save_inference_stats(f"session:{session_id}", sess)
 
-        prs = _get_or_init_dict(data, "prs", {})
+        # PR stats
         pr_number = record.get("pr_number")
         if isinstance(pr_number, int) and pr_number > 0:
-            entry = _get_or_init_dict(prs, str(pr_number), _new_counter())
-            self._accumulate_counter(entry, record)
+            pr = self._state.load_inference_stats(f"pr:{pr_number}") or _new_counter()
+            self._accumulate_counter(pr, record)
+            self._state.save_inference_stats(f"pr:{pr_number}", pr)
 
-        issues = _get_or_init_dict(data, "issues", {})
+        # Issue stats
         issue_number = record.get("issue_number")
         if isinstance(issue_number, int) and issue_number > 0:
-            issue_entry = _get_or_init_dict(issues, str(issue_number), _new_counter())
-            self._accumulate_counter(issue_entry, record)
+            iss = self._state.load_inference_stats(f"issue:{issue_number}") or _new_counter()
+            self._accumulate_counter(iss, record)
+            self._state.save_inference_stats(f"issue:{issue_number}", iss)
 
-        sources = _get_or_init_dict(data, "sources", {})
+        # Source stats
         source = str(record.get("source", "")).strip()
         if source:
-            source_entry = _get_or_init_dict(sources, source, _new_counter())
-            self._accumulate_counter(source_entry, record)
-
-        data["updated_at"] = str(record.get("timestamp", ""))
-
-        try:
-            atomic_write(
-                self._pr_stats_file, json.dumps(data, indent=2, sort_keys=True)
-            )
-        except OSError:
-            logger.warning(
-                "Could not write per-PR prompt stats to %s",
-                self._pr_stats_file,
-                exc_info=True,
-            )
-
-    def _load_pr_stats(self) -> dict[str, object]:
-        if not self._pr_stats_file.is_file():
-            return {}
-        try:
-            raw = self._pr_stats_file.read_text()
-        except OSError:
-            return {}
-        if not raw.strip():
-            return {}
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            logger.warning("Per-PR stats file is corrupt, rebuilding")
-            return {}
-        return parsed if isinstance(parsed, dict) else {}
+            src = self._state.load_inference_stats(f"source:{source}") or _new_counter()
+            self._accumulate_counter(src, record)
+            self._state.save_inference_stats(f"source:{source}", src)
 
     def get_mtime(self) -> float:
-        """Return the modification time of the inferences file, or 0.0."""
-        try:
-            return (
-                self._inferences_file.stat().st_mtime
-                if self._inferences_file.is_file()
-                else 0.0
-            )
-        except OSError:
-            return 0.0
+        """Return a proxy for modification time — count of inferences."""
+        if self._state and hasattr(self._state, "count_inferences"):
+            try:
+                return float(self._state.count_inferences())
+            except Exception:  # noqa: BLE001
+                pass
+        return 0.0
 
     def load_inferences(
         self,
         *,
         limit: int = 5000,
     ) -> list[dict[str, Any]]:
-        """Load recent inference rows from JSONL, newest last."""
+        """Load recent inference rows from Dolt, newest last."""
         if limit <= 0:
             return []
-        if not self._inferences_file.is_file():
-            return []
-        rows: list[dict[str, Any]] = []
-        try:
-            with open(self._inferences_file) as f:
-                for raw_line in f:
-                    stripped = raw_line.strip()
-                    if not stripped:
-                        continue
-                    try:
-                        parsed = json.loads(stripped)
-                    except json.JSONDecodeError:
-                        logger.debug(
-                            "Skipping corrupt inference line in %s",
-                            self._inferences_file,
-                            exc_info=True,
-                        )
-                        continue
-                    if isinstance(parsed, dict):
-                        rows.append(parsed)
-        except OSError:
-            logger.warning(
-                "Could not read prompt telemetry from %s",
-                self._inferences_file,
-                exc_info=True,
-            )
-            return []
-        if len(rows) > limit:
-            return rows[-limit:]
-        return rows
+        if self._state and hasattr(self._state, "load_recent_inferences"):
+            try:
+                return self._state.load_recent_inferences(limit)
+            except Exception:  # noqa: BLE001
+                logger.warning("Could not load inferences from Dolt", exc_info=True)
+        return []
 
     @staticmethod
     def _accumulate_counter(
@@ -375,70 +315,76 @@ class PromptTelemetry:
 
     def get_pr_totals(self, pr_number: int) -> dict[str, int] | None:
         """Return aggregate telemetry totals for a PR, or None if missing."""
-        data = self._load_pr_stats()
-        prs = data.get("prs", {})
-        if not isinstance(prs, dict):
-            return None
-        entry = prs.get(str(pr_number))
-        if not isinstance(entry, dict):
-            return None
-        return {k: int(v) for k, v in entry.items() if isinstance(v, int)}
+        if self._state and hasattr(self._state, "load_inference_stats"):
+            try:
+                data = self._state.load_inference_stats(f"pr:{pr_number}")
+                if data and isinstance(data, dict):
+                    return {k: int(v) for k, v in data.items() if isinstance(v, int)}
+            except Exception:  # noqa: BLE001
+                pass
+        return None
 
     def get_lifetime_totals(self) -> dict[str, int]:
         """Return aggregate telemetry totals across all sessions."""
-        data = self._load_pr_stats()
-        lifetime = data.get("lifetime", {})
-        if not isinstance(lifetime, dict):
-            return {}
-        return {k: int(v) for k, v in lifetime.items() if isinstance(v, int)}
+        if self._state and hasattr(self._state, "load_inference_stats"):
+            try:
+                data = self._state.load_inference_stats("lifetime")
+                if data and isinstance(data, dict):
+                    return {k: int(v) for k, v in data.items() if isinstance(v, int)}
+            except Exception:  # noqa: BLE001
+                pass
+        return {}
 
     def get_session_totals(self, session_id: str) -> dict[str, int]:
         """Return aggregate telemetry totals for a single session ID."""
         if not session_id:
             return {}
-        data = self._load_pr_stats()
-        sessions = data.get("sessions", {})
-        if not isinstance(sessions, dict):
-            return {}
-        entry = sessions.get(session_id, {})
-        if not isinstance(entry, dict):
-            return {}
-        return {k: int(v) for k, v in entry.items() if isinstance(v, int)}
+        if self._state and hasattr(self._state, "load_inference_stats"):
+            try:
+                data = self._state.load_inference_stats(f"session:{session_id}")
+                if data and isinstance(data, dict):
+                    return {k: int(v) for k, v in data.items() if isinstance(v, int)}
+            except Exception:  # noqa: BLE001
+                pass
+        return {}
 
     def get_issue_totals(self) -> dict[int, dict[str, int]]:
         """Return aggregate telemetry totals keyed by issue number."""
-        data = self._load_pr_stats()
-        issues = data.get("issues", {})
-        if not isinstance(issues, dict):
-            return {}
-        result: dict[int, dict[str, int]] = {}
-        for key, payload in issues.items():
-            if not isinstance(payload, dict):
-                continue
+        if self._state and hasattr(self._state, "load_all_inference_stats_by_prefix"):
             try:
-                issue_number = int(key)
-            except (TypeError, ValueError):
-                continue
-            result[issue_number] = {
-                k: int(v) for k, v in payload.items() if isinstance(v, int)
-            }
-        return result
+                raw = self._state.load_all_inference_stats_by_prefix("issue:")
+                result: dict[int, dict[str, int]] = {}
+                for key, payload in raw.items():
+                    try:
+                        issue_number = int(key.replace("issue:", ""))
+                    except (TypeError, ValueError):
+                        continue
+                    if isinstance(payload, dict):
+                        result[issue_number] = {
+                            k: int(v) for k, v in payload.items() if isinstance(v, int)
+                        }
+                return result
+            except Exception:  # noqa: BLE001
+                pass
+        return {}
 
     def get_source_totals(self) -> dict[str, dict[str, int]]:
         """Return aggregate telemetry totals keyed by source."""
-        data = self._load_pr_stats()
-        sources = data.get("sources", {})
-        if not isinstance(sources, dict):
-            return {}
-        result: dict[str, dict[str, int]] = {}
-        for key, payload in sources.items():
-            source = str(key).strip()
-            if not source or not isinstance(payload, dict):
-                continue
-            result[source] = {
-                k: int(v) for k, v in payload.items() if isinstance(v, int)
-            }
-        return result
+        if self._state and hasattr(self._state, "load_all_inference_stats_by_prefix"):
+            try:
+                raw = self._state.load_all_inference_stats_by_prefix("source:")
+                result: dict[str, dict[str, int]] = {}
+                for key, payload in raw.items():
+                    source = key.replace("source:", "").strip()
+                    if not source or not isinstance(payload, dict):
+                        continue
+                    result[source] = {
+                        k: int(v) for k, v in payload.items() if isinstance(v, int)
+                    }
+                return result
+            except Exception:  # noqa: BLE001
+                pass
+        return {}
 
 
 def parse_command_tool_model(cmd: list[str]) -> tuple[str, str]:
