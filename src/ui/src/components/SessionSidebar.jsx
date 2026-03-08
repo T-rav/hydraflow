@@ -1,15 +1,11 @@
 import React, { useState, useMemo } from 'react'
 import { useHydraFlow } from '../context/HydraFlowContext'
 import { theme } from '../theme'
-import { PULSE_ANIMATION } from '../constants'
+import { PULSE_ANIMATION, canonicalRepoSlug } from '../constants'
 
 function shortRepo(repo) {
   const parts = (repo || '').split('/')
   return parts.length > 1 ? parts[parts.length - 1] : repo
-}
-
-function canonicalRepoSlug(repo) {
-  return String(repo || '').trim().replace(/[\\/]+/g, '-')
 }
 
 export function SessionSidebar() {

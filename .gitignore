@@ -217,6 +217,7 @@ src/ui/e2e/results/
 # HydraFlow runtime state
 .hydraflow/
 .hydra/
+.hydraflow-hook-cache/
 jolly-sea-65a9/
 .DS_Store
 

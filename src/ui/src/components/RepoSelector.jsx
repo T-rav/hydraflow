@@ -1,10 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useHydraFlow } from '../context/HydraFlowContext'
+import { canonicalRepoSlug } from '../constants'
 import { theme } from '../theme'
-
-function canonicalRepoSlug(value) {
-  return String(value || '').trim().replace(/[\\/]+/g, '-')
-}
 
 function buildDisplayName(repo) {
   if (repo.full_name) return repo.full_name
