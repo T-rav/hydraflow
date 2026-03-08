@@ -5114,7 +5114,9 @@ class TestMemorySyncLabels:
         cfg = HydraFlowConfig(repo_root=tmp_path, repo="acme/widgets")
         labels = cfg.memory_sync_labels
         for lbl in cfg.improve_label:
-            assert lbl in labels, f"improve_label '{lbl}' missing from memory_sync_labels"
+            assert lbl in labels, (
+                f"improve_label '{lbl}' missing from memory_sync_labels"
+            )
 
     def test_includes_memory_and_transcript_labels(self, tmp_path: Path) -> None:
         cfg = HydraFlowConfig(repo_root=tmp_path, repo="acme/widgets")
