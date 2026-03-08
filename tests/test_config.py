@@ -1458,6 +1458,8 @@ class TestHydraFlowConfigGitIdentity:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("HYDRAFLOW_GIT_USER_NAME", raising=False)
+        monkeypatch.delenv("GIT_AUTHOR_NAME", raising=False)
+        monkeypatch.delenv("GIT_COMMITTER_NAME", raising=False)
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
@@ -1469,6 +1471,8 @@ class TestHydraFlowConfigGitIdentity:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("HYDRAFLOW_GIT_USER_EMAIL", raising=False)
+        monkeypatch.delenv("GIT_AUTHOR_EMAIL", raising=False)
+        monkeypatch.delenv("GIT_COMMITTER_EMAIL", raising=False)
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             worktree_base=tmp_path / "wt",
@@ -1545,6 +1549,10 @@ class TestHydraFlowConfigGitIdentity:
     ) -> None:
         monkeypatch.delenv("HYDRAFLOW_GIT_USER_NAME", raising=False)
         monkeypatch.delenv("HYDRAFLOW_GIT_USER_EMAIL", raising=False)
+        monkeypatch.delenv("GIT_AUTHOR_NAME", raising=False)
+        monkeypatch.delenv("GIT_COMMITTER_NAME", raising=False)
+        monkeypatch.delenv("GIT_AUTHOR_EMAIL", raising=False)
+        monkeypatch.delenv("GIT_COMMITTER_EMAIL", raising=False)
         (tmp_path / ".env").write_text(
             "HYDRAFLOW_GIT_USER_NAME=Dotenv Bot\n"
             "HYDRAFLOW_GIT_USER_EMAIL=dotenv-bot@example.com\n"
@@ -1562,6 +1570,10 @@ class TestHydraFlowConfigGitIdentity:
     ) -> None:
         monkeypatch.delenv("HYDRAFLOW_GIT_USER_NAME", raising=False)
         monkeypatch.delenv("HYDRAFLOW_GIT_USER_EMAIL", raising=False)
+        monkeypatch.delenv("GIT_AUTHOR_NAME", raising=False)
+        monkeypatch.delenv("GIT_COMMITTER_NAME", raising=False)
+        monkeypatch.delenv("GIT_AUTHOR_EMAIL", raising=False)
+        monkeypatch.delenv("GIT_COMMITTER_EMAIL", raising=False)
         (tmp_path / ".env").write_text(
             "HYDRAFLOW_GIT_USER_NAME=Dotenv Bot # preferred\n"
             "HYDRAFLOW_GIT_USER_EMAIL=dotenv-bot@example.com # notifications\n"
@@ -3579,6 +3591,12 @@ class TestDockerConfigValidation:
         monkeypatch.delenv("HYDRAFLOW_GH_TOKEN", raising=False)
         monkeypatch.delenv("GH_TOKEN", raising=False)
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        monkeypatch.delenv("HYDRAFLOW_GIT_USER_NAME", raising=False)
+        monkeypatch.delenv("HYDRAFLOW_GIT_USER_EMAIL", raising=False)
+        monkeypatch.delenv("GIT_AUTHOR_NAME", raising=False)
+        monkeypatch.delenv("GIT_COMMITTER_NAME", raising=False)
+        monkeypatch.delenv("GIT_AUTHOR_EMAIL", raising=False)
+        monkeypatch.delenv("GIT_COMMITTER_EMAIL", raising=False)
         caplog.clear()
         with caplog.at_level("WARNING", logger="hydraflow.config"):
             HydraFlowConfig(
@@ -3600,6 +3618,9 @@ class TestDockerConfigValidation:
         import shutil
 
         monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/docker")
+        monkeypatch.delenv("HYDRAFLOW_GIT_USER_EMAIL", raising=False)
+        monkeypatch.delenv("GIT_AUTHOR_EMAIL", raising=False)
+        monkeypatch.delenv("GIT_COMMITTER_EMAIL", raising=False)
         caplog.clear()
         with caplog.at_level("WARNING", logger="hydraflow.config"):
             HydraFlowConfig(

@@ -945,16 +945,24 @@ class TestGetDockerRunner:
         runner = get_docker_runner(config)
         assert isinstance(runner, HostRunner)
 
-    def test_returns_host_when_no_image(self) -> None:
+    def test_returns_host_when_no_image(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import shutil
+
         from tests.helpers import ConfigFactory
 
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/docker")
         config = ConfigFactory.create(execution_mode="docker", docker_image="")
         runner = get_docker_runner(config)
         assert isinstance(runner, HostRunner)
 
-    def test_returns_host_when_docker_unavailable(self) -> None:
+    def test_returns_host_when_docker_unavailable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import shutil
+
         from tests.helpers import ConfigFactory
 
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/docker")
         config = ConfigFactory.create(
             execution_mode="docker", docker_image="hydra:latest"
         )
@@ -962,9 +970,14 @@ class TestGetDockerRunner:
             runner = get_docker_runner(config)
         assert isinstance(runner, HostRunner)
 
-    def test_returns_docker_runner_when_available(self) -> None:
+    def test_returns_docker_runner_when_available(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import shutil
+
         from tests.helpers import ConfigFactory
 
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/docker")
         config = ConfigFactory.create(
             execution_mode="docker",
             docker_image="hydra:latest",
@@ -980,19 +993,29 @@ class TestGetDockerRunner:
         assert isinstance(runner, DockerRunner)
         assert isinstance(runner, SubprocessRunner)
 
-    def test_logs_warning_when_no_image(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_logs_warning_when_no_image(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import shutil
+
         from tests.helpers import ConfigFactory
 
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/docker")
         config = ConfigFactory.create(execution_mode="docker", docker_image="")
         with caplog.at_level("WARNING"):
             get_docker_runner(config)
         assert "no docker_image configured" in caplog.text
 
     def test_logs_warning_when_docker_unavailable(
-        self, caplog: pytest.LogCaptureFixture
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
+        import shutil
+
         from tests.helpers import ConfigFactory
 
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/docker")
         config = ConfigFactory.create(
             execution_mode="docker", docker_image="hydra:latest"
         )
@@ -1020,6 +1043,10 @@ class TestGetDockerRunner:
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
         monkeypatch.delenv("HYDRAFLOW_GIT_USER_NAME", raising=False)
         monkeypatch.delenv("HYDRAFLOW_GIT_USER_EMAIL", raising=False)
+        monkeypatch.delenv("GIT_AUTHOR_NAME", raising=False)
+        monkeypatch.delenv("GIT_COMMITTER_NAME", raising=False)
+        monkeypatch.delenv("GIT_AUTHOR_EMAIL", raising=False)
+        monkeypatch.delenv("GIT_COMMITTER_EMAIL", raising=False)
 
         import shutil
 
