@@ -21,6 +21,7 @@ BATCH_SIZE ?= 15
 REVIEWERS ?= 5
 HITL_WORKERS ?= 1
 PLANNERS ?= 2
+PLANNER_MODEL ?= opus
 PORT ?= 5555
 LOG_DIR ?= $(PROJECT_ROOT)/.hydraflow/logs
 
@@ -84,6 +85,7 @@ help:
 	@echo "  REVIEWERS        Max concurrent reviewers (default: 5)"
 	@echo "  HITL_WORKERS     Max concurrent HITL workers (default: 1)"
 	@echo "  PLANNERS         Max concurrent planners (default: 2)"
+	@echo "  PLANNER_MODEL    Planner model (default: opus)"
 
 run: check-node-ui
 	@mkdir -p $(LOG_DIR)
@@ -411,6 +413,7 @@ hot:
 	[ "$(origin REVIEWERS)" = "command line" ] && JSON="$$JSON, \"max_reviewers\": $(REVIEWERS)"; \
 	[ "$(origin REVIEW_MODEL)" = "command line" ] && JSON="$$JSON, \"review_model\": \"$(REVIEW_MODEL)\""; \
 	[ "$(origin PLANNERS)" = "command line" ] && JSON="$$JSON, \"max_planners\": $(PLANNERS)"; \
+	[ "$(origin PLANNER_MODEL)" = "command line" ] && JSON="$$JSON, \"planner_model\": \"$(PLANNER_MODEL)\""; \
 	[ "$(origin HITL_WORKERS)" = "command line" ] && JSON="$$JSON, \"max_hitl_workers\": $(HITL_WORKERS)"; \
 	JSON="$$JSON}"; \
 	curl -s -X PATCH "http://localhost:$(PORT)/api/control/config" \

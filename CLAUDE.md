@@ -19,7 +19,8 @@ HydraFlow runs five concurrent async loops from `orchestrator.py`:
 ### Key Files
 
 **Core infrastructure:**
-- `cli.py` — CLI entry point (run, dry-run, clean, prep, scaffold)
+- `server.py` — Server entry point (`python -m server`)
+- `scripts/run_admin_task.py` — Admin task runner (clean, prep, scaffold, ensure-labels)
 - `orchestrator.py` — Main coordinator (five async polling loops)
 - `config.py` — `HydraFlowConfig` Pydantic model (50+ env-var overrides)
 - `models.py` — Pydantic data models (Phase, SessionLog, ReviewResult, etc.)
@@ -107,6 +108,8 @@ make setup          # Install hooks, CLI, config, labels
 make prep           # Sync agent assets + run full repo prep (labels, audit, CI/tests)
 make scaffold       # Generate baseline tests and CI configuration only (no asset sync)
 make ensure-labels  # Create HydraFlow lifecycle labels
+make integration    # Run integration tests
+make soak           # Run soak/load tests
 make hot            # Send config update to running instance
 make ui             # Build React dashboard
 make ui-dev         # Start React dashboard dev server
