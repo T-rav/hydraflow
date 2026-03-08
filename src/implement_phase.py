@@ -15,9 +15,11 @@ from models import GitHubIssue, PipelineStage, Task, WorkerResult, WorkerResultM
 from phase_utils import (
     escalate_to_hitl,
     is_adr_issue_title,
+    is_likely_bug,
     record_harness_failure,
     release_batch_in_flight,
     run_refilling_pool,
+    safe_file_memory_suggestion,
     store_lifecycle,
 )
 from pr_manager import PRManager
@@ -25,7 +27,7 @@ from run_recorder import RunRecorder
 from state import StateTracker
 from subprocess_util import AuthenticationError, CreditExhaustedError
 from task_source import TaskTransitioner
-from worktree import WorktreeManager
+from workspace import WorkspaceManager
 
 logger = logging.getLogger("hydraflow.implement_phase")
 
@@ -37,7 +39,7 @@ class ImplementPhase:
         self,
         config: HydraFlowConfig,
         state: StateTracker,
-        worktrees: WorktreeManager,
+        worktrees: WorkspaceManager,
         agents: AgentRunner,
         prs: PRManager,
         store: IssueStore,
@@ -122,20 +124,33 @@ class ImplementPhase:
                     return await self._worker_inner(idx, issue, branch)
                 except (AuthenticationError, CreditExhaustedError, MemoryError):
                     raise
-                except Exception:
-                    logger.exception("Worker failed for issue #%d", issue.id)
+                except Exception as exc:
+                    exc_type_name = type(exc).__name__
+                    if is_likely_bug(exc):
+                        logger.critical(
+                            "Worker failed for issue #%d — likely bug (%s)",
+                            issue.id,
+                            exc_type_name,
+                            exc_info=True,
+                        )
+                    else:
+                        logger.exception(
+                            "Worker failed for issue #%d — %s",
+                            issue.id,
+                            exc_type_name,
+                        )
                     self._state.mark_issue(issue.id, "failed")
                     record_harness_failure(
                         self._harness_insights,
                         issue.id,
                         FailureCategory.IMPLEMENTATION_ERROR,
-                        f"Worker exception for issue #{issue.id}",
+                        f"Worker {exc_type_name} for issue #{issue.id}",
                         stage=PipelineStage.IMPLEMENT,
                     )
                     return WorkerResult(
                         issue_number=issue.id,
                         branch=branch,
-                        error=f"Worker exception for issue #{issue.id}",
+                        error=f"Worker {exc_type_name} for issue #{issue.id}",
                     )
                 finally:
                     async with self._active_issues_lock:
@@ -154,6 +169,37 @@ class ImplementPhase:
     async def _worker_inner(self, idx: int, issue: Task, branch: str) -> WorkerResult:
         """Core implementation logic — called inside the semaphore."""
         self._prepare_adr_plan(issue)
+
+        # If a non-draft PR already exists and this is NOT a review-feedback
+        # retry, skip implementation and transition directly to review.
+        # This handles issues requeued to hydraflow-ready that already have
+        # completed PRs from a prior run.
+        review_feedback = self._state.get_review_feedback(issue.id) or ""
+        if not review_feedback:
+            existing_pr = await self._prs.find_open_pr_for_branch(
+                branch, issue_number=issue.id
+            )
+            if existing_pr and existing_pr.number > 0 and not existing_pr.draft:
+                logger.info(
+                    "Issue #%d already has open PR #%d — skipping to review",
+                    issue.id,
+                    existing_pr.number,
+                )
+                await self._transitioner.transition(
+                    issue.id,
+                    "review",
+                    pr_number=existing_pr.number,
+                )
+                self._store.enqueue_transition(issue, "review")
+                self._state.increment_session_counter("implemented")
+                self._state.mark_issue(issue.id, "success")
+                return WorkerResult(
+                    issue_number=issue.id,
+                    branch=branch,
+                    success=True,
+                    pr_info=existing_pr,
+                )
+
         cap_result = await self._check_attempt_cap(issue, branch)
         if cap_result is not None:
             return cap_result
@@ -171,7 +217,6 @@ class ImplementPhase:
                 logger.debug("Run recording setup failed", exc_info=True)
                 ctx = None
 
-        review_feedback = self._state.get_review_feedback(issue.id) or ""
         result = await self._run_implementation(issue, branch, idx, review_feedback)
 
         # Finalize the recording
@@ -386,9 +431,8 @@ class ImplementPhase:
             if pushed:
                 pr = None
                 if not is_retry:
-                    draft = not result.success
                     gh_issue = GitHubIssue.from_task(issue)
-                    pr = await self._prs.create_pr(gh_issue, result.branch, draft=draft)
+                    pr = await self._prs.create_pr(gh_issue, result.branch)
                     result.pr_info = pr
                 else:
                     pr = await self._prs.find_open_pr_for_branch(
@@ -425,6 +469,15 @@ class ImplementPhase:
                             hitl_label=self._config.hitl_label[0],
                         )
                         self._store.enqueue_transition(issue, "hitl")
+                        if result.transcript:
+                            await safe_file_memory_suggestion(
+                                result.transcript,
+                                "implement_zero_diff",
+                                f"issue #{issue.id}",
+                                self._config,
+                                self._prs,
+                                self._state,
+                            )
                         return result
                     logger.warning(
                         "Implementation succeeded for issue #%d but no open PR exists for branch %s",

@@ -13,6 +13,8 @@ from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+import file_util
+
 logger = logging.getLogger("hydraflow.config")
 
 # Data-driven env-var override tables.
@@ -22,8 +24,10 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     (
         "max_pre_quality_review_attempts",
         "HYDRAFLOW_MAX_PRE_QUALITY_REVIEW_ATTEMPTS",
-        1,
+        3,
     ),
+    ("max_diff_sanity_attempts", "HYDRAFLOW_MAX_DIFF_SANITY_ATTEMPTS", 1),
+    ("max_test_adequacy_attempts", "HYDRAFLOW_MAX_TEST_ADEQUACY_ATTEMPTS", 1),
     ("max_review_fix_attempts", "HYDRAFLOW_MAX_REVIEW_FIX_ATTEMPTS", 2),
     ("min_review_findings", "HYDRAFLOW_MIN_REVIEW_FINDINGS", 3),
     ("max_issue_body_chars", "HYDRAFLOW_MAX_ISSUE_BODY_CHARS", 10_000),
@@ -44,6 +48,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("pr_unstick_interval", "HYDRAFLOW_PR_UNSTICK_INTERVAL", 3600),
     ("report_issue_interval", "HYDRAFLOW_REPORT_ISSUE_INTERVAL", 30),
     ("epic_monitor_interval", "HYDRAFLOW_EPIC_MONITOR_INTERVAL", 1800),
+    ("epic_sweep_interval", "HYDRAFLOW_EPIC_SWEEP_INTERVAL", 3600),
     ("worktree_gc_interval", "HYDRAFLOW_WORKTREE_GC_INTERVAL", 1800),
     ("collaborator_cache_ttl", "HYDRAFLOW_COLLABORATOR_CACHE_TTL", 600),
     ("artifact_retention_days", "HYDRAFLOW_ARTIFACT_RETENTION_DAYS", 30),
@@ -195,6 +200,7 @@ _ENV_LABEL_MAP: dict[str, tuple[str, list[str]]] = {
     "HYDRAFLOW_LABEL_REVIEW": ("review_label", ["hydraflow-review"]),
     "HYDRAFLOW_LABEL_HITL": ("hitl_label", ["hydraflow-hitl"]),
     "HYDRAFLOW_LABEL_HITL_ACTIVE": ("hitl_active_label", ["hydraflow-hitl-active"]),
+    "HYDRAFLOW_LABEL_HITL_AUTOFIX": ("hitl_autofix_label", ["hydraflow-hitl-autofix"]),
     "HYDRAFLOW_LABEL_FIXED": ("fixed_label", ["hydraflow-fixed"]),
     "HYDRAFLOW_LABEL_IMPROVE": ("improve_label", ["hydraflow-improve"]),
     "HYDRAFLOW_LABEL_MEMORY": ("memory_label", ["hydraflow-memory"]),
@@ -285,10 +291,22 @@ class HydraFlowConfig(BaseModel):
         description="Max quality fix-and-retry cycles before marking agent as failed",
     )
     max_pre_quality_review_attempts: int = Field(
-        default=1,
+        default=3,
         ge=0,
         le=5,
         description="Max pre-quality review/correction passes before quality verification",
+    )
+    max_diff_sanity_attempts: int = Field(
+        default=1,
+        ge=0,
+        le=3,
+        description="Max diff sanity check passes (0 = disabled)",
+    )
+    max_test_adequacy_attempts: int = Field(
+        default=1,
+        ge=0,
+        le=3,
+        description="Max test adequacy check passes (0 = disabled)",
     )
     max_review_fix_attempts: int = Field(
         default=2,
@@ -358,6 +376,10 @@ class HydraFlowConfig(BaseModel):
         default=["hydraflow-hitl-active"],
         description="Labels for HITL items being actively processed (OR logic)",
     )
+    hitl_autofix_label: list[str] = Field(
+        default=["hydraflow-hitl-autofix"],
+        description="Labels for HITL items undergoing automatic fix attempt (OR logic)",
+    )
     fixed_label: list[str] = Field(
         default=["hydraflow-fixed"],
         description="Labels applied after PR is merged (OR logic)",
@@ -417,6 +439,12 @@ class HydraFlowConfig(BaseModel):
     epic_monitor_interval: int = Field(
         default=1800,
         description="Epic monitor loop interval in seconds (default 30 min)",
+    )
+    epic_sweep_interval: int = Field(
+        default=3600,
+        ge=600,
+        le=86400,
+        description="Epic sweeper loop interval in seconds (default 1 hour)",
     )
     worktree_gc_interval: int = Field(
         default=1800,
@@ -1159,6 +1187,7 @@ class HydraFlowConfig(BaseModel):
         "review_label",
         "hitl_label",
         "hitl_active_label",
+        "hitl_autofix_label",
         "fixed_label",
         "improve_label",
         "memory_label",
@@ -1213,6 +1242,7 @@ class HydraFlowConfig(BaseModel):
             self.review_label,
             self.hitl_label,
             self.hitl_active_label,
+            self.hitl_autofix_label,
             self.fixed_label,
             self.improve_label,
             self.transcript_label,
@@ -1302,7 +1332,8 @@ class HydraFlowConfig(BaseModel):
             HYDRAFLOW_LABEL_READY       → ready_label  (implement stage)
             HYDRAFLOW_LABEL_REVIEW      → review_label
             HYDRAFLOW_LABEL_HITL        → hitl_label
-            HYDRAFLOW_LABEL_HITL_ACTIVE → hitl_active_label
+            HYDRAFLOW_LABEL_HITL_ACTIVE  → hitl_active_label
+            HYDRAFLOW_LABEL_HITL_AUTOFIX → hitl_autofix_label
             HYDRAFLOW_LABEL_FIXED       → fixed_label
             HYDRAFLOW_LABEL_IMPROVE     → improve_label
             HYDRAFLOW_LABEL_MEMORY      → memory_label
@@ -1867,30 +1898,35 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
 
 def _validate_docker(config: HydraFlowConfig) -> None:
     """Validate Docker availability when execution_mode is 'docker'."""
-    if config.execution_mode == "docker":
-        if shutil.which("docker") is None:
-            msg = (
-                "execution_mode is 'docker' but the 'docker' command "
-                "was not found on PATH"
-            )
-            raise ValueError(msg)
+    if config.execution_mode != "docker":
+        return
 
-        if not config.gh_token:
-            logger.warning(
-                "Docker mode without GH token configured; container actions may use the local gh auth context "
-                "(set HYDRAFLOW_GH_TOKEN/GH_TOKEN/GITHUB_TOKEN, e.g. in .env)."
-            )
-        if bool(config.git_user_name) ^ bool(config.git_user_email):
-            logger.warning(
-                "Docker mode git identity is incomplete (name=%r email=%r); commits may fall back to host identity.",
-                config.git_user_name,
-                config.git_user_email,
-            )
-        elif not config.git_user_name and not config.git_user_email:
-            logger.warning(
-                "Docker mode git identity not configured; commits may use fallback host/global git identity "
-                "(set HYDRAFLOW_GIT_USER_NAME and HYDRAFLOW_GIT_USER_EMAIL, e.g. in .env)."
-            )
+    if not config.docker_image.strip():
+        # No image configured → fall back to host execution; no Docker validation needed.
+        return
+
+    if shutil.which("docker") is None:
+        msg = (
+            "execution_mode is 'docker' but the 'docker' command was not found on PATH"
+        )
+        raise ValueError(msg)
+
+    if not config.gh_token:
+        logger.warning(
+            "Docker mode without GH token configured; container actions may use the local gh auth context "
+            "(set HYDRAFLOW_GH_TOKEN/GH_TOKEN/GITHUB_TOKEN, e.g. in .env)."
+        )
+    if bool(config.git_user_name) ^ bool(config.git_user_email):
+        logger.warning(
+            "Docker mode git identity is incomplete (name=%r email=%r); commits may fall back to host identity.",
+            config.git_user_name,
+            config.git_user_email,
+        )
+    elif not config.git_user_name and not config.git_user_email:
+        logger.warning(
+            "Docker mode git identity not configured; commits may use fallback host/global git identity "
+            "(set HYDRAFLOW_GIT_USER_NAME and HYDRAFLOW_GIT_USER_EMAIL, e.g. in .env)."
+        )
 
 
 def _find_repo_root() -> Path:
@@ -1974,19 +2010,28 @@ def load_config_file(path: Path | None) -> dict[str, Any]:
 
 
 def save_config_file(path: Path | None, values: dict[str, Any]) -> None:
-    """Save config values to a JSON file, merging with existing contents."""
+    """Save config values to a JSON file, merging with existing contents.
+
+    Uses atomic write (temp file + ``os.replace``) to prevent data loss from
+    concurrent writes or crashes mid-write (TOCTOU race condition).
+    """
     if path is None:
         return
+
     existing: dict[str, Any] = {}
     try:
         existing = json.loads(path.read_text())
         if not isinstance(existing, dict):
+            logger.warning(
+                "Config file %s contained non-dict JSON; starting fresh", path
+            )
             existing = {}
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        pass
+    except FileNotFoundError:
+        logger.debug("Config file %s not found; will create", path)
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("Failed to read config file %s: %s; starting fresh", path, exc)
     existing.update(values)
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(existing, indent=2) + "\n")
-    except OSError:
-        logger.warning("Failed to write config file %s", path)
+        file_util.atomic_write(path, json.dumps(existing, indent=2) + "\n")
+    except OSError as exc:
+        logger.warning("Failed to write config file %s: %s", path, exc)

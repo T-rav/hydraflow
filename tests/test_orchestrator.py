@@ -50,6 +50,8 @@ def _mock_fetcher_noop(orch: HydraFlowOrchestrator) -> None:
     orch._store.get_active_issues = lambda: {}  # type: ignore[method-assign]
     orch._fetcher.fetch_issue_by_number = AsyncMock(return_value=None)  # type: ignore[method-assign]
     orch._fetcher.fetch_reviewable_prs = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
+    orch._enable_rerere = AsyncMock()  # type: ignore[method-assign]
+    orch._worktrees.sanitize_repo = AsyncMock()  # type: ignore[method-assign]
 
 
 def make_worker_result(
@@ -105,10 +107,10 @@ class TestInit:
         assert isinstance(orch._state, StateTracker)
 
     def test_creates_worktree_manager(self, config: HydraFlowConfig) -> None:
-        from worktree import WorktreeManager
+        from workspace import WorkspaceManager
 
         orch = HydraFlowOrchestrator(config)
-        assert isinstance(orch._worktrees, WorktreeManager)
+        assert isinstance(orch._worktrees, WorkspaceManager)
 
     def test_creates_agent_runner(self, config: HydraFlowConfig) -> None:
         from agent import AgentRunner
@@ -380,6 +382,33 @@ class TestRunLoop:
 # ---------------------------------------------------------------------------
 # run() finally block — subprocess cleanup
 # ---------------------------------------------------------------------------
+
+
+class TestRunCallsSanitizeRepo:
+    """Verify run() calls sanitize_repo at startup and shutdown."""
+
+    @pytest.mark.asyncio
+    async def test_sanitize_repo_called_on_startup(
+        self, config: HydraFlowConfig
+    ) -> None:
+        orch = HydraFlowOrchestrator(config)
+        orch._prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
+        _mock_fetcher_noop(orch)
+
+        async def plan_and_stop() -> list[PlanResult]:
+            orch._stop_event.set()
+            return []
+
+        orch._planner_phase.plan_issues = plan_and_stop  # type: ignore[method-assign]
+        orch._implementer.run_batch = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
+
+        with patch.object(
+            orch._worktrees, "sanitize_repo", new_callable=AsyncMock
+        ) as mock_sanitize:
+            await orch.run()
+
+        # Called at startup + shutdown = at least 2 times
+        assert mock_sanitize.await_count >= 2
 
 
 class TestRunFinallyTerminatesRunners:
@@ -1305,6 +1334,39 @@ class TestLoopExceptionIsolation:
         assert call_count == 2
 
     @pytest.mark.asyncio
+    async def test_review_loop_no_hot_spin_on_requeued_issues(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """When reviewable issues are re-queued (PR not visible), the loop should
+        break out of _do_review_work instead of spinning hot."""
+        orch = HydraFlowOrchestrator(config)
+        fetch_count = 0
+
+        requeued_task = Task(id=99, title="Test issue", body="")
+
+        def fake_get_reviewable(max_count: int) -> list[Task]:
+            nonlocal fetch_count
+            fetch_count += 1
+            if fetch_count == 1:
+                return [requeued_task]
+            # On second call the re-queued item would appear again,
+            # but the loop should have broken out before getting here.
+            return [requeued_task]
+
+        async def fake_review_single(issue: Task) -> bool:
+            # Simulate PR not visible — returns False (re-queued)
+            return False
+
+        orch._store.get_reviewable = fake_get_reviewable  # type: ignore[method-assign]
+        orch._review_single_issue = fake_review_single  # type: ignore[method-assign]
+
+        await orch._do_review_work()
+
+        # Should have fetched once, reviewed once, then broken out —
+        # NOT looped back to fetch the re-queued item again.
+        assert fetch_count == 1
+
+    @pytest.mark.asyncio
     async def test_error_event_published_on_triage_exception(
         self, config: HydraFlowConfig
     ) -> None:
@@ -1427,6 +1489,8 @@ class TestSupervisorLoops:
         """If one loop crashes despite try/except, others should keep running."""
         orch = HydraFlowOrchestrator(config)
         orch._prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
+        orch._enable_rerere = AsyncMock()  # type: ignore[method-assign]
+        orch._worktrees.sanitize_repo = AsyncMock()  # type: ignore[method-assign]
 
         implement_calls = 0
 
@@ -1708,6 +1772,8 @@ class TestAuthFailure:
         """An AuthenticationError in any loop should stop the orchestrator."""
         orch = HydraFlowOrchestrator(config)
         orch._prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
+        orch._enable_rerere = AsyncMock()  # type: ignore[method-assign]
+        orch._worktrees.sanitize_repo = AsyncMock()  # type: ignore[method-assign]
 
         async def auth_failing_triage() -> None:
             raise AuthenticationError("401 Unauthorized")
@@ -1734,6 +1800,8 @@ class TestAuthFailure:
         """Auth failure should publish a SYSTEM_ALERT event."""
         orch = HydraFlowOrchestrator(config, event_bus=event_bus)
         orch._prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
+        orch._enable_rerere = AsyncMock()  # type: ignore[method-assign]
+        orch._worktrees.sanitize_repo = AsyncMock()  # type: ignore[method-assign]
 
         async def auth_failing_plan() -> list[PlanResult]:
             raise AuthenticationError("401 Unauthorized")
@@ -1764,6 +1832,8 @@ class TestAuthFailure:
         """Auth failure should set the _auth_failed flag."""
         orch = HydraFlowOrchestrator(config)
         orch._prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
+        orch._enable_rerere = AsyncMock()  # type: ignore[method-assign]
+        orch._worktrees.sanitize_repo = AsyncMock()  # type: ignore[method-assign]
 
         async def auth_failing_implement() -> tuple[list[WorkerResult], list[Task]]:
             raise AuthenticationError("401 Unauthorized")
@@ -3003,6 +3073,61 @@ class TestMemoryErrorPropagation:
         await orch._polling_loop("test", failing_then_stop, 10)
         assert call_count == 2
 
+    @pytest.mark.asyncio
+    async def test_polling_loop_emits_ok_heartbeat(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """_polling_loop should call update_bg_worker_status('ok') after work."""
+        orch = HydraFlowOrchestrator(config)
+
+        async def work_then_stop() -> bool:
+            orch._stop_event.set()
+            return False
+
+        async def instant_sleep(seconds: int) -> None:  # noqa: ARG001
+            await asyncio.sleep(0)
+
+        orch._sleep_or_stop = instant_sleep  # type: ignore[method-assign]
+        await orch._polling_loop("implement", work_then_stop, 10)
+        states = orch.get_bg_worker_states()
+        assert "implement" in states
+        assert states["implement"]["status"] == "ok"
+
+    @pytest.mark.asyncio
+    async def test_polling_loop_emits_error_heartbeat(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """_polling_loop should call update_bg_worker_status('error') on exception."""
+        orch = HydraFlowOrchestrator(config)
+        call_count = 0
+        status_calls: list[tuple[str, str]] = []
+        _orig_update = orch.update_bg_worker_status
+
+        def tracking_update(name: str, status: str) -> None:
+            status_calls.append((name, status))
+            _orig_update(name, status)
+
+        orch.update_bg_worker_status = tracking_update  # type: ignore[method-assign]
+
+        async def fail_then_stop() -> bool:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("boom")
+            orch._stop_event.set()
+            return False
+
+        async def instant_sleep(seconds: int) -> None:  # noqa: ARG001
+            await asyncio.sleep(0)
+
+        orch._sleep_or_stop = instant_sleep  # type: ignore[method-assign]
+        await orch._polling_loop("triage", fail_then_stop, 10)
+        # Error heartbeat must be emitted on the exception iteration
+        assert ("triage", "error") in status_calls
+        # Final heartbeat should be "ok" from the second (successful) call
+        states = orch.get_bg_worker_states()
+        assert states["triage"]["status"] == "ok"
+
 
 # --- Background Worker Enabled ---
 
@@ -3319,3 +3444,249 @@ class TestPipelineStatsEmission:
         # Verify the method exists
         assert hasattr(orch, "_pipeline_stats_loop")
         assert callable(orch._pipeline_stats_loop)
+
+
+# ---------------------------------------------------------------------------
+# Polling loop — exception classification & circuit breaker (#2065)
+# ---------------------------------------------------------------------------
+
+
+class TestPollingLoopExceptionClassification:
+    """Tests for exception classification and circuit breaker in _polling_loop."""
+
+    @pytest.mark.asyncio
+    async def test_likely_bug_logged_at_critical(self, config: HydraFlowConfig) -> None:
+        """TypeError/KeyError etc. should be logged at CRITICAL level."""
+        orch = HydraFlowOrchestrator(config)
+        call_count = 0
+
+        async def bug_then_stop() -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise TypeError("bad type")
+            orch._stop_event.set()
+
+        async def instant_sleep(seconds: int) -> None:  # noqa: ARG001
+            await asyncio.sleep(0)
+
+        orch._sleep_or_stop = instant_sleep  # type: ignore[method-assign]
+        await orch._polling_loop("test", bug_then_stop, 10)
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_error_event_includes_exception_metadata(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """ERROR events should include exception_type and is_likely_bug fields."""
+        orch = HydraFlowOrchestrator(config)
+        published: list[HydraFlowEvent] = []
+        original_publish = orch._bus.publish
+
+        async def capture_publish(event: HydraFlowEvent) -> None:
+            published.append(event)
+            await original_publish(event)
+
+        orch._bus.publish = capture_publish  # type: ignore[method-assign]
+        call_count = 0
+
+        async def fail_then_stop() -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise KeyError("missing key")
+            orch._stop_event.set()
+
+        async def instant_sleep(seconds: int) -> None:  # noqa: ARG001
+            await asyncio.sleep(0)
+
+        orch._sleep_or_stop = instant_sleep  # type: ignore[method-assign]
+        await orch._polling_loop("test", fail_then_stop, 10)
+
+        error_events = [e for e in published if e.type == EventType.ERROR]
+        assert len(error_events) == 1
+        data = error_events[0].data
+        assert data["exception_type"] == "KeyError"
+        assert data["is_likely_bug"] is True
+        assert data["consecutive_failures"] == 1
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_fires_after_max_consecutive(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """After max_consecutive_failures of the same type, a SYSTEM_ALERT fires."""
+        orch = HydraFlowOrchestrator(config)
+        published: list[HydraFlowEvent] = []
+        original_publish = orch._bus.publish
+
+        async def capture_publish(event: HydraFlowEvent) -> None:
+            published.append(event)
+            await original_publish(event)
+
+        orch._bus.publish = capture_publish  # type: ignore[method-assign]
+        call_count = 0
+        max_failures = 3
+
+        async def always_fail() -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count > max_failures:
+                orch._stop_event.set()
+                return
+            raise RuntimeError("always fails")
+
+        async def instant_sleep(seconds: int) -> None:  # noqa: ARG001
+            await asyncio.sleep(0)
+
+        orch._sleep_or_stop = instant_sleep  # type: ignore[method-assign]
+        await orch._polling_loop(
+            "test", always_fail, 10, max_consecutive_failures=max_failures
+        )
+
+        alert_events = [e for e in published if e.type == EventType.SYSTEM_ALERT]
+        assert len(alert_events) == 1
+        assert "circuit breaker" in alert_events[0].data["message"]
+        assert alert_events[0].data["consecutive_failures"] == max_failures
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_fires_exactly_once_beyond_threshold(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """SYSTEM_ALERT fires exactly once (at threshold), not on every subsequent failure."""
+        orch = HydraFlowOrchestrator(config)
+        published: list[HydraFlowEvent] = []
+        original_publish = orch._bus.publish
+
+        async def capture_publish(event: HydraFlowEvent) -> None:
+            published.append(event)
+            await original_publish(event)
+
+        orch._bus.publish = capture_publish  # type: ignore[method-assign]
+        call_count = 0
+        max_failures = 2
+
+        async def always_fail() -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count > max_failures + 2:
+                orch._stop_event.set()
+                return
+            raise RuntimeError("always fails")
+
+        async def instant_sleep(seconds: int) -> None:  # noqa: ARG001
+            await asyncio.sleep(0)
+
+        orch._sleep_or_stop = instant_sleep  # type: ignore[method-assign]
+        await orch._polling_loop(
+            "test", always_fail, 10, max_consecutive_failures=max_failures
+        )
+
+        # Should fire exactly once despite 4 total failures beyond threshold
+        alert_events = [e for e in published if e.type == EventType.SYSTEM_ALERT]
+        assert len(alert_events) == 1
+
+    @pytest.mark.asyncio
+    async def test_success_resets_failure_counter(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """A successful iteration should reset the consecutive failure counter."""
+        orch = HydraFlowOrchestrator(config)
+        published: list[HydraFlowEvent] = []
+        original_publish = orch._bus.publish
+
+        async def capture_publish(event: HydraFlowEvent) -> None:
+            published.append(event)
+            await original_publish(event)
+
+        orch._bus.publish = capture_publish  # type: ignore[method-assign]
+        call_count = 0
+
+        async def fail_succeed_fail_stop() -> bool:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("fail 1")
+            if call_count == 2:
+                return True  # success — resets counter
+            if call_count == 3:
+                raise RuntimeError("fail 2")
+            orch._stop_event.set()
+            return False
+
+        async def instant_sleep(seconds: int) -> None:  # noqa: ARG001
+            await asyncio.sleep(0)
+
+        orch._sleep_or_stop = instant_sleep  # type: ignore[method-assign]
+        await orch._polling_loop(
+            "test", fail_succeed_fail_stop, 10, max_consecutive_failures=2
+        )
+
+        # Two errors, but no SYSTEM_ALERT because success reset the counter
+        error_events = [e for e in published if e.type == EventType.ERROR]
+        alert_events = [e for e in published if e.type == EventType.SYSTEM_ALERT]
+        assert len(error_events) == 2
+        assert len(alert_events) == 0
+        # Both errors should have consecutive_failures == 1 (reset between them)
+        assert error_events[0].data["consecutive_failures"] == 1
+        assert error_events[1].data["consecutive_failures"] == 1
+
+    @pytest.mark.asyncio
+    async def test_different_exception_types_reset_counter(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Switching exception types resets the consecutive counter."""
+        orch = HydraFlowOrchestrator(config)
+        published: list[HydraFlowEvent] = []
+        original_publish = orch._bus.publish
+
+        async def capture_publish(event: HydraFlowEvent) -> None:
+            published.append(event)
+            await original_publish(event)
+
+        orch._bus.publish = capture_publish  # type: ignore[method-assign]
+        call_count = 0
+
+        async def alternate_exceptions() -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("r1")
+            if call_count == 2:
+                raise TypeError("t1")
+            orch._stop_event.set()
+
+        async def instant_sleep(seconds: int) -> None:  # noqa: ARG001
+            await asyncio.sleep(0)
+
+        orch._sleep_or_stop = instant_sleep  # type: ignore[method-assign]
+        await orch._polling_loop(
+            "test", alternate_exceptions, 10, max_consecutive_failures=2
+        )
+
+        error_events = [e for e in published if e.type == EventType.ERROR]
+        # Both should have consecutive_failures == 1 (different types)
+        assert error_events[0].data["consecutive_failures"] == 1
+        assert error_events[1].data["consecutive_failures"] == 1
+
+    @pytest.mark.asyncio
+    async def test_transient_error_logged_at_exception_level(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Non-bug exceptions (RuntimeError, etc.) use logger.exception level."""
+        orch = HydraFlowOrchestrator(config)
+        call_count = 0
+
+        async def transient_then_stop() -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("network blip")
+            orch._stop_event.set()
+
+        async def instant_sleep(seconds: int) -> None:  # noqa: ARG001
+            await asyncio.sleep(0)
+
+        orch._sleep_or_stop = instant_sleep  # type: ignore[method-assign]
+        # Should complete without raising
+        await orch._polling_loop("test", transient_then_stop, 10)
+        assert call_count == 2
