@@ -7,6 +7,7 @@ import logging
 import os
 import random
 import re
+import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -208,10 +209,17 @@ def _is_auth_error(stderr: str) -> bool:
 def make_clean_env(gh_token: str = "") -> dict[str, str]:
     """Build a subprocess env dict with ``CLAUDECODE`` stripped.
 
+    Also strips ``GIT_WORK_TREE`` and ``GIT_DIR`` to prevent git
+    worktree corruption — these env vars override git's internal
+    resolution and cause ``core.worktree`` to be written to the
+    config, corrupting the repo for subsequent operations.
+
     When *gh_token* is non-empty it is injected as ``GH_TOKEN``.
     """
     env = {**os.environ}
     env.pop("CLAUDECODE", None)
+    env.pop("GIT_WORK_TREE", None)
+    env.pop("GIT_DIR", None)
     if gh_token:
         env["GH_TOKEN"] = gh_token
     return env
@@ -297,11 +305,17 @@ async def run_subprocess(
             ) from None
         if result.returncode != 0:
             msg = f"Command {cmd!r} failed (rc={result.returncode}): {result.stderr}"
+            cause = subprocess.CalledProcessError(
+                result.returncode,
+                list(cmd),
+                output=result.stdout,
+                stderr=result.stderr,
+            )
             if _is_auth_error(result.stderr):
-                raise AuthenticationError(msg)
+                raise AuthenticationError(msg) from cause
             if _is_rate_limited(result.stderr):
                 _trigger_rate_limit_cooldown()
-            raise RuntimeError(msg)
+            raise RuntimeError(msg) from cause
         return result.stdout
 
     if use_semaphore:

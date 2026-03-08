@@ -930,6 +930,12 @@ class TestCheckDockerAvailable:
 class TestGetDockerRunner:
     """Tests for get_docker_runner factory."""
 
+    @pytest.fixture(autouse=True)
+    def _mock_docker_on_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import shutil
+
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/docker")
+
     def test_returns_subprocess_runner_protocol_when_disabled(self) -> None:
         """get_docker_runner returns a SubprocessRunner when execution_mode='host'."""
         from tests.helpers import ConfigFactory
@@ -946,31 +952,40 @@ class TestGetDockerRunner:
         assert isinstance(runner, HostRunner)
 
     def test_returns_host_when_no_image(self) -> None:
+        import shutil
+
         from tests.helpers import ConfigFactory
 
-        config = ConfigFactory.create(execution_mode="docker", docker_image="")
+        with patch.object(shutil, "which", return_value="/usr/bin/docker"):
+            config = ConfigFactory.create(execution_mode="docker", docker_image="")
         runner = get_docker_runner(config)
         assert isinstance(runner, HostRunner)
 
     def test_returns_host_when_docker_unavailable(self) -> None:
+        import shutil
+
         from tests.helpers import ConfigFactory
 
-        config = ConfigFactory.create(
-            execution_mode="docker", docker_image="hydra:latest"
-        )
+        with patch.object(shutil, "which", return_value="/usr/bin/docker"):
+            config = ConfigFactory.create(
+                execution_mode="docker", docker_image="hydra:latest"
+            )
         with patch("docker_runner._check_docker_available", return_value=False):
             runner = get_docker_runner(config)
         assert isinstance(runner, HostRunner)
 
     def test_returns_docker_runner_when_available(self) -> None:
+        import shutil
+
         from tests.helpers import ConfigFactory
 
-        config = ConfigFactory.create(
-            execution_mode="docker",
-            docker_image="hydra:latest",
-            docker_spawn_delay=3.0,
-            docker_network="test-net",
-        )
+        with patch.object(shutil, "which", return_value="/usr/bin/docker"):
+            config = ConfigFactory.create(
+                execution_mode="docker",
+                docker_image="hydra:latest",
+                docker_spawn_delay=3.0,
+                docker_network="test-net",
+            )
         mock_client = _make_mock_docker_client()
         with (
             patch("docker_runner._check_docker_available", return_value=True),
@@ -981,9 +996,12 @@ class TestGetDockerRunner:
         assert isinstance(runner, SubprocessRunner)
 
     def test_logs_warning_when_no_image(self, caplog: pytest.LogCaptureFixture) -> None:
+        import shutil
+
         from tests.helpers import ConfigFactory
 
-        config = ConfigFactory.create(execution_mode="docker", docker_image="")
+        with patch.object(shutil, "which", return_value="/usr/bin/docker"):
+            config = ConfigFactory.create(execution_mode="docker", docker_image="")
         with caplog.at_level("WARNING"):
             get_docker_runner(config)
         assert "no docker_image configured" in caplog.text
@@ -991,11 +1009,14 @@ class TestGetDockerRunner:
     def test_logs_warning_when_docker_unavailable(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
+        import shutil
+
         from tests.helpers import ConfigFactory
 
-        config = ConfigFactory.create(
-            execution_mode="docker", docker_image="hydra:latest"
-        )
+        with patch.object(shutil, "which", return_value="/usr/bin/docker"):
+            config = ConfigFactory.create(
+                execution_mode="docker", docker_image="hydra:latest"
+            )
         with (
             caplog.at_level("WARNING"),
             patch("docker_runner._check_docker_available", return_value=False),
@@ -1020,6 +1041,13 @@ class TestGetDockerRunner:
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
         monkeypatch.delenv("HYDRAFLOW_GIT_USER_NAME", raising=False)
         monkeypatch.delenv("HYDRAFLOW_GIT_USER_EMAIL", raising=False)
+        for var in (
+            "GIT_AUTHOR_NAME",
+            "GIT_AUTHOR_EMAIL",
+            "GIT_COMMITTER_NAME",
+            "GIT_COMMITTER_EMAIL",
+        ):
+            monkeypatch.delenv(var, raising=False)
 
         import shutil
 
@@ -1135,6 +1163,22 @@ class TestDockerProcessKillSuppression:
 # ---------------------------------------------------------------------------
 
 
+class TestBuildContainerKwargs:
+    """Tests for build_container_kwargs."""
+
+    def test_tmpfs_includes_writable_home(self) -> None:
+        from docker_runner import build_container_kwargs
+        from tests.helpers import ConfigFactory
+
+        config = ConfigFactory.create(execution_mode="docker")
+        kwargs = build_container_kwargs(config)
+        tmpfs = kwargs["tmpfs"]
+        assert "/tmp" in tmpfs
+        assert "/home/hydraflow" in tmpfs
+        assert "uid=1000" in tmpfs["/home/hydraflow"]
+        assert "gid=1000" in tmpfs["/home/hydraflow"]
+
+
 class TestBuildMounts:
     """Tests for DockerRunner._build_mounts."""
 
@@ -1147,6 +1191,21 @@ class TestBuildMounts:
         assert "/tmp/worktree" in mounts
         assert mounts["/tmp/worktree"]["bind"] == "/workspace"
         assert mounts["/tmp/worktree"]["mode"] == "rw"
+
+    def test_cwd_equals_repo_root_does_not_clobber_workspace(
+        self, tmp_path: Path
+    ) -> None:
+        repo = tmp_path / "repo"
+        runner, _ = _make_runner(repo_root=repo, log_dir=tmp_path / "logs")
+        (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
+
+        # When cwd matches repo_root, /workspace must survive — /repo is skipped
+        mounts = runner._build_mounts(str(repo))
+
+        assert str(repo) in mounts
+        assert mounts[str(repo)]["bind"] == "/workspace"
+        assert mounts[str(repo)]["mode"] == "rw"
+        assert "/repo" not in [v["bind"] for v in mounts.values()]
 
     def test_no_workspace_when_cwd_is_none(self, tmp_path: Path) -> None:
         runner, _ = _make_runner(log_dir=tmp_path / "logs")
@@ -1319,66 +1378,205 @@ class TestBuildMounts:
 
 
 # ---------------------------------------------------------------------------
-# Worktree detection and command wrapping
+# Workspace preparation (worktree → standalone clone)
 # ---------------------------------------------------------------------------
 
 
-class TestDetectWorktree:
-    """Tests for DockerRunner._detect_worktree."""
+class TestPrepareWorkspace:
+    """Tests for DockerRunner.prepare_workspace."""
 
-    def test_returns_name_for_valid_worktree(self, tmp_path: Path) -> None:
-        (tmp_path / ".git").write_text("gitdir: /repo/.git/worktrees/issue-42\n")
-        assert DockerRunner._detect_worktree(str(tmp_path)) == "issue-42"
-
-    def test_returns_none_for_git_directory(self, tmp_path: Path) -> None:
-        (tmp_path / ".git").mkdir()
-        assert DockerRunner._detect_worktree(str(tmp_path)) is None
-
-    def test_returns_none_when_no_git(self, tmp_path: Path) -> None:
-        assert DockerRunner._detect_worktree(str(tmp_path)) is None
-
-    def test_returns_none_for_malformed_gitdir(self, tmp_path: Path) -> None:
-        (tmp_path / ".git").write_text("not a gitdir line\n")
-        assert DockerRunner._detect_worktree(str(tmp_path)) is None
-
-
-class TestWrapCmdForWorktree:
-    """Tests for DockerRunner._wrap_cmd_for_worktree."""
-
-    def test_wraps_command_for_worktree(self, tmp_path: Path) -> None:
-        (tmp_path / ".git").write_text("gitdir: /repo/.git/worktrees/issue-99\n")
-        runner, _ = _make_runner(log_dir=tmp_path / "logs")
-        (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
-
-        result = runner._wrap_cmd_for_worktree(["claude", "-p", "hello"], str(tmp_path))
-
-        assert result[0] == "sh"
-        assert result[1] == "-c"
-        assert "/dot-git/worktrees/issue-99" in result[2]
-        assert "claude" in result[2]
-
-    def test_no_wrap_for_non_worktree(self, tmp_path: Path) -> None:
+    def test_noop_when_already_standalone(self, tmp_path: Path) -> None:
         (tmp_path / ".git").mkdir()
         runner, _ = _make_runner(log_dir=tmp_path / "logs")
         (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
 
-        cmd = ["claude", "-p", "hello"]
-        result = runner._wrap_cmd_for_worktree(cmd, str(tmp_path))
-        assert list(result) == cmd
+        # Should not raise or change anything
+        runner.prepare_workspace(str(tmp_path))
+        assert (tmp_path / ".git").is_dir()
 
-    def test_no_wrap_when_cwd_none(self, tmp_path: Path) -> None:
+    def test_noop_when_no_git(self, tmp_path: Path) -> None:
         runner, _ = _make_runner(log_dir=tmp_path / "logs")
         (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
 
-        cmd = ["claude", "-p", "hello"]
-        result = runner._wrap_cmd_for_worktree(cmd, None)
-        assert list(result) == cmd
+        runner.prepare_workspace(str(tmp_path))
+
+    def test_noop_for_malformed_git_file(self, tmp_path: Path) -> None:
+        (tmp_path / ".git").write_text("not a gitdir pointer\n")
+        runner, _ = _make_runner(log_dir=tmp_path / "logs")
+        (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
+
+        runner.prepare_workspace(str(tmp_path))
+        assert (tmp_path / ".git").is_file()
+
+    def test_converts_worktree_to_standalone(self, tmp_path: Path) -> None:
+        """Happy path: a worktree .git file is replaced with a real .git dir."""
+        # Set up a real git repo to clone from
+        import subprocess
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "--allow-empty", "-m", "init"],
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
+            env={
+                **__import__("os").environ,
+                "GIT_AUTHOR_NAME": "test",
+                "GIT_AUTHOR_EMAIL": "t@t",
+                "GIT_COMMITTER_NAME": "test",
+                "GIT_COMMITTER_EMAIL": "t@t",
+            },
+        )
+
+        # Create a worktree
+        wt = tmp_path / "worktree"
+        subprocess.run(
+            ["git", "worktree", "add", str(wt), "-b", "test-branch"],
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
+        )
+
+        # Verify it starts as a .git file (worktree pointer)
+        assert (wt / ".git").is_file()
+
+        runner, _ = _make_runner(repo_root=repo, log_dir=tmp_path / "logs")
+        (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
+        runner.prepare_workspace(str(wt))
+
+        # After conversion it should be a standalone .git directory
+        assert (wt / ".git").is_dir()
+        # Should be a functional git repo
+        result = subprocess.run(
+            ["git", "status"],
+            cwd=str(wt),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0
+
+    def test_converts_worktree_cleanup_on_failure(self, tmp_path: Path) -> None:
+        """If git clone fails, cleanup runs and exception re-raised."""
+        import subprocess as sp
+
+        wt = tmp_path / "worktree"
+        wt.mkdir()
+        (wt / ".git").write_text("gitdir: /nonexistent/path\n")
+
+        runner, _ = _make_runner(
+            repo_root=tmp_path / "nonexistent-repo",
+            log_dir=tmp_path / "logs",
+        )
+        (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
+
+        with pytest.raises((sp.CalledProcessError, OSError)):
+            runner.prepare_workspace(str(wt))
+
+        # .git file should still be gone (unlinked before clone fails)
+        # but .git-clone-tmp should be cleaned up
+        assert not (wt / ".git-clone-tmp").exists()
+
+    def test_branch_none_skips_branch_flag(self, tmp_path: Path) -> None:
+        """When branch detection fails, clone proceeds without --branch."""
+        import subprocess
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "--allow-empty", "-m", "init"],
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
+            env={
+                **__import__("os").environ,
+                "GIT_AUTHOR_NAME": "test",
+                "GIT_AUTHOR_EMAIL": "t@t",
+                "GIT_COMMITTER_NAME": "test",
+                "GIT_COMMITTER_EMAIL": "t@t",
+            },
+        )
+
+        wt = tmp_path / "worktree"
+        subprocess.run(
+            ["git", "worktree", "add", "--detach", str(wt)],
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
+        )
+        assert (wt / ".git").is_file()
+
+        runner, _ = _make_runner(repo_root=repo, log_dir=tmp_path / "logs")
+        (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
+        runner.prepare_workspace(str(wt))
+
+        # Should still convert successfully (detached HEAD → no --branch flag)
+        assert (wt / ".git").is_dir()
 
 
-class TestBuildMountsGitDir:
-    """Tests for .git directory mounting for worktree support."""
+class TestPrepareWorkspaceCalledFromEntryPoints:
+    """Verify prepare_workspace is invoked from create_streaming_process and run_simple."""
 
-    def test_mounts_git_dir_when_exists(self, tmp_path: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_create_streaming_process_calls_prepare(self) -> None:
+        runner, mock_client = _make_runner()
+        mock_container = MagicMock()
+        mock_container.wait.return_value = {"StatusCode": 0}
+        mock_socket = _MockSocketBuffer(b"")
+        mock_socket._sock = mock_socket
+        mock_container.attach_socket.return_value = mock_socket
+        mock_client.containers.create.return_value = mock_container
+
+        with patch.object(runner, "prepare_workspace") as mock_prep:
+            await runner.create_streaming_process(["echo", "hi"], cwd="/some/path")
+            mock_prep.assert_called_once_with("/some/path")
+
+    @pytest.mark.asyncio
+    async def test_create_streaming_process_skips_prepare_no_cwd(self) -> None:
+        runner, mock_client = _make_runner()
+        mock_container = MagicMock()
+        mock_container.wait.return_value = {"StatusCode": 0}
+        mock_socket = _MockSocketBuffer(b"")
+        mock_socket._sock = mock_socket
+        mock_container.attach_socket.return_value = mock_socket
+        mock_client.containers.create.return_value = mock_container
+
+        with patch.object(runner, "prepare_workspace") as mock_prep:
+            await runner.create_streaming_process(["echo", "hi"])
+            mock_prep.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_run_simple_calls_prepare(self) -> None:
+        runner, mock_client = _make_runner()
+        mock_container = MagicMock()
+        mock_container.wait.return_value = {"StatusCode": 0}
+        mock_container.logs.return_value = b""
+        mock_client.containers.create.return_value = mock_container
+
+        with patch.object(runner, "prepare_workspace") as mock_prep:
+            await runner.run_simple(["echo", "hi"], cwd="/some/path")
+            mock_prep.assert_called_once_with("/some/path")
+
+    @pytest.mark.asyncio
+    async def test_run_simple_skips_prepare_no_cwd(self) -> None:
+        runner, mock_client = _make_runner()
+        mock_container = MagicMock()
+        mock_container.wait.return_value = {"StatusCode": 0}
+        mock_container.logs.return_value = b""
+        mock_client.containers.create.return_value = mock_container
+
+        with patch.object(runner, "prepare_workspace") as mock_prep:
+            await runner.run_simple(["echo", "hi"])
+            mock_prep.assert_not_called()
+
+
+class TestBuildMountsNoGitDir:
+    """Tests verifying .git is NOT mounted into Docker containers."""
+
+    def test_git_dir_not_mounted(self, tmp_path: Path) -> None:
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / ".git").mkdir()
@@ -1387,14 +1585,11 @@ class TestBuildMountsGitDir:
 
         mounts = runner._build_mounts(str(tmp_path / "workspace"))
 
-        assert str(repo / ".git") in mounts
-        assert mounts[str(repo / ".git")]["bind"] == "/dot-git"
-        assert mounts[str(repo / ".git")]["mode"] == "rw"
+        assert not any(v["bind"] == "/dot-git" for v in mounts.values())
 
     def test_no_git_mount_when_missing(self, tmp_path: Path) -> None:
         repo = tmp_path / "repo"
         repo.mkdir()
-        # No .git directory
         runner, _ = _make_runner(repo_root=repo, log_dir=tmp_path / "logs")
         (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
 
