@@ -43,7 +43,6 @@ export const initialState = {
   currentSessionId: null,
   selectedSessionId: null,
   selectedRepoSlug: null,
-  selectedRepoSlugRaw: null,
   supervisedRepos: [],
   runtimes: [],
   issueHistory: null,
@@ -670,27 +669,12 @@ export function reducer(state, action) {
     case 'SELECT_SESSION':
       return { ...state, selectedSessionId: action.data.sessionId }
 
-    case 'SELECT_REPO': {
-      const newSlug = action.data.slug ? normalizeRepoSlug(action.data.slug) : null
-      const repoChanged = newSlug !== state.selectedRepoSlug
+    case 'SELECT_REPO':
       return {
         ...state,
-        selectedRepoSlug: newSlug,
-        selectedRepoSlugRaw: action.data.slug || null,
+        selectedRepoSlug: normalizeRepoSlug(action.data.slug),
         selectedSessionId: null,
-        // Reset stale data from the previous repo so users don't see a flash
-        // of old content while the new data is being fetched.
-        ...(repoChanged ? {
-          pipelineIssues: { ...emptyPipeline },
-          hitlItems: [],
-          workers: {},
-          prs: [],
-          reviews: [],
-          sessionPrsCount: 0,
-          events: [],
-        } : {}),
       }
-    }
 
     case 'SET_RUNTIMES':
       return {
@@ -741,41 +725,34 @@ export function HydraFlowProvider({ children }) {
   const bgWorkersRef = useRef(state.backgroundWorkers)
 
   bgWorkersRef.current = state.backgroundWorkers
-  const selectedRepoSlugRaw = state.selectedRepoSlugRaw
-
-  const withRepoQuery = useCallback((path) => {
-    if (!selectedRepoSlugRaw) return path
-    const separator = path.includes('?') ? '&' : '?'
-    return `${path}${separator}repo=${encodeURIComponent(selectedRepoSlugRaw)}`
-  }, [selectedRepoSlugRaw])
 
   const fetchLifetimeStats = useCallback(() => {
-    fetch(withRepoQuery('/api/stats'))
+    fetch('/api/stats')
       .then(r => r.json())
       .then(data => dispatch({ type: 'LIFETIME_STATS', data }))
       .catch(() => {})
-  }, [withRepoQuery])
+  }, [])
 
   const fetchHitlItems = useCallback(() => {
-    fetch(withRepoQuery('/api/hitl'))
+    fetch('/api/hitl')
       .then(r => r.json())
       .then(data => dispatch({ type: 'HITL_ITEMS', data }))
       .catch(() => {})
-  }, [withRepoQuery])
+  }, [])
 
   const fetchPipeline = useCallback(() => {
-    fetch(withRepoQuery('/api/pipeline'))
+    fetch('/api/pipeline')
       .then(r => r.json())
       .then(data => dispatch({ type: 'PIPELINE_SNAPSHOT', data: data.stages || {} }))
       .catch(() => {})
-  }, [withRepoQuery])
+  }, [])
 
   const fetchPipelineStats = useCallback(() => {
-    fetch(withRepoQuery('/api/pipeline/stats'))
+    fetch('/api/pipeline/stats')
       .then(r => r.json())
       .then(data => dispatch({ type: 'PIPELINE_STATS', data }))
       .catch(() => {})
-  }, [withRepoQuery])
+  }, [])
 
   const fetchGithubMetrics = useCallback(() => {
     fetch('/api/metrics/github')
@@ -799,11 +776,11 @@ export function HydraFlowProvider({ children }) {
   }, [])
 
   const fetchSessions = useCallback(() => {
-    fetch(withRepoQuery('/api/sessions'))
+    fetch('/api/sessions')
       .then(r => r.json())
       .then(data => dispatch({ type: 'SESSIONS', data }))
       .catch(() => {})
-  }, [withRepoQuery])
+  }, [])
 
   const selectSession = useCallback((sessionId) => {
     dispatch({ type: 'SELECT_SESSION', data: { sessionId } })
@@ -1046,29 +1023,6 @@ export function HydraFlowProvider({ children }) {
     }
   }, [fetchRepos])
 
-  const addRepoBySlug = useCallback(async (repoSlug) => {
-    const slug = (repoSlug || '').trim()
-    if (!slug) return { ok: false, error: 'slug required' }
-    try {
-      const res = await fetch('/api/repos', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ slug }),
-      })
-      if (!res.ok) {
-        const message = await parseApiError(
-          res,
-          `Failed to register repo (${res.status})`,
-        )
-        return { ok: false, error: message }
-      }
-      await fetchRepos()
-      return { ok: true }
-    } catch (err) {
-      return { ok: false, error: err?.message || 'Network error' }
-    }
-  }, [fetchRepos, parseApiError])
-
   const removeRepoShortcut = useCallback((repoSlug) => {
     removeRepo(repoSlug)
   }, [removeRepo])
@@ -1156,6 +1110,19 @@ export function HydraFlowProvider({ children }) {
     } catch { /* ignore — local state already updated */ }
   }, [])
 
+  const triggerBgWorker = useCallback(async (name) => {
+    try {
+      const resp = await fetch('/api/control/bg-worker/trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      })
+      return resp.ok
+    } catch {
+      return false
+    }
+  }, [])
+
   const updateBgWorkerInterval = useCallback(async (name, intervalSeconds) => {
     // Optimistic local update
     dispatch({ type: 'UPDATE_BG_WORKER_INTERVAL', data: { name, interval_seconds: intervalSeconds } })
@@ -1197,7 +1164,7 @@ export function HydraFlowProvider({ children }) {
 
   const refreshControlStatus = useCallback(async () => {
     try {
-      const res = await fetch(withRepoQuery('/api/control/status'))
+      const res = await fetch('/api/control/status')
       if (!res.ok) return false
       const data = await res.json()
       dispatch({
@@ -1212,7 +1179,7 @@ export function HydraFlowProvider({ children }) {
     } catch {
       return false
     }
-  }, [withRepoQuery])
+  }, [])
 
   const startOrchestrator = useCallback(async () => {
     try {
@@ -1238,12 +1205,12 @@ export function HydraFlowProvider({ children }) {
 
   const connect = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const repoQuery = selectedRepoSlugRaw ? `?repo=${encodeURIComponent(selectedRepoSlugRaw)}` : ''
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws${repoQuery}`)
+    const repoParam = state.selectedRepoSlug ? `?repo=${encodeURIComponent(state.selectedRepoSlug)}` : ''
+    const ws = new WebSocket(`${protocol}//${window.location.host}/ws${repoParam}`)
 
     ws.onopen = () => {
       dispatch({ type: 'CONNECTED' })
-      fetch(withRepoQuery('/api/control/status'))
+      fetch('/api/control/status')
         .then(r => r.json())
         .then(data => {
           dispatch({
@@ -1282,7 +1249,7 @@ export function HydraFlowProvider({ children }) {
           dispatch({ type: 'BACKGROUND_WORKERS', data: data.workers })
         })
         .catch(() => {})
-      fetch(withRepoQuery('/api/queue'))
+      fetch('/api/queue')
         .then(r => r.json())
         .then(data => dispatch({ type: 'QUEUE_STATS', data }))
         .catch(() => {})
@@ -1347,14 +1314,22 @@ export function HydraFlowProvider({ children }) {
       } catch { /* ignore parse errors */ }
     }
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
+      // Guard against stale connections: when selectedRepoSlug changes, the
+      // useEffect cleanup closes the old WS and connect() opens a new one
+      // (wsRef.current = new_ws). If this onclose fires after that, skip the
+      // reconnect to avoid opening a second connection to the wrong repo.
+      if (wsRef.current !== ws) return
       dispatch({ type: 'DISCONNECTED' })
+      // 1008 = Policy Violation — server explicitly rejected our repo slug.
+      // Don't reconnect; the slug is invalid and retrying would loop forever.
+      if (event.code === 1008) return
       reconnectTimer.current = setTimeout(connect, 2000)
     }
 
     ws.onerror = () => ws.close()
     wsRef.current = ws
-  }, [fetchLifetimeStats, fetchHitlItems, fetchGithubMetrics, fetchMetricsHistory, fetchPipeline, fetchPipelineStats, fetchEpics, fetchSessions, fetchRepos, fetchRuntimes, selectedRepoSlugRaw, withRepoQuery])
+  }, [state.selectedRepoSlug, fetchLifetimeStats, fetchHitlItems, fetchGithubMetrics, fetchMetricsHistory, fetchPipeline, fetchPipelineStats, fetchEpics, fetchSessions, fetchRepos, fetchRuntimes])
 
   useEffect(() => {
     if (isSeeded) return
@@ -1486,13 +1461,13 @@ export function HydraFlowProvider({ children }) {
     submitHumanInput,
     requestChanges,
     toggleBgWorker,
+    triggerBgWorker,
     updateBgWorkerInterval,
     refreshHitl: fetchHitlItems,
     selectSession,
     selectRepo,
     deleteSession,
     addRepoByPath,
-    addRepoBySlug,
     removeRepoShortcut,
     startRuntime,
     stopRuntime,
