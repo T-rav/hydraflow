@@ -1323,7 +1323,6 @@ async def _run_main(config: HydraFlowConfig) -> None:
     from repo_runtime import RepoRuntime, RepoRuntimeRegistry
     from repo_store import RepoRecord, RepoStore
 
-    logger = logging.getLogger("hydraflow.cli")
     cli_explicit_fields = set(getattr(config, "cli_explicit_fields", frozenset()))
     default_slug = config.repo_slug if config.repo else None
     registry = RepoRuntimeRegistry()
@@ -1529,8 +1528,7 @@ def main(argv: list[str] | None = None) -> None:
         _run_replay(config, args.replay, args.replay_latest)
         sys.exit(0)
 
-    _logger = logging.getLogger("hydraflow.cli")
-    _logger.info(
+    logger.info(
         "Loaded worker counts: triagers=%d planners=%d workers=%d reviewers=%d hitl=%d (config_file=%s)",
         config.max_triagers,
         config.max_planners,
