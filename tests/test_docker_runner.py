@@ -930,6 +930,11 @@ class TestCheckDockerAvailable:
 class TestGetDockerRunner:
     """Tests for get_docker_runner factory."""
 
+    @pytest.fixture(autouse=True)
+    def _mock_docker_on_path(self) -> None:  # type: ignore[misc]
+        with patch("shutil.which", return_value="/usr/bin/docker"):
+            yield
+
     def test_returns_subprocess_runner_protocol_when_disabled(self) -> None:
         """get_docker_runner returns a SubprocessRunner when execution_mode='host'."""
         from tests.helpers import ConfigFactory
@@ -1020,6 +1025,10 @@ class TestGetDockerRunner:
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
         monkeypatch.delenv("HYDRAFLOW_GIT_USER_NAME", raising=False)
         monkeypatch.delenv("HYDRAFLOW_GIT_USER_EMAIL", raising=False)
+        monkeypatch.delenv("GIT_AUTHOR_NAME", raising=False)
+        monkeypatch.delenv("GIT_AUTHOR_EMAIL", raising=False)
+        monkeypatch.delenv("GIT_COMMITTER_NAME", raising=False)
+        monkeypatch.delenv("GIT_COMMITTER_EMAIL", raising=False)
 
         import shutil
 
