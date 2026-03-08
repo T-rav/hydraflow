@@ -73,6 +73,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hydraflow.dashboard")
 
+# Internal pipeline labels that must not be treated as epic names in the history panel.
+_EPIC_INTERNAL_LABELS: frozenset[str] = frozenset(
+    {"hydraflow-epic-child", "hydraflow-epic"}
+)
+
 # Backend stage keys → frontend stage names
 _STAGE_NAME_MAP: dict[str, str] = {
     IssueStoreStage.FIND: "triage",
@@ -680,12 +685,12 @@ def create_router(
             if not row.get("epic"):
                 # Skip internal pipeline labels (e.g. hydraflow-epic-child);
                 # only keep labels that look like actual epic names.
-                _skip = {"hydraflow-epic-child", "hydraflow-epic"}
                 epic = next(
                     (
                         lbl
                         for lbl in labels
-                        if "epic" in lbl.lower() and lbl.lower() not in _skip
+                        if "epic" in lbl.lower()
+                        and lbl.lower() not in _EPIC_INTERNAL_LABELS
                     ),
                     "",
                 )
@@ -2179,14 +2184,13 @@ def create_router(
 
                 if event.type == EventType.ISSUE_CREATED:
                     labels = event.data.get("labels", [])
-                    _skip_event = {"hydraflow-epic-child", "hydraflow-epic"}
                     if isinstance(labels, list) and not row.get("epic"):
                         for lbl in labels:
                             s = str(lbl).strip()
                             if (
                                 s
                                 and "epic" in s.lower()
-                                and s.lower() not in _skip_event
+                                and s.lower() not in _EPIC_INTERNAL_LABELS
                             ):
                                 row["epic"] = s
                                 break
