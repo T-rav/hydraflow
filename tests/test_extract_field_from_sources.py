@@ -197,6 +197,23 @@ class TestExtractFieldFromSources:
         result = _extract_field_from_sources(("slug", "repo"), body, None, (None, None))
         assert result == "primary"
 
+    def test_alias_field_resolved_from_nested_req(self) -> None:
+        body = {"req": {"repo": "alias-in-nested"}}
+        result = _extract_field_from_sources(("slug", "repo"), body, None, (None, None))
+        assert result == "alias-in-nested"
+
+    def test_body_wins_over_json_req_query_when_query_params_first(self) -> None:
+        body = {"slug": "from-body"}
+        query = json.dumps({"slug": "from-json"})
+        result = _extract_field_from_sources(
+            ("slug", "repo"),
+            body,
+            query,
+            (None, None),
+            query_params_first=True,
+        )
+        assert result == "from-body"
+
 
 class TestExtractRepoSlug:
     """Tests for _extract_repo_slug via the actual wrapper function."""
@@ -222,6 +239,16 @@ class TestExtractRepoSlug:
             _extract_repo_slug({"req": {"slug": "nested"}}, None, None, None)
             == "nested"
         )
+
+    def test_slug_from_nested_body_repo_alias(self) -> None:
+        assert (
+            _extract_repo_slug({"req": {"repo": "nested-alias"}}, None, None, None)
+            == "nested-alias"
+        )
+
+    def test_slug_body_wins_over_json_req_query(self) -> None:
+        q = json.dumps({"slug": "from-json"})
+        assert _extract_repo_slug({"slug": "from-body"}, q, None, None) == "from-body"
 
     def test_slug_from_json_query(self) -> None:
         q = json.dumps({"slug": "from-json"})
@@ -256,6 +283,14 @@ class TestExtractRepoPath:
             == "/nested"
         )
 
+    def test_path_from_nested_body_repo_path_alias(self) -> None:
+        assert (
+            _extract_repo_path(
+                {"req": {"repo_path": "/nested-alias"}}, None, None, None
+            )
+            == "/nested-alias"
+        )
+
     def test_path_from_json_query(self) -> None:
         q = json.dumps({"path": "/from-json"})
         assert _extract_repo_path(None, q, None, None) == "/from-json"
@@ -265,6 +300,11 @@ class TestExtractRepoPath:
 
     def test_body_wins_over_query_param(self) -> None:
         assert _extract_repo_path({"path": "/body"}, None, "/query", None) == "/body"
+
+    def test_path_from_repo_path_query_param(self) -> None:
+        assert (
+            _extract_repo_path(None, None, None, "/from-alias-qp") == "/from-alias-qp"
+        )
 
     def test_empty_when_nothing_provided(self) -> None:
         assert _extract_repo_path(None, None, None, None) == ""
