@@ -53,7 +53,7 @@ export const initialState = {
   memories: null,
 }
 
-function normalizeRepoSlug(value) {
+export function normalizeRepoSlug(value) {
   return String(value || '').trim().replace(/[\\/]+/g, '-')
 }
 
@@ -1378,6 +1378,27 @@ export function HydraFlowProvider({ children }) {
     })
   }, [state.sessions, state.selectedRepoSlug])
 
+  const repoFilteredPipelineIssues = useMemo(() => {
+    if (!state.selectedRepoSlug) return state.pipelineIssues
+    const filtered = {}
+    for (const [stage, issues] of Object.entries(state.pipelineIssues)) {
+      filtered[stage] = (issues || []).filter(issue => {
+        // If issue has no repo field, include it (single-repo mode)
+        if (!issue.repo) return true
+        return normalizeRepoSlug(issue.repo) === state.selectedRepoSlug
+      })
+    }
+    return filtered
+  }, [state.pipelineIssues, state.selectedRepoSlug])
+
+  const repoFilteredHitlItems = useMemo(() => {
+    if (!state.selectedRepoSlug) return state.hitlItems
+    return (state.hitlItems || []).filter(item => {
+      if (!item.repo) return true
+      return normalizeRepoSlug(item.repo) === state.selectedRepoSlug
+    })
+  }, [state.hitlItems, state.selectedRepoSlug])
+
   const selectedSession = useMemo(() => {
     if (!state.selectedSessionId) return null
     return state.sessions.find(s => s.id === state.selectedSessionId) ?? null
@@ -1431,6 +1452,8 @@ export function HydraFlowProvider({ children }) {
     ...state,
     events: filteredEvents,
     sessions: repoFilteredSessions,
+    pipelineIssues: repoFilteredPipelineIssues,
+    hitlItems: repoFilteredHitlItems,
     selectedSession,
     stageStatus,
     resetSession,

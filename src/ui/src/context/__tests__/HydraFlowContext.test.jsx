@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
-import { reducer } from '../HydraFlowContext'
+import { reducer, normalizeRepoSlug } from '../HydraFlowContext'
 
 const emptyPipeline = {
   triage: [],
@@ -1644,5 +1644,29 @@ describe('SESSION_RESET reducer', () => {
 
     // Session fields cleared
     expect(next.workers).toEqual({})
+  })
+})
+
+describe('normalizeRepoSlug', () => {
+  it('replaces slashes with hyphens', () => {
+    expect(normalizeRepoSlug('org/repo')).toBe('org-repo')
+  })
+
+  it('trims whitespace', () => {
+    expect(normalizeRepoSlug('  org/repo  ')).toBe('org-repo')
+  })
+
+  it('handles empty/null values', () => {
+    expect(normalizeRepoSlug(null)).toBe('')
+    expect(normalizeRepoSlug(undefined)).toBe('')
+    expect(normalizeRepoSlug('')).toBe('')
+  })
+
+  it('replaces backslashes', () => {
+    expect(normalizeRepoSlug('org\\repo')).toBe('org-repo')
+  })
+
+  it('replaces consecutive slashes', () => {
+    expect(normalizeRepoSlug('org//repo')).toBe('org-repo')
   })
 })

@@ -1,15 +1,11 @@
 import React, { useState, useMemo } from 'react'
-import { useHydraFlow } from '../context/HydraFlowContext'
+import { useHydraFlow, normalizeRepoSlug } from '../context/HydraFlowContext'
 import { theme } from '../theme'
 import { PULSE_ANIMATION } from '../constants'
 
 function shortRepo(repo) {
   const parts = (repo || '').split('/')
   return parts.length > 1 ? parts[parts.length - 1] : repo
-}
-
-function canonicalRepoSlug(repo) {
-  return String(repo || '').trim().replace(/[\\/]+/g, '-')
 }
 
 export function SessionSidebar() {
@@ -25,6 +21,8 @@ export function SessionSidebar() {
     supervisedRepos = [],
     runtimes = [],
     removeRepoShortcut,
+    startRuntime,
+    stopRuntime,
   } = useHydraFlow()
   const [expandedRepos, setExpandedRepos] = useState({})
   const [hoveredSession, setHoveredSession] = useState(null)
@@ -50,7 +48,7 @@ export function SessionSidebar() {
     }
 
     for (const session of sessions) {
-      const slug = canonicalRepoSlug(session.repo) || shortRepo(session.repo)
+      const slug = normalizeRepoSlug(session.repo) || shortRepo(session.repo)
       const key = slug || session.repo
       const entry = ensureEntry(key, slug, slug, session.repo)
       entry.sessions.push(session)
@@ -58,8 +56,8 @@ export function SessionSidebar() {
 
     for (const repo of supervisedRepos || []) {
       if (!repo) continue
-      const rawSlug = repo.slug || canonicalRepoSlug(repo.path || '') || shortRepo(repo.path || '')
-      const filterSlug = canonicalRepoSlug(rawSlug)
+      const rawSlug = repo.slug || normalizeRepoSlug(repo.path || '') || shortRepo(repo.path || '')
+      const filterSlug = normalizeRepoSlug(rawSlug)
       let entryKey = (filterSlug && slugIndex.get(filterSlug)) || filterSlug
       let entry = entryKey ? entries.get(entryKey) : undefined
       if (!entry) {
@@ -88,7 +86,7 @@ export function SessionSidebar() {
 
     // Merge runtime status into entries
     const runtimeMap = new Map(
-      (runtimes || []).map((rt) => [canonicalRepoSlug(rt.slug), rt]),
+      (runtimes || []).map((rt) => [normalizeRepoSlug(rt.slug), rt]),
     )
     for (const entry of entries.values()) {
       entry.runtime = runtimeMap.get(entry.filterSlug) || null
@@ -106,6 +104,15 @@ export function SessionSidebar() {
   const handleDelete = (e, sessionId) => {
     e.stopPropagation()
     deleteSession(sessionId)
+  }
+
+  const handleStartStop = async (e, slug, isRunning, repoPath) => {
+    e.stopPropagation()
+    if (isRunning) {
+      await stopRuntime?.(slug)
+    } else {
+      await startRuntime?.(slug, repoPath)
+    }
   }
 
   const handleDisconnect = (e, slug, isRunning) => {
@@ -159,6 +166,17 @@ export function SessionSidebar() {
                 </div>
                 <div style={styles.repoMeta}>
                   <span style={styles.repoCount}>{repoSessions.length}</span>
+                  {entry.info && (
+                    <button
+                      onClick={(e) => handleStartStop(e, entry.slug, isRunning, entry.info?.path)}
+                      style={isRunning ? styles.repoStopBtn : styles.repoStartBtn}
+                      aria-label={isRunning ? 'Stop repo' : 'Start repo'}
+                      title={isRunning ? 'Stop' : 'Start'}
+                      data-testid={`repo-startstop-${entry.filterSlug}`}
+                    >
+                      {isRunning ? 'Stop' : 'Start'}
+                    </button>
+                  )}
                   {entry.info && (
                     <button
                       onClick={(e) => handleDisconnect(e, entry.slug, isRunning)}

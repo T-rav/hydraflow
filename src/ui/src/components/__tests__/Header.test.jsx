@@ -14,6 +14,7 @@ const html2canvasFn = vi.fn()
 
 vi.mock('../../context/HydraFlowContext', () => ({
   useHydraFlow: (...args) => mockUseHydraFlow(...args),
+  normalizeRepoSlug: (v) => String(v || '').trim().replace(/[\\/]+/g, '-'),
 }))
 vi.mock('html2canvas', () => ({
   default: (...args) => html2canvasFn(...args),
@@ -42,6 +43,12 @@ beforeEach(() => {
     submitReport: vi.fn(),
     startOrchestrator: vi.fn(),
     stopOrchestrator: vi.fn(),
+    supervisedRepos: [],
+    runtimes: [],
+    selectedRepoSlug: null,
+    selectRepo: vi.fn(),
+    addRepoByPath: vi.fn(),
+    startRuntime: vi.fn(),
   })
 })
 
@@ -408,6 +415,25 @@ describe('Header component', () => {
       })
       expect(screen.queryByTestId('screenshot-thumbnail')).toBeNull()
       expect(html2canvasFn).toHaveBeenCalledTimes(3)
+    })
+  })
+
+  describe('Repo selector integration', () => {
+    it('renders repo selector in header', () => {
+      render(<Header {...defaultProps} />)
+      expect(screen.getByTestId('repo-selector')).toBeInTheDocument()
+    })
+
+    it('renders add repo button', () => {
+      render(<Header {...defaultProps} />)
+      expect(screen.getByTestId('header-add-repo-button')).toBeInTheDocument()
+    })
+
+    it('opens register dialog when add button is clicked', () => {
+      render(<Header {...defaultProps} />)
+      expect(screen.queryByTestId('register-repo-dialog')).toBeNull()
+      fireEvent.click(screen.getByTestId('header-add-repo-button'))
+      expect(screen.getByTestId('register-repo-dialog')).toBeInTheDocument()
     })
   })
 })

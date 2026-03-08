@@ -5,6 +5,7 @@ const mockUseHydraFlow = vi.fn()
 
 vi.mock('../../context/HydraFlowContext', () => ({
   useHydraFlow: (...args) => mockUseHydraFlow(...args),
+  normalizeRepoSlug: (v) => String(v || '').trim().replace(/[\\/]+/g, '-'),
 }))
 
 const { SessionSidebar } = await import('../SessionSidebar')
@@ -209,15 +210,54 @@ describe('SessionSidebar supervised repo state', () => {
     expect(screen.getByText('/repos/demo')).toBeDefined()
   })
 
-  it('does not show per-repo Start/Stop controls', () => {
+  it('shows Start button for stopped supervised repo', () => {
     mockUseHydraFlow.mockReturnValue(
       defaultContext({
         supervisedRepos: [{ ...SUPERVISED_REPO, running: false }],
       })
     )
     render(<SessionSidebar />)
-    expect(screen.queryByText('Start')).toBeNull()
+    expect(screen.getByText('Start')).toBeInTheDocument()
     expect(screen.queryByText('Stop')).toBeNull()
+  })
+
+  it('shows Stop button for running supervised repo', () => {
+    mockUseHydraFlow.mockReturnValue(
+      defaultContext({
+        supervisedRepos: [{ ...SUPERVISED_REPO, running: true }],
+        runtimes: [{ slug: 'demo', running: true }],
+      })
+    )
+    render(<SessionSidebar />)
+    expect(screen.getByText('Stop')).toBeInTheDocument()
+    expect(screen.queryByText('Start')).toBeNull()
+  })
+
+  it('calls stopRuntime when Stop button is clicked', () => {
+    const stopRuntime = vi.fn()
+    mockUseHydraFlow.mockReturnValue(
+      defaultContext({
+        supervisedRepos: [{ ...SUPERVISED_REPO, running: true }],
+        runtimes: [{ slug: 'demo', running: true }],
+        stopRuntime,
+      })
+    )
+    render(<SessionSidebar />)
+    fireEvent.click(screen.getByText('Stop'))
+    expect(stopRuntime).toHaveBeenCalledWith('demo')
+  })
+
+  it('calls startRuntime when Start button is clicked', () => {
+    const startRuntime = vi.fn()
+    mockUseHydraFlow.mockReturnValue(
+      defaultContext({
+        supervisedRepos: [{ ...SUPERVISED_REPO, running: false }],
+        startRuntime,
+      })
+    )
+    render(<SessionSidebar />)
+    fireEvent.click(screen.getByText('Start'))
+    expect(startRuntime).toHaveBeenCalledWith('demo', '/repos/demo')
   })
 })
 

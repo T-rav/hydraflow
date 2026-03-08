@@ -3,6 +3,8 @@ import { theme } from '../theme'
 import { useHydraFlow } from '../context/HydraFlowContext'
 import { PIPELINE_STAGES, SENSITIVE_SELECTORS } from '../constants'
 import { ReportIssueModal } from './ReportIssueModal'
+import { RepoSelector } from './RepoSelector'
+import { RegisterRepoDialog } from './RegisterRepoDialog'
 
 function isCrossOriginImage(el) {
   if (!el || el.tagName !== 'IMG') return false
@@ -195,6 +197,7 @@ export function Header({ connected, orchestratorStatus }) {
 
   const [reportModalOpen, setReportModalOpen] = useState(false)
   const [screenshotDataUrl, setScreenshotDataUrl] = useState(null)
+  const [registerDialogOpen, setRegisterDialogOpen] = useState(false)
 
   const handleReportClick = useCallback(async () => {
     // Capture screenshot BEFORE opening the modal so the overlay isn't in the shot.
@@ -238,6 +241,18 @@ export function Header({ connected, orchestratorStatus }) {
         <span style={connected ? dotConnected : dotDisconnected} />
       </div>
       <div style={styles.center}>
+        <div style={styles.repoGroup}>
+          <RepoSelector />
+          <button
+            style={styles.addRepoBtn}
+            onClick={() => setRegisterDialogOpen(true)}
+            data-testid="header-add-repo-button"
+            aria-label="Register repo"
+            title="Register repo"
+          >
+            +
+          </button>
+        </div>
         <div style={styles.sessionBox} data-testid="session-box" aria-label="Session pipeline statistics">
           <div style={styles.pipelineRow} data-testid="session-pipeline">
             {sessionStages.map((stage, index) => (
@@ -300,6 +315,10 @@ export function Header({ connected, orchestratorStatus }) {
         onSubmit={handleReportSubmit}
         onClose={() => setReportModalOpen(false)}
       />
+      <RegisterRepoDialog
+        isOpen={registerDialogOpen}
+        onClose={() => setRegisterDialogOpen(false)}
+      />
     </header>
   )
 }
@@ -322,6 +341,29 @@ const styles = {
   version: { color: theme.textMuted, fontWeight: 500, fontSize: 11 },
   updateNotice: { color: theme.accent, fontWeight: 600, fontSize: 11 },
   dot: { width: 8, height: 8, borderRadius: '50%', display: 'inline-block' },
+  repoGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 4,
+    flexShrink: 0,
+  },
+  addRepoBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    border: `1px solid ${theme.border}`,
+    background: 'none',
+    color: theme.textMuted,
+    fontSize: 16,
+    fontWeight: 700,
+    cursor: 'pointer',
+    padding: 0,
+    lineHeight: 1,
+    transition: 'color 0.15s, border-color 0.15s',
+  },
   center: {
     display: 'flex',
     alignItems: 'center',
