@@ -1263,4 +1263,9 @@ class TestRunMainRegistryWiring:
         ):
             await _run_main(config)
 
-        MockRegistry.assert_called_once_with()
+        # _run_main creates two registries in dashboard mode:
+        # 1) RepoRuntimeRegistry() at startup (no data_root, no persistence)
+        # 2) RepoRuntimeRegistry(data_root=...) for the dashboard (persistent)
+        assert MockRegistry.call_count == 2
+        MockRegistry.assert_any_call()
+        MockRegistry.assert_any_call(data_root=config.data_root)
