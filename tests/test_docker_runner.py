@@ -1167,14 +1167,10 @@ class TestBuildContainerKwargs:
     """Tests for build_container_kwargs."""
 
     def test_tmpfs_includes_writable_home(self) -> None:
-        import shutil
-        from unittest.mock import patch
-
         from docker_runner import build_container_kwargs
         from tests.helpers import ConfigFactory
 
-        with patch.object(shutil, "which", return_value="/usr/bin/docker"):
-            config = ConfigFactory.create(execution_mode="docker")
+        config = ConfigFactory.create(execution_mode="docker")
         kwargs = build_container_kwargs(config)
         tmpfs = kwargs["tmpfs"]
         assert "/tmp" in tmpfs
