@@ -948,16 +948,18 @@ class TestGetDockerRunner:
     def test_returns_host_when_no_image(self) -> None:
         from tests.helpers import ConfigFactory
 
-        config = ConfigFactory.create(execution_mode="docker", docker_image="")
+        with patch("shutil.which", return_value="/usr/bin/docker"):
+            config = ConfigFactory.create(execution_mode="docker", docker_image="")
         runner = get_docker_runner(config)
         assert isinstance(runner, HostRunner)
 
     def test_returns_host_when_docker_unavailable(self) -> None:
         from tests.helpers import ConfigFactory
 
-        config = ConfigFactory.create(
-            execution_mode="docker", docker_image="hydra:latest"
-        )
+        with patch("shutil.which", return_value="/usr/bin/docker"):
+            config = ConfigFactory.create(
+                execution_mode="docker", docker_image="hydra:latest"
+            )
         with patch("docker_runner._check_docker_available", return_value=False):
             runner = get_docker_runner(config)
         assert isinstance(runner, HostRunner)
@@ -965,12 +967,13 @@ class TestGetDockerRunner:
     def test_returns_docker_runner_when_available(self) -> None:
         from tests.helpers import ConfigFactory
 
-        config = ConfigFactory.create(
-            execution_mode="docker",
-            docker_image="hydra:latest",
-            docker_spawn_delay=3.0,
-            docker_network="test-net",
-        )
+        with patch("shutil.which", return_value="/usr/bin/docker"):
+            config = ConfigFactory.create(
+                execution_mode="docker",
+                docker_image="hydra:latest",
+                docker_spawn_delay=3.0,
+                docker_network="test-net",
+            )
         mock_client = _make_mock_docker_client()
         with (
             patch("docker_runner._check_docker_available", return_value=True),
@@ -983,7 +986,8 @@ class TestGetDockerRunner:
     def test_logs_warning_when_no_image(self, caplog: pytest.LogCaptureFixture) -> None:
         from tests.helpers import ConfigFactory
 
-        config = ConfigFactory.create(execution_mode="docker", docker_image="")
+        with patch("shutil.which", return_value="/usr/bin/docker"):
+            config = ConfigFactory.create(execution_mode="docker", docker_image="")
         with caplog.at_level("WARNING"):
             get_docker_runner(config)
         assert "no docker_image configured" in caplog.text
@@ -993,9 +997,10 @@ class TestGetDockerRunner:
     ) -> None:
         from tests.helpers import ConfigFactory
 
-        config = ConfigFactory.create(
-            execution_mode="docker", docker_image="hydra:latest"
-        )
+        with patch("shutil.which", return_value="/usr/bin/docker"):
+            config = ConfigFactory.create(
+                execution_mode="docker", docker_image="hydra:latest"
+            )
         with (
             caplog.at_level("WARNING"),
             patch("docker_runner._check_docker_available", return_value=False),
@@ -1020,6 +1025,10 @@ class TestGetDockerRunner:
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
         monkeypatch.delenv("HYDRAFLOW_GIT_USER_NAME", raising=False)
         monkeypatch.delenv("HYDRAFLOW_GIT_USER_EMAIL", raising=False)
+        monkeypatch.delenv("GIT_AUTHOR_NAME", raising=False)
+        monkeypatch.delenv("GIT_COMMITTER_NAME", raising=False)
+        monkeypatch.delenv("GIT_AUTHOR_EMAIL", raising=False)
+        monkeypatch.delenv("GIT_COMMITTER_EMAIL", raising=False)
 
         import shutil
 
