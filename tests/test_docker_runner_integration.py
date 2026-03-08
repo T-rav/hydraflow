@@ -50,8 +50,6 @@ _TEST_IMAGE = "alpine:latest"
 @pytest.fixture(autouse=True, scope="session")
 def _pull_image_once() -> None:
     """Ensure the test image is available locally (runs once per session)."""
-    if not _docker_available:
-        return
     client = _docker_mod.from_env()
     try:
         client.images.get(_TEST_IMAGE)
@@ -153,10 +151,22 @@ class TestVolumeMountIntegration:
     async def test_repo_root_mounted_readonly(
         self, runner: DockerRunner, tmp_workspace: Path
     ) -> None:
-        """Repo root is mounted at /repo as read-only."""
+        """Repo root is mounted at /repo as read-only; writes are rejected."""
         result = await runner.run_simple(["cat", "/repo/hello.txt"])
         assert result.returncode == 0
         assert "hello from host" in result.stdout
+
+        # Verify the mount is actually read-only — write attempt must fail.
+        write_result = await runner.run_simple(
+            ["sh", "-c", "echo blocked > /repo/should_not_exist.txt 2>&1; echo exit=$?"]
+        )
+        output = write_result.stdout + write_result.stderr
+        assert (
+            "exit=1" in output
+            or "read-only" in output.lower()
+            or "permission denied" in output.lower()
+        ), f"Expected write to /repo to fail, got: {output!r}"
+        assert not (tmp_workspace / "should_not_exist.txt").exists()
 
 
 # ---------------------------------------------------------------------------
