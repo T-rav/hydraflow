@@ -1381,8 +1381,7 @@ def create_router(
     @router.post("/api/hitl/{issue_number}/close")
     async def hitl_close(issue_number: int, body: HITLCloseRequest) -> JSONResponse:
         """Close a HITL issue on GitHub (reason required)."""
-        orch = get_orchestrator()
-        if not orch:
+        if not get_orchestrator():
             return JSONResponse({"status": "no orchestrator"}, status_code=400)
         await pr_manager.close_issue(issue_number)
 
@@ -1421,6 +1420,9 @@ def create_router(
 
         All issue types (bugs, epics, etc.) route to triage first.
         """
+        if not get_orchestrator():
+            return JSONResponse({"status": "no orchestrator"}, status_code=400)
+
         target_label = config.find_label[0]
         target_stage = "triage"
 

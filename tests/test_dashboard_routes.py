@@ -5386,12 +5386,26 @@ class TestResolveHitlItemHelper:
         self, config, event_bus, state, tmp_path
     ) -> None:
         """Endpoints using _resolve_hitl_item return 400 when no orchestrator."""
-        from models import HITLSkipRequest
+        from models import HITLCloseRequest, HITLSkipRequest
 
-        router, _ = self._make_router(config, event_bus, state, tmp_path)
+        router, pr_mgr = self._make_router(config, event_bus, state, tmp_path)
+        pr_mgr.close_issue = AsyncMock()
+
         skip = self._find_endpoint(router, "/api/hitl/{issue_number}/skip")
         response = await skip(42, HITLSkipRequest(reason="test"))
         assert response.status_code == 400
+
+        close = self._find_endpoint(router, "/api/hitl/{issue_number}/close")
+        response = await close(42, HITLCloseRequest(reason="test"))
+        assert response.status_code == 400
+        pr_mgr.close_issue.assert_not_called()
+
+        approve = self._find_endpoint(
+            router, "/api/hitl/{issue_number}/approve-process"
+        )
+        response = await approve(42)
+        assert response.status_code == 400
+        pr_mgr.swap_pipeline_labels.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_resolve_comment_failure_does_not_break_response(
