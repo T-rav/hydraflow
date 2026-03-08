@@ -575,11 +575,10 @@ def create_router(
         When *slug* is ``None`` or no registry is configured, returns the
         single-repo closure defaults for backward compatibility.
         """
-        target = slug or default_repo_slug
-        if registry is not None and target:
-            rt: RepoRuntime | None = registry.get(target)
+        if registry is not None and slug is not None:
+            rt: RepoRuntime | None = registry.get(slug)
             if rt is None:
-                raise HTTPException(status_code=404, detail=f"Unknown repo: {target}")
+                raise HTTPException(status_code=404, detail=f"Unknown repo: {slug}")
             return rt.config, rt.state, rt.event_bus, lambda: rt.orchestrator
         return config, state, event_bus, get_orchestrator
 
@@ -2106,8 +2105,7 @@ def create_router(
         persisted as overrides in the repo store.
         """
         persist = body.pop("persist", False)
-        target_repo = repo or default_repo_slug
-        _cfg, _state, _bus, _get_orch = _resolve_runtime(target_repo)
+        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
 
         updates: dict[str, Any] = {}
 
@@ -2143,8 +2141,8 @@ def create_router(
             object.__setattr__(_cfg, key, validated_value)
             applied[key] = validated_value
 
-        if target_repo and repo_store is not None and applied:
-            repo_store.update_overrides(target_repo, applied)
+        if repo and repo_store is not None and applied:
+            repo_store.update_overrides(repo, applied)
         elif persist and applied:
             save_config_file(_cfg.config_file, applied)
 

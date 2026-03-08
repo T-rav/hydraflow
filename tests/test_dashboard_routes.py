@@ -6568,6 +6568,45 @@ class TestResolveRuntime:
         assert resp.status_code == 200
         mock_state.to_dict.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_state_endpoint_no_repo_param_with_registry_uses_closure_defaults(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        """GET /api/state with no repo param must not 404 even when a registry is set.
+
+        Regression: _resolve_runtime previously fell through to
+        ``default_repo_slug`` and tried to look it up in the registry.  If
+        that slug was absent the registry raised 404, breaking every endpoint
+        that omitted the optional ``repo`` query parameter.
+        """
+        mock_registry = MagicMock()
+        # Registry is set but does not contain the default slug.
+        mock_registry.get.return_value = None
+
+        from dashboard_routes import create_router
+        from pr_manager import PRManager
+
+        pr_mgr = PRManager(config, event_bus)
+        router = create_router(
+            config=config,
+            event_bus=event_bus,
+            state=state,
+            pr_manager=pr_mgr,
+            get_orchestrator=lambda: None,
+            set_orchestrator=lambda o: None,
+            set_run_task=lambda t: None,
+            ui_dist_dir=tmp_path / "no-dist",
+            template_dir=tmp_path / "no-templates",
+            registry=mock_registry,
+            default_repo_slug="owner-repo",
+        )
+        ep = next(r for r in router.routes if getattr(r, "path", "") == "/api/state")
+        # Must succeed: no slug provided → use closure defaults, ignore registry.
+        resp = await ep.endpoint()
+        assert resp.status_code == 200
+        # Registry lookup should NOT have been called (no slug was provided).
+        mock_registry.get.assert_not_called()
+
 
 class TestRuntimeLifecycleEndpoints:
     """Tests for /api/runtimes/* lifecycle endpoints."""
