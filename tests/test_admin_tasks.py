@@ -360,7 +360,7 @@ class TestRunCleanTask:
             states.append(inst)
             return inst
 
-        monkeypatch.setattr("worktree.WorktreeManager", fake_worktree_manager)
+        monkeypatch.setattr("workspace.WorkspaceManager", fake_worktree_manager)
         monkeypatch.setattr("state.StateTracker", fake_state_tracker)
 
         result = await run_clean(config)
