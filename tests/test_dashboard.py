@@ -2867,7 +2867,7 @@ class TestRegistryForwarding:
 
         mock_registry = MagicMock()
 
-        with patch("dashboard.create_router") as mock_create_router:
+        with patch("dashboard_routes.create_router") as mock_create_router:
             mock_create_router.return_value = MagicMock()
             dashboard = HydraFlowDashboard(
                 config, event_bus, state, registry=mock_registry
@@ -2883,7 +2883,7 @@ class TestRegistryForwarding:
     ) -> None:
         from dashboard import HydraFlowDashboard
 
-        with patch("dashboard.create_router") as mock_create_router:
+        with patch("dashboard_routes.create_router") as mock_create_router:
             mock_create_router.return_value = MagicMock()
             dashboard = HydraFlowDashboard(config, event_bus, state)
             dashboard.create_app()
