@@ -2367,3 +2367,223 @@ class TestBuildPromptRuntimeLogs:
             prompt = runner._build_prompt(issue)
 
         assert "## Recent Application Logs" not in prompt
+
+
+# ---------------------------------------------------------------------------
+# Prior failure section in prompt
+# ---------------------------------------------------------------------------
+
+
+class TestPriorFailureInPrompt:
+    """Tests that prior_failure is included in the implementation prompt."""
+
+    def test_prior_failure_included_in_prompt(
+        self, config, event_bus: EventBus
+    ) -> None:
+        runner = AgentRunner(config, event_bus)
+        issue = TaskFactory.create()
+
+        with (
+            patch("base_runner.load_project_manifest", return_value=""),
+            patch("base_runner.load_memory_digest", return_value=""),
+        ):
+            prompt = runner._build_prompt(
+                issue,
+                prior_failure="TDD red phase modified non-test files: docs/adr/001.md",
+            )
+
+        assert "## Prior Attempt Failure" in prompt
+        assert "TDD red phase modified non-test files: docs/adr/001.md" in prompt
+        assert "Avoid repeating the same mistake" in prompt
+
+    def test_no_prior_failure_section_when_empty(
+        self, config, event_bus: EventBus
+    ) -> None:
+        runner = AgentRunner(config, event_bus)
+        issue = TaskFactory.create()
+
+        with (
+            patch("base_runner.load_project_manifest", return_value=""),
+            patch("base_runner.load_memory_digest", return_value=""),
+        ):
+            prompt = runner._build_prompt(issue, prior_failure="")
+
+        assert "## Prior Attempt Failure" not in prompt
+
+
+# ---------------------------------------------------------------------------
+# TDD red phase internal retry
+# ---------------------------------------------------------------------------
+
+
+class TestTddRedPhaseRetry:
+    """Tests for TDD red phase internal retry with worktree reset."""
+
+    @pytest.mark.asyncio
+    async def test_tdd_red_retries_on_non_test_file_change(
+        self, config, event_bus: EventBus, issue, tmp_path: Path
+    ) -> None:
+        """TDD red phase should retry after resetting on non-test file change."""
+        config = ConfigFactory.create(max_tdd_red_attempts=2, repo_root=tmp_path)
+        runner = AgentRunner(config, event_bus)
+        call_count = {"n": 0}
+
+        async def fake_execute(*args, **kwargs):
+            return "TDD_RED_RESULT: OK"
+
+        # First call: non-test file changed. Second call: test-only.
+        async def fake_changed_files(*args, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return {"src/agent.py", "tests/test_agent.py"}
+            return {"tests/test_agent.py"}
+
+        with (
+            patch.object(
+                runner, "_execute", new_callable=AsyncMock, side_effect=fake_execute
+            ),
+            patch.object(
+                runner,
+                "_collect_changed_files_for_tdd_red",
+                new_callable=AsyncMock,
+                side_effect=fake_changed_files,
+            ),
+            patch.object(
+                runner,
+                "_verify_tdd_red_fails",
+                new_callable=AsyncMock,
+                return_value=(True, "Expected failing test observed"),
+            ),
+            patch.object(
+                runner,
+                "_reset_worktree_to_main",
+                new_callable=AsyncMock,
+            ) as mock_reset,
+        ):
+            ok, msg, _tx = await runner._run_tdd_red_phase(
+                issue, tmp_path, "agent/issue-42", worker_id=1
+            )
+
+        assert ok is True
+        assert msg == "OK"
+        mock_reset.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_tdd_red_exhausts_attempts_on_persistent_failure(
+        self, config, event_bus: EventBus, issue, tmp_path: Path
+    ) -> None:
+        """TDD red should hard-fail after exhausting all retry attempts."""
+        config = ConfigFactory.create(max_tdd_red_attempts=2, repo_root=tmp_path)
+        runner = AgentRunner(config, event_bus)
+
+        with (
+            patch.object(
+                runner,
+                "_execute",
+                new_callable=AsyncMock,
+                return_value="TDD_RED_RESULT: OK",
+            ),
+            patch.object(
+                runner,
+                "_collect_changed_files_for_tdd_red",
+                new_callable=AsyncMock,
+                return_value={"src/agent.py"},  # Always non-test
+            ),
+            patch.object(
+                runner,
+                "_reset_worktree_to_main",
+                new_callable=AsyncMock,
+            ) as mock_reset,
+        ):
+            ok, msg, _tx = await runner._run_tdd_red_phase(
+                issue, tmp_path, "agent/issue-42", worker_id=1
+            )
+
+        assert ok is False
+        assert "non-test files" in msg
+        # Should have reset once (between attempt 1 and 2)
+        mock_reset.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_tdd_red_single_attempt_no_retry(
+        self, config, event_bus: EventBus, issue, tmp_path: Path
+    ) -> None:
+        """With max_tdd_red_attempts=1, should not retry."""
+        config = ConfigFactory.create(max_tdd_red_attempts=1, repo_root=tmp_path)
+        runner = AgentRunner(config, event_bus)
+
+        with (
+            patch.object(
+                runner,
+                "_execute",
+                new_callable=AsyncMock,
+                return_value="TDD_RED_RESULT: OK",
+            ),
+            patch.object(
+                runner,
+                "_collect_changed_files_for_tdd_red",
+                new_callable=AsyncMock,
+                return_value={"src/agent.py"},
+            ),
+            patch.object(
+                runner,
+                "_reset_worktree_to_main",
+                new_callable=AsyncMock,
+            ) as mock_reset,
+        ):
+            ok, msg, _tx = await runner._run_tdd_red_phase(
+                issue, tmp_path, "agent/issue-42", worker_id=1
+            )
+
+        assert ok is False
+        mock_reset.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_tdd_red_prior_error_included_in_retry_prompt(
+        self, config, event_bus: EventBus, issue, tmp_path: Path
+    ) -> None:
+        """On retry, the TDD red prompt should include the prior error."""
+        config = ConfigFactory.create(max_tdd_red_attempts=2, repo_root=tmp_path)
+        runner = AgentRunner(config, event_bus)
+        prompts: list[str] = []
+
+        async def capture_execute(cmd, prompt, *args, **kwargs):
+            prompts.append(prompt)
+            return "TDD_RED_RESULT: OK"
+
+        call_count = {"n": 0}
+
+        async def fake_changed(*args, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return {"src/main.py"}
+            return {"tests/test_main.py"}
+
+        with (
+            patch.object(
+                runner, "_execute", new_callable=AsyncMock, side_effect=capture_execute
+            ),
+            patch.object(
+                runner,
+                "_collect_changed_files_for_tdd_red",
+                new_callable=AsyncMock,
+                side_effect=fake_changed,
+            ),
+            patch.object(
+                runner,
+                "_verify_tdd_red_fails",
+                new_callable=AsyncMock,
+                return_value=(True, "OK"),
+            ),
+            patch.object(runner, "_reset_worktree_to_main", new_callable=AsyncMock),
+        ):
+            await runner._run_tdd_red_phase(
+                issue, tmp_path, "agent/issue-42", worker_id=1
+            )
+
+        assert len(prompts) == 2
+        # First prompt should not have prior error
+        assert "Previous TDD red attempt failed" not in prompts[0]
+        # Second prompt should include prior error
+        assert "Previous TDD red attempt failed" in prompts[1]
+        assert "non-test files" in prompts[1]

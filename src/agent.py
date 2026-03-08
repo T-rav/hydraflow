@@ -101,6 +101,7 @@ Run through this checklist before your final commit:
         branch: str,
         worker_id: int = 0,
         review_feedback: str = "",
+        prior_failure: str = "",
     ) -> WorkerResult:
         """Run the implementation agent for *task*.
 
@@ -144,7 +145,7 @@ Run through this checklist before your final commit:
             # Build and run the configured agent command
             cmd = self._build_command(worktree_path)
             prompt, prompt_stats = self._build_prompt_with_stats(
-                task, review_feedback=review_feedback
+                task, review_feedback=review_feedback, prior_failure=prior_failure
             )
             transcript = await self._execute(
                 cmd,
@@ -247,6 +248,24 @@ Run through this checklist before your final commit:
             return True
         return any(pattern in norm for pattern in cls._TEST_FILE_PATTERNS)
 
+    async def _reset_worktree_to_main(self, worktree_path: Path) -> None:
+        """Hard-reset the worktree to origin/main and clean untracked files."""
+        await self._runner.run_simple(
+            ["git", "fetch", "origin", self._config.main_branch],
+            cwd=str(worktree_path),
+            timeout=self._config.git_command_timeout,
+        )
+        await self._runner.run_simple(
+            ["git", "reset", "--hard", f"origin/{self._config.main_branch}"],
+            cwd=str(worktree_path),
+            timeout=self._config.git_command_timeout,
+        )
+        await self._runner.run_simple(
+            ["git", "clean", "-fd"],
+            cwd=str(worktree_path),
+            timeout=self._config.git_command_timeout,
+        )
+
     async def _run_tdd_red_phase(
         self,
         issue: Task,
@@ -254,47 +273,84 @@ Run through this checklist before your final commit:
         branch: str,
         worker_id: int,
     ) -> tuple[bool, str, str]:
-        """Run mandatory TDD-red phase before implementation."""
-        cmd = self._build_command(worktree_path)
-        prompt = self._build_tdd_red_prompt(issue)
-        transcript = await self._execute(
-            cmd,
-            prompt,
-            worktree_path,
-            {"issue": issue.id, "source": "implementer"},
-        )
-        red_ok, red_summary = self._parse_skill_result(transcript, "TDD_RED_RESULT")
-        if not red_ok:
-            return (
-                False,
-                "TDD red phase failed" + (f": {red_summary}" if red_summary else ""),
-                transcript,
-            )
+        """Run mandatory TDD-red phase with internal retry.
 
-        changed_files = await self._collect_changed_files_for_tdd_red(
-            worktree_path, branch
-        )
-        if not changed_files:
-            return (
-                False,
-                "TDD red phase produced no file changes",
-                transcript,
-            )
-        non_test_files = sorted(
-            path for path in changed_files if not self._is_test_file_path(path)
-        )
-        if non_test_files:
-            return (
-                False,
-                "TDD red phase modified non-test files: "
-                + ", ".join(non_test_files[:8]),
-                transcript,
-            )
+        On validation failure (non-test files modified, no changes, etc.),
+        resets the worktree and re-prompts the agent with the specific error.
+        Only hard-fails after ``max_tdd_red_attempts`` are exhausted.
+        """
+        max_attempts = self._config.max_tdd_red_attempts
+        last_error = ""
+        last_transcript = ""
 
-        failure_ok, failure_msg = await self._verify_tdd_red_fails(worktree_path)
-        if not failure_ok:
-            return False, failure_msg, transcript
-        return True, "OK", transcript
+        for attempt in range(1, max_attempts + 1):
+            if attempt > 1:
+                logger.info(
+                    "TDD red phase retry %d/%d for issue #%d — resetting worktree",
+                    attempt,
+                    max_attempts,
+                    issue.id,
+                )
+                try:
+                    await self._reset_worktree_to_main(worktree_path)
+                except (RuntimeError, TimeoutError, FileNotFoundError):
+                    logger.warning(
+                        "Failed to reset worktree for TDD red retry", exc_info=True
+                    )
+
+            cmd = self._build_command(worktree_path)
+            prompt = self._build_tdd_red_prompt(issue, prior_error=last_error)
+            transcript = await self._execute(
+                cmd,
+                prompt,
+                worktree_path,
+                {"issue": issue.id, "source": "implementer"},
+            )
+            last_transcript = transcript
+
+            red_ok, red_summary = self._parse_skill_result(transcript, "TDD_RED_RESULT")
+            if not red_ok:
+                last_error = "TDD red phase failed" + (
+                    f": {red_summary}" if red_summary else ""
+                )
+                if attempt < max_attempts:
+                    continue
+                return False, last_error, transcript
+
+            changed_files = await self._collect_changed_files_for_tdd_red(
+                worktree_path, branch
+            )
+            if not changed_files:
+                last_error = "TDD red phase produced no file changes"
+                if attempt < max_attempts:
+                    continue
+                return False, last_error, transcript
+
+            non_test_files = sorted(
+                path for path in changed_files if not self._is_test_file_path(path)
+            )
+            if non_test_files:
+                last_error = "TDD red phase modified non-test files: " + ", ".join(
+                    non_test_files[:8]
+                )
+                if attempt < max_attempts:
+                    continue
+                return False, last_error, transcript
+
+            failure_ok, failure_msg = await self._verify_tdd_red_fails(worktree_path)
+            if not failure_ok:
+                last_error = failure_msg
+                if attempt < max_attempts:
+                    continue
+                return False, failure_msg, transcript
+
+            return True, "OK", transcript
+
+        return (
+            False,
+            last_error or "TDD red phase exhausted all attempts",
+            last_transcript,
+        )
 
     async def _collect_changed_files_for_tdd_red(
         self, worktree_path: Path, branch: str
@@ -497,15 +553,17 @@ Run through this checklist before your final commit:
             + f"\n[Comment truncated from {len(raw):,} chars]"
         )
 
-    def _build_prompt(self, issue: Task, review_feedback: str = "") -> str:
+    def _build_prompt(
+        self, issue: Task, review_feedback: str = "", prior_failure: str = ""
+    ) -> str:
         """Build the implementation prompt for the agent."""
         prompt, _stats = self._build_prompt_with_stats(
-            issue, review_feedback=review_feedback
+            issue, review_feedback=review_feedback, prior_failure=prior_failure
         )
         return prompt
 
     def _build_prompt_with_stats(
-        self, issue: Task, review_feedback: str = ""
+        self, issue: Task, review_feedback: str = "", prior_failure: str = ""
     ) -> tuple[str, dict[str, object]]:
         """Build the implementation prompt and pruning stats."""
         plan_comment, other_comments = self._extract_plan_comment(issue.comments)
@@ -552,6 +610,15 @@ Run through this checklist before your final commit:
                 f"A reviewer rejected the previous implementation. "
                 f"Address all feedback below:\n\n"
                 f"{review_feedback}"
+            )
+
+        prior_failure_section = ""
+        if prior_failure:
+            prior_failure_section = (
+                f"\n\n## Prior Attempt Failure\n\n"
+                f"Your previous implementation attempt failed with the following error. "
+                f"Avoid repeating the same mistake:\n\n"
+                f"```\n{prior_failure}\n```"
             )
 
         comments_section = ""
@@ -615,7 +682,7 @@ Run through this checklist before your final commit:
 
 ## Issue: {issue.title}
 
-{body}{plan_section}{review_feedback_section}{comments_section}{manifest_section}{memory_section}{log_section}
+{body}{plan_section}{review_feedback_section}{prior_failure_section}{comments_section}{manifest_section}{memory_section}{log_section}
 
 ## Instructions
 
@@ -662,11 +729,18 @@ Run through this checklist before your final commit:
         }
         return prompt, stats
 
-    def _build_tdd_red_prompt(self, issue: Task) -> str:
+    def _build_tdd_red_prompt(self, issue: Task, prior_error: str = "") -> str:
         """Build a strict test-first prompt for the red phase."""
         test_cmd = self._config.test_command
+        prior_error_section = ""
+        if prior_error:
+            prior_error_section = (
+                f"\n**IMPORTANT — Previous TDD red attempt failed:**\n"
+                f"```\n{prior_error}\n```\n"
+                f"Do NOT repeat this mistake. Only modify test files.\n"
+            )
         return f"""You are running TDD Red Phase for GitHub issue #{issue.id}: {issue.title}.
-
+{prior_error_section}
 Goal:
 - add or adjust tests ONLY
 - do not modify non-test files in this phase

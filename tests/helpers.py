@@ -185,6 +185,7 @@ class ConfigFactory:
         min_review_findings: int = 3,
         max_merge_conflict_fix_attempts: int = 3,
         max_ci_timeout_fix_attempts: int = 2,
+        max_tdd_red_attempts: int = 2,
         max_issue_attempts: int = 3,
         review_label: list[str] | None = None,
         hitl_label: list[str] | None = None,
@@ -360,6 +361,7 @@ class ConfigFactory:
             min_review_findings=min_review_findings,
             max_merge_conflict_fix_attempts=max_merge_conflict_fix_attempts,
             max_ci_timeout_fix_attempts=max_ci_timeout_fix_attempts,
+            max_tdd_red_attempts=max_tdd_red_attempts,
             max_issue_attempts=max_issue_attempts,
             review_label=review_label
             if review_label is not None
@@ -680,6 +682,7 @@ def make_implement_phase(
             branch: str,
             worker_id: int = 0,
             review_feedback: str = "",
+            prior_failure: str = "",
         ) -> WorkerResult:
             return WorkerResultFactory.create(
                 issue_number=issue.id,
