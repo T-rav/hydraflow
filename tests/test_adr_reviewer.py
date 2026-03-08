@@ -2012,7 +2012,6 @@ class TestAutoTriage:
         assert list(reviewer._config.hitl_label) == labels_kwarg
         assert stats["escalated"] == 1
         assert stats["auto_triaged"] == 0
-        assert stats["auto_triaged"] == 0
 
 
 class TestPreValidationGate:
@@ -2158,6 +2157,33 @@ class TestPreValidationGate:
         await reviewer._route_pre_validation_failure(1, "Test", validation, stats)
 
         assert reviewer._prs.create_issue.await_count == 2
+        assert stats["auto_triaged"] == 0
+        assert stats["escalated"] == 1
+
+    @pytest.mark.asyncio
+    async def test_pre_validation_failure_auto_triage_disabled_goes_to_hitl(
+        self, tmp_path: Path
+    ) -> None:
+        """When auto_triage is False, pre-validation failure goes directly to HITL."""
+        reviewer = _make_reviewer(tmp_path, adr_review_auto_triage=False)
+        from adr_pre_validator import ADRValidationIssue, ADRValidationResult
+
+        validation = ADRValidationResult(
+            issues=[
+                ADRValidationIssue(
+                    code="missing_section_context",
+                    message="ADR is missing required section: ## Context",
+                    fixable=False,
+                )
+            ]
+        )
+        stats = {"auto_triaged": 0, "escalated": 0, "pre_validation_skipped": 0}
+        await reviewer._route_pre_validation_failure(1, "Test ADR", validation, stats)
+
+        reviewer._prs.create_issue.assert_awaited_once()
+        call_args = reviewer._prs.create_issue.await_args
+        labels_kwarg = call_args.kwargs.get("labels", [])
+        assert list(reviewer._config.hitl_label) == labels_kwarg
         assert stats["auto_triaged"] == 0
         assert stats["escalated"] == 1
 
