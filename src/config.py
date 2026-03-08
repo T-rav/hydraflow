@@ -1266,9 +1266,9 @@ class HydraFlowConfig(BaseModel):
 
     @property
     def memory_sync_labels(self) -> list[str]:
-        """Return labels fetched by memory sync (memory + transcript summaries)."""
+        """Return labels fetched by memory sync (memory + improve + transcript)."""
         result: list[str] = []
-        for label in [*self.memory_label, *self.transcript_label]:
+        for label in [*self.memory_label, *self.improve_label, *self.transcript_label]:
             if label not in result:
                 result.append(label)
         return result
