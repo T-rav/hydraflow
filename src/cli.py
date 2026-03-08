@@ -424,6 +424,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Dashboard web UI port (default: 5555)",
     )
     parser.add_argument(
+        "--dashboard-host",
+        default=None,
+        help="Interface/IP to bind the dashboard web UI (default: 127.0.0.1)",
+    )
+    parser.add_argument(
         "--no-dashboard",
         action="store_true",
         help="Disable the live web dashboard",
@@ -631,6 +636,7 @@ def build_config(args: argparse.Namespace) -> HydraFlowConfig:
         "ac_tool",
         "verification_judge_tool",
         "dashboard_port",
+        "dashboard_host",
         "gh_token",
         "git_user_name",
         "git_user_email",
@@ -1258,12 +1264,12 @@ async def _run_scaffold(config: HydraFlowConfig) -> bool:
 async def _run_clean(config: HydraFlowConfig) -> None:
     """Remove all worktrees and reset state."""
     from state import StateTracker
-    from worktree import WorktreeManager
+    from workspace import WorkspaceManager
 
     logger = logging.getLogger("hydraflow")
     logger.info("Cleaning up all HydraFlow worktrees and state...")
 
-    wt_mgr = WorktreeManager(config)
+    wt_mgr = WorkspaceManager(config)
     await wt_mgr.destroy_all()
 
     state = StateTracker(config.state_file)
@@ -1316,6 +1322,7 @@ async def _run_main(config: HydraFlowConfig) -> None:
         from dashboard import HydraFlowDashboard
         from events import EventBus, EventLog, EventType, HydraFlowEvent
         from models import Phase
+        from repo_runtime import RepoRuntimeRegistry
         from state import StateTracker
 
         event_log = EventLog(config.event_log_path)
@@ -1327,10 +1334,12 @@ async def _run_main(config: HydraFlowConfig) -> None:
         await bus.load_history_from_disk()
         state = StateTracker(config.state_file)
 
+        registry = RepoRuntimeRegistry()
         dashboard = HydraFlowDashboard(
             config=config,
             event_bus=bus,
             state=state,
+            registry=registry,
         )
         await dashboard.start()
 
@@ -1350,6 +1359,7 @@ async def _run_main(config: HydraFlowConfig) -> None:
         try:
             await stop_event.wait()
         finally:
+            await registry.stop_all()
             if dashboard._orchestrator and dashboard._orchestrator.running:
                 await dashboard._orchestrator.stop()
             await dashboard.stop()
@@ -1394,6 +1404,16 @@ def main(argv: list[str] | None = None) -> None:
         _run_replay(config, args.replay, args.replay_latest)
         sys.exit(0)
 
+    _logger = logging.getLogger("hydraflow.cli")
+    _logger.info(
+        "Loaded worker counts: triagers=%d planners=%d workers=%d reviewers=%d hitl=%d (config_file=%s)",
+        config.max_triagers,
+        config.max_planners,
+        config.max_workers,
+        config.max_reviewers,
+        config.max_hitl_workers,
+        config.config_file,
+    )
     asyncio.run(_run_main(config))
 
 

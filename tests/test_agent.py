@@ -42,12 +42,12 @@ class TestAgentRunnerInheritance:
 
 
 # ---------------------------------------------------------------------------
-# issue fixture override — returns Task instead of GitHubIssue
+# agent_task fixture — returns Task instead of GitHubIssue
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
-def issue() -> Task:
+def agent_task() -> Task:
     return Task(
         id=42,
         title="Fix the frobnicator",
@@ -150,45 +150,51 @@ class TestBuildPrompt:
     """Tests for AgentRunner._build_prompt."""
 
     def test_prompt_includes_issue_number(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """Prompt should reference the issue number."""
         runner = AgentRunner(config, event_bus)
-        prompt = runner._build_prompt(issue)
-        assert str(issue.id) in prompt
+        prompt = runner._build_prompt(agent_task)
+        assert str(agent_task.id) in prompt
 
-    def test_prompt_includes_title(self, config, event_bus: EventBus, issue) -> None:
+    def test_prompt_includes_title(
+        self, config, event_bus: EventBus, agent_task
+    ) -> None:
         """Prompt should include the issue title."""
         runner = AgentRunner(config, event_bus)
-        prompt = runner._build_prompt(issue)
-        assert issue.title in prompt
+        prompt = runner._build_prompt(agent_task)
+        assert agent_task.title in prompt
 
-    def test_prompt_includes_body(self, config, event_bus: EventBus, issue) -> None:
+    def test_prompt_includes_body(
+        self, config, event_bus: EventBus, agent_task
+    ) -> None:
         """Prompt should include the issue body text."""
         runner = AgentRunner(config, event_bus)
-        prompt = runner._build_prompt(issue)
-        assert issue.body in prompt
+        prompt = runner._build_prompt(agent_task)
+        assert agent_task.body in prompt
 
-    def test_prompt_includes_rules(self, config, event_bus: EventBus, issue) -> None:
+    def test_prompt_includes_rules(
+        self, config, event_bus: EventBus, agent_task
+    ) -> None:
         """Prompt should contain the mandatory rules section."""
         runner = AgentRunner(config, event_bus)
-        prompt = runner._build_prompt(issue)
+        prompt = runner._build_prompt(agent_task)
         assert "Rules" in prompt or "rules" in prompt.lower()
 
     def test_prompt_references_make_quality(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """Prompt should instruct the agent to run make quality."""
         runner = AgentRunner(config, event_bus)
-        prompt = runner._build_prompt(issue)
+        prompt = runner._build_prompt(agent_task)
         assert "make quality" in prompt
 
     def test_prompt_does_not_reference_make_test_fast(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """Prompt should not reference make test-fast anywhere (replaced by configurable test_command)."""
         runner = AgentRunner(config, event_bus)
-        prompt = runner._build_prompt(issue)
+        prompt = runner._build_prompt(agent_task)
         assert "make test-fast" not in prompt
 
     def test_prompt_includes_comments_section_when_comments_exist(
@@ -209,12 +215,12 @@ class TestBuildPrompt:
         assert "What about Z?" in prompt
 
     def test_prompt_omits_comments_section_when_no_comments(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """Prompt should not include a Discussion section when there are no comments."""
-        # Default issue fixture has empty comments
+        # Default agent_task fixture has empty comments
         runner = AgentRunner(config, event_bus)
-        prompt = runner._build_prompt(issue)
+        prompt = runner._build_prompt(agent_task)
         assert "Discussion" not in prompt
 
     def test_prompt_extracts_plan_comment_as_dedicated_section(
@@ -264,20 +270,20 @@ class TestBuildPrompt:
         assert "Discussion" not in prompt
 
     def test_prompt_no_plan_section_when_no_plan_comment(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """When no comment contains a plan, no plan section should appear."""
         runner = AgentRunner(config, event_bus)
-        prompt = runner._build_prompt(issue)
+        prompt = runner._build_prompt(agent_task)
 
         assert "Follow this plan closely" not in prompt
 
     def test_prompt_includes_ui_guidelines(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """Prompt should include UI guidelines for component reuse and responsive design."""
         runner = AgentRunner(config, event_bus)
-        prompt = runner._build_prompt(issue)
+        prompt = runner._build_prompt(agent_task)
         assert "UI Guidelines" in prompt
         assert "src/ui/src/components/" in prompt
         assert "never duplicate" in prompt.lower()
@@ -285,26 +291,26 @@ class TestBuildPrompt:
         assert "theme" in prompt.lower()
 
     def test_prompt_instructs_no_push_or_pr(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """Prompt should explicitly tell the agent not to push or create PRs."""
         runner = AgentRunner(config, event_bus)
-        prompt = runner._build_prompt(issue)
+        prompt = runner._build_prompt(agent_task)
         assert "push" in prompt.lower() or "Do NOT push" in prompt
         assert "pull request" in prompt.lower() or "pr create" in prompt.lower()
 
     def test_prompt_forbids_interactive_git(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """Prompt should forbid interactive git commands (no TTY in Docker)."""
         runner = AgentRunner(config, event_bus)
-        prompt = runner._build_prompt(issue)
+        prompt = runner._build_prompt(agent_task)
         assert "git add -i" in prompt
         assert "git add -p" in prompt
         assert "git rebase -i" in prompt
 
     def test_prompt_includes_common_feedback_when_reviews_exist(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """Prompt should include Common Review Feedback when review data exists."""
         from review_insights import ReviewInsightStore, ReviewRecord
@@ -324,16 +330,76 @@ class TestBuildPrompt:
             )
 
         runner = AgentRunner(config, event_bus)
-        prompt = runner._build_prompt(issue)
+        prompt = runner._build_prompt(agent_task)
         assert "## Common Review Feedback" in prompt
         assert "Missing or insufficient test coverage" in prompt
 
+    def test_prompt_includes_escalation_block_when_threshold_met(
+        self, config, event_bus: EventBus, agent_task
+    ) -> None:
+        """Prompt should include mandatory escalation block when patterns exceed threshold."""
+        from review_insights import ReviewInsightStore, ReviewRecord
+
+        store = ReviewInsightStore(config.repo_root / ".hydraflow" / "memory")
+        for i in range(3):
+            store.append_review(
+                ReviewRecord(
+                    pr_number=200 + i,
+                    issue_number=50 + i,
+                    timestamp="2026-02-20T11:00:00Z",
+                    verdict=ReviewVerdict.REQUEST_CHANGES,
+                    summary="Missing coverage",
+                    fixes_made=False,
+                    categories=["missing_tests"],
+                )
+            )
+
+        runner = AgentRunner(config, event_bus)
+        prompt = runner._build_prompt(agent_task)
+        assert "Mandatory Requirements: Test Coverage" in prompt
+        assert "missing or insufficient test coverage" in prompt
+
+    def test_prompt_omits_escalation_below_threshold(
+        self, config, event_bus: EventBus, agent_task
+    ) -> None:
+        from review_insights import ReviewInsightStore, ReviewRecord
+
+        store = ReviewInsightStore(config.repo_root / ".hydraflow" / "memory")
+        # Below default threshold of 3
+        for i in range(2):
+            store.append_review(
+                ReviewRecord(
+                    pr_number=300 + i,
+                    issue_number=70 + i,
+                    timestamp="2026-02-22T11:00:00Z",
+                    verdict=ReviewVerdict.REQUEST_CHANGES,
+                    summary="Missing coverage",
+                    fixes_made=False,
+                    categories=["missing_tests"],
+                )
+            )
+
+        runner = AgentRunner(config, event_bus)
+        prompt = runner._build_prompt(agent_task)
+        assert "Mandatory Requirements" not in prompt
+        assert "## Common Review Feedback" in prompt
+
+    def test_prompt_includes_new_self_check_items(
+        self, config, event_bus: EventBus, agent_task
+    ) -> None:
+        """Prompt should include the new dead-code and failure-path checklist items."""
+        runner = AgentRunner(config, event_bus)
+        prompt = runner._build_prompt(agent_task)
+        assert "New code is reachable" in prompt
+        assert "Tests verify issue requirements" in prompt
+        assert "Failure paths are tested" in prompt
+
     def test_prompt_works_without_review_data(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """Prompt should work normally when no review data exists."""
         runner = AgentRunner(config, event_bus)
-        prompt = runner._build_prompt(issue)
+        prompt = runner._build_prompt(agent_task)
         assert "## Common Review Feedback" not in prompt
         # The rest of the prompt should still be there
         assert "## Instructions" in prompt
@@ -354,7 +420,7 @@ class TestBuildPrompt:
         assert int(stats["pruned_chars_total"]) > 0
 
     def test_prompt_truncates_common_feedback_section(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         runner = AgentRunner(config, event_bus)
         with patch.object(
@@ -362,27 +428,27 @@ class TestBuildPrompt:
             "_get_review_feedback_section",
             return_value="B" * 10000,
         ):
-            prompt, stats = runner._build_prompt_with_stats(issue)
+            prompt, stats = runner._build_prompt_with_stats(agent_task)
         assert "Common review feedback summarized" in prompt
         assert int(stats["pruned_chars_total"]) > 0
 
     def test_prompt_includes_review_feedback_when_provided(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """Prompt should include Review Feedback section when feedback is provided."""
         runner = AgentRunner(config, event_bus)
         feedback = "Missing error handling in the parse_config function"
-        prompt = runner._build_prompt(issue, review_feedback=feedback)
+        prompt = runner._build_prompt(agent_task, review_feedback=feedback)
         assert "## Review Feedback" in prompt
         assert "Missing error handling in the parse_config function" in prompt
         assert "reviewer rejected" in prompt.lower()
 
     def test_prompt_omits_review_feedback_when_empty(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """Prompt should not include Review Feedback section when feedback is empty."""
         runner = AgentRunner(config, event_bus)
-        prompt = runner._build_prompt(issue, review_feedback="")
+        prompt = runner._build_prompt(agent_task, review_feedback="")
         assert "## Review Feedback" not in prompt
 
     def test_prompt_review_feedback_after_plan_section(
@@ -408,11 +474,11 @@ class TestBuildPrompt:
         assert plan_pos < feedback_pos < instructions_pos
 
     def test_prompt_includes_self_check_checklist(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """Prompt should include the self-check checklist section."""
         runner = AgentRunner(config, event_bus)
-        prompt = runner._build_prompt(issue)
+        prompt = runner._build_prompt(agent_task)
         assert "## Self-Check Before Committing" in prompt
         assert "Tests cover all new/changed code" in prompt
         assert "No missing imports" in prompt
@@ -421,11 +487,11 @@ class TestBuildPrompt:
         assert "No leftover debug code" in prompt
 
     def test_self_check_appears_after_instructions(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """Self-check should appear after Instructions and before UI Guidelines."""
         runner = AgentRunner(config, event_bus)
-        prompt = runner._build_prompt(issue)
+        prompt = runner._build_prompt(agent_task)
         instructions_pos = prompt.index("## Instructions")
         self_check_pos = prompt.index("## Self-Check Before Committing")
         ui_pos = prompt.index("## UI Guidelines")
@@ -437,7 +503,7 @@ class TestBuildPrompt:
         assert len(AgentRunner._SELF_CHECK_CHECKLIST) > 100
 
     def test_prompt_includes_escalated_mandatory_block_when_recurring(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """When missing_tests is recurring, prompt should include mandatory block."""
         escalation_data = [
@@ -453,21 +519,21 @@ class TestBuildPrompt:
         ]
         runner = AgentRunner(config, event_bus)
         with patch.object(runner, "_get_escalation_data", return_value=escalation_data):
-            prompt = runner._build_prompt(issue)
+            prompt = runner._build_prompt(agent_task)
         assert "## Mandatory Requirements" in prompt
         assert "Every new function MUST have a test" in prompt
 
     def test_prompt_no_mandatory_block_when_no_escalations(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """When no escalations, prompt should not include mandatory block."""
         runner = AgentRunner(config, event_bus)
         with patch.object(runner, "_get_escalation_data", return_value=[]):
-            prompt = runner._build_prompt(issue)
+            prompt = runner._build_prompt(agent_task)
         assert "## Mandatory Requirements" not in prompt
 
     def test_self_check_includes_dynamic_items_when_escalated(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """Self-check should include category-specific items when escalated."""
         escalation_data = [
@@ -484,12 +550,12 @@ class TestBuildPrompt:
         ]
         runner = AgentRunner(config, event_bus)
         with patch.object(runner, "_get_escalation_data", return_value=escalation_data):
-            prompt = runner._build_prompt(issue)
+            prompt = runner._build_prompt(agent_task)
         assert "Every new/modified public function has a dedicated test" in prompt
         assert "Edge cases (None, empty, boundary) are tested" in prompt
 
     def test_pre_quality_review_includes_escalation_guidance(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """Pre-quality review prompt should include escalation guidance when present."""
         escalation_data = [
@@ -503,34 +569,84 @@ class TestBuildPrompt:
         ]
         runner = AgentRunner(config, event_bus)
         with patch.object(runner, "_get_escalation_data", return_value=escalation_data):
-            prompt = runner._build_pre_quality_review_prompt(issue, attempt=1)
+            prompt = runner._build_pre_quality_review_prompt(agent_task, attempt=1)
         assert "Verify every new public function has a unit test" in prompt
 
     def test_pre_quality_review_no_escalation_when_empty(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """Pre-quality review prompt should not have escalation section when empty."""
         runner = AgentRunner(config, event_bus)
         with patch.object(runner, "_get_escalation_data", return_value=[]):
-            prompt = runner._build_pre_quality_review_prompt(issue, attempt=1)
+            prompt = runner._build_pre_quality_review_prompt(agent_task, attempt=1)
         assert "Escalated Requirements" not in prompt
 
     def test_pre_quality_review_includes_edge_case_checks(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """Pre-quality review prompt should include expanded scope items."""
         runner = AgentRunner(config, event_bus)
-        prompt = runner._build_pre_quality_review_prompt(issue, attempt=1)
+        prompt = runner._build_pre_quality_review_prompt(agent_task, attempt=1)
         assert "type hints" in prompt
         assert "edge cases" in prompt
         assert "empty inputs" in prompt
 
+    def test_pre_quality_review_checks_logic_errors(
+        self, config, event_bus: EventBus, agent_task
+    ) -> None:
+        """Pre-quality review should check for logic errors."""
+        runner = AgentRunner(config, event_bus)
+        prompt = runner._build_pre_quality_review_prompt(agent_task, attempt=1)
+        assert "logic errors" in prompt
+
+    def test_pre_quality_review_checks_failure_paths(
+        self, config, event_bus: EventBus, agent_task
+    ) -> None:
+        """Pre-quality review should verify failure paths are tested."""
+        runner = AgentRunner(config, event_bus)
+        prompt = runner._build_pre_quality_review_prompt(agent_task, attempt=1)
+        assert "failure/error paths" in prompt
+
+    def test_pre_quality_review_checks_missing_implementation(
+        self, config, event_bus: EventBus, agent_task
+    ) -> None:
+        """Pre-quality review should check for gaps vs plan/issue description."""
+        runner = AgentRunner(config, event_bus)
+        prompt = runner._build_pre_quality_review_prompt(agent_task, attempt=1)
+        assert "is anything missing" in prompt
+
+    def test_prompt_includes_test_step(
+        self, config, event_bus: EventBus, agent_task
+    ) -> None:
+        """Implementation prompt should include a test-writing step."""
+        runner = AgentRunner(config, event_bus)
+        prompt = runner._build_prompt(agent_task)
+        assert "Write tests" in prompt
+        assert "prevent regressions" in prompt
+
+    def test_self_check_includes_dead_code_check(
+        self, config, event_bus: EventBus, agent_task
+    ) -> None:
+        """Self-check checklist should verify no dead code is introduced."""
+        runner = AgentRunner(config, event_bus)
+        prompt = runner._build_prompt(agent_task)
+        assert "New code is reachable" in prompt
+        assert "dead code" in prompt
+
+    def test_self_check_includes_issue_requirements_check(
+        self, config, event_bus: EventBus, agent_task
+    ) -> None:
+        """Self-check checklist should verify tests match issue requirements."""
+        runner = AgentRunner(config, event_bus)
+        prompt = runner._build_prompt(agent_task)
+        assert "Tests verify issue requirements" in prompt
+
     def test_prompt_forbids_already_satisfied(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """Prompt must instruct agent to never claim issue is already satisfied."""
         runner = AgentRunner(config, event_bus)
-        prompt = runner._build_prompt(issue)
+        prompt = runner._build_prompt(agent_task)
         assert "NEVER conclude that the issue is" in prompt
         assert "already satisfied" in prompt.lower()
         assert "Always produce commits" in prompt
@@ -618,19 +734,19 @@ class TestDiffSanityLoop:
 
     @pytest.mark.asyncio
     async def test_skipped_when_disabled(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         config.max_diff_sanity_attempts = 0
         runner = AgentRunner(config, event_bus)
         ok, msg = await runner._run_diff_sanity_loop(
-            issue, tmp_path, "branch", worker_id=0
+            agent_task, tmp_path, "branch", worker_id=0
         )
         assert ok is True
         assert "disabled" in msg
 
     @pytest.mark.asyncio
     async def test_skipped_when_no_commits(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         config.max_diff_sanity_attempts = 1
         runner = AgentRunner(config, event_bus)
@@ -638,14 +754,14 @@ class TestDiffSanityLoop:
             runner, "_count_commits", new_callable=AsyncMock, return_value=0
         ):
             ok, msg = await runner._run_diff_sanity_loop(
-                issue, tmp_path, "branch", worker_id=0
+                agent_task, tmp_path, "branch", worker_id=0
             )
         assert ok is True
         assert "No commits" in msg
 
     @pytest.mark.asyncio
     async def test_passes_on_ok_result(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         config.max_diff_sanity_attempts = 1
         runner = AgentRunner(config, event_bus)
@@ -667,13 +783,13 @@ class TestDiffSanityLoop:
             ),
         ):
             ok, msg = await runner._run_diff_sanity_loop(
-                issue, tmp_path, "branch", worker_id=0
+                agent_task, tmp_path, "branch", worker_id=0
             )
         assert ok is True
 
     @pytest.mark.asyncio
     async def test_returns_false_on_retry(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         config.max_diff_sanity_attempts = 1
         runner = AgentRunner(config, event_bus)
@@ -695,14 +811,14 @@ class TestDiffSanityLoop:
             ),
         ):
             ok, msg = await runner._run_diff_sanity_loop(
-                issue, tmp_path, "branch", worker_id=0
+                agent_task, tmp_path, "branch", worker_id=0
             )
         assert ok is False
         assert "debug code" in msg
 
     @pytest.mark.asyncio
     async def test_run_fails_when_diff_sanity_fails(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """AgentRunner.run should return success=False when diff sanity fails."""
         config.max_diff_sanity_attempts = 1
@@ -729,7 +845,7 @@ class TestDiffSanityLoop:
                     "DIFF_SANITY_RESULT: RETRY\nSUMMARY: scope creep",
                 ]
             )
-            result = await runner.run(issue, tmp_path, "agent/issue-42")
+            result = await runner.run(agent_task, tmp_path, "agent/issue-42")
 
         assert result.success is False
         assert "Diff sanity" in (result.error or "")
@@ -740,19 +856,19 @@ class TestTestAdequacyLoop:
 
     @pytest.mark.asyncio
     async def test_skipped_when_disabled(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         config.max_test_adequacy_attempts = 0
         runner = AgentRunner(config, event_bus)
         ok, msg = await runner._run_test_adequacy_loop(
-            issue, tmp_path, "branch", worker_id=0
+            agent_task, tmp_path, "branch", worker_id=0
         )
         assert ok is True
         assert "disabled" in msg
 
     @pytest.mark.asyncio
     async def test_skipped_when_no_commits(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         config.max_test_adequacy_attempts = 1
         runner = AgentRunner(config, event_bus)
@@ -760,14 +876,14 @@ class TestTestAdequacyLoop:
             runner, "_count_commits", new_callable=AsyncMock, return_value=0
         ):
             ok, msg = await runner._run_test_adequacy_loop(
-                issue, tmp_path, "branch", worker_id=0
+                agent_task, tmp_path, "branch", worker_id=0
             )
         assert ok is True
         assert "No commits" in msg
 
     @pytest.mark.asyncio
     async def test_passes_on_ok_result(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         config.max_test_adequacy_attempts = 1
         runner = AgentRunner(config, event_bus)
@@ -789,13 +905,13 @@ class TestTestAdequacyLoop:
             ),
         ):
             ok, msg = await runner._run_test_adequacy_loop(
-                issue, tmp_path, "branch", worker_id=0
+                agent_task, tmp_path, "branch", worker_id=0
             )
         assert ok is True
 
     @pytest.mark.asyncio
     async def test_returns_false_on_retry(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         config.max_test_adequacy_attempts = 1
         runner = AgentRunner(config, event_bus)
@@ -817,7 +933,7 @@ class TestTestAdequacyLoop:
             ),
         ):
             ok, msg = await runner._run_test_adequacy_loop(
-                issue, tmp_path, "branch", worker_id=0
+                agent_task, tmp_path, "branch", worker_id=0
             )
         assert ok is False
         assert "missing tests" in msg
@@ -833,7 +949,7 @@ class TestRunSuccess:
 
     @pytest.mark.asyncio
     async def test_run_success_returns_worker_result_with_success_true(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """run should return a WorkerResult with success=True on the happy path."""
         runner = AgentRunner(config, event_bus)
@@ -856,17 +972,17 @@ class TestRunSuccess:
             ),
             patch.object(runner, "_save_transcript"),
         ):
-            result = await runner.run(issue, tmp_path, "agent/issue-42")
+            result = await runner.run(agent_task, tmp_path, "agent/issue-42")
 
         assert result.success is True
-        assert result.issue_number == issue.id
+        assert result.issue_number == agent_task.id
         assert result.branch == "agent/issue-42"
         assert result.commits == 2
         assert result.transcript == "transcript"
 
     @pytest.mark.asyncio
     async def test_run_success_sets_duration(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """run should record a positive duration_seconds."""
         runner = AgentRunner(config, event_bus)
@@ -884,7 +1000,7 @@ class TestRunSuccess:
             ),
             patch.object(runner, "_save_transcript"),
         ):
-            result = await runner.run(issue, tmp_path, "agent/issue-42")
+            result = await runner.run(agent_task, tmp_path, "agent/issue-42")
 
         assert result.duration_seconds >= 0
 
@@ -923,7 +1039,7 @@ class TestForceCommitUncommitted:
             result = await runner._force_commit_uncommitted(task, tmp_path)
 
         assert result is True
-        assert call_count == 4  # unset core.worktree, status, add, commit
+        assert call_count == 3  # status, add, commit
 
     @pytest.mark.asyncio
     async def test_force_commit_noop_when_clean(
@@ -945,7 +1061,57 @@ class TestForceCommitUncommitted:
             result = await runner._force_commit_uncommitted(task, tmp_path)
 
         assert result is False
-        assert mock_host.run_simple.await_count == 2  # unset core.worktree, status
+        assert mock_host.run_simple.await_count == 1  # status
+
+    @pytest.mark.asyncio
+    async def test_force_commit_returns_false_when_git_add_fails(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """Non-zero returncode from git add should return False."""
+        runner = AgentRunner(config, event_bus)
+        task = TaskFactory.create(id=99, title="Fix the widget")
+
+        async def fake_run_simple(cmd, *, cwd=None, timeout=120.0, **kw):
+            from execution import SimpleResult
+
+            if "status" in cmd:
+                return SimpleResult(stdout=" M src/foo.py", stderr="", returncode=0)
+            if "add" in cmd:
+                return SimpleResult(stdout="", stderr="fatal: error", returncode=128)
+            return SimpleResult(stdout="", stderr="", returncode=0)
+
+        mock_host = MagicMock()
+        mock_host.run_simple = AsyncMock(side_effect=fake_run_simple)
+
+        with patch("execution.get_default_runner", return_value=mock_host):
+            result = await runner._force_commit_uncommitted(task, tmp_path)
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_force_commit_returns_false_when_git_commit_fails(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """Non-zero returncode from git commit should return False."""
+        runner = AgentRunner(config, event_bus)
+        task = TaskFactory.create(id=99, title="Fix the widget")
+
+        async def fake_run_simple(cmd, *, cwd=None, timeout=120.0, **kw):
+            from execution import SimpleResult
+
+            if "status" in cmd:
+                return SimpleResult(stdout=" M src/foo.py", stderr="", returncode=0)
+            if "commit" in cmd:
+                return SimpleResult(stdout="", stderr="nothing to commit", returncode=1)
+            return SimpleResult(stdout="", stderr="", returncode=0)
+
+        mock_host = MagicMock()
+        mock_host.run_simple = AsyncMock(side_effect=fake_run_simple)
+
+        with patch("execution.get_default_runner", return_value=mock_host):
+            result = await runner._force_commit_uncommitted(task, tmp_path)
+
+        assert result is False
 
     @pytest.mark.asyncio
     async def test_force_commit_handles_error_gracefully(
@@ -966,126 +1132,6 @@ class TestForceCommitUncommitted:
 
 class TestForceCommitE2E:
     """End-to-end tests using real git repos to verify the salvage-commit flow."""
-
-    @pytest.mark.asyncio
-    async def test_force_commit_with_docker_corrupted_worktree(
-        self, config, event_bus: EventBus, tmp_path: Path
-    ) -> None:
-        """Simulate Docker corruption: core.worktree=/workspace + dirty files.
-
-        This is the exact scenario that causes zero-commit failures in production:
-        1. Docker container sets core.worktree=/workspace in git config
-        2. Agent exits without committing
-        3. Host-side git status sees nothing (looks at /workspace, not worktree)
-        4. _force_commit_uncommitted should fix the config and commit the work
-        """
-        import subprocess
-
-        # Create a real git repo with an initial commit
-        repo = tmp_path / "repo"
-        repo.mkdir()
-        subprocess.run(["git", "init", repo], check=True, capture_output=True)
-        subprocess.run(
-            ["git", "-C", str(repo), "config", "user.email", "test@test.com"],
-            check=True,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "-C", str(repo), "config", "user.name", "Test"],
-            check=True,
-            capture_output=True,
-        )
-        (repo / "README.md").write_text("# Hello")
-        subprocess.run(
-            ["git", "-C", str(repo), "add", "."], check=True, capture_output=True
-        )
-        subprocess.run(
-            ["git", "-C", str(repo), "commit", "-m", "Initial commit"],
-            check=True,
-            capture_output=True,
-        )
-
-        # Simulate Docker corruption: set core.worktree to a non-existent path
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(repo),
-                "config",
-                "core.worktree",
-                "/nonexistent_worktree_path",
-            ],
-            check=True,
-            capture_output=True,
-        )
-
-        # Verify corruption: git status sees nothing because the path doesn't exist
-        result = subprocess.run(
-            ["git", "-C", str(repo), "status", "--porcelain"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert result.stdout.strip() == "", (
-            "Corruption setup failed — status should be empty"
-        )
-
-        # Simulate agent leaving uncommitted work
-        (repo / "src").mkdir()
-        (repo / "src" / "fix.py").write_text("def fix(): pass\n")
-
-        # Verify corruption still hides the new file
-        result = subprocess.run(
-            ["git", "-C", str(repo), "status", "--porcelain"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert result.stdout.strip() == "", "Corruption should hide new files"
-
-        # Now run _force_commit_uncommitted — it should fix config + commit
-        runner = AgentRunner(config, event_bus)
-        task = TaskFactory.create(id=42, title="Fix the bug")
-
-        committed = await runner._force_commit_uncommitted(task, repo)
-
-        assert committed is True
-
-        # Verify the commit exists
-        log = subprocess.run(
-            ["git", "-C", str(repo), "log", "--oneline"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        assert "Fix the bug" in log.stdout
-        assert (
-            "Auto-committed by HydraFlow"
-            in subprocess.run(
-                ["git", "-C", str(repo), "log", "-1", "--format=%b"],
-                capture_output=True,
-                text=True,
-                check=True,
-            ).stdout
-        )
-
-        # Verify core.worktree is unset
-        cfg_result = subprocess.run(
-            ["git", "-C", str(repo), "config", "core.worktree"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert cfg_result.returncode != 0, "core.worktree should be unset"
-
-        # Verify working tree is clean
-        status = subprocess.run(
-            ["git", "-C", str(repo), "status", "--porcelain"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        assert status.stdout.strip() == ""
 
     @pytest.mark.asyncio
     async def test_force_commit_clean_repo_no_corruption(
@@ -1183,7 +1229,7 @@ class TestRunFailure:
 
     @pytest.mark.asyncio
     async def test_run_failure_when_verify_returns_false_and_fix_loop_fails(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """run should return success=False when quality fix loop also fails."""
         runner = AgentRunner(config, event_bus)
@@ -1209,7 +1255,7 @@ class TestRunFailure:
             ),
             patch.object(runner, "_save_transcript"),
         ):
-            result = await runner.run(issue, tmp_path, "agent/issue-42")
+            result = await runner.run(agent_task, tmp_path, "agent/issue-42")
 
         assert result.success is False
         assert result.error == "Still failing"
@@ -1217,7 +1263,7 @@ class TestRunFailure:
 
     @pytest.mark.asyncio
     async def test_run_skips_fix_loop_when_no_commits(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """run should not invoke the fix loop when there are no commits."""
         runner = AgentRunner(config, event_bus)
@@ -1242,7 +1288,7 @@ class TestRunFailure:
             ),
             patch.object(runner, "_save_transcript"),
         ):
-            result = await runner.run(issue, tmp_path, "agent/issue-42")
+            result = await runner.run(agent_task, tmp_path, "agent/issue-42")
 
         assert result.success is False
         fix_mock.assert_not_awaited()
@@ -1253,14 +1299,14 @@ class TestPreQualityReviewLoop:
 
     @pytest.mark.asyncio
     async def test_skips_when_no_commits(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         runner = AgentRunner(config, event_bus)
         with patch.object(
             runner, "_count_commits", new_callable=AsyncMock, return_value=0
         ):
             ok, msg, attempts = await runner._run_pre_quality_review_loop(
-                issue, tmp_path, "agent/issue-42", worker_id=1
+                agent_task, tmp_path, "agent/issue-42", worker_id=1
             )
         assert ok is True
         assert attempts == 0
@@ -1268,7 +1314,7 @@ class TestPreQualityReviewLoop:
 
     @pytest.mark.asyncio
     async def test_retries_bounded_by_config(
-        self, event_bus: EventBus, issue, tmp_path: Path
+        self, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         cfg = ConfigFactory.create(
             max_pre_quality_review_attempts=2,
@@ -1289,7 +1335,7 @@ class TestPreQualityReviewLoop:
             ) as execute_mock,
         ):
             ok, _msg, attempts = await runner._run_pre_quality_review_loop(
-                issue, tmp_path, "agent/issue-42", worker_id=1
+                agent_task, tmp_path, "agent/issue-42", worker_id=1
             )
         assert ok is False
         assert attempts == 2
@@ -1297,7 +1343,7 @@ class TestPreQualityReviewLoop:
 
     @pytest.mark.asyncio
     async def test_run_success_when_fix_loop_succeeds(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """run should return success=True when the fix loop recovers."""
         runner = AgentRunner(config, event_bus)
@@ -1323,14 +1369,14 @@ class TestPreQualityReviewLoop:
             ),
             patch.object(runner, "_save_transcript"),
         ):
-            result = await runner.run(issue, tmp_path, "agent/issue-42")
+            result = await runner.run(agent_task, tmp_path, "agent/issue-42")
 
         assert result.success is True
         assert result.quality_fix_attempts == 1
 
     @pytest.mark.asyncio
     async def test_run_handles_exception_and_returns_failure(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """run should catch unexpected exceptions and return success=False."""
         runner = AgentRunner(config, event_bus)
@@ -1344,14 +1390,14 @@ class TestPreQualityReviewLoop:
             ),
             patch.object(runner, "_save_transcript"),
         ):
-            result = await runner.run(issue, tmp_path, "agent/issue-42")
+            result = await runner.run(agent_task, tmp_path, "agent/issue-42")
 
         assert result.success is False
         assert "subprocess exploded" in (result.error or "")
 
     @pytest.mark.asyncio
     async def test_run_records_error_message_on_exception(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """run should store the exception message in result.error."""
         runner = AgentRunner(config, event_bus)
@@ -1365,14 +1411,14 @@ class TestPreQualityReviewLoop:
             ),
             patch.object(runner, "_save_transcript"),
         ):
-            result = await runner.run(issue, tmp_path, "agent/issue-42")
+            result = await runner.run(agent_task, tmp_path, "agent/issue-42")
 
         assert result.error is not None
         assert "unexpected value" in result.error
 
     @pytest.mark.asyncio
     async def test_run_skips_fix_loop_when_max_attempts_zero(
-        self, event_bus: EventBus, issue, tmp_path: Path
+        self, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """run should skip the fix loop when max_quality_fix_attempts is 0."""
         cfg = ConfigFactory.create(
@@ -1403,7 +1449,7 @@ class TestPreQualityReviewLoop:
             ),
             patch.object(runner, "_save_transcript"),
         ):
-            result = await runner.run(issue, tmp_path, "agent/issue-42")
+            result = await runner.run(agent_task, tmp_path, "agent/issue-42")
 
         assert result.success is False
         fix_mock.assert_not_awaited()
@@ -1419,28 +1465,28 @@ class TestRunDryRun:
 
     @pytest.mark.asyncio
     async def test_dry_run_returns_success_without_executing(
-        self, dry_config, event_bus: EventBus, issue, tmp_path: Path
+        self, dry_config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """In dry-run mode, run should succeed without calling _execute."""
         runner = AgentRunner(dry_config, event_bus)
 
         execute_mock = AsyncMock()
         with patch.object(runner, "_execute", execute_mock):
-            result = await runner.run(issue, tmp_path, "agent/issue-42")
+            result = await runner.run(agent_task, tmp_path, "agent/issue-42")
 
         execute_mock.assert_not_awaited()
         assert result.success is True
 
     @pytest.mark.asyncio
     async def test_dry_run_does_not_call_verify_result(
-        self, dry_config, event_bus: EventBus, issue, tmp_path: Path
+        self, dry_config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """In dry-run mode, _verify_result should not be called."""
         runner = AgentRunner(dry_config, event_bus)
 
         verify_mock = AsyncMock()
         with patch.object(runner, "_verify_result", verify_mock):
-            await runner.run(issue, tmp_path, "agent/issue-42")
+            await runner.run(agent_task, tmp_path, "agent/issue-42")
 
         verify_mock.assert_not_awaited()
 
@@ -1657,44 +1703,44 @@ class TestBuildQualityFixPrompt:
     """Tests for AgentRunner._build_quality_fix_prompt."""
 
     def test_prompt_includes_error_output(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """Fix prompt should include the quality error output."""
         runner = AgentRunner(config, event_bus)
-        prompt = runner._build_quality_fix_prompt(issue, "ruff: error E501", 1)
+        prompt = runner._build_quality_fix_prompt(agent_task, "ruff: error E501", 1)
         assert "ruff: error E501" in prompt
 
     def test_prompt_includes_attempt_number(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """Fix prompt should include the attempt number."""
         runner = AgentRunner(config, event_bus)
-        prompt = runner._build_quality_fix_prompt(issue, "error", 3)
+        prompt = runner._build_quality_fix_prompt(agent_task, "error", 3)
         assert "3" in prompt
 
     def test_prompt_includes_issue_number(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """Fix prompt should reference the issue number."""
         runner = AgentRunner(config, event_bus)
-        prompt = runner._build_quality_fix_prompt(issue, "error", 1)
-        assert str(issue.id) in prompt
+        prompt = runner._build_quality_fix_prompt(agent_task, "error", 1)
+        assert str(agent_task.id) in prompt
 
     def test_prompt_instructs_make_quality(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """Fix prompt should instruct running make quality."""
         runner = AgentRunner(config, event_bus)
-        prompt = runner._build_quality_fix_prompt(issue, "error", 1)
+        prompt = runner._build_quality_fix_prompt(agent_task, "error", 1)
         assert "make quality" in prompt
 
     def test_prompt_truncates_long_error_output(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """Fix prompt should truncate error output to last 3000 chars."""
         runner = AgentRunner(config, event_bus)
         long_error = "x" * 5000
-        prompt = runner._build_quality_fix_prompt(issue, long_error, 1)
+        prompt = runner._build_quality_fix_prompt(agent_task, long_error, 1)
         # The prompt should contain at most 3000 chars of the error
         assert "x" * 3000 in prompt
         assert "x" * 5000 not in prompt
@@ -1710,7 +1756,7 @@ class TestQualityFixLoop:
 
     @pytest.mark.asyncio
     async def test_succeeds_on_first_attempt(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """Fix loop should succeed on first attempt when quality passes."""
         runner = AgentRunner(config, event_bus)
@@ -1727,7 +1773,7 @@ class TestQualityFixLoop:
             ),
         ):
             success, msg, attempts = await runner._run_quality_fix_loop(
-                issue, tmp_path, "agent/issue-42", "initial error", worker_id=0
+                agent_task, tmp_path, "agent/issue-42", "initial error", worker_id=0
             )
 
         assert success is True
@@ -1736,7 +1782,7 @@ class TestQualityFixLoop:
 
     @pytest.mark.asyncio
     async def test_succeeds_on_second_attempt(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """Fix loop should succeed when second attempt passes quality."""
         runner = AgentRunner(config, event_bus)
@@ -1755,7 +1801,7 @@ class TestQualityFixLoop:
             ),
         ):
             success, msg, attempts = await runner._run_quality_fix_loop(
-                issue, tmp_path, "agent/issue-42", "initial error", worker_id=0
+                agent_task, tmp_path, "agent/issue-42", "initial error", worker_id=0
             )
 
         assert success is True
@@ -1764,7 +1810,7 @@ class TestQualityFixLoop:
 
     @pytest.mark.asyncio
     async def test_fails_after_max_attempts(
-        self, event_bus: EventBus, issue, tmp_path: Path
+        self, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """Fix loop should fail after exhausting max_quality_fix_attempts."""
         cfg = ConfigFactory.create(
@@ -1787,7 +1833,7 @@ class TestQualityFixLoop:
             ),
         ):
             success, msg, attempts = await runner._run_quality_fix_loop(
-                issue, tmp_path, "agent/issue-42", "initial error", worker_id=0
+                agent_task, tmp_path, "agent/issue-42", "initial error", worker_id=0
             )
 
         assert success is False
@@ -1796,7 +1842,7 @@ class TestQualityFixLoop:
 
     @pytest.mark.asyncio
     async def test_emits_quality_fix_status_events(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """Fix loop should emit QUALITY_FIX status events."""
         runner = AgentRunner(config, event_bus)
@@ -1814,7 +1860,7 @@ class TestQualityFixLoop:
             ),
         ):
             await runner._run_quality_fix_loop(
-                issue, tmp_path, "agent/issue-42", "error", worker_id=0
+                agent_task, tmp_path, "agent/issue-42", "error", worker_id=0
             )
 
         events = []
@@ -1827,7 +1873,7 @@ class TestQualityFixLoop:
 
     @pytest.mark.asyncio
     async def test_zero_max_attempts_returns_immediately(
-        self, event_bus: EventBus, issue, tmp_path: Path
+        self, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """Fix loop with 0 max attempts should return failure without executing."""
         cfg = ConfigFactory.create(
@@ -1842,7 +1888,7 @@ class TestQualityFixLoop:
             patch.object(runner, "_execute", new_callable=AsyncMock) as exec_mock,
         ):
             success, msg, attempts = await runner._run_quality_fix_loop(
-                issue, tmp_path, "agent/issue-42", "error", worker_id=0
+                agent_task, tmp_path, "agent/issue-42", "error", worker_id=0
             )
 
         assert success is False
@@ -1944,7 +1990,7 @@ class TestRunSaveTranscriptOSError:
         self,
         config,
         event_bus: EventBus,
-        issue,
+        agent_task,
         tmp_path: Path,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
@@ -1973,10 +2019,10 @@ class TestRunSaveTranscriptOSError:
                 side_effect=OSError("disk full"),
             ),
         ):
-            result = await runner.run(issue, tmp_path, "agent/issue-42")
+            result = await runner.run(agent_task, tmp_path, "agent/issue-42")
 
         assert result.success is True
-        assert result.issue_number == issue.id
+        assert result.issue_number == agent_task.id
         assert result.branch == "agent/issue-42"
         assert result.commits == 2
         assert "Failed to save transcript" in caplog.text
@@ -1986,7 +2032,7 @@ class TestRunSaveTranscriptOSError:
         self,
         config,
         event_bus: EventBus,
-        issue,
+        agent_task,
         tmp_path: Path,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
@@ -2006,7 +2052,7 @@ class TestRunSaveTranscriptOSError:
                 side_effect=OSError("disk full"),
             ),
         ):
-            result = await runner.run(issue, tmp_path, "agent/issue-42")
+            result = await runner.run(agent_task, tmp_path, "agent/issue-42")
 
         assert result.success is False
         assert "agent crashed" in (result.error or "")
@@ -2023,7 +2069,7 @@ class TestEventPublishing:
 
     @pytest.mark.asyncio
     async def test_run_emits_running_status_at_start(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """run should publish WORKER_UPDATE with status=running before executing."""
         runner = AgentRunner(config, event_bus)
@@ -2045,7 +2091,7 @@ class TestEventPublishing:
             ),
             patch.object(runner, "_save_transcript"),
         ):
-            await runner.run(issue, tmp_path, "agent/issue-42")
+            await runner.run(agent_task, tmp_path, "agent/issue-42")
 
         while not queue.empty():
             received_events.append(queue.get_nowait())
@@ -2058,7 +2104,7 @@ class TestEventPublishing:
 
     @pytest.mark.asyncio
     async def test_run_emits_done_status_on_success(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """run should publish WORKER_UPDATE with status=done on a successful run."""
         runner = AgentRunner(config, event_bus)
@@ -2077,7 +2123,7 @@ class TestEventPublishing:
             ),
             patch.object(runner, "_save_transcript"),
         ):
-            await runner.run(issue, tmp_path, "agent/issue-42")
+            await runner.run(agent_task, tmp_path, "agent/issue-42")
 
         events = []
         while not queue.empty():
@@ -2089,7 +2135,7 @@ class TestEventPublishing:
 
     @pytest.mark.asyncio
     async def test_run_emits_failed_status_on_exception(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """run should publish WORKER_UPDATE with status=failed when an exception occurs."""
         runner = AgentRunner(config, event_bus)
@@ -2104,7 +2150,7 @@ class TestEventPublishing:
             ),
             patch.object(runner, "_save_transcript"),
         ):
-            await runner.run(issue, tmp_path, "agent/issue-42")
+            await runner.run(agent_task, tmp_path, "agent/issue-42")
 
         events = []
         while not queue.empty():
@@ -2116,7 +2162,7 @@ class TestEventPublishing:
 
     @pytest.mark.asyncio
     async def test_run_emits_testing_status_during_verification(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """run should publish WORKER_UPDATE with status=testing before verifying."""
         runner = AgentRunner(config, event_bus)
@@ -2135,7 +2181,7 @@ class TestEventPublishing:
             ),
             patch.object(runner, "_save_transcript"),
         ):
-            await runner.run(issue, tmp_path, "agent/issue-42")
+            await runner.run(agent_task, tmp_path, "agent/issue-42")
 
         events = []
         while not queue.empty():
@@ -2147,7 +2193,7 @@ class TestEventPublishing:
 
     @pytest.mark.asyncio
     async def test_run_events_include_correct_issue_number(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """WORKER_UPDATE events should carry the correct issue number."""
         runner = AgentRunner(config, event_bus)
@@ -2166,7 +2212,7 @@ class TestEventPublishing:
             ),
             patch.object(runner, "_save_transcript"),
         ):
-            await runner.run(issue, tmp_path, "agent/issue-42", worker_id=3)
+            await runner.run(agent_task, tmp_path, "agent/issue-42", worker_id=3)
 
         events = []
         while not queue.empty():
@@ -2174,12 +2220,12 @@ class TestEventPublishing:
 
         worker_updates = [e for e in events if e.type == EventType.WORKER_UPDATE]
         for event in worker_updates:
-            assert event.data.get("issue") == issue.id
+            assert event.data.get("issue") == agent_task.id
             assert event.data.get("worker") == 3
 
     @pytest.mark.asyncio
     async def test_worker_update_events_include_implementer_role(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """WORKER_UPDATE events should carry role='implementer'."""
         runner = AgentRunner(config, event_bus)
@@ -2198,7 +2244,7 @@ class TestEventPublishing:
             ),
             patch.object(runner, "_save_transcript"),
         ):
-            await runner.run(issue, tmp_path, "agent/issue-42")
+            await runner.run(agent_task, tmp_path, "agent/issue-42")
 
         events = []
         while not queue.empty():
@@ -2211,13 +2257,13 @@ class TestEventPublishing:
 
     @pytest.mark.asyncio
     async def test_dry_run_emits_running_and_done_events(
-        self, dry_config, event_bus: EventBus, issue, tmp_path: Path
+        self, dry_config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """In dry-run mode, run should still emit RUNNING and DONE status events."""
         runner = AgentRunner(dry_config, event_bus)
         queue = event_bus.subscribe()
 
-        await runner.run(issue, tmp_path, "agent/issue-42")
+        await runner.run(agent_task, tmp_path, "agent/issue-42")
 
         events = []
         while not queue.empty():
@@ -2230,13 +2276,13 @@ class TestEventPublishing:
 
     @pytest.mark.asyncio
     async def test_dry_run_events_include_implementer_role(
-        self, dry_config, event_bus: EventBus, issue, tmp_path: Path
+        self, dry_config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """In dry-run mode, WORKER_UPDATE events should still carry role='implementer'."""
         runner = AgentRunner(dry_config, event_bus)
         queue = event_bus.subscribe()
 
-        await runner.run(issue, tmp_path, "agent/issue-42")
+        await runner.run(agent_task, tmp_path, "agent/issue-42")
 
         events = []
         while not queue.empty():
@@ -2295,7 +2341,7 @@ class TestExecuteStreaming:
 
     @pytest.mark.asyncio
     async def test_execute_returns_transcript(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """_execute should return the full transcript from stdout lines."""
         runner = AgentRunner(config, event_bus)
@@ -2304,14 +2350,14 @@ class TestExecuteStreaming:
 
         with patch("asyncio.create_subprocess_exec", mock_create):
             transcript = await runner._execute(
-                ["claude", "-p"], "prompt", tmp_path, {"issue": issue.id}
+                ["claude", "-p"], "prompt", tmp_path, {"issue": agent_task.id}
             )
 
         assert transcript == output
 
     @pytest.mark.asyncio
     async def test_execute_publishes_transcript_line_events(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """_execute should publish a TRANSCRIPT_LINE event per non-empty line."""
         runner = AgentRunner(config, event_bus)
@@ -2320,7 +2366,7 @@ class TestExecuteStreaming:
 
         with patch("asyncio.create_subprocess_exec", mock_create):
             await runner._execute(
-                ["claude", "-p"], "prompt", tmp_path, {"issue": issue.id}
+                ["claude", "-p"], "prompt", tmp_path, {"issue": agent_task.id}
             )
 
         events = event_bus.get_history()
@@ -2331,11 +2377,11 @@ class TestExecuteStreaming:
         assert "Line two" in lines
         assert "Line three" in lines
         for ev in transcript_events:
-            assert ev.data["issue"] == issue.id
+            assert ev.data["issue"] == agent_task.id
 
     @pytest.mark.asyncio
     async def test_execute_skips_empty_lines_for_events(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """_execute should not publish events for blank/whitespace-only lines."""
         runner = AgentRunner(config, event_bus)
@@ -2344,7 +2390,7 @@ class TestExecuteStreaming:
 
         with patch("asyncio.create_subprocess_exec", mock_create):
             await runner._execute(
-                ["claude", "-p"], "prompt", tmp_path, {"issue": issue.id}
+                ["claude", "-p"], "prompt", tmp_path, {"issue": agent_task.id}
             )
 
         events = event_bus.get_history()
@@ -2353,7 +2399,7 @@ class TestExecuteStreaming:
 
     @pytest.mark.asyncio
     async def test_execute_logs_warning_on_nonzero_exit(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """_execute should log a warning when the process exits non-zero."""
         runner = AgentRunner(config, event_bus)
@@ -2367,14 +2413,14 @@ class TestExecuteStreaming:
             patch.object(runner, "_log", mock_logger),
         ):
             await runner._execute(
-                ["claude", "-p"], "prompt", tmp_path, {"issue": issue.id}
+                ["claude", "-p"], "prompt", tmp_path, {"issue": agent_task.id}
             )
 
         mock_logger.warning.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_execute_uses_large_stream_limit(
-        self, config, event_bus: EventBus, issue, tmp_path: Path
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         """_execute should set limit=1MB on subprocess to handle large stream-json lines."""
         runner = AgentRunner(config, event_bus)
@@ -2382,7 +2428,7 @@ class TestExecuteStreaming:
 
         with patch("asyncio.create_subprocess_exec", mock_create) as mock_exec:
             await runner._execute(
-                ["claude", "-p"], "prompt", tmp_path, {"issue": issue.id}
+                ["claude", "-p"], "prompt", tmp_path, {"issue": agent_task.id}
             )
 
         kwargs = mock_exec.call_args[1]
@@ -2625,11 +2671,11 @@ class TestBuildPromptFallbackAndTruncation:
         assert "make test-fast" not in prompt
 
     def test_default_test_command_is_make_test(
-        self, config, event_bus: EventBus, issue
+        self, config, event_bus: EventBus, agent_task
     ) -> None:
         """Default test_command should produce 'make test' in the prompt."""
         runner = AgentRunner(config, event_bus)
-        prompt = runner._build_prompt(issue)
+        prompt = runner._build_prompt(agent_task)
         assert "`make test`" in prompt
 
 
@@ -2802,3 +2848,45 @@ class TestBuildPromptRuntimeLogs:
             prompt = runner._build_prompt(issue)
 
         assert "## Recent Application Logs" not in prompt
+
+
+# ---------------------------------------------------------------------------
+# Prior failure section in prompt
+# ---------------------------------------------------------------------------
+
+
+class TestPriorFailureInPrompt:
+    """Tests that prior_failure is included in the implementation prompt."""
+
+    def test_prior_failure_included_in_prompt(
+        self, config, event_bus: EventBus
+    ) -> None:
+        runner = AgentRunner(config, event_bus)
+        issue = TaskFactory.create()
+
+        with (
+            patch("base_runner.load_project_manifest", return_value=""),
+            patch("base_runner.load_memory_digest", return_value=""),
+        ):
+            prompt = runner._build_prompt(
+                issue,
+                prior_failure="TDD red phase modified non-test files: docs/adr/001.md",
+            )
+
+        assert "## Prior Attempt Failure" in prompt
+        assert "TDD red phase modified non-test files: docs/adr/001.md" in prompt
+        assert "Avoid repeating the same mistake" in prompt
+
+    def test_no_prior_failure_section_when_empty(
+        self, config, event_bus: EventBus
+    ) -> None:
+        runner = AgentRunner(config, event_bus)
+        issue = TaskFactory.create()
+
+        with (
+            patch("base_runner.load_project_manifest", return_value=""),
+            patch("base_runner.load_memory_digest", return_value=""),
+        ):
+            prompt = runner._build_prompt(issue, prior_failure="")
+
+        assert "## Prior Attempt Failure" not in prompt

@@ -1250,6 +1250,20 @@ def test_build_review_prompt_no_make_test_fast(config, event_bus, pr_info, task)
     assert "make test-fast" not in prompt
 
 
+def test_build_review_prompt_includes_test_coverage_audit(
+    config, event_bus, pr_info, task
+):
+    """Reviewer prompt should include expanded test coverage audit criteria."""
+    runner = _make_runner(config, event_bus)
+    prompt = runner._build_review_prompt(pr_info, task, "diff")
+
+    assert "Test coverage audit" in prompt
+    assert "issue requirements" in prompt
+    assert "dead code" in prompt
+    assert "Failure and error paths" in prompt
+    assert "New branches/conditions" in prompt
+
+
 # ---------------------------------------------------------------------------
 # _get_head_sha — timeout
 # ---------------------------------------------------------------------------
@@ -1705,3 +1719,23 @@ def test_build_ci_fix_prompt_excludes_code_scanning_when_none(config, event_bus)
     )
 
     assert "## Code Scanning Alerts" not in prompt
+
+
+# ---------------------------------------------------------------------------
+# fix_review_findings
+# ---------------------------------------------------------------------------
+
+
+def test_build_review_fix_prompt_contains_feedback(config, event_bus):
+    """Review fix prompt should contain the review summary and instructions."""
+    from tests.conftest import PRInfoFactory, TaskFactory
+
+    runner = _make_runner(config, event_bus)
+    pr = PRInfoFactory.create()
+    issue = TaskFactory.create()
+
+    prompt = runner._build_review_fix_prompt(pr, issue, "Missing null check in foo()")
+
+    assert "Missing null check in foo()" in prompt
+    assert "review-fix:" in prompt
+    assert "VERDICT:" in prompt
