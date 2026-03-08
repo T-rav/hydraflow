@@ -952,13 +952,23 @@ class ReviewPhase:
 
             except (AuthenticationError, CreditExhaustedError, MemoryError):
                 raise
-            except Exception:
-                logger.warning(
-                    "PR #%d: review fix attempt %d failed — falling back to rejection",
-                    pr.number,
-                    attempt,
-                    exc_info=True,
-                )
+            except Exception as exc:
+                if is_likely_bug(exc):
+                    logger.critical(
+                        "PR #%d: review fix attempt %d hit likely bug (%s) — "
+                        "falling back to rejection",
+                        pr.number,
+                        attempt,
+                        type(exc).__name__,
+                        exc_info=True,
+                    )
+                else:
+                    logger.warning(
+                        "PR #%d: review fix attempt %d failed — falling back to rejection",
+                        pr.number,
+                        attempt,
+                        exc_info=True,
+                    )
                 break
 
         return result, diff
