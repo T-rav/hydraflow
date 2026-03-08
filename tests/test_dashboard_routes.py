@@ -6030,23 +6030,6 @@ class TestAddRepoByPath:
             side_effect=fake_create_subprocess_exec,
         )
 
-    def _make_router(self, config, event_bus, state, tmp_path):
-        from dashboard_routes import create_router
-        from pr_manager import PRManager
-
-        pr_mgr = PRManager(config, event_bus)
-        return create_router(
-            config=config,
-            event_bus=event_bus,
-            state=state,
-            pr_manager=pr_mgr,
-            get_orchestrator=lambda: None,
-            set_orchestrator=lambda o: None,
-            set_run_task=lambda t: None,
-            ui_dist_dir=tmp_path / "no-dist",
-            template_dir=tmp_path / "no-templates",
-        )
-
     def _get_endpoint(self, router):
         for route in router.routes:
             if (
