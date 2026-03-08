@@ -286,6 +286,24 @@ class TestHealthRoute:
         assert payload["session_started_at"] is None
         assert payload["uptime_seconds"] is None
 
+    def test_healthz_reports_starting_when_orchestrator_missing(
+        self, config: HydraFlowConfig, event_bus: EventBus, state
+    ) -> None:
+        from fastapi.testclient import TestClient
+
+        from dashboard import HydraFlowDashboard
+
+        dashboard = HydraFlowDashboard(config, event_bus, state)
+        app = dashboard.create_app()
+
+        client = TestClient(app)
+        payload = client.get("/healthz").json()
+
+        assert payload["status"] == "starting"
+        assert payload["orchestrator_running"] is False
+        assert payload["ready"] is False
+        assert payload["checks"]["orchestrator"]["status"] == "missing"
+
 
 # ---------------------------------------------------------------------------
 # Accessibility
