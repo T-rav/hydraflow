@@ -1457,6 +1457,67 @@ class TestPrepareWorkspace:
             check=False,
         )
         assert result.returncode == 0
+        # Origin should point back to the parent repo (not a local clone tmp)
+        origin_url = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=str(wt),
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        # The parent repo has no GitHub remote, so it stays as local path —
+        # but it must NOT point to .git-clone-tmp
+        assert ".git-clone-tmp" not in origin_url
+
+    def test_remote_url_updated_to_real_origin(self, tmp_path: Path) -> None:
+        """Clone's origin is updated to the parent repo's real remote URL."""
+        import subprocess
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "--allow-empty", "-m", "init"],
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
+            env={
+                **__import__("os").environ,
+                "GIT_AUTHOR_NAME": "test",
+                "GIT_AUTHOR_EMAIL": "t@t",
+                "GIT_COMMITTER_NAME": "test",
+                "GIT_COMMITTER_EMAIL": "t@t",
+            },
+        )
+        # Set a fake GitHub remote on the parent repo
+        subprocess.run(
+            ["git", "remote", "add", "origin", "https://github.com/test/repo.git"],
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
+        )
+
+        wt = tmp_path / "worktree"
+        subprocess.run(
+            ["git", "worktree", "add", str(wt), "-b", "test-branch"],
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
+        )
+
+        runner, _ = _make_runner(repo_root=repo, log_dir=tmp_path / "logs")
+        (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
+        runner.prepare_workspace(str(wt))
+
+        # Origin in the clone should be the GitHub URL, not the local path
+        origin_url = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=str(wt),
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        assert origin_url == "https://github.com/test/repo.git"
 
     def test_converts_worktree_cleanup_on_failure(self, tmp_path: Path) -> None:
         """If git clone fails, cleanup runs and exception re-raised."""

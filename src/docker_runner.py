@@ -406,6 +406,26 @@ class DockerRunner:
             git_path.unlink()
             (clone_tmp / ".git").rename(git_path)
 
+            # Point origin at the real remote (GitHub), not the local repo.
+            # git clone --local sets origin to the local path, which causes
+            # "branch is currently checked out" errors when pushing.
+            try:
+                real_remote = subprocess.run(
+                    ["git", "remote", "get-url", "origin"],
+                    cwd=str(self._repo_root),
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                ).stdout.strip()
+                subprocess.run(
+                    ["git", "remote", "set-url", "origin", real_remote],
+                    cwd=cwd,
+                    check=True,
+                    capture_output=True,
+                )
+            except (subprocess.CalledProcessError, OSError):
+                logger.warning("Could not update clone remote to real origin")
+
             # Update the index to match the already-checked-out files
             subprocess.run(
                 ["git", "reset", "HEAD"],
