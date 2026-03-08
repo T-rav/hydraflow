@@ -124,7 +124,7 @@ class RepoRuntimeRegistry:
     Parameters
     ----------
     data_root:
-        Directory where ``repos.json`` is stored for persistence across
+        Directory where ``runtime-repos.json`` is stored for persistence across
         restarts.  When ``None``, persistence is disabled (in-memory only).
     """
 
@@ -134,15 +134,15 @@ class RepoRuntimeRegistry:
 
     @property
     def _repos_path(self) -> Path | None:
-        """Path to the ``repos.json`` persistence file, or ``None``."""
+        """Path to the runtime persistence file, or ``None``."""
         if self._data_root is None:
             return None
-        return self._data_root / "repos.json"
+        return self._data_root / "runtime-repos.json"
 
     # --- Persistence ---
 
     def _save(self) -> None:
-        """Persist the current set of registered repos to ``repos.json``."""
+        """Persist the current set of registered repos to ``runtime-repos.json``."""
         path = self._repos_path
         if path is None:
             return
@@ -162,7 +162,7 @@ class RepoRuntimeRegistry:
         logger.debug("Saved %d repo(s) to %s", len(entries), path)
 
     def _load(self) -> list[dict[str, str]]:
-        """Load saved repo entries from ``repos.json``.
+        """Load saved repo entries from ``runtime-repos.json``.
 
         Returns a list of dicts with ``slug``, ``repo``, and ``repo_root``
         keys.  Returns an empty list when the file is missing or malformed.
@@ -176,16 +176,16 @@ class RepoRuntimeRegistry:
             logger.warning("Failed to read %s: %s", path, exc)
             return []
         if not isinstance(data, dict):
-            logger.warning("Invalid repos.json format (expected object)")
+            logger.warning("Invalid runtime-repos.json format (expected object)")
             return []
         repos = data.get("repos")
         if not isinstance(repos, list):
-            logger.warning("Invalid repos.json: missing 'repos' list")
+            logger.warning("Invalid runtime-repos.json: missing 'repos' list")
             return []
         return [e for e in repos if isinstance(e, dict) and "repo_root" in e]
 
     async def load_saved(self) -> list[RepoRuntime]:
-        """Re-register repos persisted in ``repos.json``.
+        """Re-register repos persisted in ``runtime-repos.json``.
 
         Skips entries whose ``repo_root`` no longer exists or that are
         already registered.  Returns the list of newly registered runtimes.

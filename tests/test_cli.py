@@ -878,26 +878,26 @@ class TestRunMainSignalHandlers:
         mock_dashboard.stop.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_dashboard_load_saved_before_register(self) -> None:
-        """_run_main must call load_saved() before register() so prior repos survive.
+    async def test_dashboard_registers_existing_repos_before_dashboard_start(
+        self, tmp_path
+    ) -> None:
+        """_run_main registers existing repos from RepoStore before starting the dashboard.
 
-        Regression guard: if register() is called first, _save() inside it
-        overwrites repos.json with only the current repo, discarding saved ones.
+        Regression guard: the registry used by the dashboard must already contain
+        any repos saved from previous runs so the dashboard can serve them immediately.
         """
         from tests.helpers import ConfigFactory
 
-        config = ConfigFactory.create(dashboard_enabled=True)
+        config = ConfigFactory.create(dashboard_enabled=True, repo_root=tmp_path)
 
         call_order: list[str] = []
 
         mock_registry = MagicMock()
-        mock_registry.load_saved = AsyncMock(
-            side_effect=lambda: call_order.append("load_saved") or []
-        )
         mock_registry.register = AsyncMock(
-            side_effect=lambda _cfg: call_order.append("register")
+            side_effect=lambda _cfg: call_order.append("register") or MagicMock()
         )
         mock_registry.stop_all = AsyncMock()
+        mock_registry.__contains__ = MagicMock(return_value=False)
 
         real_loop = asyncio.get_running_loop()
 
@@ -907,7 +907,9 @@ class TestRunMainSignalHandlers:
 
         mock_dashboard = AsyncMock()
         mock_dashboard._orchestrator = None
-        mock_dashboard.start = AsyncMock()
+        mock_dashboard.start = AsyncMock(
+            side_effect=lambda: call_order.append("dashboard_start")
+        )
         mock_dashboard.stop = AsyncMock()
 
         with (
@@ -917,10 +919,10 @@ class TestRunMainSignalHandlers:
         ):
             await _run_main(config)
 
-        # load_saved must appear before register in the call order
-        assert "load_saved" in call_order
+        # repos must be registered before the dashboard starts
         assert "register" in call_order
-        assert call_order.index("load_saved") < call_order.index("register")
+        assert "dashboard_start" in call_order
+        assert call_order.index("register") < call_order.index("dashboard_start")
 
 
 # ---------------------------------------------------------------------------
@@ -1233,7 +1235,7 @@ class TestRunMainRegistryWiring:
 
     @pytest.mark.asyncio
     async def test_dashboard_creates_registry_and_repo_store(self, tmp_path) -> None:
-        """_run_main creates a RepoRuntimeRegistry (no data_root) and a RepoStore."""
+        """_run_main creates a single RepoRuntimeRegistry with data_root."""
         from tests.helpers import ConfigFactory
 
         config = ConfigFactory.create(dashboard_enabled=True, repo_root=tmp_path)
@@ -1263,9 +1265,5 @@ class TestRunMainRegistryWiring:
         ):
             await _run_main(config)
 
-        # _run_main creates two registries in dashboard mode:
-        # 1) RepoRuntimeRegistry() at startup (no data_root, no persistence)
-        # 2) RepoRuntimeRegistry(data_root=...) for the dashboard (persistent)
-        assert MockRegistry.call_count == 2
-        MockRegistry.assert_any_call()
-        MockRegistry.assert_any_call(data_root=config.data_root)
+        # _run_main creates exactly one registry with data_root for persistence
+        MockRegistry.assert_called_once_with(data_root=config.data_root)
