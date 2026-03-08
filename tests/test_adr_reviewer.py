@@ -2128,8 +2128,10 @@ class TestPreValidationGate:
         call_args = reviewer._prs.create_issue.await_args
         title = call_args.args[0]
         body = call_args.args[1]
+        labels_kwarg = call_args.kwargs.get("labels", [])
         assert "Pre-validation" in title
         assert "missing required section" in body
+        assert list(reviewer._config.find_label) == labels_kwarg
         assert stats["auto_triaged"] == 1
         assert stats["escalated"] == 0
 

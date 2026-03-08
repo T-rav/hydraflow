@@ -91,8 +91,8 @@ class ADRPreValidator:
         """Check that required sections have non-trivial content."""
         for section in _REQUIRED_SECTIONS:
             pattern = re.compile(
-                rf"(?i){re.escape(section)}[ \t]*\n(.*?)(?=\n## |\Z)",
-                re.DOTALL,
+                rf"^{re.escape(section)}[ \t]*\n(.*?)(?=^##\s|\Z)",
+                re.DOTALL | re.MULTILINE | re.IGNORECASE,
             )
             match = pattern.search(content)
             if match:
