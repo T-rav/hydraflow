@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hydraflow.adr_reviewer")
 
+# Valid statuses are single words: Proposed, Accepted, Superseded, Deprecated, Rejected.
 _STATUS_RE = re.compile(r"\*\*Status:\*\*\s*(\w+)", re.IGNORECASE)
 _ADR_FILE_RE = re.compile(r"^(\d{4})-.*\.md$")
 _DUPLICATE_THRESHOLD = 0.7
@@ -403,8 +404,8 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
             ]
             cmd_input = None
         else:
-            cmd = [tool, "-p", "--model", model]
-            cmd_input = prompt.encode()
+            cmd = [tool, "-p", prompt, "--model", model]
+            cmd_input = None
 
         env = make_clean_env(self._config.gh_token)
         try:
