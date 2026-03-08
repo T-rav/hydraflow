@@ -63,7 +63,7 @@ class DoltConnection:
         self.dolt_dir.mkdir(parents=True, exist_ok=True)
         result = subprocess.run(
             ["dolt", "init"],
-            cwd=self.dolt_dir,
+            check=False, cwd=self.dolt_dir,
             capture_output=True,
             text=True,
         )
@@ -101,7 +101,7 @@ class DoltConnection:
         final_query = self._interpolate(query, params) if params else query
         result = subprocess.run(
             ["dolt", "sql", "-q", final_query, "-r", "json"],
-            cwd=self.dolt_dir,
+            check=False, cwd=self.dolt_dir,
             capture_output=True,
             text=True,
         )

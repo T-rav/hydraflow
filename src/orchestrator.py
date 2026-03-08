@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from config import HydraFlowConfig
+from dolt.store import DoltStore
 from events import EventBus, EventType, HydraFlowEvent
 from models import (
     BackgroundWorkerState,
@@ -28,7 +29,6 @@ from phase_utils import (
     release_batch_in_flight,
     safe_file_memory_suggestion,
 )
-from dolt.store import DoltStore
 from service_registry import OrchestratorCallbacks, build_services
 from subprocess_util import (
     AuthenticationError,

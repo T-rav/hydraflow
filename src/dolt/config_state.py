@@ -24,7 +24,7 @@ class _StateSingletonMixin:
         cur.close()
         if not row:
             return {}
-        return dict(zip(columns, row))
+        return dict(zip(columns, row, strict=False))
 
     def update(self, **kwargs: Any) -> None:
         """Update multiple columns at once."""

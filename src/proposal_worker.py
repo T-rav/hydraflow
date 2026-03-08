@@ -77,7 +77,7 @@ class ProposalWorker:
                 event = await asyncio.wait_for(
                     queue.get(), timeout=self._debounce_seconds
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # Debounce window expired — process pending signals
                 if pending:
                     await self._process_signals(pending)
