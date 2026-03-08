@@ -35,6 +35,7 @@ except Exception:
 
 pytestmark = [
     pytest.mark.integration,
+    pytest.mark.docker,
     pytest.mark.skipif(not _docker_available, reason="Docker daemon not available"),
 ]
 
@@ -50,6 +51,8 @@ _TEST_IMAGE = "alpine:latest"
 @pytest.fixture(autouse=True, scope="session")
 def _pull_image_once() -> None:
     """Ensure the test image is available locally (runs once per session)."""
+    if not _docker_available:
+        return
     client = _docker_mod.from_env()
     try:
         client.images.get(_TEST_IMAGE)
