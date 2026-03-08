@@ -190,13 +190,24 @@ class WorktreeManager:
         main = self._config.main_branch
         gh = self._config.gh_token
 
-        # 1. Unset core.worktree if Docker left it behind
+        # 1. Fix Docker-induced config corruption
+        # Docker containers can corrupt the host .git/config by setting
+        # core.worktree or core.bare=true.  Fix both unconditionally.
         with contextlib.suppress(RuntimeError):
             await run_subprocess(
                 "git",
                 "config",
                 "--unset",
                 "core.worktree",
+                cwd=repo,
+                gh_token=gh,
+            )
+        with contextlib.suppress(RuntimeError):
+            await run_subprocess(
+                "git",
+                "config",
+                "core.bare",
+                "false",
                 cwd=repo,
                 gh_token=gh,
             )

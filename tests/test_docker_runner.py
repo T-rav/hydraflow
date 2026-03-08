@@ -1498,6 +1498,52 @@ class TestPatchWorktreeConfig:
         runner._unpatch_worktree_config(None)
 
 
+class TestSanitizeHostGitConfig:
+    """Tests for DockerRunner._sanitize_host_git_config."""
+
+    def test_resets_bare_true_to_false(self, tmp_path: Path) -> None:
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        git_dir = repo / ".git"
+        git_dir.mkdir()
+        (git_dir / "config").write_text(
+            "[core]\n\trepositoryformatversion = 0\n\tbare = true\n"
+        )
+        runner, _ = _make_runner(repo_root=repo, log_dir=tmp_path / "logs")
+        (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
+
+        runner._sanitize_host_git_config()
+
+        content = (git_dir / "config").read_text()
+        assert "bare = false" in content
+        assert "bare = true" not in content
+
+    def test_removes_core_worktree_from_host(self, tmp_path: Path) -> None:
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        git_dir = repo / ".git"
+        git_dir.mkdir()
+        (git_dir / "config").write_text(
+            "[core]\n\tbare = false\n\tworktree = /workspace\n"
+        )
+        runner, _ = _make_runner(repo_root=repo, log_dir=tmp_path / "logs")
+        (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
+
+        runner._sanitize_host_git_config()
+
+        content = (git_dir / "config").read_text()
+        assert "/workspace" not in content
+
+    def test_handles_missing_git_dir(self, tmp_path: Path) -> None:
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        runner, _ = _make_runner(repo_root=repo, log_dir=tmp_path / "logs")
+        (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
+
+        # Should not raise
+        runner._sanitize_host_git_config()
+
+
 class TestBuildMountsGitDir:
     """Tests for .git directory mounting for worktree support."""
 

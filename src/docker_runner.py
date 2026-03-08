@@ -268,11 +268,14 @@ class DockerProcess:
         result = await self._loop.run_in_executor(None, self._container.wait)
         code = int(result.get("StatusCode", 1))
         self.returncode = code
-        # Clean up core.worktree patch after container exits
+        # Clean up worktree config patch and host git config after container exits
         unpatch = getattr(self, "_unpatch", None)
         config = getattr(self, "_patched_config", None)
         if unpatch and config:
             unpatch(config)
+        sanitize_host = getattr(self, "_sanitize_host", None)
+        if sanitize_host:
+            sanitize_host()
         return code
 
 
@@ -449,6 +452,31 @@ class DockerRunner:
         except OSError as exc:
             logger.warning("Failed to unpatch worktree config: %s", exc)
 
+    def _sanitize_host_git_config(self) -> None:
+        """Fix Docker-induced corruption on the host ``.git/config``.
+
+        Docker containers mount ``.git`` read-write and the agent inside
+        may set ``core.bare=true`` or ``core.worktree``, corrupting the
+        host repo.  This runs after every container exit to undo the damage.
+        """
+        repo_config = self._repo_root / ".git" / "config"
+        if not repo_config.exists():
+            return
+        cfg = str(repo_config)
+        try:
+            subprocess.run(
+                ["git", "config", "--file", cfg, "core.bare", "false"],
+                check=False,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "config", "--file", cfg, "--unset", "core.worktree"],
+                check=False,
+                capture_output=True,
+            )
+        except OSError as exc:
+            logger.warning("Failed to sanitize host git config: %s", exc)
+
     def _get_user_tool_mounts(self) -> dict[str, dict[str, str]]:
         """Return cached user-tool mounts, refreshing when env/home selection changes."""
         key = (
@@ -623,9 +651,11 @@ class DockerRunner:
             )
             proc._patched_config = patched_config  # type: ignore[attr-defined]
             proc._unpatch = self._unpatch_worktree_config  # type: ignore[attr-defined]
+            proc._sanitize_host = self._sanitize_host_git_config  # type: ignore[attr-defined]
             return cast(asyncio.subprocess.Process, proc)
         except Exception:
             self._unpatch_worktree_config(patched_config)
+            self._sanitize_host_git_config()
             with contextlib.suppress(Exception):
                 await loop.run_in_executor(None, lambda: container.remove(force=True))
             self._containers.discard(container)
@@ -713,6 +743,7 @@ class DockerRunner:
             raise
         finally:
             self._unpatch_worktree_config(patched_config)
+            self._sanitize_host_git_config()
             with contextlib.suppress(Exception):
                 await loop.run_in_executor(None, lambda: container.remove(force=True))
             self._containers.discard(container)
