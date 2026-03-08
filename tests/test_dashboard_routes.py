@@ -5889,6 +5889,48 @@ class TestWebSocketEndpoint:
         assert len(sent_texts) >= 1
         assert "default" in sent_texts[0]
 
+    @pytest.mark.asyncio
+    async def test_websocket_repo_slug_no_registry_falls_back_to_default(
+        self, config, event_bus: EventBus, state, tmp_path
+    ) -> None:
+        """When ?repo=slug is provided but registry is None, falls back to default bus."""
+        from fastapi import WebSocket
+        from fastapi.websockets import WebSocketDisconnect
+
+        from tests.conftest import EventFactory
+
+        await event_bus.publish(EventFactory.create(data={"default": True}))
+
+        # No registry — single-repo mode
+        router = self._make_router(config, event_bus, state, tmp_path, registry=None)
+        endpoint = None
+        for route in router.routes:
+            if hasattr(route, "path") and route.path == "/ws":
+                endpoint = route.endpoint
+                break
+        assert endpoint is not None
+
+        mock_ws = AsyncMock(spec=WebSocket)
+        mock_ws.query_params = {"repo": "some-org-some-repo"}
+        sent_texts: list[str] = []
+        mock_ws.send_text = AsyncMock(side_effect=sent_texts.append)
+
+        q: asyncio.Queue = asyncio.Queue()
+        q.get = AsyncMock(side_effect=WebSocketDisconnect)  # type: ignore[method-assign]
+
+        with patch.object(event_bus, "subscription") as mock_sub:
+            mock_ctx = AsyncMock()
+            mock_ctx.__aenter__ = AsyncMock(return_value=q)
+            mock_ctx.__aexit__ = AsyncMock(return_value=False)
+            mock_sub.return_value = mock_ctx
+
+            await endpoint(mock_ws)
+
+        mock_ws.accept.assert_called_once()
+        # Should use default bus (not error) since registry is None
+        assert len(sent_texts) >= 1
+        assert "default" in sent_texts[0]
+
 
 class TestIssueHistoryCache:
     """Tests for issue history disk cache (save / load / warm-up / invalidation)."""
