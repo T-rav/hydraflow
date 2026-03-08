@@ -838,6 +838,7 @@ class TestRunMainSignalHandlers:
         with (
             patch.object(real_loop, "add_signal_handler", side_effect=tracking_add),
             patch("dashboard.HydraFlowDashboard", return_value=mock_dashboard),
+            patch("cli._auto_register_current_repo", new_callable=AsyncMock),
         ):
             await _run_main(config)
 
@@ -869,6 +870,7 @@ class TestRunMainSignalHandlers:
         with (
             patch.object(real_loop, "add_signal_handler", side_effect=trigger_stop),
             patch("dashboard.HydraFlowDashboard", return_value=mock_dashboard),
+            patch("cli._auto_register_current_repo", new_callable=AsyncMock),
         ):
             await _run_main(config)
 
@@ -1230,3 +1232,44 @@ class TestAutoRegisterCurrentRepo:
         registry.register = AsyncMock(side_effect=RuntimeError("boom"))
         # Should not raise
         await _auto_register_current_repo(registry, config)
+
+
+class TestRunMainRegistryWiring:
+    """Tests that _run_main wires RepoRuntimeRegistry correctly."""
+
+    @pytest.mark.asyncio
+    async def test_dashboard_passes_data_root_and_calls_load_saved(
+        self, tmp_path
+    ) -> None:
+        """_run_main creates registry with data_root and calls load_saved."""
+        from tests.helpers import ConfigFactory
+
+        config = ConfigFactory.create(dashboard_enabled=True, repo_root=tmp_path)
+
+        real_loop = asyncio.get_running_loop()
+
+        mock_dashboard = AsyncMock()
+        mock_dashboard._orchestrator = None
+        mock_dashboard.start = AsyncMock()
+        mock_dashboard.stop = AsyncMock()
+
+        mock_registry = MagicMock()
+        mock_registry.load_saved = AsyncMock(return_value=0)
+        mock_registry.stop_all = AsyncMock()
+
+        def trigger_stop(sig: int, cb: object) -> None:
+            if callable(cb):
+                cb()
+
+        with (
+            patch.object(real_loop, "add_signal_handler", side_effect=trigger_stop),
+            patch("dashboard.HydraFlowDashboard", return_value=mock_dashboard),
+            patch("cli._auto_register_current_repo", new_callable=AsyncMock),
+            patch(
+                "repo_runtime.RepoRuntimeRegistry", return_value=mock_registry
+            ) as MockRegistry,
+        ):
+            await _run_main(config)
+
+        MockRegistry.assert_called_once_with(data_root=config.data_root)
+        mock_registry.load_saved.assert_awaited_once_with(config)

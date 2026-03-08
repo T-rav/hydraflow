@@ -1330,7 +1330,7 @@ async def _auto_register_current_repo(
         logger.debug("No repo configured; skipping auto-register")
         return
 
-    slug = config.repo.replace("/", "-") or config.repo_root.name
+    slug = config.repo.replace("/", "-")
     if slug in registry:
         logger.debug("Repo %r already registered; skipping auto-register", slug)
         return
