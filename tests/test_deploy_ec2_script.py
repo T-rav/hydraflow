@@ -11,7 +11,9 @@ REPO_ROOT = Path(__file__).parent.parent
 SCRIPT_PATH = REPO_ROOT / "deploy" / "ec2" / "deploy-hydraflow.sh"
 
 
-def _prepare_doctor_environment(tmp_path: Path, *, include_env_file: bool = True) -> dict[str, str]:
+def _prepare_doctor_environment(
+    tmp_path: Path, *, include_env_file: bool = True
+) -> dict[str, str]:
     """Create a fake repo + PATH so the doctor command can run in CI."""
     repo_root = tmp_path / "hydraflow"
     repo_root.mkdir()
