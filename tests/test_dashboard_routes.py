@@ -5709,6 +5709,30 @@ class TestHITLApproveProcessEndpoint:
         # State should still be cleaned up
         mock_orch.skip_hitl_issue.assert_called_once_with(42)
 
+    @pytest.mark.asyncio
+    async def test_approve_process_publishes_hitl_update_event(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        """approve-process should publish a HITL_UPDATE event with resolved status."""
+        mock_orch = MagicMock()
+        mock_orch.skip_hitl_issue = MagicMock()
+        router, pr_mgr = self._make_router(
+            config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
+        )
+        pr_mgr.swap_pipeline_labels = AsyncMock()  # type: ignore[method-assign]
+        pr_mgr.post_comment = AsyncMock()
+
+        endpoint = self._find_endpoint(
+            router, "/api/hitl/{issue_number}/approve-process"
+        )
+        await endpoint(42)
+
+        hitl_events = [e for e in event_bus._history if e.type == EventType.HITL_UPDATE]
+        assert len(hitl_events) == 1
+        assert hitl_events[0].data["status"] == "resolved"
+        assert hitl_events[0].data["action"] == "approved_for_processing"
+        assert hitl_events[0].data["issue"] == 42
+
 
 # ---------------------------------------------------------------------------
 # POST /api/intent
