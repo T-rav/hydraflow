@@ -322,6 +322,7 @@ class ConfigFactory:
         epic_auto_decompose: bool = False,
         epic_decompose_complexity_threshold: int = 8,
         epic_monitor_interval: int = 1800,
+        epic_sweep_interval: int = 3600,
         worktree_gc_interval: int = 1800,
         epic_stale_days: int = 7,
         epic_merge_strategy: Literal[
@@ -524,6 +525,7 @@ class ConfigFactory:
                 epic_auto_decompose=epic_auto_decompose,
                 epic_decompose_complexity_threshold=epic_decompose_complexity_threshold,
                 epic_monitor_interval=epic_monitor_interval,
+                epic_sweep_interval=epic_sweep_interval,
                 worktree_gc_interval=worktree_gc_interval,
                 epic_stale_days=epic_stale_days,
                 epic_merge_strategy=epic_merge_strategy,
@@ -778,7 +780,7 @@ class PipelineHarness:
         worker_result=None,
         review_verdict="approve",
     ) -> PipelineRunResult:
-        """Drive an issue through triage → plan → implement → review."""
+        """Drive an issue through triage -> plan -> implement -> review."""
         from models import ReviewVerdict
         from tests.conftest import (
             PlanResultFactory,
