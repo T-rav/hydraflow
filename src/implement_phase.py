@@ -15,6 +15,7 @@ from models import GitHubIssue, PipelineStage, Task, WorkerResult, WorkerResultM
 from phase_utils import (
     escalate_to_hitl,
     is_adr_issue_title,
+    is_likely_bug,
     record_harness_failure,
     release_batch_in_flight,
     run_refilling_pool,
@@ -24,9 +25,9 @@ from phase_utils import (
 from pr_manager import PRManager
 from run_recorder import RunRecorder
 from state import StateTracker
-from subprocess_util import AuthenticationError, CreditExhaustedError
+from subprocess_util import AuthenticationError, CreditExhaustedError, run_subprocess
 from task_source import TaskTransitioner
-from worktree import WorktreeManager
+from workspace import WorkspaceManager
 
 logger = logging.getLogger("hydraflow.implement_phase")
 
@@ -38,7 +39,7 @@ class ImplementPhase:
         self,
         config: HydraFlowConfig,
         state: StateTracker,
-        worktrees: WorktreeManager,
+        worktrees: WorkspaceManager,
         agents: AgentRunner,
         prs: PRManager,
         store: IssueStore,
@@ -123,20 +124,33 @@ class ImplementPhase:
                     return await self._worker_inner(idx, issue, branch)
                 except (AuthenticationError, CreditExhaustedError, MemoryError):
                     raise
-                except Exception:
-                    logger.exception("Worker failed for issue #%d", issue.id)
+                except Exception as exc:
+                    exc_type_name = type(exc).__name__
+                    if is_likely_bug(exc):
+                        logger.critical(
+                            "Worker failed for issue #%d — likely bug (%s)",
+                            issue.id,
+                            exc_type_name,
+                            exc_info=True,
+                        )
+                    else:
+                        logger.exception(
+                            "Worker failed for issue #%d — %s",
+                            issue.id,
+                            exc_type_name,
+                        )
                     self._state.mark_issue(issue.id, "failed")
                     record_harness_failure(
                         self._harness_insights,
                         issue.id,
                         FailureCategory.IMPLEMENTATION_ERROR,
-                        f"Worker exception for issue #{issue.id}",
+                        f"Worker {exc_type_name} for issue #{issue.id}",
                         stage=PipelineStage.IMPLEMENT,
                     )
                     return WorkerResult(
                         issue_number=issue.id,
                         branch=branch,
-                        error=f"Worker exception for issue #{issue.id}",
+                        error=f"Worker {exc_type_name} for issue #{issue.id}",
                     )
                 finally:
                     async with self._active_issues_lock:
@@ -279,11 +293,38 @@ class ImplementPhase:
             error=f"Implementation attempt cap exceeded ({attempts - 1} attempts)",
         )
 
-    async def _setup_worktree_and_branch(self, issue: Task, branch: str) -> Path:
-        """Ensure worktree exists/resumed and branch is pushed."""
+    async def _setup_worktree_and_branch(
+        self, issue: Task, branch: str, *, reset_to_main: bool = False
+    ) -> Path:
+        """Ensure worktree exists/resumed and branch is pushed.
+
+        When *reset_to_main* is True (review-feedback retry), hard-reset the
+        branch to ``origin/main`` so the agent starts fresh instead of
+        re-implementing on top of previously rejected code.
+        """
         wt_path = self._config.worktree_path_for_issue(issue.id)
         if wt_path.is_dir():
-            logger.info("Resuming existing worktree for issue #%d", issue.id)
+            if reset_to_main:
+                logger.info(
+                    "Resetting worktree for issue #%d to main (review retry)",
+                    issue.id,
+                )
+                await run_subprocess(
+                    "git",
+                    "fetch",
+                    "origin",
+                    "main",
+                    cwd=wt_path,
+                )
+                await run_subprocess(
+                    "git",
+                    "reset",
+                    "--hard",
+                    "origin/main",
+                    cwd=wt_path,
+                )
+            else:
+                logger.info("Resuming existing worktree for issue #%d", issue.id)
         else:
             wt_path = await self._worktrees.create(issue.id, branch)
         self._state.set_worktree(issue.id, str(wt_path))
@@ -332,7 +373,9 @@ class ImplementPhase:
         review_feedback: str,
     ) -> WorkerResult:
         """Set up worktree, push branch, run agent, record metrics."""
-        wt_path = await self._setup_worktree_and_branch(issue, branch)
+        wt_path = await self._setup_worktree_and_branch(
+            issue, branch, reset_to_main=bool(review_feedback)
+        )
 
         result = await self._agents.run(
             issue,
@@ -401,9 +444,8 @@ class ImplementPhase:
             if pushed:
                 pr = None
                 if not is_retry:
-                    draft = not result.success
                     gh_issue = GitHubIssue.from_task(issue)
-                    pr = await self._prs.create_pr(gh_issue, result.branch, draft=draft)
+                    pr = await self._prs.create_pr(gh_issue, result.branch)
                     result.pr_info = pr
                 else:
                     pr = await self._prs.find_open_pr_for_branch(
