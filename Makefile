@@ -20,6 +20,7 @@ REVIEW_MODEL ?= sonnet
 BATCH_SIZE ?= 15
 REVIEWERS ?= 5
 HITL_WORKERS ?= 1
+PLANNERS ?= 2
 PORT ?= 5555
 LOG_DIR ?= $(PROJECT_ROOT)/.hydraflow/logs
 
@@ -33,7 +34,7 @@ RESET := \033[0m
 # Docker agent image
 DOCKER_IMAGE ?= ghcr.io/t-rav/hydraflow-agent:latest
 
-.PHONY: help run dev dry-run clean coverage cover smoke test test-fast test-cov lint lint-check lint-fix typecheck security quality quality-lite install setup status ui ui-dev ui-clean ensure-labels prep hot docker-build docker-test deps screenshot screenshot-update check-node-ui
+.PHONY: help run dev dry-run clean coverage cover smoke test test-fast test-cov lint lint-check lint-fix typecheck security quality quality-lite install setup status ui ui-dev ui-clean ensure-labels prep scaffold hot docker-build docker-test deps screenshot screenshot-update check-node-ui
 
 check-node-ui:
 	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh --version >/dev/null
@@ -60,6 +61,7 @@ help:
 	@echo "  make quality        quality-lite + test (parallel)"
 	@echo "  make ensure-labels  Create HydraFlow labels in GitHub repo"
 	@echo "  make prep           Quick prep/scaffold of CI + baseline tests"
+	@echo "  make scaffold       Generate baseline tests and CI configuration"
 	@echo "  make setup          Install hooks/assets for target repo ($(TARGET_REPO_ROOT))"
 	@echo "  make install        Install dashboard dependencies"
 	@echo "  make ui             Build React dashboard (src/ui/dist/)"
@@ -69,9 +71,18 @@ help:
 	@echo "  make docker-build   Build Hydra agent Docker image"
 	@echo "  make docker-test    Build + smoke-test the agent image"
 	@echo ""
-	@echo "$(GREEN)Options:$(RESET)"
+	@echo "$(GREEN)Options (make run):$(RESET)"
 	@echo "  PORT             Dashboard port (default: 5555)"
 	@echo "  LOG_DIR          Log directory (default: .hydraflow/logs)"
+	@echo ""
+	@echo "$(GREEN)Options (make hot — live config update):$(RESET)"
+	@echo "  WORKERS          Max concurrent agents (default: 3)"
+	@echo "  MODEL            Implementation model (default: opus)"
+	@echo "  REVIEW_MODEL     Review model (default: sonnet)"
+	@echo "  BATCH_SIZE       Issue batch size (default: 15)"
+	@echo "  REVIEWERS        Max concurrent reviewers (default: 5)"
+	@echo "  HITL_WORKERS     Max concurrent HITL workers (default: 1)"
+	@echo "  PLANNERS         Max concurrent planners (default: 2)"
 
 run: check-node-ui
 	@mkdir -p $(LOG_DIR)
@@ -379,6 +390,11 @@ prep: deps
 	@echo "$(BLUE)Scanning repo and scaffolding CI/tests...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/run_admin_task.py prep
 	@echo "$(GREEN)Prep complete$(RESET)"
+
+scaffold: deps
+	@echo "$(BLUE)Generating baseline tests and CI configuration...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/run_admin_task.py scaffold
+	@echo "$(GREEN)Scaffold complete$(RESET)"
 
 ensure-labels: deps
 	@echo "$(BLUE)Creating HydraFlow lifecycle labels...$(RESET)"
