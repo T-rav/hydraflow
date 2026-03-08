@@ -7875,6 +7875,7 @@ class TestRuntimeEndpointsWithRegistry:
     ) -> None:
         router = self._make_router(config, event_bus, state, tmp_path, registry=None)
         endpoint = self._find_endpoint(router, "/api/runtimes/{slug}", "GET")
+        assert endpoint is not None
 
         resp = await endpoint("any-slug")
         assert resp.status_code == 501
@@ -7899,6 +7900,7 @@ class TestRuntimeEndpointsWithRegistry:
         import json as json_mod
 
         data = json_mod.loads(resp.body)
+        assert resp.status_code == 200
         assert data["status"] == "started"
         mock_rt.start.assert_awaited_once()
 
@@ -7940,6 +7942,7 @@ class TestRuntimeEndpointsWithRegistry:
         import json as json_mod
 
         data = json_mod.loads(resp.body)
+        assert resp.status_code == 200
         assert data["status"] == "stopped"
         mock_rt.stop.assert_awaited_once()
 
@@ -7972,6 +7975,7 @@ class TestRuntimeEndpointsWithRegistry:
     ) -> None:
         router = self._make_router(config, event_bus, state, tmp_path, registry=None)
         endpoint = self._find_endpoint(router, "/api/runtimes/{slug}/start")
+        assert endpoint is not None
 
         resp = await endpoint("my-repo")
         assert resp.status_code == 501
@@ -7982,6 +7986,7 @@ class TestRuntimeEndpointsWithRegistry:
     ) -> None:
         router = self._make_router(config, event_bus, state, tmp_path, registry=None)
         endpoint = self._find_endpoint(router, "/api/runtimes/{slug}/stop")
+        assert endpoint is not None
 
         resp = await endpoint("my-repo")
         assert resp.status_code == 501
@@ -8010,6 +8015,55 @@ class TestRuntimeEndpointsWithRegistry:
     ) -> None:
         router = self._make_router(config, event_bus, state, tmp_path, registry=None)
         endpoint = self._find_endpoint(router, "/api/runtimes/{slug}", "DELETE")
+        assert endpoint is not None
 
         resp = await endpoint("my-repo")
         assert resp.status_code == 501
+
+    @pytest.mark.asyncio
+    async def test_start_runtime_not_found(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        mock_registry = MagicMock()
+        mock_registry.get.return_value = None
+
+        router = self._make_router(
+            config, event_bus, state, tmp_path, registry=mock_registry
+        )
+        endpoint = self._find_endpoint(router, "/api/runtimes/{slug}/start")
+        assert endpoint is not None
+
+        resp = await endpoint("nonexistent")
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_stop_runtime_not_found(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        mock_registry = MagicMock()
+        mock_registry.get.return_value = None
+
+        router = self._make_router(
+            config, event_bus, state, tmp_path, registry=mock_registry
+        )
+        endpoint = self._find_endpoint(router, "/api/runtimes/{slug}/stop")
+        assert endpoint is not None
+
+        resp = await endpoint("nonexistent")
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_delete_runtime_not_found(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        mock_registry = MagicMock()
+        mock_registry.get.return_value = None
+
+        router = self._make_router(
+            config, event_bus, state, tmp_path, registry=mock_registry
+        )
+        endpoint = self._find_endpoint(router, "/api/runtimes/{slug}", "DELETE")
+        assert endpoint is not None
+
+        resp = await endpoint("nonexistent")
+        assert resp.status_code == 404
