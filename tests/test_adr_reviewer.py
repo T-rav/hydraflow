@@ -2241,7 +2241,7 @@ class TestAutoTriageCouncilFeedback:
             await reviewer._route_result(result, adr_path, adr_dir, stats)
 
         assert stats["auto_triaged"] == 1
-        assert stats["escalated"] == 1
+        assert stats["escalated"] == 0
 
     @pytest.mark.asyncio
     async def test_no_auto_triage_routes_to_hitl(self, tmp_path: Path) -> None:

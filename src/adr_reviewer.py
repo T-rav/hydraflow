@@ -157,7 +157,8 @@ class ADRCouncilReviewer:
     async def review_proposed_adrs(self) -> dict[str, int]:
         """Scan for proposed ADRs and run council reviews.
 
-        Returns stats: {reviewed, accepted, rejected, escalated, duplicates, rounds_total}.
+        Returns stats: {reviewed, accepted, rejected, escalated, duplicates,
+        rounds_total, pre_review_blocked, auto_triaged}.
         """
         adr_dir = Path(self._config.repo_root) / "docs" / "adr"
         if not adr_dir.is_dir():
@@ -258,6 +259,11 @@ class ADRCouncilReviewer:
                     )
                     stats["auto_triaged"] += 1
                     return
+                logger.warning(
+                    "ADR-%04d auto-triage returned invalid issue number (%s); falling back to HITL",
+                    validation.adr_number,
+                    issue_number,
+                )
             except Exception:
                 logger.exception(
                     "ADR-%04d auto-triage failed; falling back to HITL",
@@ -647,10 +653,8 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
                 stats["accepted"] += 1
                 return
             await self._triage_or_hitl(result, reason="changes_requested", stats=stats)
-            stats["escalated"] += 1
         else:
             await self._triage_or_hitl(result, reason="no_consensus", stats=stats)
-            stats["escalated"] += 1
 
     async def _triage_or_hitl(
         self,
@@ -666,6 +670,7 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
                 stats["auto_triaged"] += 1
                 return
         await self._escalate_to_hitl(result, reason=reason)
+        stats["escalated"] += 1
 
     async def _route_to_triage(self, result: ADRCouncilResult, *, reason: str) -> bool:
         """Create a follow-up issue in triage so normal plan/fix flow can run.
