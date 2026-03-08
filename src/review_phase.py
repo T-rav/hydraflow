@@ -530,6 +530,10 @@ class ReviewPhase:
             )
 
         await self._record_review_outcome(pr, result)
+        try:
+            self._state.db.commit(f"review: PR #{pr.number}")
+        except Exception:
+            logger.debug("Dolt commit failed", exc_info=True)
 
         skip_worktree_cleanup = False
         if result.verdict == ReviewVerdict.APPROVE and pr.number > 0:

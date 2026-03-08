@@ -691,6 +691,10 @@ class HydraFlowOrchestrator:
         self._state.reset_session_counters(session_start_time.isoformat())
         self._state.save_session(self._current_session)
         self._bus.set_session_id(session_id)
+        try:
+            self._state.db.commit(f"session-start: {session_id}")
+        except Exception:
+            logger.debug("Dolt commit failed", exc_info=True)
         await self._bus.publish(
             HydraFlowEvent(
                 type=EventType.SESSION_START,
@@ -731,6 +735,10 @@ class HydraFlowOrchestrator:
                 },
             )
         )
+        try:
+            self._state.db.commit(f"session-end: {self._current_session.id}")
+        except Exception:
+            logger.debug("Dolt commit failed", exc_info=True)
         self._current_session = None
         self._bus.set_session_id(None)
 
@@ -781,6 +789,10 @@ class HydraFlowOrchestrator:
                 await self._worktrees.sanitize_repo()
             await asyncio.sleep(0)
             self._running = False
+            try:
+                self._state.db.commit("shutdown: graceful")
+            except Exception:
+                logger.debug("Dolt commit failed", exc_info=True)
             await self._publish_status()
             logger.info("HydraFlow stopped")
 
@@ -983,6 +995,10 @@ class HydraFlowOrchestrator:
                 continue
             self.update_bg_worker_status(name, "ok")
             if did_work:
+                try:
+                    self._state.db.commit(f"{name}-cycle: completed")
+                except Exception:
+                    logger.debug("Dolt commit failed", exc_info=True)
                 continue
             await self._sleep_or_stop(interval)
 

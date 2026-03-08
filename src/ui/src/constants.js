@@ -66,6 +66,10 @@ export const EVENT_PROCESS_MAP = {
   ci_check: 'ci',
   issue_created: 'triage',
   background_worker_status: 'bg_worker',
+  review_insight_recorded: 'signals',
+  harness_failure_recorded: 'signals',
+  retrospective_recorded: 'signals',
+  metrics_snapshot_recorded: 'signals',
 }
 
 /**

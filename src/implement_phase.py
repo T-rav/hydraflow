@@ -495,6 +495,12 @@ class ImplementPhase:
                     return result
 
                 if result.success:
+                    try:
+                        self._state.db.commit(
+                            f"implement: PR created for issue #{issue.id}"
+                        )
+                    except Exception:
+                        logger.debug("Dolt commit failed", exc_info=True)
                     await self._transitioner.transition(
                         issue.id,
                         "review",

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop
 from config import HydraFlowConfig
-from events import EventBus
+from events import EventBus, EventType
 from issue_store import IssueStore
 from models import StatusCallback
 
@@ -49,6 +49,13 @@ class MetricsSyncLoop(BaseBackgroundLoop):
 
     def _get_default_interval(self) -> int:
         return self._config.metrics_sync_interval
+
+    def _signal_types(self) -> frozenset[EventType]:
+        return frozenset({
+            EventType.MERGE_UPDATE,
+            EventType.REVIEW_UPDATE,
+            EventType.PHASE_CHANGE,
+        })
 
     async def _do_work(self) -> dict[str, Any] | None:
         queue_stats = self._store.get_queue_stats()

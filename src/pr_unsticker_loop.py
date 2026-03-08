@@ -9,7 +9,7 @@ from typing import Any
 
 from base_background_loop import BaseBackgroundLoop
 from config import HydraFlowConfig
-from events import EventBus
+from events import EventBus, EventType
 from models import StatusCallback
 from pr_manager import PRManager
 from pr_unsticker import PRUnsticker
@@ -45,6 +45,9 @@ class PRUnstickerLoop(BaseBackgroundLoop):
 
     def _get_default_interval(self) -> int:
         return self._config.pr_unstick_interval
+
+    def _signal_types(self) -> frozenset[EventType]:
+        return frozenset({EventType.CI_CHECK, EventType.REVIEW_UPDATE})
 
     async def _do_work(self) -> dict[str, Any] | None:
         """Resolve all HITL causes (conflicts, CI failures, generic)."""

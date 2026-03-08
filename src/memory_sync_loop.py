@@ -9,7 +9,7 @@ from typing import Any
 
 from base_background_loop import BaseBackgroundLoop
 from config import HydraFlowConfig
-from events import EventBus
+from events import EventBus, EventType
 from issue_fetcher import IssueFetcher
 from memory import MemorySyncWorker
 from models import MemoryIssueData, StatusCallback
@@ -48,6 +48,9 @@ class MemorySyncLoop(BaseBackgroundLoop):
 
     def _get_default_interval(self) -> int:
         return self._config.memory_sync_interval
+
+    def _signal_types(self) -> frozenset[EventType]:
+        return frozenset({EventType.SESSION_END, EventType.MERGE_UPDATE})
 
     async def _do_work(self) -> dict[str, Any] | None:
         issues = await self._fetcher.fetch_issues_by_labels(

@@ -275,6 +275,12 @@ class PostMergeHandler:
                 pr.issue_number, self._config.fixed_label[0]
             )
             await self._prs.close_issue(pr.issue_number)
+            try:
+                self._state.db.commit(
+                    f"merge: PR #{pr.number} for issue #{pr.issue_number}"
+                )
+            except Exception:
+                logger.debug("Dolt commit failed", exc_info=True)
             await self._post_inference_totals_comment(pr, issue)
             await self._run_post_merge_hooks(pr, issue, result, diff, visual_decision)
         else:
@@ -487,6 +493,11 @@ class PostMergeHandler:
                 self._epic_checker.check_and_close_epics(pr.issue_number),
                 pr.issue_number,
             )
+
+        try:
+            self._state.db.commit(f"post-merge: issue #{pr.issue_number}")
+        except Exception:
+            logger.debug("Dolt commit failed", exc_info=True)
 
     def _get_judge_result(
         self,

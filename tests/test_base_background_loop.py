@@ -13,7 +13,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from base_background_loop import BaseBackgroundLoop
-from events import EventBus, EventType
+from events import EventBus, EventType, HydraFlowEvent
 from subprocess_util import AuthenticationError, CreditExhaustedError
 from tests.helpers import ConfigFactory
 
@@ -26,11 +26,13 @@ class _StubLoop(BaseBackgroundLoop):
         *,
         work_fn: Any = None,
         default_interval: int = 60,
+        signal_types: frozenset[EventType] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self._work_fn = work_fn or (lambda: {"stub": True})
         self._default_interval = default_interval
+        self._declared_signal_types = signal_types or frozenset()
 
     async def _do_work(self) -> dict[str, Any] | None:
         result = self._work_fn()
@@ -41,6 +43,9 @@ class _StubLoop(BaseBackgroundLoop):
     def _get_default_interval(self) -> int:
         return self._default_interval
 
+    def _signal_types(self) -> frozenset[EventType]:
+        return self._declared_signal_types
+
 
 def _make_stub(
     tmp_path: Path,
@@ -50,10 +55,14 @@ def _make_stub(
     default_interval: int = 60,
     interval_cb: Any = None,
     run_on_startup: bool = False,
+    signal_types: frozenset[EventType] | None = None,
+    min_cooldown: int = 30,
+    bus: EventBus | None = None,
 ) -> tuple[_StubLoop, asyncio.Event]:
     """Build a _StubLoop with test-friendly defaults."""
     config = ConfigFactory.create(repo_root=tmp_path / "repo")
-    bus = EventBus()
+    if bus is None:
+        bus = EventBus()
     stop_event = asyncio.Event()
 
     call_count = 0
@@ -68,6 +77,7 @@ def _make_stub(
     loop = _StubLoop(
         work_fn=work_fn,
         default_interval=default_interval,
+        signal_types=signal_types,
         worker_name="test_worker",
         config=config,
         bus=bus,
@@ -77,6 +87,7 @@ def _make_stub(
         sleep_fn=instant_sleep,
         interval_cb=interval_cb,
         run_on_startup=run_on_startup,
+        min_cooldown=min_cooldown,
     )
     return loop, stop_event
 
@@ -257,3 +268,175 @@ class TestBaseBackgroundLoopRunOnStartup:
 
         # Initial startup execution always runs; loop body skipped when disabled
         assert call_count == 1
+
+
+class TestSignalTypes:
+    """Tests for _signal_types declaration."""
+
+    def test_default_signal_types_is_empty(self, tmp_path: Path) -> None:
+        """Without override, _signal_types returns empty frozenset."""
+        loop, _ = _make_stub(tmp_path)
+        assert loop._signal_types() == frozenset()
+
+    def test_signal_types_returns_declared_types(self, tmp_path: Path) -> None:
+        """Subclass-declared signal types are returned."""
+        signals = frozenset({EventType.MERGE_UPDATE, EventType.SESSION_END})
+        loop, _ = _make_stub(tmp_path, signal_types=signals)
+        assert loop._signal_types() == signals
+
+
+class TestTriggerAndCooldown:
+    """Tests for the trigger mechanism and cooldown enforcement."""
+
+    def test_trigger_sets_event(self, tmp_path: Path) -> None:
+        """_trigger() sets the internal asyncio.Event."""
+        loop, _ = _make_stub(tmp_path)
+        assert not loop._trigger_event.is_set()
+        loop._trigger()
+        assert loop._trigger_event.is_set()
+
+    def test_cooldown_after_fresh_init(self, tmp_path: Path) -> None:
+        """After init, cooldown has already expired (last_run_mono is 0)."""
+        loop, _ = _make_stub(tmp_path, min_cooldown=30)
+        assert loop._seconds_until_cooldown_expires() == 0.0
+
+    def test_cooldown_after_cycle(self, tmp_path: Path) -> None:
+        """After setting _last_run_mono to now, cooldown is close to min_cooldown."""
+        import time
+
+        loop, _ = _make_stub(tmp_path, min_cooldown=60)
+        loop._last_run_mono = time.monotonic()
+        remaining = loop._seconds_until_cooldown_expires()
+        assert 59 <= remaining <= 60
+
+    @pytest.mark.asyncio
+    async def test_interruptible_sleep_returns_false_on_timeout(
+        self, tmp_path: Path
+    ) -> None:
+        """When no signal arrives, _interruptible_sleep returns False."""
+        loop, _ = _make_stub(tmp_path)
+        result = await loop._interruptible_sleep(0.01)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_interruptible_sleep_returns_true_on_trigger(
+        self, tmp_path: Path
+    ) -> None:
+        """When triggered, _interruptible_sleep returns True early."""
+        loop, _ = _make_stub(tmp_path)
+
+        async def trigger_soon() -> None:
+            await asyncio.sleep(0.01)
+            loop._trigger()
+
+        asyncio.create_task(trigger_soon())
+        result = await loop._interruptible_sleep(5.0)
+        assert result is True
+
+
+class TestSignalListenerIntegration:
+    """Integration tests for the signal listener + main loop."""
+
+    @pytest.mark.asyncio
+    async def test_signal_triggers_early_execution(self, tmp_path: Path) -> None:
+        """Publishing a matching event triggers a work cycle before the timer expires."""
+        bus = EventBus()
+        work_calls: list[int] = []
+
+        def tracking_work() -> dict[str, Any]:
+            work_calls.append(1)
+            return {"n": len(work_calls)}
+
+        loop, stop = _make_stub(
+            tmp_path,
+            work_fn=tracking_work,
+            signal_types=frozenset({EventType.MERGE_UPDATE}),
+            min_cooldown=0,
+            default_interval=3600,  # very long timer
+            bus=bus,
+        )
+
+        async def publish_and_stop() -> None:
+            await asyncio.sleep(0.05)
+            await bus.publish(
+                HydraFlowEvent(type=EventType.MERGE_UPDATE, data={})
+            )
+            # Give the loop time to react, then stop
+            await asyncio.sleep(0.1)
+            stop.set()
+            loop._trigger()  # Wake from any remaining sleep
+
+        asyncio.create_task(publish_and_stop())
+        await asyncio.wait_for(loop.run(), timeout=5.0)
+
+        assert len(work_calls) >= 1
+
+    @pytest.mark.asyncio
+    async def test_non_matching_signal_does_not_trigger(
+        self, tmp_path: Path
+    ) -> None:
+        """Publishing a non-matching event does not trigger early execution."""
+        bus = EventBus()
+        work_calls: list[int] = []
+
+        def tracking_work() -> dict[str, Any]:
+            work_calls.append(1)
+            return {"n": len(work_calls)}
+
+        loop, stop = _make_stub(
+            tmp_path,
+            work_fn=tracking_work,
+            signal_types=frozenset({EventType.MERGE_UPDATE}),
+            min_cooldown=0,
+            default_interval=3600,
+            bus=bus,
+        )
+
+        async def publish_wrong_and_stop() -> None:
+            await asyncio.sleep(0.05)
+            # Publish a non-matching event type
+            await bus.publish(
+                HydraFlowEvent(type=EventType.PHASE_CHANGE, data={})
+            )
+            await asyncio.sleep(0.1)
+            stop.set()
+            loop._trigger()  # Wake from sleep to allow exit
+
+        asyncio.create_task(publish_wrong_and_stop())
+        await asyncio.wait_for(loop.run(), timeout=5.0)
+
+        # Work should not have been called since the timer is 3600s
+        # and only a non-matching event was published
+        assert len(work_calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_listener_task_is_cleaned_up_on_stop(
+        self, tmp_path: Path
+    ) -> None:
+        """The signal listener task is cancelled when run() exits."""
+        bus = EventBus()
+        loop, stop = _make_stub(
+            tmp_path,
+            signal_types=frozenset({EventType.MERGE_UPDATE}),
+            min_cooldown=0,
+            default_interval=3600,
+            bus=bus,
+        )
+
+        stop.set()
+        loop._trigger()  # Ensure immediate exit
+
+        await asyncio.wait_for(loop.run(), timeout=2.0)
+        # No hanging tasks — if we get here, cleanup succeeded
+
+    @pytest.mark.asyncio
+    async def test_execute_cycle_updates_last_run_mono(
+        self, tmp_path: Path
+    ) -> None:
+        """_execute_cycle sets _last_run_mono for cooldown tracking."""
+        loop, _ = _make_stub(tmp_path)
+        assert loop._last_run_mono == 0.0
+
+        await loop._execute_cycle()
+
+        assert loop._last_run_mono > 0.0

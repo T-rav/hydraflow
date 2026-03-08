@@ -4,6 +4,12 @@ Extracts the shared run-loop, error handling, success reporting,
 interval management, and enabled-check logic that was previously
 duplicated across memory_sync_loop, metrics_sync_loop,
 pr_unsticker_loop, and manifest_refresh_loop.
+
+Loops are event-driven: each subclass declares which ``EventType``
+signals trigger an immediate run via :meth:`_signal_types`.  A timer
+fallback still fires at the configured interval so external changes
+are eventually picked up.  A minimum cooldown (default 30 s) prevents
+thrashing when many events arrive in a burst.
 """
 
 from __future__ import annotations
@@ -11,6 +17,7 @@ from __future__ import annotations
 import abc
 import asyncio
 import logging
+import time
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from typing import Any
@@ -22,14 +29,25 @@ from subprocess_util import AuthenticationError, CreditExhaustedError
 
 logger = logging.getLogger("hydraflow.base_background_loop")
 
+_DEFAULT_MIN_COOLDOWN: int = 30  # seconds
+
 
 class BaseBackgroundLoop(abc.ABC):
     """Abstract base for background worker loops.
 
-    Subclasses implement :meth:`_do_work` (domain-specific logic) and
-    :meth:`_get_default_interval` (config-driven default interval).
-    The base class handles the run loop, enabled check, error reporting,
-    status publishing, and interval management.
+    Subclasses implement :meth:`_do_work` (domain-specific logic),
+    :meth:`_get_default_interval` (config-driven default interval), and
+    :meth:`_signal_types` (event types that trigger an immediate run).
+
+    The run loop combines two wake-up sources:
+
+    1. **Timer** — fires every ``_get_interval()`` seconds (fallback).
+    2. **Signal listener** — wakes immediately when a matching event
+       arrives on the ``EventBus``.
+
+    A minimum cooldown (:attr:`_min_cooldown`) prevents runs from
+    happening more frequently than every *N* seconds regardless of how
+    many signals arrive.
     """
 
     def __init__(
@@ -44,6 +62,7 @@ class BaseBackgroundLoop(abc.ABC):
         sleep_fn: Callable[[int | float], Coroutine[Any, Any, None]],
         interval_cb: Callable[[str], int] | None = None,
         run_on_startup: bool = False,
+        min_cooldown: int = _DEFAULT_MIN_COOLDOWN,
     ) -> None:
         self._worker_name = worker_name
         self._config = config
@@ -54,6 +73,18 @@ class BaseBackgroundLoop(abc.ABC):
         self._sleep_fn = sleep_fn
         self._interval_cb = interval_cb
         self._run_on_startup = run_on_startup
+        self._min_cooldown = min_cooldown
+
+        # Signal trigger — set by the signal-listener task to wake the
+        # main loop early.
+        self._trigger_event: asyncio.Event = asyncio.Event()
+        # Monotonic timestamp of the last completed work cycle (used for
+        # cooldown enforcement).
+        self._last_run_mono: float = 0.0
+
+    # ------------------------------------------------------------------
+    # Abstract interface
+    # ------------------------------------------------------------------
 
     @abc.abstractmethod
     async def _do_work(self) -> dict[str, Any] | None:
@@ -67,11 +98,67 @@ class BaseBackgroundLoop(abc.ABC):
     def _get_default_interval(self) -> int:
         """Return the config-driven default interval in seconds."""
 
+    def _signal_types(self) -> frozenset[EventType]:
+        """Return event types that should trigger an immediate run.
+
+        Subclasses override this to declare their triggers.  The default
+        returns an empty set (pure timer-based, backward-compatible).
+        """
+        return frozenset()
+
+    # ------------------------------------------------------------------
+    # Interval / cooldown helpers
+    # ------------------------------------------------------------------
+
     def _get_interval(self) -> int:
         """Return the effective interval, preferring dynamic override."""
         if self._interval_cb is not None:
             return self._interval_cb(self._worker_name)
         return self._get_default_interval()
+
+    def _seconds_until_cooldown_expires(self) -> float:
+        """Seconds remaining before the cooldown window expires (>= 0)."""
+        elapsed = time.monotonic() - self._last_run_mono
+        return max(0.0, self._min_cooldown - elapsed)
+
+    # ------------------------------------------------------------------
+    # Trigger
+    # ------------------------------------------------------------------
+
+    def _trigger(self) -> None:
+        """Wake the main loop so it runs a cycle as soon as cooldown allows."""
+        self._trigger_event.set()
+
+    # ------------------------------------------------------------------
+    # Signal listener
+    # ------------------------------------------------------------------
+
+    async def _signal_listener(self) -> None:
+        """Subscribe to the EventBus and set the trigger on matching events."""
+        signals = self._signal_types()
+        if not signals:
+            return  # No signals declared — nothing to listen to.
+
+        queue = self._bus.subscribe()
+        try:
+            while not self._stop_event.is_set():
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=1.0)
+                except TimeoutError:
+                    continue
+                if event.type in signals:
+                    logger.debug(
+                        "%s triggered by %s event",
+                        self._worker_name,
+                        event.type,
+                    )
+                    self._trigger()
+        finally:
+            self._bus.unsubscribe(queue)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
     def _build_details(self, stats: dict[str, Any] | None) -> dict[str, Any]:
         """Coerce arbitrary worker stats into a details dict."""
@@ -128,23 +215,84 @@ class BaseBackgroundLoop(abc.ABC):
                     },
                 )
             )
+        finally:
+            self._last_run_mono = time.monotonic()
+
+    # ------------------------------------------------------------------
+    # Interruptible sleep
+    # ------------------------------------------------------------------
+
+    async def _interruptible_sleep(self, seconds: float) -> bool:
+        """Sleep for *seconds*, but return early if a signal triggers.
+
+        Returns ``True`` if a signal woke us, ``False`` if the full
+        duration elapsed.
+        """
+        self._trigger_event.clear()
+        try:
+            await asyncio.wait_for(self._trigger_event.wait(), timeout=seconds)
+            return True  # Woken by signal
+        except TimeoutError:
+            return False  # Full sleep elapsed
+
+    # ------------------------------------------------------------------
+    # Main run loop
+    # ------------------------------------------------------------------
 
     async def run(self) -> None:
-        """Run the background worker loop until the stop event is set."""
-        if self._run_on_startup:
-            await self._execute_cycle()
+        """Run the background worker loop until the stop event is set.
 
-        while not self._stop_event.is_set():
-            interval = self._get_interval()
+        A signal-listener task runs alongside the main loop.  When a
+        matching event arrives the remaining sleep is interrupted and
+        the cycle runs immediately (subject to cooldown).
+        """
+        listener_task: asyncio.Task[None] | None = None
+        if self._signal_types():
+            listener_task = asyncio.create_task(
+                self._signal_listener(),
+                name=f"{self._worker_name}-signal-listener",
+            )
+
+        try:
             if self._run_on_startup:
-                await self._sleep_fn(interval)
+                await self._execute_cycle()
+
+            while not self._stop_event.is_set():
+                interval = self._get_interval()
+
+                # --- sleep phase (interruptible) ---
+                triggered = await self._interruptible_sleep(interval)
+
                 if self._stop_event.is_set():
                     break
+
                 if not self._enabled_cb(self._worker_name):
                     continue
-            elif not self._enabled_cb(self._worker_name):
-                await self._sleep_fn(interval)
-                continue
-            await self._execute_cycle()
-            if not self._run_on_startup:
-                await self._sleep_fn(interval)
+
+                # --- cooldown enforcement ---
+                if triggered:
+                    remaining = self._seconds_until_cooldown_expires()
+                    if remaining > 0:
+                        logger.debug(
+                            "%s signal received but cooldown has %.1fs remaining",
+                            self._worker_name,
+                            remaining,
+                        )
+                        await self._interruptible_sleep(remaining)
+                        if self._stop_event.is_set():
+                            break
+                        if not self._enabled_cb(self._worker_name):
+                            continue
+
+                # Clear any pending trigger before executing so we don't
+                # immediately re-trigger after the cycle completes.
+                self._trigger_event.clear()
+
+                await self._execute_cycle()
+        finally:
+            if listener_task is not None:
+                listener_task.cancel()
+                try:
+                    await listener_task
+                except asyncio.CancelledError:
+                    pass

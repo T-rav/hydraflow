@@ -259,6 +259,10 @@ class ProposalWorker:
             logger.info("Filed proposal: %s [%s/%s]", title, domain, category)
             if hasattr(self._state, "mark_category_proposed"):
                 self._state.mark_category_proposed(domain, category)
+            try:
+                self._state.db.commit(f"proposal: {title}")
+            except Exception:
+                logger.debug("Dolt commit failed", exc_info=True)
         except Exception:
             logger.warning(
                 "Failed to file proposal: %s", title, exc_info=True

@@ -14,7 +14,7 @@ from typing import Any
 
 from base_background_loop import BaseBackgroundLoop
 from config import HydraFlowConfig
-from events import EventBus
+from events import EventBus, EventType
 from manifest import ProjectManifestManager
 from manifest_issue_syncer import ManifestIssueSyncer
 from models import ManifestRefreshSummary, StatusCallback
@@ -60,6 +60,9 @@ class ManifestRefreshLoop(BaseBackgroundLoop):
 
     def _get_default_interval(self) -> int:
         return self._config.manifest_refresh_interval
+
+    def _signal_types(self) -> frozenset[EventType]:
+        return frozenset({EventType.MERGE_UPDATE})
 
     async def _do_work(self) -> dict[str, Any] | None:
         content, digest_hash = self._manifest_manager.refresh()

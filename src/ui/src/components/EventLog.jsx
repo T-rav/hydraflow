@@ -18,6 +18,10 @@ export const typeColors = {
   ci_check: theme.yellow,
   issue_created: theme.green,
   background_worker_status: theme.accent,
+  review_insight_recorded: theme.orange,
+  harness_failure_recorded: theme.red,
+  retrospective_recorded: theme.purple,
+  metrics_snapshot_recorded: theme.yellow,
 }
 
 /**
@@ -46,6 +50,10 @@ export function eventSummary(type, data) {
     case 'ci_check': return `PR #${data.pr} CI ${data.status}`
     case 'issue_created': return `#${data.issue} created`
     case 'background_worker_status': return `${data.worker} → ${data.status}`
+    case 'review_insight_recorded': return `Review insight: ${data.pattern || data.title || 'recorded'}`
+    case 'harness_failure_recorded': return `Harness failure: ${data.test || data.title || 'recorded'}`
+    case 'retrospective_recorded': return `Retrospective: ${data.summary || data.title || 'recorded'}`
+    case 'metrics_snapshot_recorded': return `Metrics snapshot: ${data.label || 'recorded'}`
     default: return JSON.stringify(data).slice(0, 80)
   }
 }

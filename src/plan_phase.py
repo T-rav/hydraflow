@@ -179,6 +179,10 @@ class PlanPhase:
             self._state.record_issue_created()
 
         self._state.increment_session_counter("planned")
+        try:
+            self._state.db.commit(f"plan: issue #{issue.id}")
+        except Exception:
+            logger.debug("Dolt commit failed", exc_info=True)
         logger.info("Plan posted and labels swapped for issue #%d", issue.id)
 
     async def _handle_plan_failure(self, issue: Task, result: PlanResult) -> None:

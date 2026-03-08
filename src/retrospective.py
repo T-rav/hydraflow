@@ -73,6 +73,10 @@ class RetrospectiveCollector:
                 type=EventType.RETROSPECTIVE_RECORDED,
                 data=entry.model_dump(),
             ))
+            try:
+                self._state.db.commit(f"retro: issue #{issue_number}")
+            except Exception:
+                logger.debug("Dolt commit failed", exc_info=True)
         except Exception:
             logger.warning(
                 "Retrospective failed for issue #%d — continuing",
