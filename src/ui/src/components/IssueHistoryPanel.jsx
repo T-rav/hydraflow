@@ -242,6 +242,7 @@ export function OutcomesPanel() {
       if (issueText.includes(q)) return true
       if ((item.epic || '').toLowerCase().includes(q)) return true
       if ((item.crate_title || '').toLowerCase().includes(q)) return true
+      if (item.crate_number != null && String(item.crate_number).includes(q)) return true
       const slug = extractRepoSlug(item.issue_url)
       if (slug && slug.toLowerCase().includes(q)) return true
       if ((item.outcome?.reason || '').toLowerCase().includes(q)) return true
