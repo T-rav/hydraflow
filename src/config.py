@@ -97,7 +97,7 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("triage_model", "HYDRAFLOW_TRIAGE_MODEL", "haiku"),
     ("subskill_model", "HYDRAFLOW_SUBSKILL_MODEL", "haiku"),
     ("debug_model", "HYDRAFLOW_DEBUG_MODEL", "opus"),
-    ("report_issue_model", "HYDRAFLOW_REPORT_ISSUE_MODEL", "haiku"),
+    ("report_issue_model", "HYDRAFLOW_REPORT_ISSUE_MODEL", "opus"),
     ("adr_review_model", "HYDRAFLOW_ADR_REVIEW_MODEL", "sonnet"),
     ("changelog_file", "HYDRAFLOW_CHANGELOG_FILE", ""),
     ("release_tag_prefix", "HYDRAFLOW_RELEASE_TAG_PREFIX", "v"),
@@ -878,8 +878,8 @@ class HydraFlowConfig(BaseModel):
         description="CLI backend for report-issue worker",
     )
     report_issue_model: str = Field(
-        default="haiku",
-        description="Model for report-issue worker (formatting task, cheap)",
+        default="opus",
+        description="Model for report-issue worker (codebase research + structured issue creation)",
     )
     report_issue_interval: int = Field(
         default=30,
