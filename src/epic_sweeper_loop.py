@@ -66,13 +66,16 @@ class EpicSweeperLoop(BaseBackgroundLoop):
         swept = 0
         checked = 0
         for epic in epics:
-            sub_issues = self._collect_sub_issues(epic.number, epic.body)
-            if not sub_issues:
-                continue
-            checked += 1
-            closed = await self._try_sweep_epic(epic.number, epic.body, sub_issues)
-            if closed:
-                swept += 1
+            try:
+                sub_issues = self._collect_sub_issues(epic.number, epic.body)
+                if not sub_issues:
+                    continue
+                checked += 1
+                closed = await self._try_sweep_epic(epic.number, epic.body, sub_issues)
+                if closed:
+                    swept += 1
+            except Exception:
+                logger.exception("Error sweeping epic #%d — skipping", epic.number)
         return {"checked": checked, "swept": swept, "total_open_epics": len(epics)}
 
     def _collect_sub_issues(self, epic_number: int, body: str) -> list[int]:
