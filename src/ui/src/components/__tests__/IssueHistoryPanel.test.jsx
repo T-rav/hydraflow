@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 
 const mockUseHydraFlow = vi.fn()
 vi.mock('../../context/HydraFlowContext', () => ({
@@ -87,7 +87,7 @@ describe('OutcomesPanel (merged History+Outcomes)', () => {
     expect(screen.queryByText('Fix auth cache')).not.toBeInTheDocument()
     expect(screen.getByText('Merge docs')).toBeInTheDocument()
 
-    fireEvent.change(screen.getByPlaceholderText('Search issue #, title, repo, epic, crate'), { target: { value: 'auth' } })
+    fireEvent.change(screen.getByPlaceholderText('Search issue #, title, repo, epic, crate, reason'), { target: { value: 'auth' } })
     expect(screen.getByText('No issues match this filter.')).toBeInTheDocument()
   })
 
@@ -226,10 +226,7 @@ describe('OutcomesPanel (merged History+Outcomes)', () => {
     const payload = makePayload()
     payload.items[0].crate_number = 5
     payload.items[0].crate_title = 'v1.0 Sprint'
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => payload,
-    })
+    mockUseHydraFlow.mockReturnValue({ issueHistory: payload })
     render(<OutcomesPanel />)
     await waitFor(() => expect(screen.getByText('Fix auth cache')).toBeInTheDocument())
     expect(screen.getByText('v1.0 Sprint')).toBeInTheDocument()
@@ -254,7 +251,7 @@ describe('OutcomesPanel (merged History+Outcomes)', () => {
   it('searches by repo name', async () => {
     render(<OutcomesPanel />)
     await waitFor(() => expect(screen.getByText('Fix auth cache')).toBeInTheDocument())
-    fireEvent.change(screen.getByPlaceholderText('Search issue #, title, repo, epic, crate'), { target: { value: 'docs-site' } })
+    fireEvent.change(screen.getByPlaceholderText('Search issue #, title, repo, epic, crate, reason'), { target: { value: 'docs-site' } })
     expect(screen.queryByText('Fix auth cache')).not.toBeInTheDocument()
     expect(screen.getByText('Merge docs')).toBeInTheDocument()
   })
@@ -262,7 +259,7 @@ describe('OutcomesPanel (merged History+Outcomes)', () => {
   it('searches by outcome reason', async () => {
     render(<OutcomesPanel />)
     await waitFor(() => expect(screen.getByText('Fix auth cache')).toBeInTheDocument())
-    fireEvent.change(screen.getByPlaceholderText('Search issue #, title, repo, epic, crate'), { target: { value: 'auto-merge' } })
+    fireEvent.change(screen.getByPlaceholderText('Search issue #, title, repo, epic, crate, reason'), { target: { value: 'auto-merge' } })
     expect(screen.queryByText('Fix auth cache')).not.toBeInTheDocument()
     expect(screen.getByText('Merge docs')).toBeInTheDocument()
   })
