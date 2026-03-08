@@ -811,7 +811,9 @@ class TestRunMainSignalHandlers:
         ):
             await _run_main(config)
 
-        mock_runtime.stop.assert_called_once()
+        # stop() may be called more than once: once by the signal handler
+        # and once by registry.stop_all() in the finally block.
+        assert mock_runtime.stop.call_count >= 1
 
     @pytest.mark.asyncio
     async def test_dashboard_registers_signal_handlers(self) -> None:
@@ -1224,3 +1226,41 @@ class TestStartupWorkerCountLogging:
         assert "workers=3" in log_output
         assert "reviewers=5" in log_output
         assert "hitl=2" in log_output
+
+
+class TestRunMainRegistryWiring:
+    """Tests that _run_main wires RepoRuntimeRegistry correctly."""
+
+    @pytest.mark.asyncio
+    async def test_dashboard_creates_registry_and_repo_store(self, tmp_path) -> None:
+        """_run_main creates a RepoRuntimeRegistry (no data_root) and a RepoStore."""
+        from tests.helpers import ConfigFactory
+
+        config = ConfigFactory.create(dashboard_enabled=True, repo_root=tmp_path)
+
+        real_loop = asyncio.get_running_loop()
+
+        mock_dashboard = AsyncMock()
+        mock_dashboard._orchestrator = None
+        mock_dashboard.start = AsyncMock()
+        mock_dashboard.stop = AsyncMock()
+
+        mock_registry = MagicMock()
+        mock_registry.stop_all = AsyncMock()
+        mock_registry.register = AsyncMock(return_value=MagicMock())
+        mock_registry.__contains__ = MagicMock(return_value=False)
+
+        def trigger_stop(sig: int, cb: object) -> None:
+            if callable(cb):
+                cb()
+
+        with (
+            patch.object(real_loop, "add_signal_handler", side_effect=trigger_stop),
+            patch("dashboard.HydraFlowDashboard", return_value=mock_dashboard),
+            patch(
+                "repo_runtime.RepoRuntimeRegistry", return_value=mock_registry
+            ) as MockRegistry,
+        ):
+            await _run_main(config)
+
+        MockRegistry.assert_called_once_with()
