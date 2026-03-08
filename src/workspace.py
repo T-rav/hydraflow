@@ -76,8 +76,8 @@ class WorkspaceManager:
             _FETCH_LOCKS[key] = lock
         return lock
 
-    def _repo_worktree_lock(self) -> asyncio.Lock:
-        """Return a per-repo lock for worktree create/destroy operations."""
+    def _repo_workspace_lock(self) -> asyncio.Lock:
+        """Return a per-repo lock for workspace create/destroy operations."""
         key = f"wt:{self._config.repo_slug}"
         lock = _WORKTREE_LOCKS.get(key)
         if lock is None:
@@ -238,7 +238,7 @@ class WorkspaceManager:
                     gh_token=gh,
                 )
 
-        # 5. Reset main to match remote
+        # 3. Reset main to match remote
         with contextlib.suppress(RuntimeError):
             await run_subprocess(
                 "git",
@@ -249,7 +249,7 @@ class WorkspaceManager:
                 gh_token=gh,
             )
 
-        # 6. Delete orphan agent/* branches that aren't tied to active worktrees
+        # 4. Delete orphan agent/* branches
         try:
             branches_output = await run_subprocess(
                 "git",
@@ -275,7 +275,7 @@ class WorkspaceManager:
         except RuntimeError:
             logger.debug("Could not list agent branches for cleanup", exc_info=True)
 
-        logger.info("Repo sanitized — HEAD on %s, worktrees pruned", main)
+        logger.info("Repo sanitized — HEAD on %s, orphan branches pruned", main)
 
     async def pre_work_check(self) -> None:
         """Quick validation before creating a workspace.
@@ -391,11 +391,11 @@ class WorkspaceManager:
 
         Returns the absolute path to the new workspace.
         """
-        async with self._repo_worktree_lock():
+        async with self._repo_workspace_lock():
             return await self._create_unlocked(issue_number, branch)
 
     async def _create_unlocked(self, issue_number: int, branch: str) -> Path:
-        """Inner create logic — must be called under ``_repo_worktree_lock``."""
+        """Inner create logic — must be called under ``_repo_workspace_lock``."""
         wt_path = self._config.worktree_path_for_issue(issue_number)
         logger.info(
             "Creating workspace %s on branch %s",
@@ -508,11 +508,11 @@ class WorkspaceManager:
 
     async def destroy(self, issue_number: int) -> None:
         """Remove the workspace for *issue_number*."""
-        async with self._repo_worktree_lock():
+        async with self._repo_workspace_lock():
             await self._destroy_unlocked(issue_number)
 
     async def _destroy_unlocked(self, issue_number: int) -> None:
-        """Inner destroy logic — must be called under ``_repo_worktree_lock``."""
+        """Inner destroy logic — must be called under ``_repo_workspace_lock``."""
         wt_path = self._config.worktree_path_for_issue(issue_number)
         if self._config.dry_run:
             logger.info("[dry-run] Would destroy workspace %s", wt_path)

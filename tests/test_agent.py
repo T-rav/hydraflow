@@ -948,6 +948,56 @@ class TestForceCommitUncommitted:
         assert mock_host.run_simple.await_count == 1  # status
 
     @pytest.mark.asyncio
+    async def test_force_commit_returns_false_when_git_add_fails(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """Non-zero returncode from git add should return False."""
+        runner = AgentRunner(config, event_bus)
+        task = TaskFactory.create(id=99, title="Fix the widget")
+
+        async def fake_run_simple(cmd, *, cwd=None, timeout=120.0, **kw):
+            from execution import SimpleResult
+
+            if "status" in cmd:
+                return SimpleResult(stdout=" M src/foo.py", stderr="", returncode=0)
+            if "add" in cmd:
+                return SimpleResult(stdout="", stderr="fatal: error", returncode=128)
+            return SimpleResult(stdout="", stderr="", returncode=0)
+
+        mock_host = MagicMock()
+        mock_host.run_simple = AsyncMock(side_effect=fake_run_simple)
+
+        with patch("execution.get_default_runner", return_value=mock_host):
+            result = await runner._force_commit_uncommitted(task, tmp_path)
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_force_commit_returns_false_when_git_commit_fails(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """Non-zero returncode from git commit should return False."""
+        runner = AgentRunner(config, event_bus)
+        task = TaskFactory.create(id=99, title="Fix the widget")
+
+        async def fake_run_simple(cmd, *, cwd=None, timeout=120.0, **kw):
+            from execution import SimpleResult
+
+            if "status" in cmd:
+                return SimpleResult(stdout=" M src/foo.py", stderr="", returncode=0)
+            if "commit" in cmd:
+                return SimpleResult(stdout="", stderr="nothing to commit", returncode=1)
+            return SimpleResult(stdout="", stderr="", returncode=0)
+
+        mock_host = MagicMock()
+        mock_host.run_simple = AsyncMock(side_effect=fake_run_simple)
+
+        with patch("execution.get_default_runner", return_value=mock_host):
+            result = await runner._force_commit_uncommitted(task, tmp_path)
+
+        assert result is False
+
+    @pytest.mark.asyncio
     async def test_force_commit_handles_error_gracefully(
         self, config, event_bus: EventBus, tmp_path: Path
     ) -> None:

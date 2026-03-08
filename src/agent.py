@@ -950,12 +950,20 @@ SUMMARY: <one-line summary>
                 "Issue #%d: agent left uncommitted changes — force-committing",
                 task.id,
             )
-            await host.run_simple(
+            add_result = await host.run_simple(
                 ["git", "add", "-A"],
                 cwd=cwd,
                 timeout=timeout,
             )
-            await host.run_simple(
+            if add_result.returncode != 0:
+                logger.warning(
+                    "Issue #%d: git add failed (rc=%d): %s",
+                    task.id,
+                    add_result.returncode,
+                    add_result.stderr,
+                )
+                return False
+            commit_result = await host.run_simple(
                 [
                     "git",
                     "commit",
@@ -966,6 +974,14 @@ SUMMARY: <one-line summary>
                 cwd=cwd,
                 timeout=timeout,
             )
+            if commit_result.returncode != 0:
+                logger.warning(
+                    "Issue #%d: git commit failed (rc=%d): %s",
+                    task.id,
+                    commit_result.returncode,
+                    commit_result.stderr,
+                )
+                return False
             logger.info(
                 "Issue #%d: salvage commit created for uncommitted work",
                 task.id,

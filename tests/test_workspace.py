@@ -672,7 +672,7 @@ class TestPerRepoWorktreeLock:
         """Two managers for the same repo should share the same lock."""
         manager_a = WorkspaceManager(config)
         manager_b = WorkspaceManager(config)
-        assert manager_a._repo_worktree_lock() is manager_b._repo_worktree_lock()
+        assert manager_a._repo_workspace_lock() is manager_b._repo_workspace_lock()
 
     def test_different_repos_get_different_locks(self, tmp_path: Path) -> None:
         """Two managers for different repos should have independent locks."""
@@ -688,8 +688,8 @@ class TestPerRepoWorktreeLock:
             worktree_base=tmp_path / "wt",
             repo_root=tmp_path / "b",
         )
-        lock_a = WorkspaceManager(cfg_a)._repo_worktree_lock()
-        lock_b = WorkspaceManager(cfg_b)._repo_worktree_lock()
+        lock_a = WorkspaceManager(cfg_a)._repo_workspace_lock()
+        lock_b = WorkspaceManager(cfg_b)._repo_workspace_lock()
         assert lock_a is not lock_b
 
 

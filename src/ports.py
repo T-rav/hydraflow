@@ -183,15 +183,15 @@ class PRPort(Protocol):
 
 @runtime_checkable
 class WorkspacePort(Protocol):
-    """Port for git worktree lifecycle operations.
+    """Port for git workspace lifecycle operations.
 
-    Implemented by: ``worktree.WorkspaceManager``
+    Implemented by: ``workspace.WorkspaceManager``
     """
 
     async def create(self, issue_number: int, branch: str) -> Path:
-        """Create an isolated git worktree for *issue_number* on *branch*.
+        """Create an isolated workspace for *issue_number* on *branch*.
 
-        Returns the path to the new worktree.
+        Returns the path to the new workspace.
         """
         ...
 
