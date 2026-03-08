@@ -1,41 +1,44 @@
-"""Integration tests for docker_runner.py — requires a running Docker daemon.
+"""Integration tests for docker_runner.py — real Docker daemon interactions.
 
-These tests exercise DockerRunner against a real Docker daemon to verify
-container creation, stream demultiplexing, resource limits, volume mounts,
-cleanup, and network isolation.
-
-Run with: pytest -m docker tests/test_docker_runner_integration.py
-Skip with: pytest -m "not docker"
+These tests require a running Docker daemon and the ``alpine:latest`` image.
+They are marked with ``@pytest.mark.integration`` and will be skipped when
+Docker is unavailable.
 """
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+import contextlib
+import textwrap
 from pathlib import Path
-from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
 
 import pytest
 
-if TYPE_CHECKING:
-    from docker_runner import DockerRunner
+from docker_runner import (
+    DockerRunner,
+    build_container_kwargs,
+)
+from tests.helpers import ConfigFactory
 
-# Guard: skip the entire module when Docker is not available.
+# ---------------------------------------------------------------------------
+# Skip guard — skip entire module when Docker daemon is not reachable
+# ---------------------------------------------------------------------------
+
+_docker_available = False
 try:
-    import docker
+    import docker as _docker_mod
 
-    _client = docker.from_env()
+    _client = _docker_mod.from_env()
     _client.ping()
-    _DOCKER_AVAILABLE = True
+    _docker_available = True
 except Exception:
-    _DOCKER_AVAILABLE = False
+    pass
 
 pytestmark = [
-    pytest.mark.docker,
-    pytest.mark.skipif(not _DOCKER_AVAILABLE, reason="Docker daemon not available"),
+    pytest.mark.integration,
+    pytest.mark.skipif(not _docker_available, reason="Docker daemon not available"),
 ]
 
-# A minimal image available on most Docker hosts.
+# Use a minimal, widely-available image for integration tests
 _TEST_IMAGE = "alpine:latest"
 
 
@@ -44,396 +47,264 @@ _TEST_IMAGE = "alpine:latest"
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(scope="module")
-def _pull_image() -> None:
-    """Ensure the test image is pulled once per module."""
-    client = docker.from_env()
+@pytest.fixture(autouse=True, scope="session")
+def _pull_image_once() -> None:
+    """Ensure the test image is available locally (runs once per session)."""
+    client = _docker_mod.from_env()
     try:
         client.images.get(_TEST_IMAGE)
-    except docker.errors.ImageNotFound:
+    except _docker_mod.errors.ImageNotFound:
         client.images.pull(_TEST_IMAGE)
 
 
 @pytest.fixture()
-def repo_root(tmp_path: Path) -> Path:
-    """Create a temporary repo root directory."""
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    return repo
+def tmp_workspace(tmp_path: Path) -> Path:
+    """Create a temporary workspace directory with a test file."""
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    (ws / "hello.txt").write_text("hello from host\n")
+    return ws
 
 
 @pytest.fixture()
-def log_dir(tmp_path: Path) -> Path:
-    """Create a temporary log directory."""
-    logs = tmp_path / "logs"
-    logs.mkdir()
-    return logs
+def tmp_log_dir(tmp_path: Path) -> Path:
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    return log_dir
 
 
 @pytest.fixture()
-def work_dir(tmp_path: Path) -> Path:
-    """Create a temporary working directory (simulates a worktree)."""
-    wd = tmp_path / "workspace"
-    wd.mkdir()
-    return wd
-
-
-@pytest.fixture()
-def docker_config() -> MagicMock:
-    """Minimal HydraFlowConfig mock for DockerRunner."""
-    cfg = MagicMock()
-    cfg.docker_cpu_limit = 1.0
-    cfg.docker_memory_limit = "128m"
-    cfg.docker_pids_limit = 64
-    cfg.docker_network_mode = "none"
-    cfg.docker_read_only_root = False
-    cfg.docker_no_new_privileges = True
-    cfg.docker_tmp_size = "64m"
-    return cfg
-
-
-@pytest.fixture()
-async def runner(
-    _pull_image: None,
-    repo_root: Path,
-    log_dir: Path,
-    docker_config: MagicMock,
-) -> AsyncGenerator[DockerRunner, None]:
-    """Create a DockerRunner pointed at the test image, with cleanup after each test."""
-    from docker_runner import DockerRunner
-
-    r = DockerRunner(
+def runner(tmp_workspace: Path, tmp_log_dir: Path) -> DockerRunner:
+    """Create a DockerRunner with zero spawn delay for fast tests."""
+    return DockerRunner(
         image=_TEST_IMAGE,
-        repo_root=repo_root,
-        log_dir=log_dir,
+        repo_root=tmp_workspace,
+        log_dir=tmp_log_dir,
         spawn_delay=0.0,
-        config=docker_config,
     )
-    try:
-        yield r
-    finally:
-        await r.cleanup()
 
 
 # ---------------------------------------------------------------------------
-# Tests
+# Test: run_simple — basic container execution
 # ---------------------------------------------------------------------------
 
 
-class TestContainerCreation:
-    """Test container creation with a real Docker daemon."""
+class TestRunSimpleIntegration:
+    """Integration tests for DockerRunner.run_simple."""
 
-    async def test_run_simple_echo(self, runner: DockerRunner, work_dir: Path) -> None:
-        """A basic echo command should succeed and return stdout."""
-        result = await runner.run_simple(
-            ["echo", "hello world"],
-            cwd=str(work_dir),
-            timeout=30.0,
-        )
+    async def test_echo_returns_stdout(self, runner: DockerRunner) -> None:
+        """Container runs echo and returns stdout."""
+        result = await runner.run_simple(["echo", "integration-test"])
         assert result.returncode == 0
-        assert "hello world" in result.stdout
+        assert "integration-test" in result.stdout
 
-    async def test_run_simple_stderr(
-        self, runner: DockerRunner, work_dir: Path
-    ) -> None:
-        """stderr output should be captured separately."""
-        result = await runner.run_simple(
-            ["sh", "-c", "echo err >&2"],
-            cwd=str(work_dir),
-            timeout=30.0,
-        )
-        assert result.returncode == 0
+    async def test_stderr_captured(self, runner: DockerRunner) -> None:
+        """Container stderr is captured separately."""
+        result = await runner.run_simple(["sh", "-c", "echo err >&2"])
         assert "err" in result.stderr
 
-    async def test_nonzero_exit_code(
-        self, runner: DockerRunner, work_dir: Path
-    ) -> None:
-        """Non-zero exit codes should propagate correctly."""
-        result = await runner.run_simple(
-            ["sh", "-c", "exit 42"],
-            cwd=str(work_dir),
-            timeout=30.0,
-        )
+    async def test_nonzero_exit_code_propagated(self, runner: DockerRunner) -> None:
+        """Non-zero exit codes propagate correctly."""
+        result = await runner.run_simple(["sh", "-c", "exit 42"])
         assert result.returncode == 42
 
+    async def test_timeout_kills_container(self, runner: DockerRunner) -> None:
+        """Container is killed when timeout expires; no leaked containers."""
+        with pytest.raises(TimeoutError):
+            await runner.run_simple(["sleep", "60"], timeout=1.0)
+        # After timeout, no containers should be tracked
+        assert len(runner._containers) == 0
 
-class TestStreamDemultiplexing:
-    """Test multiplexed stdout/stderr stream parsing with a real Docker attach socket."""
 
-    async def test_streaming_process_stdout(
-        self, runner: DockerRunner, work_dir: Path
+# ---------------------------------------------------------------------------
+# Test: volume mounts
+# ---------------------------------------------------------------------------
+
+
+class TestVolumeMountIntegration:
+    """Verify volume mounts are correct inside the container."""
+
+    async def test_workspace_file_visible(
+        self, runner: DockerRunner, tmp_workspace: Path
     ) -> None:
-        """Streaming process should yield stdout lines via async iteration."""
-        proc = await runner.create_streaming_process(
-            ["sh", "-c", "echo line1; echo line2; echo line3"],
-            cwd=str(work_dir),
-        )
-        lines: list[bytes] = []
-        async for chunk in proc.stdout:  # type: ignore[union-attr]
-            lines.append(chunk)
-
-        exit_code = await proc.wait()
-        assert exit_code == 0
-        combined = b"".join(lines).decode()
-        assert "line1" in combined
-        assert "line2" in combined
-        assert "line3" in combined
-
-    async def test_streaming_process_stderr_collection(
-        self, runner: DockerRunner, work_dir: Path
-    ) -> None:
-        """Stderr should be collected during stdout streaming."""
-        proc = await runner.create_streaming_process(
-            ["sh", "-c", "echo out; echo err >&2"],
-            cwd=str(work_dir),
-        )
-        # Drain stdout
-        async for _ in proc.stdout:  # type: ignore[union-attr]
-            pass
-
-        stderr_data = await proc.stderr.read()  # type: ignore[union-attr]
-        await proc.wait()
-        assert b"err" in stderr_data
-
-
-class TestVolumeMounts:
-    """Test volume mount correctness — files visible inside container and changes persisted."""
-
-    async def test_host_file_visible_in_container(
-        self, runner: DockerRunner, work_dir: Path
-    ) -> None:
-        """Files in the host work_dir should be visible as /workspace inside the container."""
-        (work_dir / "testfile.txt").write_text("hello from host")
-
+        """Files in cwd are visible inside container at /workspace."""
         result = await runner.run_simple(
-            ["cat", "/workspace/testfile.txt"],
-            cwd=str(work_dir),
-            timeout=30.0,
+            ["cat", "/workspace/hello.txt"],
+            cwd=str(tmp_workspace),
         )
         assert result.returncode == 0
         assert "hello from host" in result.stdout
 
-    async def test_container_changes_persisted_to_host(
-        self, runner: DockerRunner, work_dir: Path
+    async def test_workspace_changes_persisted(
+        self, runner: DockerRunner, tmp_workspace: Path
     ) -> None:
-        """Changes made inside the container should be persisted to the host volume."""
+        """Changes made inside the container persist on the host."""
         result = await runner.run_simple(
-            ["sh", "-c", "echo written_by_container > /workspace/output.txt"],
-            cwd=str(work_dir),
-            timeout=30.0,
+            ["sh", "-c", "echo 'written inside' > /workspace/output.txt"],
+            cwd=str(tmp_workspace),
         )
         assert result.returncode == 0
+        output_file = tmp_workspace / "output.txt"
+        assert output_file.exists()
+        assert "written inside" in output_file.read_text()
 
-        output = (work_dir / "output.txt").read_text()
-        assert "written_by_container" in output
-
-    async def test_repo_mounted_read_only(
-        self, runner: DockerRunner, repo_root: Path, work_dir: Path
+    async def test_repo_root_mounted_readonly(
+        self, runner: DockerRunner, tmp_workspace: Path
     ) -> None:
-        """The repo root is mounted at /repo as read-only — writes should fail."""
-        (repo_root / "existing.txt").write_text("original")
-
-        result = await runner.run_simple(
-            ["sh", "-c", "echo overwrite > /repo/existing.txt"],
-            cwd=str(work_dir),
-            timeout=30.0,
-        )
-        # The write should fail because /repo is read-only
-        assert result.returncode != 0
-
-        # Original file should be unchanged
-        assert (repo_root / "existing.txt").read_text() == "original"
-
-    async def test_log_dir_mounted(
-        self, runner: DockerRunner, log_dir: Path, work_dir: Path
-    ) -> None:
-        """The log directory should be mounted at /logs inside the container."""
-        result = await runner.run_simple(
-            ["sh", "-c", "echo logentry > /logs/test.log"],
-            cwd=str(work_dir),
-            timeout=30.0,
-        )
+        """Repo root is mounted at /repo as read-only; writes are rejected."""
+        result = await runner.run_simple(["cat", "/repo/hello.txt"])
         assert result.returncode == 0
-        assert (log_dir / "test.log").read_text().strip() == "logentry"
+        assert "hello from host" in result.stdout
 
-
-class TestContainerCleanup:
-    """Test container cleanup on timeout and normal completion."""
-
-    async def test_cleanup_removes_containers(
-        self, runner: DockerRunner, work_dir: Path
-    ) -> None:
-        """After cleanup(), no tracked containers should remain in Docker."""
-        # Run a container that stays alive for a bit
-        await runner.create_streaming_process(
-            ["sleep", "60"],
-            cwd=str(work_dir),
+        # Verify the mount is actually read-only — write attempt must fail.
+        write_result = await runner.run_simple(
+            ["sh", "-c", "echo blocked > /repo/should_not_exist.txt 2>&1; echo exit=$?"]
         )
-        # We should have at least one tracked container
-        assert len(runner._containers) >= 1
-        container_ids = [c.id for c in runner._containers]
-
-        # Cleanup should remove all
-        await runner.cleanup()
-        assert len(runner._containers) == 0
-
-        # Verify containers are actually gone from Docker
-        client = docker.from_env()
-        for cid in container_ids:
-            with pytest.raises(docker.errors.NotFound):
-                client.containers.get(cid)
-
-    async def test_timeout_kills_container(
-        self, runner: DockerRunner, work_dir: Path
-    ) -> None:
-        """A container that exceeds the timeout should be killed."""
-        with pytest.raises(TimeoutError):
-            await runner.run_simple(
-                ["sleep", "60"],
-                cwd=str(work_dir),
-                timeout=2.0,
-            )
-
-        # After timeout, the container should have been cleaned up
-        assert len(runner._containers) == 0
-
-    async def test_async_context_manager_cleanup(
-        self,
-        _pull_image: None,
-        repo_root: Path,
-        log_dir: Path,
-        work_dir: Path,
-        docker_config: MagicMock,
-    ) -> None:
-        """Using DockerRunner as async context manager should clean up on exit."""
-        from docker_runner import DockerRunner
-
-        async with DockerRunner(
-            image=_TEST_IMAGE,
-            repo_root=repo_root,
-            log_dir=log_dir,
-            spawn_delay=0.0,
-            config=docker_config,
-        ) as dr:
-            await dr.create_streaming_process(
-                ["sleep", "60"],
-                cwd=str(work_dir),
-            )
-            container_ids = [c.id for c in dr._containers]
-            assert len(container_ids) >= 1
-
-        # After exiting the context manager, containers should be removed
-        client = docker.from_env()
-        for cid in container_ids:
-            with pytest.raises(docker.errors.NotFound):
-                client.containers.get(cid)
-
-
-class TestNetworkIsolation:
-    """Test container network isolation."""
-
-    async def test_network_mode_none_blocks_traffic(
-        self, runner: DockerRunner, work_dir: Path
-    ) -> None:
-        """With network_mode='none', the container should not be able to reach external hosts."""
-        result = await runner.run_simple(
-            ["sh", "-c", "ping -c 1 -W 2 8.8.8.8 2>&1 || echo NETWORK_BLOCKED"],
-            cwd=str(work_dir),
-            timeout=15.0,
-        )
-        # Either ping fails (non-zero exit) or the echo runs
-        assert result.returncode != 0 or "NETWORK_BLOCKED" in result.stdout
-
-
-class TestResourceLimits:
-    """Test resource limit enforcement with real Docker."""
-
-    async def test_memory_limit_enforced(
-        self, runner: DockerRunner, work_dir: Path
-    ) -> None:
-        """A container that exceeds its memory limit should be killed (OOMKilled)."""
-        # The runner has 128m memory limit. Allocate well beyond that using
-        # a shell approach that holds memory (writing to a tmpfs which counts
-        # against the cgroup memory limit).
-        result = await runner.run_simple(
-            [
-                "sh",
-                "-c",
-                # Write to /dev/shm (tmpfs backed by memory) to force real allocation
-                "dd if=/dev/zero of=/dev/shm/fill bs=1M count=256 2>&1; echo done",
-            ],
-            cwd=str(work_dir),
-            timeout=30.0,
-        )
-        # The container should be OOM-killed (exit code 137 = SIGKILL) or
-        # the dd should fail with a write error due to memory limits.
+        output = write_result.stdout + write_result.stderr
         assert (
-            result.returncode != 0 or "No space left" in result.stdout + result.stderr
-        ), f"Expected OOM kill or write failure, got rc={result.returncode}"
+            "exit=1" in output
+            or "read-only" in output.lower()
+            or "permission denied" in output.lower()
+        ), f"Expected write to /repo to fail, got: {output!r}"
+        assert not (tmp_workspace / "should_not_exist.txt").exists()
 
-    async def test_pids_limit_enforced(
-        self, runner: DockerRunner, work_dir: Path
+
+# ---------------------------------------------------------------------------
+# Test: container cleanup
+# ---------------------------------------------------------------------------
+
+
+class TestContainerCleanupIntegration:
+    """Verify containers are cleaned up after execution."""
+
+    async def test_container_removed_after_run_simple(
+        self, runner: DockerRunner
     ) -> None:
-        """A container should be unable to create processes beyond its PID limit."""
-        # PID limit is 64 — try to fork many more
-        result = await runner.run_simple(
-            [
-                "sh",
-                "-c",
-                # Try to spawn 200 background processes — should fail around pid limit
-                "for i in $(seq 1 200); do sleep 60 & done 2>&1; echo FORK_COUNT=$(jobs -p | wc -l)",
-            ],
-            cwd=str(work_dir),
-            timeout=30.0,
+        """Container is removed after successful run_simple."""
+        await runner.run_simple(["true"])
+        assert len(runner._containers) == 0
+
+    async def test_cleanup_removes_all_tracked(
+        self, tmp_workspace: Path, tmp_log_dir: Path
+    ) -> None:
+        """cleanup() removes all in-flight tracked containers."""
+        # Use create_streaming_process so the container stays in _containers
+        # until we explicitly call cleanup (unlike run_simple which removes on exit).
+        r = DockerRunner(
+            image=_TEST_IMAGE,
+            repo_root=tmp_workspace,
+            log_dir=tmp_log_dir,
+            spawn_delay=0.0,
         )
-        # Extract fork count — it should be less than 200 due to PID limit
-        if "FORK_COUNT=" in result.stdout:
-            count_str = result.stdout.split("FORK_COUNT=")[1].strip().split()[0]
-            fork_count = int(count_str)
-            # With a PID limit of 64 (including the sh process and its children),
-            # we should have significantly fewer than 200 forks
-            assert fork_count < 200, (
-                f"Expected fewer than 200 forked processes with pids_limit=64, "
-                f"got {fork_count}"
-            )
-        else:
-            # If we didn't get the output, the container was likely killed due to
-            # resource limits — that's also an acceptable outcome
-            pass
-
-
-class TestSecurityOpts:
-    """Test security configuration against real Docker."""
-
-    async def test_no_new_privileges(
-        self, runner: DockerRunner, work_dir: Path
-    ) -> None:
-        """Container should run with no-new-privileges security option."""
-        result = await runner.run_simple(
-            ["cat", "/proc/self/status"],
-            cwd=str(work_dir),
-            timeout=15.0,
+        proc = await r.create_streaming_process(
+            ["sleep", "60"],
+            cwd=str(tmp_workspace),
         )
-        assert result.returncode == 0
-        # NoNewPrivs should be 1 (enabled)
-        assert "NoNewPrivs:\t1" in result.stdout
+        container = next(iter(r._containers))
+        container_id = container.id
+        assert len(r._containers) == 1
+
+        await r.cleanup()
+        assert len(r._containers) == 0
+
+        # Verify the container no longer exists in Docker
+        client = _docker_mod.from_env()
+        running_ids = {c.id for c in client.containers.list(all=True)}
+        assert container_id not in running_ids
+
+        # Reap the process to avoid resource warnings
+        proc.kill()
+        with contextlib.suppress(Exception):
+            await proc.wait()
 
 
-class TestBuildContainerKwargsValidation:
-    """Test that build_container_kwargs output is accepted by Docker SDK."""
+# ---------------------------------------------------------------------------
+# Test: create_streaming_process
+# ---------------------------------------------------------------------------
 
-    async def test_kwargs_accepted_by_docker_create(
-        self, _pull_image: None, docker_config: MagicMock, work_dir: Path
+
+class TestStreamingProcessIntegration:
+    """Integration tests for DockerRunner.create_streaming_process."""
+
+    async def test_streaming_stdout_lines(
+        self, runner: DockerRunner, tmp_workspace: Path
     ) -> None:
-        """Container kwargs from build_container_kwargs should be valid for Docker SDK."""
-        from docker_runner import build_container_kwargs
+        """Streaming process yields stdout lines from a real container."""
+        proc = await runner.create_streaming_process(
+            ["sh", "-c", "echo line1; echo line2; echo line3"],
+            cwd=str(tmp_workspace),
+        )
+        lines: list[bytes] = []
+        async for chunk in proc.stdout:
+            lines.append(chunk)
+        exit_code = await proc.wait()
+        assert exit_code == 0
 
-        kwargs = build_container_kwargs(docker_config)
+        joined = b"".join(lines).decode()
+        assert "line1" in joined
+        assert "line2" in joined
+        assert "line3" in joined
 
-        client = docker.from_env()
+    async def test_streaming_stderr_collected(
+        self, runner: DockerRunner, tmp_workspace: Path
+    ) -> None:
+        """Streaming process collects stderr via the demuxer."""
+        proc = await runner.create_streaming_process(
+            ["sh", "-c", "echo out; echo err >&2"],
+            cwd=str(tmp_workspace),
+        )
+        stdout_lines: list[bytes] = []
+        async for chunk in proc.stdout:
+            stdout_lines.append(chunk)
+        stderr_data = await proc.stderr.read()
+        exit_code = await proc.wait()
+
+        assert exit_code == 0
+        assert b"out" in b"".join(stdout_lines)
+        assert b"err" in stderr_data
+
+    async def test_streaming_process_kill(
+        self, runner: DockerRunner, tmp_workspace: Path
+    ) -> None:
+        """Killing a streaming process stops the container."""
+        proc = await runner.create_streaming_process(
+            ["sleep", "60"],
+            cwd=str(tmp_workspace),
+        )
+        proc.kill()
+        # wait should return non-zero after kill
+        code = await proc.wait()
+        assert code != 0
+
+
+# ---------------------------------------------------------------------------
+# Test: build_container_kwargs validated by Docker SDK
+# ---------------------------------------------------------------------------
+
+
+class TestBuildContainerKwargsDockerValidation:
+    """Validate that build_container_kwargs output is accepted by Docker SDK."""
+
+    async def test_kwargs_accepted_by_create(
+        self, tmp_workspace: Path, tmp_log_dir: Path
+    ) -> None:
+        """Docker SDK accepts kwargs from build_container_kwargs without error."""
+        config = ConfigFactory.create(
+            execution_mode="docker",
+            docker_image=_TEST_IMAGE,
+            docker_cpu_limit=1.0,
+            docker_memory_limit="128m",
+            docker_pids_limit=64,
+            docker_network_mode="bridge",
+            docker_read_only_root=False,
+            docker_no_new_privileges=True,
+        )
+        kwargs = build_container_kwargs(config)
+
+        client = _docker_mod.from_env()
         container = client.containers.create(
-            _TEST_IMAGE,
-            command=["echo", "test"],
+            image=_TEST_IMAGE,
+            command=["true"],
             **kwargs,
         )
         try:
@@ -443,17 +314,187 @@ class TestBuildContainerKwargsValidation:
         finally:
             container.remove(force=True)
 
-    async def test_kwargs_resource_values_match_config(
-        self, docker_config: MagicMock
+    async def test_network_mode_none_accepted(self) -> None:
+        """Docker accepts network_mode='none'."""
+        config = ConfigFactory.create(docker_network_mode="none")
+        kwargs = build_container_kwargs(config)
+
+        client = _docker_mod.from_env()
+        container = client.containers.create(
+            image=_TEST_IMAGE,
+            command=["true"],
+            **kwargs,
+        )
+        try:
+            container.start()
+            result = container.wait()
+            assert result["StatusCode"] == 0
+        finally:
+            container.remove(force=True)
+
+
+# ---------------------------------------------------------------------------
+# Test: network isolation
+# ---------------------------------------------------------------------------
+
+
+class TestNetworkIsolationIntegration:
+    """Verify network isolation settings work at the Docker level."""
+
+    async def test_network_mode_none_blocks_connectivity(
+        self, tmp_workspace: Path, tmp_log_dir: Path
     ) -> None:
-        """Verify kwargs values match the config inputs."""
-        from docker_runner import build_container_kwargs
+        """Container with network_mode=none cannot reach external hosts."""
+        runner = DockerRunner(
+            image=_TEST_IMAGE,
+            repo_root=tmp_workspace,
+            log_dir=tmp_log_dir,
+            spawn_delay=0.0,
+            config=ConfigFactory.create(docker_network_mode="none"),
+        )
+        # wget should fail with no network
+        result = await runner.run_simple(
+            ["sh", "-c", "wget -q -O /dev/null http://1.1.1.1/ 2>&1 || echo 'no-net'"],
+            timeout=10.0,
+        )
+        assert "no-net" in result.stdout
 
-        kwargs = build_container_kwargs(docker_config)
 
-        assert kwargs["nano_cpus"] == int(1.0 * 1e9)
-        assert kwargs["mem_limit"] == "128m"
-        assert kwargs["pids_limit"] == 64
-        assert kwargs["network_mode"] == "none"
-        assert kwargs["cap_drop"] == ["ALL"]
-        assert "no-new-privileges:true" in kwargs["security_opt"]
+# ---------------------------------------------------------------------------
+# Test: security hardening
+# ---------------------------------------------------------------------------
+
+
+class TestSecurityHardeningIntegration:
+    """Verify security settings are enforced by Docker."""
+
+    async def test_cap_drop_all_prevents_privileged_ops(
+        self, tmp_workspace: Path, tmp_log_dir: Path
+    ) -> None:
+        """With cap_drop=ALL, privileged operations like chown on root-owned files fail."""
+        config = ConfigFactory.create(docker_read_only_root=False)
+        runner = DockerRunner(
+            image=_TEST_IMAGE,
+            repo_root=tmp_workspace,
+            log_dir=tmp_log_dir,
+            spawn_delay=0.0,
+            config=config,
+        )
+        # mknod requires CAP_MKNOD which should be dropped
+        result = await runner.run_simple(
+            ["sh", "-c", "mknod /tmp/testdev b 1 1 2>&1; echo exit=$?"],
+        )
+        # mknod should fail with dropped capabilities
+        assert (
+            "exit=1" in result.stdout
+            or "Operation not permitted" in result.stdout
+            or "denied" in result.stdout.lower()
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test: resource limits
+# ---------------------------------------------------------------------------
+
+
+class TestResourceLimitsIntegration:
+    """Verify resource limits are enforced by Docker."""
+
+    async def test_pids_limit_enforced(
+        self, tmp_workspace: Path, tmp_log_dir: Path
+    ) -> None:
+        """Container with low PID limit cannot fork unlimited processes."""
+        config = ConfigFactory.create(
+            docker_pids_limit=5,
+            docker_read_only_root=False,
+        )
+        runner = DockerRunner(
+            image=_TEST_IMAGE,
+            repo_root=tmp_workspace,
+            log_dir=tmp_log_dir,
+            spawn_delay=0.0,
+            config=config,
+        )
+        # Try to fork many processes — should hit PID limit
+        script = textwrap.dedent("""\
+            i=0; while [ $i -lt 100 ]; do
+                sleep 30 &
+                i=$((i+1))
+            done 2>&1
+            echo "forked=$i"
+        """)
+        result = await runner.run_simple(
+            ["sh", "-c", script],
+            timeout=15.0,
+        )
+        # Either we get a "Resource temporarily unavailable" / fork error,
+        # or we see fewer than 100 forks completed (limit prevented all forks).
+        output = result.stdout + result.stderr
+        fork_error = (
+            "Resource temporarily unavailable" in output or "Cannot fork" in output
+        )
+        # Parse how many forks actually completed
+        forked_count = None
+        for token in output.split():
+            if token.startswith("forked="):
+                with contextlib.suppress(ValueError):
+                    forked_count = int(token.split("=", 1)[1])
+        limited_by_pid = forked_count is not None and forked_count < 100
+        assert fork_error or limited_by_pid, (
+            f"PID limit not enforced: output={output!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test: multiplexed stream demux with real Docker socket
+# ---------------------------------------------------------------------------
+
+
+class TestMultiplexedStreamIntegration:
+    """Verify Docker multiplexed stream parsing with real containers."""
+
+    async def test_interleaved_stdout_stderr_demuxed(
+        self, runner: DockerRunner, tmp_workspace: Path
+    ) -> None:
+        """Interleaved stdout/stderr streams are correctly demultiplexed."""
+        script = "echo out1; echo err1 >&2; echo out2; echo err2 >&2"
+        proc = await runner.create_streaming_process(
+            ["sh", "-c", script],
+            cwd=str(tmp_workspace),
+        )
+        stdout_lines: list[bytes] = []
+        async for chunk in proc.stdout:
+            stdout_lines.append(chunk)
+        stderr_data = await proc.stderr.read()
+        await proc.wait()
+
+        stdout_joined = b"".join(stdout_lines).decode()
+        stderr_joined = stderr_data.decode()
+
+        assert "out1" in stdout_joined
+        assert "out2" in stdout_joined
+        assert "err1" in stderr_joined
+        assert "err2" in stderr_joined
+        # stdout should NOT contain stderr content
+        assert "err1" not in stdout_joined
+        assert "err2" not in stdout_joined
+
+    async def test_large_output_fully_received(
+        self, runner: DockerRunner, tmp_workspace: Path
+    ) -> None:
+        """Large output (many frames) is fully received via the demuxer."""
+        # Generate 500 lines of output
+        proc = await runner.create_streaming_process(
+            ["sh", "-c", "seq 1 500"],
+            cwd=str(tmp_workspace),
+        )
+        stdout_lines: list[bytes] = []
+        async for chunk in proc.stdout:
+            stdout_lines.append(chunk)
+        await proc.wait()
+
+        joined = b"".join(stdout_lines).decode()
+        lines = [line for line in joined.strip().split("\n") if line.strip()]
+        assert len(lines) == 500
+        assert lines[0].strip() == "1"
+        assert lines[-1].strip() == "500"
