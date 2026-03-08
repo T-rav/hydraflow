@@ -875,6 +875,51 @@ class TestRunMainSignalHandlers:
         mock_orch.stop.assert_called_once()
         mock_dashboard.stop.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_dashboard_load_saved_before_register(self) -> None:
+        """_run_main must call load_saved() before register() so prior repos survive.
+
+        Regression guard: if register() is called first, _save() inside it
+        overwrites repos.json with only the current repo, discarding saved ones.
+        """
+        from tests.helpers import ConfigFactory
+
+        config = ConfigFactory.create(dashboard_enabled=True)
+
+        call_order: list[str] = []
+
+        mock_registry = MagicMock()
+        mock_registry.load_saved = AsyncMock(
+            side_effect=lambda: call_order.append("load_saved") or []
+        )
+        mock_registry.register = AsyncMock(
+            side_effect=lambda _cfg: call_order.append("register")
+        )
+        mock_registry.stop_all = AsyncMock()
+
+        real_loop = asyncio.get_running_loop()
+
+        def trigger_stop(sig: int, cb: object) -> None:
+            if sig == signal.SIGINT and callable(cb):
+                cb()
+
+        mock_dashboard = AsyncMock()
+        mock_dashboard._orchestrator = None
+        mock_dashboard.start = AsyncMock()
+        mock_dashboard.stop = AsyncMock()
+
+        with (
+            patch.object(real_loop, "add_signal_handler", side_effect=trigger_stop),
+            patch("dashboard.HydraFlowDashboard", return_value=mock_dashboard),
+            patch("repo_runtime.RepoRuntimeRegistry", return_value=mock_registry),
+        ):
+            await _run_main(config)
+
+        # load_saved must appear before register in the call order
+        assert "load_saved" in call_order
+        assert "register" in call_order
+        assert call_order.index("load_saved") < call_order.index("register")
+
 
 # ---------------------------------------------------------------------------
 # --max-issue-attempts CLI arg
