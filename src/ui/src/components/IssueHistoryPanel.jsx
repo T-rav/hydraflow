@@ -323,7 +323,7 @@ export function OutcomesPanel() {
     const outcomeReason = item.outcome?.reason || ''
     const repoSlug = extractRepoSlug(item.issue_url)
     const duration = formatDuration(item.first_seen, item.last_seen)
-    const hasCrate = item.crate_title || item.crate_number
+    const hasCrate = item.crate_title != null || item.crate_number != null
     return (
       <div key={issueNum} style={styles.rowWrap}>
         <div style={styles.row}>
@@ -518,7 +518,7 @@ export function OutcomesPanel() {
         <div style={styles.filterRow}>
           <input
             type="text"
-            placeholder="Search issue #, title, repo, epic, crate"
+            placeholder="Search issue #, title, repo, epic, crate, reason"
             value={search}
             onChange={e => setSearch(e.target.value)}
             style={styles.searchInput}
