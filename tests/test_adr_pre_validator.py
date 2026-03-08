@@ -181,10 +181,11 @@ class TestCheckSupersession:
         codes = [i.code for i in result.issues]
         assert "invalid_supersession" in codes
 
-    def test_no_all_adrs_skips_check(self) -> None:
+    def test_supersession_with_null_adr_list_treated_as_empty(self) -> None:
         content = _valid_adr(decision="This supersedes ADR-9999.")
         validator = ADRPreValidator()
-        # When all_adrs is None, supersession check should not crash
+        # When all_adrs is None it is coerced to [], so any supersession reference
+        # is flagged invalid because no existing ADRs are known.
         result = validator.validate(content, None)
         codes = [i.code for i in result.issues]
         assert "invalid_supersession" in codes

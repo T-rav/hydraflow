@@ -1908,10 +1908,8 @@ class TestAutoTriage:
         assert stats["escalated"] == 0
 
     @pytest.mark.asyncio
-    async def test_auto_triage_disabled_does_not_increment_auto_triaged(
-        self, tmp_path: Path
-    ) -> None:
-        """When auto_triage is False and triage succeeds, auto_triaged stays 0."""
+    async def test_auto_triage_disabled_escalates_to_hitl(self, tmp_path: Path) -> None:
+        """When auto_triage is False, triage is skipped and HITL is called directly."""
         reviewer = _make_reviewer(tmp_path, adr_review_auto_triage=False)
         result = ADRCouncilResult(
             adr_number=1,
@@ -1928,14 +1926,16 @@ class TestAutoTriage:
         with (
             patch.object(
                 reviewer, "_route_to_triage", new_callable=AsyncMock, return_value=True
-            ),
+            ) as mock_triage,
             patch.object(
                 reviewer, "_escalate_to_hitl", new_callable=AsyncMock
             ) as mock_hitl,
         ):
             await reviewer._route_result(result, MagicMock(), MagicMock(), stats)
-            mock_hitl.assert_not_awaited()
+            mock_triage.assert_not_awaited()
+            mock_hitl.assert_awaited_once()
         assert stats["auto_triaged"] == 0
+        assert stats["escalated"] == 1
         assert stats["rejected"] == 1
 
     @pytest.mark.asyncio
