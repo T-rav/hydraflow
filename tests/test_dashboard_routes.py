@@ -4201,6 +4201,27 @@ class TestAdminTaskEndpoints:
         assert data["status"] == "ok"
         mock_scaffold.assert_awaited_once_with(other_config)
 
+    @pytest.mark.asyncio
+    async def test_admin_ensure_labels_returns_task_payload(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        import json
+
+        result = TaskResult(success=True, log=["labels synced"], warnings=[])
+        with patch(
+            "dashboard_routes.run_ensure_labels",
+            new_callable=AsyncMock,
+            return_value=result,
+        ) as mock_labels:
+            router = self._make_router(config, event_bus, state, tmp_path)
+            endpoint = self._find_post_endpoint(router, "/api/admin/ensure-labels")
+            response = await endpoint(repo=None)
+        data = json.loads(response.body)
+        assert response.status_code == 200
+        assert data["status"] == "ok"
+        assert data["result"] == result.as_dict()
+        mock_labels.assert_awaited_once_with(config)
+
 
 # ---------------------------------------------------------------------------
 # GET /api/sessions and /api/sessions/{session_id}

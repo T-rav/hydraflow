@@ -89,8 +89,9 @@ HydraFlow exposes first-class HTTP endpoints for operational tasks once `make ru
 - `POST /api/admin/scaffold` &mdash; scaffold CI/tests (dry-run friendly) and report coverage posture.
 - `POST /api/admin/clean` &mdash; destroy all HydraFlow worktrees in the repo and reset local state.
 
-The Make targets (`make prep`, `make scaffold`, `make clean`) are thin wrappers around these endpoints.
-You can also call them directly via the included helper:
+The Make targets (`make prep`, `make scaffold`, `make clean`) invoke `scripts/run_admin_task.py`
+directly, so they work without a running server. When the server is active you can also hit the
+endpoints directly via the included helper:
 
 ```bash
 # example: trigger prep via HTTP without leaving the terminal
