@@ -50,9 +50,10 @@ _HEADER_SIZE = 8
 _STDOUT_STREAM = 1
 _STDERR_STREAM = 2
 
-_CONTAINER_PI_HOME = "/root/.pi"
-_CONTAINER_CODEX_HOME = "/root/.codex"
-_CONTAINER_CLAUDE_HOME = "/root/.claude"
+_CONTAINER_HOME = "/home/hydraflow"
+_CONTAINER_PI_HOME = f"{_CONTAINER_HOME}/.pi"
+_CONTAINER_CODEX_HOME = f"{_CONTAINER_HOME}/.codex"
+_CONTAINER_CLAUDE_HOME = f"{_CONTAINER_HOME}/.claude"
 
 
 def build_container_kwargs(config: HydraFlowConfig) -> dict[str, Any]:
@@ -81,8 +82,15 @@ def build_container_kwargs(config: HydraFlowConfig) -> dict[str, Any]:
         kwargs["security_opt"] = security_opt
     kwargs["cap_drop"] = ["ALL"]
 
-    # Writable tmpfs for /tmp (container-internal mount, not a host path)
-    kwargs["tmpfs"] = {"/tmp": f"size={config.docker_tmp_size}"}  # nosec B108
+    # Writable tmpfs mounts (container-internal, not host paths).
+    # /tmp: general temp files.
+    # /home/hydraflow: agent tools (uv, npm, etc.) need a writable HOME for
+    # caches and config even when the root filesystem is read-only.
+    # uid/gid=1000 matches the container's hydraflow user.
+    kwargs["tmpfs"] = {
+        "/tmp": f"size={config.docker_tmp_size}",  # nosec B108
+        _CONTAINER_HOME: f"size={config.docker_tmp_size},uid=1000,gid=1000",
+    }
 
     logger.info(
         "Container constraints: cpu=%.1f mem=%s pids=%d net=%s readonly=%s",
@@ -113,7 +121,17 @@ class DockerStdinWriter:
         pass
 
     def close(self) -> None:
+        if self._closed:
+            return
         self._closed = True
+        # Shut down the write side of the socket so the container
+        # process receives EOF on stdin — without this, Claude CLI
+        # hangs forever waiting for more input.
+        import socket as _socket  # noqa: PLC0415
+
+        sock: Any = getattr(self._socket, "_sock", self._socket)
+        with contextlib.suppress(OSError):
+            sock.shutdown(_socket.SHUT_WR)
 
 
 class DockerStdoutReader:
@@ -302,7 +320,17 @@ class DockerRunner:
         mounts: dict[str, dict[str, str]] = {}
         if cwd:
             mounts[cwd] = {"bind": "/workspace", "mode": "rw"}
-        mounts[str(self._repo_root)] = {"bind": "/repo", "mode": "ro"}
+        # Only mount /repo separately when it differs from cwd — otherwise
+        # the dict key collision overwrites the /workspace mount with /repo.
+        repo_str = str(self._repo_root)
+        if repo_str != cwd:
+            mounts[repo_str] = {"bind": "/repo", "mode": "ro"}
+
+        # NOTE: The host .git directory is NOT mounted.  Workspaces are
+        # standalone local clones (created by WorkspaceManager), each with
+        # their own .git/ directory.  This prevents Docker containers from
+        # corrupting the host repo.
+
         self._log_dir.mkdir(parents=True, exist_ok=True)
         mounts[str(self._log_dir)] = {"bind": "/logs", "mode": "rw"}
         mounts.update(self._get_user_tool_mounts())
@@ -361,6 +389,16 @@ class DockerRunner:
         if claude_home.exists():
             mounts[str(claude_home)] = {"bind": _CONTAINER_CLAUDE_HOME, "mode": "rw"}
 
+        # Claude CLI stores auth tokens in ~/.claude.json (separate from
+        # the ~/.claude/ config directory).  Without this file the CLI
+        # reports "Not logged in" and produces no useful output.
+        claude_json = home / ".claude.json"
+        if claude_json.is_file():
+            mounts[str(claude_json)] = {
+                "bind": f"{_CONTAINER_HOME}/.claude.json",
+                "mode": "rw",
+            }
+
         return mounts
 
     def _build_env(self) -> dict[str, str]:
@@ -371,6 +409,7 @@ class DockerRunner:
             gh_token=self._gh_token,
             git_user_name=self._git_user_name,
             git_user_email=self._git_user_email,
+            repo_root=self._repo_root,
         )
         if env.get("PI_CODING_AGENT_DIR"):
             env["PI_CODING_AGENT_DIR"] = f"{_CONTAINER_PI_HOME}/agent"
@@ -378,6 +417,11 @@ class DockerRunner:
             env["CODEX_HOME"] = _CONTAINER_CODEX_HOME
         if env.get("CLAUDE_CONFIG_DIR"):
             env["CLAUDE_CONFIG_DIR"] = _CONTAINER_CLAUDE_HOME
+        # Ensure temp dirs use the writable tmpfs, not the readonly root fs.
+        env.setdefault("TMPDIR", "/tmp")  # nosec B108  # noqa: S108
+        # HOME must point to the writable tmpfs so tools (uv, npm, git) can
+        # write caches and config without fighting a read-only root fs.
+        env.setdefault("HOME", _CONTAINER_HOME)
         return env
 
     def _get_resource_kwargs(self) -> dict[str, Any]:
@@ -401,7 +445,7 @@ class DockerRunner:
         *,
         cwd: str | None = None,
         env: dict[str, str] | None = None,  # noqa: ARG002
-        stdin: int | None = None,  # noqa: ARG002
+        stdin: int | None = None,
         stdout: int | None = None,  # noqa: ARG002
         stderr: int | None = None,  # noqa: ARG002
         limit: int = 1024 * 1024,  # noqa: ARG002
@@ -428,12 +472,14 @@ class DockerRunner:
         container_env = self._build_env()
         working_dir = "/workspace" if cwd else None
 
+        needs_stdin = stdin is None or stdin == asyncio.subprocess.PIPE
+
         container_kwargs: dict[str, Any] = {
             "image": self._image,
-            "command": cmd,
+            "command": list(cmd),
             "environment": container_env,
             "volumes": mounts,
-            "stdin_open": True,
+            "stdin_open": needs_stdin,
             "detach": True,
         }
         if working_dir:
@@ -452,18 +498,19 @@ class DockerRunner:
 
         try:
             await loop.run_in_executor(None, container.start)
+            attach_params = {"stdout": 1, "stderr": 1, "stream": 1}
+            if needs_stdin:
+                attach_params["stdin"] = 1
             socket = await loop.run_in_executor(
                 None,
-                lambda: container.attach_socket(
-                    params={"stdin": 1, "stdout": 1, "stderr": 1, "stream": 1}
-                ),
+                lambda: container.attach_socket(params=attach_params),
             )
-            return cast(
-                asyncio.subprocess.Process,
-                DockerProcess(
-                    cast(ContainerLike, container), cast(DockerSocket, socket), loop
-                ),
+            proc = DockerProcess(
+                cast(ContainerLike, container),
+                cast(DockerSocket, socket),
+                loop,
             )
+            return cast(asyncio.subprocess.Process, proc)
         except Exception:
             with contextlib.suppress(Exception):
                 await loop.run_in_executor(None, lambda: container.remove(force=True))
@@ -497,7 +544,7 @@ class DockerRunner:
 
         container_kwargs: dict[str, Any] = {
             "image": self._image,
-            "command": cmd,
+            "command": list(cmd),
             "environment": container_env,
             "volumes": mounts,
             "detach": True,

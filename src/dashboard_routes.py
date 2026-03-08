@@ -33,6 +33,7 @@ from models import (
     BackgroundWorkerState,
     BackgroundWorkerStatus,
     BGWorkerHealth,
+    ControlStatus,
     ControlStatusConfig,
     ControlStatusResponse,
     CrateCreateRequest,
@@ -255,6 +256,29 @@ def _normalise_event_status(event_type: EventType, data: dict[str, Any]) -> str 
     elif event_type == EventType.PR_CREATED:
         result = "in_review"
     return result
+
+
+_HISTORY_STATUSES = {
+    "unknown",
+    "triaged",
+    "planned",
+    "implemented",
+    "in_review",
+    "reviewed",
+    "hitl",
+    "active",
+    "failed",
+    "merged",
+}
+
+
+def _coerce_history_status(value: str) -> str:
+    """Normalize dashboard history statuses and default to ``unknown``."""
+    cleaned = str(value).strip().lower()
+    if cleaned in _HISTORY_STATUSES:
+        return cleaned
+    logger.warning("Unknown history status %r; falling back to 'unknown'", value)
+    return "unknown"
 
 
 def _status_rank(status: str) -> int:
@@ -593,10 +617,19 @@ def create_router(
         )
 
     def _new_issue_history_entry(issue_number: int) -> dict[str, Any]:
+        repo_slug = (config.repo or "").strip()
+        if repo_slug.startswith("https://github.com/"):
+            repo_slug = repo_slug[len("https://github.com/") :]
+        elif repo_slug.startswith("http://github.com/"):
+            repo_slug = repo_slug[len("http://github.com/") :]
+        repo_slug = repo_slug.strip("/")
+        issue_url = (
+            f"https://github.com/{repo_slug}/issues/{issue_number}" if repo_slug else ""
+        )
         return {
             "issue_number": issue_number,
             "title": f"Issue #{issue_number}",
-            "issue_url": "",
+            "issue_url": issue_url,
             "status": "unknown",
             "epic": "",
             "crate_number": None,
@@ -1374,13 +1407,18 @@ def create_router(
 
     @router.post("/api/hitl/{issue_number}/approve-process")
     async def hitl_approve_process(issue_number: int) -> JSONResponse:
-        """Approve a HITL item held for issue type review — send to planning."""
+        """Approve a HITL item held for issue type review.
+
+        All issue types (bugs, epics, etc.) route to triage first.
+        """
         orch = get_orchestrator()
         if not orch:
             return JSONResponse({"status": "no orchestrator"}, status_code=400)
 
-        # Issue was already triaged as ready — send directly to planning
-        await pr_manager.swap_pipeline_labels(issue_number, config.planner_label[0])
+        target_label = config.find_label[0]
+        target_stage = "triage"
+
+        await pr_manager.swap_pipeline_labels(issue_number, target_label)
 
         # Clear HITL state after label swap succeeds
         orch.skip_hitl_issue(issue_number)
@@ -1390,14 +1428,15 @@ def create_router(
         state.record_outcome(
             issue_number,
             IssueOutcomeType.HITL_APPROVED,
-            reason="Operator approved issue type for processing",
+            reason=f"Operator approved issue type for processing ({target_stage})",
             phase="hitl",
         )
 
         try:
             await pr_manager.post_comment(
                 issue_number,
-                "**Approved for processing** — Operator approved this issue.\n\n"
+                f"**Approved for processing** — Operator approved this issue.\n\n"
+                f"Routing to **{target_stage}** (`{target_label}`).\n\n"
                 "---\n*HydraFlow Dashboard*",
             )
         except Exception:  # noqa: BLE001
@@ -1492,8 +1531,12 @@ def create_router(
             if orch and orch.credits_paused_until
             else None
         )
+        try:
+            control_status = ControlStatus(status)
+        except ValueError:
+            control_status = ControlStatus.IDLE
         response = ControlStatusResponse(
-            status=status,
+            status=control_status,
             credits_paused_until=credits_until,
             config=ControlStatusConfig(
                 app_version=get_app_version(),
@@ -1550,8 +1593,6 @@ def create_router(
         "memory_auto_approve",
         "unstick_auto_merge",
         "unstick_all_causes",
-        "auto_process_epics",
-        "auto_process_bug_reports",
         "worktree_base",
         "auto_crate",
     }
@@ -2227,7 +2268,7 @@ def create_router(
                     issue_number=issue_number,
                     title=title,
                     issue_url=str(row.get("issue_url", "")),
-                    status=row_status,
+                    status=_coerce_history_status(row_status),
                     epic=str(row.get("epic", "")),
                     crate_number=row.get("crate_number"),
                     crate_title=str(row.get("crate_title", "")),
@@ -2312,7 +2353,7 @@ def create_router(
                         issue_number=issue_number,
                         title=title,
                         issue_url=str(row.get("issue_url", "")),
-                        status=row_status,
+                        status=_coerce_history_status(row_status),
                         epic=str(row.get("epic", "")),
                         crate_number=row.get("crate_number"),
                         crate_title=str(row.get("crate_title", "")),

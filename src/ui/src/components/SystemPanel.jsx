@@ -11,11 +11,9 @@ import { InsightsPanel } from './InsightsPanel'
 const SUB_TABS = [
   { key: 'workers', label: 'Workers' },
   { key: 'pipeline', label: 'Pipeline' },
-  { key: 'processes', label: 'Processes' },
   { key: 'metrics', label: 'Metrics' },
   { key: 'insights', label: 'Insights' },
   { key: 'livestream', label: 'Livestream' },
-  { key: 'settings', label: 'Settings' },
 ]
 
 function relativeTime(isoString) {
@@ -292,66 +290,6 @@ function MemoryAutoApproveToggle() {
   )
 }
 
-function ToggleRow({ label, hint, enabled, onToggle, testId }) {
-  return (
-    <div style={styles.autoApproveRow}>
-      <div style={styles.autoApproveLabel}>
-        <span style={styles.autoApproveText}>{label}</span>
-        <span style={styles.autoApproveHint}>{hint}</span>
-      </div>
-      <button
-        style={enabled ? styles.toggleOn : styles.toggleOff}
-        onClick={onToggle}
-        data-testid={testId}
-      >
-        {enabled ? 'On' : 'Off'}
-      </button>
-    </div>
-  )
-}
-
-function ProcessToggles() {
-  const { config } = useHydraFlow()
-  const [localEpics, setLocalEpics] = useState(null)
-  const [localBugs, setLocalBugs] = useState(null)
-
-  const epicsOn = localEpics !== null ? localEpics : (config?.auto_process_epics ?? false)
-  const bugsOn = localBugs !== null ? localBugs : (config?.auto_process_bug_reports ?? false)
-
-  const toggle = useCallback(async (field, current, setLocal) => {
-    const next = !current
-    setLocal(next)
-    try {
-      const resp = await fetch('/api/control/config', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [field]: next, persist: true }),
-      })
-      if (!resp.ok) setLocal(current)
-    } catch { setLocal(current) }
-  }, [])
-
-  return (
-    <div>
-      <h3 style={styles.heading}>Process Toggles</h3>
-      <ToggleRow
-        label="Auto Process Epics"
-        hint="When off, epics go to HITL for review"
-        enabled={epicsOn}
-        onToggle={() => toggle('auto_process_epics', epicsOn, setLocalEpics)}
-        testId="auto-process-epics-toggle"
-      />
-      <ToggleRow
-        label="Auto Process Bug Reports"
-        hint="When off, bug reports go to HITL for review"
-        enabled={bugsOn}
-        onToggle={() => toggle('auto_process_bug_reports', bugsOn, setLocalBugs)}
-        testId="auto-process-bugs-toggle"
-      />
-    </div>
-  )
-}
-
 function UnstickWorkersDropdown() {
   const { config } = useHydraFlow()
   const [localValue, setLocalValue] = useState(null)
@@ -393,53 +331,6 @@ function UnstickWorkersDropdown() {
           <option key={n} value={n}>{n}</option>
         ))}
       </select>
-    </div>
-  )
-}
-
-function SettingsPanel() {
-  const { config } = useHydraFlow()
-  const [localWorktreeBase, setLocalWorktreeBase] = useState(null)
-
-  const currentValue = localWorktreeBase !== null ? localWorktreeBase : (config?.worktree_base ?? '')
-
-  const handleSave = useCallback(async (value) => {
-    const trimmed = (value || '').trim()
-    setLocalWorktreeBase(trimmed)
-    try {
-      const resp = await fetch('/api/control/config', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ worktree_base: trimmed, persist: true }),
-      })
-      if (!resp.ok) {
-        setLocalWorktreeBase(config?.worktree_base ?? '')
-      }
-    } catch {
-      setLocalWorktreeBase(config?.worktree_base ?? '')
-    }
-  }, [config?.worktree_base])
-
-  return (
-    <div style={styles.workersContent}>
-      <h3 style={styles.heading}>Settings</h3>
-      <div style={styles.autoApproveRow}>
-        <div style={styles.autoApproveLabel}>
-          <span style={styles.autoApproveText}>Worktree Base</span>
-          <span style={styles.autoApproveHint}>
-            Directory for git worktrees across all repos
-          </span>
-        </div>
-        <input
-          type="text"
-          value={currentValue}
-          onChange={(e) => setLocalWorktreeBase(e.target.value)}
-          onBlur={(e) => handleSave(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') handleSave(e.target.value) }}
-          style={styles.settingsInput}
-          data-testid="worktree-base-input"
-        />
-      </div>
     </div>
   )
 }
@@ -511,11 +402,6 @@ export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onUpdateInter
             </div>
           </div>
         )}
-        {activeSubTab === 'processes' && (
-          <div style={styles.workersContent}>
-            <ProcessToggles />
-          </div>
-        )}
         {activeSubTab === 'pipeline' && (
           <PipelineControlPanel onToggleBgWorker={onToggleBgWorker} />
         )}
@@ -524,7 +410,6 @@ export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onUpdateInter
         )}
         {activeSubTab === 'insights' && <InsightsPanel />}
         {activeSubTab === 'livestream' && <Livestream events={events} />}
-        {activeSubTab === 'settings' && <SettingsPanel />}
       </div>
     </div>
   )
@@ -805,16 +690,6 @@ const styles = {
     color: theme.text,
     cursor: 'pointer',
     outline: 'none',
-  },
-  settingsInput: {
-    padding: '4px 8px',
-    fontSize: 12,
-    border: `1px solid ${theme.border}`,
-    borderRadius: 4,
-    background: theme.bg,
-    color: theme.text,
-    outline: 'none',
-    minWidth: 200,
   },
 }
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -75,7 +76,10 @@ class TestManifestRefreshLoopRun:
 
         manifest_hash, last_updated = state.get_manifest_state()
         assert manifest_hash != ""
-        assert last_updated is not None
+        assert isinstance(last_updated, str)
+        timestamp = datetime.fromisoformat(last_updated)
+        assert timestamp.tzinfo is not None
+        assert (datetime.now(UTC) - timestamp).total_seconds() < 5
 
     @pytest.mark.asyncio
     async def test_run__calls_status_cb_on_success(self, tmp_path: Path) -> None:

@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from base_runner import BaseRunner
 from events import EventBus
+from runner_utils import AuthenticationRetryError
 
 # ---------------------------------------------------------------------------
 # Concrete subclass for testing (BaseRunner has abstract _log ClassVar)
@@ -33,11 +34,11 @@ class _TestRunner(BaseRunner):
 class TestBaseRunnerInit:
     """Tests for BaseRunner.__init__."""
 
-    def test_stores_config(self, config, event_bus: EventBus) -> None:
+    def test_init_stores_config_reference(self, config, event_bus: EventBus) -> None:
         runner = _TestRunner(config, event_bus)
         assert runner._config is config
 
-    def test_stores_event_bus(self, config, event_bus: EventBus) -> None:
+    def test_init_stores_event_bus_reference(self, config, event_bus: EventBus) -> None:
         runner = _TestRunner(config, event_bus)
         assert runner._bus is event_bus
 
@@ -73,7 +74,9 @@ class TestTerminate:
             runner.terminate()
         mock_tp.assert_called_once_with(runner._active_procs)
 
-    def test_empty_procs_no_error(self, config, event_bus: EventBus) -> None:
+    def test_terminate_with_empty_procs_does_not_raise(
+        self, config, event_bus: EventBus
+    ) -> None:
         runner = _TestRunner(config, event_bus)
         runner.terminate()  # Should not raise
 
@@ -155,12 +158,15 @@ class TestExecute:
         assert result == "transcript output"
         mock.assert_awaited_once()
         call_kwargs = mock.call_args[1]
-        assert call_kwargs["cmd"] == ["claude", "-p"]
-        assert call_kwargs["prompt"] == "prompt"
-        assert call_kwargs["cwd"] == tmp_path
-        assert call_kwargs["event_data"] == {"issue": 42}
-        assert call_kwargs["on_output"] is None
-        assert call_kwargs["gh_token"] == config.gh_token
+        expected_kwargs = {
+            "cmd": ["claude", "-p"],
+            "prompt": "prompt",
+            "cwd": tmp_path,
+            "event_data": {"issue": 42},
+            "on_output": None,
+            "gh_token": config.gh_token,
+        }
+        assert {k: call_kwargs[k] for k in expected_kwargs} == expected_kwargs
 
     @pytest.mark.asyncio
     async def test_passes_on_output_callback(
@@ -184,6 +190,56 @@ class TestExecute:
         call_kwargs = mock.call_args[1]
         assert call_kwargs["on_output"] is callback
 
+    @pytest.mark.asyncio
+    async def test_auth_failure_retries_with_backoff(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """Auth failures are retried 3 times before raising."""
+        runner = _TestRunner(config, event_bus)
+
+        with (
+            patch(
+                "base_runner.stream_claude_process",
+                new_callable=AsyncMock,
+                side_effect=AuthenticationRetryError("auth failed"),
+            ) as mock,
+            patch("asyncio.sleep", new_callable=AsyncMock) as sleep_mock,
+            pytest.raises(AuthenticationRetryError),
+        ):
+            await runner._execute(["claude", "-p"], "prompt", tmp_path, {"issue": 42})
+
+        assert mock.await_count == 3
+        # 2 sleeps: 5s after attempt 1, 10s after attempt 2
+        assert sleep_mock.await_count == 2
+        sleep_mock.assert_any_await(5.0)
+        sleep_mock.assert_any_await(10.0)
+
+    @pytest.mark.asyncio
+    async def test_auth_failure_succeeds_on_retry(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """Auth succeeds on second attempt after transient failure."""
+        runner = _TestRunner(config, event_bus)
+
+        with (
+            patch(
+                "base_runner.stream_claude_process",
+                new_callable=AsyncMock,
+                side_effect=[
+                    AuthenticationRetryError("auth failed"),
+                    "transcript output",
+                ],
+            ) as mock,
+            patch("asyncio.sleep", new_callable=AsyncMock) as sleep_mock,
+        ):
+            result = await runner._execute(
+                ["claude", "-p"], "prompt", tmp_path, {"issue": 42}
+            )
+
+        assert result == "transcript output"
+        assert mock.await_count == 2
+        assert sleep_mock.await_count == 1
+
 
 # ---------------------------------------------------------------------------
 # _inject_manifest_and_memory
@@ -193,7 +249,9 @@ class TestExecute:
 class TestInjectManifestAndMemory:
     """Tests for BaseRunner._inject_manifest_and_memory."""
 
-    def test_both_present(self, config, event_bus: EventBus) -> None:
+    def test_inject_returns_manifest_and_memory_when_both_present(
+        self, config, event_bus: EventBus
+    ) -> None:
         runner = _TestRunner(config, event_bus)
 
         with (
@@ -207,7 +265,9 @@ class TestInjectManifestAndMemory:
         assert "## Accumulated Learnings" in memory_sec
         assert "digest text" in memory_sec
 
-    def test_manifest_only(self, config, event_bus: EventBus) -> None:
+    def test_inject_returns_manifest_section_when_only_manifest_exists(
+        self, config, event_bus: EventBus
+    ) -> None:
         runner = _TestRunner(config, event_bus)
 
         with (
@@ -219,7 +279,9 @@ class TestInjectManifestAndMemory:
         assert "## Project Context" in manifest_sec
         assert memory_sec == ""
 
-    def test_memory_only(self, config, event_bus: EventBus) -> None:
+    def test_inject_returns_memory_section_when_only_digest_exists(
+        self, config, event_bus: EventBus
+    ) -> None:
         runner = _TestRunner(config, event_bus)
 
         with (
@@ -231,7 +293,9 @@ class TestInjectManifestAndMemory:
         assert manifest_sec == ""
         assert "## Accumulated Learnings" in memory_sec
 
-    def test_neither_present(self, config, event_bus: EventBus) -> None:
+    def test_inject_returns_empty_strings_when_no_manifest_or_digest(
+        self, config, event_bus: EventBus
+    ) -> None:
         runner = _TestRunner(config, event_bus)
 
         with (
@@ -253,7 +317,9 @@ class TestVerifyQuality:
     """Tests for BaseRunner._verify_quality."""
 
     @pytest.mark.asyncio
-    async def test_success(self, config, event_bus: EventBus, tmp_path: Path) -> None:
+    async def test_verify_quality_returns_true_on_success(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
         mock_runner = MagicMock()
         mock_runner.run_simple = AsyncMock(
             return_value=MagicMock(returncode=0, stdout="OK", stderr="")
@@ -297,7 +363,9 @@ class TestVerifyQuality:
         assert "make not found" in msg
 
     @pytest.mark.asyncio
-    async def test_timeout(self, config, event_bus: EventBus, tmp_path: Path) -> None:
+    async def test_verify_quality_returns_false_on_timeout(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
         mock_runner = MagicMock()
         mock_runner.run_simple = AsyncMock(side_effect=TimeoutError)
         runner = _TestRunner(config, event_bus, runner=mock_runner)
@@ -308,7 +376,7 @@ class TestVerifyQuality:
         assert "timed out" in msg
 
     @pytest.mark.asyncio
-    async def test_truncates_output(
+    async def test_verify_quality_truncates_long_failure_output(
         self, config, event_bus: EventBus, tmp_path: Path
     ) -> None:
         mock_runner = MagicMock()

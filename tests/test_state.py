@@ -36,24 +36,74 @@ def make_tracker(tmp_path: Path, *, filename: str = "state.json") -> StateTracke
 
 
 class TestInitialization:
-    def test_defaults_when_no_file_exists(self, tmp_path: Path) -> None:
-        """A fresh tracker with no backing file should start from defaults."""
+    def test_fresh_tracker_has_no_active_worktrees(self, tmp_path: Path) -> None:
+        """A fresh tracker with no backing file should have no active worktrees."""
         tracker = make_tracker(tmp_path)
         assert tracker.get_active_worktrees() == {}
-        assert tracker.to_dict()["processed_issues"].get(str(1)) is None
+
+    def test_fresh_tracker_has_no_processed_issues(self, tmp_path: Path) -> None:
+        """A fresh tracker with no backing file should have no processed issues."""
+        tracker = make_tracker(tmp_path)
+        assert tracker.to_dict()["processed_issues"] == {}
+
+    def test_fresh_tracker_has_no_branches(self, tmp_path: Path) -> None:
+        """A fresh tracker with no backing file should have no branches."""
+        tracker = make_tracker(tmp_path)
         assert tracker.get_branch(1) is None
-        assert tracker.to_dict()["reviewed_prs"].get(str(1)) is None
+
+    def test_fresh_tracker_has_no_reviewed_prs(self, tmp_path: Path) -> None:
+        """A fresh tracker with no backing file should have no reviewed PRs."""
+        tracker = make_tracker(tmp_path)
+        assert tracker.to_dict()["reviewed_prs"] == {}
 
     def test_defaults_structure_matches_expected_keys(self, tmp_path: Path) -> None:
+        """A fresh tracker should expose exactly the known set of state keys."""
         tracker = make_tracker(tmp_path)
         d = tracker.to_dict()
-        assert "processed_issues" in d
-        assert "active_worktrees" in d
-        assert "active_branches" in d
-        assert "reviewed_prs" in d
-        assert "last_updated" in d
-        assert "bg_worker_states" in d
-        assert "current_batch" not in d
+        expected_keys = {
+            "active_branches",
+            "active_crate_number",
+            "active_issue_numbers",
+            "active_worktrees",
+            "baseline_audit",
+            "bg_worker_states",
+            "disabled_workers",
+            "epic_states",
+            "hitl_causes",
+            "hitl_origins",
+            "hitl_summaries",
+            "hitl_summary_failures",
+            "hitl_visual_evidence",
+            "hook_failures",
+            "interrupted_issues",
+            "issue_attempts",
+            "issue_outcomes",
+            "last_reviewed_shas",
+            "last_updated",
+            "lifetime_stats",
+            "manifest_hash",
+            "manifest_issue_number",
+            "manifest_last_updated",
+            "manifest_snapshot_hash",
+            "memory_digest_hash",
+            "memory_issue_ids",
+            "memory_last_synced",
+            "metrics_issue_number",
+            "metrics_last_snapshot_hash",
+            "metrics_last_synced",
+            "pending_reports",
+            "processed_issues",
+            "releases",
+            "review_attempts",
+            "review_feedback",
+            "reviewed_prs",
+            "session_counters",
+            "verification_issues",
+            "worker_heartbeats",
+            "worker_intervals",
+            "worker_result_meta",
+        }
+        assert set(d.keys()) == expected_keys
 
     def test_loads_legacy_file_with_current_batch_field(self, tmp_path: Path) -> None:
         """Old state files containing current_batch should load without error."""
@@ -666,6 +716,41 @@ class TestHITLVisualEvidence:
         )
         assert tracker.get_hitl_visual_evidence(1).items[0].screen_name == "a"
         assert tracker.get_hitl_visual_evidence(2).items[0].screen_name == "b"
+
+
+# ---------------------------------------------------------------------------
+# HITL summary failure tracking
+# ---------------------------------------------------------------------------
+
+
+class TestHITLSummaryFailure:
+    def test_get_returns_empty_when_nothing_set(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        last_failed_at, error = tracker.get_hitl_summary_failure(42)
+        assert last_failed_at is None
+        assert error == ""
+
+    def test_set_and_get_failure_metadata(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        tracker.set_hitl_summary_failure(7, "LLM timeout")
+        last_failed_at, error = tracker.get_hitl_summary_failure(7)
+        assert last_failed_at is not None
+        assert error == "LLM timeout"
+
+    def test_error_is_truncated_to_300_chars(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        message = "X" * 400
+        tracker.set_hitl_summary_failure(12, message)
+        _, error = tracker.get_hitl_summary_failure(12)
+        assert len(error) == 300
+
+    def test_clear_removes_failure_entry(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        tracker.set_hitl_summary_failure(99, "network blip")
+        tracker.clear_hitl_summary_failure(99)
+        last_failed_at, error = tracker.get_hitl_summary_failure(99)
+        assert last_failed_at is None
+        assert error == ""
 
 
 # ---------------------------------------------------------------------------

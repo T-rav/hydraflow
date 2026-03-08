@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
-from models import PipelineSnapshotEntry, QueueStats, Task
+from models import PipelineIssueStatus, PipelineSnapshotEntry, QueueStats, Task
 from subprocess_util import AuthenticationError
 from task_source import TaskFetcher
 
@@ -93,9 +93,10 @@ class IssueStore:
         self._active: dict[int, str] = {}
 
         # In-flight protection: items between _take_from_queue and mark_active.
-        # Prevents refresh() from re-queuing or evicting items that a phase
+        # Prevents refresh() from re-queuing items that a phase
         # has dequeued but hasn't yet marked active (semaphore wait gap).
-        self._in_flight: set[int] = set()
+        # Maps task_id → stage so snapshots can include them.
+        self._in_flight: dict[int, str] = {}
 
         # Eager transition protection: items placed by enqueue_transition
         # before GitHub labels have caught up.  Keyed by target stage so
@@ -226,24 +227,6 @@ class IssueStore:
             )
         return unique
 
-    def _evict_stale_tasks(self, incoming_ids: set[int]) -> None:
-        """Remove tasks no longer present in the pipeline from all queues.
-
-        Items that are in-flight (taken from queue, not yet marked active)
-        or eagerly transitioned (label swap pending) are protected from
-        eviction.
-        """
-        protected = (
-            set(self._active.keys()) | self._in_flight | set(self._eagerly_transitioned)
-        )
-        for stage, q in self._queues.items():
-            members = self._queue_members[stage]
-            stale = members - incoming_ids - protected
-            if stale:
-                self._queues[stage] = deque(t for t in q if t.id not in stale)
-                members -= stale
-        self._hitl_numbers &= incoming_ids | protected
-
     def _route_incoming_tasks(
         self, stage_map: dict[int, tuple[IssueStoreStage, Task]]
     ) -> None:
@@ -283,16 +266,16 @@ class IssueStore:
             self._queue_members[stage].add(task_id)
 
     def _route_issues(self, tasks: list[Task]) -> None:
-        """Route fetched tasks into the correct queues.
+        """Route fetched tasks into the correct queues (additive-only).
 
         - Each task goes to the most advanced stage matching its tags.
         - Tasks already active are not re-queued.
         - Tasks that changed tags are moved between queues.
-        - Tasks no longer returned by the fetcher are removed from queues.
+        - Existing queued items are never evicted by polling.  The pipeline
+          itself (mark_complete / enqueue_transition) handles removal.
         """
         stage_map = self._compute_stage_map(tasks)
         incoming_ids = set(stage_map.keys())
-        self._evict_stale_tasks(incoming_ids)
         self._route_incoming_tasks(stage_map)
 
         # Prune eagerly-transitioned entries for issues that vanished
@@ -301,7 +284,7 @@ class IssueStore:
             set(self._eagerly_transitioned)
             - incoming_ids
             - set(self._active.keys())
-            - self._in_flight
+            - set(self._in_flight)
         )
         for tid in vanished:
             del self._eagerly_transitioned[tid]
@@ -343,13 +326,17 @@ class IssueStore:
         for stage in self._queues:
             self._remove_from_queue(stage, issue_number)
 
+    def get_cached(self, issue_number: int) -> Task | None:
+        """Return the most recent cached Task metadata for *issue_number*."""
+        return self._issue_cache.get(issue_number)
+
     def enqueue_transition(self, task: Task, next_stage: str) -> None:
         """Immediately route *task* into *next_stage* in-memory.
 
         This provides an eager handoff between phases so downstream workers
         can pick up transitioned issues without waiting for the next GitHub
-        polling cycle.  The item is protected from ``refresh()`` eviction /
-        re-routing until GitHub labels catch up to the target stage.
+        polling cycle.  The item is protected from ``refresh()`` re-routing
+        until GitHub labels catch up to the target stage.
         """
         stage_alias: dict[str, IssueStoreStage] = {
             "find": STAGE_FIND,
@@ -362,7 +349,7 @@ class IssueStore:
         if stage is None:
             return
 
-        self._in_flight.discard(task.id)
+        self._in_flight.pop(task.id, None)
         self._issue_cache[task.id] = task
         self._remove_from_all_queues(task.id)
         self._hitl_numbers.discard(task.id)
@@ -440,7 +427,8 @@ class IssueStore:
             self._queue_members[stage].add(task.id)
 
         if result:
-            self._in_flight.update(t.id for t in result)
+            for t in result:
+                self._in_flight[t.id] = stage
             self._publish_queue_update_nowait()
         return result
 
@@ -450,13 +438,13 @@ class IssueStore:
 
     def mark_active(self, task_id: int, stage: str) -> None:
         """Mark a task as actively being processed in *stage*."""
-        self._in_flight.discard(task_id)
+        self._in_flight.pop(task_id, None)
         self._active[task_id] = stage
         self._publish_queue_update_nowait()
 
     def mark_complete(self, task_id: int) -> None:
         """Mark a task as done processing; increment throughput counter."""
-        self._in_flight.discard(task_id)
+        self._in_flight.pop(task_id, None)
         stage = self._active.pop(task_id, None)
         if stage and stage in self._processed_count:
             self._processed_count[stage] += 1
@@ -465,6 +453,12 @@ class IssueStore:
     def is_active(self, task_id: int) -> bool:
         """Return True if the task is currently being processed."""
         return task_id in self._active
+
+    def is_in_pipeline(self, issue_number: int) -> bool:
+        """Return True if the issue is queued, in-flight, or active."""
+        if issue_number in self._active or issue_number in self._in_flight:
+            return True
+        return any(any(t.id == issue_number for t in q) for q in self._queues.values())
 
     def get_active_issues(self) -> dict[int, str]:
         """Return a copy of the active issue tracking dict."""
@@ -477,7 +471,8 @@ class IssueStore:
         no orphaned in-flight entries survive if a worker exits without
         reaching ``mark_active`` or ``mark_complete``.
         """
-        self._in_flight -= task_ids
+        for tid in task_ids:
+            self._in_flight.pop(tid, None)
 
     def clear_active(self) -> None:
         """Clear all active issue tracking (used during reset)."""
@@ -591,6 +586,29 @@ class IssueStore:
             hitl_list.append(entry)
         return hitl_list
 
+    def _snapshot_in_flight(self) -> dict[str, list[PipelineSnapshotEntry]]:
+        """Return in-flight tasks grouped by their origin stage.
+
+        In-flight items have been dequeued but not yet marked active.
+        Including them in the snapshot prevents them from vanishing
+        in the dashboard during the dequeue-to-mark_active window.
+        """
+        by_stage: dict[str, list[PipelineSnapshotEntry]] = {}
+        for task_id, stage in self._in_flight.items():
+            cached = self._issue_cache.get(task_id)
+            entry = PipelineSnapshotEntry(
+                issue_number=task_id,
+                title=cached.title if cached else f"Issue #{task_id}",
+                url=cached.source_url if cached else "",
+                status=PipelineIssueStatus.PROCESSING,
+            )
+            if cached:
+                epic_meta = self._epic_metadata(cached)
+                if epic_meta:
+                    entry.update(epic_meta)  # type: ignore[typeddict-item]
+            by_stage.setdefault(stage, []).append(entry)
+        return by_stage
+
     def get_pipeline_snapshot(self) -> dict[str, list[PipelineSnapshotEntry]]:
         """Return a snapshot of all pipeline stages with their issues.
 
@@ -598,6 +616,8 @@ class IssueStore:
         ``issue_number``, ``title``, ``url``, ``status``.
         """
         snapshot = self._snapshot_queued()
+        for stage, entries in self._snapshot_in_flight().items():
+            snapshot.setdefault(stage, []).extend(entries)
         for stage, entries in self._snapshot_active().items():
             snapshot.setdefault(stage, []).extend(entries)
         snapshot[STAGE_HITL] = self._snapshot_hitl()
