@@ -402,6 +402,8 @@ class TestSupervisorTcpHandler:
 
         response = json.loads(written_data.decode().strip())
         assert response["status"] == "ok"
+        assert writer.close.called
+        assert writer.wait_closed.called
 
     @pytest.mark.asyncio
     async def test_unknown_action(self) -> None:
@@ -427,6 +429,8 @@ class TestSupervisorTcpHandler:
         response = json.loads(written_data.decode().strip())
         assert response["status"] == "error"
         assert "unknown action" in response["error"]
+        assert writer.close.called
+        assert writer.wait_closed.called
 
     @pytest.mark.asyncio
     async def test_empty_request(self) -> None:
@@ -442,6 +446,7 @@ class TestSupervisorTcpHandler:
 
         await _handle(reader, writer)
         writer.close.assert_called_once()
+        writer.wait_closed.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
