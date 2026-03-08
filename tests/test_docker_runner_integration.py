@@ -10,6 +10,7 @@ Skip with: pytest -m "not docker"
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
@@ -92,22 +93,26 @@ def docker_config() -> MagicMock:
 
 
 @pytest.fixture()
-def runner(
+async def runner(
     _pull_image: None,
     repo_root: Path,
     log_dir: Path,
     docker_config: MagicMock,
-) -> DockerRunner:
-    """Create a DockerRunner pointed at the test image."""
+) -> AsyncGenerator[DockerRunner, None]:
+    """Create a DockerRunner pointed at the test image, with cleanup after each test."""
     from docker_runner import DockerRunner
 
-    return DockerRunner(
+    r = DockerRunner(
         image=_TEST_IMAGE,
         repo_root=repo_root,
         log_dir=log_dir,
         spawn_delay=0.0,
         config=docker_config,
     )
+    try:
+        yield r
+    finally:
+        await r.cleanup()
 
 
 # ---------------------------------------------------------------------------
