@@ -1007,7 +1007,8 @@ class TestGetDockerRunner:
         assert "no docker_image configured" in caplog.text
 
     def test_logs_warning_when_docker_unavailable(
-        self, caplog: pytest.LogCaptureFixture
+        self,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         import shutil
 
