@@ -132,6 +132,9 @@ Run through this checklist before your final commit:
             )
             result.transcript = transcript
 
+            # Force-commit any uncommitted work the agent left behind
+            await self._force_commit_uncommitted(task, worktree_path)
+
             # Diff sanity check (blocking — agent must fix flagged issues)
             sanity_ok, sanity_msg = await self._run_diff_sanity_loop(
                 task, worktree_path, branch, worker_id
@@ -503,11 +506,12 @@ Run through this checklist before your final commit:
 ## Instructions
 
 1. Understand the issue and relevant code paths.
-2. Write tests to ensure functionality, prevent regressions, and catch bugs.
-3. Diff Sanity Check and Test Adequacy Check run automatically after your implementation.
-4. Run Pre-Quality Review Skill for correctness, plan adherence, and missing tests.
-5. Run Run-Tool Skill: `make lint` → `{test_cmd}` → `make quality-lite`; fix and rerun.
-5. Commit with: "Fixes #{issue.id}: <concise summary>"
+2. Implement the solution — write the code changes first.
+3. Write tests to ensure functionality, prevent regressions, and catch bugs.
+4. Diff Sanity Check and Test Adequacy Check run automatically after your implementation.
+5. Run Pre-Quality Review Skill for correctness, plan adherence, and missing tests.
+6. Run Run-Tool Skill: `make lint` → `{test_cmd}` → `make quality-lite`; fix and rerun.
+7. Commit with: "Fixes #{issue.id}: <concise summary>"
 {feedback_section}{escalation_section}
 {self._build_self_check_checklist(escalations)}
 ## UI Guidelines
@@ -525,8 +529,10 @@ Run through this checklist before your final commit:
 - Do NOT run `git push` or `gh pr create`.
 - Run `make quality-lite` (lint + typecheck + security, no tests) as a sense check.
   CI runs the full test suite — you do not need to run `make quality` or `make test`.
-- ALWAYS commit your work with `git add` and `git commit`.
+- ALWAYS commit your work with `git add <file>` and `git commit`.
   The system runs its own quality gate after you finish — your job is to produce commits.
+- NEVER use interactive git commands (`git add -i`, `git add -p`, `git rebase -i`).
+  There is no TTY — interactive commands will hang. Use `git add <file>` or `git add -A`.
 - NEVER conclude that the issue is "already satisfied" or that no work is needed.
   The planner already verified this issue requires implementation. Your job is to
   write the code, not to second-guess the plan. Always produce commits.
@@ -715,6 +721,7 @@ SUMMARY: <one-line summary>
                 worktree_path,
                 {"issue": issue.id, "source": "implementer"},
             )
+            await self._force_commit_uncommitted(issue, worktree_path)
             review_ok, review_summary = self._parse_skill_result(
                 review_transcript, "PRE_QUALITY_REVIEW_RESULT"
             )
@@ -727,6 +734,7 @@ SUMMARY: <one-line summary>
                 worktree_path,
                 {"issue": issue.id, "source": "implementer"},
             )
+            await self._force_commit_uncommitted(issue, worktree_path)
             run_tool_ok, run_tool_summary = self._parse_skill_result(
                 run_tool_transcript, "RUN_TOOL_RESULT"
             )
@@ -905,6 +913,7 @@ SUMMARY: <one-line summary>
                 worktree_path,
                 {"issue": issue.id, "source": "implementer"},
             )
+            await self._force_commit_uncommitted(issue, worktree_path)
 
             success, verify_msg = await self._verify_result(worktree_path, branch)
             if success:
@@ -913,6 +922,78 @@ SUMMARY: <one-line summary>
             last_error = verify_msg
 
         return False, last_error, max_attempts
+
+    async def _force_commit_uncommitted(self, task: Task, worktree_path: Path) -> bool:
+        """Stage and commit any uncommitted changes the agent left behind.
+
+        Always runs on the **host** (not inside Docker) since the workspace
+        is bind-mounted — file edits from the container are already on disk.
+
+        Returns ``True`` if a salvage commit was created, ``False`` otherwise.
+        """
+        from execution import get_default_runner
+
+        host = get_default_runner()
+        timeout = self._config.git_command_timeout
+        cwd = str(worktree_path)
+
+        try:
+            status = await host.run_simple(
+                ["git", "status", "--porcelain"],
+                cwd=cwd,
+                timeout=timeout,
+            )
+            if not status.stdout.strip():
+                return False
+
+            logger.warning(
+                "Issue #%d: agent left uncommitted changes — force-committing",
+                task.id,
+            )
+            add_result = await host.run_simple(
+                ["git", "add", "-A"],
+                cwd=cwd,
+                timeout=timeout,
+            )
+            if add_result.returncode != 0:
+                logger.warning(
+                    "Issue #%d: git add failed (rc=%d): %s",
+                    task.id,
+                    add_result.returncode,
+                    add_result.stderr,
+                )
+                return False
+            commit_result = await host.run_simple(
+                [
+                    "git",
+                    "commit",
+                    "-m",
+                    f"Fixes #{task.id}: {task.title}\n\n"
+                    "Auto-committed by HydraFlow (agent did not commit)",
+                ],
+                cwd=cwd,
+                timeout=timeout,
+            )
+            if commit_result.returncode != 0:
+                logger.warning(
+                    "Issue #%d: git commit failed (rc=%d): %s",
+                    task.id,
+                    commit_result.returncode,
+                    commit_result.stderr,
+                )
+                return False
+            logger.info(
+                "Issue #%d: salvage commit created for uncommitted work",
+                task.id,
+            )
+            return True
+        except (TimeoutError, FileNotFoundError, OSError) as exc:
+            logger.warning(
+                "Issue #%d: force-commit failed: %s",
+                task.id,
+                exc,
+            )
+            return False
 
     async def _count_commits(self, worktree_path: Path, branch: str) -> int:
         """Count commits on *branch* ahead of main."""

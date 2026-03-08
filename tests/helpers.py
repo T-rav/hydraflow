@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 if TYPE_CHECKING:
     from events import HydraFlowEvent
     from models import QueueStats, Task
-    from worktree import WorktreeManager
+    from workspace import WorkspaceManager
 
 
 @dataclass
@@ -322,6 +322,7 @@ class ConfigFactory:
         epic_auto_decompose: bool = False,
         epic_decompose_complexity_threshold: int = 8,
         epic_monitor_interval: int = 1800,
+        epic_sweep_interval: int = 3600,
         worktree_gc_interval: int = 1800,
         epic_stale_days: int = 7,
         epic_merge_strategy: Literal[
@@ -524,6 +525,7 @@ class ConfigFactory:
                 epic_auto_decompose=epic_auto_decompose,
                 epic_decompose_complexity_threshold=epic_decompose_complexity_threshold,
                 epic_monitor_interval=epic_monitor_interval,
+                epic_sweep_interval=epic_sweep_interval,
                 worktree_gc_interval=worktree_gc_interval,
                 epic_stale_days=epic_stale_days,
                 epic_merge_strategy=epic_merge_strategy,
@@ -778,7 +780,7 @@ class PipelineHarness:
         worker_result=None,
         review_verdict="approve",
     ) -> PipelineRunResult:
-        """Drive an issue through triage → plan → implement → review."""
+        """Drive an issue through triage -> plan -> implement -> review."""
         from models import ReviewVerdict
         from tests.conftest import (
             PlanResultFactory,
@@ -885,14 +887,14 @@ class PipelineHarness:
         )
 
 
-def make_docker_manager(tmp_path: Path) -> WorktreeManager:
-    """Create a WorktreeManager with docker execution mode.
+def make_docker_manager(tmp_path: Path) -> WorkspaceManager:
+    """Create a WorkspaceManager with docker execution mode.
 
     Promoted from test_worktree._make_docker_manager() for reuse across test files.
     """
     from unittest.mock import patch
 
-    from worktree import WorktreeManager
+    from workspace import WorkspaceManager
 
     with patch("shutil.which", return_value="/usr/bin/docker"):
         cfg = ConfigFactory.create(
@@ -901,7 +903,7 @@ def make_docker_manager(tmp_path: Path) -> WorktreeManager:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-    return WorktreeManager(cfg)
+    return WorkspaceManager(cfg)
 
 
 class AuditCheckFactory:
@@ -1255,6 +1257,13 @@ def make_review_phase(
         post_merge=post_merge,
         baseline_policy=baseline_policy,
     )
+
+    # Default fix_review_findings to return no-op so _attempt_review_fix
+    # doesn't loop unexpectedly in tests that don't care about it.
+    from models import ReviewResult as _RR
+
+    _no_fix = _RR(pr_number=0, issue_number=0, fixes_made=False)
+    phase._reviewers.fix_review_findings = AsyncMock(return_value=_no_fix)
 
     if default_mocks:
         from tests.conftest import ReviewResultFactory

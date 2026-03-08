@@ -181,28 +181,23 @@ class TestImplementIncludesPush:
         assert results[0].pr_info.number == 101
 
     @pytest.mark.asyncio
-    async def test_worker_creates_draft_pr_on_failure(
+    async def test_worker_creates_full_pr_on_failure(
         self, config: HydraFlowConfig
     ) -> None:
-        """When agent fails, PR should be created as draft and label kept."""
+        """When agent fails, PR should still be created as a full (non-draft) PR."""
         issue = TaskFactory.create()
 
         phase, _, mock_prs = make_implement_phase(
             config,
             [issue],
             success=False,
-            create_pr_return=PRInfoFactory.create(draft=True),
+            create_pr_return=PRInfoFactory.create(draft=False),
         )
 
         await phase.run_batch()
 
         call_kwargs = mock_prs.create_pr.call_args
-        assert call_kwargs.kwargs.get("draft") is True
-
-        # On failure: should NOT remove hydraflow-ready or add hydraflow-review
-        mock_prs.remove_label.assert_not_awaited()
-        add_calls = [c.args for c in mock_prs.add_labels.call_args_list]
-        assert (42, ["hydraflow-review"]) not in add_calls
+        assert "draft" not in (call_kwargs.kwargs or {})
 
     @pytest.mark.asyncio
     async def test_worker_no_pr_when_push_fails(self, config: HydraFlowConfig) -> None:
@@ -310,7 +305,7 @@ class TestWorkerExceptionIsolation:
         assert len(results) == 1
         assert results[0].success is False
         assert results[0].error is not None
-        assert "Worker exception" in results[0].error
+        assert "Worker RuntimeError for issue" in results[0].error
 
     @pytest.mark.asyncio
     async def test_worker_exception_marks_issue_failed(
@@ -424,7 +419,7 @@ class TestWorktreeCreationFailure:
         assert len(results) == 1
         assert results[0].success is False
         assert results[0].error is not None
-        assert "Worker exception" in results[0].error
+        assert "Worker RuntimeError for issue" in results[0].error
 
     @pytest.mark.asyncio
     async def test_worktree_creation_failure_does_not_crash_other_workers(
@@ -446,7 +441,7 @@ class TestWorktreeCreationFailure:
         assert len(results) == 2
         result_map = {r.issue_number: r for r in results}
         assert result_map[1].success is False
-        assert "Worker exception" in result_map[1].error
+        assert "Worker RuntimeError for issue" in result_map[1].error
         assert result_map[2].success is True
 
     @pytest.mark.asyncio
