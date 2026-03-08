@@ -387,13 +387,13 @@ class TestHITLGetStatus:
         state.set_hitl_origin(42, config.improve_label[0])
         assert phase.get_status(42) == "approval"
 
-    def test_get_status_does_not_return_approval_for_non_improve_origin(
+    def test_get_status_returns_from_review_for_review_origin(
         self, config: HydraFlowConfig
     ) -> None:
-        """Non-memory escalations should not show 'approval'."""
+        """Verification issues with review origin should show 'from review'."""
         phase, state, *_ = make_hitl_phase(config)
         state.set_hitl_origin(42, "hydraflow-review")
-        assert phase.get_status(42) != "approval"
+        assert phase.get_status(42) == "from review"
 
 
 class TestHITLPhaseCorrections:
@@ -811,3 +811,88 @@ class TestHITLExceptionPropagation:
 
         # finally block should still clean up active issues
         assert 42 not in phase._active_hitl_issues
+
+
+# ---------------------------------------------------------------------------
+# HITL auto-fix attempt
+# ---------------------------------------------------------------------------
+
+
+class TestHITLAutoFix:
+    """Tests for HITLPhase.attempt_auto_fixes."""
+
+    @pytest.mark.asyncio
+    async def test_auto_fix_queues_correction_for_new_issue(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """New HITL issues should get an auto-fix correction queued."""
+        phase, state, _fetcher, prs, _wt, _runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42)
+        state.set_hitl_cause(42, "CI failed")
+
+        await phase.attempt_auto_fixes([issue])
+
+        assert 42 in phase._hitl_corrections
+        assert "AUTOMATIC FIX ATTEMPT" in phase._hitl_corrections[42]
+        assert "CI failed" in phase._hitl_corrections[42]
+        prs.swap_pipeline_labels.assert_awaited_once_with(
+            42, config.hitl_autofix_label[0]
+        )
+        prs.post_comment.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_auto_fix_skips_already_attempted(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Issues already auto-attempted should not be retried."""
+        phase, state, _fetcher, prs, _wt, _runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42)
+        state.set_hitl_cause(42, "CI failed")
+        phase._auto_fix_attempted.add(42)
+
+        await phase.attempt_auto_fixes([issue])
+
+        assert 42 not in phase._hitl_corrections
+        prs.post_comment.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_auto_fix_skips_issue_with_pending_correction(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Issues with human corrections already pending should not be auto-fixed."""
+        phase, state, _fetcher, prs, _wt, _runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42)
+        state.set_hitl_cause(42, "CI failed")
+        phase._hitl_corrections[42] = "Human fix"
+
+        await phase.attempt_auto_fixes([issue])
+
+        # Should keep the human correction, not overwrite it
+        assert phase._hitl_corrections[42] == "Human fix"
+
+    @pytest.mark.asyncio
+    async def test_auto_fix_skips_issue_without_cause(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Issues without a stored cause should not be auto-fixed."""
+        phase, _state, _fetcher, prs, _wt, _runner, _bus = make_hitl_phase(config)
+        issue = TaskFactory.create(id=42)
+
+        await phase.attempt_auto_fixes([issue])
+
+        assert 42 not in phase._hitl_corrections
+
+    @pytest.mark.asyncio
+    async def test_auto_fix_stops_on_stop_event(self, config: HydraFlowConfig) -> None:
+        """Should respect the stop event and bail out early."""
+        phase, state, _fetcher, prs, _wt, _runner, _bus = make_hitl_phase(config)
+        issue1 = TaskFactory.create(id=42)
+        issue2 = TaskFactory.create(id=43)
+        state.set_hitl_cause(42, "CI failed")
+        state.set_hitl_cause(43, "Test failed")
+        phase._stop_event.set()
+
+        await phase.attempt_auto_fixes([issue1, issue2])
+
+        assert 42 not in phase._hitl_corrections
+        assert 43 not in phase._hitl_corrections
