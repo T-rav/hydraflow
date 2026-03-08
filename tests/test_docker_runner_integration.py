@@ -285,7 +285,7 @@ class TestStreamingProcessIntegration:
 class TestBuildContainerKwargsDockerValidation:
     """Validate that build_container_kwargs output is accepted by Docker SDK."""
 
-    async def test_kwargs_accepted_by_create(
+    def test_kwargs_accepted_by_create(
         self, tmp_workspace: Path, tmp_log_dir: Path
     ) -> None:
         """Docker SDK accepts kwargs from build_container_kwargs without error."""
@@ -314,7 +314,7 @@ class TestBuildContainerKwargsDockerValidation:
         finally:
             container.remove(force=True)
 
-    async def test_network_mode_none_accepted(self) -> None:
+    def test_network_mode_none_accepted(self) -> None:
         """Docker accepts network_mode='none'."""
         config = ConfigFactory.create(docker_network_mode="none")
         kwargs = build_container_kwargs(config)
