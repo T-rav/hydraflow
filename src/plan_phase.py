@@ -131,7 +131,7 @@ class PlanPhase:
                     duration_seconds=result.duration_seconds,
                     log_file=self._plan_log_reference(issue.id),
                 )
-            except Exception:
+            except (RuntimeError, OSError):
                 logger.exception(
                     "Failed to post transcript summary for issue #%d", issue.id
                 )
@@ -245,7 +245,7 @@ class PlanPhase:
                     duration_seconds=result.duration_seconds,
                     log_file=self._plan_log_reference(issue.id),
                 )
-            except Exception:
+            except (RuntimeError, OSError):
                 logger.exception(
                     "Failed to post transcript summary for issue #%d", issue.id
                 )

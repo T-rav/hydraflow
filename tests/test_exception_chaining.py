@@ -1,7 +1,47 @@
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from agent import AgentRunner
+from events import EventBus
+from models import Task
+from tests.conftest import PRInfoFactory, TaskFactory
+from tests.helpers import ConfigFactory
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def config(tmp_path: Path):
+    return ConfigFactory.create(
+        repo_root=tmp_path / "repo",
+        worktree_base=tmp_path / "wt",
+        state_file=tmp_path / "s.json",
+    )
+
+
+@pytest.fixture
+def event_bus():
+    return EventBus()
+
+
+@pytest.fixture
+def agent_task() -> Task:
+    return TaskFactory.create(id=42, title="Fix something")
+
+
+# ---------------------------------------------------------------------------
+# AST-based exception-chaining guard
+# ---------------------------------------------------------------------------
 
 
 def test_except_blocks_chain_exceptions() -> None:
@@ -27,3 +67,550 @@ def test_except_blocks_chain_exceptions() -> None:
         "(or `from None` when intentional). Missing chaining at:\n"
         + "\n".join(offenders)
     )
+
+
+# ---------------------------------------------------------------------------
+# AgentRunner — main handler (agent.py:213)
+# ---------------------------------------------------------------------------
+
+
+class TestAgentRunnerExceptionChaining:
+    """Test is_likely_bug gate and repr(exc) in AgentRunner.run."""
+
+    @pytest.mark.asyncio
+    async def test_likely_bug_re_raises(
+        self, config, event_bus, agent_task, tmp_path: Path
+    ) -> None:
+        """TypeError (a likely bug) should propagate, not be swallowed."""
+        runner = AgentRunner(config, event_bus)
+        with (
+            patch.object(
+                runner,
+                "_execute",
+                new_callable=AsyncMock,
+                side_effect=TypeError("bad arg"),
+            ),
+            patch.object(runner, "_save_transcript"),
+            pytest.raises(TypeError, match="bad arg"),
+        ):
+            await runner.run(agent_task, tmp_path, "agent/issue-42")
+
+    @pytest.mark.asyncio
+    async def test_transient_error_caught_gracefully(
+        self, config, event_bus, agent_task, tmp_path: Path
+    ) -> None:
+        """RuntimeError (transient) should be caught and stored in result."""
+        runner = AgentRunner(config, event_bus)
+        with (
+            patch.object(
+                runner,
+                "_execute",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("subprocess crash"),
+            ),
+            patch.object(runner, "_save_transcript"),
+        ):
+            result = await runner.run(agent_task, tmp_path, "agent/issue-42")
+
+        assert result.success is False
+        assert "subprocess crash" in (result.error or "")
+
+    @pytest.mark.asyncio
+    async def test_error_stored_as_repr(
+        self, config, event_bus, agent_task, tmp_path: Path
+    ) -> None:
+        """result.error should contain repr(exc) for richer context."""
+        runner = AgentRunner(config, event_bus)
+        with (
+            patch.object(
+                runner,
+                "_execute",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("subprocess crash"),
+            ),
+            patch.object(runner, "_save_transcript"),
+        ):
+            result = await runner.run(agent_task, tmp_path, "agent/issue-42")
+
+        # repr() includes the exception class name
+        assert result.error is not None
+        assert "RuntimeError" in result.error
+
+    @pytest.mark.asyncio
+    async def test_logger_exception_used(
+        self, config, event_bus, agent_task, tmp_path: Path
+    ) -> None:
+        """logger.exception() should be used for the main failure log."""
+        runner = AgentRunner(config, event_bus)
+        with (
+            patch.object(
+                runner,
+                "_execute",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("boom"),
+            ),
+            patch.object(runner, "_save_transcript"),
+            patch("agent.logger") as mock_logger,
+        ):
+            await runner.run(agent_task, tmp_path, "agent/issue-42")
+
+        mock_logger.exception.assert_called_once()
+        # The main failure message should use exception(), not error()
+        assert "Agent failed" in mock_logger.exception.call_args.args[0]
+
+
+# ---------------------------------------------------------------------------
+# AgentRunner — helper methods (agent.py:330, 359)
+# ---------------------------------------------------------------------------
+
+
+class TestAgentHelperBugGates:
+    """Test is_likely_bug gate in _get_common_review_feedback / _get_escalation_data."""
+
+    def test_get_review_feedback_section_reraises_bug(self, config, event_bus) -> None:
+        """TypeError in feedback loading should propagate."""
+        runner = AgentRunner(config, event_bus)
+        runner._context_cache = MagicMock()
+        runner._context_cache.get_or_load.side_effect = TypeError("bad")
+        with pytest.raises(TypeError, match="bad"):
+            runner._get_review_feedback_section()
+
+    def test_get_review_feedback_section_swallows_transient(
+        self, config, event_bus
+    ) -> None:
+        """RuntimeError in feedback loading should return empty string."""
+        runner = AgentRunner(config, event_bus)
+        runner._context_cache = MagicMock()
+        runner._context_cache.get_or_load.side_effect = RuntimeError("transient")
+        assert runner._get_review_feedback_section() == ""
+
+    def test_get_escalation_data_reraises_bug(self, config, event_bus) -> None:
+        """KeyError in escalation loading should propagate."""
+        runner = AgentRunner(config, event_bus)
+        runner._context_cache = MagicMock()
+        runner._context_cache.get_or_load.side_effect = KeyError("missing")
+        with pytest.raises(KeyError, match="missing"):
+            runner._get_escalation_data()
+
+    def test_get_escalation_data_swallows_transient(self, config, event_bus) -> None:
+        """OSError in escalation loading should return empty list."""
+        runner = AgentRunner(config, event_bus)
+        runner._context_cache = MagicMock()
+        runner._context_cache.get_or_load.side_effect = OSError("disk full")
+        assert runner._get_escalation_data() == []
+
+
+# ---------------------------------------------------------------------------
+# PlannerRunner (planner.py:238)
+# ---------------------------------------------------------------------------
+
+
+class TestPlannerRunnerExceptionChaining:
+    """Test is_likely_bug gate and repr(exc) in PlannerRunner.run."""
+
+    @pytest.mark.asyncio
+    async def test_likely_bug_re_raises(self, config, event_bus) -> None:
+        from planner import PlannerRunner
+
+        runner = PlannerRunner(config, event_bus)
+        task = TaskFactory.create(id=10, title="Plan something")
+        with (
+            patch.object(
+                runner,
+                "_execute",
+                new_callable=AsyncMock,
+                side_effect=AttributeError("missing attr"),
+            ),
+            patch.object(runner, "_save_transcript"),
+            pytest.raises(AttributeError, match="missing attr"),
+        ):
+            await runner.plan(task, worker_id=0)
+
+    @pytest.mark.asyncio
+    async def test_transient_error_uses_repr(self, config, event_bus) -> None:
+        from planner import PlannerRunner
+
+        runner = PlannerRunner(config, event_bus)
+        task = TaskFactory.create(id=10, title="Plan something")
+        with (
+            patch.object(
+                runner,
+                "_execute",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("planner crash"),
+            ),
+            patch.object(runner, "_save_transcript"),
+        ):
+            result = await runner.plan(task, worker_id=0)
+
+        assert result.success is False
+        assert "RuntimeError" in (result.error or "")
+
+
+# ---------------------------------------------------------------------------
+# HITLRunner (hitl_runner.py:156)
+# ---------------------------------------------------------------------------
+
+
+class TestHITLRunnerExceptionChaining:
+    """Test is_likely_bug gate and repr(exc) in HITLRunner.run."""
+
+    @pytest.mark.asyncio
+    async def test_likely_bug_re_raises(self, config, event_bus) -> None:
+        from hitl_runner import HITLRunner
+        from models import GitHubIssue
+
+        runner = HITLRunner(config, event_bus)
+        issue = GitHubIssue(
+            number=99,
+            title="HITL test",
+            body="body",
+            labels=["hydraflow-hitl"],
+            comments=[],
+        )
+        with (
+            patch.object(
+                runner,
+                "_execute",
+                new_callable=AsyncMock,
+                side_effect=IndexError("out of range"),
+            ),
+            pytest.raises(IndexError, match="out of range"),
+        ):
+            await runner.run(
+                issue,
+                correction="fix it",
+                cause="ci",
+                worktree_path=config.repo_root,
+                worker_id=0,
+            )
+
+    @pytest.mark.asyncio
+    async def test_transient_error_uses_repr(self, config, event_bus) -> None:
+        from hitl_runner import HITLRunner
+        from models import GitHubIssue
+
+        runner = HITLRunner(config, event_bus)
+        issue = GitHubIssue(
+            number=99,
+            title="HITL test",
+            body="body",
+            labels=["hydraflow-hitl"],
+            comments=[],
+        )
+        with patch.object(
+            runner,
+            "_execute",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("hitl crash"),
+        ):
+            result = await runner.run(
+                issue,
+                correction="fix it",
+                cause="ci",
+                worktree_path=config.repo_root,
+                worker_id=0,
+            )
+
+        assert result.success is False
+        assert "RuntimeError" in (result.error or "")
+
+
+# ---------------------------------------------------------------------------
+# MergeConflictResolver (merge_conflict_resolver.py:222, 347, 367)
+# ---------------------------------------------------------------------------
+
+
+class TestMergeConflictResolverExceptionChaining:
+    """Test is_likely_bug gate in MergeConflictResolver."""
+
+    def _make_resolver(self, config, event_bus):
+        from merge_conflict_resolver import MergeConflictResolver
+
+        return MergeConflictResolver(
+            config=config,
+            worktrees=MagicMock(),
+            agents=MagicMock(),
+            prs=MagicMock(),
+            event_bus=event_bus,
+            state=MagicMock(),
+            summarizer=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_resolve_reraises_bug(self, config, event_bus) -> None:
+        resolver = self._make_resolver(config, event_bus)
+        pr = PRInfoFactory.create(number=5, issue_number=5)
+        task = TaskFactory.create(id=5)
+
+        # Mock worktrees.start_merge_main to return False (has conflicts)
+        resolver._worktrees.start_merge_main = AsyncMock(return_value=False)
+        resolver._publish_review_status = AsyncMock()
+
+        # Mock agents._build_command to raise TypeError (a likely bug)
+        resolver._agents._build_command = MagicMock(
+            side_effect=TypeError("bad merge arg")
+        )
+
+        with pytest.raises(TypeError, match="bad merge arg"):
+            await resolver.resolve_merge_conflicts(pr, task, Path("/tmp/wt"))
+
+    @pytest.mark.asyncio
+    async def test_resolve_catches_transient(self, config, event_bus) -> None:
+        resolver = self._make_resolver(config, event_bus)
+        pr = PRInfoFactory.create(number=5, issue_number=5)
+        task = TaskFactory.create(id=5)
+
+        # Mock worktrees.start_merge_main to return False (has conflicts)
+        resolver._worktrees.start_merge_main = AsyncMock(return_value=False)
+        resolver._publish_review_status = AsyncMock()
+        resolver._worktrees.abort_merge = AsyncMock()
+
+        # Mock agents._build_command to raise RuntimeError (transient)
+        resolver._agents._build_command = MagicMock(
+            side_effect=RuntimeError("transient")
+        )
+
+        # Mock fresh rebuild to also fail
+        with patch.object(
+            resolver, "fresh_branch_rebuild", new_callable=AsyncMock, return_value=False
+        ):
+            result = await resolver.resolve_merge_conflicts(pr, task, Path("/tmp/wt"))
+        assert result.success is False
+
+    @pytest.mark.asyncio
+    async def test_summarize_narrows_to_runtime_os_error(self) -> None:
+        """_maybe_summarize_conflict should only catch RuntimeError/OSError."""
+        from merge_conflict_resolver import MergeConflictResolver
+
+        resolver = MergeConflictResolver.__new__(MergeConflictResolver)
+        resolver._summarizer = AsyncMock()
+        resolver._summarizer.summarize_and_publish.side_effect = TypeError(
+            "bug in summarizer"
+        )
+        with pytest.raises(TypeError, match="bug in summarizer"):
+            await resolver._maybe_summarize_conflict("transcript", 1, 2)
+
+
+# ---------------------------------------------------------------------------
+# Triage (triage.py:144, 405)
+# ---------------------------------------------------------------------------
+
+
+class TestTriageExceptionChaining:
+    """Test is_likely_bug gate in TriageAgent."""
+
+    @pytest.mark.asyncio
+    async def test_evaluate_reraises_bug(self, config, event_bus) -> None:
+        from triage import TriageRunner
+
+        agent = TriageRunner(config, event_bus)
+        # Title/body must be long enough to pass pre-filter
+        task = TaskFactory.create(
+            id=7,
+            title="Fix the authentication module for SSO users",
+            body="The SSO login flow is broken when users try to authenticate via SAML. "
+            "This causes a 500 error on the callback endpoint.",
+        )
+        with (
+            patch.object(
+                agent,
+                "_evaluate_with_llm",
+                new_callable=AsyncMock,
+                side_effect=KeyError("missing field"),
+            ),
+            patch.object(agent, "_emit_transcript", new_callable=AsyncMock),
+            pytest.raises(KeyError, match="missing field"),
+        ):
+            await agent.evaluate(task)
+
+    @pytest.mark.asyncio
+    async def test_evaluate_catches_transient(self, config, event_bus) -> None:
+        from triage import TriageRunner
+
+        agent = TriageRunner(config, event_bus)
+        task = TaskFactory.create(
+            id=7,
+            title="Fix the authentication module for SSO users",
+            body="The SSO login flow is broken when users try to authenticate via SAML. "
+            "This causes a 500 error on the callback endpoint.",
+        )
+        with (
+            patch.object(
+                agent,
+                "_evaluate_with_llm",
+                new_callable=AsyncMock,
+                # Note: RuntimeError would be re-raised by the RuntimeError handler,
+                # so use OSError as a transient non-infrastructure error
+                side_effect=OSError("network timeout"),
+            ),
+            patch.object(agent, "_emit_transcript", new_callable=AsyncMock),
+        ):
+            result = await agent.evaluate(task)
+
+        assert result.ready is False
+        assert any("network timeout" in r for r in result.reasons)
+
+    @pytest.mark.asyncio
+    async def test_decompose_reraises_bug(self, config, event_bus) -> None:
+        from triage import TriageRunner
+
+        agent = TriageRunner(config, event_bus)
+        task = TaskFactory.create(id=7, title="Decompose me")
+        with (
+            patch.object(
+                agent,
+                "_execute",
+                new_callable=AsyncMock,
+                side_effect=AttributeError("no attr"),
+            ),
+            patch.object(agent, "_save_transcript"),
+            pytest.raises(AttributeError, match="no attr"),
+        ):
+            await agent.run_decomposition(task)
+
+
+# ---------------------------------------------------------------------------
+# VerificationJudge (verification_judge.py:107, 158)
+# ---------------------------------------------------------------------------
+
+
+class TestVerificationJudgeBugGates:
+    """Test is_likely_bug gate in VerificationJudge."""
+
+    @pytest.mark.asyncio
+    async def test_code_validation_reraises_bug(self, config, event_bus) -> None:
+        from verification_judge import VerificationJudge
+
+        judge = VerificationJudge(config, event_bus)
+
+        criteria_dir = config.repo_root / ".hydraflow" / "verification"
+        criteria_dir.mkdir(parents=True)
+        (criteria_dir / "issue-42.md").write_text(
+            "## Acceptance Criteria\n- [ ] Must work\n"
+        )
+
+        with (
+            patch.object(
+                judge,
+                "_execute",
+                new_callable=AsyncMock,
+                side_effect=TypeError("bad prompt arg"),
+            ),
+            pytest.raises(TypeError, match="bad prompt arg"),
+        ):
+            await judge.judge(issue_number=42, pr_number=101, diff="diff")
+
+    @pytest.mark.asyncio
+    async def test_code_validation_catches_transient(self, config, event_bus) -> None:
+        from verification_judge import VerificationJudge
+
+        judge = VerificationJudge(config, event_bus)
+
+        criteria_dir = config.repo_root / ".hydraflow" / "verification"
+        criteria_dir.mkdir(parents=True)
+        (criteria_dir / "issue-42.md").write_text(
+            "## Acceptance Criteria\n- [ ] Must work\n"
+        )
+
+        with patch.object(
+            judge,
+            "_execute",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("LLM timeout"),
+        ):
+            result = await judge.judge(issue_number=42, pr_number=101, diff="diff")
+
+        assert result is not None
+        assert result.criteria_results == []
+        assert result.all_criteria_pass is False
+
+
+# ---------------------------------------------------------------------------
+# ADRReviewer (adr_reviewer.py:488, 590, 1003)
+# ---------------------------------------------------------------------------
+
+
+class TestADRReviewerBugGates:
+    """Test is_likely_bug gate in ADRCouncilReviewer."""
+
+    @pytest.mark.asyncio
+    async def test_triage_routing_reraises_bug(self) -> None:
+        from adr_reviewer import ADRCouncilReviewer
+        from models import ADRCouncilResult, CouncilVerdict
+
+        reviewer = ADRCouncilReviewer.__new__(ADRCouncilReviewer)
+        reviewer._prs = AsyncMock()
+        reviewer._prs.create_issue.side_effect = TypeError("bad arg")
+        reviewer._config = MagicMock()
+        reviewer._config.find_label = ["hydraflow-find"]
+
+        result = ADRCouncilResult(
+            adr_number=1,
+            adr_path=Path("adr.md"),
+            final_decision=CouncilVerdict.REQUEST_CHANGES,
+            votes=[],
+            summary="test",
+        )
+
+        with pytest.raises(TypeError, match="bad arg"):
+            await reviewer._route_to_triage(result, reason="test")
+
+    @pytest.mark.asyncio
+    async def test_triage_routing_catches_transient(self) -> None:
+        from adr_reviewer import ADRCouncilReviewer
+        from models import ADRCouncilResult, CouncilVerdict
+
+        reviewer = ADRCouncilReviewer.__new__(ADRCouncilReviewer)
+        reviewer._prs = AsyncMock()
+        reviewer._prs.create_issue.side_effect = RuntimeError("API timeout")
+        reviewer._config = MagicMock()
+        reviewer._config.find_label = ["hydraflow-find"]
+
+        result = ADRCouncilResult(
+            adr_number=1,
+            adr_path=Path("adr.md"),
+            final_decision=CouncilVerdict.REQUEST_CHANGES,
+            votes=[],
+            summary="test",
+        )
+
+        ok = await reviewer._route_to_triage(result, reason="test")
+        assert ok is False
+
+
+# ---------------------------------------------------------------------------
+# Parametric: all is_likely_bug exception types re-raise from AgentRunner
+# ---------------------------------------------------------------------------
+
+
+BUG_EXCEPTIONS = [
+    TypeError("type bug"),
+    KeyError("key bug"),
+    AttributeError("attr bug"),
+    ValueError("value bug"),
+    IndexError("index bug"),
+    NotImplementedError("not impl"),
+]
+
+
+class TestAllBugExceptionsReRaise:
+    """Parametric test: all LIKELY_BUG_EXCEPTIONS re-raise from AgentRunner.run."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("exc", BUG_EXCEPTIONS, ids=lambda e: type(e).__name__)
+    async def test_agent_run_reraises(
+        self, config, event_bus, agent_task, tmp_path: Path, exc: Exception
+    ) -> None:
+        runner = AgentRunner(config, event_bus)
+        with (
+            patch.object(
+                runner,
+                "_execute",
+                new_callable=AsyncMock,
+                side_effect=exc,
+            ),
+            patch.object(runner, "_save_transcript"),
+            pytest.raises(type(exc)),
+        ):
+            await runner.run(agent_task, tmp_path, "agent/issue-42")
