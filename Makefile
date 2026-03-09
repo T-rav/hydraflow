@@ -68,6 +68,8 @@ help:
 	@echo "  make ui             Build React dashboard (src/ui/dist/)"
 	@echo "  make ui-dev         Start React dashboard dev server"
 	@echo "  make ui-clean       Remove src/ui/dist and node_modules"
+	@echo "  make integration    Run multi-repo integration tests"
+	@echo "  make soak           Run soak/load tests"
 	@echo "  make hot            Send config update to running instance"
 	@echo "  make docker-build   Build Hydra agent Docker image"
 	@echo "  make docker-test    Build + smoke-test the agent image"

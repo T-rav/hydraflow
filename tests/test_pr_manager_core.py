@@ -1815,7 +1815,7 @@ def test_makefile_prep_runs_cli_scaffold() -> None:
 
 
 def test_makefile_setup_runs_label_bootstrap() -> None:
-    """Makefile setup target should run ``cli.py --ensure-labels`` to ensure labels."""
+    """Makefile setup target should copy agent assets and configure managed Codex skills."""
     from pathlib import Path
 
     makefile = Path(__file__).resolve().parent.parent / "Makefile"

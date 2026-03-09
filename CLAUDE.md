@@ -104,7 +104,7 @@ make typecheck      # Run Pyright type checks
 make security       # Run Bandit security scan
 make quality        # Lint + typecheck + security + test (parallel)
 make quality-lite   # Lint + typecheck + security (no tests)
-make setup          # Install hooks, CLI, config, labels
+make setup          # Install hooks, assets, config, labels
 make prep           # Sync agent assets + run full repo prep (labels, audit, CI/tests)
 make scaffold       # Generate baseline tests and CI configuration only (no asset sync)
 make ensure-labels  # Create HydraFlow lifecycle labels
