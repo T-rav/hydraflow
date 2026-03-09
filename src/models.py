@@ -269,7 +269,7 @@ class GitHubIssue(BaseModel):
 
     @field_validator("state", mode="before")
     @classmethod
-    def _normalise_state(cls, value: Any) -> Any:
+    def _normalise_state(cls, value: GitHubIssueState | str) -> GitHubIssueState | str:
         """Allow case-insensitive GitHub API values."""
         if isinstance(value, str):
             return value.lower()
