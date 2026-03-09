@@ -1031,6 +1031,10 @@ class DoltStore:
             data.get("last_synced"),
         )
 
+    def set_memory_state(self, issue_ids: list[int], digest_hash: str) -> None:
+        """Alias for :meth:`update_memory_state` (used by MemorySyncWorker)."""
+        self.update_memory_state(issue_ids, digest_hash)
+
     # ------------------------------------------------------------------
     # Manifest state
     # ------------------------------------------------------------------
@@ -1787,6 +1791,19 @@ class DoltStore:
         """Return events since *since_iso* timestamp."""
         rows = self._events.query_since(since_iso)
         return [r.get("payload", r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Metrics snapshots
+    # ------------------------------------------------------------------
+
+    def record_metrics_snapshot(self, snapshot: dict[str, Any]) -> None:
+        """Append a metrics snapshot to Dolt."""
+        self._metrics_snap.append(snapshot)
+
+    def get_metrics_history(self, limit: int = 100) -> list[dict[str, Any]]:
+        """Return recent metrics snapshots, newest first."""
+        rows = self._metrics_snap.query(limit)
+        return [r.get("snapshot", r) for r in rows]
 
     # ------------------------------------------------------------------
     # Troubleshooting patterns
