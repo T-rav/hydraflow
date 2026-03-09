@@ -24,7 +24,8 @@ export function extractSlugFromUrl(input) {
   } catch {
     return null
   }
-  if (!/github\.com$/i.test(url.hostname) && !/github\.com$/i.test(url.hostname.replace(/^www\./, ''))) {
+  const host = url.hostname.toLowerCase().replace(/^www\./, '')
+  if (host !== 'github.com') {
     return null
   }
   const segments = url.pathname.split('/').filter(Boolean)
