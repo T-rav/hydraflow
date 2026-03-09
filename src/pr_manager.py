@@ -771,8 +771,14 @@ class PRManager:
             logger.error("Issue creation failed for %r: %s", title, exc)
             return 0
 
+    _SCREENSHOT_RELEASE_TAG = "screenshots"
+
     async def upload_screenshot(self, png_path: Path) -> str:
-        """Upload a local PNG file to GitHub (via gist) and return a permanent image URL.
+        """Upload a local PNG to GitHub as a release asset and return the URL.
+
+        Uses a dedicated ``screenshots`` release tag.  The release is
+        created automatically on first use.  Each file is uploaded with
+        a unique name (timestamp + original stem) so assets never collide.
 
         Returns an empty string on failure or in dry-run mode.
         """
@@ -780,17 +786,59 @@ class PRManager:
             logger.info("[dry-run] Would upload screenshot")
             return ""
 
-        try:
-            gist_args = ["gh", "gist", "create"]
-            if self._config.screenshot_gist_public:
-                gist_args.append("--public")
-            gist_args += ["--filename", "screenshot.png", str(png_path)]
+        self._assert_repo()
 
-            output = await self._run_gh(*gist_args)
-            return self._gist_raw_url(output, "screenshot.png")
+        try:
+            await self._ensure_screenshot_release()
+
+            # Unique asset name to avoid collisions (gh uses the filename)
+            import shutil
+            import time as _time
+
+            ts = int(_time.time())
+            asset_name = f"{ts}-{png_path.stem}.png"
+            upload_path = png_path.parent / asset_name
+            shutil.copy2(png_path, upload_path)
+
+            try:
+                await self._run_gh(
+                    "gh", "release", "upload",
+                    self._SCREENSHOT_RELEASE_TAG,
+                    str(upload_path),
+                    "--repo", self._repo,
+                    "--clobber",
+                )
+            finally:
+                upload_path.unlink(missing_ok=True)
+
+            url = (
+                f"https://github.com/{self._repo}/releases/download/"
+                f"{self._SCREENSHOT_RELEASE_TAG}/{asset_name}"
+            )
+            logger.info("Screenshot uploaded: %s", url)
+            return url
         except Exception:
             logger.exception("Screenshot upload failed")
             return ""
+
+    async def _ensure_screenshot_release(self) -> None:
+        """Create the screenshots release if it doesn't exist."""
+        try:
+            await self._run_gh(
+                "gh", "release", "view",
+                self._SCREENSHOT_RELEASE_TAG,
+                "--repo", self._repo,
+            )
+        except RuntimeError:
+            # Release doesn't exist — create it
+            await self._run_gh(
+                "gh", "release", "create",
+                self._SCREENSHOT_RELEASE_TAG,
+                "--repo", self._repo,
+                "--title", "Screenshot Assets",
+                "--notes", "Auto-uploaded screenshots from bug reports",
+                "--latest=false",
+            )
 
     async def upload_screenshot_gist(self, png_base64: str) -> str:
         """Upload a base64-encoded PNG as a GitHub gist and return the raw URL.
