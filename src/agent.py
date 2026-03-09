@@ -13,7 +13,7 @@ from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from diff_sanity import build_diff_sanity_prompt, parse_diff_sanity_result
 from events import EventBus, EventType, HydraFlowEvent
-from models import Task, WorkerResult, WorkerStatus
+from models import Task, WorkerResult, WorkerStatus, WorkerUpdatePayload
 from review_insights import (
     ReviewInsightStore,
     get_common_feedback_section,
@@ -1038,14 +1038,15 @@ SUMMARY: <one-line summary>
         self, issue_number: int, worker_id: int, status: WorkerStatus
     ) -> None:
         """Publish a worker status event."""
+        payload: WorkerUpdatePayload = {
+            "issue": issue_number,
+            "worker": worker_id,
+            "status": status.value,
+            "role": "implementer",
+        }
         await self._bus.publish(
             HydraFlowEvent(
                 type=EventType.WORKER_UPDATE,
-                data={
-                    "issue": issue_number,
-                    "worker": worker_id,
-                    "status": status.value,
-                    "role": "implementer",
-                },
+                data=payload,
             )
         )

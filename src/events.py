@@ -6,11 +6,11 @@ import asyncio
 import contextlib
 import itertools
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -88,14 +88,33 @@ class EventType(StrEnum):
     CRATE_COMPLETED = "crate_completed"
 
 
+_T = TypeVar("_T")
+
+#: Constrained value type for event payloads — eliminates unchecked ``Any``.
+EventDataValue = str | int | float | bool | None | list[str] | dict[str, object]
+
+#: The concrete dict type used for ``HydraFlowEvent.data``.
+EventData = dict[str, EventDataValue]
+
+
 class HydraFlowEvent(BaseModel):
     """A single event published on the bus."""
 
     id: int = Field(default_factory=lambda: next(_event_counter))
     type: EventType
     timestamp: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
-    data: dict[str, Any] = Field(default_factory=dict)
+    data: Mapping[str, Any] = Field(default_factory=dict)
     session_id: str | None = None
+
+    def typed_data(self, cls: type[_T]) -> _T:
+        """Cast ``self.data`` to a typed payload class for safe access.
+
+        *cls* should be one of the ``TypedDict`` payload classes defined in
+        ``models.py`` (e.g. ``WorkerUpdatePayload``).  This is a zero-cost
+        cast at runtime — no validation is performed — but gives the caller
+        full type-checker support for the returned dict keys.
+        """
+        return cls(self.data)  # type: ignore[call-arg]
 
 
 class EventLog:

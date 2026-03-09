@@ -1429,7 +1429,7 @@ async def _run_main(config: HydraFlowConfig) -> None:
     if config.dashboard_enabled:
         from dashboard import HydraFlowDashboard
         from events import EventBus, EventLog, EventType, HydraFlowEvent
-        from models import Phase
+        from models import Phase, PhaseChangePayload
         from state import StateTracker
 
         if primary_runtime:
@@ -1467,7 +1467,7 @@ async def _run_main(config: HydraFlowConfig) -> None:
             await bus.publish(
                 HydraFlowEvent(
                     type=EventType.PHASE_CHANGE,
-                    data={"phase": Phase.IDLE.value},
+                    data=PhaseChangePayload(phase=Phase.IDLE.value),
                 )
             )
 
