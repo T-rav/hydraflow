@@ -1337,6 +1337,22 @@ class TestNarrowedExceptionHandling:
         await handler._notify_epic_approval(42)
 
     @pytest.mark.asyncio
+    async def test_notify_epic_approval_catches_os_error(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """OSError in epic approval notification should be caught."""
+        handler = _make_handler(config)
+        mock_epic_manager = AsyncMock()
+        mock_epic_manager.find_parent_epics = MagicMock(return_value=[100])
+        mock_epic_manager.on_child_approved = AsyncMock(
+            side_effect=OSError("network unreachable")
+        )
+        handler._epic_manager = mock_epic_manager
+
+        # Should not raise — OSError is caught
+        await handler._notify_epic_approval(42)
+
+    @pytest.mark.asyncio
     async def test_post_inference_comment_propagates_type_error(
         self, config: HydraFlowConfig
     ) -> None:
@@ -1374,6 +1390,25 @@ class TestNarrowedExceptionHandling:
         issue = TaskFactory.create(id=5)
 
         # Should not raise — RuntimeError is caught
+        await handler._post_inference_totals_comment(pr, issue)
+
+    @pytest.mark.asyncio
+    async def test_post_inference_comment_catches_value_error(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """ValueError (e.g. json.JSONDecodeError) in post_comment should be caught."""
+        handler = _make_handler(config)
+        handler._prompt_telemetry.get_pr_totals = lambda _pr: {
+            "inference_calls": 1,
+            "total_tokens": 100,
+            "total_est_tokens": 100,
+            "actual_usage_calls": 0,
+        }
+        handler._prs.post_comment = AsyncMock(side_effect=ValueError("invalid JSON"))
+        pr = PRInfoFactory.create(number=10, issue_number=5)
+        issue = TaskFactory.create(id=5)
+
+        # Should not raise — ValueError is caught
         await handler._post_inference_totals_comment(pr, issue)
 
     @pytest.mark.asyncio
@@ -1489,5 +1524,6 @@ class TestNarrowedExceptionHandling:
 
         result = await handler._safe_hook("test hook", _fail(), issue_number=1)
         assert result is None
+        state_mock.record_hook_failure.assert_called_once()
         bus_mock.publish.assert_awaited_once()
         prs_mock.post_comment.assert_awaited_once()

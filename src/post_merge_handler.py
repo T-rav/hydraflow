@@ -327,7 +327,7 @@ class PostMergeHandler:
         )
         try:
             await self._prs.post_comment(issue.id, body)
-        except (RuntimeError, OSError):
+        except (RuntimeError, OSError, ValueError):
             logger.warning(
                 "Could not post inference usage comment for issue #%d (PR #%d)",
                 issue.id,
