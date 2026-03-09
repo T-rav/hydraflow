@@ -21,13 +21,19 @@ from models import (
     EpicChildStatus,
     EpicDetail,
     EpicProgress,
+    EpicProgressPayload,
     EpicReadiness,
+    EpicReadyPayload,
+    EpicReleasedPayload,
+    EpicReleasingPayload,
     EpicState,
     EpicStatus,
+    EpicUpdatePayload,
     GitHubIssueState,
     MergeStrategy,
     Release,
     ReviewStatus,
+    SystemAlertPayload,
 )
 from pr_manager import PRManager
 from state import StateTracker
@@ -204,12 +210,12 @@ class EpicCompletionChecker:
         sub_issue_titles: list[str] = []
         excluded_issues: list[int] = []
         hitl_blocked: list[int] = []
-        for issue_num in sub_issues:
-            issue = await self._fetcher.fetch_issue_by_number(issue_num)
+        for issue_number in sub_issues:
+            issue = await self._fetcher.fetch_issue_by_number(issue_number)
             if issue is None:
                 logger.warning(
                     "Sub-issue #%d not found while checking epic #%d — skipping",
-                    issue_num,
+                    issue_number,
                     epic_number,
                 )
                 return False
@@ -229,18 +235,18 @@ class EpicCompletionChecker:
 
             # Check if sub-issue is closed (wontfix/duplicate/invalid)
             if issue.state == GitHubIssueState.CLOSED:
-                excluded_issues.append(issue_num)
+                excluded_issues.append(issue_number)
                 logger.info(
                     "Sub-issue #%d closed without fixed label — treating as excluded "
                     "for epic #%d",
-                    issue_num,
+                    issue_number,
                     epic_number,
                 )
                 continue
 
             # Check if sub-issue is escalated to HITL (still open)
             if hitl_labels & set(issue.labels):
-                hitl_blocked.append(issue_num)
+                hitl_blocked.append(issue_number)
                 continue
 
             # Sub-issue is still open and unresolved
@@ -1009,10 +1015,10 @@ class EpicManager:
                     await self._bus.publish(
                         HydraFlowEvent(
                             type=EventType.EPIC_PROGRESS,
-                            data={
-                                "epic_number": epic.epic_number,
-                                "progress": detail.model_dump(),
-                            },
+                            data=EpicProgressPayload(
+                                epic_number=epic.epic_number,
+                                progress=detail.model_dump(),
+                            ),
                         )
                     )
                     # Check and publish readiness (skip already-released epics).
@@ -1029,10 +1035,10 @@ class EpicManager:
                         await self._bus.publish(
                             HydraFlowEvent(
                                 type=EventType.EPIC_READY,
-                                data={
-                                    "epic_number": epic.epic_number,
-                                    "readiness": detail.readiness.model_dump(),
-                                },
+                                data=EpicReadyPayload(
+                                    epic_number=epic.epic_number,
+                                    readiness=detail.readiness.model_dump(),
+                                ),
                             )
                         )
             except Exception:  # noqa: BLE001
@@ -1083,7 +1089,7 @@ class EpicManager:
             await self._bus.publish(
                 HydraFlowEvent(
                     type=EventType.EPIC_RELEASING,
-                    data={"epic_number": epic_number, "job_id": job_id},
+                    data=EpicReleasingPayload(epic_number=epic_number, job_id=job_id),
                 )
             )
 
@@ -1094,11 +1100,11 @@ class EpicManager:
             await self._bus.publish(
                 HydraFlowEvent(
                     type=EventType.EPIC_RELEASED,
-                    data={
-                        "epic_number": epic_number,
-                        "job_id": job_id,
-                        "status": "completed",
-                    },
+                    data=EpicReleasedPayload(
+                        epic_number=epic_number,
+                        job_id=job_id,
+                        status="completed",
+                    ),
                 )
             )
         except Exception as exc:  # noqa: BLE001
@@ -1110,12 +1116,12 @@ class EpicManager:
             await self._bus.publish(
                 HydraFlowEvent(
                     type=EventType.EPIC_RELEASED,
-                    data={
-                        "epic_number": epic_number,
-                        "job_id": job_id,
-                        "status": "failed",
-                        "error": str(exc),
-                    },
+                    data=EpicReleasedPayload(
+                        epic_number=epic_number,
+                        job_id=job_id,
+                        status="failed",
+                        error=str(exc),
+                    ),
                 )
             )
         finally:
@@ -1147,12 +1153,12 @@ class EpicManager:
             await self._bus.publish(
                 HydraFlowEvent(
                     type=EventType.SYSTEM_ALERT,
-                    data={
-                        "message": f"Epic #{epic.epic_number} is stale "
+                    data=SystemAlertPayload(
+                        message=f"Epic #{epic.epic_number} is stale "
                         f"(no activity for {self._config.epic_stale_days} days)",
-                        "source": "epic_monitor",
-                        "epic_number": epic.epic_number,
-                    },
+                        source="epic_monitor",
+                        epic_number=epic.epic_number,
+                    ),
                 )
             )
         return stale
@@ -1330,7 +1336,7 @@ class EpicManager:
     async def _publish_ready_event(self, epic_number: int, strategy: str) -> None:
         """Publish an EPIC_READY event when all children are approved."""
         progress = self.get_progress(epic_number)
-        data: dict[str, object] = {
+        data: EpicReadyPayload = {
             "epic_number": epic_number,
             "strategy": strategy,
         }
@@ -1407,7 +1413,7 @@ class EpicManager:
     async def _publish_update(self, epic_number: int, action: str) -> None:
         """Publish an EPIC_UPDATE event with current progress."""
         progress = self.get_progress(epic_number)
-        data: dict[str, object] = {
+        data: EpicUpdatePayload = {
             "epic_number": epic_number,
             "action": action,
         }

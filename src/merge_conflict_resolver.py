@@ -16,7 +16,7 @@ from models import (
     Task,
     WorkerStatus,
 )
-from phase_utils import publish_review_status, safe_file_memory_suggestion
+from phase_utils import MemorySuggester, is_likely_bug, publish_review_status
 from pr_manager import PRManager
 from prompt_stats import build_prompt_stats
 from state import StateTracker
@@ -46,6 +46,7 @@ class MergeConflictResolver:
         self._bus = event_bus
         self._state = state
         self._summarizer = summarizer
+        self._suggest_memory = MemorySuggester(config, prs, state)
 
     async def merge_with_main(
         self,
@@ -188,14 +189,7 @@ class MergeConflictResolver:
                     pr.number, issue.id, attempt, transcript, source=source
                 )
 
-                await safe_file_memory_suggestion(
-                    transcript,
-                    source,
-                    f"PR #{pr.number}",
-                    self._config,
-                    self._prs,
-                    self._state,
-                )
+                await self._suggest_memory(transcript, source, f"PR #{pr.number}")
 
                 success, error_msg = await self._agents._verify_result(
                     wt_path, pr.branch
@@ -220,14 +214,16 @@ class MergeConflictResolver:
                         transcript, issue.id, pr.number
                     )
             except Exception as exc:
-                logger.error(
+                if is_likely_bug(exc):
+                    raise
+                logger.exception(
                     "Conflict resolution agent failed for PR #%d (attempt %d/%d): %s",
                     pr.number,
                     attempt,
                     max_attempts,
                     exc,
                 )
-                last_error = str(exc)
+                last_error = repr(exc)
 
         # All merge attempts exhausted — abort merge and try fresh rebuild
         await self._worktrees.abort_merge(wt_path)
@@ -323,14 +319,7 @@ class MergeConflictResolver:
                 pr.number, issue.id, 0, transcript, source=source
             )
 
-            await safe_file_memory_suggestion(
-                transcript,
-                source,
-                f"PR #{pr.number}",
-                self._config,
-                self._prs,
-                self._state,
-            )
+            await self._suggest_memory(transcript, source, f"PR #{pr.number}")
 
             success, error_msg = await self._agents._verify_result(new_wt, pr.branch)
             if success:
@@ -345,7 +334,9 @@ class MergeConflictResolver:
             )
             return False
         except Exception as exc:
-            logger.error(
+            if is_likely_bug(exc):
+                raise
+            logger.exception(
                 "Fresh branch rebuild agent failed for PR #%d: %s",
                 pr.number,
                 exc,
@@ -364,7 +355,7 @@ class MergeConflictResolver:
                 issue_number=issue_number,
                 phase="conflict_resolution",
             )
-        except Exception:
+        except (RuntimeError, OSError):
             logger.exception(
                 "Failed to file transcript summary for conflict resolution on PR #%d",
                 pr_number,

@@ -13,21 +13,27 @@ from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from models import (
     BackgroundWorkerState,
+    ErrorPayload,
     GitHubIssue,
+    OrchestratorStatusPayload,
     Phase,
     PipelineStats,
+    SessionEndPayload,
     SessionLog,
+    SessionStartPayload,
     SessionStatus,
     StageStats,
+    SystemAlertPayload,
     Task,
     ThroughputStats,
     WorkFn,
 )
 from phase_utils import (
+    MemorySuggester,
     is_adr_issue_title,
     is_likely_bug,
+    log_exception_with_bug_classification,
     release_batch_in_flight,
-    safe_file_memory_suggestion,
 )
 from service_registry import OrchestratorCallbacks, build_services
 from state import StateTracker
@@ -154,6 +160,7 @@ class HydraFlowOrchestrator:
         self._runs_gc_loop = svc.runs_gc_loop
         self._adr_reviewer_loop = svc.adr_reviewer_loop
         self._crate_manager = svc.crate_manager
+        self._suggest_memory = MemorySuggester(config, self._prs, self._state)
 
         # Registry of triggerable background loop instances
         self._bg_loop_registry: dict[str, BaseBackgroundLoop] = {
@@ -316,18 +323,18 @@ class HydraFlowOrchestrator:
         async with self._active_issues_lock:
             interrupted: dict[int, str] = {}
             # Use IssueStore active tracking as the primary source
-            for issue_num, stage in self._store.get_active_issues().items():
-                interrupted[issue_num] = stage
+            for issue_number, stage in self._store.get_active_issues().items():
+                interrupted[issue_number] = stage
             # Also check in-memory tracking sets for issues not yet in the store
-            for issue_num in self._active_impl_issues:
-                if issue_num not in interrupted:
-                    interrupted[issue_num] = "implement"
-            for issue_num in self._active_review_issues:
-                if issue_num not in interrupted:
-                    interrupted[issue_num] = "review"
-            for issue_num in self._hitl_phase.active_hitl_issues:
-                if issue_num not in interrupted:
-                    interrupted[issue_num] = "hitl"
+            for issue_number in self._active_impl_issues:
+                if issue_number not in interrupted:
+                    interrupted[issue_number] = "implement"
+            for issue_number in self._active_review_issues:
+                if issue_number not in interrupted:
+                    interrupted[issue_number] = "review"
+            for issue_number in self._hitl_phase.active_hitl_issues:
+                if issue_number not in interrupted:
+                    interrupted[issue_number] = "hitl"
             return interrupted
 
     # Alias for backward compatibility
@@ -432,17 +439,13 @@ class HydraFlowOrchestrator:
 
     async def _publish_status(self) -> None:
         """Broadcast the current orchestrator status to all subscribers."""
+        data: OrchestratorStatusPayload = {"status": self.run_status}
+        if self.credits_paused_until:
+            data["credits_paused_until"] = self.credits_paused_until.isoformat()
         await self._bus.publish(
             HydraFlowEvent(
                 type=EventType.ORCHESTRATOR_STATUS,
-                data={
-                    "status": self.run_status,
-                    **(
-                        {"credits_paused_until": self.credits_paused_until.isoformat()}
-                        if self.credits_paused_until
-                        else {}
-                    ),
-                },
+                data=data,
             )
         )
 
@@ -623,11 +626,11 @@ class HydraFlowOrchestrator:
         """Remove interrupted issues from crash-recovery sets so they re-route normally."""
         interrupted = self._state.get_interrupted_issues()
         if interrupted:
-            for issue_num in interrupted:
-                self._recovered_issues.discard(issue_num)
-                self._active_impl_issues.discard(issue_num)
-                self._active_review_issues.discard(issue_num)
-                self._hitl_phase.active_hitl_issues.discard(issue_num)
+            for issue_number in interrupted:
+                self._recovered_issues.discard(issue_number)
+                self._active_impl_issues.discard(issue_number)
+                self._active_review_issues.discard(issue_number)
+                self._hitl_phase.active_hitl_issues.discard(issue_number)
             logger.info(
                 "Restored %d interrupted issue(s) for re-processing: %s",
                 len(interrupted),
@@ -741,11 +744,15 @@ class HydraFlowOrchestrator:
         self._state.reset_session_counters(session_start_time.isoformat())
         self._state.save_session(self._current_session)
         self._bus.set_session_id(session_id)
+        data: SessionStartPayload = {
+            "session_id": session_id,
+            "repo": self._config.repo,
+        }
         await self._bus.publish(
             HydraFlowEvent(
                 type=EventType.SESSION_START,
                 session_id=session_id,
-                data={"session_id": session_id, "repo": self._config.repo},
+                data=data,
             )
         )
 
@@ -768,17 +775,18 @@ class HydraFlowOrchestrator:
         self._state.prune_sessions(
             self._config.repo, self._config.max_sessions_per_repo
         )
+        data: SessionEndPayload = {
+            "session_id": self._current_session.id,
+            "status": "completed",
+            "issues_processed": self._current_session.issues_processed,
+            "issues_succeeded": self._current_session.issues_succeeded,
+            "issues_failed": self._current_session.issues_failed,
+        }
         await self._bus.publish(
             HydraFlowEvent(
                 type=EventType.SESSION_END,
                 session_id=self._current_session.id,
-                data={
-                    "session_id": self._current_session.id,
-                    "status": "completed",
-                    "issues_processed": self._current_session.issues_processed,
-                    "issues_succeeded": self._current_session.issues_succeeded,
-                    "issues_failed": self._current_session.issues_failed,
-                },
+                data=data,
             )
         )
         self._current_session = None
@@ -854,14 +862,14 @@ class HydraFlowOrchestrator:
 
         AGENTS.md documents the prompt contracts for all agent roles.  Its
         absence means agent behaviour is undocumented and harder to audit or
-        adapt.  Run ``hf init`` or copy AGENTS.md from the HydraFlow repo to
-        resolve this.
+        adapt.  Run ``make setup`` (copies AGENTS.md into the target repo) or
+        copy AGENTS.md from the HydraFlow repo to resolve this.
         """
         agents_md = self._config.repo_root / "AGENTS.md"
         if not agents_md.is_file():
             logger.warning(
                 "AGENTS.md not found in %s — agent prompt contracts are "
-                "undocumented. Run `hf init` to scaffold it.",
+                "undocumented. Run `make setup` to sync it from HydraFlow.",
                 self._config.repo_root,
             )
 
@@ -872,15 +880,16 @@ class HydraFlowOrchestrator:
             loop_name,
         )
         self._auth_failed = True
+        data: SystemAlertPayload = {
+            "message": (
+                "GitHub authentication failed. Check your gh token and restart."
+            ),
+            "source": loop_name,
+        }
         await self._bus.publish(
             HydraFlowEvent(
                 type=EventType.SYSTEM_ALERT,
-                data={
-                    "message": (
-                        "GitHub authentication failed. Check your gh token and restart."
-                    ),
-                    "source": loop_name,
-                },
+                data=data,
             )
         )
         self._stop_event.set()
@@ -904,13 +913,14 @@ class HydraFlowOrchestrator:
     ) -> None:
         """Log, publish ERROR event, create a new loop task."""
         logger.error("Loop %r crashed — restarting: %s", loop_name, exc)
+        data: ErrorPayload = {
+            "message": f"Loop {loop_name} crashed and was restarted",
+            "source": loop_name,
+        }
         await self._bus.publish(
             HydraFlowEvent(
                 type=EventType.ERROR,
-                data={
-                    "message": f"Loop {loop_name} crashed and was restarted",
-                    "source": loop_name,
-                },
+                data=data,
             )
         )
         factory_fn = dict(loop_factories)[loop_name]
@@ -1034,23 +1044,15 @@ class HydraFlowOrchestrator:
                     consecutive_failures = 1
                     last_exc_type = exc_type
 
-                # Use higher severity for likely-bug exceptions
+                # Classify for event bus data; severity handled inside helper
                 exc_is_bug = is_likely_bug(exc)
-                if exc_is_bug:
-                    logger.critical(
-                        "%s loop hit likely bug (%s) — will retry but "
-                        "this probably needs a code fix",
-                        display,
-                        exc_type.__name__,
-                        exc_info=True,
-                    )
-                else:
-                    logger.exception(
-                        "%s loop iteration failed — will retry next cycle",
-                        display,
-                    )
+                log_exception_with_bug_classification(
+                    logger,
+                    exc,
+                    f"{display} loop iteration failed — will retry next cycle",
+                )
 
-                error_data: dict[str, Any] = {
+                error_data: ErrorPayload = {
                     "message": f"{display} loop error",
                     "source": name,
                     "exception_type": exc_type.__name__,
@@ -1073,19 +1075,20 @@ class HydraFlowOrchestrator:
                         consecutive_failures,
                         exc_type.__name__,
                     )
+                    data: SystemAlertPayload = {
+                        "message": (
+                            f"{display} loop circuit breaker: "
+                            f"{consecutive_failures} consecutive "
+                            f"{exc_type.__name__} failures"
+                        ),
+                        "source": name,
+                        "exception_type": exc_type.__name__,
+                        "consecutive_failures": consecutive_failures,
+                    }
                     await self._bus.publish(
                         HydraFlowEvent(
                             type=EventType.SYSTEM_ALERT,
-                            data={
-                                "message": (
-                                    f"{display} loop circuit breaker: "
-                                    f"{consecutive_failures} consecutive "
-                                    f"{exc_type.__name__} failures"
-                                ),
-                                "source": name,
-                                "exception_type": exc_type.__name__,
-                                "consecutive_failures": consecutive_failures,
-                            },
+                            data=data,
                         )
                     )
 
@@ -1179,14 +1182,7 @@ class HydraFlowOrchestrator:
         log_file: str,
     ) -> None:
         """Run memory-suggestion filing and transcript summarization for a completed run."""
-        await safe_file_memory_suggestion(
-            transcript,
-            source,
-            reference,
-            self._config,
-            self._prs,
-            self._state,
-        )
+        await self._suggest_memory(transcript, source, reference)
         if issue_number > 0:
             try:
                 await self._summarizer.summarize_and_comment(
@@ -1198,18 +1194,11 @@ class HydraFlowOrchestrator:
                     log_file=log_file,
                 )
             except Exception as exc:
-                if is_likely_bug(exc):
-                    logger.critical(
-                        "Failed to post transcript summary for issue #%d — likely bug (%s)",
-                        issue_number,
-                        type(exc).__name__,
-                        exc_info=True,
-                    )
-                else:
-                    logger.exception(
-                        "Failed to post transcript summary for issue #%d",
-                        issue_number,
-                    )
+                log_exception_with_bug_classification(
+                    logger,
+                    exc,
+                    f"Failed to post transcript summary for issue #{issue_number}",
+                )
 
     def _log_reference(self, filename: str) -> str:
         """Return a repo- or data-relative log reference for display."""
@@ -1431,17 +1420,18 @@ class HydraFlowOrchestrator:
                 pause_seconds / 60,
             )
 
+            data: SystemAlertPayload = {
+                "message": (
+                    f"Credit limit reached. Pausing all loops until "
+                    f"{resume_at.strftime('%H:%M UTC')}. "
+                    f"Will resume automatically."
+                ),
+                "source": source,
+            }
             await self._bus.publish(
                 HydraFlowEvent(
                     type=EventType.SYSTEM_ALERT,
-                    data={
-                        "message": (
-                            f"Credit limit reached. Pausing all loops until "
-                            f"{resume_at.strftime('%H:%M UTC')}. "
-                            f"Will resume automatically."
-                        ),
-                        "source": source,
-                    },
+                    data=data,
                 )
             )
 
@@ -1464,13 +1454,14 @@ class HydraFlowOrchestrator:
         """Clear pause state and restart all loops after credit pause."""
         self._credits_paused_until = None
         logger.info("Credit pause ended — restarting all loops")
+        data: SystemAlertPayload = {
+            "message": "Credit pause ended. Resuming all loops.",
+            "source": source,
+        }
         await self._bus.publish(
             HydraFlowEvent(
                 type=EventType.SYSTEM_ALERT,
-                data={
-                    "message": "Credit pause ended. Resuming all loops.",
-                    "source": source,
-                },
+                data=data,
             )
         )
         for loop_name, factory in loop_factories:

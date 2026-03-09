@@ -11,7 +11,11 @@ from events import EventBus, EventType, HydraFlowEvent
 from hitl_runner import HITLRunner
 from issue_fetcher import IssueFetcher
 from issue_store import IssueStore
-from phase_utils import safe_file_memory_suggestion
+from models import HITLUpdatePayload
+from phase_utils import (
+    MemorySuggester,
+    log_exception_with_bug_classification,
+)
 from pr_manager import PRManager
 from state import StateTracker
 from subprocess_util import AuthenticationError, CreditExhaustedError
@@ -53,6 +57,7 @@ class HITLPhase:
         self._bus = event_bus
         self._stop_event = stop_event
         self._active_issues_cb = active_issues_cb
+        self._suggest_memory = MemorySuggester(config, prs, state)
         # HITL corrections: {issue_number: correction_text}
         self._hitl_corrections: dict[int, str] = {}
         # In-memory tracking of active HITL issues
@@ -213,13 +218,8 @@ class HITLPhase:
 
                 # File memory suggestion if present in transcript
                 if result.transcript:
-                    await safe_file_memory_suggestion(
-                        result.transcript,
-                        "hitl",
-                        f"issue #{issue_number}",
-                        self._config,
-                        self._prs,
-                        self._state,
+                    await self._suggest_memory(
+                        result.transcript, "hitl", f"issue #{issue_number}"
                     )
 
                 if result.success:
@@ -261,11 +261,11 @@ class HITLPhase:
                     await self._bus.publish(
                         HydraFlowEvent(
                             type=EventType.HITL_UPDATE,
-                            data={
-                                "issue": issue_number,
-                                "action": "resolved",
-                                "status": "resolved",
-                            },
+                            data=HITLUpdatePayload(
+                                issue=issue_number,
+                                action="resolved",
+                                status="resolved",
+                            ),
                         )
                     )
                     logger.info(
@@ -287,11 +287,11 @@ class HITLPhase:
                     await self._bus.publish(
                         HydraFlowEvent(
                             type=EventType.HITL_UPDATE,
-                            data={
-                                "issue": issue_number,
-                                "action": "failed",
-                                "status": "pending",
-                            },
+                            data=HITLUpdatePayload(
+                                issue=issue_number,
+                                action="failed",
+                                status="pending",
+                            ),
                         )
                     )
                     logger.warning(
@@ -313,8 +313,12 @@ class HITLPhase:
                         )
             except (AuthenticationError, CreditExhaustedError, MemoryError):
                 raise
-            except Exception:
-                logger.exception("HITL processing failed for issue #%d", issue_number)
+            except Exception as exc:
+                log_exception_with_bug_classification(
+                    logger,
+                    exc,
+                    f"HITL processing failed for issue #{issue_number}",
+                )
             finally:
                 self._active_hitl_issues.discard(issue_number)
                 self._notify_active_issues()
