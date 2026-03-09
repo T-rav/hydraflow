@@ -173,9 +173,11 @@ class TestContainerLikeProtocol:
 
         sig = inspect.signature(ContainerLike.wait)
         ret = sig.return_annotation
-        # Should be dict[str, int], not Any
+        # Should be dict[str, Any] (heterogeneous: StatusCode int, Error dict|None)
+        # not bare Any — must be a parameterised dict annotation
         assert ret is not inspect.Parameter.empty
-        assert "Any" not in str(ret)
+        assert ret != "Any"
+        assert "dict" in str(ret)
 
     def test_logs_return_type(self) -> None:
         import inspect
