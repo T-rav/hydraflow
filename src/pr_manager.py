@@ -802,10 +802,13 @@ class PRManager:
 
             try:
                 await self._run_gh(
-                    "gh", "release", "upload",
+                    "gh",
+                    "release",
+                    "upload",
                     self._SCREENSHOT_RELEASE_TAG,
                     str(upload_path),
-                    "--repo", self._repo,
+                    "--repo",
+                    self._repo,
                     "--clobber",
                 )
             finally:
@@ -825,18 +828,26 @@ class PRManager:
         """Create the screenshots release if it doesn't exist."""
         try:
             await self._run_gh(
-                "gh", "release", "view",
+                "gh",
+                "release",
+                "view",
                 self._SCREENSHOT_RELEASE_TAG,
-                "--repo", self._repo,
+                "--repo",
+                self._repo,
             )
         except RuntimeError:
             # Release doesn't exist — create it
             await self._run_gh(
-                "gh", "release", "create",
+                "gh",
+                "release",
+                "create",
                 self._SCREENSHOT_RELEASE_TAG,
-                "--repo", self._repo,
-                "--title", "Screenshot Assets",
-                "--notes", "Auto-uploaded screenshots from bug reports",
+                "--repo",
+                self._repo,
+                "--title",
+                "Screenshot Assets",
+                "--notes",
+                "Auto-uploaded screenshots from bug reports",
                 "--latest=false",
             )
 

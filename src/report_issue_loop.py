@@ -142,7 +142,11 @@ class ReportIssueLoop(BaseBackgroundLoop):
 
         # Use hydraflow-ready so bug reports skip triage/planning and go
         # straight to implementation.
-        ready_label = self._config.ready_label[0] if self._config.ready_label else "hydraflow-ready"
+        ready_label = (
+            self._config.ready_label[0]
+            if self._config.ready_label
+            else "hydraflow-ready"
+        )
         description += (
             f"\n\nIMPORTANT: Use the label `{ready_label}` instead of "
             f"`hydraflow-find` for this issue."
@@ -264,9 +268,14 @@ class ReportIssueLoop(BaseBackgroundLoop):
         """
         try:
             output = await self._pr_manager._run_gh(
-                "gh", "issue", "view", str(issue_number),
-                "--repo", self._pr_manager._repo,
-                "--json", "labels,body",
+                "gh",
+                "issue",
+                "view",
+                str(issue_number),
+                "--repo",
+                self._pr_manager._repo,
+                "--json",
+                "labels,body",
             )
             import json as _json
 
@@ -291,9 +300,14 @@ class ReportIssueLoop(BaseBackgroundLoop):
                 )
                 appendix = f"\n\n## Screenshot\n\n![Screenshot]({screenshot_url})\n"
                 await self._pr_manager._run_gh(
-                    "gh", "issue", "edit", str(issue_number),
-                    "--repo", self._pr_manager._repo,
-                    "--body", body + appendix,
+                    "gh",
+                    "issue",
+                    "edit",
+                    str(issue_number),
+                    "--repo",
+                    self._pr_manager._repo,
+                    "--body",
+                    body + appendix,
                 )
         except Exception:
             logger.warning(

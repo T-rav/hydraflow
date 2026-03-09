@@ -43,9 +43,7 @@ def _make_loop(
     )
     pr_manager.create_issue = AsyncMock(return_value=123)
     pr_manager.add_labels = AsyncMock()
-    pr_manager._run_gh = AsyncMock(
-        return_value='{"labels":[],"body":""}'
-    )
+    pr_manager._run_gh = AsyncMock(return_value='{"labels":[],"body":""}')
     pr_manager._repo = "owner/repo"
     runner = MagicMock()
 
