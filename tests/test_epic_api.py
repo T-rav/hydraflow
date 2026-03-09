@@ -337,8 +337,10 @@ class TestEpicEndpoints:
             merged_children=2,
             readiness=EpicReadiness(all_implemented=True),
         )
-        mock_orch._epic_manager = MagicMock()
-        mock_orch._epic_manager.get_all_detail = AsyncMock(return_value=[mock_detail])
+        mock_orch._svc = MagicMock()
+        mock_orch._svc.epic_manager.get_all_detail = AsyncMock(
+            return_value=[mock_detail]
+        )
 
         router, _pr = make_dashboard_router(
             config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
@@ -360,8 +362,8 @@ class TestEpicEndpoints:
         from unittest.mock import MagicMock
 
         mock_orch = MagicMock()
-        mock_orch._epic_manager = MagicMock()
-        mock_orch._epic_manager.get_detail = AsyncMock(return_value=None)
+        mock_orch._svc = MagicMock()
+        mock_orch._svc.epic_manager.get_detail = AsyncMock(return_value=None)
 
         router, _pr = make_dashboard_router(
             config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
@@ -389,8 +391,8 @@ class TestEpicEndpoints:
             ],
         )
         mock_orch = MagicMock()
-        mock_orch._epic_manager = MagicMock()
-        mock_orch._epic_manager.get_detail = AsyncMock(return_value=mock_detail)
+        mock_orch._svc = MagicMock()
+        mock_orch._svc.epic_manager.get_detail = AsyncMock(return_value=mock_detail)
 
         router, _pr = make_dashboard_router(
             config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
@@ -429,8 +431,8 @@ class TestEpicEndpoints:
         from unittest.mock import MagicMock
 
         mock_orch = MagicMock()
-        mock_orch._epic_manager = MagicMock()
-        mock_orch._epic_manager.trigger_release = AsyncMock(
+        mock_orch._svc = MagicMock()
+        mock_orch._svc.epic_manager.trigger_release = AsyncMock(
             return_value={"job_id": "release-100-123", "status": "started"}
         )
 
@@ -452,8 +454,8 @@ class TestEpicEndpoints:
         from unittest.mock import MagicMock
 
         mock_orch = MagicMock()
-        mock_orch._epic_manager = MagicMock()
-        mock_orch._epic_manager.trigger_release = AsyncMock(
+        mock_orch._svc = MagicMock()
+        mock_orch._svc.epic_manager.trigger_release = AsyncMock(
             return_value={"error": "epic not found", "status": "failed"}
         )
 

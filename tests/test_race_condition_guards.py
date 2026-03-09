@@ -258,7 +258,7 @@ class TestOrchestratorBuildInterruptedIssuesLock:
     @pytest.mark.asyncio
     async def test_build_interrupted_includes_hitl(self, tmp_path) -> None:
         orch = _make_orchestrator(tmp_path)
-        orch._hitl_phase.active_hitl_issues.add(5)
+        orch._svc.hitl_phase.active_hitl_issues.add(5)
 
         result = await orch._build_interrupted_issues()
 
@@ -293,7 +293,7 @@ class TestOrchestratorBuildInterruptedIssuesLock:
         orch._active_impl_issues = {99}
 
         # Mock the implementer to return no results
-        orch._implementer.run_batch = AsyncMock(return_value=([], []))
+        orch._svc.implementer.run_batch = AsyncMock(return_value=([], []))
 
         lock_acquired = False
         original_acquire = orch._active_issues_lock.acquire

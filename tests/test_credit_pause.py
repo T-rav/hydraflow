@@ -81,15 +81,15 @@ async def _poll_then_stop(
 
 def _mock_fetcher_noop(orch: HydraFlowOrchestrator) -> None:
     """Mock store and fetcher methods so no real gh CLI calls are made."""
-    orch._store.get_triageable = lambda _max_count: []  # type: ignore[method-assign]
-    orch._store.get_plannable = lambda _max_count: []  # type: ignore[method-assign]
-    orch._store.get_reviewable = lambda _max_count: []  # type: ignore[method-assign]
-    orch._store.start = AsyncMock()  # type: ignore[method-assign]
-    orch._store.get_active_issues = lambda: {}  # type: ignore[method-assign]
-    orch._fetcher.fetch_issue_by_number = AsyncMock(return_value=None)  # type: ignore[method-assign]
-    orch._fetcher.fetch_reviewable_prs = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
+    orch._svc.store.get_triageable = lambda _max_count: []  # type: ignore[method-assign]
+    orch._svc.store.get_plannable = lambda _max_count: []  # type: ignore[method-assign]
+    orch._svc.store.get_reviewable = lambda _max_count: []  # type: ignore[method-assign]
+    orch._svc.store.start = AsyncMock()  # type: ignore[method-assign]
+    orch._svc.store.get_active_issues = lambda: {}  # type: ignore[method-assign]
+    orch._svc.fetcher.fetch_issue_by_number = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    orch._svc.fetcher.fetch_reviewable_prs = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
     orch._enable_rerere = AsyncMock()  # type: ignore[method-assign]
-    orch._worktrees.sanitize_repo = AsyncMock()  # type: ignore[method-assign]
+    orch._svc.worktrees.sanitize_repo = AsyncMock()  # type: ignore[method-assign]
 
 
 # ===========================================================================
@@ -424,7 +424,7 @@ class TestCreditExhaustionPauseResume:
     ) -> None:
         """Credit exhaustion in a loop should publish a SYSTEM_ALERT event."""
         orch = HydraFlowOrchestrator(config, event_bus=event_bus)
-        orch._prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
         _mock_fetcher_noop(orch)
 
         call_count = 0
@@ -439,10 +439,10 @@ class TestCreditExhaustionPauseResume:
                 )
             return []
 
-        orch._triager.triage_issues = AsyncMock(return_value=0)  # type: ignore[method-assign]
-        orch._planner_phase.plan_issues = credit_failing_plan  # type: ignore[method-assign]
-        orch._implementer.run_batch = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
-        orch._fetcher.fetch_reviewable_prs = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
+        orch._svc.triager.triage_issues = AsyncMock(return_value=0)  # type: ignore[method-assign]
+        orch._svc.planner_phase.plan_issues = credit_failing_plan  # type: ignore[method-assign]
+        orch._svc.implementer.run_batch = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
+        orch._svc.fetcher.fetch_reviewable_prs = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
 
         async def instant_sleep(seconds: int | float) -> None:
             await asyncio.sleep(0)
@@ -480,7 +480,7 @@ class TestCreditExhaustionPauseResume:
     ) -> None:
         """Credit exhaustion should pause all loops and resume after the wait."""
         orch = HydraFlowOrchestrator(config, event_bus=event_bus)
-        orch._prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
         _mock_fetcher_noop(orch)
 
         call_count = 0
@@ -495,10 +495,10 @@ class TestCreditExhaustionPauseResume:
                 )
             return []
 
-        orch._triager.triage_issues = AsyncMock(return_value=0)  # type: ignore[method-assign]
-        orch._planner_phase.plan_issues = credit_failing_then_ok  # type: ignore[method-assign]
-        orch._implementer.run_batch = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
-        orch._fetcher.fetch_reviewable_prs = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
+        orch._svc.triager.triage_issues = AsyncMock(return_value=0)  # type: ignore[method-assign]
+        orch._svc.planner_phase.plan_issues = credit_failing_then_ok  # type: ignore[method-assign]
+        orch._svc.implementer.run_batch = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
+        orch._svc.fetcher.fetch_reviewable_prs = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
 
         async def instant_sleep(seconds: int | float) -> None:
             await asyncio.sleep(0)
@@ -522,7 +522,7 @@ class TestCreditExhaustionPauseResume:
     ) -> None:
         """When no resume time is parseable, a default pause duration is used."""
         orch = HydraFlowOrchestrator(config, event_bus=event_bus)
-        orch._prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
         _mock_fetcher_noop(orch)
 
         call_count = 0
@@ -534,10 +534,10 @@ class TestCreditExhaustionPauseResume:
                 raise CreditExhaustedError("credits out", resume_at=None)
             return []
 
-        orch._triager.triage_issues = AsyncMock(return_value=0)  # type: ignore[method-assign]
-        orch._planner_phase.plan_issues = credit_failing_no_time  # type: ignore[method-assign]
-        orch._implementer.run_batch = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
-        orch._fetcher.fetch_reviewable_prs = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
+        orch._svc.triager.triage_issues = AsyncMock(return_value=0)  # type: ignore[method-assign]
+        orch._svc.planner_phase.plan_issues = credit_failing_no_time  # type: ignore[method-assign]
+        orch._svc.implementer.run_batch = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
+        orch._svc.fetcher.fetch_reviewable_prs = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
 
         sleep_durations: list[float] = []
 
@@ -567,7 +567,7 @@ class TestCreditExhaustionPauseResume:
     ) -> None:
         """Credit exhaustion should terminate all active subprocesses."""
         orch = HydraFlowOrchestrator(config)
-        orch._prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
         _mock_fetcher_noop(orch)
 
         terminate_calls = {"planners": 0, "agents": 0, "reviewers": 0, "hitl": 0}
@@ -584,10 +584,10 @@ class TestCreditExhaustionPauseResume:
         def track_hitl_terminate() -> None:
             terminate_calls["hitl"] += 1
 
-        orch._planners.terminate = track_planner_terminate  # type: ignore[method-assign]
-        orch._agents.terminate = track_agent_terminate  # type: ignore[method-assign]
-        orch._reviewers.terminate = track_reviewer_terminate  # type: ignore[method-assign]
-        orch._hitl_runner.terminate = track_hitl_terminate  # type: ignore[method-assign]
+        orch._svc.planners.terminate = track_planner_terminate  # type: ignore[method-assign]
+        orch._svc.agents.terminate = track_agent_terminate  # type: ignore[method-assign]
+        orch._svc.reviewers.terminate = track_reviewer_terminate  # type: ignore[method-assign]
+        orch._svc.hitl_runner.terminate = track_hitl_terminate  # type: ignore[method-assign]
 
         call_count = 0
 
@@ -600,10 +600,10 @@ class TestCreditExhaustionPauseResume:
                     resume_at=datetime.now(UTC) + timedelta(seconds=0.05),
                 )
 
-        orch._triager.triage_issues = credit_failing_triage  # type: ignore[method-assign]
-        orch._planner_phase.plan_issues = AsyncMock(return_value=[])  # type: ignore[method-assign]
-        orch._implementer.run_batch = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
-        orch._fetcher.fetch_reviewable_prs = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
+        orch._svc.triager.triage_issues = credit_failing_triage  # type: ignore[method-assign]
+        orch._svc.planner_phase.plan_issues = AsyncMock(return_value=[])  # type: ignore[method-assign]
+        orch._svc.implementer.run_batch = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
+        orch._svc.fetcher.fetch_reviewable_prs = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
 
         async def instant_sleep(seconds: int | float) -> None:
             await asyncio.sleep(0)
@@ -633,7 +633,7 @@ class TestCreditExhaustionPauseResume:
     ) -> None:
         """Calling stop() during a credit pause should interrupt the wait."""
         orch = HydraFlowOrchestrator(config)
-        orch._prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
         _mock_fetcher_noop(orch)
 
         async def credit_failing_implement() -> None:
@@ -642,10 +642,10 @@ class TestCreditExhaustionPauseResume:
                 resume_at=datetime.now(UTC) + timedelta(hours=5),
             )
 
-        orch._triager.triage_issues = AsyncMock(return_value=0)  # type: ignore[method-assign]
-        orch._planner_phase.plan_issues = AsyncMock(return_value=[])  # type: ignore[method-assign]
-        orch._implementer.run_batch = credit_failing_implement  # type: ignore[method-assign]
-        orch._fetcher.fetch_reviewable_prs = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
+        orch._svc.triager.triage_issues = AsyncMock(return_value=0)  # type: ignore[method-assign]
+        orch._svc.planner_phase.plan_issues = AsyncMock(return_value=[])  # type: ignore[method-assign]
+        orch._svc.implementer.run_batch = credit_failing_implement  # type: ignore[method-assign]
+        orch._svc.fetcher.fetch_reviewable_prs = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
 
         # Should complete quickly (not wait 5 hours) because stop() interrupts
         await asyncio.wait_for(

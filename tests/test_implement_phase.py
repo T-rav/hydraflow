@@ -2278,3 +2278,230 @@ class TestZeroCommitCorrectiveRetry:
         assert any("Attempt 1/3" in c[1] for c in comment_calls)
         # Zero-commit path should NOT escalate to HITL — retry instead
         mock_prs.transition_issue_label.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _is_zero_commit_failure (static method)
+# ---------------------------------------------------------------------------
+
+
+class TestIsZeroCommitFailure:
+    """Tests for the _is_zero_commit_failure static helper."""
+
+    def test_returns_true_for_zero_commit_failure(self) -> None:
+        result = WorkerResult(
+            issue_number=1,
+            branch="agent/issue-1",
+            success=False,
+            error="No commits found on branch",
+            commits=0,
+        )
+        from implement_phase import ImplementPhase
+
+        assert ImplementPhase._is_zero_commit_failure(result) is True
+
+    def test_returns_false_when_success(self) -> None:
+        result = WorkerResult(
+            issue_number=1,
+            branch="agent/issue-1",
+            success=True,
+            commits=0,
+        )
+        from implement_phase import ImplementPhase
+
+        assert ImplementPhase._is_zero_commit_failure(result) is False
+
+    def test_returns_false_when_different_error(self) -> None:
+        result = WorkerResult(
+            issue_number=1,
+            branch="agent/issue-1",
+            success=False,
+            error="Agent timed out",
+            commits=0,
+        )
+        from implement_phase import ImplementPhase
+
+        assert ImplementPhase._is_zero_commit_failure(result) is False
+
+    def test_returns_false_when_has_commits(self) -> None:
+        result = WorkerResult(
+            issue_number=1,
+            branch="agent/issue-1",
+            success=False,
+            error="No commits found on branch",
+            commits=3,
+        )
+        from implement_phase import ImplementPhase
+
+        assert ImplementPhase._is_zero_commit_failure(result) is False
+
+
+# ---------------------------------------------------------------------------
+# _handle_zero_commits
+# ---------------------------------------------------------------------------
+
+
+class TestHandleZeroCommits:
+    """Tests for the extracted _handle_zero_commits method."""
+
+    @pytest.mark.asyncio
+    async def test_marks_failed_and_posts_comment(
+        self, config: HydraFlowConfig
+    ) -> None:
+        issue = TaskFactory.create()
+        result = WorkerResult(
+            issue_number=42,
+            branch="agent/issue-42",
+            success=False,
+            error="No commits found on branch",
+            commits=0,
+            worktree_path=str(config.worktree_path_for_issue(42)),
+        )
+
+        phase, _, mock_prs = make_implement_phase(config, [issue])
+        phase._state.increment_issue_attempts(42)
+
+        returned = await phase._handle_zero_commits(issue, result)
+
+        assert returned is result
+        assert phase._state.to_dict()["processed_issues"].get(str(42)) == "failed"
+        mock_prs.post_comment.assert_awaited_once()
+        comment_body = mock_prs.post_comment.call_args.args[1]
+        assert "Zero Commits" in comment_body
+
+
+# ---------------------------------------------------------------------------
+# _handle_successful_push
+# ---------------------------------------------------------------------------
+
+
+class TestHandleSuccessfulPush:
+    """Tests for the extracted _handle_successful_push method."""
+
+    @pytest.mark.asyncio
+    async def test_creates_pr_on_first_attempt(self, config: HydraFlowConfig) -> None:
+        issue = TaskFactory.create()
+        result = WorkerResultFactory.create(
+            issue_number=42,
+            success=True,
+            worktree_path=str(config.worktree_path_for_issue(42)),
+        )
+
+        phase, _, mock_prs = make_implement_phase(
+            config, [issue], create_pr_return=PRInfoFactory.create()
+        )
+
+        early = await phase._handle_successful_push(issue, result, is_retry=False)
+
+        assert early is None  # no early return — caller continues
+        mock_prs.create_pr.assert_awaited_once()
+        assert result.pr_info is not None
+        mock_prs.transition.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_finds_existing_pr_on_retry(self, config: HydraFlowConfig) -> None:
+        issue = TaskFactory.create()
+        result = WorkerResultFactory.create(
+            issue_number=42,
+            success=True,
+            worktree_path=str(config.worktree_path_for_issue(42)),
+        )
+
+        phase, _, mock_prs = make_implement_phase(config, [issue])
+        mock_prs.find_open_pr_for_branch.return_value = PRInfoFactory.create()
+
+        early = await phase._handle_successful_push(issue, result, is_retry=True)
+
+        assert early is None
+        mock_prs.create_pr.assert_not_awaited()
+        mock_prs.find_open_pr_for_branch.assert_awaited_once()
+        assert result.pr_info is not None
+
+    @pytest.mark.asyncio
+    async def test_no_pr_delegates_to_fallback(self, config: HydraFlowConfig) -> None:
+        issue = TaskFactory.create()
+        result = WorkerResultFactory.create(
+            issue_number=42,
+            success=True,
+            worktree_path=str(config.worktree_path_for_issue(42)),
+        )
+
+        phase, _, mock_prs = make_implement_phase(
+            config, [issue], create_pr_return=PRInfoFactory.create(number=0)
+        )
+        mock_prs.branch_has_diff_from_main.return_value = True
+
+        early = await phase._handle_successful_push(issue, result, is_retry=False)
+
+        # Should return a result (early exit from fallback)
+        assert early is not None
+        assert early.success is False
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_push_succeeds_but_agent_failed(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """When push succeeds but result.success=False, no PR actions fire and None is returned."""
+        issue = TaskFactory.create()
+        result = WorkerResultFactory.create(
+            issue_number=42,
+            success=False,
+            worktree_path=str(config.worktree_path_for_issue(42)),
+        )
+
+        phase, _, mock_prs = make_implement_phase(
+            config, [issue], create_pr_return=PRInfoFactory.create()
+        )
+
+        early = await phase._handle_successful_push(issue, result, is_retry=False)
+
+        assert early is None  # no early return — caller handles status marking
+        mock_prs.transition.assert_not_awaited()
+        mock_prs.create_pr.assert_awaited_once()  # PR is still resolved
+
+
+# ---------------------------------------------------------------------------
+# _handle_no_pr_fallback
+# ---------------------------------------------------------------------------
+
+
+class TestHandleNoPrFallback:
+    """Tests for the extracted _handle_no_pr_fallback method."""
+
+    @pytest.mark.asyncio
+    async def test_no_diff_escalates_to_hitl(self, config: HydraFlowConfig) -> None:
+        issue = TaskFactory.create()
+        result = WorkerResultFactory.create(
+            issue_number=42,
+            success=True,
+            worktree_path=str(config.worktree_path_for_issue(42)),
+        )
+
+        phase, _, mock_prs = make_implement_phase(config, [issue])
+        mock_prs.branch_has_diff_from_main.return_value = False
+
+        returned = await phase._handle_no_pr_fallback(issue, result)
+
+        assert phase._state.to_dict()["processed_issues"].get(str(42)) == "failed"
+        mock_prs.swap_pipeline_labels.assert_awaited()
+        assert returned is result
+
+    @pytest.mark.asyncio
+    async def test_with_diff_marks_failed_for_retry(
+        self, config: HydraFlowConfig
+    ) -> None:
+        issue = TaskFactory.create()
+        result = WorkerResultFactory.create(
+            issue_number=42,
+            success=True,
+            worktree_path=str(config.worktree_path_for_issue(42)),
+        )
+
+        phase, _, mock_prs = make_implement_phase(config, [issue])
+        mock_prs.branch_has_diff_from_main.return_value = True
+
+        returned = await phase._handle_no_pr_fallback(issue, result)
+
+        assert returned.success is False
+        assert returned.error == "PR creation failed"
+        assert phase._state.to_dict()["processed_issues"].get(str(42)) == "failed"

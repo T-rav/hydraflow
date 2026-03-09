@@ -18,6 +18,7 @@ from models import (
     OrchestratorStatusPayload,
     Phase,
     PipelineStats,
+    ReviewResult,
     SessionEndPayload,
     SessionLog,
     SessionStartPayload,
@@ -35,7 +36,7 @@ from phase_utils import (
     log_exception_with_bug_classification,
     release_batch_in_flight,
 )
-from service_registry import OrchestratorCallbacks, build_services
+from service_registry import OrchestratorCallbacks, ServiceRegistry, build_services
 from state import StateTracker
 from subprocess_util import (
     AuthenticationError,
@@ -123,65 +124,29 @@ class HydraFlowOrchestrator:
             ),
         )
 
-        # Expose services as instance attributes for backward compatibility
-        self._worktrees = svc.worktrees
-        self._subprocess_runner = svc.subprocess_runner
-        self._agents = svc.agents
-        self._planners = svc.planners
-        self._prs = svc.prs
-        self._reviewers = svc.reviewers
-        self._hitl_runner = svc.hitl_runner
-        self._triage = svc.triage
-        self._summarizer = svc.summarizer
-        self._fetcher = svc.fetcher
-        self._store = svc.store
-        self._triager = svc.triager
-        self._planner_phase = svc.planner_phase
-        self._hitl_phase = svc.hitl_phase
-        self._run_recorder = svc.run_recorder
-        self._implementer = svc.implementer
-        self._metrics_manager = svc.metrics_manager
-        self._pr_unsticker = svc.pr_unsticker
-        self._memory_sync = svc.memory_sync
-        self._retrospective = svc.retrospective
-        self._ac_generator = svc.ac_generator
-        self._verification_judge = svc.verification_judge
-        self._epic_checker = svc.epic_checker
-        self._reviewer = svc.reviewer
-        self._memory_sync_bg = svc.memory_sync_bg
-        self._metrics_sync_bg = svc.metrics_sync_bg
-        self._pr_unsticker_loop = svc.pr_unsticker_loop
-        self._manifest_refresh_loop = svc.manifest_refresh_loop
-        self._report_issue_loop = svc.report_issue_loop
-        self._epic_manager = svc.epic_manager
-        self._epic_monitor_loop = svc.epic_monitor_loop
-        self._epic_sweeper_loop = svc.epic_sweeper_loop
-        self._verify_monitor_loop = svc.verify_monitor_loop
-        self._worktree_gc_loop = svc.worktree_gc_loop
-        self._runs_gc_loop = svc.runs_gc_loop
-        self._adr_reviewer_loop = svc.adr_reviewer_loop
-        self._crate_manager = svc.crate_manager
-        self._suggest_memory = MemorySuggester(config, self._prs, self._state)
+        # Store the service registry directly — access via self._svc.<name>
+        self._svc: ServiceRegistry = svc
+        self._suggest_memory = MemorySuggester(config, svc.prs, self._state)
 
         # Registry of triggerable background loop instances
         self._bg_loop_registry: dict[str, BaseBackgroundLoop] = {
-            "memory_sync": self._memory_sync_bg,
-            "metrics": self._metrics_sync_bg,
-            "pr_unsticker": self._pr_unsticker_loop,
-            "manifest_refresh": self._manifest_refresh_loop,
-            "report_issue": self._report_issue_loop,
-            "epic_monitor": self._epic_monitor_loop,
-            "epic_sweeper": self._epic_sweeper_loop,
-            "verify_monitor": self._verify_monitor_loop,
-            "worktree_gc": self._worktree_gc_loop,
-            "runs_gc": self._runs_gc_loop,
-            "adr_reviewer": self._adr_reviewer_loop,
+            "memory_sync": self._svc.memory_sync_bg,
+            "metrics": self._svc.metrics_sync_bg,
+            "pr_unsticker": self._svc.pr_unsticker_loop,
+            "manifest_refresh": self._svc.manifest_refresh_loop,
+            "report_issue": self._svc.report_issue_loop,
+            "epic_monitor": self._svc.epic_monitor_loop,
+            "epic_sweeper": self._svc.epic_sweeper_loop,
+            "verify_monitor": self._svc.verify_monitor_loop,
+            "worktree_gc": self._svc.worktree_gc_loop,
+            "runs_gc": self._svc.runs_gc_loop,
+            "adr_reviewer": self._svc.adr_reviewer_loop,
         }
 
     @property
     def crate_manager(self) -> CrateManager:
         """Expose the crate manager for dashboard integration."""
-        return self._crate_manager
+        return self._svc.crate_manager
 
     @property
     def event_bus(self) -> EventBus:
@@ -191,7 +156,7 @@ class HydraFlowOrchestrator:
     @property
     def issue_store(self) -> IssueStore:
         """Expose the centralized issue store for dashboard integration."""
-        return self._store
+        return self._svc.store
 
     @property
     def state(self) -> StateTracker:
@@ -201,12 +166,12 @@ class HydraFlowOrchestrator:
     @property
     def run_recorder(self) -> RunRecorder:
         """Expose run recorder for dashboard API."""
-        return self._run_recorder
+        return self._svc.run_recorder
 
     @property
     def metrics_manager(self) -> MetricsManager:
         """Expose metrics manager for dashboard API."""
-        return self._metrics_manager
+        return self._svc.metrics_manager
 
     @property
     def running(self) -> bool:
@@ -221,10 +186,10 @@ class HydraFlowOrchestrator:
     def _has_active_processes(self) -> bool:
         """Return True if any runner pool still has live subprocesses."""
         return bool(
-            self._planners._active_procs
-            or self._agents._active_procs
-            or self._reviewers._active_procs
-            or self._hitl_runner._active_procs
+            self._svc.planners._active_procs
+            or self._svc.agents._active_procs
+            or self._svc.reviewers._active_procs
+            or self._svc.hitl_runner._active_procs
         )
 
     @property
@@ -274,15 +239,15 @@ class HydraFlowOrchestrator:
 
     def submit_hitl_correction(self, issue_number: int, correction: str) -> None:
         """Store a correction for a HITL issue to guide retry."""
-        self._hitl_phase.submit_correction(issue_number, correction)
+        self._svc.hitl_phase.submit_correction(issue_number, correction)
 
     def get_hitl_status(self, issue_number: int) -> str:
         """Return the HITL status for an issue."""
-        return self._hitl_phase.get_status(issue_number)
+        return self._svc.hitl_phase.get_status(issue_number)
 
     def skip_hitl_issue(self, issue_number: int) -> None:
         """Remove an issue from HITL tracking."""
-        self._hitl_phase.skip_issue(issue_number)
+        self._svc.hitl_phase.skip_issue(issue_number)
 
     async def stop(self) -> None:
         """Signal the orchestrator to stop and kill active subprocesses.
@@ -292,10 +257,10 @@ class HydraFlowOrchestrator:
         """
         self._stop_event.set()
         logger.info("Stop requested — terminating active processes")
-        self._planners.terminate()
-        self._agents.terminate()
-        self._reviewers.terminate()
-        self._hitl_runner.terminate()
+        self._svc.planners.terminate()
+        self._svc.agents.terminate()
+        self._svc.reviewers.terminate()
+        self._svc.hitl_runner.terminate()
 
         # Checkpoint interrupted issues before cancelling tasks
         interrupted = await self._build_interrupted_issues()
@@ -325,7 +290,7 @@ class HydraFlowOrchestrator:
         async with self._active_issues_lock:
             interrupted: dict[int, str] = {}
             # Use IssueStore active tracking as the primary source
-            for issue_number, stage in self._store.get_active_issues().items():
+            for issue_number, stage in self._svc.store.get_active_issues().items():
                 interrupted[issue_number] = stage
             # Also check in-memory tracking sets for issues not yet in the store
             for issue_number in self._active_impl_issues:
@@ -334,7 +299,7 @@ class HydraFlowOrchestrator:
             for issue_number in self._active_review_issues:
                 if issue_number not in interrupted:
                     interrupted[issue_number] = "review"
-            for issue_number in self._hitl_phase.active_hitl_issues:
+            for issue_number in self._svc.hitl_phase.active_hitl_issues:
                 if issue_number not in interrupted:
                     interrupted[issue_number] = "hitl"
             return interrupted
@@ -348,21 +313,21 @@ class HydraFlowOrchestrator:
         self._running = False
         self._auth_failed = False
         self._credits_paused_until = None
-        self._store.clear_active()
+        self._svc.store.clear_active()
         self._active_impl_issues.clear()
         self._active_review_issues.clear()
-        self._hitl_phase.active_hitl_issues.clear()
+        self._svc.hitl_phase.active_hitl_issues.clear()
         self._state.clear_interrupted_issues()
 
     @property
     def _active_hitl_issues(self) -> set[int]:
         """Backward-compatible access to HITL active issues."""
-        return self._hitl_phase.active_hitl_issues
+        return self._svc.hitl_phase.active_hitl_issues
 
     @property
     def _hitl_corrections(self) -> dict[int, str]:
         """Backward-compatible access to HITL corrections dict."""
-        return self._hitl_phase.hitl_corrections
+        return self._svc.hitl_phase.hitl_corrections
 
     def _sync_active_issue_numbers(self) -> None:
         """Persist the combined active issue set to state."""
@@ -370,7 +335,7 @@ class HydraFlowOrchestrator:
             list(
                 self._active_impl_issues
                 | self._active_review_issues
-                | self._hitl_phase.active_hitl_issues
+                | self._svc.hitl_phase.active_hitl_issues
             )
         )
 
@@ -453,7 +418,7 @@ class HydraFlowOrchestrator:
 
     def build_pipeline_stats(self) -> PipelineStats:
         """Build a unified snapshot of the pipeline state."""
-        queue_stats = self._store.get_queue_stats()
+        queue_stats = self._svc.store.get_queue_stats()
         lifetime = self._state.get_lifetime_stats()
 
         # Compute uptime from session start
@@ -476,11 +441,11 @@ class HydraFlowOrchestrator:
 
         # Map stage keys to runner pools for active worker counts
         stage_runners: dict[str, int] = {
-            "triage": len(self._triage._active_procs),
-            "plan": len(self._planners._active_procs),
-            "implement": len(self._agents._active_procs),
-            "review": len(self._reviewers._active_procs),
-            "hitl": len(self._hitl_runner._active_procs),
+            "triage": len(self._svc.triage._active_procs),
+            "plan": len(self._svc.planners._active_procs),
+            "implement": len(self._svc.agents._active_procs),
+            "review": len(self._svc.reviewers._active_procs),
+            "hitl": len(self._svc.hitl_runner._active_procs),
         }
 
         # Map IssueStore stage names to our stage keys
@@ -583,11 +548,11 @@ class HydraFlowOrchestrator:
             try:
                 if (
                     self._config.auto_crate
-                    and self._crate_manager.active_crate_number is None
+                    and self._svc.crate_manager.active_crate_number is None
                 ):
-                    uncrated = self._store.get_uncrated_issues()
+                    uncrated = self._svc.store.get_uncrated_issues()
                     if uncrated:
-                        await self._crate_manager.auto_package_if_needed(uncrated)
+                        await self._svc.crate_manager.auto_package_if_needed(uncrated)
                 crate_failures = 0
             except Exception as exc:
                 crate_failures += 1
@@ -632,7 +597,7 @@ class HydraFlowOrchestrator:
                 self._recovered_issues.discard(issue_number)
                 self._active_impl_issues.discard(issue_number)
                 self._active_review_issues.discard(issue_number)
-                self._hitl_phase.active_hitl_issues.discard(issue_number)
+                self._svc.hitl_phase.active_hitl_issues.discard(issue_number)
             logger.info(
                 "Restored %d interrupted issue(s) for re-processing: %s",
                 len(interrupted),
@@ -806,11 +771,11 @@ class HydraFlowOrchestrator:
         self._restore_state()
         if (
             not self._config.auto_crate
-            and self._crate_manager.active_crate_number is not None
+            and self._svc.crate_manager.active_crate_number is not None
         ):
             logger.info(
                 "Auto-crate disabled; clearing active crate %s",
-                self._crate_manager.active_crate_number,
+                self._svc.crate_manager.active_crate_number,
             )
             self._state.set_active_crate_number(None)
 
@@ -823,8 +788,8 @@ class HydraFlowOrchestrator:
             self._config.poll_interval,
         )
 
-        await self._worktrees.sanitize_repo()
-        await self._prs.ensure_labels_exist()
+        await self._svc.worktrees.sanitize_repo()
+        await self._svc.prs.ensure_labels_exist()
         await self._enable_rerere()
         self._warn_if_agents_md_missing()
         await self._start_session()
@@ -833,12 +798,12 @@ class HydraFlowOrchestrator:
             await self._supervise_loops()
         finally:
             await self._end_session()
-            self._planners.terminate()
-            self._agents.terminate()
-            self._reviewers.terminate()
-            self._hitl_runner.terminate()
+            self._svc.planners.terminate()
+            self._svc.agents.terminate()
+            self._svc.reviewers.terminate()
+            self._svc.hitl_runner.terminate()
             with contextlib.suppress(Exception):
-                await self._worktrees.sanitize_repo()
+                await self._svc.worktrees.sanitize_repo()
             await asyncio.sleep(0)
             self._running = False
             await self._publish_status()
@@ -952,7 +917,7 @@ class HydraFlowOrchestrator:
         """Run all loops plus the IssueStore poller, restarting any that crash."""
 
         async def _store_loop() -> None:
-            await self._store.start(self._stop_event)
+            await self._svc.store.start(self._stop_event)
 
         loop_factories: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]] = [
             ("store", _store_loop),
@@ -963,15 +928,15 @@ class HydraFlowOrchestrator:
             ("hitl", self._hitl_loop),
             ("memory_sync", self._memory_sync_loop),
             ("metrics", self._metrics_sync_loop),
-            ("pr_unsticker", self._pr_unsticker_loop.run),
+            ("pr_unsticker", self._svc.pr_unsticker_loop.run),
             ("manifest_refresh", self._manifest_refresh_bg_loop),
-            ("report_issue", self._report_issue_loop.run),
-            ("epic_monitor", self._epic_monitor_loop.run),
-            ("epic_sweeper", self._epic_sweeper_loop.run),
-            ("verify_monitor", self._verify_monitor_loop.run),
-            ("worktree_gc", self._worktree_gc_loop.run),
-            ("runs_gc", self._runs_gc_loop.run),
-            ("adr_reviewer", self._adr_reviewer_loop.run),
+            ("report_issue", self._svc.report_issue_loop.run),
+            ("epic_monitor", self._svc.epic_monitor_loop.run),
+            ("epic_sweeper", self._svc.epic_sweeper_loop.run),
+            ("verify_monitor", self._svc.verify_monitor_loop.run),
+            ("worktree_gc", self._svc.worktree_gc_loop.run),
+            ("runs_gc", self._svc.runs_gc_loop.run),
+            ("adr_reviewer", self._svc.adr_reviewer_loop.run),
             ("pipeline_stats", self._pipeline_stats_loop),
         ]
         self._prune_stale_disabled_workers({n for n, _ in loop_factories})
@@ -1111,7 +1076,7 @@ class HydraFlowOrchestrator:
         """Continuously poll for find-labeled issues and triage them."""
         await self._polling_loop(
             "triage",
-            self._triager.triage_issues,
+            self._svc.triager.triage_issues,
             self._config.poll_interval,
             enabled_name="triage",
         )
@@ -1120,7 +1085,7 @@ class HydraFlowOrchestrator:
         """Continuously poll for planner-labeled issues."""
         await self._polling_loop(
             "plan",
-            self._planner_phase.plan_issues,
+            self._svc.planner_phase.plan_issues,
             self._config.poll_interval,
             enabled_name="plan",
         )
@@ -1145,13 +1110,13 @@ class HydraFlowOrchestrator:
 
     async def _do_hitl_work(self) -> None:
         """Fetch HITL issues, attempt auto-fixes, then process human corrections."""
-        hitl_issues = await self._fetcher.fetch_issues_by_labels(
+        hitl_issues = await self._svc.fetcher.fetch_issues_by_labels(
             list(self._config.hitl_label),
             limit=50,
         )
         if hitl_issues:
-            await self._hitl_phase.attempt_auto_fixes(hitl_issues)
-        await self._hitl_phase.process_corrections()
+            await self._svc.hitl_phase.attempt_auto_fixes(hitl_issues)
+        await self._svc.hitl_phase.process_corrections()
 
     async def _hitl_loop(self) -> None:
         """Continuously process HITL corrections submitted via the dashboard."""
@@ -1163,15 +1128,15 @@ class HydraFlowOrchestrator:
 
     async def _memory_sync_loop(self) -> None:
         """Continuously poll ``hydraflow-memory`` issues and rebuild the digest."""
-        await self._memory_sync_bg.run()
+        await self._svc.memory_sync_bg.run()
 
     async def _metrics_sync_loop(self) -> None:
         """Continuously aggregate and persist metrics snapshots."""
-        await self._metrics_sync_bg.run()
+        await self._svc.metrics_sync_bg.run()
 
     async def _manifest_refresh_bg_loop(self) -> None:
         """Continuously rescan the repo and update the project manifest."""
-        await self._manifest_refresh_loop.run()
+        await self._svc.manifest_refresh_loop.run()
 
     async def _post_run_hooks(
         self,
@@ -1188,7 +1153,7 @@ class HydraFlowOrchestrator:
         await self._suggest_memory(transcript, source, reference)
         if issue_number > 0:
             try:
-                await self._summarizer.summarize_and_comment(
+                await self._svc.summarizer.summarize_and_comment(
                     transcript=transcript,
                     issue_number=issue_number,
                     phase=phase,
@@ -1224,7 +1189,7 @@ class HydraFlowOrchestrator:
                     )
                 )
         while not self._stop_event.is_set():
-            results, issues = await self._implementer.run_batch()
+            results, issues = await self._svc.implementer.run_batch()
             if not issues:
                 break
             did_work = True
@@ -1261,7 +1226,7 @@ class HydraFlowOrchestrator:
             # Fill empty slots from the queue
             free_slots = max_slots - len(pending)
             if free_slots > 0:
-                new_issues = self._store.get_reviewable(free_slots)
+                new_issues = self._svc.store.get_reviewable(free_slots)
                 for issue in new_issues:
                     task = asyncio.create_task(
                         self._review_single_issue(issue),
@@ -1317,49 +1282,51 @@ class HydraFlowOrchestrator:
         """
         try:
             if is_adr_issue_title(issue.title):
-                await self._reviewer.review_adrs([issue])
+                await self._svc.reviewer.review_adrs([issue])
                 return True
 
-            active_in_store = set(self._store.get_active_issues().keys())
+            active_in_store = set(self._svc.store.get_active_issues().keys())
             gh_issue = GitHubIssue.from_task(issue)
-            prs, gh_issues = await self._fetcher.fetch_reviewable_prs(
+            prs, gh_issues = await self._svc.fetcher.fetch_reviewable_prs(
                 active_in_store, prefetched_issues=[gh_issue]
             )
             if not prs:
                 # PR not visible yet — re-queue for next cycle
-                self._store.enqueue_transition(issue, "review")
+                self._svc.store.enqueue_transition(issue, "review")
                 return False
 
-            review_results = await self._reviewer.review_prs(
+            review_results = await self._svc.reviewer.review_prs(
                 prs, [i.to_task() for i in gh_issues]
             )
-            for result in review_results:
-                if result.transcript:
-                    if result.merged:
-                        review_status = "success"
-                    elif result.ci_passed is False:
-                        review_status = "failed"
-                    else:
-                        review_status = "completed"
-                    await self._post_run_hooks(
-                        transcript=result.transcript,
-                        source="reviewer",
-                        reference=f"PR #{result.pr_number}",
-                        issue_number=result.issue_number,
-                        phase="review",
-                        status=review_status,
-                        duration_seconds=result.duration_seconds,
-                        log_file=self._log_reference(
-                            f"review-pr-{result.pr_number}.txt"
-                        ),
-                    )
-            if any(r.merged for r in review_results):
-                await asyncio.sleep(_POST_MERGE_DELAY)
-                await self._prs.pull_main()
-                await self._crate_manager.check_and_advance()
+            await self._post_review_hooks(review_results)
             return True
         finally:
-            release_batch_in_flight(self._store, {issue.id})
+            release_batch_in_flight(self._svc.store, {issue.id})
+
+    async def _post_review_hooks(self, review_results: list[ReviewResult]) -> None:
+        """Run post-run hooks and post-merge actions for completed reviews."""
+        for result in review_results:
+            if result.transcript:
+                if result.merged:
+                    review_status = "success"
+                elif result.ci_passed is False:
+                    review_status = "failed"
+                else:
+                    review_status = "completed"
+                await self._post_run_hooks(
+                    transcript=result.transcript,
+                    source="reviewer",
+                    reference=f"PR #{result.pr_number}",
+                    issue_number=result.issue_number,
+                    phase="review",
+                    status=review_status,
+                    duration_seconds=result.duration_seconds,
+                    log_file=self._log_reference(f"review-pr-{result.pr_number}.txt"),
+                )
+        if any(r.merged for r in review_results):
+            await asyncio.sleep(_POST_MERGE_DELAY)
+            await self._svc.prs.pull_main()
+            await self._svc.crate_manager.check_and_advance()
 
     async def _sleep_or_stop(self, seconds: int | float) -> None:
         """Sleep for *seconds*, waking early if stop is requested."""
@@ -1381,10 +1348,10 @@ class HydraFlowOrchestrator:
         for task in tasks.values():
             task.cancel()
         await asyncio.gather(*tasks.values(), return_exceptions=True)
-        self._planners.terminate()
-        self._agents.terminate()
-        self._reviewers.terminate()
-        self._hitl_runner.terminate()
+        self._svc.planners.terminate()
+        self._svc.agents.terminate()
+        self._svc.reviewers.terminate()
+        self._svc.hitl_runner.terminate()
 
     async def _sleep_until_resume(self, resume_at: datetime) -> None:
         """Sleep until *resume_at* (interruptible by stop event)."""
