@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { useHydraFlow } from '../context/HydraFlowContext'
 import { theme } from '../theme'
+import { GitHubRepoPicker } from './GitHubRepoPicker'
 
 /**
  * Extract an owner/repo slug from a GitHub URL.
@@ -36,7 +37,8 @@ export function extractSlugFromUrl(input) {
 }
 
 export function RegisterRepoDialog({ isOpen, onClose }) {
-  const { addRepoBySlug, addRepoByPath } = useHydraFlow()
+  const { addRepoBySlug, addRepoByPath, fetchRepos } = useHydraFlow()
+  const [tab, setTab] = useState('github')
   const [slug, setSlug] = useState('')
   const [path, setPath] = useState('')
   const [error, setError] = useState('')
@@ -48,6 +50,7 @@ export function RegisterRepoDialog({ isOpen, onClose }) {
       setPath('')
       setError('')
       setSubmitting(false)
+      setTab('github')
       return
     }
     const handleKeyDown = (e) => {
@@ -57,7 +60,7 @@ export function RegisterRepoDialog({ isOpen, onClose }) {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [isOpen, onClose])
 
-  const handleSubmit = useCallback(async (event) => {
+  const handleManualSubmit = useCallback(async (event) => {
     event.preventDefault()
     if (submitting) return
     const trimmedSlug = slug.trim()
@@ -90,6 +93,11 @@ export function RegisterRepoDialog({ isOpen, onClose }) {
     onClose?.()
   }, [slug, path, submitting, addRepoBySlug, addRepoByPath, onClose])
 
+  const handlePickerSelect = useCallback(async () => {
+    if (fetchRepos) await fetchRepos()
+    onClose?.()
+  }, [fetchRepos, onClose])
+
   if (!isOpen) return null
 
   return (
@@ -99,44 +107,78 @@ export function RegisterRepoDialog({ isOpen, onClose }) {
           <span style={styles.title}>Register Repo</span>
           <button type="button" style={styles.closeBtn} onClick={onClose} aria-label="Close register repo dialog">×</button>
         </div>
-        <p style={styles.subtitle}>
-          Paste a GitHub URL or enter an owner/repo slug,
-          or point to a local path to register it with the supervisor.
-        </p>
-        <form onSubmit={handleSubmit}>
-          <label style={styles.label} htmlFor="register-slug">GitHub URL or slug</label>
-          <input
-            id="register-slug"
-            type="text"
-            value={slug}
-            onChange={(e) => setSlug(e.target.value)}
-            placeholder="https://github.com/owner/repo or owner/repo"
-            style={styles.input}
-            autoFocus
-          />
-          <div style={styles.orDivider}>or</div>
-          <label style={styles.label} htmlFor="register-path">Filesystem path</label>
-          <input
-            id="register-path"
-            type="text"
-            value={path}
-            onChange={(e) => setPath(e.target.value)}
-            placeholder="/Users/me/projects/repo"
-            style={styles.input}
-          />
-          {error && <div style={styles.error}>{error}</div>}
-          <div style={styles.actions}>
-            <button type="button" onClick={onClose} style={styles.cancelBtn}>Cancel</button>
-            <button
-              type="submit"
-              style={!slug.trim() && !path.trim() ? styles.submitDisabled : styles.submitBtn}
-              disabled={submitting || (!slug.trim() && !path.trim())}
-              data-testid="register-submit"
-            >
-              {submitting ? 'Registering…' : 'Register Repo'}
-            </button>
+
+        <div style={styles.tabBar}>
+          <button
+            type="button"
+            onClick={() => setTab('github')}
+            style={tab === 'github' ? styles.tabActive : styles.tab}
+            data-testid="tab-github"
+          >
+            GitHub
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('manual')}
+            style={tab === 'manual' ? styles.tabActive : styles.tab}
+            data-testid="tab-manual"
+          >
+            Manual
+          </button>
+        </div>
+
+        {tab === 'github' && (
+          <div style={styles.tabContent}>
+            <p style={styles.subtitle}>
+              Search and select a repo from your GitHub account.
+              It will be cloned automatically.
+            </p>
+            <GitHubRepoPicker onSelect={handlePickerSelect} disabled={submitting} />
           </div>
-        </form>
+        )}
+
+        {tab === 'manual' && (
+          <div style={styles.tabContent}>
+            <p style={styles.subtitle}>
+              Paste a GitHub URL or enter an owner/repo slug,
+              or point to a local path to register it with the supervisor.
+            </p>
+            <form onSubmit={handleManualSubmit}>
+              <label style={styles.label} htmlFor="register-slug">GitHub URL or slug</label>
+              <input
+                id="register-slug"
+                type="text"
+                value={slug}
+                onChange={(e) => setSlug(e.target.value)}
+                placeholder="https://github.com/owner/repo or owner/repo"
+                style={styles.input}
+                autoFocus
+              />
+              <div style={styles.orDivider}>or</div>
+              <label style={styles.label} htmlFor="register-path">Filesystem path</label>
+              <input
+                id="register-path"
+                type="text"
+                value={path}
+                onChange={(e) => setPath(e.target.value)}
+                placeholder="/Users/me/projects/repo"
+                style={styles.input}
+              />
+              {error && <div style={styles.error}>{error}</div>}
+              <div style={styles.actions}>
+                <button type="button" onClick={onClose} style={styles.cancelBtn}>Cancel</button>
+                <button
+                  type="submit"
+                  style={!slug.trim() && !path.trim() ? styles.submitDisabled : styles.submitBtn}
+                  disabled={submitting || (!slug.trim() && !path.trim())}
+                  data-testid="register-submit"
+                >
+                  {submitting ? 'Registering…' : 'Register Repo'}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -153,7 +195,7 @@ const styles = {
     zIndex: 1000,
   },
   card: {
-    width: 420,
+    width: 480,
     background: theme.surface,
     borderRadius: 12,
     border: `1px solid ${theme.border}`,
@@ -177,6 +219,38 @@ const styles = {
     fontSize: 20,
     color: theme.textMuted,
     cursor: 'pointer',
+  },
+  tabBar: {
+    display: 'flex',
+    gap: 0,
+    marginBottom: 12,
+    borderBottom: `1px solid ${theme.border}`,
+  },
+  tab: {
+    flex: 1,
+    padding: '8px 12px',
+    border: 'none',
+    borderBottom: '2px solid transparent',
+    background: 'transparent',
+    color: theme.textMuted,
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: 'pointer',
+    transition: 'color 0.15s, border-color 0.15s',
+  },
+  tabActive: {
+    flex: 1,
+    padding: '8px 12px',
+    border: 'none',
+    borderBottom: `2px solid ${theme.accent}`,
+    background: 'transparent',
+    color: theme.accent,
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: 'pointer',
+  },
+  tabContent: {
+    minHeight: 200,
   },
   subtitle: {
     fontSize: 12,

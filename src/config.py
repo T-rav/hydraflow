@@ -103,6 +103,7 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("adr_review_model", "HYDRAFLOW_ADR_REVIEW_MODEL", "sonnet"),
     ("changelog_file", "HYDRAFLOW_CHANGELOG_FILE", ""),
     ("release_tag_prefix", "HYDRAFLOW_RELEASE_TAG_PREFIX", "v"),
+    ("repos_workspace_dir", "HYDRAFLOW_REPOS_WORKSPACE_DIR", "~/.hydra/repos"),
 ]
 
 _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
@@ -921,6 +922,10 @@ class HydraFlowConfig(BaseModel):
     data_root: Path = Field(
         default=Path("."),
         description="Directory for persistent HydraFlow data (.hydraflow)",
+    )
+    repos_workspace_dir: Path = Field(
+        default=Path("~/.hydra/repos"),
+        description="Base directory for cloned GitHub repos (default ~/.hydra/repos)",
     )
     state_file: Path = Field(default=Path("."), description="Path to state JSON file")
 
