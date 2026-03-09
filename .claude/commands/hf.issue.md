@@ -27,8 +27,11 @@ Before doing anything else, resolve these three values. Use the EXACT fallback l
 
 If `$ARGUMENTS` mentions a screenshot file path (e.g. `/tmp/hydraflow-report-*.png`):
 1. **Read the image** with the Read tool to understand what the user saw
-2. **Save the path** — you MUST include `![Screenshot](<path>)` in the issue body so `gh issue create` auto-uploads it
-3. Use what you see in the screenshot to inform your understanding of the bug
+2. Use what you see in the screenshot to inform your understanding of the bug
+
+If `$ARGUMENTS` includes an uploaded screenshot URL (e.g. `https://gist.githubusercontent.com/...`):
+- Use `![Screenshot](<URL>)` in the issue body with the **uploaded URL** (NOT the local file path)
+- NEVER embed a local filesystem path like `/tmp/...` or `/var/folders/...` in the issue body — it will render as a broken image on GitHub
 
 ### Phase 1: Understand the Request
 

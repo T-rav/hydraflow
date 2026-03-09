@@ -771,6 +771,27 @@ class PRManager:
             logger.error("Issue creation failed for %r: %s", title, exc)
             return 0
 
+    async def upload_screenshot(self, png_path: Path) -> str:
+        """Upload a local PNG file to GitHub (via gist) and return a permanent image URL.
+
+        Returns an empty string on failure or in dry-run mode.
+        """
+        if self._config.dry_run:
+            logger.info("[dry-run] Would upload screenshot")
+            return ""
+
+        try:
+            gist_args = ["gh", "gist", "create"]
+            if self._config.screenshot_gist_public:
+                gist_args.append("--public")
+            gist_args += ["--filename", "screenshot.png", str(png_path)]
+
+            output = await self._run_gh(*gist_args)
+            return self._gist_raw_url(output, "screenshot.png")
+        except Exception:
+            logger.exception("Screenshot upload failed")
+            return ""
+
     async def upload_screenshot_gist(self, png_base64: str) -> str:
         """Upload a base64-encoded PNG as a GitHub gist and return the raw URL.
 

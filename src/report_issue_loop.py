@@ -106,6 +106,18 @@ class ReportIssueLoop(BaseBackgroundLoop):
                         report.id,
                     )
 
+        # Upload screenshot to GitHub (via gist) so the issue body can
+        # reference a real URL instead of a local temp path.
+        screenshot_url: str = ""
+        if screenshot_path:
+            screenshot_url = await self._pr_manager.upload_screenshot(screenshot_path)
+            if not screenshot_url:
+                logger.warning(
+                    "Screenshot upload failed for report %s; "
+                    "issue will be created without inline image",
+                    report.id,
+                )
+
         # Build prompt — invoke /hf.issue so Claude gets the full skill
         # instructions (codebase research, duplicate check, structured body).
         description = report.description
@@ -113,11 +125,28 @@ class ReportIssueLoop(BaseBackgroundLoop):
             description += (
                 f"\n\nA screenshot of the bug is saved at {screenshot_path} "
                 f"— read it with the Read tool to see what the user saw."
-                f"\n\nInclude this markdown image in the GitHub issue body so "
-                f"the screenshot is visible inline (gh issue create will "
-                f"auto-upload the local file):\n\n"
-                f"![Screenshot]({screenshot_path})"
             )
+            if screenshot_url:
+                description += (
+                    f"\n\nThe screenshot has been uploaded to: {screenshot_url}"
+                    f"\n\nInclude this markdown image in the GitHub issue body "
+                    f"so the screenshot is visible inline:\n\n"
+                    f"![Screenshot]({screenshot_url})"
+                )
+            else:
+                description += (
+                    "\n\nScreenshot upload failed — do NOT include a local "
+                    "file path in the issue body as it will render as a "
+                    "broken image."
+                )
+
+        # Use hydraflow-ready so bug reports skip triage/planning and go
+        # straight to implementation.
+        ready_label = self._config.ready_label[0] if self._config.ready_label else "hydraflow-ready"
+        description += (
+            f"\n\nIMPORTANT: Use the label `{ready_label}` instead of "
+            f"`hydraflow-find` for this issue."
+        )
 
         prompt = f"/hf.issue {description}"
 
@@ -152,6 +181,9 @@ class ReportIssueLoop(BaseBackgroundLoop):
                 screenshot_path.unlink(missing_ok=True)
 
         if issue_number > 0:
+            # Verify the agent applied the correct label and screenshot
+            await self._verify_issue(issue_number, ready_label, screenshot_url)
+
             # Success — remove from queue
             self._state.remove_report(report.id)
             logger.info(
@@ -222,6 +254,54 @@ class ReportIssueLoop(BaseBackgroundLoop):
             body,
             labels,
         )
+
+    async def _verify_issue(
+        self, issue_number: int, expected_label: str, screenshot_url: str
+    ) -> None:
+        """Verify the created issue has the correct label and screenshot.
+
+        Fixes up the issue if the agent missed either requirement.
+        """
+        try:
+            output = await self._pr_manager._run_gh(
+                "gh", "issue", "view", str(issue_number),
+                "--repo", self._pr_manager._repo,
+                "--json", "labels,body",
+            )
+            import json as _json
+
+            data = _json.loads(output)
+            labels = [lb.get("name", "") for lb in data.get("labels", [])]
+            body = data.get("body", "")
+
+            # Fix missing label
+            if expected_label not in labels:
+                logger.warning(
+                    "Issue #%d missing label %r — adding it",
+                    issue_number,
+                    expected_label,
+                )
+                await self._pr_manager.add_labels(issue_number, [expected_label])
+
+            # Fix missing screenshot URL in body
+            if screenshot_url and screenshot_url not in body:
+                logger.warning(
+                    "Issue #%d missing screenshot URL — appending it",
+                    issue_number,
+                )
+                appendix = f"\n\n## Screenshot\n\n![Screenshot]({screenshot_url})\n"
+                await self._pr_manager._run_gh(
+                    "gh", "issue", "edit", str(issue_number),
+                    "--repo", self._pr_manager._repo,
+                    "--body", body + appendix,
+                )
+        except Exception:
+            logger.warning(
+                "Post-creation verification failed for issue #%d — "
+                "issue was created but may need manual label/screenshot fix",
+                issue_number,
+                exc_info=True,
+            )
 
     @staticmethod
     def _save_screenshot(b64_data: str) -> Path:

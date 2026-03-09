@@ -35,10 +35,18 @@ def _make_loop(
 
     state = StateTracker(tmp_path / "state.json")
     pr_manager = MagicMock()
+    pr_manager.upload_screenshot = AsyncMock(
+        return_value="https://gist.example.com/screenshot.png"
+    )
     pr_manager.upload_screenshot_gist = AsyncMock(
         return_value="https://gist.example.com/screenshot.png"
     )
     pr_manager.create_issue = AsyncMock(return_value=123)
+    pr_manager.add_labels = AsyncMock()
+    pr_manager._run_gh = AsyncMock(
+        return_value='{"labels":[],"body":""}'
+    )
+    pr_manager._repo = "owner/repo"
     runner = MagicMock()
 
     loop = ReportIssueLoop(
@@ -216,7 +224,8 @@ class TestReportIssueLoopDoWork:
             await loop._do_work()
 
         prompt = mock_stream.call_args.kwargs.get("prompt", "")
-        assert prompt == "/hf.issue Bug in the dashboard"
+        assert prompt.startswith("/hf.issue Bug in the dashboard")
+        assert "IMPORTANT: Use the label" in prompt
 
     @pytest.mark.asyncio
     async def test_screenshot_with_secrets_is_stripped(self, tmp_path: Path) -> None:
