@@ -369,7 +369,7 @@ async def run_with_fatal_guard(
     logged via :func:`log_exception_with_bug_classification` and
     ``on_failure(exc_type_name)`` is returned as the result.
     """
-    from subprocess_util import (  # noqa: PLC0415
+    from subprocess_util import (  # noqa: PLC0415 — deferred to avoid circular import
         AuthenticationError,
         CreditExhaustedError,
     )
