@@ -11,7 +11,14 @@ from agent import AgentRunner
 from config import HydraFlowConfig
 from harness_insights import FailureCategory, HarnessInsightStore
 from issue_store import IssueStore
-from models import GitHubIssue, PipelineStage, Task, WorkerResult, WorkerResultMeta
+from models import (
+    GitHubIssue,
+    PipelineStage,
+    PRInfo,
+    Task,
+    WorkerResult,
+    WorkerResultMeta,
+)
 from phase_utils import (
     MemorySuggester,
     PipelineEscalator,
@@ -444,7 +451,7 @@ class ImplementPhase:
 
     async def _resolve_pr(
         self, issue: Task, result: WorkerResult, is_retry: bool
-    ) -> object | None:
+    ) -> PRInfo | None:
         """Create a new PR or recover an existing one, updating result.pr_info."""
         if not is_retry:
             gh_issue = GitHubIssue.from_task(issue)
