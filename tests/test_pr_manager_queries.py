@@ -1486,6 +1486,34 @@ class TestQueryIssuesByLabels:
 
         assert results == []
         assert "test_ctx" in caplog.text
+        assert any(r.levelname == "WARNING" for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_skips_label_on_json_decode_error(self, event_bus, tmp_path):
+        """A JSONDecodeError for one label should be caught and skipped."""
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+        )
+        mgr = _make_manager(cfg, event_bus)
+
+        call_idx = 0
+
+        async def mock_run_gh(*cmd, cwd=None):
+            nonlocal call_idx
+            call_idx += 1
+            if call_idx == 1:
+                return "not valid json{"
+            return json.dumps([{"number": 9, "title": "OK"}])
+
+        mgr._run_gh = mock_run_gh
+
+        results = await mgr._query_issues_by_labels(
+            ["bad-json-label", "good-label"], "."
+        )
+        assert len(results) == 1
+        assert results[0]["number"] == 9
 
     @pytest.mark.asyncio
     async def test_empty_labels_returns_empty(self, event_bus, tmp_path):

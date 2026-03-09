@@ -1339,7 +1339,13 @@ class PRManager:
                     if num not in seen:
                         seen.add(num)
                         results.append(item)
-            except (RuntimeError, json.JSONDecodeError, KeyError, TypeError):
+            except (
+                RuntimeError,
+                json.JSONDecodeError,
+                KeyError,
+                TypeError,
+                AttributeError,
+            ):
                 getattr(logger, error_level, logger.warning)(
                     "Failed in %s for label %s",
                     error_context,
