@@ -338,13 +338,7 @@ class PRUnsticker:
                 )
                 return False
 
-        except (
-            TimeoutError,
-            OSError,
-            RuntimeError,
-            ValueError,
-            asyncio.CancelledError,
-        ):
+        except (OSError, RuntimeError, ValueError, asyncio.CancelledError):
             logger.exception("PR Unsticker failed for issue #%d", issue_number)
             await self._release_back_to_hitl(
                 issue_number,
@@ -461,13 +455,7 @@ class PRUnsticker:
                 error_msg[:200] if error_msg else "",
             )
             return False
-        except (
-            TimeoutError,
-            OSError,
-            RuntimeError,
-            ValueError,
-            asyncio.CancelledError,
-        ) as exc:
+        except (OSError, RuntimeError, ValueError, asyncio.CancelledError) as exc:
             logger.error(
                 "Unsticker CI fix agent failed for issue #%d: %s",
                 issue_number,
@@ -638,13 +626,7 @@ diff — you may catch things `make quality` won't.
                     issue_number,
                     error_msg[:200] if error_msg else "",
                 )
-            except (
-                TimeoutError,
-                OSError,
-                RuntimeError,
-                ValueError,
-                asyncio.CancelledError,
-            ) as exc:
+            except (OSError, RuntimeError, ValueError, asyncio.CancelledError) as exc:
                 logger.error(
                     "Unsticker CI timeout agent failed for issue #%d (attempt %d): %s",
                     issue_number,
