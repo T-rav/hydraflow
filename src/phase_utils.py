@@ -383,6 +383,108 @@ async def run_with_fatal_guard(
         return on_failure(type(exc).__name__)
 
 
+class MemorySuggester:
+    """Pre-bound callable for :func:`safe_file_memory_suggestion`.
+
+    Stores the ``(config, prs, state)`` triple so call sites only need to
+    pass ``(transcript, source, reference)``.
+
+    Usage::
+
+        suggest = MemorySuggester(config, prs, state)
+        await suggest(transcript, "planner", f"issue #{issue.id}")
+    """
+
+    __slots__ = ("_config", "_prs", "_state")
+
+    def __init__(
+        self, config: HydraFlowConfig, prs: PRPort, state: StateTracker
+    ) -> None:
+        self._config = config
+        self._prs = prs
+        self._state = state
+
+    async def __call__(self, transcript: str, source: str, reference: str) -> None:
+        await safe_file_memory_suggestion(
+            transcript, source, reference, self._config, self._prs, self._state
+        )
+
+
+class PipelineEscalator:
+    """Bundles ``escalate_to_hitl`` + ``enqueue_transition`` + ``record_harness_failure``.
+
+    The plan and implement phases repeat this trio at every escalation
+    site.  This helper encapsulates the three calls so each call site
+    collapses to a single ``await escalator(...)`` invocation.
+
+    Usage::
+
+        escalator = PipelineEscalator(
+            state, prs, store, harness_insights,
+            origin_label=config.planner_label[0],
+            hitl_label=config.hitl_label[0],
+            stage=PipelineStage.PLAN,
+        )
+        await escalator(issue, cause="...", details="...", category=FailureCategory.PLAN_VALIDATION)
+    """
+
+    __slots__ = (
+        "_state",
+        "_prs",
+        "_store",
+        "_harness_insights",
+        "_origin_label",
+        "_hitl_label",
+        "_stage",
+    )
+
+    def __init__(
+        self,
+        state: StateTracker,
+        prs: PRPort,
+        store: IssueStore,
+        harness_insights: HarnessInsightStore | None,
+        *,
+        origin_label: str,
+        hitl_label: str,
+        stage: PipelineStage,
+    ) -> None:
+        self._state = state
+        self._prs = prs
+        self._store = store
+        self._harness_insights = harness_insights
+        self._origin_label = origin_label
+        self._hitl_label = hitl_label
+        self._stage = stage
+
+    async def __call__(
+        self,
+        issue: Any,
+        *,
+        cause: str,
+        details: str,
+        category: FailureCategory,
+    ) -> None:
+        """Escalate *issue* to HITL, enqueue transition, and record failure."""
+        issue_number = issue.id if hasattr(issue, "id") else issue
+        await escalate_to_hitl(
+            self._state,
+            self._prs,
+            issue_number,
+            cause=cause,
+            origin_label=self._origin_label,
+            hitl_label=self._hitl_label,
+        )
+        self._store.enqueue_transition(issue, "hitl")
+        record_harness_failure(
+            self._harness_insights,
+            issue_number,
+            category,
+            details,
+            stage=self._stage,
+        )
+
+
 def next_adr_number(adr_dir: Path) -> int:
     """Return the next available ADR number by scanning *adr_dir*.
 
