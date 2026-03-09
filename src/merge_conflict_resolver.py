@@ -11,6 +11,7 @@ from events import EventBus
 from models import (
     ConflictResolutionResult,
     EscalateFn,
+    HitlEscalation,
     PRInfo,
     PublishFn,
     Task,
@@ -91,18 +92,20 @@ class MergeConflictResolver:
         )
         await publish_fn(pr, worker_id, "escalating")
         await escalate_fn(
-            pr.issue_number,
-            pr.number,
-            cause="Merge conflict with main branch",
-            origin_label=self._config.review_label[0],
-            comment=(
-                f"**Merge conflicts** with "
-                f"`{self._config.main_branch}` could not be "
-                "resolved automatically. "
-                "Escalating to human review."
-            ),
-            event_cause="merge_conflict",
-            task=issue,
+            HitlEscalation(
+                issue_number=pr.issue_number,
+                pr_number=pr.number,
+                cause="Merge conflict with main branch",
+                origin_label=self._config.review_label[0],
+                comment=(
+                    f"**Merge conflicts** with "
+                    f"`{self._config.main_branch}` could not be "
+                    "resolved automatically. "
+                    "Escalating to human review."
+                ),
+                event_cause="merge_conflict",
+                task=issue,
+            )
         )
         return False
 
@@ -191,22 +194,20 @@ class MergeConflictResolver:
 
                 await self._suggest_memory(transcript, source, f"PR #{pr.number}")
 
-                success, error_msg = await self._agents._verify_result(
-                    wt_path, pr.branch
-                )
-                if success:
+                verify = await self._agents._verify_result(wt_path, pr.branch)
+                if verify.passed:
                     await self._maybe_summarize_conflict(
                         transcript, issue.id, pr.number
                     )
                     return ConflictResolutionResult(success=True, used_rebuild=False)
 
-                last_error = error_msg
+                last_error = verify.summary
                 logger.warning(
                     "Conflict resolution attempt %d/%d failed for PR #%d: %s",
                     attempt,
                     max_attempts,
                     pr.number,
-                    error_msg[:200] if error_msg else "",
+                    verify.summary[:200] if verify.summary else "",
                 )
                 # Summarize final failed attempt
                 if attempt == max_attempts:
@@ -321,8 +322,8 @@ class MergeConflictResolver:
 
             await self._suggest_memory(transcript, source, f"PR #{pr.number}")
 
-            success, error_msg = await self._agents._verify_result(new_wt, pr.branch)
-            if success:
+            verify = await self._agents._verify_result(new_wt, pr.branch)
+            if verify.passed:
                 await self._maybe_summarize_conflict(transcript, issue.id, pr.number)
                 logger.info("Fresh branch rebuild succeeded for PR #%d", pr.number)
                 return True
@@ -330,7 +331,7 @@ class MergeConflictResolver:
             logger.warning(
                 "Fresh branch rebuild verification failed for PR #%d: %s",
                 pr.number,
-                error_msg[:200] if error_msg else "",
+                verify.summary[:200] if verify.summary else "",
             )
             return False
         except Exception as exc:

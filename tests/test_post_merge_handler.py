@@ -227,9 +227,9 @@ class TestPostMergeHandler:
             publish_fn=publish_fn,
         )
 
-        kwargs = escalate_fn.await_args.kwargs
-        assert kwargs["cause"] == "PR merge failed on GitHub: merge conflict"
-        assert "merge conflicts" in kwargs["comment"]
+        esc = escalate_fn.await_args.args[0]
+        assert esc.cause == "PR merge failed on GitHub: merge conflict"
+        assert "merge conflicts" in esc.comment
 
     @pytest.mark.asyncio
     async def test_handle_approved_merge_failure_non_conflict_sets_blocked_cause(
@@ -257,10 +257,8 @@ class TestPostMergeHandler:
             publish_fn=publish_fn,
         )
 
-        kwargs = escalate_fn.await_args.kwargs
-        assert (
-            kwargs["cause"] == "PR merge failed on GitHub: merge blocked (non-conflict)"
-        )
+        esc = escalate_fn.await_args.args[0]
+        assert esc.cause == "PR merge failed on GitHub: merge blocked (non-conflict)"
 
     @pytest.mark.asyncio
     async def test_handle_approved_merge_conflict_attempts_auto_fix_and_retries_merge(
@@ -323,8 +321,8 @@ class TestPostMergeHandler:
         )
 
         merge_conflict_fix_fn.assert_awaited_once_with(pr, issue, 0)
-        kwargs = escalate_fn.await_args.kwargs
-        assert kwargs["cause"] == "PR merge failed on GitHub: merge conflict"
+        esc = escalate_fn.await_args.args[0]
+        assert esc.cause == "PR merge failed on GitHub: merge conflict"
 
     @pytest.mark.asyncio
     async def test_get_judge_result_none(self, config: HydraFlowConfig) -> None:
@@ -537,15 +535,20 @@ class TestPostMergeHandler:
         )
 
         handler._prs.create_issue.assert_awaited_once()
-        # Verification issue should record review origin so dashboard shows
-        # "from review" instead of "pending".
-        assert handler._state.get_hitl_origin(42) == config.review_label[0]
+        # Verification issue should use verify_label, not hitl_label.
+        call_args = handler._prs.create_issue.call_args
+        assert config.verify_label[0] in call_args[0][2]
+        # Should record VERIFY_PENDING outcome with verification_issue_number.
+        outcome = handler._state.get_outcome(issue.id)
+        assert outcome is not None
+        assert outcome.outcome.value == "verify_pending"
+        assert outcome.verification_issue_number == 42
 
     @pytest.mark.asyncio
-    async def test_verification_issue_records_review_origin(
+    async def test_verification_issue_uses_verify_label_not_hitl(
         self, config: HydraFlowConfig
     ) -> None:
-        """Verification issues must record review origin for correct HITL status."""
+        """Verification issues must use verify_label, not hitl_label."""
         verdict = JudgeVerdict(
             issue_number=1,
             criteria_results=[
@@ -582,8 +585,12 @@ class TestPostMergeHandler:
             publish_fn=publish_fn,
         )
 
-        origin = handler._state.get_hitl_origin(99)
-        assert origin == config.review_label[0]
+        # Label used should be verify_label, not hitl_label
+        call_args = handler._prs.create_issue.call_args
+        assert config.verify_label[0] in call_args[0][2]
+        assert config.hitl_label[0] not in call_args[0][2]
+        # Should NOT set hitl_origin (verify issues aren't HITL items)
+        assert handler._state.get_hitl_origin(99) is None
 
     @pytest.mark.asyncio
     async def test_verification_issue_skipped_for_refactor_and_test_only_work(

@@ -17,6 +17,8 @@ if TYPE_CHECKING:
 
 from events import EventType
 from models import (
+    HitlEscalation,
+    LoopResult,
     PRInfo,
     ReviewResult,
     ReviewVerdict,
@@ -45,7 +47,9 @@ class TestHITLEscalationEvents:
         """Merge conflict escalation should emit HITL_ESCALATION with cause merge_conflict."""
         mock_agents = AsyncMock()
         mock_agents._execute = AsyncMock(return_value="transcript")
-        mock_agents._verify_result = AsyncMock(return_value=(False, ""))
+        mock_agents._verify_result = AsyncMock(
+            return_value=LoopResult(passed=False, summary="")
+        )
         phase = make_review_phase(config, agents=mock_agents, event_bus=event_bus)
         issue = TaskFactory.create()
         pr = PRInfoFactory.create()
@@ -689,11 +693,13 @@ class TestEscalateToHitl:
         phase._prs.post_pr_comment = AsyncMock()
 
         await phase._escalate_to_hitl(
-            42,
-            101,
-            cause="Test failure",
-            origin_label="hydraflow-review",
-            comment="Escalation comment",
+            HitlEscalation(
+                issue_number=42,
+                pr_number=101,
+                cause="Test failure",
+                origin_label="hydraflow-review",
+                comment="Escalation comment",
+            )
         )
 
         assert phase._state.get_hitl_origin(42) == "hydraflow-review"
@@ -712,11 +718,13 @@ class TestEscalateToHitl:
         phase._prs.post_pr_comment = AsyncMock()
 
         await phase._escalate_to_hitl(
-            42,
-            101,
-            cause="Test",
-            origin_label="hydraflow-review",
-            comment="comment",
+            HitlEscalation(
+                issue_number=42,
+                pr_number=101,
+                cause="Test",
+                origin_label="hydraflow-review",
+                comment="comment",
+            )
         )
 
         stats = phase._state.get_lifetime_stats()
@@ -733,11 +741,13 @@ class TestEscalateToHitl:
         phase._prs.post_pr_comment = AsyncMock()
 
         await phase._escalate_to_hitl(
-            42,
-            101,
-            cause="Test",
-            origin_label="hydraflow-review",
-            comment="comment",
+            HitlEscalation(
+                issue_number=42,
+                pr_number=101,
+                cause="Test",
+                origin_label="hydraflow-review",
+                comment="comment",
+            )
         )
 
         phase._prs.transition.assert_awaited_once_with(42, "hitl", pr_number=101)
@@ -756,11 +766,13 @@ class TestEscalateToHitl:
         phase._prs.post_comment = AsyncMock()
 
         await phase._escalate_to_hitl(
-            42,
-            101,
-            cause="Test",
-            origin_label="hydraflow-review",
-            comment="Escalation!",
+            HitlEscalation(
+                issue_number=42,
+                pr_number=101,
+                cause="Test",
+                origin_label="hydraflow-review",
+                comment="Escalation!",
+            )
         )
 
         phase._prs.post_pr_comment.assert_awaited_once_with(101, "Escalation!")
@@ -780,12 +792,14 @@ class TestEscalateToHitl:
         phase._prs.post_comment = AsyncMock()
 
         await phase._escalate_to_hitl(
-            42,
-            101,
-            cause="Test",
-            origin_label="hydraflow-review",
-            comment="Escalation!",
-            post_on_pr=False,
+            HitlEscalation(
+                issue_number=42,
+                pr_number=101,
+                cause="Test",
+                origin_label="hydraflow-review",
+                comment="Escalation!",
+                post_on_pr=False,
+            )
         )
 
         phase._prs.post_comment.assert_awaited_once_with(42, "Escalation!")
@@ -804,12 +818,14 @@ class TestEscalateToHitl:
         phase._prs.post_pr_comment = AsyncMock()
 
         await phase._escalate_to_hitl(
-            42,
-            101,
-            cause="Test cause",
-            origin_label="hydraflow-review",
-            comment="comment",
-            event_cause="test_event",
+            HitlEscalation(
+                issue_number=42,
+                pr_number=101,
+                cause="Test cause",
+                origin_label="hydraflow-review",
+                comment="comment",
+                event_cause="test_event",
+            )
         )
 
         history = event_bus.get_history()
@@ -832,12 +848,14 @@ class TestEscalateToHitl:
         phase._prs.post_pr_comment = AsyncMock()
 
         await phase._escalate_to_hitl(
-            42,
-            101,
-            cause="CI failed",
-            origin_label="hydraflow-review",
-            comment="comment",
-            extra_event_data={"ci_fix_attempts": 3},
+            HitlEscalation(
+                issue_number=42,
+                pr_number=101,
+                cause="CI failed",
+                origin_label="hydraflow-review",
+                comment="comment",
+                extra_event_data={"ci_fix_attempts": 3},
+            )
         )
 
         history = event_bus.get_history()
@@ -858,12 +876,14 @@ class TestEscalateToHitl:
         issue = TaskFactory.create(id=42)
 
         await phase._escalate_to_hitl(
-            issue.id,
-            101,
-            cause="Test",
-            origin_label="hydraflow-review",
-            comment="Escalation!",
-            task=issue,
+            HitlEscalation(
+                issue_number=issue.id,
+                pr_number=101,
+                cause="Test",
+                origin_label="hydraflow-review",
+                comment="Escalation!",
+                task=issue,
+            )
         )
 
         phase._store.enqueue_transition.assert_called_once_with(issue, "hitl")
@@ -881,11 +901,13 @@ class TestEscalateToHitl:
         phase._prs.post_pr_comment = AsyncMock()
 
         await phase._escalate_to_hitl(
-            42,
-            101,
-            cause="Test",
-            origin_label="hydraflow-review",
-            comment="Escalation!",
+            HitlEscalation(
+                issue_number=42,
+                pr_number=101,
+                cause="Test",
+                origin_label="hydraflow-review",
+                comment="Escalation!",
+            )
         )
 
         phase._store.enqueue_transition.assert_not_called()
@@ -1200,12 +1222,14 @@ class TestVisualEvidenceEscalation:
         )
 
         await phase._escalate_to_hitl(
-            42,
-            101,
-            cause="Visual validation failed",
-            origin_label="hydraflow-review",
-            comment="Visual failure",
-            visual_evidence=evidence,
+            HitlEscalation(
+                issue_number=42,
+                pr_number=101,
+                cause="Visual validation failed",
+                origin_label="hydraflow-review",
+                comment="Visual failure",
+                visual_evidence=evidence,
+            )
         )
 
         stored = phase._state.get_hitl_visual_evidence(42)
@@ -1227,11 +1251,13 @@ class TestVisualEvidenceEscalation:
         phase._prs.post_pr_comment = AsyncMock()
 
         await phase._escalate_to_hitl(
-            42,
-            101,
-            cause="CI failed",
-            origin_label="hydraflow-review",
-            comment="CI failure",
+            HitlEscalation(
+                issue_number=42,
+                pr_number=101,
+                cause="CI failed",
+                origin_label="hydraflow-review",
+                comment="CI failure",
+            )
         )
 
         assert phase._state.get_hitl_visual_evidence(42) is None
@@ -1260,12 +1286,14 @@ class TestVisualEvidenceEscalation:
         )
 
         await phase._escalate_to_hitl(
-            42,
-            101,
-            cause="Visual validation warning",
-            origin_label="hydraflow-review",
-            comment="Visual warning",
-            visual_evidence=evidence,
+            HitlEscalation(
+                issue_number=42,
+                pr_number=101,
+                cause="Visual validation warning",
+                origin_label="hydraflow-review",
+                comment="Visual warning",
+                visual_evidence=evidence,
+            )
         )
 
         hitl_events = [
@@ -1438,12 +1466,14 @@ class TestVisualEvidenceEscalation:
 
         # First escalation
         await phase._escalate_to_hitl(
-            42,
-            101,
-            cause="Visual validation failed",
-            origin_label="hydraflow-review",
-            comment="Visual failure",
-            visual_evidence=evidence,
+            HitlEscalation(
+                issue_number=42,
+                pr_number=101,
+                cause="Visual validation failed",
+                origin_label="hydraflow-review",
+                comment="Visual failure",
+                visual_evidence=evidence,
+            )
         )
 
         # Evidence should be stored
@@ -1461,12 +1491,14 @@ class TestVisualEvidenceEscalation:
         )
 
         await phase._escalate_to_hitl(
-            42,
-            101,
-            cause="Visual validation failed (retry)",
-            origin_label="hydraflow-review",
-            comment="Visual failure retry",
-            visual_evidence=evidence_v2,
+            HitlEscalation(
+                issue_number=42,
+                pr_number=101,
+                cause="Visual validation failed (retry)",
+                origin_label="hydraflow-review",
+                comment="Visual failure retry",
+                visual_evidence=evidence_v2,
+            )
         )
 
         # Updated evidence should be stored

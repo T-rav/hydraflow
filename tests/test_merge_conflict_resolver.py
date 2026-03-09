@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from config import HydraFlowConfig
 
-from models import ConflictResolutionResult
+from models import ConflictResolutionResult, HitlEscalation, LoopResult
 from tests.conftest import PRInfoFactory, TaskFactory
 from tests.helpers import ConfigFactory, make_conflict_resolver
 
@@ -71,6 +71,11 @@ class TestMergeConflictResolver:
 
         assert result is False
         escalate_fn.assert_awaited_once()
+        esc = escalate_fn.await_args.args[0]
+        assert isinstance(esc, HitlEscalation)
+        assert esc.cause == "Merge conflict with main branch"
+        assert esc.pr_number == pr.number
+        assert esc.issue_number == pr.issue_number
 
     @pytest.mark.asyncio
     async def test_resolve_returns_false_when_no_agents(
@@ -113,7 +118,9 @@ class TestMergeConflictResolver:
         """Should run the agent and verify quality when there are conflicts."""
         mock_agents = AsyncMock()
         mock_agents._execute = AsyncMock(return_value="transcript")
-        mock_agents._verify_result = AsyncMock(return_value=(True, ""))
+        mock_agents._verify_result = AsyncMock(
+            return_value=LoopResult(passed=True, summary="")
+        )
         resolver = make_conflict_resolver(config, agents=mock_agents)
         pr = PRInfoFactory.create()
         issue = TaskFactory.create()
@@ -135,7 +142,9 @@ class TestMergeConflictResolver:
         """A transcript file should be saved for each attempt."""
         mock_agents = AsyncMock()
         mock_agents._execute = AsyncMock(return_value="transcript content")
-        mock_agents._verify_result = AsyncMock(return_value=(True, ""))
+        mock_agents._verify_result = AsyncMock(
+            return_value=LoopResult(passed=True, summary="")
+        )
         resolver = make_conflict_resolver(config, agents=mock_agents)
         pr = PRInfoFactory.create()
         issue = TaskFactory.create()
@@ -160,7 +169,9 @@ class TestSourceParameter:
         """Verify that transcripts use the source parameter for filename prefix."""
         mock_agents = AsyncMock()
         mock_agents._execute = AsyncMock(return_value="transcript content")
-        mock_agents._verify_result = AsyncMock(return_value=(True, ""))
+        mock_agents._verify_result = AsyncMock(
+            return_value=LoopResult(passed=True, summary="")
+        )
         resolver = make_conflict_resolver(config, agents=mock_agents)
         pr = PRInfoFactory.create()
         issue = TaskFactory.create()
@@ -185,7 +196,9 @@ class TestSourceParameter:
         """Verify _suggest_memory gets the correct source string."""
         mock_agents = AsyncMock()
         mock_agents._execute = AsyncMock(return_value="transcript")
-        mock_agents._verify_result = AsyncMock(return_value=(True, ""))
+        mock_agents._verify_result = AsyncMock(
+            return_value=LoopResult(passed=True, summary="")
+        )
         resolver = make_conflict_resolver(config, agents=mock_agents)
         pr = PRInfoFactory.create()
         issue = TaskFactory.create()
@@ -215,7 +228,9 @@ class TestWorkerIdNone:
         """Verify no REVIEW_UPDATE events when worker_id is None."""
         mock_agents = AsyncMock()
         mock_agents._execute = AsyncMock(return_value="transcript")
-        mock_agents._verify_result = AsyncMock(return_value=(True, ""))
+        mock_agents._verify_result = AsyncMock(
+            return_value=LoopResult(passed=True, summary="")
+        )
         resolver = make_conflict_resolver(config, agents=mock_agents)
         pr = PRInfoFactory.create()
         issue = TaskFactory.create()
@@ -251,7 +266,9 @@ class TestWorkerIdNone:
         """Verify REVIEW_UPDATE events are published when worker_id is provided."""
         mock_agents = AsyncMock()
         mock_agents._execute = AsyncMock(return_value="transcript")
-        mock_agents._verify_result = AsyncMock(return_value=(True, ""))
+        mock_agents._verify_result = AsyncMock(
+            return_value=LoopResult(passed=True, summary="")
+        )
         resolver = make_conflict_resolver(config, agents=mock_agents)
         pr = PRInfoFactory.create()
         issue = TaskFactory.create()
@@ -329,7 +346,10 @@ class TestFreshBranchRebuild:
         mock_agents._execute = AsyncMock(return_value="transcript")
         # First call (merge attempt) fails, second call (rebuild) succeeds
         mock_agents._verify_result = AsyncMock(
-            side_effect=[(False, "quality failed"), (True, "")]
+            side_effect=[
+                LoopResult(passed=False, summary="quality failed"),
+                LoopResult(passed=True, summary=""),
+            ]
         )
         resolver = make_conflict_resolver(cfg, agents=mock_agents)
         pr = PRInfoFactory.create()
@@ -364,7 +384,9 @@ class TestFreshBranchRebuild:
         )
         mock_agents = AsyncMock()
         mock_agents._execute = AsyncMock(return_value="rebuilt transcript")
-        mock_agents._verify_result = AsyncMock(return_value=(True, ""))
+        mock_agents._verify_result = AsyncMock(
+            return_value=LoopResult(passed=True, summary="")
+        )
         resolver = make_conflict_resolver(cfg, agents=mock_agents)
         pr = PRInfoFactory.create()
         issue = TaskFactory.create()
@@ -456,7 +478,10 @@ class TestFreshBranchRebuild:
         mock_agents._execute = AsyncMock(return_value="transcript")
         # Merge attempt fails, rebuild succeeds
         mock_agents._verify_result = AsyncMock(
-            side_effect=[(False, "failed"), (True, "")]
+            side_effect=[
+                LoopResult(passed=False, summary="failed"),
+                LoopResult(passed=True, summary=""),
+            ]
         )
         resolver = make_conflict_resolver(cfg, agents=mock_agents)
         pr = PRInfoFactory.create()
