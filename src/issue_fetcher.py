@@ -37,7 +37,7 @@ class IssueFetcher:
     def _normalize_issue_payload(item: dict[str, Any]) -> dict[str, Any]:
         """Map REST/CLI issue shapes to the GitHubIssue-compatible payload."""
         comments_raw = item.get("comments", [])
-        comments: list[str] = comments_raw if isinstance(comments_raw, list) else []
+        comments: list[Any] = comments_raw if isinstance(comments_raw, list) else []
         user = item.get("user")
         author = user.get("login", "") if isinstance(user, dict) else ""
         milestone_raw = item.get("milestone")
