@@ -1762,6 +1762,33 @@ class TestNarrowedExceptionHandling:
         with pytest.raises(TypeError, match="bad type"):
             await unsticker._re_rebase_remaining(items)
 
+    def test_detect_language_falls_back_on_module_not_found(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """ModuleNotFoundError (module absent in env) falls back to 'general'."""
+        unsticker, *_ = _make_unsticker(tmp_path)
+        monkeypatch.delitem(sys.modules, "polyglot_prep", raising=False)
+        # Prevent real import by making it raise ModuleNotFoundError
+        import builtins
+
+        real_import = builtins.__import__
+
+        def fake_import(name: str, *args: object, **kwargs: object) -> object:
+            if name == "polyglot_prep":
+                raise ModuleNotFoundError("No module named 'polyglot_prep'")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+        with caplog.at_level(logging.WARNING):
+            result = unsticker._detect_language(tmp_path)
+
+        assert result == "general"
+        assert "Falling back to 'general' language classification" in caplog.text
+
     def test_detect_language_propagates_type_error(
         self,
         tmp_path: Path,

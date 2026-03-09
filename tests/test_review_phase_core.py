@@ -2646,6 +2646,28 @@ class TestBaselinePolicyIntegration:
         assert "Baseline" in result.summary
 
     @pytest.mark.asyncio
+    async def test_baseline_policy_oserror_fails_closed(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """OSError during baseline policy check should also fail closed."""
+        from baseline_policy import BaselinePolicy
+
+        mock_policy = AsyncMock(spec=BaselinePolicy)
+        mock_policy.check_approval = AsyncMock(side_effect=OSError("connection reset"))
+
+        phase = make_review_phase(
+            config, default_mocks=True, baseline_policy=mock_policy
+        )
+        pr = PRInfoFactory.create()
+        task = TaskFactory.create()
+
+        result = await phase._check_baseline_policy(pr, task)
+
+        assert result is not None
+        assert result.approved is False
+        assert result.requires_approval is True
+
+    @pytest.mark.asyncio
     async def test_baseline_policy_code_bug_propagates(
         self, config: HydraFlowConfig
     ) -> None:
@@ -2682,6 +2704,21 @@ class TestNarrowedExceptionHandling:
         phase._config.code_scanning_enabled = True
         phase._prs.fetch_code_scanning_alerts = AsyncMock(
             side_effect=RuntimeError("gh CLI failed")
+        )
+        pr = PRInfoFactory.create()
+
+        result = await phase._fetch_code_scanning_alerts(pr)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_fetch_code_scanning_alerts_catches_oserror(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """OSError (e.g., network failure) is caught gracefully."""
+        phase = make_review_phase(config, default_mocks=True)
+        phase._config.code_scanning_enabled = True
+        phase._prs.fetch_code_scanning_alerts = AsyncMock(
+            side_effect=OSError("network unreachable")
         )
         pr = PRInfoFactory.create()
 

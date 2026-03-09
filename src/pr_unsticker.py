@@ -657,7 +657,7 @@ diff — you may catch things `make quality` won't.
             from polyglot_prep import detect_prep_stack
 
             return detect_prep_stack(wt_path)
-        except (RuntimeError, OSError) as exc:
+        except (RuntimeError, OSError, ImportError) as exc:
             logger.warning(
                 "Falling back to 'general' language classification for %s: %s",
                 wt_path,
@@ -703,7 +703,7 @@ diff — you may catch things `make quality` won't.
                     pattern.pattern_name,
                     issue_number,
                 )
-        except (RuntimeError, OSError) as exc:
+        except (RuntimeError, OSError, ImportError) as exc:
             logger.warning(
                 "Failed to persist troubleshooting pattern for issue #%d: %s",
                 issue_number,
