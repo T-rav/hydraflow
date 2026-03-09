@@ -330,17 +330,20 @@ def make_streaming_proc(
 
 def instant_sleep_factory(
     stop_event: asyncio.Event,
+    *,
+    max_cycles: int = 3,
 ) -> Callable[[int | float], Coroutine[Any, Any, None]]:
-    """Return a sleep function that stops the loop after 2 sleep cycles.
+    """Return a sleep function that stops the loop after *max_cycles* sleep calls.
 
     Used by background worker loop tests to prevent infinite loops.
+    Default of 3 allows 2 full work cycles (sleep → work → sleep → work → sleep → stop).
     """
     call_count = 0
 
     async def sleep(_seconds: int | float) -> None:
         nonlocal call_count
         call_count += 1
-        if call_count >= 2:
+        if call_count >= max_cycles:
             stop_event.set()
         await asyncio.sleep(0)
 

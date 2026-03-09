@@ -58,6 +58,7 @@ def _make_stub(
     signal_types: frozenset[EventType] | None = None,
     min_cooldown: int = 30,
     bus: EventBus | None = None,
+    sleep_fn: Any = None,
 ) -> tuple[_StubLoop, asyncio.Event]:
     """Build a _StubLoop with test-friendly defaults."""
     config = ConfigFactory.create(repo_root=tmp_path / "repo")
@@ -65,14 +66,17 @@ def _make_stub(
         bus = EventBus()
     stop_event = asyncio.Event()
 
-    call_count = 0
+    if sleep_fn is None:
+        call_count = 0
 
-    async def instant_sleep(_seconds: int | float) -> None:
-        nonlocal call_count
-        call_count += 1
-        if call_count >= 2:
-            stop_event.set()
-        await asyncio.sleep(0)
+        async def instant_sleep(_seconds: int | float) -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 3:
+                stop_event.set()
+            await asyncio.sleep(0)
+
+        sleep_fn = instant_sleep
 
     loop = _StubLoop(
         work_fn=work_fn,
@@ -84,7 +88,7 @@ def _make_stub(
         stop_event=stop_event,
         status_cb=MagicMock(),
         enabled_cb=lambda _name: enabled,
-        sleep_fn=instant_sleep,
+        sleep_fn=sleep_fn,
         interval_cb=interval_cb,
         run_on_startup=run_on_startup,
         min_cooldown=min_cooldown,
@@ -323,7 +327,7 @@ class TestTriggerAndCooldown:
         self, tmp_path: Path
     ) -> None:
         """When triggered, _interruptible_sleep returns True early."""
-        loop, _ = _make_stub(tmp_path)
+        loop, _ = _make_stub(tmp_path, sleep_fn=asyncio.sleep)
 
         async def trigger_soon() -> None:
             await asyncio.sleep(0.01)
@@ -354,6 +358,7 @@ class TestSignalListenerIntegration:
             min_cooldown=0,
             default_interval=3600,  # very long timer
             bus=bus,
+            sleep_fn=asyncio.sleep,
         )
 
         async def publish_and_stop() -> None:
@@ -364,7 +369,6 @@ class TestSignalListenerIntegration:
             # Give the loop time to react, then stop
             await asyncio.sleep(0.1)
             stop.set()
-            loop._trigger()  # Wake from any remaining sleep
 
         asyncio.create_task(publish_and_stop())
         await asyncio.wait_for(loop.run(), timeout=5.0)
@@ -390,6 +394,7 @@ class TestSignalListenerIntegration:
             min_cooldown=0,
             default_interval=3600,
             bus=bus,
+            sleep_fn=asyncio.sleep,
         )
 
         async def publish_wrong_and_stop() -> None:
@@ -400,7 +405,6 @@ class TestSignalListenerIntegration:
             )
             await asyncio.sleep(0.1)
             stop.set()
-            loop._trigger()  # Wake from sleep to allow exit
 
         asyncio.create_task(publish_wrong_and_stop())
         await asyncio.wait_for(loop.run(), timeout=5.0)

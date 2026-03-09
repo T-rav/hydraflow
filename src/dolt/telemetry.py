@@ -1,57 +1,12 @@
-"""Repositories for inference tracking and model pricing."""
+"""Repository for model pricing."""
 
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from dolt.connection import DoltConnection
-
-
-class InferenceRepository:
-    """Append/load the ``inferences`` table; stats via ``inference_stats``."""
-
-    def __init__(self, db: DoltConnection) -> None:
-        self.db = db
-
-    def append(self, inference: dict) -> None:
-        """Insert a new inference record."""
-        self.db.execute(
-            "INSERT INTO inferences (data_json) VALUES (%s)",
-            (json.dumps(inference),),
-        )
-
-    def load(self, limit: int = 100) -> list[dict[str, Any]]:
-        """Return recent inference records."""
-        rows = self.db.fetchall(
-            "SELECT id, data_json, timestamp "
-            "FROM inferences ORDER BY id DESC LIMIT %s",
-            (limit,),
-        )
-        return [
-            {
-                "id": r[0],
-                "inference": json.loads(r[1]) if r[1] else {},
-                "created_at": r[2],
-            }
-            for r in rows
-        ]
-
-    def update_stats(self, stats: dict) -> None:
-        """Upsert aggregated inference statistics."""
-        self.db.execute(
-            "REPLACE INTO inference_stats (stat_key, data_json) VALUES (%s, %s)",
-            ("global", json.dumps(stats)),
-        )
-
-    def get_stats(self) -> dict | None:
-        """Return the current inference stats."""
-        row = self.db.fetchone(
-            "SELECT data_json FROM inference_stats WHERE stat_key = %s",
-            ("global",),
-        )
-        return json.loads(row[0]) if row else None
 
 
 class ModelPricingRepository:

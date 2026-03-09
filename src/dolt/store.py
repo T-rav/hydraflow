@@ -45,7 +45,7 @@ from dolt.pipeline import (
     ReleaseRepository,
     ReportRepository,
 )
-from dolt.telemetry import InferenceRepository, ModelPricingRepository
+from dolt.telemetry import ModelPricingRepository
 from dolt.troubleshooting import TroubleshootingPatternRepository
 from dolt.workers import WorkerRepository
 from models import LifetimeStats
@@ -111,7 +111,6 @@ class DoltStore:
         self._curated_manifest = CuratedManifestRepository(self.db)
 
         # Telemetry
-        self._inferences = InferenceRepository(self.db)
         self._model_pricing = ModelPricingRepository(self.db)
 
         # Pipeline

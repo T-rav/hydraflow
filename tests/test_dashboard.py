@@ -378,12 +378,9 @@ class TestEventsRoute:
         dashboard = HydraFlowDashboard(config, event_bus, state)
         app = dashboard.create_app()
 
-        async def publish() -> None:
-            await event_bus.publish(
-                EventFactory.create(type=EventType.PHASE_CHANGE, data={"phase": "plan"})
-            )
-
-        asyncio.run(publish())
+        event_bus._history.append(
+            EventFactory.create(type=EventType.PHASE_CHANGE, data={"phase": "plan"})
+        )
 
         client = TestClient(app)
         response = client.get("/api/events")
@@ -1249,17 +1246,14 @@ class TestWebSocketEndpoint:
 
         from dashboard import HydraFlowDashboard
 
-        async def publish_events() -> None:
-            await event_bus.publish(
-                EventFactory.create(type=EventType.PHASE_CHANGE, data={"phase": "plan"})
+        event_bus._history.append(
+            EventFactory.create(type=EventType.PHASE_CHANGE, data={"phase": "plan"})
+        )
+        event_bus._history.append(
+            EventFactory.create(
+                type=EventType.PHASE_CHANGE, data={"phase": "implement"}
             )
-            await event_bus.publish(
-                EventFactory.create(
-                    type=EventType.PHASE_CHANGE, data={"phase": "implement"}
-                )
-            )
-
-        asyncio.run(publish_events())
+        )
 
         dashboard = HydraFlowDashboard(config, event_bus, state)
         app = dashboard.create_app()
@@ -1283,15 +1277,12 @@ class TestWebSocketEndpoint:
 
         from dashboard import HydraFlowDashboard
 
-        async def publish() -> None:
-            await event_bus.publish(
-                EventFactory.create(
-                    type=EventType.WORKER_UPDATE,
-                    data={"issue": 42, "status": "running"},
-                )
+        event_bus._history.append(
+            EventFactory.create(
+                type=EventType.WORKER_UPDATE,
+                data={"issue": 42, "status": "running"},
             )
-
-        asyncio.run(publish())
+        )
 
         dashboard = HydraFlowDashboard(config, event_bus, state)
         app = dashboard.create_app()
@@ -1424,15 +1415,12 @@ class TestWebSocketEndpoint:
 
         from dashboard import HydraFlowDashboard
 
-        async def publish_events() -> None:
-            await event_bus.publish(
-                EventFactory.create(type=EventType.PHASE_CHANGE, data={"phase": "plan"})
-            )
-            await event_bus.publish(
-                EventFactory.create(type=EventType.PHASE_CHANGE, data={"phase": "plan"})
-            )
-
-        asyncio.run(publish_events())
+        event_bus._history.append(
+            EventFactory.create(type=EventType.PHASE_CHANGE, data={"phase": "plan"})
+        )
+        event_bus._history.append(
+            EventFactory.create(type=EventType.PHASE_CHANGE, data={"phase": "plan"})
+        )
 
         dashboard = HydraFlowDashboard(config, event_bus, state)
         app = dashboard.create_app()
@@ -1459,18 +1447,15 @@ class TestWebSocketEndpoint:
 
         from dashboard import HydraFlowDashboard
 
-        async def publish_events() -> None:
-            await event_bus.publish(
-                EventFactory.create(type=EventType.PHASE_CHANGE, data={"step": 1})
-            )
-            await event_bus.publish(
-                EventFactory.create(type=EventType.PHASE_CHANGE, data={"step": 2})
-            )
-            await event_bus.publish(
-                EventFactory.create(type=EventType.WORKER_UPDATE, data={"step": 3})
-            )
-
-        asyncio.run(publish_events())
+        event_bus._history.append(
+            EventFactory.create(type=EventType.PHASE_CHANGE, data={"step": 1})
+        )
+        event_bus._history.append(
+            EventFactory.create(type=EventType.PHASE_CHANGE, data={"step": 2})
+        )
+        event_bus._history.append(
+            EventFactory.create(type=EventType.WORKER_UPDATE, data={"step": 3})
+        )
 
         dashboard = HydraFlowDashboard(config, event_bus, state)
         app = dashboard.create_app()
@@ -2371,13 +2356,10 @@ class TestWebSocketErrorLogging:
 
         from dashboard import HydraFlowDashboard
 
-        # Publish an event so history is non-empty
-        async def publish() -> None:
-            await event_bus.publish(
-                EventFactory.create(type=EventType.PHASE_CHANGE, data={"batch": 1})
-            )
-
-        asyncio.run(publish())
+        # Add an event so history is non-empty
+        event_bus._history.append(
+            EventFactory.create(type=EventType.PHASE_CHANGE, data={"batch": 1})
+        )
 
         dashboard = HydraFlowDashboard(config, event_bus, state)
         app = dashboard.create_app()

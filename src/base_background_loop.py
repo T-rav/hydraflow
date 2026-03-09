@@ -225,15 +225,33 @@ class BaseBackgroundLoop(abc.ABC):
     async def _interruptible_sleep(self, seconds: float) -> bool:
         """Sleep for *seconds*, but return early if a signal triggers.
 
+        Uses ``_sleep_fn`` as the timer so tests can inject an instant
+        sleep that also controls the stop event.  Also wakes immediately
+        when the stop event or trigger event is set.
+
         Returns ``True`` if a signal woke us, ``False`` if the full
-        duration elapsed.
+        duration elapsed or the stop event was set.
         """
         self._trigger_event.clear()
+
+        stop_task = asyncio.create_task(self._stop_event.wait())
+        trigger_task = asyncio.create_task(self._trigger_event.wait())
+        sleep_task = asyncio.create_task(self._sleep_fn(seconds))
+
         try:
-            await asyncio.wait_for(self._trigger_event.wait(), timeout=seconds)
-            return True  # Woken by signal
-        except TimeoutError:
-            return False  # Full sleep elapsed
+            done, pending = await asyncio.wait(
+                {stop_task, trigger_task, sleep_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for t in pending:
+                t.cancel()
+
+            return trigger_task in done
+        except asyncio.CancelledError:
+            stop_task.cancel()
+            trigger_task.cancel()
+            sleep_task.cancel()
+            raise
 
     # ------------------------------------------------------------------
     # Main run loop
