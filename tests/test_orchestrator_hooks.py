@@ -32,15 +32,15 @@ from tests.conftest import IssueFactory, PRInfoFactory, TaskFactory, WorkerResul
 
 def _mock_fetcher_noop(orch: HydraFlowOrchestrator) -> None:
     """Mock store and fetcher methods so no real gh CLI calls are made."""
-    orch._store.get_triageable = lambda _max_count: []  # type: ignore[method-assign]
-    orch._store.get_plannable = lambda _max_count: []  # type: ignore[method-assign]
-    orch._store.get_reviewable = lambda _max_count: []  # type: ignore[method-assign]
-    orch._store.start = AsyncMock()  # type: ignore[method-assign]
-    orch._store.get_active_issues = lambda: {}  # type: ignore[method-assign]
-    orch._fetcher.fetch_issue_by_number = AsyncMock(return_value=None)  # type: ignore[method-assign]
-    orch._fetcher.fetch_reviewable_prs = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
+    orch._svc.store.get_triageable = lambda _max_count: []  # type: ignore[method-assign]
+    orch._svc.store.get_plannable = lambda _max_count: []  # type: ignore[method-assign]
+    orch._svc.store.get_reviewable = lambda _max_count: []  # type: ignore[method-assign]
+    orch._svc.store.start = AsyncMock()  # type: ignore[method-assign]
+    orch._svc.store.get_active_issues = lambda: {}  # type: ignore[method-assign]
+    orch._svc.fetcher.fetch_issue_by_number = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    orch._svc.fetcher.fetch_reviewable_prs = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
     orch._enable_rerere = AsyncMock()  # type: ignore[method-assign]
-    orch._worktrees.sanitize_repo = AsyncMock()  # type: ignore[method-assign]
+    orch._svc.worktrees.sanitize_repo = AsyncMock()  # type: ignore[method-assign]
 
 
 def make_worker_result(
@@ -167,7 +167,7 @@ class TestMemorySuggestionFiling:
             orch._stop_event.set()
             return [result], [TaskFactory.create(id=42)]
 
-        orch._implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
+        orch._svc.implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
 
         with patch(
             "phase_utils.file_memory_suggestion", new_callable=AsyncMock
@@ -191,7 +191,7 @@ class TestMemorySuggestionFiling:
             orch._stop_event.set()
             return [result], [TaskFactory.create(id=42)]
 
-        orch._implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
+        orch._svc.implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
 
         with patch(
             "phase_utils.file_memory_suggestion", new_callable=AsyncMock
@@ -217,7 +217,7 @@ class TestMemorySuggestionFiling:
                 TaskFactory.create(id=30),
             ]
 
-        orch._implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
+        orch._svc.implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
 
         with patch(
             "phase_utils.file_memory_suggestion", new_callable=AsyncMock
@@ -243,12 +243,12 @@ class TestMemorySuggestionFiling:
             pr_number=101, issue_number=42, transcript=MEMORY_TRANSCRIPT
         )
 
-        orch._store.get_active_issues = lambda: {42: "review"}  # type: ignore[method-assign]
-        orch._fetcher.fetch_reviewable_prs = AsyncMock(  # type: ignore[method-assign]
+        orch._svc.store.get_active_issues = lambda: {42: "review"}  # type: ignore[method-assign]
+        orch._svc.fetcher.fetch_reviewable_prs = AsyncMock(  # type: ignore[method-assign]
             return_value=([pr], [review_issue])
         )
-        orch._reviewer.review_prs = AsyncMock(return_value=[review_result])  # type: ignore[method-assign]
-        orch._prs.pull_main = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.reviewer.review_prs = AsyncMock(return_value=[review_result])  # type: ignore[method-assign]
+        orch._svc.prs.pull_main = AsyncMock()  # type: ignore[method-assign]
 
         call_count = 0
 
@@ -260,7 +260,7 @@ class TestMemorySuggestionFiling:
             orch._stop_event.set()
             return []
 
-        orch._store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
+        orch._svc.store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
 
         with patch(
             "phase_utils.file_memory_suggestion", new_callable=AsyncMock
@@ -285,12 +285,12 @@ class TestMemorySuggestionFiling:
             pr_number=101, issue_number=42, transcript=""
         )
 
-        orch._store.get_active_issues = lambda: {42: "review"}  # type: ignore[method-assign]
-        orch._fetcher.fetch_reviewable_prs = AsyncMock(  # type: ignore[method-assign]
+        orch._svc.store.get_active_issues = lambda: {42: "review"}  # type: ignore[method-assign]
+        orch._svc.fetcher.fetch_reviewable_prs = AsyncMock(  # type: ignore[method-assign]
             return_value=([pr], [review_issue])
         )
-        orch._reviewer.review_prs = AsyncMock(return_value=[review_result])  # type: ignore[method-assign]
-        orch._prs.pull_main = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.reviewer.review_prs = AsyncMock(return_value=[review_result])  # type: ignore[method-assign]
+        orch._svc.prs.pull_main = AsyncMock()  # type: ignore[method-assign]
 
         call_count = 0
 
@@ -302,7 +302,7 @@ class TestMemorySuggestionFiling:
             orch._stop_event.set()
             return []
 
-        orch._store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
+        orch._svc.store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
 
         with patch(
             "phase_utils.file_memory_suggestion", new_callable=AsyncMock
@@ -327,15 +327,17 @@ class TestMemorySuggestionFiling:
                 return [review_task]
             return []
 
-        orch._store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
-        orch._store.get_active_issues = lambda: {}  # type: ignore[method-assign]
-        orch._store.enqueue_transition = MagicMock()  # type: ignore[method-assign]
-        orch._fetcher.fetch_reviewable_prs = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
+        orch._svc.store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
+        orch._svc.store.get_active_issues = lambda: {}  # type: ignore[method-assign]
+        orch._svc.store.enqueue_transition = MagicMock()  # type: ignore[method-assign]
+        orch._svc.fetcher.fetch_reviewable_prs = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
 
         did_work = await orch._do_review_work()
 
         assert did_work is False
-        orch._store.enqueue_transition.assert_called_once_with(review_task, "review")
+        orch._svc.store.enqueue_transition.assert_called_once_with(
+            review_task, "review"
+        )
 
     @pytest.mark.asyncio
     async def test_do_review_work_processes_adr_without_pr(
@@ -361,15 +363,15 @@ class TestMemorySuggestionFiling:
                 return [adr_task]
             return []
 
-        orch._store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
-        orch._reviewer.review_adrs = AsyncMock(return_value=[])  # type: ignore[method-assign]
-        orch._fetcher.fetch_reviewable_prs = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
+        orch._svc.store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
+        orch._svc.reviewer.review_adrs = AsyncMock(return_value=[])  # type: ignore[method-assign]
+        orch._svc.fetcher.fetch_reviewable_prs = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
 
         did_work = await orch._do_review_work()
 
         assert did_work is True
-        orch._reviewer.review_adrs.assert_awaited_once_with([adr_task])
-        orch._fetcher.fetch_reviewable_prs.assert_not_awaited()
+        orch._svc.reviewer.review_adrs.assert_awaited_once_with([adr_task])
+        orch._svc.fetcher.fetch_reviewable_prs.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_do_review_work_keeps_work_true_when_adr_processed_and_no_prs(
@@ -396,17 +398,17 @@ class TestMemorySuggestionFiling:
                 return [adr_task, normal_review_task]
             return []
 
-        orch._store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
-        orch._store.get_active_issues = lambda: {}  # type: ignore[method-assign]
-        orch._store.enqueue_transition = MagicMock()  # type: ignore[method-assign]
-        orch._reviewer.review_adrs = AsyncMock(return_value=[])  # type: ignore[method-assign]
-        orch._fetcher.fetch_reviewable_prs = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
+        orch._svc.store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
+        orch._svc.store.get_active_issues = lambda: {}  # type: ignore[method-assign]
+        orch._svc.store.enqueue_transition = MagicMock()  # type: ignore[method-assign]
+        orch._svc.reviewer.review_adrs = AsyncMock(return_value=[])  # type: ignore[method-assign]
+        orch._svc.fetcher.fetch_reviewable_prs = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
 
         did_work = await orch._do_review_work()
 
         assert did_work is True
-        orch._reviewer.review_adrs.assert_awaited_once_with([adr_task])
-        orch._store.enqueue_transition.assert_called_once_with(
+        orch._svc.reviewer.review_adrs.assert_awaited_once_with([adr_task])
+        orch._svc.store.enqueue_transition.assert_called_once_with(
             normal_review_task, "review"
         )
 
@@ -427,7 +429,7 @@ class TestMemorySuggestionFiling:
         )
         r2 = make_review_result(pr_number=202, issue_number=20, transcript="")
 
-        orch._store.get_active_issues = lambda: {10: "review", 20: "review"}  # type: ignore[method-assign]
+        orch._svc.store.get_active_issues = lambda: {10: "review", 20: "review"}  # type: ignore[method-assign]
 
         # Per-issue PR fetch: each _review_single_issue calls with one issue
         async def _fetch_per_issue(
@@ -440,7 +442,7 @@ class TestMemorySuggestionFiling:
                 return [pr_b], [issue_b]
             return [], []
 
-        orch._fetcher.fetch_reviewable_prs = AsyncMock(side_effect=_fetch_per_issue)  # type: ignore[method-assign]
+        orch._svc.fetcher.fetch_reviewable_prs = AsyncMock(side_effect=_fetch_per_issue)  # type: ignore[method-assign]
 
         # Per-issue review: each call gets one PR
         async def _review_per_pr(
@@ -451,8 +453,8 @@ class TestMemorySuggestionFiling:
                 return [r1]
             return [r2]
 
-        orch._reviewer.review_prs = AsyncMock(side_effect=_review_per_pr)  # type: ignore[method-assign]
-        orch._prs.pull_main = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.reviewer.review_prs = AsyncMock(side_effect=_review_per_pr)  # type: ignore[method-assign]
+        orch._svc.prs.pull_main = AsyncMock()  # type: ignore[method-assign]
 
         call_count = 0
 
@@ -464,7 +466,7 @@ class TestMemorySuggestionFiling:
             orch._stop_event.set()
             return []
 
-        orch._store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
+        orch._svc.store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
 
         with patch(
             "phase_utils.file_memory_suggestion", new_callable=AsyncMock
@@ -492,7 +494,7 @@ class TestMemorySuggestionFiling:
                 TaskFactory.create(id=20),
             ]
 
-        orch._implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
+        orch._svc.implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
 
         with patch(
             "phase_utils.file_memory_suggestion",
@@ -515,12 +517,12 @@ class TestMemorySuggestionFiling:
             pr_number=201, issue_number=10, transcript=MEMORY_TRANSCRIPT
         )
 
-        orch._store.get_active_issues = lambda: {10: "review"}  # type: ignore[method-assign]
-        orch._fetcher.fetch_reviewable_prs = AsyncMock(  # type: ignore[method-assign]
+        orch._svc.store.get_active_issues = lambda: {10: "review"}  # type: ignore[method-assign]
+        orch._svc.fetcher.fetch_reviewable_prs = AsyncMock(  # type: ignore[method-assign]
             return_value=([pr_a], [issue_a])
         )
-        orch._reviewer.review_prs = AsyncMock(return_value=[r1])  # type: ignore[method-assign]
-        orch._prs.pull_main = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.reviewer.review_prs = AsyncMock(return_value=[r1])  # type: ignore[method-assign]
+        orch._svc.prs.pull_main = AsyncMock()  # type: ignore[method-assign]
 
         call_count = 0
 
@@ -532,7 +534,7 @@ class TestMemorySuggestionFiling:
             orch._stop_event.set()
             return []
 
-        orch._store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
+        orch._svc.store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
 
         with patch(
             "phase_utils.file_memory_suggestion",
@@ -565,8 +567,8 @@ class TestTranscriptSummaryFiling:
             orch._stop_event.set()
             return [result], [TaskFactory.create(id=42)]
 
-        orch._implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
-        orch._summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
+        orch._svc.summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
 
         with patch(
             "phase_utils.file_memory_suggestion",
@@ -574,8 +576,8 @@ class TestTranscriptSummaryFiling:
         ):
             await orch._implement_loop()
 
-        orch._summarizer.summarize_and_comment.assert_awaited_once()
-        call_kwargs = orch._summarizer.summarize_and_comment.call_args
+        orch._svc.summarizer.summarize_and_comment.assert_awaited_once()
+        call_kwargs = orch._svc.summarizer.summarize_and_comment.call_args
         assert call_kwargs.kwargs["transcript"] == SUMMARY_TRANSCRIPT
         assert call_kwargs.kwargs["issue_number"] == 42
         assert call_kwargs.kwargs["phase"] == "implement"
@@ -595,8 +597,8 @@ class TestTranscriptSummaryFiling:
             orch._stop_event.set()
             return [result], [TaskFactory.create(id=42)]
 
-        orch._implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
-        orch._summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
+        orch._svc.summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
 
         with patch(
             "phase_utils.file_memory_suggestion",
@@ -605,7 +607,7 @@ class TestTranscriptSummaryFiling:
             await orch._implement_loop()
 
         assert (
-            orch._summarizer.summarize_and_comment.call_args.kwargs["status"]
+            orch._svc.summarizer.summarize_and_comment.call_args.kwargs["status"]
             == "failed"
         )
 
@@ -621,8 +623,8 @@ class TestTranscriptSummaryFiling:
             orch._stop_event.set()
             return [result], [TaskFactory.create(id=42)]
 
-        orch._implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
-        orch._summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
+        orch._svc.summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
 
         with patch(
             "phase_utils.file_memory_suggestion",
@@ -630,7 +632,7 @@ class TestTranscriptSummaryFiling:
         ):
             await orch._implement_loop()
 
-        orch._summarizer.summarize_and_comment.assert_not_awaited()
+        orch._svc.summarizer.summarize_and_comment.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_review_loop_calls_summarize_and_comment_on_issue(
@@ -645,13 +647,13 @@ class TestTranscriptSummaryFiling:
             pr_number=101, issue_number=42, transcript=SUMMARY_TRANSCRIPT
         )
 
-        orch._store.get_active_issues = lambda: {42: "review"}  # type: ignore[method-assign]
-        orch._fetcher.fetch_reviewable_prs = AsyncMock(  # type: ignore[method-assign]
+        orch._svc.store.get_active_issues = lambda: {42: "review"}  # type: ignore[method-assign]
+        orch._svc.fetcher.fetch_reviewable_prs = AsyncMock(  # type: ignore[method-assign]
             return_value=([pr], [review_issue])
         )
-        orch._reviewer.review_prs = AsyncMock(return_value=[review_result])  # type: ignore[method-assign]
-        orch._prs.pull_main = AsyncMock()  # type: ignore[method-assign]
-        orch._summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.reviewer.review_prs = AsyncMock(return_value=[review_result])  # type: ignore[method-assign]
+        orch._svc.prs.pull_main = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
 
         call_count = 0
 
@@ -663,7 +665,7 @@ class TestTranscriptSummaryFiling:
             orch._stop_event.set()
             return []
 
-        orch._store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
+        orch._svc.store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
 
         with patch(
             "phase_utils.file_memory_suggestion",
@@ -671,8 +673,8 @@ class TestTranscriptSummaryFiling:
         ):
             await orch._review_loop()
 
-        orch._summarizer.summarize_and_comment.assert_awaited_once()
-        call_kwargs = orch._summarizer.summarize_and_comment.call_args
+        orch._svc.summarizer.summarize_and_comment.assert_awaited_once()
+        call_kwargs = orch._svc.summarizer.summarize_and_comment.call_args
         # Fix for #767: should use issue_number (42), not pr_number (101)
         assert call_kwargs.kwargs["issue_number"] == 42
         assert call_kwargs.kwargs["phase"] == "review"
@@ -697,13 +699,13 @@ class TestTranscriptSummaryFiling:
             summary="Looks good.",
         )
 
-        orch._store.get_active_issues = lambda: {42: "review"}  # type: ignore[method-assign]
-        orch._fetcher.fetch_reviewable_prs = AsyncMock(  # type: ignore[method-assign]
+        orch._svc.store.get_active_issues = lambda: {42: "review"}  # type: ignore[method-assign]
+        orch._svc.fetcher.fetch_reviewable_prs = AsyncMock(  # type: ignore[method-assign]
             return_value=([pr], [review_issue])
         )
-        orch._reviewer.review_prs = AsyncMock(return_value=[review_result])  # type: ignore[method-assign]
-        orch._prs.pull_main = AsyncMock()  # type: ignore[method-assign]
-        orch._summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.reviewer.review_prs = AsyncMock(return_value=[review_result])  # type: ignore[method-assign]
+        orch._svc.prs.pull_main = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
 
         call_count = 0
 
@@ -715,7 +717,7 @@ class TestTranscriptSummaryFiling:
             orch._stop_event.set()
             return []
 
-        orch._store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
+        orch._svc.store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
 
         with patch(
             "phase_utils.file_memory_suggestion",
@@ -724,7 +726,7 @@ class TestTranscriptSummaryFiling:
             await orch._review_loop()
 
         assert (
-            orch._summarizer.summarize_and_comment.call_args.kwargs["status"]
+            orch._svc.summarizer.summarize_and_comment.call_args.kwargs["status"]
             == "success"
         )
 
@@ -747,13 +749,13 @@ class TestTranscriptSummaryFiling:
             summary="CI failed.",
         )
 
-        orch._store.get_active_issues = lambda: {42: "review"}  # type: ignore[method-assign]
-        orch._fetcher.fetch_reviewable_prs = AsyncMock(  # type: ignore[method-assign]
+        orch._svc.store.get_active_issues = lambda: {42: "review"}  # type: ignore[method-assign]
+        orch._svc.fetcher.fetch_reviewable_prs = AsyncMock(  # type: ignore[method-assign]
             return_value=([pr], [review_issue])
         )
-        orch._reviewer.review_prs = AsyncMock(return_value=[review_result])  # type: ignore[method-assign]
-        orch._prs.pull_main = AsyncMock()  # type: ignore[method-assign]
-        orch._summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.reviewer.review_prs = AsyncMock(return_value=[review_result])  # type: ignore[method-assign]
+        orch._svc.prs.pull_main = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
 
         call_count = 0
 
@@ -765,7 +767,7 @@ class TestTranscriptSummaryFiling:
             orch._stop_event.set()
             return []
 
-        orch._store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
+        orch._svc.store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
 
         with patch(
             "phase_utils.file_memory_suggestion",
@@ -774,7 +776,7 @@ class TestTranscriptSummaryFiling:
             await orch._review_loop()
 
         assert (
-            orch._summarizer.summarize_and_comment.call_args.kwargs["status"]
+            orch._svc.summarizer.summarize_and_comment.call_args.kwargs["status"]
             == "failed"
         )
 
@@ -796,13 +798,13 @@ class TestTranscriptSummaryFiling:
             summary="Looks good.",
         )
 
-        orch._store.get_active_issues = lambda: {0: "review"}  # type: ignore[method-assign]
-        orch._fetcher.fetch_reviewable_prs = AsyncMock(  # type: ignore[method-assign]
+        orch._svc.store.get_active_issues = lambda: {0: "review"}  # type: ignore[method-assign]
+        orch._svc.fetcher.fetch_reviewable_prs = AsyncMock(  # type: ignore[method-assign]
             return_value=([pr], [review_issue])
         )
-        orch._reviewer.review_prs = AsyncMock(return_value=[review_result])  # type: ignore[method-assign]
-        orch._prs.pull_main = AsyncMock()  # type: ignore[method-assign]
-        orch._summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.reviewer.review_prs = AsyncMock(return_value=[review_result])  # type: ignore[method-assign]
+        orch._svc.prs.pull_main = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
 
         call_count = 0
 
@@ -814,7 +816,7 @@ class TestTranscriptSummaryFiling:
             orch._stop_event.set()
             return []
 
-        orch._store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
+        orch._svc.store.get_reviewable = get_reviewable_once  # type: ignore[method-assign]
 
         with patch(
             "phase_utils.file_memory_suggestion",
@@ -822,7 +824,7 @@ class TestTranscriptSummaryFiling:
         ):
             await orch._review_loop()
 
-        orch._summarizer.summarize_and_comment.assert_not_awaited()
+        orch._svc.summarizer.summarize_and_comment.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_transcript_summary_failure_does_not_block_pipeline(
@@ -840,8 +842,8 @@ class TestTranscriptSummaryFiling:
                 TaskFactory.create(id=20),
             ]
 
-        orch._implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
-        orch._summarizer.summarize_and_comment = AsyncMock(  # type: ignore[method-assign]
+        orch._svc.implementer.run_batch = batch_and_stop  # type: ignore[method-assign]
+        orch._svc.summarizer.summarize_and_comment = AsyncMock(  # type: ignore[method-assign]
             side_effect=[RuntimeError("transient"), None]
         )
 
@@ -853,7 +855,7 @@ class TestTranscriptSummaryFiling:
             await orch._implement_loop()
 
         # Both calls should have been attempted despite the first one failing
-        assert orch._summarizer.summarize_and_comment.await_count == 2
+        assert orch._svc.summarizer.summarize_and_comment.await_count == 2
 
 
 # ---------------------------------------------------------------------------
@@ -870,7 +872,7 @@ class TestPostRunHooks:
     ) -> None:
         """Happy path: both memory suggestion and summarize are called."""
         orch = HydraFlowOrchestrator(config)
-        orch._summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
 
         with patch(
             "phase_utils.file_memory_suggestion", new_callable=AsyncMock
@@ -886,7 +888,7 @@ class TestPostRunHooks:
                 log_file=".hydraflow/logs/issue-42.txt",
             )
             mock_mem.assert_awaited_once()
-        orch._summarizer.summarize_and_comment.assert_awaited_once()
+        orch._svc.summarizer.summarize_and_comment.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_memory_suggestion_failure_does_not_block_summarize(
@@ -894,7 +896,7 @@ class TestPostRunHooks:
     ) -> None:
         """Exception in memory suggestion must not prevent summarize."""
         orch = HydraFlowOrchestrator(config)
-        orch._summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
 
         with patch(
             "phase_utils.file_memory_suggestion",
@@ -911,7 +913,7 @@ class TestPostRunHooks:
                 duration_seconds=5.0,
                 log_file="log.txt",
             )
-        orch._summarizer.summarize_and_comment.assert_awaited_once()
+        orch._svc.summarizer.summarize_and_comment.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_summarize_failure_does_not_propagate(
@@ -919,7 +921,7 @@ class TestPostRunHooks:
     ) -> None:
         """Exception in summarize must not propagate to caller."""
         orch = HydraFlowOrchestrator(config)
-        orch._summarizer.summarize_and_comment = AsyncMock(  # type: ignore[method-assign]
+        orch._svc.summarizer.summarize_and_comment = AsyncMock(  # type: ignore[method-assign]
             side_effect=RuntimeError("summarize failed")
         )
 
@@ -942,7 +944,7 @@ class TestPostRunHooks:
     ) -> None:
         """When issue_number is 0 (review edge case), summarize is skipped."""
         orch = HydraFlowOrchestrator(config)
-        orch._summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
 
         with patch(
             "phase_utils.file_memory_suggestion", new_callable=AsyncMock
@@ -958,7 +960,7 @@ class TestPostRunHooks:
                 log_file="log.txt",
             )
             mock_mem.assert_awaited_once()
-        orch._summarizer.summarize_and_comment.assert_not_awaited()
+        orch._svc.summarizer.summarize_and_comment.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_passes_correct_args_to_memory_suggestion(
@@ -966,7 +968,7 @@ class TestPostRunHooks:
     ) -> None:
         """Verify argument forwarding to file_memory_suggestion."""
         orch = HydraFlowOrchestrator(config)
-        orch._summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
 
         with patch(
             "phase_utils.file_memory_suggestion", new_callable=AsyncMock
@@ -991,7 +993,7 @@ class TestPostRunHooks:
     ) -> None:
         """Verify argument forwarding to summarize_and_comment."""
         orch = HydraFlowOrchestrator(config)
-        orch._summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
+        orch._svc.summarizer.summarize_and_comment = AsyncMock()  # type: ignore[method-assign]
 
         with patch("phase_utils.file_memory_suggestion", new_callable=AsyncMock):
             await orch._post_run_hooks(
@@ -1004,7 +1006,7 @@ class TestPostRunHooks:
                 duration_seconds=3.5,
                 log_file="logs/issue-7.txt",
             )
-        orch._summarizer.summarize_and_comment.assert_awaited_once_with(
+        orch._svc.summarizer.summarize_and_comment.assert_awaited_once_with(
             transcript="tx",
             issue_number=7,
             phase="implement",
@@ -1146,7 +1148,7 @@ class TestRestoreState:
         orch._state.set_interrupted_issues({10: "implement", 20: "review"})
         # Pre-populate review and HITL sets so the discard calls are actually exercised
         orch._active_review_issues.update([10, 20])
-        orch._hitl_phase.active_hitl_issues.update([10, 20])
+        orch._svc.hitl_phase.active_hitl_issues.update([10, 20])
 
         orch._restore_state()
 
@@ -1157,8 +1159,8 @@ class TestRestoreState:
         assert 20 not in orch._active_impl_issues
         assert 10 not in orch._active_review_issues
         assert 20 not in orch._active_review_issues
-        assert 10 not in orch._hitl_phase.active_hitl_issues
-        assert 20 not in orch._hitl_phase.active_hitl_issues
+        assert 10 not in orch._svc.hitl_phase.active_hitl_issues
+        assert 20 not in orch._svc.hitl_phase.active_hitl_issues
 
 
 # ---------------------------------------------------------------------------

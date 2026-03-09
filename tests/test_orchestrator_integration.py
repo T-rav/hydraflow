@@ -75,7 +75,7 @@ async def _drive_loop(
 
 
 def _queue_depth(orch: HydraFlowOrchestrator, stage: str) -> int:
-    stats = orch._store.get_queue_stats()
+    stats = orch._svc.store.get_queue_stats()
     return stats.queue_depth.get(stage, 0)
 
 
@@ -100,7 +100,7 @@ async def test_full_pipeline_lifecycle(tmp_path) -> None:
             title="Pipeline happy path",
             tags=[config.find_label[0]],
         )
-        orch._store.enqueue_transition(issue, "find")
+        orch._svc.store.enqueue_transition(issue, "find")
 
         await _drive_loop(
             orch,
@@ -125,7 +125,7 @@ async def test_full_pipeline_lifecycle(tmp_path) -> None:
             lambda: _queue_depth(orch, "review") == 0,
         )
 
-        stats = orch._store.get_queue_stats()
+        stats = orch._svc.store.get_queue_stats()
         assert stats.queue_depth.get("find", 0) == 0
         assert stats.queue_depth.get("plan", 0) == 0
         assert stats.queue_depth.get("ready", 0) == 0
@@ -148,7 +148,7 @@ async def test_crash_recovery_releases_recovered_issue(tmp_path) -> None:
             title="Recovered issue",
             tags=[config.ready_label[0]],
         )
-        orch._store.enqueue_transition(issue, "ready")
+        orch._svc.store.enqueue_transition(issue, "ready")
 
         await orch._do_implement_work()
 
@@ -201,7 +201,7 @@ async def test_hitl_round_trip_moves_issue_back_to_plan(tmp_path) -> None:
             title="Needs HITL",
             tags=[config.find_label[0]],
         )
-        orch._store.enqueue_transition(issue, "find")
+        orch._svc.store.enqueue_transition(issue, "find")
 
         await _drive_loop(
             orch,
@@ -210,7 +210,7 @@ async def test_hitl_round_trip_moves_issue_back_to_plan(tmp_path) -> None:
         )
         assert _queue_depth(orch, "hitl") == 1
 
-        orch._hitl_phase.submit_correction(issue_id, "retry with guidance")
+        orch._svc.hitl_phase.submit_correction(issue_id, "retry with guidance")
 
         await _drive_loop(
             orch,
@@ -231,7 +231,7 @@ async def test_failed_implementation_discards_worktree(tmp_path) -> None:
             title="Implementation failure",
             tags=[config.ready_label[0]],
         )
-        orch._store.enqueue_transition(issue, "ready")
+        orch._svc.store.enqueue_transition(issue, "ready")
 
         await _drive_loop(
             orch,
@@ -239,7 +239,7 @@ async def test_failed_implementation_discards_worktree(tmp_path) -> None:
             lambda: _queue_depth(orch, "ready") == 0,
         )
 
-        worktrees = cast(FakeWorkspaceManager, orch._worktrees)
+        worktrees = cast(FakeWorkspaceManager, orch._svc.worktrees)
         assert issue_id in worktrees.cleaned
 
 
@@ -255,7 +255,7 @@ async def test_concurrent_loops_do_not_double_process_same_issue(tmp_path) -> No
             title="Concurrent isolation check",
             tags=[config.ready_label[0]],
         )
-        orch._store.enqueue_transition(issue, "ready")
+        orch._svc.store.enqueue_transition(issue, "ready")
 
         # Run two implement work calls concurrently in the same event loop.
         # ScriptedImplementPhase.run_batch has no await points, so the first
@@ -285,22 +285,22 @@ async def test_label_transition_atomicity(tmp_path) -> None:
         )
 
         def _total_queue_depth() -> int:
-            stats = orch._store.get_queue_stats()
+            stats = orch._svc.store.get_queue_stats()
             return sum(stats.queue_depth.values())
 
-        orch._store.enqueue_transition(issue, "find")
+        orch._svc.store.enqueue_transition(issue, "find")
         assert _total_queue_depth() == 1
 
-        orch._store.enqueue_transition(issue, "plan")
+        orch._svc.store.enqueue_transition(issue, "plan")
         assert _total_queue_depth() == 1
 
-        orch._store.enqueue_transition(issue, "ready")
+        orch._svc.store.enqueue_transition(issue, "ready")
         assert _total_queue_depth() == 1
 
-        orch._store.enqueue_transition(issue, "review")
+        orch._svc.store.enqueue_transition(issue, "review")
         assert _total_queue_depth() == 1
 
-        orch._store.enqueue_transition(issue, "hitl")
+        orch._svc.store.enqueue_transition(issue, "hitl")
         assert _total_queue_depth() == 1
 
 

@@ -766,7 +766,7 @@ class ReviewMockBuilder:
                 fixes_made=False,
             )
             mock_reviewers.review = AsyncMock(return_value=result)
-        self._orch._reviewers = mock_reviewers
+        self._orch._svc.reviewers = mock_reviewers
 
         # PR manager mock
         mock_prs = AsyncMock()
@@ -780,12 +780,12 @@ class ReviewMockBuilder:
         mock_prs.pull_main = AsyncMock()
         for name, mock in self._pr_methods.items():
             setattr(mock_prs, name, mock)
-        self._orch._prs = mock_prs
+        self._orch._svc.prs = mock_prs
 
         # Worktree mock
         mock_wt = AsyncMock()
         mock_wt.destroy = AsyncMock()
-        self._orch._worktrees = mock_wt
+        self._orch._svc.worktrees = mock_wt
 
         # Create worktree directory
         wt = self._config.worktree_base / f"issue-{self._issue_number}"

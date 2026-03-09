@@ -173,7 +173,7 @@ class TestOrchestratorStop:
     async def test_stop_persists_interrupted_issues(self, tmp_path: Path) -> None:
         """After stop(), state file contains the correct interrupted_issues."""
         orch = _make_orchestrator(tmp_path)
-        orch._store.get_active_issues.return_value = {42: "implement", 99: "review"}
+        orch._svc.store.get_active_issues.return_value = {42: "implement", 99: "review"}
 
         await orch.stop()
 
@@ -184,7 +184,7 @@ class TestOrchestratorStop:
     async def test_stop_mid_implement_checkpoints_phase(self, tmp_path: Path) -> None:
         """Issue in implement phase gets checkpointed as 'implement'."""
         orch = _make_orchestrator(tmp_path)
-        orch._store.get_active_issues.return_value = {42: "implement"}
+        orch._svc.store.get_active_issues.return_value = {42: "implement"}
 
         await orch.stop()
 
@@ -195,7 +195,7 @@ class TestOrchestratorStop:
     async def test_stop_mid_plan_checkpoints_phase(self, tmp_path: Path) -> None:
         """Issue in plan phase gets checkpointed as 'plan'."""
         orch = _make_orchestrator(tmp_path)
-        orch._store.get_active_issues.return_value = {42: "plan"}
+        orch._svc.store.get_active_issues.return_value = {42: "plan"}
 
         await orch.stop()
 
@@ -206,7 +206,7 @@ class TestOrchestratorStop:
     async def test_stop_mid_review_checkpoints_phase(self, tmp_path: Path) -> None:
         """Issue in review phase gets checkpointed as 'review'."""
         orch = _make_orchestrator(tmp_path)
-        orch._store.get_active_issues.return_value = {99: "review"}
+        orch._svc.store.get_active_issues.return_value = {99: "review"}
 
         await orch.stop()
 
@@ -217,7 +217,7 @@ class TestOrchestratorStop:
     async def test_stop_includes_in_memory_impl_issues(self, tmp_path: Path) -> None:
         """Issues tracked in _active_impl_issues but not in store are included."""
         orch = _make_orchestrator(tmp_path)
-        orch._store.get_active_issues.return_value = {}
+        orch._svc.store.get_active_issues.return_value = {}
         orch._active_impl_issues = {55}
 
         await orch.stop()
@@ -229,7 +229,7 @@ class TestOrchestratorStop:
     async def test_stop_includes_in_memory_review_issues(self, tmp_path: Path) -> None:
         """Issues tracked in _active_review_issues are included."""
         orch = _make_orchestrator(tmp_path)
-        orch._store.get_active_issues.return_value = {}
+        orch._svc.store.get_active_issues.return_value = {}
         orch._active_review_issues = {77}
 
         await orch.stop()
@@ -241,7 +241,7 @@ class TestOrchestratorStop:
     async def test_stop_empty_active_issues(self, tmp_path: Path) -> None:
         """When no issues are in-flight, interrupted_issues is empty."""
         orch = _make_orchestrator(tmp_path)
-        orch._store.get_active_issues.return_value = {}
+        orch._svc.store.get_active_issues.return_value = {}
 
         await orch.stop()
 
@@ -276,10 +276,10 @@ class TestOrchestratorStop:
 
         await orch.stop()
 
-        orch._planners.terminate.assert_called()
-        orch._agents.terminate.assert_called()
-        orch._reviewers.terminate.assert_called()
-        orch._hitl_runner.terminate.assert_called()
+        orch._svc.planners.terminate.assert_called()
+        orch._svc.agents.terminate.assert_called()
+        orch._svc.reviewers.terminate.assert_called()
+        orch._svc.hitl_runner.terminate.assert_called()
 
 
 # ---------------------------------------------------------------------------
@@ -358,7 +358,7 @@ class TestOrchestratorResume:
             await orch.run()
 
         assert 33 not in orch._active_impl_issues
-        assert 33 not in orch._hitl_phase.active_hitl_issues
+        assert 33 not in orch._svc.hitl_phase.active_hitl_issues
         assert orch._state.get_interrupted_issues() == {}
 
     @pytest.mark.asyncio
@@ -606,7 +606,7 @@ class TestBuildInterruptedIssues:
     async def test_combines_store_and_memory_tracking(self, tmp_path: Path) -> None:
         """Merges IssueStore active + in-memory tracking sets."""
         orch = _make_orchestrator(tmp_path)
-        orch._store.get_active_issues.return_value = {42: "implement"}
+        orch._svc.store.get_active_issues.return_value = {42: "implement"}
         orch._active_review_issues = {99}
 
         result = await orch._build_interrupted_issues()
@@ -617,7 +617,7 @@ class TestBuildInterruptedIssues:
     async def test_store_takes_precedence(self, tmp_path: Path) -> None:
         """If an issue is in both store and memory, store value is used."""
         orch = _make_orchestrator(tmp_path)
-        orch._store.get_active_issues.return_value = {42: "review"}
+        orch._svc.store.get_active_issues.return_value = {42: "review"}
         orch._active_impl_issues = {42}  # Also tracked here
 
         result = await orch._build_interrupted_issues()
@@ -629,8 +629,8 @@ class TestBuildInterruptedIssues:
     async def test_includes_hitl_issues(self, tmp_path: Path) -> None:
         """HITL issues are captured."""
         orch = _make_orchestrator(tmp_path)
-        orch._store.get_active_issues.return_value = {}
-        orch._hitl_phase.active_hitl_issues = {33}
+        orch._svc.store.get_active_issues.return_value = {}
+        orch._svc.hitl_phase.active_hitl_issues = {33}
 
         result = await orch._build_interrupted_issues()
 
@@ -640,7 +640,7 @@ class TestBuildInterruptedIssues:
     async def test_empty_when_no_active(self, tmp_path: Path) -> None:
         """Returns empty dict when nothing is active."""
         orch = _make_orchestrator(tmp_path)
-        orch._store.get_active_issues.return_value = {}
+        orch._svc.store.get_active_issues.return_value = {}
 
         assert await orch._build_interrupted_issues() == {}
 
