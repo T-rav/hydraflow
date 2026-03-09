@@ -1624,3 +1624,155 @@ TROUBLESHOOTING_PATTERN_END
 
         # Fix still succeeds even though reflection failed
         assert stats["resolved"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Narrowed exception handling — code bugs propagate
+# ---------------------------------------------------------------------------
+
+
+class TestNarrowedExceptionHandling:
+    """Verify that narrowed except clauses let code bugs propagate."""
+
+    @pytest.mark.asyncio
+    async def test_process_item_reraises_likely_bug(self, tmp_path: Path) -> None:
+        """TypeError/KeyError from _resolve_by_cause must propagate."""
+        issue = GitHubIssue(number=42, title="Fix bug", body="body", labels=[])
+        unsticker, state, prs, agents, wt, fetcher, bus, _, resolver = _make_unsticker(
+            tmp_path
+        )
+        state.set_hitl_cause(42, "ci_failure")
+        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+
+        # Make _resolve_by_cause raise a code bug
+        with (
+            patch.object(
+                unsticker,
+                "_resolve_by_cause",
+                AsyncMock(side_effect=TypeError("bad type")),
+            ),
+            pytest.raises(TypeError, match="bad type"),
+        ):
+            await unsticker._process_item(_make_hitl_item(42, pr=10, prUrl="u"))
+
+    @pytest.mark.asyncio
+    async def test_process_item_catches_runtime_error(self, tmp_path: Path) -> None:
+        """RuntimeError (subprocess) in _process_item should be caught gracefully."""
+        issue = GitHubIssue(number=42, title="Fix bug", body="body", labels=[])
+        unsticker, state, prs, agents, wt, fetcher, bus, _, resolver = _make_unsticker(
+            tmp_path
+        )
+        state.set_hitl_cause(42, "ci_failure")
+        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+
+        with patch.object(
+            unsticker,
+            "_resolve_by_cause",
+            AsyncMock(side_effect=RuntimeError("subprocess failed")),
+        ):
+            result = await unsticker._process_item(
+                _make_hitl_item(42, pr=10, prUrl="u")
+            )
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_resolve_ci_or_quality_reraises_likely_bug(
+        self, tmp_path: Path
+    ) -> None:
+        """AttributeError in CI fix agent must propagate."""
+        unsticker, state, prs, agents, wt, _fetcher, _bus, _hr, _resolver = (
+            _make_unsticker(tmp_path)
+        )
+        issue = GitHubIssue(number=42, title="Fix CI", body="body", labels=[])
+        state.set_hitl_cause(42, "ci_failure")
+
+        wt.start_merge_main = AsyncMock(return_value=True)
+        agents._build_command = MagicMock(return_value=["cmd"])
+        agents._execute = AsyncMock(side_effect=AttributeError("bad attr"))
+
+        with pytest.raises(AttributeError, match="bad attr"):
+            await unsticker._resolve_ci_or_quality(
+                42, issue, tmp_path / "wt", "branch", "url"
+            )
+
+    @pytest.mark.asyncio
+    async def test_resolve_ci_or_quality_catches_runtime_error(
+        self, tmp_path: Path
+    ) -> None:
+        """RuntimeError in CI fix agent should be caught gracefully."""
+        unsticker, state, prs, agents, wt, _fetcher, _bus, _hr, _resolver = (
+            _make_unsticker(tmp_path)
+        )
+        issue = GitHubIssue(number=42, title="Fix CI", body="body", labels=[])
+        state.set_hitl_cause(42, "ci_failure")
+
+        wt.start_merge_main = AsyncMock(return_value=True)
+        agents._build_command = MagicMock(return_value=["cmd"])
+        agents._execute = AsyncMock(side_effect=RuntimeError("agent crashed"))
+
+        result = await unsticker._resolve_ci_or_quality(
+            42, issue, tmp_path / "wt", "branch", "url"
+        )
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_re_rebase_catches_runtime_error(self, tmp_path: Path) -> None:
+        """RuntimeError during re-rebase should be caught gracefully."""
+        unsticker, state, prs, agents, wt, _fetcher, _bus, _hr, _resolver = (
+            _make_unsticker(tmp_path)
+        )
+        wt_dir = tmp_path / "worktrees" / "issue-42"
+        wt_dir.mkdir(parents=True)
+
+        wt.start_merge_main = AsyncMock(side_effect=RuntimeError("git failed"))
+
+        items = [_make_hitl_item(42, pr=10, prUrl="u")]
+        # Should not raise
+        await unsticker._re_rebase_remaining(items)
+
+    @pytest.mark.asyncio
+    async def test_re_rebase_propagates_type_error(self, tmp_path: Path) -> None:
+        """TypeError during re-rebase must propagate."""
+        unsticker, state, prs, agents, wt, _fetcher, _bus, _hr, _resolver = (
+            _make_unsticker(tmp_path)
+        )
+        wt_dir = tmp_path / "worktrees" / "issue-42"
+        wt_dir.mkdir(parents=True)
+
+        wt.start_merge_main = AsyncMock(side_effect=TypeError("bad type"))
+
+        items = [_make_hitl_item(42, pr=10, prUrl="u")]
+        with pytest.raises(TypeError, match="bad type"):
+            await unsticker._re_rebase_remaining(items)
+
+    def test_detect_language_propagates_type_error(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """TypeError in detect_language must propagate (not fallback to 'general')."""
+        unsticker, *_ = _make_unsticker(tmp_path)
+        failing_module = SimpleNamespace(
+            detect_prep_stack=MagicMock(side_effect=TypeError("bad"))
+        )
+        monkeypatch.setitem(sys.modules, "polyglot_prep", failing_module)
+
+        with pytest.raises(TypeError, match="bad"):
+            unsticker._detect_language(tmp_path)
+
+    def test_isolate_hanging_tests_catches_runtime_error(self, tmp_path: Path) -> None:
+        """RuntimeError in test isolation should produce a message, not raise."""
+        unsticker, *_ = _make_unsticker(tmp_path)
+        unsticker._agents = MagicMock()
+        unsticker._agents._runner.run_simple = AsyncMock(
+            side_effect=RuntimeError("command failed")
+        )
+
+        result = asyncio.get_event_loop().run_until_complete(
+            unsticker._isolate_hanging_tests(tmp_path)
+        )
+        assert "Test isolation failed" in result
+        assert "command failed" in result
