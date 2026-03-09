@@ -1527,3 +1527,73 @@ class TestNarrowedExceptionHandling:
         state_mock.record_hook_failure.assert_called_once()
         bus_mock.publish.assert_awaited_once()
         prs_mock.post_comment.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_safe_hook_bus_publish_failure_still_calls_post_comment(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """When bus.publish fails, post_comment must still be called (full chain)."""
+        state_mock = MagicMock()
+        bus_mock = AsyncMock()
+        bus_mock.publish = AsyncMock(side_effect=RuntimeError("bus unavailable"))
+        prs_mock = AsyncMock()
+        handler = PostMergeHandler(
+            config=config,
+            state=state_mock,
+            prs=prs_mock,
+            event_bus=bus_mock,
+            ac_generator=None,
+            retrospective=None,
+            verification_judge=None,
+            epic_checker=None,
+        )
+
+        async def _fail() -> str:
+            raise RuntimeError("hook failed")
+
+        result = await handler._safe_hook("test hook", _fail(), issue_number=1)
+        assert result is None
+        bus_mock.publish.assert_awaited_once()
+        prs_mock.post_comment.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_retrospective_runtime_error_is_swallowed(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """RuntimeError from retrospective.record must be caught in _run_post_merge_hooks."""
+        mock_retro = AsyncMock()
+        mock_retro.record = AsyncMock(side_effect=RuntimeError("db unavailable"))
+        handler = _make_handler(config, retrospective=mock_retro)
+        pr = PRInfoFactory.create()
+        issue = TaskFactory.create()
+        result = ReviewResultFactory.create()
+
+        handler._prs.merge_pr = AsyncMock(return_value=True)
+
+        # Should not raise — RuntimeError from retrospective is caught
+        await handler.handle_approved(
+            pr,
+            issue,
+            result,
+            "diff",
+            0,
+            ci_gate_fn=AsyncMock(return_value=True),
+            escalate_fn=AsyncMock(),
+            publish_fn=AsyncMock(),
+        )
+
+    @pytest.mark.asyncio
+    async def test_notify_epic_approval_catches_value_error(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """ValueError in epic approval notification should be caught."""
+        handler = _make_handler(config)
+        mock_epic_manager = AsyncMock()
+        mock_epic_manager.find_parent_epics = MagicMock(return_value=[100])
+        mock_epic_manager.on_child_approved = AsyncMock(
+            side_effect=ValueError("malformed response")
+        )
+        handler._epic_manager = mock_epic_manager
+
+        # Should not raise — ValueError is now caught
+        await handler._notify_epic_approval(42)
