@@ -1134,8 +1134,8 @@ def create_router(
         issue: GitHubIssue, *, cause: str, origin: str | None
     ) -> str:
         """Build a text context block for HITL summary generation."""
-        body = str(getattr(issue, "body", "") or "").strip()
-        comments = list(getattr(issue, "comments", []) or [])
+        body = issue.body.strip()
+        comments = issue.comments
         recent_comments = [str(c).strip() for c in comments[-5:] if str(c).strip()]
         comments_block = "\n".join(f"- {c[:400]}" for c in recent_comments)
         origin_text = origin or "unknown"
