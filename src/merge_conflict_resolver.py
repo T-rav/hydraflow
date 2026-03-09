@@ -11,6 +11,7 @@ from events import EventBus
 from models import (
     ConflictResolutionResult,
     EscalateFn,
+    HitlEscalation,
     PRInfo,
     PublishFn,
     Task,
@@ -91,18 +92,20 @@ class MergeConflictResolver:
         )
         await publish_fn(pr, worker_id, "escalating")
         await escalate_fn(
-            pr.issue_number,
-            pr.number,
-            cause="Merge conflict with main branch",
-            origin_label=self._config.review_label[0],
-            comment=(
-                f"**Merge conflicts** with "
-                f"`{self._config.main_branch}` could not be "
-                "resolved automatically. "
-                "Escalating to human review."
-            ),
-            event_cause="merge_conflict",
-            task=issue,
+            HitlEscalation(
+                issue_number=pr.issue_number,
+                pr_number=pr.number,
+                cause="Merge conflict with main branch",
+                origin_label=self._config.review_label[0],
+                comment=(
+                    f"**Merge conflicts** with "
+                    f"`{self._config.main_branch}` could not be "
+                    "resolved automatically. "
+                    "Escalating to human review."
+                ),
+                event_cause="merge_conflict",
+                task=issue,
+            )
         )
         return False
 

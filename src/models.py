@@ -648,6 +648,25 @@ class VisualEvidence(BaseModel):
     attempt: int = 1
 
 
+# --- HITL Escalation ---
+
+
+@dataclass
+class HitlEscalation:
+    """Groups parameters for a HITL escalation request."""
+
+    issue_number: int
+    pr_number: int | None
+    cause: str
+    origin_label: str
+    comment: str
+    post_on_pr: bool = True
+    event_cause: str = ""
+    extra_event_data: dict[str, object] | None = None
+    task: Task | None = None
+    visual_evidence: VisualEvidence | None = None
+
+
 # --- Reviews ---
 
 
@@ -2282,20 +2301,7 @@ class EscalateFn(Protocol):
     Matches ``ReviewPhase._escalate_to_hitl``.
     """
 
-    async def __call__(
-        self,
-        issue_number: int,
-        pr_number: int,
-        cause: str,
-        origin_label: str,
-        *,
-        comment: str,
-        post_on_pr: bool = ...,
-        event_cause: str = ...,
-        extra_event_data: dict[str, object] | None = ...,
-        task: Task | None = ...,
-        visual_evidence: VisualEvidence | None = ...,
-    ) -> None: ...
+    async def __call__(self, esc: HitlEscalation) -> None: ...
 
 
 class PublishFn(Protocol):

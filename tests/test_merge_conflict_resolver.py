@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from config import HydraFlowConfig
 
-from models import ConflictResolutionResult, LoopResult
+from models import ConflictResolutionResult, HitlEscalation, LoopResult
 from tests.conftest import PRInfoFactory, TaskFactory
 from tests.helpers import ConfigFactory, make_conflict_resolver
 
@@ -71,6 +71,11 @@ class TestMergeConflictResolver:
 
         assert result is False
         escalate_fn.assert_awaited_once()
+        esc = escalate_fn.await_args.args[0]
+        assert isinstance(esc, HitlEscalation)
+        assert esc.cause == "Merge conflict with main branch"
+        assert esc.pr_number == pr.number
+        assert esc.issue_number == pr.issue_number
 
     @pytest.mark.asyncio
     async def test_resolve_returns_false_when_no_agents(
