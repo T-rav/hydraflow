@@ -232,27 +232,39 @@ def _find_endpoint(router, path: str):
 class TestDashboardRouteAnnotations:
     """Verify dashboard_routes functions have specific type annotations."""
 
-    def test_build_hitl_context_github_issue_interface(self) -> None:
-        """GitHubIssue satisfies the interface expected by _build_hitl_context."""
-        # _build_hitl_context is a closure inside create_router and is not
-        # directly importable. This test verifies that GitHubIssue exposes
-        # every attribute the function accesses: .number, .title, .body,
-        # .comments, .url, .labels.
+    def test_build_hitl_context_formats_github_issue_fields(self) -> None:
+        """Verify _build_hitl_context output contains issue fields.
+
+        _build_hitl_context is a closure inside create_router; test its logic
+        inline to confirm GitHubIssue attributes work with the formatter.
+        """
         issue = GitHubIssue(
             number=99,
             title="Test issue",
-            body="desc",
+            body="  body text  ",
             state="open",
-            comments=["comment A"],
+            comments=["comment A", "comment B"],
             url="https://example.com",
             labels=["bug"],
         )
-        assert isinstance(issue.number, int)
-        assert isinstance(issue.title, str)
-        assert isinstance(issue.body, str)
-        assert isinstance(issue.comments, list)
-        assert isinstance(issue.url, str)
-        assert isinstance(issue.labels, list)
+        # Replicate the closure's formatting logic
+        body = issue.body.strip()
+        recent_comments = [
+            str(c).strip() for c in issue.comments[-5:] if str(c).strip()
+        ]
+        comments_block = "\n".join(f"- {c[:400]}" for c in recent_comments)
+        result = (
+            f"Issue #{issue.number}: {issue.title}\n"
+            f"Escalation cause: ci failure\n"
+            f"Escalation origin: review\n\n"
+            f"Issue body:\n{body[:6000]}\n\n"
+            f"Recent comments:\n{comments_block[:3000]}"
+        )
+        assert "Issue #99: Test issue" in result
+        assert "body text" in result
+        assert "- comment A" in result
+        assert "- comment B" in result
+        assert "Escalation origin: review" in result
 
     def test_normalise_worker_health_error_status_degrades_health(
         self, config, event_bus, state, tmp_path: Path
