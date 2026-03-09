@@ -1516,6 +1516,34 @@ class TestQueryIssuesByLabels:
         assert results[0]["number"] == 9
 
     @pytest.mark.asyncio
+    async def test_skips_label_on_attribute_error(self, event_bus, tmp_path):
+        """A non-list jq result (e.g. dict) causes AttributeError and is skipped."""
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+        )
+        mgr = _make_manager(cfg, event_bus)
+
+        call_idx = 0
+
+        async def mock_run_gh(*cmd, cwd=None):
+            nonlocal call_idx
+            call_idx += 1
+            if call_idx == 1:
+                # Dict instead of list — iterating yields string keys, .get() raises AttributeError
+                return '{"error": "api error"}'
+            return json.dumps([{"number": 9, "title": "OK"}])
+
+        mgr._run_gh = mock_run_gh
+
+        results = await mgr._query_issues_by_labels(
+            ["bad-response-label", "good-label"], "."
+        )
+        assert len(results) == 1
+        assert results[0]["number"] == 9
+
+    @pytest.mark.asyncio
     async def test_empty_labels_returns_empty(self, event_bus, tmp_path):
         """No labels means no API calls and empty results."""
         cfg = ConfigFactory.create(

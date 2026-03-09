@@ -1372,8 +1372,8 @@ class PRManager:
 
         prs: list[PRListItem] = []
         for p in raw_items:
-            pr_num = p["number"]
             try:
+                pr_num = p["number"]
                 branch, draft = await self._get_pr_branch_and_draft(pr_num)
                 issue_number = self._issue_number_from_branch(branch)
                 prs.append(
