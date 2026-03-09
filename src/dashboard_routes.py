@@ -48,6 +48,7 @@ from models import (
     CrateCreateRequest,
     CrateItemsRequest,
     CrateUpdateRequest,
+    GitHubIssue,
     HITLCloseRequest,
     HITLSkipRequest,
     IntentRequest,
@@ -495,7 +496,7 @@ def _extract_field_from_sources(
     """
     candidates: list[str] = []
 
-    def _push(value: Any) -> None:
+    def _push(value: str | int | float | bool | None) -> None:
         if isinstance(value, str):
             trimmed = value.strip()
             if trimmed:
@@ -1103,7 +1104,9 @@ def create_router(
 
         await asyncio.gather(*(_fetch_and_apply(num) for num in issue_numbers))
 
-    def _build_hitl_context(issue: Any, *, cause: str, origin: str | None) -> str:
+    def _build_hitl_context(
+        issue: GitHubIssue, *, cause: str, origin: str | None
+    ) -> str:
         """Build a text context block for HITL summary generation."""
         body = str(getattr(issue, "body", "") or "").strip()
         comments = list(getattr(issue, "comments", []) or [])
@@ -1202,7 +1205,9 @@ def create_router(
                     0,
                 )
 
-        def _normalise_worker_health(raw_status: Any) -> BGWorkerHealth:
+        def _normalise_worker_health(
+            raw_status: str | BGWorkerHealth | None,
+        ) -> BGWorkerHealth:
             """Coerce a raw status value to a BGWorkerHealth enum member."""
             if isinstance(raw_status, BGWorkerHealth):
                 return raw_status
