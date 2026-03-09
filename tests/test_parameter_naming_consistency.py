@@ -118,6 +118,7 @@ class TestNoIssueNumVariables:
             "orchestrator",
             "workspace_gc_loop",
             "timeline",
+            "dashboard_routes",
         ],
     )
     def test_no_issue_num_in_source(self, module_name: str):
