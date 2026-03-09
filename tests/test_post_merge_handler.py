@@ -227,9 +227,9 @@ class TestPostMergeHandler:
             publish_fn=publish_fn,
         )
 
-        kwargs = escalate_fn.await_args.kwargs
-        assert kwargs["cause"] == "PR merge failed on GitHub: merge conflict"
-        assert "merge conflicts" in kwargs["comment"]
+        esc = escalate_fn.await_args.args[0]
+        assert esc.cause == "PR merge failed on GitHub: merge conflict"
+        assert "merge conflicts" in esc.comment
 
     @pytest.mark.asyncio
     async def test_handle_approved_merge_failure_non_conflict_sets_blocked_cause(
@@ -257,10 +257,8 @@ class TestPostMergeHandler:
             publish_fn=publish_fn,
         )
 
-        kwargs = escalate_fn.await_args.kwargs
-        assert (
-            kwargs["cause"] == "PR merge failed on GitHub: merge blocked (non-conflict)"
-        )
+        esc = escalate_fn.await_args.args[0]
+        assert esc.cause == "PR merge failed on GitHub: merge blocked (non-conflict)"
 
     @pytest.mark.asyncio
     async def test_handle_approved_merge_conflict_attempts_auto_fix_and_retries_merge(
@@ -323,8 +321,8 @@ class TestPostMergeHandler:
         )
 
         merge_conflict_fix_fn.assert_awaited_once_with(pr, issue, 0)
-        kwargs = escalate_fn.await_args.kwargs
-        assert kwargs["cause"] == "PR merge failed on GitHub: merge conflict"
+        esc = escalate_fn.await_args.args[0]
+        assert esc.cause == "PR merge failed on GitHub: merge conflict"
 
     @pytest.mark.asyncio
     async def test_get_judge_result_none(self, config: HydraFlowConfig) -> None:
