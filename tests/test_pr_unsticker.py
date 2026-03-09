@@ -1818,3 +1818,21 @@ class TestNarrowedExceptionHandling:
         result = await unsticker._isolate_hanging_tests(tmp_path)
         assert "Test isolation failed" in result
         assert "command failed" in result
+
+    @pytest.mark.asyncio
+    async def test_resolve_ci_timeout_reraises_likely_bug(self, tmp_path: Path) -> None:
+        """TypeError/AttributeError from the CI timeout agent must propagate."""
+        unsticker, state, prs, agents, wt, _fetcher, _bus, _hr, _resolver = (
+            _make_unsticker(tmp_path)
+        )
+        issue = GitHubIssue(number=42, title="Fix timeout", body="body", labels=[])
+        state.set_hitl_cause(42, "ci_timeout")
+
+        wt.start_merge_main = AsyncMock(return_value=True)
+        agents._build_command = MagicMock(return_value=["cmd"])
+        agents._execute = AsyncMock(side_effect=AttributeError("bad attr"))
+
+        with pytest.raises(AttributeError, match="bad attr"):
+            await unsticker._resolve_ci_timeout(
+                42, issue, tmp_path / "wt", "branch", "url"
+            )
