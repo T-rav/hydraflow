@@ -1777,7 +1777,10 @@ class TestNarrowedExceptionHandling:
         with pytest.raises(TypeError, match="bad"):
             unsticker._detect_language(tmp_path)
 
-    def test_isolate_hanging_tests_catches_runtime_error(self, tmp_path: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_isolate_hanging_tests_catches_runtime_error(
+        self, tmp_path: Path
+    ) -> None:
         """RuntimeError in test isolation should produce a message, not raise."""
         unsticker, *_ = _make_unsticker(tmp_path)
         unsticker._agents = MagicMock()
@@ -1785,8 +1788,6 @@ class TestNarrowedExceptionHandling:
             side_effect=RuntimeError("command failed")
         )
 
-        result = asyncio.get_event_loop().run_until_complete(
-            unsticker._isolate_hanging_tests(tmp_path)
-        )
+        result = await unsticker._isolate_hanging_tests(tmp_path)
         assert "Test isolation failed" in result
         assert "command failed" in result
