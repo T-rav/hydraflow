@@ -590,6 +590,7 @@ def create_router(
         return config, state, event_bus, get_orchestrator
 
     def _pr_manager_for(cfg: HydraFlowConfig, bus: EventBus) -> PRManager:
+        """Return the shared PRManager when config matches; otherwise create a new one."""
         if cfg is config and bus is event_bus:
             return pr_manager
         return PRManager(cfg, bus)
@@ -1132,6 +1133,7 @@ def create_router(
     async def _compute_hitl_summary(
         issue_number: int, *, cause: str, origin: str | None
     ) -> str | None:
+        """Fetch issue, generate and normalise a HITL summary, then persist to state."""
         if (
             not config.transcript_summarization_enabled
             or config.dry_run
@@ -1160,6 +1162,7 @@ def create_router(
     async def _warm_hitl_summary(
         issue_number: int, *, cause: str, origin: str | None
     ) -> None:
+        """Schedule background HITL summary generation, guarded by inflight tracking."""
         if issue_number in hitl_summary_inflight:
             return
         hitl_summary_inflight.add(issue_number)
