@@ -2437,6 +2437,28 @@ class TestHandleSuccessfulPush:
         assert early is not None
         assert early.success is False
 
+    @pytest.mark.asyncio
+    async def test_returns_none_when_push_succeeds_but_agent_failed(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """When push succeeds but result.success=False, no PR actions fire and None is returned."""
+        issue = TaskFactory.create()
+        result = WorkerResultFactory.create(
+            issue_number=42,
+            success=False,
+            worktree_path=str(config.worktree_path_for_issue(42)),
+        )
+
+        phase, _, mock_prs = make_implement_phase(
+            config, [issue], create_pr_return=PRInfoFactory.create()
+        )
+
+        early = await phase._handle_successful_push(issue, result, is_retry=False)
+
+        assert early is None  # no early return — caller handles status marking
+        mock_prs.transition.assert_not_awaited()
+        mock_prs.create_pr.assert_awaited_once()  # PR is still resolved
+
 
 # ---------------------------------------------------------------------------
 # _handle_no_pr_fallback
