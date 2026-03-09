@@ -338,6 +338,8 @@ class PRUnsticker:
                 )
                 return False
 
+        except (TypeError, KeyError):
+            raise
         except Exception:
             logger.exception("PR Unsticker failed for issue #%d", issue_number)
             await self._release_back_to_hitl(
@@ -455,6 +457,8 @@ class PRUnsticker:
                 error_msg[:200] if error_msg else "",
             )
             return False
+        except (TypeError, KeyError, AttributeError):
+            raise
         except Exception as exc:
             logger.error(
                 "Unsticker CI fix agent failed for issue #%d: %s",
@@ -626,6 +630,8 @@ diff — you may catch things `make quality` won't.
                     issue_number,
                     error_msg[:200] if error_msg else "",
                 )
+            except (TypeError, KeyError, AttributeError):
+                raise
             except Exception as exc:
                 logger.error(
                     "Unsticker CI timeout agent failed for issue #%d (attempt %d): %s",
