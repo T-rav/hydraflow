@@ -976,6 +976,7 @@ class IssueOutcomeType(StrEnum):
     FAILED = "failed"
     MANUAL_CLOSE = "manual_close"
     VERIFY_PENDING = "verify_pending"
+    VERIFY_RESOLVED = "verify_resolved"
 
 
 class IssueOutcome(BaseModel):
@@ -1070,6 +1071,7 @@ class LifetimeStats(BaseModel):
     total_outcomes_manual_close: int = 0
     total_outcomes_hitl_approved: int = 0
     total_outcomes_verify_pending: int = 0
+    total_outcomes_verify_resolved: int = 0
     # Threshold proposals already filed (avoid re-filing)
     fired_thresholds: list[str] = Field(default_factory=list)
 

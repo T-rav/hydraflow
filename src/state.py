@@ -314,6 +314,15 @@ class StateTracker:
         """Return the verification issue number for *original_issue*, or *None*."""
         return self._data.verification_issues.get(str(original_issue))
 
+    def clear_verification_issue(self, original_issue: int) -> None:
+        """Remove the verification issue mapping for *original_issue*."""
+        self._data.verification_issues.pop(str(original_issue), None)
+        self.save()
+
+    def get_all_verification_issues(self) -> dict[int, int]:
+        """Return all pending verification issue mappings as {original: verify}."""
+        return {int(k): v for k, v in self._data.verification_issues.items()}
+
     # --- issue attempt tracking ---
 
     def get_issue_attempts(self, issue_number: int) -> int:
@@ -413,6 +422,7 @@ class StateTracker:
             IssueOutcomeType.MANUAL_CLOSE: "total_outcomes_manual_close",
             IssueOutcomeType.HITL_APPROVED: "total_outcomes_hitl_approved",
             IssueOutcomeType.VERIFY_PENDING: "total_outcomes_verify_pending",
+            IssueOutcomeType.VERIFY_RESOLVED: "total_outcomes_verify_resolved",
         }
 
         key = str(issue_number)

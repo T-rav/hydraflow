@@ -49,6 +49,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("report_issue_interval", "HYDRAFLOW_REPORT_ISSUE_INTERVAL", 30),
     ("epic_monitor_interval", "HYDRAFLOW_EPIC_MONITOR_INTERVAL", 1800),
     ("epic_sweep_interval", "HYDRAFLOW_EPIC_SWEEP_INTERVAL", 3600),
+    ("verify_monitor_interval", "HYDRAFLOW_VERIFY_MONITOR_INTERVAL", 3600),
     ("worktree_gc_interval", "HYDRAFLOW_WORKTREE_GC_INTERVAL", 1800),
     ("collaborator_cache_ttl", "HYDRAFLOW_COLLABORATOR_CACHE_TTL", 600),
     ("artifact_retention_days", "HYDRAFLOW_ARTIFACT_RETENTION_DAYS", 30),
@@ -447,6 +448,12 @@ class HydraFlowConfig(BaseModel):
         ge=600,
         le=86400,
         description="Epic sweeper loop interval in seconds (default 1 hour)",
+    )
+    verify_monitor_interval: int = Field(
+        default=3600,
+        ge=60,
+        le=86400,
+        description="Verify monitor loop interval in seconds (default 1 hour)",
     )
     worktree_gc_interval: int = Field(
         default=1800,
