@@ -1304,7 +1304,7 @@ class PRManager:
         jq_filter: str,
         *,
         error_context: str = "query_issues_by_labels",
-        error_level: str = "debug",
+        error_level: Literal["debug", "info", "warning", "error"] = "debug",
     ) -> list[dict[str, Any]]:
         """Fetch open issues/PRs for *labels*, deduplicated by ``number``.
 
@@ -1340,7 +1340,7 @@ class PRManager:
                         seen.add(num)
                         results.append(item)
             except (RuntimeError, json.JSONDecodeError, KeyError, TypeError):
-                getattr(logger, error_level)(
+                getattr(logger, error_level, logger.warning)(
                     "Failed in %s for label %s",
                     error_context,
                     label,
