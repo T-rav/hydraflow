@@ -14,7 +14,7 @@ from epic import (
     check_all_checkboxes,
     parse_epic_sub_issues,
 )
-from models import EpicState, GitHubIssue
+from models import EpicChildInfo, EpicState, GitHubIssue
 from tests.conftest import IssueFactory, make_state
 from tests.helpers import ConfigFactory
 
@@ -1369,3 +1369,187 @@ class TestNarrowedExceptionHandling:
         await manager._execute_release(100, "job-1")
         # Verify job was cleaned up
         assert 100 not in manager._release_jobs
+
+    @pytest.mark.asyncio
+    async def test_build_child_info_catches_runtime_error_on_fetch(
+        self, tmp_path: Path
+    ) -> None:
+        """RuntimeError from fetch_issue_by_number is caught; child_info still returned."""
+        manager, _, fetcher = _make_epic_manager(tmp_path)
+        fetcher.fetch_issue_by_number = AsyncMock(
+            side_effect=RuntimeError("fetch failed")
+        )
+        epic = EpicState(epic_number=100, child_issues=[1])
+        result = await manager._build_child_info(1, epic, "org/repo", "hydraflow-fixed")
+        # No exception — returns a partial EpicChildInfo
+        assert result.issue_number == 1
+
+    @pytest.mark.asyncio
+    async def test_build_child_info_propagates_type_error_on_fetch(
+        self, tmp_path: Path
+    ) -> None:
+        """TypeError from fetch_issue_by_number propagates."""
+        manager, _, fetcher = _make_epic_manager(tmp_path)
+        fetcher.fetch_issue_by_number = AsyncMock(side_effect=TypeError("bad type"))
+        epic = EpicState(epic_number=100, child_issues=[1])
+        with pytest.raises(TypeError, match="bad type"):
+            await manager._build_child_info(1, epic, "org/repo", "hydraflow-fixed")
+
+    @pytest.mark.asyncio
+    async def test_build_child_info_catches_runtime_error_on_pr_fetch(
+        self, tmp_path: Path
+    ) -> None:
+        """RuntimeError from find_open_pr_for_branch is caught."""
+        manager, prs, _ = _make_epic_manager(tmp_path)
+        manager._state.set_branch(1, "issue-1")
+        prs.find_open_pr_for_branch = AsyncMock(
+            side_effect=RuntimeError("pr fetch failed")
+        )
+        epic = EpicState(epic_number=100, child_issues=[1])
+        result = await manager._build_child_info(1, epic, "org/repo", "hydraflow-fixed")
+        assert result.issue_number == 1
+
+    @pytest.mark.asyncio
+    async def test_build_child_info_propagates_type_error_on_pr_fetch(
+        self, tmp_path: Path
+    ) -> None:
+        """TypeError from find_open_pr_for_branch propagates."""
+        manager, prs, _ = _make_epic_manager(tmp_path)
+        manager._state.set_branch(1, "issue-1")
+        prs.find_open_pr_for_branch = AsyncMock(side_effect=TypeError("bad"))
+        epic = EpicState(epic_number=100, child_issues=[1])
+        with pytest.raises(TypeError, match="bad"):
+            await manager._build_child_info(1, epic, "org/repo", "hydraflow-fixed")
+
+    @pytest.mark.asyncio
+    async def test_enrich_pr_status_catches_runtime_error_on_checks(
+        self, tmp_path: Path
+    ) -> None:
+        """RuntimeError from get_pr_checks is caught; child_info unchanged."""
+        manager, prs, _ = _make_epic_manager(tmp_path)
+        prs.get_pr_checks = AsyncMock(side_effect=RuntimeError("checks failed"))
+        child_info = EpicChildInfo(issue_number=1)
+        await manager._enrich_pr_status(child_info, 42)
+        # No exception; other fields may still be populated from remaining calls
+
+    @pytest.mark.asyncio
+    async def test_enrich_pr_status_propagates_type_error_on_checks(
+        self, tmp_path: Path
+    ) -> None:
+        """TypeError from get_pr_checks propagates."""
+        manager, prs, _ = _make_epic_manager(tmp_path)
+        prs.get_pr_checks = AsyncMock(side_effect=TypeError("bad"))
+        child_info = EpicChildInfo(issue_number=1)
+        with pytest.raises(TypeError, match="bad"):
+            await manager._enrich_pr_status(child_info, 42)
+
+    @pytest.mark.asyncio
+    async def test_enrich_pr_status_catches_runtime_error_on_reviews(
+        self, tmp_path: Path
+    ) -> None:
+        """RuntimeError from get_pr_reviews is caught."""
+        manager, prs, _ = _make_epic_manager(tmp_path)
+        prs.get_pr_checks = AsyncMock(return_value=[])
+        prs.get_pr_reviews = AsyncMock(side_effect=RuntimeError("reviews failed"))
+        child_info = EpicChildInfo(issue_number=1)
+        await manager._enrich_pr_status(child_info, 42)
+
+    @pytest.mark.asyncio
+    async def test_enrich_pr_status_catches_runtime_error_on_mergeable(
+        self, tmp_path: Path
+    ) -> None:
+        """RuntimeError from get_pr_mergeable is caught."""
+        manager, prs, _ = _make_epic_manager(tmp_path)
+        prs.get_pr_checks = AsyncMock(return_value=[])
+        prs.get_pr_reviews = AsyncMock(return_value=[])
+        prs.get_pr_mergeable = AsyncMock(side_effect=RuntimeError("mergeable failed"))
+        child_info = EpicChildInfo(issue_number=1)
+        await manager._enrich_pr_status(child_info, 42)
+
+    @pytest.mark.asyncio
+    async def test_refresh_cache_catches_runtime_error(self, tmp_path: Path) -> None:
+        """RuntimeError from _build_detail in refresh_cache is caught."""
+        manager, _, _ = _make_epic_manager(tmp_path)
+        manager._state.upsert_epic_state(EpicState(epic_number=100, child_issues=[1]))
+        manager._build_detail = AsyncMock(side_effect=RuntimeError("build failed"))
+        # Should not raise
+        await manager.refresh_cache()
+
+    @pytest.mark.asyncio
+    async def test_refresh_cache_propagates_type_error(self, tmp_path: Path) -> None:
+        """TypeError from _build_detail propagates."""
+        manager, _, _ = _make_epic_manager(tmp_path)
+        manager._state.upsert_epic_state(EpicState(epic_number=100, child_issues=[1]))
+        manager._build_detail = AsyncMock(side_effect=TypeError("bad type"))
+        with pytest.raises(TypeError, match="bad type"):
+            await manager.refresh_cache()
+
+    @pytest.mark.asyncio
+    async def test_check_stale_epics_catches_runtime_error(
+        self, tmp_path: Path
+    ) -> None:
+        """RuntimeError from post_comment in check_stale_epics is caught."""
+        manager, prs, _ = _make_epic_manager(tmp_path)
+        # Insert a stale epic (last_activity in the distant past)
+        manager._state.upsert_epic_state(
+            EpicState(
+                epic_number=100,
+                child_issues=[1],
+                last_activity="2000-01-01T00:00:00+00:00",
+            )
+        )
+        prs.post_comment = AsyncMock(side_effect=RuntimeError("post failed"))
+        # Should not raise; stale list still returned
+        stale = await manager.check_stale_epics()
+        assert 100 in stale
+
+    @pytest.mark.asyncio
+    async def test_check_stale_epics_propagates_type_error(
+        self, tmp_path: Path
+    ) -> None:
+        """TypeError from post_comment propagates."""
+        manager, prs, _ = _make_epic_manager(tmp_path)
+        manager._state.upsert_epic_state(
+            EpicState(
+                epic_number=100,
+                child_issues=[1],
+                last_activity="2000-01-01T00:00:00+00:00",
+            )
+        )
+        prs.post_comment = AsyncMock(side_effect=TypeError("bad arg"))
+        with pytest.raises(TypeError, match="bad arg"):
+            await manager.check_stale_epics()
+
+    @pytest.mark.asyncio
+    async def test_release_epic_merge_loop_catches_runtime_error(
+        self, tmp_path: Path
+    ) -> None:
+        """RuntimeError from find_pr_for_issue in release_epic merge loop is caught."""
+        manager, prs, _ = _make_epic_manager(tmp_path)
+        manager._state.upsert_epic_state(
+            EpicState(epic_number=100, child_issues=[1], approved_children=[1])
+        )
+        # Make get_progress return ready_to_merge=True
+        mock_progress = MagicMock()
+        mock_progress.ready_to_merge = True
+        manager.get_progress = MagicMock(return_value=mock_progress)
+        prs.find_pr_for_issue = AsyncMock(side_effect=RuntimeError("pr lookup failed"))
+        result = await manager.release_epic(100)
+        assert "error" in result
+        assert "exception" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_release_epic_merge_loop_propagates_type_error(
+        self, tmp_path: Path
+    ) -> None:
+        """TypeError from find_pr_for_issue propagates."""
+        manager, prs, _ = _make_epic_manager(tmp_path)
+        manager._state.upsert_epic_state(
+            EpicState(epic_number=100, child_issues=[1], approved_children=[1])
+        )
+        mock_progress = MagicMock()
+        mock_progress.ready_to_merge = True
+        manager.get_progress = MagicMock(return_value=mock_progress)
+        prs.find_pr_for_issue = AsyncMock(side_effect=TypeError("bad type"))
+        with pytest.raises(TypeError, match="bad type"):
+            await manager.release_epic(100)

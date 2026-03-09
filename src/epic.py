@@ -893,7 +893,9 @@ class EpicManager:
                     elif stage:
                         child_info.status = EpicChildStatus.QUEUED
         except RuntimeError:
-            logger.debug("Could not fetch child #%d for epic detail", child_num)
+            logger.debug(
+                "Could not fetch child #%d for epic detail", child_num, exc_info=True
+            )
 
         # Enrich with branch/PR data from state
         branch = self._state.get_branch(child_num)
@@ -918,6 +920,7 @@ class EpicManager:
                     "Could not fetch PR info for child #%d branch %s",
                     child_num,
                     branch,
+                    exc_info=True,
                 )
 
         return child_info
@@ -937,7 +940,9 @@ class EpicManager:
                 else:
                     child_info.ci_status = CIStatus.PENDING
         except RuntimeError:
-            logger.debug("Could not fetch CI checks for PR #%d", pr_number)
+            logger.debug(
+                "Could not fetch CI checks for PR #%d", pr_number, exc_info=True
+            )
 
         try:
             reviews = await self._prs.get_pr_reviews(pr_number)
@@ -950,12 +955,14 @@ class EpicManager:
                 else:
                     child_info.review_status = ReviewStatus.PENDING
         except RuntimeError:
-            logger.debug("Could not fetch reviews for PR #%d", pr_number)
+            logger.debug("Could not fetch reviews for PR #%d", pr_number, exc_info=True)
 
         try:
             child_info.mergeable = await self._prs.get_pr_mergeable(pr_number)
         except RuntimeError:
-            logger.debug("Could not fetch mergeable status for PR #%d", pr_number)
+            logger.debug(
+                "Could not fetch mergeable status for PR #%d", pr_number, exc_info=True
+            )
 
     def _compute_readiness(
         self, children: list[EpicChildInfo], epic: EpicState
