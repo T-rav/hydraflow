@@ -18,6 +18,7 @@ from models import (
     CiGateFn,
     EscalateFn,
     GitHubIssue,
+    HitlEscalation,
     PRInfo,
     PublishFn,
     ReviewResult,
@@ -42,23 +43,24 @@ class TestEscalateFnProtocol:
     async def test_async_mock_satisfies_protocol(self) -> None:
         """AsyncMock should work as EscalateFn with the expected args."""
         fn: EscalateFn = AsyncMock()
-        await fn(
-            1,
-            2,
+        esc = HitlEscalation(
+            issue_number=1,
+            pr_number=2,
             cause="test",
             origin_label="review",
             comment="test comment",
             event_cause="test_cause",
         )
+        await fn(esc)
         fn.assert_called_once()  # type: ignore[union-attr]
 
     @pytest.mark.asyncio
     async def test_async_mock_with_all_optional_args(self) -> None:
         """AsyncMock should accept all optional keyword args."""
         fn: EscalateFn = AsyncMock()
-        await fn(
-            1,
-            2,
+        esc = HitlEscalation(
+            issue_number=1,
+            pr_number=2,
             cause="test",
             origin_label="review",
             comment="test comment",
@@ -67,6 +69,7 @@ class TestEscalateFnProtocol:
             extra_event_data={"key": "value"},
             task=Task(id=1, title="foo"),
         )
+        await fn(esc)
         fn.assert_called_once()  # type: ignore[union-attr]
 
     def test_signature_matches_review_phase(self) -> None:
@@ -269,12 +272,14 @@ class TestMergeConflictResolverCallPatterns:
         escalate_fn: EscalateFn = AsyncMock()
         # Matches the call pattern at merge_conflict_resolver.py:85-97
         await escalate_fn(
-            42,  # issue_number
-            99,  # pr_number
-            cause="Merge conflict with main branch",
-            origin_label="hydraflow-review",
-            comment="Merge conflicts could not be resolved automatically.",
-            event_cause="merge_conflict",
+            HitlEscalation(
+                issue_number=42,
+                pr_number=99,
+                cause="Merge conflict with main branch",
+                origin_label="hydraflow-review",
+                comment="Merge conflicts could not be resolved automatically.",
+                event_cause="merge_conflict",
+            )
         )
         escalate_fn.assert_called_once()  # type: ignore[union-attr]
 
@@ -313,12 +318,14 @@ class TestPostMergeHandlerCallPatterns:
         escalate_fn: EscalateFn = AsyncMock()
         # Matches post_merge_handler.py:130-140
         await escalate_fn(
-            42,
-            99,
-            cause="PR merge failed on GitHub",
-            origin_label="hydraflow-review",
-            comment="Merge failed — PR could not be merged.",
-            event_cause="merge_failed",
+            HitlEscalation(
+                issue_number=42,
+                pr_number=99,
+                cause="PR merge failed on GitHub",
+                origin_label="hydraflow-review",
+                comment="Merge failed — PR could not be merged.",
+                event_cause="merge_failed",
+            )
         )
         escalate_fn.assert_called_once()  # type: ignore[union-attr]
 

@@ -20,6 +20,7 @@ from models import (
     CriterionVerdict,
     EscalateFn,
     GitHubIssue,
+    HitlEscalation,
     IssueOutcomeType,
     JudgeResult,
     JudgeVerdict,
@@ -298,13 +299,15 @@ class PostMergeHandler:
                 cause = "PR merge failed on GitHub: merge blocked (non-conflict)"
 
             await escalate_fn(
-                pr.issue_number,
-                pr.number,
-                cause=cause,
-                origin_label=self._config.review_label[0],
-                comment=comment,
-                event_cause="merge_failed",
-                task=issue,
+                HitlEscalation(
+                    issue_number=pr.issue_number,
+                    pr_number=pr.number,
+                    cause=cause,
+                    origin_label=self._config.review_label[0],
+                    comment=comment,
+                    event_cause="merge_failed",
+                    task=issue,
+                )
             )
 
     async def _post_inference_totals_comment(self, pr: PRInfo, issue: Task) -> None:

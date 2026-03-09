@@ -24,6 +24,7 @@ from merge_conflict_resolver import MergeConflictResolver
 from models import (
     BaselineApprovalResult,
     ConflictResolutionResult,
+    HitlEscalation,
     JudgeResult,
     PipelineStage,
     PRInfo,
@@ -248,19 +249,21 @@ class ReviewPhase:
 
         if reasons:
             await self._escalate_to_hitl(
-                issue.id,
-                None,
-                cause="ADR review failed validation",
-                origin_label=self._config.review_label[0],
-                comment=(
-                    "## ADR Review Failed\n\n"
-                    "The ADR draft is not ready for finalization.\n\n"
-                    "**Required fixes:**\n"
-                    + "\n".join(f"- {reason}" for reason in reasons)
-                ),
-                post_on_pr=False,
-                event_cause="adr_review_failed",
-                task=issue,
+                HitlEscalation(
+                    issue_number=issue.id,
+                    pr_number=None,
+                    cause="ADR review failed validation",
+                    origin_label=self._config.review_label[0],
+                    comment=(
+                        "## ADR Review Failed\n\n"
+                        "The ADR draft is not ready for finalization.\n\n"
+                        "**Required fixes:**\n"
+                        + "\n".join(f"- {reason}" for reason in reasons)
+                    ),
+                    post_on_pr=False,
+                    event_cause="adr_review_failed",
+                    task=issue,
+                )
             )
             return ReviewResult(
                 pr_number=0,
@@ -442,20 +445,22 @@ class ReviewPhase:
             and not baseline_result.approved
         ):
             await self._escalate_to_hitl(
-                pr.issue_number,
-                pr.number,
-                cause="Baseline changes require approval",
-                origin_label=self._config.review_label[0],
-                comment=(
-                    "## Baseline Policy Violation\n\n"
-                    "This PR modifies visual baseline files that require "
-                    "explicit approval from a designated owner before merging.\n\n"
-                    "**Changed baseline files:**\n"
-                    + "\n".join(f"- `{f}`" for f in baseline_result.changed_files)
-                    + "\n\nPlease request a review from an authorized baseline approver."
-                ),
-                event_cause="baseline_approval_required",
-                task=task,
+                HitlEscalation(
+                    issue_number=pr.issue_number,
+                    pr_number=pr.number,
+                    cause="Baseline changes require approval",
+                    origin_label=self._config.review_label[0],
+                    comment=(
+                        "## Baseline Policy Violation\n\n"
+                        "This PR modifies visual baseline files that require "
+                        "explicit approval from a designated owner before merging.\n\n"
+                        "**Changed baseline files:**\n"
+                        + "\n".join(f"- `{f}`" for f in baseline_result.changed_files)
+                        + "\n\nPlease request a review from an authorized baseline approver."
+                    ),
+                    event_cause="baseline_approval_required",
+                    task=task,
+                )
             )
             return ReviewResult(
                 pr_number=pr.number,
@@ -648,22 +653,24 @@ class ReviewPhase:
 
         await self._publish_review_status(pr, worker_id, "escalating")
         await self._escalate_to_hitl(
-            task.id,
-            pr.number,
-            cause=cause,
-            origin_label=self._config.review_label[0],
-            comment=(
-                f"**Visual validation failed** — escalating to human review.\n\n"
-                f"{summary_text}"
-            ),
-            event_cause="visual_validation_failed",
-            extra_event_data={
-                "visual_verdict": report.overall_verdict.value,
-                "visual_retries": report.total_retries,
-                "infra_failures": report.infra_failures,
-                "visual_diffs": report.visual_diffs,
-            },
-            task=task,
+            HitlEscalation(
+                issue_number=task.id,
+                pr_number=pr.number,
+                cause=cause,
+                origin_label=self._config.review_label[0],
+                comment=(
+                    f"**Visual validation failed** — escalating to human review.\n\n"
+                    f"{summary_text}"
+                ),
+                event_cause="visual_validation_failed",
+                extra_event_data={
+                    "visual_verdict": report.overall_verdict.value,
+                    "visual_retries": report.total_retries,
+                    "infra_failures": report.infra_failures,
+                    "visual_diffs": report.visual_diffs,
+                },
+                task=task,
+            )
         )
         result.verdict = ReviewVerdict.REQUEST_CHANGES
         result.summary = f"Visual validation failed: {cause}"
@@ -841,6 +848,59 @@ class ReviewPhase:
             log=logger,
         )
 
+    async def _run_single_review_fix(
+        self,
+        pr: PRInfo,
+        task: Task,
+        wt_path: Path,
+        result: ReviewResult,
+        attempt: int,
+        worker_id: int,
+        code_scanning_alerts: list[dict] | None = None,
+    ) -> tuple[ReviewResult, str] | None:
+        """Run one fix-then-re-review cycle.
+
+        Returns ``(re_result, updated_diff)`` on success, or ``None`` if
+        the fix agent made no changes.
+        """
+        await self._publish_review_status(pr, worker_id, "fixing_review")
+
+        fix_result = await self._reviewers.fix_review_findings(
+            pr,
+            task,
+            wt_path,
+            result.summary,
+            worker_id=worker_id,
+        )
+
+        if not fix_result.fixes_made:
+            logger.info(
+                "PR #%d: fix agent made no changes on attempt %d — giving up",
+                pr.number,
+                attempt,
+            )
+            return None
+
+        # Push the fixes
+        await self._prs.push_branch(wt_path, pr.branch)
+
+        # Re-review
+        await self._publish_review_status(pr, worker_id, "re_reviewing")
+        updated_diff = await self._prs.get_pr_diff(pr.number)
+        re_result = await self._reviewers.review(
+            pr,
+            task,
+            wt_path,
+            updated_diff,
+            worker_id=worker_id,
+            code_scanning_alerts=code_scanning_alerts,
+        )
+
+        if re_result.fixes_made:
+            await self._prs.push_branch(wt_path, pr.branch)
+
+        return re_result, updated_diff
+
     async def _attempt_review_fix(
         self,
         pr: PRInfo,
@@ -867,50 +927,16 @@ class ReviewPhase:
                 max_fix_attempts,
             )
 
-            async def _single_fix_attempt(
-                _result: ReviewResult = result,
-                _attempt: int = attempt,
-            ) -> tuple[ReviewResult, str] | None:
-                await self._publish_review_status(pr, worker_id, "fixing_review")
-
-                fix_result = await self._reviewers.fix_review_findings(
-                    pr,
-                    task,
-                    wt_path,
-                    _result.summary,
-                    worker_id=worker_id,
-                )
-
-                if not fix_result.fixes_made:
-                    logger.info(
-                        "PR #%d: fix agent made no changes on attempt %d — giving up",
-                        pr.number,
-                        _attempt,
-                    )
-                    return None
-
-                # Push the fixes
-                await self._prs.push_branch(wt_path, pr.branch)
-
-                # Re-review
-                await self._publish_review_status(pr, worker_id, "re_reviewing")
-                updated_diff = await self._prs.get_pr_diff(pr.number)
-                re_result = await self._reviewers.review(
-                    pr,
-                    task,
-                    wt_path,
-                    updated_diff,
-                    worker_id=worker_id,
-                    code_scanning_alerts=code_scanning_alerts,
-                )
-
-                if re_result.fixes_made:
-                    await self._prs.push_branch(wt_path, pr.branch)
-
-                return re_result, updated_diff
-
             attempt_outcome = await run_with_fatal_guard(
-                _single_fix_attempt(),
+                self._run_single_review_fix(
+                    pr,
+                    task,
+                    wt_path,
+                    result,
+                    attempt,
+                    worker_id,
+                    code_scanning_alerts=code_scanning_alerts,
+                ),
                 on_failure=lambda _: None,
                 context=f"PR #{pr.number}: review fix attempt {attempt} failed — falling back to rejection",
                 log=logger,
@@ -1086,6 +1112,28 @@ class ReviewPhase:
         runtime = round(time.monotonic() - start, 3)
 
         # Emit gate telemetry
+        await self._emit_visual_gate_telemetry(
+            pr, issue, worker_id, verdict, reason, runtime, artifacts
+        )
+
+        if verdict == "pass":
+            await self._handle_visual_gate_pass(pr, result, verdict, runtime, artifacts)
+            return True
+
+        await self._handle_visual_gate_failure(pr, issue, result, verdict, reason)
+        return False
+
+    async def _emit_visual_gate_telemetry(
+        self,
+        pr: PRInfo,
+        issue: Task,
+        worker_id: int,
+        verdict: str,
+        reason: str,
+        runtime: float,
+        artifacts: dict[str, str],
+    ) -> None:
+        """Emit a VISUAL_GATE event with pipeline results."""
         if self._bus:
             await self._bus.publish(
                 HydraFlowEvent(
@@ -1104,29 +1152,43 @@ class ReviewPhase:
                 )
             )
 
-        if verdict == "pass":
-            result.visual_passed = True
-            # Post sign-off comment with evidence links
-            sign_off = (
-                f"**Visual Gate: PASSED**\n\n"
-                f"Visual validation completed successfully.\n"
-                f"Verdict: `{verdict}` | Runtime: {runtime}s"
+    async def _handle_visual_gate_pass(
+        self,
+        pr: PRInfo,
+        result: ReviewResult,
+        verdict: str,
+        runtime: float,
+        artifacts: dict[str, str],
+    ) -> None:
+        """Post sign-off comment and mark visual gate as passed."""
+        result.visual_passed = True
+        sign_off = (
+            f"**Visual Gate: PASSED**\n\n"
+            f"Visual validation completed successfully.\n"
+            f"Verdict: `{verdict}` | Runtime: {runtime}s"
+        )
+        if artifacts:
+            sign_off += "\n\n**Artifacts:**\n"
+            for name, link in artifacts.items():
+                sign_off += f"- [{name}]({link})\n"
+        try:
+            await self._prs.post_pr_comment(pr.number, sign_off)
+        except (RuntimeError, OSError):
+            logger.warning(
+                "PR #%d: could not post visual gate sign-off comment",
+                pr.number,
+                exc_info=True,
             )
-            if artifacts:
-                sign_off += "\n\n**Artifacts:**\n"
-                for name, link in artifacts.items():
-                    sign_off += f"- [{name}]({link})\n"
-            try:
-                await self._prs.post_pr_comment(pr.number, sign_off)
-            except (RuntimeError, OSError):
-                logger.warning(
-                    "PR #%d: could not post visual gate sign-off comment",
-                    pr.number,
-                    exc_info=True,
-                )
-            return True
 
-        # Warn/fail blocks merge and escalates to HITL
+    async def _handle_visual_gate_failure(
+        self,
+        pr: PRInfo,
+        issue: Task,
+        result: ReviewResult,
+        verdict: str,
+        reason: str,
+    ) -> None:
+        """Post block comment, escalate to HITL, and mark visual gate as failed."""
         result.visual_passed = False
         logger.warning(
             "PR #%d: visual gate BLOCKED (verdict=%s) — blocking merge",
@@ -1147,15 +1209,16 @@ class ReviewPhase:
                 exc_info=True,
             )
         await self._escalate_to_hitl(
-            pr.issue_number,
-            pr.number,
-            cause=f"Visual gate {verdict}",
-            origin_label=self._config.review_label[0],
-            comment=f"Visual gate verdict: {verdict} — {reason}",
-            event_cause="visual_gate_failed",
-            task=issue,
+            HitlEscalation(
+                issue_number=pr.issue_number,
+                pr_number=pr.number,
+                cause=f"Visual gate {verdict}",
+                origin_label=self._config.review_label[0],
+                comment=f"Visual gate verdict: {verdict} — {reason}",
+                event_cause="visual_gate_failed",
+                task=issue,
+            )
         )
-        return False
 
     async def _invoke_visual_pipeline(
         self,
@@ -1243,18 +1306,20 @@ class ReviewPhase:
         )
         cause = f"CI failed after {ci_fix_attempts} fix attempt(s): {logs[:200]}"
         await self._escalate_to_hitl(
-            issue.id,
-            pr.number,
-            cause=cause,
-            origin_label=self._config.review_label[0],
-            comment=(
-                f"**CI failed** after {ci_fix_attempts} fix attempt(s).\n\n"
-                f"Last failure: {logs}\n\n"
-                f"PR not merged — escalating to human review."
-            ),
-            event_cause="ci_failed",
-            extra_event_data={"ci_fix_attempts": ci_fix_attempts},
-            task=issue,
+            HitlEscalation(
+                issue_number=issue.id,
+                pr_number=pr.number,
+                cause=cause,
+                origin_label=self._config.review_label[0],
+                comment=(
+                    f"**CI failed** after {ci_fix_attempts} fix attempt(s).\n\n"
+                    f"Last failure: {logs}\n\n"
+                    f"PR not merged — escalating to human review."
+                ),
+                event_cause="ci_failed",
+                extra_event_data={"ci_fix_attempts": ci_fix_attempts},
+                task=issue,
+            )
         )
 
     async def wait_and_fix_ci(
@@ -1313,6 +1378,18 @@ class ReviewPhase:
             if not made_changes:
                 break
 
+        await self._handle_ci_exhaustion(pr, issue, result, summary, worker_id)
+        return False
+
+    async def _handle_ci_exhaustion(
+        self,
+        pr: PRInfo,
+        issue: Task,
+        result: ReviewResult,
+        summary: str,
+        worker_id: int,
+    ) -> None:
+        """Handle the case where all CI fix attempts are exhausted."""
         result.ci_passed = False
         if result.transcript:
             await self._suggest_memory(
@@ -1320,7 +1397,6 @@ class ReviewPhase:
             )
         await self._publish_review_status(pr, worker_id, "escalating")
         await self._escalate_ci_failure(pr, issue, summary, result.ci_fix_attempts)
-        return False
 
     async def _record_review_insight(self, result: ReviewResult) -> None:
         """Record a review result and file improvement proposals if patterns emerge.
@@ -1382,48 +1458,37 @@ class ReviewPhase:
         """Emit a REVIEW_UPDATE event with the given status."""
         await publish_review_status(self._bus, pr, worker_id, status)
 
-    async def _escalate_to_hitl(
-        self,
-        issue_number: int,
-        pr_number: int | None,
-        cause: str,
-        origin_label: str,
-        *,
-        comment: str,
-        post_on_pr: bool = True,
-        event_cause: str = "",
-        extra_event_data: dict[str, object] | None = None,
-        task: Task | None = None,
-        visual_evidence: VisualEvidence | None = None,
-    ) -> None:
+    async def _escalate_to_hitl(self, esc: HitlEscalation) -> None:
         """Record HITL escalation state, swap labels, post comment, publish event."""
-        self._state.set_hitl_origin(issue_number, origin_label)
-        self._state.set_hitl_cause(issue_number, cause)
+        self._state.set_hitl_origin(esc.issue_number, esc.origin_label)
+        self._state.set_hitl_cause(esc.issue_number, esc.cause)
         self._state.record_hitl_escalation()
-        if visual_evidence is not None:
-            self._state.set_hitl_visual_evidence(issue_number, visual_evidence)
+        if esc.visual_evidence is not None:
+            self._state.set_hitl_visual_evidence(esc.issue_number, esc.visual_evidence)
 
-        await self._transitioner.transition(issue_number, "hitl", pr_number=pr_number)
-        if task is not None:
-            self._store.enqueue_transition(task, "hitl")
+        await self._transitioner.transition(
+            esc.issue_number, "hitl", pr_number=esc.pr_number
+        )
+        if esc.task is not None:
+            self._store.enqueue_transition(esc.task, "hitl")
 
-        if post_on_pr and pr_number and pr_number > 0:
-            await self._prs.post_pr_comment(pr_number, comment)
+        if esc.post_on_pr and esc.pr_number and esc.pr_number > 0:
+            await self._prs.post_pr_comment(esc.pr_number, esc.comment)
         else:
-            await self._prs.post_comment(issue_number, comment)
+            await self._prs.post_comment(esc.issue_number, esc.comment)
 
         event_data: dict[str, object] = {
-            "issue": issue_number,
+            "issue": esc.issue_number,
             "status": "escalated",
             "role": "reviewer",
-            "cause": event_cause or cause,
+            "cause": esc.event_cause or esc.cause,
         }
-        if pr_number and pr_number > 0:
-            event_data["pr"] = pr_number
-        if visual_evidence is not None:
-            event_data["visual_evidence"] = visual_evidence.model_dump()
-        if extra_event_data:
-            event_data.update(extra_event_data)
+        if esc.pr_number and esc.pr_number > 0:
+            event_data["pr"] = esc.pr_number
+        if esc.visual_evidence is not None:
+            event_data["visual_evidence"] = esc.visual_evidence.model_dump()
+        if esc.extra_event_data:
+            event_data.update(esc.extra_event_data)
         await self._bus.publish(
             HydraFlowEvent(type=EventType.HITL_ESCALATION, data=event_data)
         )
@@ -1484,14 +1549,16 @@ class ReviewPhase:
         )
 
         await self._escalate_to_hitl(
-            issue_number,
-            pr_number,
-            cause=cause,
-            origin_label=self._config.review_label[0],
-            comment=comment,
-            event_cause="visual_validation_failed",
-            task=task,
-            visual_evidence=evidence,
+            HitlEscalation(
+                issue_number=issue_number,
+                pr_number=pr_number,
+                cause=cause,
+                origin_label=self._config.review_label[0],
+                comment=comment,
+                event_cause="visual_validation_failed",
+                task=task,
+                visual_evidence=evidence,
+            )
         )
 
     @staticmethod
@@ -1631,17 +1698,19 @@ class ReviewPhase:
             )
             await self._publish_review_status(pr, worker_id, "escalating")
             await self._escalate_to_hitl(
-                pr.issue_number,
-                pr.number,
-                cause=f"Review fix cap exceeded after {max_attempts} attempt(s)",
-                origin_label=self._config.review_label[0],
-                comment=(
-                    f"**Review fix cap exceeded** — {max_attempts} review fix "
-                    f"attempt(s) exhausted. Escalating to human review."
-                ),
-                post_on_pr=False,
-                event_cause="review_fix_cap_exceeded",
-                task=task,
+                HitlEscalation(
+                    issue_number=pr.issue_number,
+                    pr_number=pr.number,
+                    cause=f"Review fix cap exceeded after {max_attempts} attempt(s)",
+                    origin_label=self._config.review_label[0],
+                    comment=(
+                        f"**Review fix cap exceeded** — {max_attempts} review fix "
+                        f"attempt(s) exhausted. Escalating to human review."
+                    ),
+                    post_on_pr=False,
+                    event_cause="review_fix_cap_exceeded",
+                    task=task,
+                )
             )
             if result.transcript:
                 await self._suggest_memory(
