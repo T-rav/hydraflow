@@ -852,6 +852,39 @@ class TestDiffSanityLoop:
         assert result.success is False
         assert "Diff sanity" in (result.error or "")
 
+    @pytest.mark.asyncio
+    async def test_recovers_on_second_attempt(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """_run_diff_sanity_loop should recover if a later attempt returns OK."""
+        config.max_diff_sanity_attempts = 2
+        runner = AgentRunner(config, event_bus)
+        with (
+            patch.object(
+                runner, "_count_commits", new_callable=AsyncMock, return_value=1
+            ),
+            patch.object(
+                runner,
+                "_get_branch_diff",
+                new_callable=AsyncMock,
+                return_value="+import os\n",
+            ),
+            patch.object(
+                runner,
+                "_execute",
+                new_callable=AsyncMock,
+                side_effect=[
+                    "DIFF_SANITY_RESULT: RETRY\nSUMMARY: debug code",
+                    "DIFF_SANITY_RESULT: OK\nSUMMARY: No issues found",
+                ],
+            ),
+        ):
+            result = await runner._run_diff_sanity_loop(
+                agent_task, tmp_path, "branch", worker_id=0
+            )
+        assert result.passed is True
+        assert result.attempts == 2
+
 
 class TestTestAdequacyLoop:
     """Tests for the test adequacy check skill integration."""

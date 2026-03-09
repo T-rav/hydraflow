@@ -700,20 +700,20 @@ SUMMARY: <one-line summary>
         )
 
     @staticmethod
-    def _parse_skill_result(transcript: str, marker: str) -> tuple[bool, str]:
+    def _parse_skill_result(transcript: str, marker: str) -> LoopResult:
         """Parse a skill result marker line from transcript text.
 
-        Returns ``(ok, summary)``. Missing marker defaults to OK to preserve
+        Returns a :class:`LoopResult`. Missing marker defaults to OK to preserve
         backward compatibility with older prompts/tools.
         """
         pattern = rf"{re.escape(marker)}:\s*(OK|RETRY)"
         match = re.search(pattern, transcript, re.IGNORECASE)
         if not match:
-            return True, "No explicit result marker"
+            return LoopResult(passed=True, summary="No explicit result marker")
         status = match.group(1).upper()
         summary_match = re.search(r"SUMMARY:\s*(.+)", transcript, re.IGNORECASE)
         summary = summary_match.group(1).strip() if summary_match else ""
-        return status == "OK", summary
+        return LoopResult(passed=status == "OK", summary=summary)
 
     async def _run_pre_quality_review_loop(
         self,
@@ -744,7 +744,7 @@ SUMMARY: <one-line summary>
                 {"issue": issue.id, "source": "implementer"},
             )
             await self._force_commit_uncommitted(issue, worktree_path)
-            review_ok, review_summary = self._parse_skill_result(
+            review_result = self._parse_skill_result(
                 review_transcript, "PRE_QUALITY_REVIEW_RESULT"
             )
 
@@ -757,15 +757,15 @@ SUMMARY: <one-line summary>
                 {"issue": issue.id, "source": "implementer"},
             )
             await self._force_commit_uncommitted(issue, worktree_path)
-            run_tool_ok, run_tool_summary = self._parse_skill_result(
+            run_tool_result = self._parse_skill_result(
                 run_tool_transcript, "RUN_TOOL_RESULT"
             )
 
-            if review_ok and run_tool_ok:
+            if review_result.passed and run_tool_result.passed:
                 return LoopResult(passed=True, summary="OK", attempts=attempt)
 
             last_summary = "; ".join(
-                s for s in [review_summary, run_tool_summary] if s
+                s for s in [review_result.summary, run_tool_result.summary] if s
             ).strip()
             if attempt == max_attempts:
                 return LoopResult(
@@ -833,7 +833,7 @@ SUMMARY: <one-line summary>
         cmd = self._build_pre_quality_review_command()
         summary = ""
 
-        for _attempt in range(max_attempts):
+        for attempt in range(1, max_attempts + 1):
             transcript = await self._execute(
                 cmd,
                 prompt,
@@ -842,7 +842,7 @@ SUMMARY: <one-line summary>
             )
             passed, summary, findings = parse_diff_sanity_result(transcript)
             if passed:
-                return LoopResult(passed=True, summary=summary)
+                return LoopResult(passed=True, summary=summary, attempts=attempt)
             if findings:
                 logger.info(
                     "Diff sanity findings for #%d: %s",
@@ -850,7 +850,7 @@ SUMMARY: <one-line summary>
                     "; ".join(findings[:5]),
                 )
 
-        return LoopResult(passed=False, summary=summary)
+        return LoopResult(passed=False, summary=summary, attempts=max_attempts)
 
     async def _run_test_adequacy_loop(
         self,
@@ -888,7 +888,7 @@ SUMMARY: <one-line summary>
         cmd = self._build_pre_quality_review_command()
         summary = ""
 
-        for _attempt in range(max_attempts):
+        for attempt in range(1, max_attempts + 1):
             transcript = await self._execute(
                 cmd,
                 prompt,
@@ -897,7 +897,7 @@ SUMMARY: <one-line summary>
             )
             passed, summary, gaps = parse_test_adequacy_result(transcript)
             if passed:
-                return LoopResult(passed=True, summary=summary)
+                return LoopResult(passed=True, summary=summary, attempts=attempt)
             if gaps:
                 logger.info(
                     "Test adequacy gaps for #%d: %s",
@@ -905,7 +905,7 @@ SUMMARY: <one-line summary>
                     "; ".join(gaps[:5]),
                 )
 
-        return LoopResult(passed=False, summary=summary)
+        return LoopResult(passed=False, summary=summary, attempts=max_attempts)
 
     async def _run_quality_fix_loop(
         self,
