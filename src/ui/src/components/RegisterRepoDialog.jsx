@@ -184,6 +184,17 @@ export function RegisterRepoDialog({ isOpen, onClose }) {
   )
 }
 
+const _tabBase = {
+  flex: 1,
+  padding: '8px 12px',
+  border: 'none',
+  background: 'transparent',
+  fontSize: 12,
+  fontWeight: 600,
+  cursor: 'pointer',
+  transition: 'color 0.15s, border-color 0.15s',
+}
+
 const styles = {
   overlay: {
     position: 'fixed',
@@ -226,29 +237,8 @@ const styles = {
     marginBottom: 12,
     borderBottom: `1px solid ${theme.border}`,
   },
-  tab: {
-    flex: 1,
-    padding: '8px 12px',
-    border: 'none',
-    borderBottom: '2px solid transparent',
-    background: 'transparent',
-    color: theme.textMuted,
-    fontSize: 12,
-    fontWeight: 600,
-    cursor: 'pointer',
-    transition: 'color 0.15s, border-color 0.15s',
-  },
-  tabActive: {
-    flex: 1,
-    padding: '8px 12px',
-    border: 'none',
-    borderBottom: `2px solid ${theme.accent}`,
-    background: 'transparent',
-    color: theme.accent,
-    fontSize: 12,
-    fontWeight: 600,
-    cursor: 'pointer',
-  },
+  tab: { ..._tabBase, borderBottom: '2px solid transparent', color: theme.textMuted },
+  tabActive: { ..._tabBase, borderBottom: `2px solid ${theme.accent}`, color: theme.accent },
   tabContent: {
     minHeight: 200,
   },

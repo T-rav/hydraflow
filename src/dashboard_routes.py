@@ -3619,6 +3619,7 @@ def create_router(
             "--limit",
             "100",
         ]
+        proc: asyncio.subprocess.Process | None = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -3634,6 +3635,9 @@ def create_router(
                 status_code=503,
             )
         except TimeoutError:
+            if proc is not None:
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
             return JSONResponse(
                 {"error": "gh CLI timed out"},
                 status_code=504,
@@ -3726,24 +3730,30 @@ def create_router(
             owner_dir = clone_target.parent
             owner_dir.mkdir(parents=True, exist_ok=True)
             cmd = ["gh", "repo", "clone", slug, str(clone_target)]
+            clone_proc: asyncio.subprocess.Process | None = None
             try:
-                proc = await asyncio.create_subprocess_exec(
+                clone_proc = await asyncio.create_subprocess_exec(
                     *cmd,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+                _, stderr = await asyncio.wait_for(
+                    clone_proc.communicate(), timeout=300
+                )
             except FileNotFoundError:
                 return JSONResponse(
                     {"error": "gh CLI not found"},
                     status_code=503,
                 )
             except TimeoutError:
+                if clone_proc is not None:
+                    with contextlib.suppress(ProcessLookupError):
+                        clone_proc.kill()
                 return JSONResponse(
                     {"error": "Clone timed out"},
                     status_code=504,
                 )
-            if proc.returncode != 0:
+            if clone_proc.returncode != 0:
                 msg = (stderr or b"").decode().strip()
                 return JSONResponse(
                     {"error": f"Clone failed: {msg}"},
