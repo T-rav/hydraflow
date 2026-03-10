@@ -103,6 +103,7 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("adr_review_model", "HYDRAFLOW_ADR_REVIEW_MODEL", "sonnet"),
     ("changelog_file", "HYDRAFLOW_CHANGELOG_FILE", ""),
     ("release_tag_prefix", "HYDRAFLOW_RELEASE_TAG_PREFIX", "v"),
+    ("repos_workspace_dir", "HYDRAFLOW_REPOS_WORKSPACE_DIR", "~/.hydra/repos"),
 ]
 
 _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
@@ -922,6 +923,10 @@ class HydraFlowConfig(BaseModel):
         default=Path("."),
         description="Directory for persistent HydraFlow data (.hydraflow)",
     )
+    repos_workspace_dir: Path = Field(
+        default=Path("~/.hydra/repos"),
+        description="Base directory for cloned GitHub repos (default ~/.hydra/repos)",
+    )
     state_file: Path = Field(default=Path("."), description="Path to state JSON file")
 
     # Event persistence
@@ -1713,10 +1718,14 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
 
     # Data-driven env var overrides (str fields)
     for field, env_key, default in _ENV_STR_OVERRIDES:
-        if getattr(config, field) == default:
+        current = getattr(config, field)
+        if str(current) == default:
             env_val = _get_env(env_key)
             if env_val is not None:
-                object.__setattr__(config, field, env_val)
+                # Preserve the field's type (e.g. Path vs str)
+                field_type = type(current)
+                new_val = field_type(env_val) if field_type is not str else env_val
+                object.__setattr__(config, field, new_val)
 
     # Data-driven env var overrides (float fields)
     for field, env_key, default in _ENV_FLOAT_OVERRIDES:
