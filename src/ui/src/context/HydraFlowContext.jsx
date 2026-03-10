@@ -1572,6 +1572,7 @@ export function HydraFlowProvider({ children }) {
     deleteSession,
     addRepoBySlug,
     addRepoByPath,
+    fetchRepos,
     removeRepoShortcut,
     startRuntime,
     stopRuntime,

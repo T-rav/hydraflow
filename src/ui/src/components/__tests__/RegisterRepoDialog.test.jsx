@@ -14,6 +14,12 @@ describe('RegisterRepoDialog', () => {
     mockUseHydraFlow.mockReturnValue({
       addRepoBySlug: vi.fn().mockResolvedValue({ ok: true }),
       addRepoByPath: vi.fn().mockResolvedValue({ ok: true }),
+      fetchRepos: vi.fn().mockResolvedValue(undefined),
+    })
+    // Suppress fetch calls from GitHubRepoPicker auto-load
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ repos: [] }),
     })
   })
 
@@ -22,20 +28,38 @@ describe('RegisterRepoDialog', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('validates when no inputs provided', () => {
+  it('defaults to GitHub tab', () => {
     render(<RegisterRepoDialog isOpen onClose={() => {}} />)
+    expect(screen.getByTestId('tab-github')).toBeInTheDocument()
+    expect(screen.getByTestId('tab-manual')).toBeInTheDocument()
+    // GitHub tab content should be visible
+    expect(screen.getByText(/Search and select a repo/)).toBeInTheDocument()
+  })
+
+  it('switches to Manual tab', () => {
+    render(<RegisterRepoDialog isOpen onClose={() => {}} />)
+    fireEvent.click(screen.getByTestId('tab-manual'))
+    expect(screen.getByText(/Paste a GitHub URL/)).toBeInTheDocument()
+    expect(screen.getByLabelText('GitHub URL or slug')).toBeInTheDocument()
+  })
+
+  it('validates when no inputs provided on Manual tab', () => {
+    render(<RegisterRepoDialog isOpen onClose={() => {}} />)
+    fireEvent.click(screen.getByTestId('tab-manual'))
     fireEvent.submit(screen.getByTestId('register-submit').closest('form'))
     expect(screen.getByText('Enter a GitHub URL, slug, or repo path')).toBeInTheDocument()
   })
 
-  it('submits slug via addRepoBySlug', async () => {
+  it('submits slug via addRepoBySlug on Manual tab', async () => {
     const addRepoBySlug = vi.fn().mockResolvedValue({ ok: true })
     mockUseHydraFlow.mockReturnValue({
       addRepoBySlug,
       addRepoByPath: vi.fn(),
+      fetchRepos: vi.fn(),
     })
     const onClose = vi.fn()
     render(<RegisterRepoDialog isOpen onClose={onClose} />)
+    fireEvent.click(screen.getByTestId('tab-manual'))
     fireEvent.change(screen.getByLabelText('GitHub URL or slug'), { target: { value: 'acme/app' } })
     fireEvent.click(screen.getByTestId('register-submit'))
     await waitFor(() => expect(addRepoBySlug).toHaveBeenCalledWith('acme/app'))
@@ -47,8 +71,10 @@ describe('RegisterRepoDialog', () => {
     mockUseHydraFlow.mockReturnValue({
       addRepoBySlug: vi.fn(),
       addRepoByPath,
+      fetchRepos: vi.fn(),
     })
     render(<RegisterRepoDialog isOpen onClose={() => {}} />)
+    fireEvent.click(screen.getByTestId('tab-manual'))
     fireEvent.change(screen.getByLabelText('Filesystem path'), { target: { value: '/repos/demo' } })
     fireEvent.click(screen.getByTestId('register-submit'))
     await waitFor(() => expect(addRepoByPath).toHaveBeenCalledWith('/repos/demo'))
@@ -59,9 +85,11 @@ describe('RegisterRepoDialog', () => {
     mockUseHydraFlow.mockReturnValue({
       addRepoBySlug,
       addRepoByPath: vi.fn(),
+      fetchRepos: vi.fn(),
     })
     const onClose = vi.fn()
     render(<RegisterRepoDialog isOpen onClose={onClose} />)
+    fireEvent.click(screen.getByTestId('tab-manual'))
     fireEvent.change(screen.getByLabelText('GitHub URL or slug'), { target: { value: 'acme/missing' } })
     fireEvent.click(screen.getByTestId('register-submit'))
     await waitFor(() => expect(screen.getByText('Repo not found')).toBeInTheDocument())
@@ -73,8 +101,10 @@ describe('RegisterRepoDialog', () => {
     mockUseHydraFlow.mockReturnValue({
       addRepoBySlug,
       addRepoByPath: vi.fn(),
+      fetchRepos: vi.fn(),
     })
     render(<RegisterRepoDialog isOpen onClose={() => {}} />)
+    fireEvent.click(screen.getByTestId('tab-manual'))
     fireEvent.change(screen.getByLabelText('GitHub URL or slug'), { target: { value: 'acme/fail' } })
     fireEvent.click(screen.getByTestId('register-submit'))
     await waitFor(() => expect(screen.getByText('Registration failed')).toBeInTheDocument())
@@ -98,7 +128,7 @@ describe('RegisterRepoDialog', () => {
     const onClose = vi.fn()
     render(<RegisterRepoDialog isOpen onClose={onClose} />)
     // Click the subtitle paragraph inside the card (not overlay, not a close button)
-    fireEvent.click(screen.getByText(/Paste a GitHub URL/))
+    fireEvent.click(screen.getByText(/Search and select a repo/))
     expect(onClose).not.toHaveBeenCalled()
   })
 
@@ -109,31 +139,36 @@ describe('RegisterRepoDialog', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
-  it('closes via Cancel button', () => {
+  it('closes via Cancel button on Manual tab', () => {
     const onClose = vi.fn()
     render(<RegisterRepoDialog isOpen onClose={onClose} />)
+    fireEvent.click(screen.getByTestId('tab-manual'))
     fireEvent.click(screen.getByText('Cancel'))
     expect(onClose).toHaveBeenCalled()
   })
 
   it('resets form state when reopened', () => {
     const { rerender } = render(<RegisterRepoDialog isOpen onClose={() => {}} />)
+    fireEvent.click(screen.getByTestId('tab-manual'))
     fireEvent.change(screen.getByLabelText('GitHub URL or slug'), { target: { value: 'acme/app' } })
     expect(screen.getByLabelText('GitHub URL or slug').value).toBe('acme/app')
     // Close and reopen
     rerender(<RegisterRepoDialog isOpen={false} onClose={() => {}} />)
     rerender(<RegisterRepoDialog isOpen onClose={() => {}} />)
-    expect(screen.getByLabelText('GitHub URL or slug').value).toBe('')
+    // Should default back to GitHub tab
+    expect(screen.getByText(/Search and select a repo/)).toBeInTheDocument()
   })
 
-  it('submit button is disabled when both inputs are empty', () => {
+  it('submit button is disabled when both inputs are empty on Manual tab', () => {
     render(<RegisterRepoDialog isOpen onClose={() => {}} />)
+    fireEvent.click(screen.getByTestId('tab-manual'))
     const btn = screen.getByTestId('register-submit')
     expect(btn).toBeDisabled()
   })
 
   it('submit button is enabled when slug is provided', () => {
     render(<RegisterRepoDialog isOpen onClose={() => {}} />)
+    fireEvent.click(screen.getByTestId('tab-manual'))
     fireEvent.change(screen.getByLabelText('GitHub URL or slug'), { target: { value: 'acme/app' } })
     const btn = screen.getByTestId('register-submit')
     expect(btn).not.toBeDisabled()
@@ -145,8 +180,10 @@ describe('RegisterRepoDialog', () => {
     mockUseHydraFlow.mockReturnValue({
       addRepoBySlug,
       addRepoByPath: vi.fn(),
+      fetchRepos: vi.fn(),
     })
     render(<RegisterRepoDialog isOpen onClose={() => {}} />)
+    fireEvent.click(screen.getByTestId('tab-manual'))
     fireEvent.change(screen.getByLabelText('GitHub URL or slug'), { target: { value: 'acme/app' } })
     fireEvent.click(screen.getByTestId('register-submit'))
     await waitFor(() => expect(screen.getByText('Registering\u2026')).toBeInTheDocument())
@@ -156,8 +193,9 @@ describe('RegisterRepoDialog', () => {
   it('prefers slug over path when both are provided', async () => {
     const addRepoBySlug = vi.fn().mockResolvedValue({ ok: true })
     const addRepoByPath = vi.fn().mockResolvedValue({ ok: true })
-    mockUseHydraFlow.mockReturnValue({ addRepoBySlug, addRepoByPath })
+    mockUseHydraFlow.mockReturnValue({ addRepoBySlug, addRepoByPath, fetchRepos: vi.fn() })
     render(<RegisterRepoDialog isOpen onClose={() => {}} />)
+    fireEvent.click(screen.getByTestId('tab-manual'))
     fireEvent.change(screen.getByLabelText('GitHub URL or slug'), { target: { value: 'acme/app' } })
     fireEvent.change(screen.getByLabelText('Filesystem path'), { target: { value: '/repos/app' } })
     fireEvent.click(screen.getByTestId('register-submit'))
@@ -170,9 +208,11 @@ describe('RegisterRepoDialog', () => {
     mockUseHydraFlow.mockReturnValue({
       addRepoBySlug,
       addRepoByPath: vi.fn(),
+      fetchRepos: vi.fn(),
     })
     const onClose = vi.fn()
     render(<RegisterRepoDialog isOpen onClose={onClose} />)
+    fireEvent.click(screen.getByTestId('tab-manual'))
     fireEvent.change(screen.getByLabelText('GitHub URL or slug'), {
       target: { value: 'https://github.com/acme/app' },
     })
@@ -186,8 +226,10 @@ describe('RegisterRepoDialog', () => {
     mockUseHydraFlow.mockReturnValue({
       addRepoBySlug,
       addRepoByPath: vi.fn(),
+      fetchRepos: vi.fn(),
     })
     render(<RegisterRepoDialog isOpen onClose={() => {}} />)
+    fireEvent.click(screen.getByTestId('tab-manual'))
     fireEvent.change(screen.getByLabelText('GitHub URL or slug'), {
       target: { value: 'https://github.com/acme/app.git' },
     })
@@ -200,8 +242,10 @@ describe('RegisterRepoDialog', () => {
     mockUseHydraFlow.mockReturnValue({
       addRepoBySlug,
       addRepoByPath: vi.fn(),
+      fetchRepos: vi.fn(),
     })
     render(<RegisterRepoDialog isOpen onClose={() => {}} />)
+    fireEvent.click(screen.getByTestId('tab-manual'))
     fireEvent.change(screen.getByLabelText('GitHub URL or slug'), {
       target: { value: 'acme/app' },
     })
@@ -214,9 +258,11 @@ describe('RegisterRepoDialog', () => {
     mockUseHydraFlow.mockReturnValue({
       addRepoBySlug,
       addRepoByPath: vi.fn(),
+      fetchRepos: vi.fn(),
     })
     const onClose = vi.fn()
     render(<RegisterRepoDialog isOpen onClose={onClose} />)
+    fireEvent.click(screen.getByTestId('tab-manual'))
     fireEvent.change(screen.getByLabelText('GitHub URL or slug'), { target: { value: 'acme/app' } })
     fireEvent.click(screen.getByTestId('register-submit'))
     await waitFor(() => expect(screen.getByText('Network failure')).toBeInTheDocument())
@@ -229,8 +275,10 @@ describe('RegisterRepoDialog', () => {
     mockUseHydraFlow.mockReturnValue({
       addRepoBySlug: vi.fn(),
       addRepoByPath,
+      fetchRepos: vi.fn(),
     })
     render(<RegisterRepoDialog isOpen onClose={() => {}} />)
+    fireEvent.click(screen.getByTestId('tab-manual'))
     fireEvent.change(screen.getByLabelText('Filesystem path'), { target: { value: '/bad/path' } })
     fireEvent.click(screen.getByTestId('register-submit'))
     await waitFor(() => expect(screen.getByText('Path not found')).toBeInTheDocument())
