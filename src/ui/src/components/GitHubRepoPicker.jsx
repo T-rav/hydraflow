@@ -1,12 +1,26 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { theme } from '../theme'
 
+const _repoRowBase = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  width: '100%',
+  padding: '8px 10px',
+  border: 'none',
+  borderBottom: `1px solid ${theme.border}`,
+  color: theme.text,
+  textAlign: 'left',
+  gap: 8,
+}
+
 export function GitHubRepoPicker({ onSelect, disabled }) {
   const [query, setQuery] = useState('')
   const [repos, setRepos] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [cloning, setCloningSlug] = useState(null)
+  const [hoveredSlug, setHoveredSlug] = useState(null)
   const debounceRef = useRef(null)
 
   const fetchRepos = useCallback(async (searchQuery) => {
@@ -91,10 +105,10 @@ export function GitHubRepoPicker({ onSelect, disabled }) {
       {error && <div style={styles.error}>{error}</div>}
       <div style={styles.repoList}>
         {loading && !cloning && (
-          <div style={styles.loadingRow}>Loading repos…</div>
+          <div style={styles.centeredRow}>Loading repos…</div>
         )}
         {!loading && repos.length === 0 && !error && (
-          <div style={styles.emptyRow}>No repos found</div>
+          <div style={styles.centeredRow}>No repos found</div>
         )}
         {repos.map((repo) => {
           const owner = repo.owner?.login || ''
@@ -106,8 +120,10 @@ export function GitHubRepoPicker({ onSelect, disabled }) {
               key={slug}
               type="button"
               onClick={() => handleSelect(repo)}
+              onMouseEnter={() => setHoveredSlug(slug)}
+              onMouseLeave={() => setHoveredSlug(null)}
               disabled={!!cloning || disabled}
-              style={isCloning ? styles.repoRowCloning : styles.repoRow}
+              style={isCloning ? styles.repoRowCloning : hoveredSlug === slug ? styles.repoRowHover : styles.repoRow}
               data-testid={`github-repo-item-${slug}`}
             >
               <div style={styles.repoInfo}>
@@ -154,47 +170,15 @@ const styles = {
     borderRadius: 6,
     background: theme.bg,
   },
-  loadingRow: {
+  centeredRow: {
     padding: '12px 10px',
     fontSize: 11,
     color: theme.textMuted,
     textAlign: 'center',
   },
-  emptyRow: {
-    padding: '12px 10px',
-    fontSize: 11,
-    color: theme.textMuted,
-    textAlign: 'center',
-  },
-  repoRow: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    width: '100%',
-    padding: '8px 10px',
-    border: 'none',
-    borderBottom: `1px solid ${theme.border}`,
-    background: 'transparent',
-    color: theme.text,
-    cursor: 'pointer',
-    textAlign: 'left',
-    gap: 8,
-    transition: 'background 0.15s',
-  },
-  repoRowCloning: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    width: '100%',
-    padding: '8px 10px',
-    border: 'none',
-    borderBottom: `1px solid ${theme.border}`,
-    background: theme.accentSubtle,
-    color: theme.text,
-    cursor: 'wait',
-    textAlign: 'left',
-    gap: 8,
-  },
+  repoRow: { ..._repoRowBase, background: 'transparent', cursor: 'pointer' },
+  repoRowHover: { ..._repoRowBase, background: theme.mutedSubtle, cursor: 'pointer' },
+  repoRowCloning: { ..._repoRowBase, background: theme.accentSubtle, cursor: 'wait' },
   repoInfo: {
     display: 'flex',
     flexDirection: 'column',
