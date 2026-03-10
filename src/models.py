@@ -1478,6 +1478,7 @@ class TrackedReportUpdate(BaseModel):
 
     action: Literal["confirm_fixed", "reopen", "cancel"]
     detail: str = ""
+    reporter_id: str = ""
 
 
 class PRListItem(BaseModel):

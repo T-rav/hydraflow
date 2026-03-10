@@ -794,7 +794,7 @@ export function HydraFlowProvider({ children }) {
       const res = await fetch(`/api/reports/${reportId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, detail }),
+        body: JSON.stringify({ action, detail, reporter_id: reporterIdRef.current }),
       })
       if (res.ok) fetchTrackedReports()
     } catch {

@@ -3868,6 +3868,28 @@ def create_router(
         report_id: str, body: TrackedReportUpdate
     ) -> JSONResponse:
         """Update a tracked report (confirm fixed, reopen, cancel)."""
+        report = state.get_tracked_report(report_id)
+        if report is None:
+            return JSONResponse({"error": "Report not found"}, status_code=404)
+        if (
+            body.reporter_id
+            and report.reporter_id
+            and body.reporter_id != report.reporter_id
+        ):
+            return JSONResponse({"error": "Forbidden"}, status_code=403)
+        # Validate state-machine transitions
+        valid_actions: dict[str, list[str]] = {
+            "confirm_fixed": ["fixed"],
+            "reopen": ["fixed", "in-progress", "closed"],
+            "cancel": ["queued", "in-progress", "fixed", "reopened"],
+        }
+        if report.status not in valid_actions.get(body.action, []):
+            return JSONResponse(
+                {
+                    "error": f"Action '{body.action}' is not allowed in status '{report.status}'"
+                },
+                status_code=422,
+            )
         action_map = {
             "confirm_fixed": ("closed", "Confirmed fixed by reporter"),
             "reopen": ("reopened", "Reopened by reporter"),

@@ -246,7 +246,7 @@ class TestTrackedReportEndpoints:
         self, config, event_bus, state, tmp_path
     ) -> None:
         state.add_tracked_report(
-            TrackedReport(id="r1", reporter_id="u1", description="X")
+            TrackedReport(id="r1", reporter_id="u1", description="X", status="fixed")
         )
         router, _pr_mgr = self._make_router(config, event_bus, state, tmp_path)
         endpoint = self._find_endpoint(router, "/api/reports/{report_id}", "PATCH")
@@ -343,3 +343,79 @@ class TestTrackedReportEndpoints:
         assert len(pending) == 1
         assert len(tracked) == 1
         assert pending[0].id == tracked[0].id
+
+    @pytest.mark.asyncio
+    async def test_update_tracked_report_ownership_rejected(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        """PATCH with a mismatched reporter_id returns 403."""
+        state.add_tracked_report(
+            TrackedReport(
+                id="r1", reporter_id="owner-1", description="X", status="fixed"
+            )
+        )
+        router, _pr_mgr = self._make_router(config, event_bus, state, tmp_path)
+        endpoint = self._find_endpoint(router, "/api/reports/{report_id}", "PATCH")
+        body = TrackedReportUpdate(action="confirm_fixed", reporter_id="attacker-2")
+        response = await endpoint("r1", body)
+        assert response.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_update_tracked_report_invalid_transition_queued_reopen(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        """Reopening a queued report is not a valid transition."""
+        state.add_tracked_report(
+            TrackedReport(id="r1", reporter_id="u1", description="X", status="queued")
+        )
+        router, _pr_mgr = self._make_router(config, event_bus, state, tmp_path)
+        endpoint = self._find_endpoint(router, "/api/reports/{report_id}", "PATCH")
+        body = TrackedReportUpdate(action="reopen")
+        response = await endpoint("r1", body)
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_update_tracked_report_invalid_transition_confirm_queued(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        """Confirming a fix on a queued report is not a valid transition."""
+        state.add_tracked_report(
+            TrackedReport(id="r1", reporter_id="u1", description="X", status="queued")
+        )
+        router, _pr_mgr = self._make_router(config, event_bus, state, tmp_path)
+        endpoint = self._find_endpoint(router, "/api/reports/{report_id}", "PATCH")
+        body = TrackedReportUpdate(action="confirm_fixed")
+        response = await endpoint("r1", body)
+        assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Persistence tests
+# ---------------------------------------------------------------------------
+
+
+class TestTrackedReportPersistence:
+    """Verify tracked reports survive a full save/reload cycle."""
+
+    def test_tracked_reports_persist_across_reload(self, tmp_path) -> None:
+        from state import StateTracker
+
+        state1 = StateTracker(tmp_path / "state.json")
+        state1.add_tracked_report(
+            TrackedReport(id="r1", reporter_id="u1", description="Persist me")
+        )
+        state1.update_tracked_report(
+            "r1",
+            status="in-progress",
+            detail="Working on it",
+            action_label="processing",
+        )
+
+        # Reload from the same file
+        state2 = StateTracker(tmp_path / "state.json")
+        reports = state2.get_tracked_reports("u1")
+        assert len(reports) == 1
+        assert reports[0].id == "r1"
+        assert reports[0].status == "in-progress"
+        assert len(reports[0].history) == 1
+        assert reports[0].history[0].action == "processing"
