@@ -61,7 +61,7 @@ class TroubleshootingPatternStore:
 
     async def record_pattern(self, pattern: TroubleshootingPattern) -> None:
         """Record a troubleshooting pattern to Hindsight."""
-        from hindsight import BANK_TROUBLESHOOTING, retain_safe
+        from hindsight import Bank, retain_safe
 
         content = (
             f"{pattern.pattern_name}: {pattern.description}\n"
@@ -69,7 +69,7 @@ class TroubleshootingPatternStore:
         )
         await retain_safe(
             self._hindsight,
-            BANK_TROUBLESHOOTING,
+            Bank.TROUBLESHOOTING,
             content,
             context=f"CI troubleshooting pattern ({pattern.language})",
             metadata={
@@ -87,7 +87,7 @@ class TroubleshootingPatternStore:
         Returns up to *limit* patterns sorted by frequency descending.
         Pass ``limit=None`` to return all patterns without a cap.
         """
-        from hindsight import BANK_TROUBLESHOOTING, recall_safe
+        from hindsight import Bank, recall_safe
 
         query = (
             f"troubleshooting patterns for {language}"
@@ -96,7 +96,7 @@ class TroubleshootingPatternStore:
         )
         recall_limit = limit or 50
         memories = await recall_safe(
-            self._hindsight, BANK_TROUBLESHOOTING, query, limit=recall_limit
+            self._hindsight, Bank.TROUBLESHOOTING, query, limit=recall_limit
         )
         patterns: list[TroubleshootingPattern] = []
         for m in memories:

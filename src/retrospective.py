@@ -206,11 +206,11 @@ class RetrospectiveCollector:
         """Dual-write retrospective entry to Hindsight."""
         if self._hindsight is None:
             return
-        from hindsight import BANK_RETROSPECTIVES, retain_safe
+        from hindsight import Bank, retain_safe
 
         await retain_safe(
             self._hindsight,
-            BANK_RETROSPECTIVES,
+            Bank.RETROSPECTIVES,
             entry.model_dump_json(),
             context=f"Issue #{entry.issue_number} PR #{entry.pr_number} retrospective",
             metadata={
@@ -226,10 +226,10 @@ class RetrospectiveCollector:
         """Recall the last *n* retrospective entries from Hindsight."""
         if self._hindsight is None:
             return []
-        from hindsight import BANK_RETROSPECTIVES, recall_safe
+        from hindsight import Bank, recall_safe
 
         memories = await recall_safe(
-            self._hindsight, BANK_RETROSPECTIVES, "retrospective entries", limit=n
+            self._hindsight, Bank.RETROSPECTIVES, "retrospective entries", limit=n
         )
         entries: list[RetrospectiveEntry] = []
         for m in memories:

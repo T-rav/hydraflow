@@ -198,11 +198,11 @@ class ReviewInsightStore:
 
     async def record_review(self, record: ReviewRecord) -> None:
         """Record a review to Hindsight."""
-        from hindsight import BANK_REVIEW_INSIGHTS, retain_safe
+        from hindsight import Bank, retain_safe
 
         await retain_safe(
             self._hindsight,
-            BANK_REVIEW_INSIGHTS,
+            Bank.REVIEW_INSIGHTS,
             record.model_dump_json(),
             context=f"PR #{record.pr_number} review ({record.verdict})",
             metadata={
@@ -215,10 +215,10 @@ class ReviewInsightStore:
 
     async def load_recent(self, n: int = 10) -> list[ReviewRecord]:
         """Load the last *n* review records from Hindsight."""
-        from hindsight import BANK_REVIEW_INSIGHTS, recall_safe
+        from hindsight import Bank, recall_safe
 
         memories = await recall_safe(
-            self._hindsight, BANK_REVIEW_INSIGHTS, "review feedback patterns", limit=n
+            self._hindsight, Bank.REVIEW_INSIGHTS, "review feedback patterns", limit=n
         )
         records: list[ReviewRecord] = []
         for m in memories:

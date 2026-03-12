@@ -7,6 +7,7 @@ See https://github.com/vectorize-io/hindsight
 from __future__ import annotations
 
 import logging
+from enum import StrEnum
 from typing import Any
 
 import httpx
@@ -14,12 +15,15 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger("hydraflow.hindsight")
 
-# Bank IDs for different memory domains
-BANK_LEARNINGS = "hydraflow-learnings"
-BANK_RETROSPECTIVES = "hydraflow-retrospectives"
-BANK_REVIEW_INSIGHTS = "hydraflow-review-insights"
-BANK_HARNESS_INSIGHTS = "hydraflow-harness-insights"
-BANK_TROUBLESHOOTING = "hydraflow-troubleshooting"
+
+class Bank(StrEnum):
+    """Hindsight memory bank identifiers."""
+
+    LEARNINGS = "hydraflow-learnings"
+    RETROSPECTIVES = "hydraflow-retrospectives"
+    REVIEW_INSIGHTS = "hydraflow-review-insights"
+    HARNESS_INSIGHTS = "hydraflow-harness-insights"
+    TROUBLESHOOTING = "hydraflow-troubleshooting"
 
 
 class HindsightMemory(BaseModel):

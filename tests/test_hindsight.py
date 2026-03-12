@@ -12,10 +12,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from hindsight import (
-    BANK_LEARNINGS,
-    BANK_RETROSPECTIVES,
-    BANK_REVIEW_INSIGHTS,
-    BANK_TROUBLESHOOTING,
+    Bank,
     HindsightClient,
     HindsightMemory,
     format_memories_as_markdown,
@@ -24,28 +21,31 @@ from hindsight import (
 )
 
 # ---------------------------------------------------------------------------
-# Bank constant tests
+# Bank enum tests
 # ---------------------------------------------------------------------------
 
 
-class TestBankConstants:
+class TestBankEnum:
     def test_bank_ids_are_distinct(self):
-        banks = {
-            BANK_LEARNINGS,
-            BANK_RETROSPECTIVES,
-            BANK_REVIEW_INSIGHTS,
-            BANK_TROUBLESHOOTING,
-        }
-        assert len(banks) == 4
+        assert len(set(Bank)) == 5
 
     def test_bank_ids_have_prefix(self):
-        for bank in [
-            BANK_LEARNINGS,
-            BANK_RETROSPECTIVES,
-            BANK_REVIEW_INSIGHTS,
-            BANK_TROUBLESHOOTING,
-        ]:
+        for bank in Bank:
             assert bank.startswith("hydraflow-")
+
+    def test_bank_is_str_enum(self):
+        assert isinstance(Bank.LEARNINGS, str)
+        assert Bank.LEARNINGS == "hydraflow-learnings"
+
+    def test_all_expected_members_exist(self):
+        expected = {
+            "LEARNINGS",
+            "RETROSPECTIVES",
+            "REVIEW_INSIGHTS",
+            "HARNESS_INSIGHTS",
+            "TROUBLESHOOTING",
+        }
+        assert set(Bank.__members__.keys()) == expected
 
 
 # ---------------------------------------------------------------------------

@@ -140,11 +140,11 @@ class HarnessInsightStore:
 
     async def record_failure(self, record: FailureRecord) -> None:
         """Record a failure to Hindsight."""
-        from hindsight import BANK_HARNESS_INSIGHTS, retain_safe
+        from hindsight import Bank, retain_safe
 
         await retain_safe(
             self._hindsight,
-            BANK_HARNESS_INSIGHTS,
+            Bank.HARNESS_INSIGHTS,
             record.model_dump_json(),
             context=f"Issue #{record.issue_number} {record.category} failure",
             metadata={
@@ -158,10 +158,10 @@ class HarnessInsightStore:
 
     async def load_recent(self, n: int = 20) -> list[FailureRecord]:
         """Load the last *n* failure records from Hindsight."""
-        from hindsight import BANK_HARNESS_INSIGHTS, recall_safe
+        from hindsight import Bank, recall_safe
 
         memories = await recall_safe(
-            self._hindsight, BANK_HARNESS_INSIGHTS, "pipeline failures", limit=n
+            self._hindsight, Bank.HARNESS_INSIGHTS, "pipeline failures", limit=n
         )
         records: list[FailureRecord] = []
         for m in memories:

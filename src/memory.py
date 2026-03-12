@@ -12,7 +12,7 @@ from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from file_util import atomic_write
 from hindsight import (
-    BANK_LEARNINGS,
+    Bank,
     HindsightClient,
     format_memories_as_markdown,
     recall_safe,
@@ -129,7 +129,7 @@ async def recall_contextual_memory(
 
     Returns formatted markdown, or empty string on failure.
     """
-    memories = await recall_safe(hindsight, BANK_LEARNINGS, query, limit=limit)
+    memories = await recall_safe(hindsight, Bank.LEARNINGS, query, limit=limit)
     if not memories:
         return ""
     content = format_memories_as_markdown(memories)
@@ -269,7 +269,7 @@ class MemorySyncWorker:
         for record in learnings:
             await retain_safe(
                 self._hindsight,
-                BANK_LEARNINGS,
+                Bank.LEARNINGS,
                 record.learning,
                 context=record.title,
                 metadata={
@@ -281,7 +281,7 @@ class MemorySyncWorker:
 
         # Trigger Hindsight reflection to build mental models
         try:
-            await self._hindsight.reflect(BANK_LEARNINGS)
+            await self._hindsight.reflect(Bank.LEARNINGS)
         except Exception:
             logger.warning("Hindsight reflect failed", exc_info=True)
 

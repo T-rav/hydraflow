@@ -3039,11 +3039,11 @@ def create_router(
                     "entries": [],
                 }
             )
-        from hindsight import BANK_RETROSPECTIVES, recall_safe
+        from hindsight import Bank, recall_safe
 
         memories = await recall_safe(
             hindsight,
-            BANK_RETROSPECTIVES,
+            Bank.RETROSPECTIVES,
             "retrospective entries",
             limit=config.retrospective_window,
         )
@@ -3092,13 +3092,13 @@ def create_router(
     @router.get("/api/memories")
     async def get_memories() -> JSONResponse:
         """Return memory items from Hindsight and curated manifest data."""
-        from hindsight import BANK_LEARNINGS, recall_safe
+        from hindsight import Bank, recall_safe
         from manifest_curator import CuratedManifestStore
 
         items: list[dict[str, object]] = []
         if hindsight is not None:
             memories = await recall_safe(
-                hindsight, BANK_LEARNINGS, "recent learnings", limit=50
+                hindsight, Bank.LEARNINGS, "recent learnings", limit=50
             )
             for mem in memories:
                 with contextlib.suppress(Exception):
