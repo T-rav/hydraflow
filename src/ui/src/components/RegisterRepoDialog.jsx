@@ -94,9 +94,21 @@ export function RegisterRepoDialog({ isOpen, onClose }) {
   }, [slug, path, submitting, addRepoBySlug, addRepoByPath, onClose])
 
   const handlePickerSelect = useCallback(async (slug) => {
-    if (slug) await addRepoBySlug(slug)
-    else if (fetchRepos) await fetchRepos()
-    onClose?.()
+    setError('')
+    try {
+      if (slug) {
+        const result = await addRepoBySlug(slug)
+        if (!result?.ok) {
+          setError(result?.error || 'Registration failed')
+          return
+        }
+      } else if (fetchRepos) {
+        await fetchRepos()
+      }
+      onClose?.()
+    } catch (err) {
+      setError(err?.message || 'Registration failed')
+    }
   }, [addRepoBySlug, fetchRepos, onClose])
 
   if (!isOpen) return null
@@ -135,6 +147,7 @@ export function RegisterRepoDialog({ isOpen, onClose }) {
               It will be cloned automatically.
             </p>
             <GitHubRepoPicker onSelect={handlePickerSelect} disabled={submitting} />
+            {error && <div style={styles.error}>{error}</div>}
           </div>
         )}
 
