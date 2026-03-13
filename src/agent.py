@@ -423,12 +423,29 @@ Run through this checklist before your final commit:
                 label="Implementation plan",
             )
             history_after += len(plan_comment)
-            plan_section = (
-                f"\n\n## Implementation Plan\n\n"
-                f"Follow this plan closely. It was created by a planner agent "
-                f"that already analyzed the codebase.\n\n"
-                f"{plan_comment}"
+            # Detect whether the plan uses Task Graph format
+            has_task_graph = bool(
+                re.search(r"## Task Graph\b", plan_comment, re.IGNORECASE)
             )
+            if has_task_graph:
+                plan_section = (
+                    f"\n\n## Implementation Plan\n\n"
+                    f"Follow this plan closely. It uses a **Task Graph** with ordered phases.\n"
+                    f"Execute phases in order (P1 before P2, etc.). For each phase:\n"
+                    f"1. Write tests that encode the behavioral specs listed for that phase.\n"
+                    f"2. Run tests — they should FAIL (you haven't implemented yet).\n"
+                    f"3. Implement the minimum code to make tests pass.\n"
+                    f"4. Run the full test suite before moving to the next phase.\n\n"
+                    f"Do NOT skip ahead to later phases before earlier ones pass.\n\n"
+                    f"{plan_comment}"
+                )
+            else:
+                plan_section = (
+                    f"\n\n## Implementation Plan\n\n"
+                    f"Follow this plan closely. It was created by a planner agent "
+                    f"that already analyzed the codebase.\n\n"
+                    f"{plan_comment}"
+                )
 
         review_feedback_section = ""
         if review_feedback:

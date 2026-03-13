@@ -278,6 +278,45 @@ class TestBuildPrompt:
 
         assert "Follow this plan closely" not in prompt
 
+    def test_prompt_uses_task_graph_instructions_when_plan_has_task_graph(
+        self, config, event_bus: EventBus
+    ) -> None:
+        """When the plan contains a Task Graph, the prompt should include phase-based TDD instructions."""
+        issue = Task(
+            id=10,
+            title="Add widget feature",
+            body="We need widgets",
+            comments=[
+                "## Implementation Plan\n\n## Task Graph\n\n"
+                "### P1 \u2014 Model\n**Files:** src/models.py\n"
+                "**Tests:**\n- Widget persists\n**Depends on:** (none)\n",
+            ],
+        )
+        runner = AgentRunner(config, event_bus)
+        prompt, _ = runner._build_prompt_with_stats(issue)
+
+        assert "Task Graph" in prompt
+        assert "Execute phases in order" in prompt
+        assert "Write tests that encode the behavioral specs" in prompt
+
+    def test_prompt_uses_standard_instructions_when_plan_has_no_task_graph(
+        self, config, event_bus: EventBus
+    ) -> None:
+        """When the plan has no Task Graph, the standard follow-plan instruction is used."""
+        issue = Task(
+            id=10,
+            title="Fix bug",
+            body="Something is broken",
+            comments=[
+                "## Implementation Plan\n\nStep 1: Fix the thing\nStep 2: Test it\n",
+            ],
+        )
+        runner = AgentRunner(config, event_bus)
+        prompt, _ = runner._build_prompt_with_stats(issue)
+
+        assert "Follow this plan closely" in prompt
+        assert "Execute phases in order" not in prompt
+
     def test_prompt_includes_ui_guidelines(
         self, config, event_bus: EventBus, agent_task
     ) -> None:

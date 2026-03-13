@@ -6,7 +6,7 @@ import logging
 import re
 import time
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
@@ -42,6 +42,15 @@ _PLAN_SECTION_DESCRIPTIONS: tuple[tuple[str, str], ...] = (
         "  ```\n"
         "  Each line must start with MODIFIED:, ADDED:, or REMOVED: "
         "followed by the file path.",
+    ),
+    (
+        "## Task Graph",
+        "dependency-ordered implementation phases using `### P{N} — Name` subsections. "
+        "Each phase lists **Files:** (paths to create/modify), "
+        "**Tests:** (behavioral specs — observable outcomes, not test code), "
+        "and **Depends on:** (prior phase numbers or 'none'). "
+        "Lower-numbered phases execute first; independent phases at the same level "
+        "can run in parallel. Max 6 phases per plan.",
     ),
     (
         "## Implementation Steps",
@@ -388,6 +397,7 @@ class PlannerRunner(BaseRunner):
                 "Plans missing any required section will be rejected and you will be asked to retry.\n\n"
                 f"{sections_bullet_list}"
             )
+            task_graph_guidance = ""
             pre_mortem_section = ""
         else:
             mode_note = (
@@ -399,6 +409,30 @@ class PlannerRunner(BaseRunner):
                 "Your plan MUST include ALL of the following sections with these EXACT headers.\n"
                 "Plans missing any required section will be rejected and you will be asked to retry.\n\n"
                 f"{sections_bullet_list}"
+            )
+            task_graph_guidance = (
+                "\n\n## Task Graph Format\n\n"
+                "The `## Task Graph` section must use `### P{N} — Name` subsections.\n"
+                "Each phase includes **Files:**, **Tests:**, and **Depends on:**.\n\n"
+                "Example:\n"
+                "```\n"
+                "### P1 — Data Model\n"
+                "**Files:** src/models.py (modify), migrations/0042_add_widget.py (create)\n"
+                "**Tests:**\n"
+                "- Creating a Widget with valid fields persists and returns an id\n"
+                "- Creating a Widget with duplicate name raises IntegrityError\n"
+                "**Depends on:** (none)\n\n"
+                "### P2 — Service Layer\n"
+                "**Files:** src/widget_service.py (create)\n"
+                "**Tests:**\n"
+                "- WidgetService.create() with valid input returns a Widget\n"
+                "- WidgetService.list() returns only active widgets\n"
+                "**Depends on:** P1\n"
+                "```\n\n"
+                "Test specs must be **behavioral** — describe observable outcomes, not test code.\n"
+                "Good: 'POST /widgets with missing name returns 400'\n"
+                "Bad: 'Test the create_widget function'\n\n"
+                "Max 6 phases. If more are needed, the issue should be decomposed into an epic."
             )
             pre_mortem_section = (
                 "\n\n## Pre-Mortem\n\n"
@@ -440,8 +474,9 @@ Use semantic tools first (before grep):
 1. Restate the issue in your own words.
 2. Explore relevant code with semantic tools.
 3. Identify concrete file-level deltas.
-4. Define testing strategy and edge cases.
-5. For UI work, call out reusable components/shared modules (`constants.js`, `types.js`, `theme.js`).
+4. Build a Task Graph with dependency-ordered phases (full plans only).
+5. Write behavioral test specs for each phase — describe observable outcomes, not test code.
+6. For UI work, call out reusable components/shared modules (`constants.js`, `types.js`, `theme.js`).
 
 ## Required Output
 
@@ -454,7 +489,7 @@ PLAN_END
 Then provide a one-line summary:
 SUMMARY: <brief one-line description of the plan>
 
-{schema_section}{pre_mortem_section}
+{schema_section}{task_graph_guidance}{pre_mortem_section}
 
 ## Handling Uncertainty
 
@@ -530,7 +565,7 @@ This closes the issue automatically. False positives waste significant human tim
         "## Files to Modify",
         "## New Files",
         "## File Delta",
-        "## Implementation Steps",
+        "## Task Graph",
         "## Testing Strategy",
         "## Acceptance Criteria",
         "## Key Considerations",
@@ -662,6 +697,42 @@ This closes the issue automatically. False positives waste significant human tim
                     "## Testing Strategy must reference at least one test file or pattern"
                 )
 
+        # --- Task Graph validation (full plans) ---
+        if scale != "lite":
+            tg_match = re.search(
+                r"## Task Graph\s*\n(.*?)(?=\n## |\Z)",
+                plan,
+                re.DOTALL | re.IGNORECASE,
+            )
+            if tg_match:
+                tg_body = tg_match.group(1)
+                phases = self._extract_task_graph_phases(tg_body)
+                if not phases:
+                    errors.append(
+                        "## Task Graph must contain at least one ### P{N} phase"
+                    )
+                else:
+                    for phase in phases:
+                        if not phase.get("files"):
+                            errors.append(
+                                f"Task Graph phase {phase['name']} must include "
+                                f"**Files:** with at least one path"
+                            )
+                        if not phase.get("tests"):
+                            errors.append(
+                                f"Task Graph phase {phase['name']} must include "
+                                f"**Tests:** with at least one behavioral spec"
+                            )
+                    # Validate dependency references
+                    phase_ids = {p["id"] for p in phases}
+                    for phase in phases:
+                        for dep in phase.get("depends_on", []):
+                            if dep not in phase_ids:
+                                errors.append(
+                                    f"Task Graph phase {phase['name']} depends on "
+                                    f"{dep} which does not exist"
+                                )
+
         # --- Implementation Steps must contain at least one actionable step ---
         is_match = re.search(
             r"## Implementation Steps\s*\n(.*?)(?=\n## |\Z)",
@@ -749,11 +820,108 @@ This closes the issue automatically. False positives waste significant human tim
         step_texts.extend((s1 or s2).strip() for s1, s2 in heading_steps)
         return [s for s in step_texts if s]
 
+    # Regex for task graph phase headers: ### P1 — Name or ### P1 - Name
+    _PHASE_HEADER_RE = re.compile(r"^###\s+P(\d+)\s*[\u2014\-]+\s*(.+)$", re.MULTILINE)
+
+    def _extract_task_graph_phases(self, section_body: str) -> list[dict[str, Any]]:
+        """Extract structured phases from a Task Graph section body.
+
+        Returns a list of dicts with keys: ``id``, ``name``, ``files``,
+        ``tests``, ``depends_on``.
+        """
+        headers = list(self._PHASE_HEADER_RE.finditer(section_body))
+        if not headers:
+            return []
+
+        phases: list[dict[str, Any]] = []
+        for i, match in enumerate(headers):
+            phase_num = match.group(1)
+            phase_name = match.group(2).strip()
+            # Extract body between this header and the next (or end)
+            start = match.end()
+            end = headers[i + 1].start() if i + 1 < len(headers) else len(section_body)
+            body = section_body[start:end]
+
+            # Extract **Files:** content
+            files_match = re.search(
+                r"\*\*Files:\*\*\s*(.+?)(?=\n\*\*|\Z)", body, re.DOTALL
+            )
+            files: list[str] = []
+            if files_match:
+                files = re.findall(
+                    r"[\w\-]+(?:/[\w\-]+)+\.?[\w]*|[\w\-]+\.[\w]+",
+                    files_match.group(1),
+                )
+
+            # Extract **Tests:** content (behavioral specs)
+            tests_match = re.search(
+                r"\*\*Tests:\*\*\s*(.+?)(?=\n\*\*|\Z)", body, re.DOTALL
+            )
+            tests: list[str] = []
+            if tests_match:
+                tests = [
+                    s.strip()
+                    for s in re.findall(
+                        r"^\s*[-*]\s+(.+)$", tests_match.group(1), re.MULTILINE
+                    )
+                    if s.strip()
+                ]
+
+            # Extract **Depends on:** content
+            deps_match = re.search(
+                r"\*\*Depends on:\*\*\s*(.+?)(?=\n\*\*|\n###|\Z)", body, re.DOTALL
+            )
+            depends_on: list[str] = []
+            if deps_match:
+                dep_text = deps_match.group(1).strip().lower()
+                if dep_text not in ("none", "(none)", "n/a", "-"):
+                    depends_on = re.findall(r"P(\d+)", deps_match.group(1))
+                    depends_on = [f"P{d}" for d in depends_on]
+
+            phases.append(
+                {
+                    "id": f"P{phase_num}",
+                    "name": f"P{phase_num} — {phase_name}",
+                    "files": files,
+                    "tests": tests,
+                    "depends_on": depends_on,
+                }
+            )
+
+        return phases
+
     def _score_actionability(
         self, plan: str, *, scale: PlanScale = "full"
     ) -> tuple[int, str]:
         """Return actionability ``(score, rank)`` for *plan*."""
         score = 0
+
+        # --- Task Graph scoring (full plans) ---
+        tg_match = re.search(
+            r"## Task Graph\s*\n(.*?)(?=\n## |\Z)",
+            plan,
+            re.DOTALL | re.IGNORECASE,
+        )
+        if tg_match and scale != "lite":
+            phases = self._extract_task_graph_phases(tg_match.group(1))
+            if phases:
+                score += 20  # Has phases
+                if len(phases) >= 2:
+                    score += 15  # Multiple phases
+                # Check for file references
+                has_files = any(p.get("files") for p in phases)
+                if has_files:
+                    score += 25
+                # Check for behavioral test specs
+                has_tests = any(p.get("tests") for p in phases)
+                if has_tests:
+                    score += 10
+                # Check for dependency structure
+                has_deps = any(p.get("depends_on") for p in phases)
+                if has_deps:
+                    score += 10
+
+        # --- Implementation Steps scoring (lite plans or fallback) ---
         is_match = re.search(
             r"## Implementation Steps\s*\n(.*?)(?=\n## |\Z)",
             plan,
