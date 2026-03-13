@@ -11,6 +11,7 @@ from typing import Literal
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from events import EventType, HydraFlowEvent
+from labels import Label
 from models import NewIssueSpec, PlannerStatus, PlannerUpdatePayload, PlanResult, Task
 from phase_utils import is_likely_bug
 from runner_constants import MEMORY_SUGGESTION_PROMPT
@@ -104,7 +105,9 @@ class PlannerRunner(BaseRunner):
             logger.info("Issue #%d classified as %s plan", task.id, scale)
 
             cmd = self._build_command()
-            prompt, prompt_stats = self._build_prompt_with_stats(task, scale=scale)
+            prompt, prompt_stats = await self._build_prompt_with_stats(
+                task, scale=scale
+            )
 
             def _check_plan_complete(accumulated: str) -> bool:
                 if "PLAN_END" in accumulated:
@@ -333,7 +336,7 @@ class PlannerRunner(BaseRunner):
                 lines.append(f"- `{header}` \u2014 {desc}")
         return "\n".join(lines)
 
-    def _build_prompt_with_stats(
+    async def _build_prompt_with_stats(
         self, issue: Task, *, scale: PlanScale = "full"
     ) -> tuple[str, dict[str, object]]:
         """Build the planning prompt and pruning stats.
@@ -371,9 +374,11 @@ class PlannerRunner(BaseRunner):
                 "the surrounding text describes what they show."
             )
 
-        manifest_section, memory_section = self._inject_manifest_and_memory()
+        manifest_section, memory_section = await self._inject_manifest_and_memory(
+            query_context=issue.title
+        )
 
-        find_label = self._config.find_label[0]
+        find_label = Label.FIND
 
         # --- Scale-adaptive schema section ---
         sections_bullet_list = self._format_sections_list(scale)

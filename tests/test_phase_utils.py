@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from events import EventType
 from harness_insights import FailureCategory, HarnessInsightStore
+from labels import Label
 from models import PipelineStage
 from phase_utils import (
     LIKELY_BUG_EXCEPTIONS,
@@ -302,11 +303,11 @@ class TestEscalateToHitl:
             prs,
             issue_number=42,
             cause="Plan failed",
-            origin_label="hydraflow-plan",
-            hitl_label="hydraflow-hitl",
+            origin_label=Label.PLAN,
+            hitl_label=Label.HITL,
         )
 
-        state.set_hitl_origin.assert_called_once_with(42, "hydraflow-plan")
+        state.set_hitl_origin.assert_called_once_with(42, Label.PLAN)
         state.set_hitl_cause.assert_called_once_with(42, "Plan failed")
         state.record_hitl_escalation.assert_called_once()
 
@@ -321,11 +322,11 @@ class TestEscalateToHitl:
             prs,
             issue_number=42,
             cause="Failed",
-            origin_label="hydraflow-ready",
-            hitl_label="hydraflow-hitl",
+            origin_label=Label.READY,
+            hitl_label=Label.HITL,
         )
 
-        prs.swap_pipeline_labels.assert_awaited_once_with(42, "hydraflow-hitl")
+        prs.swap_pipeline_labels.assert_awaited_once_with(42, Label.HITL)
 
 
 # ---------------------------------------------------------------------------
@@ -444,13 +445,14 @@ class TestStoreLifecycle:
 class TestRecordHarnessFailure:
     """Tests for record_harness_failure."""
 
-    def test_appends_failure_record_to_store(self, tmp_path: Path) -> None:
-        """Should append a FailureRecord with correct fields to the store."""
-        memory_dir = tmp_path / "memory"
-        memory_dir.mkdir()
-        store = HarnessInsightStore(memory_dir)
+    @pytest.mark.asyncio
+    async def test_records_failure_to_store(self) -> None:
+        """Should call record_failure on the store with a correct FailureRecord."""
+        mock_hindsight = AsyncMock()
+        store = HarnessInsightStore(hindsight=mock_hindsight)
+        store.record_failure = AsyncMock()
 
-        record_harness_failure(
+        await record_harness_failure(
             store,
             42,
             FailureCategory.PLAN_VALIDATION,
@@ -458,16 +460,17 @@ class TestRecordHarnessFailure:
             stage=PipelineStage.PLAN,
         )
 
-        records = store.load_recent()
-        assert len(records) == 1
-        assert records[0].issue_number == 42
-        assert records[0].category == FailureCategory.PLAN_VALIDATION
-        assert records[0].stage == "plan"
-        assert records[0].pr_number == 0
+        store.record_failure.assert_awaited_once()
+        record = store.record_failure.call_args.args[0]
+        assert record.issue_number == 42
+        assert record.category == FailureCategory.PLAN_VALIDATION
+        assert record.stage == "plan"
+        assert record.pr_number == 0
 
-    def test_noop_when_store_is_none(self) -> None:
+    @pytest.mark.asyncio
+    async def test_noop_when_store_is_none(self) -> None:
         """Should not raise when harness_insights is None."""
-        record_harness_failure(
+        await record_harness_failure(
             None,
             42,
             FailureCategory.PLAN_VALIDATION,
@@ -475,13 +478,14 @@ class TestRecordHarnessFailure:
             stage=PipelineStage.PLAN,
         )
 
-    def test_catches_exception_from_store(self) -> None:
+    @pytest.mark.asyncio
+    async def test_catches_exception_from_store(self) -> None:
         """Should catch and log exceptions from the store without propagating."""
         mock_store = MagicMock()
-        mock_store.append_failure.side_effect = RuntimeError("disk full")
+        mock_store.record_failure = AsyncMock(side_effect=RuntimeError("disk full"))
 
         with patch("phase_utils.logger") as mock_logger:
-            record_harness_failure(
+            await record_harness_failure(
                 mock_store,
                 42,
                 FailureCategory.PLAN_VALIDATION,
@@ -497,13 +501,14 @@ class TestRecordHarnessFailure:
             assert logged_call.args[1] == 42
             assert logged_call.kwargs["exc_info"] is True
 
-    def test_passes_pr_number_to_record(self, tmp_path: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_passes_pr_number_to_record(self) -> None:
         """Should set pr_number on the FailureRecord when provided."""
-        memory_dir = tmp_path / "memory"
-        memory_dir.mkdir()
-        store = HarnessInsightStore(memory_dir)
+        mock_hindsight = AsyncMock()
+        store = HarnessInsightStore(hindsight=mock_hindsight)
+        store.record_failure = AsyncMock()
 
-        record_harness_failure(
+        await record_harness_failure(
             store,
             66,
             FailureCategory.REVIEW_REJECTION,
@@ -512,18 +517,19 @@ class TestRecordHarnessFailure:
             pr_number=200,
         )
 
-        records = store.load_recent()
-        assert len(records) == 1
-        assert records[0].pr_number == 200
-        assert records[0].stage == "review"
+        store.record_failure.assert_awaited_once()
+        record = store.record_failure.call_args.args[0]
+        assert record.pr_number == 200
+        assert record.stage == "review"
 
-    def test_extracts_subcategories(self, tmp_path: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_extracts_subcategories(self) -> None:
         """Should extract subcategories from the details string."""
-        memory_dir = tmp_path / "memory"
-        memory_dir.mkdir()
-        store = HarnessInsightStore(memory_dir)
+        mock_hindsight = AsyncMock()
+        store = HarnessInsightStore(hindsight=mock_hindsight)
+        store.record_failure = AsyncMock()
 
-        record_harness_failure(
+        await record_harness_failure(
             store,
             42,
             FailureCategory.QUALITY_GATE,
@@ -531,9 +537,9 @@ class TestRecordHarnessFailure:
             stage=PipelineStage.IMPLEMENT,
         )
 
-        records = store.load_recent()
-        assert len(records) == 1
-        assert "lint_error" in records[0].subcategories
+        store.record_failure.assert_awaited_once()
+        record = store.record_failure.call_args.args[0]
+        assert "lint_error" in record.subcategories
 
 
 # ---------------------------------------------------------------------------
@@ -730,8 +736,8 @@ class TestPipelineEscalator:
         prs: AsyncMock | None = None,
         store: MagicMock | None = None,
         harness_insights: MagicMock | None = None,
-        origin_label: str = "hydraflow-plan",
-        hitl_label: str = "hydraflow-hitl",
+        origin_label: str = Label.PLAN,
+        hitl_label: str = Label.HITL,
         stage: PipelineStage = PipelineStage.PLAN,
     ) -> PipelineEscalator:
         return PipelineEscalator(
@@ -759,10 +765,10 @@ class TestPipelineEscalator:
             category=FailureCategory.PLAN_VALIDATION,
         )
 
-        state.set_hitl_origin.assert_called_once_with(42, "hydraflow-plan")
+        state.set_hitl_origin.assert_called_once_with(42, Label.PLAN)
         state.set_hitl_cause.assert_called_once_with(42, "Plan failed")
         state.record_hitl_escalation.assert_called_once()
-        prs.swap_pipeline_labels.assert_awaited_once_with(42, "hydraflow-hitl")
+        prs.swap_pipeline_labels.assert_awaited_once_with(42, Label.HITL)
 
     @pytest.mark.asyncio
     async def test_enqueues_transition(self) -> None:
@@ -784,6 +790,7 @@ class TestPipelineEscalator:
     async def test_records_harness_failure(self) -> None:
         """Should call record_harness_failure with correct args."""
         harness = MagicMock()
+        harness.record_failure = AsyncMock()
         escalator = self._make_escalator(
             harness_insights=harness, stage=PipelineStage.IMPLEMENT
         )
@@ -796,8 +803,8 @@ class TestPipelineEscalator:
             category=FailureCategory.HITL_ESCALATION,
         )
 
-        harness.append_failure.assert_called_once()
-        record = harness.append_failure.call_args.args[0]
+        harness.record_failure.assert_awaited_once()
+        record = harness.record_failure.call_args.args[0]
         assert record.issue_number == 7
         assert record.category == FailureCategory.HITL_ESCALATION
         assert record.stage == PipelineStage.IMPLEMENT
@@ -823,13 +830,14 @@ class TestPipelineEscalator:
         state = MagicMock()
         prs = AsyncMock()
         harness = MagicMock()
+        harness.record_failure = AsyncMock()
         escalator = PipelineEscalator(
             state=state,
             prs=prs,
             store=MagicMock(),
             harness_insights=harness,
-            origin_label="hydraflow-ready",
-            hitl_label="hydraflow-hitl",
+            origin_label=Label.READY,
+            hitl_label=Label.HITL,
             stage=PipelineStage.IMPLEMENT,
         )
         issue = MagicMock(id=99)
@@ -841,6 +849,6 @@ class TestPipelineEscalator:
             category=FailureCategory.HITL_ESCALATION,
         )
 
-        state.set_hitl_origin.assert_called_once_with(99, "hydraflow-ready")
-        record = harness.append_failure.call_args.args[0]
+        state.set_hitl_origin.assert_called_once_with(99, Label.READY)
+        record = harness.record_failure.call_args.args[0]
         assert record.stage == PipelineStage.IMPLEMENT

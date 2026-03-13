@@ -8,6 +8,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from labels import Label
 from models import ConflictResolutionResult, HITLUpdatePayload
 from phase_utils import MemorySuggester
 from prompt_stats import build_prompt_stats, truncate_with_notice
@@ -251,7 +252,7 @@ class PRUnsticker:
         if item.pr is not None and item.pr > 0:
             claim_kwargs["pr_number"] = item.pr
         await self._prs.swap_pipeline_labels(
-            issue_number, self._config.hitl_active_label[0], **claim_kwargs
+            issue_number, Label.HITL_ACTIVE, **claim_kwargs
         )
 
         cause_desc = cause.value.replace("_", " ")
@@ -309,8 +310,7 @@ class PRUnsticker:
                             issue_number, origin, **origin_kwargs
                         )
                     else:
-                        for lbl in self._config.hitl_active_label:
-                            await self._prs.remove_label(issue_number, lbl)
+                        await self._prs.remove_label(issue_number, Label.HITL_ACTIVE)
 
                     self._state.remove_hitl_origin(issue_number)
                     self._state.remove_hitl_cause(issue_number)
@@ -559,7 +559,7 @@ diff — you may catch things `make quality` won't.
         language = "general"
         if self._troubleshooting_store is not None:
             language = self._detect_language(wt_path)
-            patterns = self._troubleshooting_store.load_patterns(
+            patterns = await self._troubleshooting_store.load_patterns(
                 language=language,
                 limit=10,
             )
@@ -671,7 +671,7 @@ diff — you may catch things `make quality` won't.
                 transcript, issue_number, language
             )
             if pattern is not None:
-                self._troubleshooting_store.append_pattern(pattern)
+                await self._troubleshooting_store.record_pattern(pattern)
                 logger.info(
                     "Persisted troubleshooting pattern '%s' from issue #%d (explicit)",
                     pattern.pattern_name,
@@ -682,7 +682,7 @@ diff — you may catch things `make quality` won't.
             # Stage 2: self-reflection via cheap model
             pattern = await self._reflect_on_fix(transcript, issue_number, language)
             if pattern is not None:
-                self._troubleshooting_store.append_pattern(pattern)
+                await self._troubleshooting_store.record_pattern(pattern)
                 logger.info(
                     "Persisted troubleshooting pattern '%s' from issue #%d (reflection)",
                     pattern.pattern_name,
@@ -714,7 +714,7 @@ diff — you may catch things `make quality` won't.
         if store is None:
             return None
 
-        known = store.load_patterns(limit=50)
+        known = await store.load_patterns(limit=50)
         known_block = "\n".join(f"- {p.pattern_name}: {p.description}" for p in known)
 
         # Truncate transcript to keep the prompt small
@@ -1056,7 +1056,7 @@ TROUBLESHOOTING_PATTERN_END
             release_kwargs["pr_number"] = pr_number
         await self._prs.swap_pipeline_labels(
             issue_number,
-            self._config.hitl_label[0],
+            Label.HITL,
             **release_kwargs,
         )
         await self._prs.post_comment(

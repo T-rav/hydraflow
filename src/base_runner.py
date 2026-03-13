@@ -15,7 +15,7 @@ from context_cache import ContextSectionCache
 from events import EventBus
 from execution import get_default_runner
 from manifest import load_project_manifest
-from memory import load_memory_digest
+from memory import recall_contextual_memory
 from models import LoopResult, TranscriptEventData
 from prompt_telemetry import PromptTelemetry, parse_command_tool_model
 from runner_utils import (
@@ -26,6 +26,7 @@ from runner_utils import (
 
 if TYPE_CHECKING:
     from execution import SubprocessRunner
+    from hindsight import HindsightClient
 
 
 class BaseRunner:
@@ -44,6 +45,7 @@ class BaseRunner:
         config: HydraFlowConfig,
         event_bus: EventBus,
         runner: SubprocessRunner | None = None,
+        hindsight: HindsightClient | None = None,
     ) -> None:
         self._config = config
         self._bus = event_bus
@@ -52,6 +54,7 @@ class BaseRunner:
         self._context_cache = ContextSectionCache(config)
         self._prompt_telemetry = PromptTelemetry(config)
         self._last_context_stats: dict[str, int] = {"cache_hits": 0, "cache_misses": 0}
+        self._hindsight = hindsight
 
     def terminate(self) -> None:
         """Kill all active subprocesses."""
@@ -158,11 +161,13 @@ class BaseRunner:
                 exc_info=True,
             )
 
-    def _inject_manifest_and_memory(self) -> tuple[str, str]:
-        """Load the project manifest and memory digest.
+    async def _inject_manifest_and_memory(
+        self, query_context: str = ""
+    ) -> tuple[str, str]:
+        """Load the project manifest and recall memories from Hindsight.
 
         Returns ``(manifest_section, memory_section)`` where each is an
-        empty string when the corresponding file is missing.
+        empty string when the corresponding data is unavailable.
         """
         cache_hits = 0
         cache_misses = 0
@@ -180,21 +185,21 @@ class BaseRunner:
             manifest_section = f"\n\n## Project Context\n\n{manifest}"
 
         memory_section = ""
-        digest_path = self._config.data_path("memory", "digest.md")
-        digest, digest_hit = self._context_cache.get_or_load(
-            key="memory_digest",
-            source_path=digest_path,
-            loader=load_memory_digest,
-        )
-        cache_hits += 1 if digest_hit else 0
-        cache_misses += 0 if digest_hit else 1
-        if digest:
-            memory_section = f"\n\n## Accumulated Learnings\n\n{digest}"
+        memory_chars = 0
+        if self._hindsight is not None and query_context:
+            recalled = await recall_contextual_memory(
+                self._hindsight,
+                query_context,
+                max_chars=self._config.max_memory_prompt_chars,
+            )
+            if recalled:
+                memory_section = f"\n\n{recalled}"
+                memory_chars = len(recalled)
 
         self._last_context_stats = {
             "cache_hits": cache_hits,
             "cache_misses": cache_misses,
-            "context_chars_before": len(manifest) + len(digest),
+            "context_chars_before": len(manifest) + memory_chars,
             "context_chars_after": len(manifest_section) + len(memory_section),
         }
 

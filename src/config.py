@@ -69,7 +69,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("visual_max_retries", "HYDRAFLOW_VISUAL_MAX_RETRIES", 2),
     ("agent_timeout", "HYDRAFLOW_AGENT_TIMEOUT", 3600),
     ("transcript_summary_timeout", "HYDRAFLOW_TRANSCRIPT_SUMMARY_TIMEOUT", 120),
-    ("memory_compaction_timeout", "HYDRAFLOW_MEMORY_COMPACTION_TIMEOUT", 60),
+    ("hindsight_timeout", "HYDRAFLOW_HINDSIGHT_TIMEOUT", 30),
     ("quality_timeout", "HYDRAFLOW_QUALITY_TIMEOUT", 3600),
     ("git_command_timeout", "HYDRAFLOW_GIT_COMMAND_TIMEOUT", 30),
     ("summarizer_timeout", "HYDRAFLOW_SUMMARIZER_TIMEOUT", 120),
@@ -94,7 +94,6 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("docker_network", "HYDRAFLOW_DOCKER_NETWORK", ""),
     ("system_model", "HYDRAFLOW_SYSTEM_MODEL", ""),
     ("background_model", "HYDRAFLOW_BACKGROUND_MODEL", ""),
-    ("memory_compaction_model", "HYDRAFLOW_MEMORY_COMPACTION_MODEL", "haiku"),
     ("transcript_summary_model", "HYDRAFLOW_TRANSCRIPT_SUMMARY_MODEL", "haiku"),
     ("triage_model", "HYDRAFLOW_TRIAGE_MODEL", "haiku"),
     ("subskill_model", "HYDRAFLOW_SUBSKILL_MODEL", "haiku"),
@@ -104,6 +103,8 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("changelog_file", "HYDRAFLOW_CHANGELOG_FILE", ""),
     ("release_tag_prefix", "HYDRAFLOW_RELEASE_TAG_PREFIX", "v"),
     ("repos_workspace_dir", "HYDRAFLOW_REPOS_WORKSPACE_DIR", "~/.hydra/repos"),
+    ("hindsight_url", "HYDRAFLOW_HINDSIGHT_URL", "http://localhost:8888"),
+    ("hindsight_api_key", "HYDRAFLOW_HINDSIGHT_API_KEY", ""),
 ]
 
 _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
@@ -174,7 +175,6 @@ _ENV_LITERAL_OVERRIDES: list[tuple[str, str]] = [
     ("planner_tool", "HYDRAFLOW_PLANNER_TOOL"),
     ("triage_tool", "HYDRAFLOW_TRIAGE_TOOL"),
     ("transcript_summary_tool", "HYDRAFLOW_TRANSCRIPT_SUMMARY_TOOL"),
-    ("memory_compaction_tool", "HYDRAFLOW_MEMORY_COMPACTION_TOOL"),
     ("ac_tool", "HYDRAFLOW_AC_TOOL"),
     ("verification_judge_tool", "HYDRAFLOW_VERIFICATION_JUDGE_TOOL"),
     ("subskill_tool", "HYDRAFLOW_SUBSKILL_TOOL"),
@@ -197,36 +197,11 @@ _DEPRECATED_ENV_REVERSE: dict[str, str] = {
     v: k for k, v in _DEPRECATED_ENV_ALIASES.items()
 }
 
-# Label env var overrides — maps env key → (field_name, default_value)
-_ENV_LABEL_MAP: dict[str, tuple[str, list[str]]] = {
-    "HYDRAFLOW_LABEL_FIND": ("find_label", ["hydraflow-find"]),
-    "HYDRAFLOW_LABEL_PLAN": ("planner_label", ["hydraflow-plan"]),
-    "HYDRAFLOW_LABEL_READY": ("ready_label", ["hydraflow-ready"]),
-    "HYDRAFLOW_LABEL_REVIEW": ("review_label", ["hydraflow-review"]),
-    "HYDRAFLOW_LABEL_HITL": ("hitl_label", ["hydraflow-hitl"]),
-    "HYDRAFLOW_LABEL_HITL_ACTIVE": ("hitl_active_label", ["hydraflow-hitl-active"]),
-    "HYDRAFLOW_LABEL_HITL_AUTOFIX": ("hitl_autofix_label", ["hydraflow-hitl-autofix"]),
-    "HYDRAFLOW_LABEL_FIXED": ("fixed_label", ["hydraflow-fixed"]),
-    "HYDRAFLOW_LABEL_IMPROVE": ("improve_label", ["hydraflow-improve"]),
-    "HYDRAFLOW_LABEL_MEMORY": ("memory_label", ["hydraflow-memory"]),
-    "HYDRAFLOW_LABEL_TRANSCRIPT": ("transcript_label", ["hydraflow-transcript"]),
-    "HYDRAFLOW_LABEL_MANIFEST": ("manifest_label", ["hydraflow-manifest"]),
-    "HYDRAFLOW_LABEL_METRICS": ("metrics_label", ["hydraflow-metrics"]),
-    "HYDRAFLOW_LABEL_DUP": ("dup_label", ["hydraflow-dup"]),
-    "HYDRAFLOW_LABEL_EPIC": ("epic_label", ["hydraflow-epic"]),
-    "HYDRAFLOW_LABEL_EPIC_CHILD": ("epic_child_label", ["hydraflow-epic-child"]),
-    "HYDRAFLOW_LABEL_VERIFY": ("verify_label", ["hydraflow-verify"]),
-}
-
 
 class HydraFlowConfig(BaseModel):
     """Configuration for the HydraFlow orchestrator."""
 
     # Issue selection
-    ready_label: list[str] = Field(
-        default=["hydraflow-ready"],
-        description="GitHub issue labels to filter by (OR logic)",
-    )
     batch_size: int = Field(default=15, ge=1, le=50, description="Issues per batch")
     repo: str = Field(
         default="",
@@ -363,63 +338,6 @@ class HydraFlowConfig(BaseModel):
         description="Task source backend. Only 'github' supported today.",
     )
 
-    # Label lifecycle
-    review_label: list[str] = Field(
-        default=["hydraflow-review"],
-        description="Labels for issues/PRs under review (OR logic)",
-    )
-    hitl_label: list[str] = Field(
-        default=["hydraflow-hitl"],
-        description="Labels for issues escalated to human-in-the-loop (OR logic)",
-    )
-    hitl_active_label: list[str] = Field(
-        default=["hydraflow-hitl-active"],
-        description="Labels for HITL items being actively processed (OR logic)",
-    )
-    hitl_autofix_label: list[str] = Field(
-        default=["hydraflow-hitl-autofix"],
-        description="Labels for HITL items undergoing automatic fix attempt (OR logic)",
-    )
-    fixed_label: list[str] = Field(
-        default=["hydraflow-fixed"],
-        description="Labels applied after PR is merged (OR logic)",
-    )
-    verify_label: list[str] = Field(
-        default=["hydraflow-verify"],
-        description="Labels for post-merge verification issues (OR logic)",
-    )
-    improve_label: list[str] = Field(
-        default=["hydraflow-improve"],
-        description="Labels for improvement/memory suggestion issues (OR logic)",
-    )
-    memory_label: list[str] = Field(
-        default=["hydraflow-memory"],
-        description="Labels for accepted agent learnings (OR logic)",
-    )
-    transcript_label: list[str] = Field(
-        default=["hydraflow-transcript"],
-        description="Labels for transcript-summary issues queued for memory sync (OR logic)",
-    )
-    manifest_label: list[str] = Field(
-        default=["hydraflow-manifest"],
-        description="Labels for manifest snapshot persistence issues (OR logic)",
-    )
-    metrics_label: list[str] = Field(
-        default=["hydraflow-metrics"],
-        description="Labels for the metrics persistence issue (OR logic)",
-    )
-    dup_label: list[str] = Field(
-        default=["hydraflow-dup"],
-        description="Labels applied when issue is already satisfied (no changes needed)",
-    )
-    epic_label: list[str] = Field(
-        default=["hydraflow-epic"],
-        description="Labels for epic tracking issues with linked sub-issues (OR logic)",
-    )
-    epic_child_label: list[str] = Field(
-        default=["hydraflow-epic-child"],
-        description="Labels for child issues linked to epics (OR logic)",
-    )
     epic_group_planning: bool = Field(
         default=True,
         description="Group epic children for cohort planning with gap review",
@@ -524,14 +442,6 @@ class HydraFlowConfig(BaseModel):
     )
 
     # Discovery / planner configuration
-    find_label: list[str] = Field(
-        default=["hydraflow-find"],
-        description="Labels for new issues to discover and triage into planning (OR logic)",
-    )
-    planner_label: list[str] = Field(
-        default=["hydraflow-plan"],
-        description="Labels for issues needing plans (OR logic)",
-    )
     planner_tool: Literal["claude", "codex", "pi"] = Field(
         default="claude",
         description="CLI backend for planning agents",
@@ -689,31 +599,17 @@ class HydraFlowConfig(BaseModel):
         le=200_000,
         description="Max characters for PR diff in reviewer prompts before truncation",
     )
-    max_memory_chars: int = Field(
-        default=4000,
-        ge=500,
-        le=50_000,
-        description="Max characters for memory digest before compaction",
-    )
     max_memory_prompt_chars: int = Field(
         default=4000,
         ge=500,
         le=50_000,
-        description="Max characters for memory digest injected into agent prompts",
+        description="Max characters for recalled memories injected into agent prompts",
     )
     max_troubleshooting_prompt_chars: int = Field(
         default=3000,
         ge=500,
         le=10_000,
         description="Max characters for learned troubleshooting patterns in CI timeout prompts",
-    )
-    memory_compaction_tool: Literal["claude", "codex", "pi"] = Field(
-        default="claude",
-        description="CLI backend for memory digest compaction",
-    )
-    memory_compaction_model: str = Field(
-        default="haiku",
-        description="Cheap model for summarising memory digest when over size limit",
     )
 
     # Memory auto-approve
@@ -722,9 +618,14 @@ class HydraFlowConfig(BaseModel):
         description="When True, memory suggestions skip HITL and go directly to the sync queue",
     )
 
-    memory_prune_stale_items: bool = Field(
-        default=True,
-        description="Remove local memory item files whose source issue is no longer active",
+    # Hindsight memory backend
+    hindsight_url: str = Field(
+        default="http://localhost:8888",
+        description="Base URL for the Hindsight REST API",
+    )
+    hindsight_api_key: str = Field(
+        default="",
+        description="API key for Hindsight authentication",
     )
 
     # Observability context injection
@@ -799,14 +700,6 @@ class HydraFlowConfig(BaseModel):
             "*.html",
         ],
         description="Glob patterns for files that trigger visual validation requirement",
-    )
-    visual_required_label: str = Field(
-        default="hydraflow-visual-required",
-        description="Override label to force visual validation regardless of file paths",
-    )
-    visual_skip_label: str = Field(
-        default="hydraflow-visual-skip",
-        description="Override label to skip visual validation with an audit reason",
     )
     visual_max_retries: int = Field(
         default=2,
@@ -1120,11 +1013,11 @@ class HydraFlowConfig(BaseModel):
         le=600,
         description="Timeout in seconds for transcript summarization model calls",
     )
-    memory_compaction_timeout: int = Field(
-        default=60,
-        ge=30,
-        le=600,
-        description="Timeout in seconds for memory compaction model calls",
+    hindsight_timeout: int = Field(
+        default=30,
+        ge=5,
+        le=120,
+        description="Timeout in seconds for Hindsight API calls",
     )
 
     # Execution mode
@@ -1215,32 +1108,6 @@ class HydraFlowConfig(BaseModel):
         description="GitHub token for gh CLI auth (overrides shell GH_TOKEN)",
     )
 
-    @field_validator(
-        "ready_label",
-        "review_label",
-        "hitl_label",
-        "hitl_active_label",
-        "hitl_autofix_label",
-        "fixed_label",
-        "improve_label",
-        "memory_label",
-        "transcript_label",
-        "manifest_label",
-        "metrics_label",
-        "dup_label",
-        "epic_label",
-        "epic_child_label",
-        "find_label",
-        "planner_label",
-        "verify_label",
-    )
-    @classmethod
-    def labels_must_not_be_empty(cls, v: list[str]) -> list[str]:
-        """Reject empty label lists — downstream code indexes with [0]."""
-        if not v:
-            raise ValueError("Label list must contain at least one label")
-        return v
-
     @field_validator("docker_memory_limit", "docker_tmp_size")
     @classmethod
     def validate_docker_size_notation(cls, v: str) -> str:
@@ -1266,35 +1133,6 @@ class HydraFlowConfig(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
     @property
-    def all_pipeline_labels(self) -> list[str]:
-        """Return a flat list of every pipeline-stage label (for cleanup)."""
-        result: list[str] = []
-        for labels in (
-            self.find_label,
-            self.planner_label,
-            self.ready_label,
-            self.review_label,
-            self.hitl_label,
-            self.hitl_active_label,
-            self.hitl_autofix_label,
-            self.fixed_label,
-            self.verify_label,
-            self.improve_label,
-            self.transcript_label,
-        ):
-            result.extend(labels)
-        return result
-
-    @property
-    def memory_sync_labels(self) -> list[str]:
-        """Return labels fetched by memory sync (memory + improve + transcript)."""
-        result: list[str] = []
-        for label in [*self.memory_label, *self.improve_label, *self.transcript_label]:
-            if label not in result:
-                result.append(label)
-        return result
-
-    @property
     def log_dir(self) -> Path:
         """Return the directory for transcript / log files."""
         return self.data_root / "logs"
@@ -1303,11 +1141,6 @@ class HydraFlowConfig(BaseModel):
     def plans_dir(self) -> Path:
         """Return the directory for saved plan files."""
         return self.data_root / "plans"
-
-    @property
-    def memory_dir(self) -> Path:
-        """Return the directory for memory / review-insight files."""
-        return self.data_root / "memory"
 
     @property
     def visual_reports_dir(self) -> Path:
@@ -1362,20 +1195,8 @@ class HydraFlowConfig(BaseModel):
             HYDRAFLOW_GIT_USER_NAME     → git_user_name
             HYDRAFLOW_GIT_USER_EMAIL    → git_user_email
             HYDRAFLOW_MIN_PLAN_WORDS    → min_plan_words
-            HYDRAFLOW_LABEL_FIND        → find_label   (discovery stage)
-            HYDRAFLOW_LABEL_PLAN        → planner_label
-            HYDRAFLOW_LABEL_READY       → ready_label  (implement stage)
-            HYDRAFLOW_LABEL_REVIEW      → review_label
-            HYDRAFLOW_LABEL_HITL        → hitl_label
-            HYDRAFLOW_LABEL_HITL_ACTIVE  → hitl_active_label
-            HYDRAFLOW_LABEL_HITL_AUTOFIX → hitl_autofix_label
-            HYDRAFLOW_LABEL_FIXED       → fixed_label
-            HYDRAFLOW_LABEL_VERIFY      → verify_label
-            HYDRAFLOW_LABEL_IMPROVE     → improve_label
-            HYDRAFLOW_LABEL_MEMORY      → memory_label
-            HYDRAFLOW_LABEL_DUP         → dup_label
-            HYDRAFLOW_LABEL_EPIC        → epic_label
-            HYDRAFLOW_LABEL_EPIC_CHILD  → epic_child_label
+        Pipeline labels are hardcoded in ``labels.Label`` (StrEnum) — no env
+        var overrides.
         """
         _resolve_base_paths(self)
         _resolve_repo_and_identity(self)
@@ -1425,7 +1246,6 @@ def _apply_profile_overrides(config: HydraFlowConfig) -> None:
         for field in (
             "triage_tool",
             "transcript_summary_tool",
-            "memory_compaction_tool",
             "report_issue_tool",
         ):
             _apply_if_default(field, config.background_tool)
@@ -1434,7 +1254,6 @@ def _apply_profile_overrides(config: HydraFlowConfig) -> None:
         for field in (
             "triage_model",
             "transcript_summary_model",
-            "memory_compaction_model",
             "report_issue_model",
         ):
             _apply_if_default(field, config.background_model)
@@ -1920,20 +1739,6 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
                     msg = f"HYDRAFLOW_DOCKER_PIDS_LIMIT must be between 16 and 4096, got {pids_val}"
                     raise ValueError(msg)
                 object.__setattr__(config, "docker_pids_limit", pids_val)
-
-    # Label env var overrides (only apply when still at the default)
-    for env_key, (field_name, default_val) in _ENV_LABEL_MAP.items():
-        current = getattr(config, field_name)
-        env_val = os.environ.get(env_key)
-        if env_val is not None and current == default_val:
-            # Split on comma, ignoring empty parts; skip override if result is empty
-            labels = (
-                [part.strip() for part in env_val.split(",") if part.strip()]
-                if env_val
-                else []
-            )
-            if labels:
-                object.__setattr__(config, field_name, labels)
 
 
 def _validate_docker(config: HydraFlowConfig) -> None:

@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from events import EventBus
+from labels import Label
 from models import SessionStatus
 
 
@@ -271,7 +272,7 @@ class TestRequestChangesEndpoint:
         assert data["status"] == "ok"
 
         assert state.get_hitl_cause(42) == "Fix the tests"
-        assert state.get_hitl_origin(42) == config.review_label[0]
+        assert state.get_hitl_origin(42) == Label.REVIEW
 
     @pytest.mark.asyncio
     async def test_request_changes_swaps_labels(
@@ -286,7 +287,7 @@ class TestRequestChangesEndpoint:
             {"issue_number": 42, "feedback": "Fix the tests", "stage": "review"}
         )
 
-        pr_mgr.swap_pipeline_labels.assert_awaited_once_with(42, config.hitl_label[0])
+        pr_mgr.swap_pipeline_labels.assert_awaited_once_with(42, Label.HITL)
 
     @pytest.mark.asyncio
     async def test_request_changes_emits_escalation_event(
@@ -307,7 +308,7 @@ class TestRequestChangesEndpoint:
         assert event.type == "hitl_escalation"
         assert event.data["issue"] == 42
         assert event.data["cause"] == "Fix the tests"
-        assert event.data["origin"] == config.ready_label[0]
+        assert event.data["origin"] == Label.READY
 
     @pytest.mark.asyncio
     async def test_request_changes_rejects_empty_feedback(
@@ -423,9 +424,9 @@ class TestRequestChangesEndpoint:
         assert data["status"] == "ok"
 
         assert state.get_hitl_cause(10) == "Not the right issue"
-        assert state.get_hitl_origin(10) == config.find_label[0]
+        assert state.get_hitl_origin(10) == Label.FIND
 
-        pr_mgr.swap_pipeline_labels.assert_awaited_once_with(10, config.hitl_label[0])
+        pr_mgr.swap_pipeline_labels.assert_awaited_once_with(10, Label.HITL)
 
     @pytest.mark.asyncio
     async def test_request_changes_plan_stage(
@@ -445,9 +446,9 @@ class TestRequestChangesEndpoint:
         assert data["status"] == "ok"
 
         assert state.get_hitl_cause(7) == "Plan is incomplete"
-        assert state.get_hitl_origin(7) == config.planner_label[0]
+        assert state.get_hitl_origin(7) == Label.PLAN
 
-        pr_mgr.swap_pipeline_labels.assert_awaited_once_with(7, config.hitl_label[0])
+        pr_mgr.swap_pipeline_labels.assert_awaited_once_with(7, Label.HITL)
 
 
 class TestDeleteSessionEndpoint:
@@ -1688,7 +1689,7 @@ class TestGetTimelineIssueEndpoint:
 class TestMemoriesEndpoint:
     """Tests for the /api/memories endpoint."""
 
-    def _make_router(self, config, event_bus, state, tmp_path):
+    def _make_router(self, config, event_bus, state, tmp_path, hindsight=None):
         from dashboard_routes import create_router
         from pr_manager import PRManager
 
@@ -1703,6 +1704,7 @@ class TestMemoriesEndpoint:
             set_run_task=lambda t: None,
             ui_dist_dir=tmp_path / "no-dist",
             template_dir=tmp_path / "no-templates",
+            hindsight=hindsight,
         )
 
     def _find_endpoint(self, router, path):
@@ -1734,64 +1736,66 @@ class TestMemoriesEndpoint:
         self, config, event_bus, state, tmp_path
     ) -> None:
         import json
+        from unittest.mock import AsyncMock, MagicMock
 
-        items_dir = config.data_path("memory", "items")
-        items_dir.mkdir(parents=True, exist_ok=True)
-        (items_dir / "42.md").write_text("Always validate inputs")
-        (items_dir / "55.md").write_text("Use async for I/O")
+        mock_hindsight = AsyncMock()
+        mem1 = MagicMock()
+        mem1.content = "Always validate inputs"
+        mem2 = MagicMock()
+        mem2.content = "Use async for I/O"
 
-        digest_path = config.data_path("memory", "digest.md")
-        digest_path.write_text("# Digest\nSome content here")
+        with patch("hindsight.recall_safe", AsyncMock(return_value=[mem1, mem2])):
+            router = self._make_router(
+                config, event_bus, state, tmp_path, hindsight=mock_hindsight
+            )
+            endpoint = self._find_endpoint(router, "/api/memories")
+            response = await endpoint()
 
-        router = self._make_router(config, event_bus, state, tmp_path)
-        endpoint = self._find_endpoint(router, "/api/memories")
-        response = await endpoint()
         data = json.loads(response.body)
         assert data["total_items"] == 2
-        assert data["digest_chars"] > 0
         assert len(data["items"]) == 2
-        # Items are sorted reverse by filename, so 55 comes first
-        numbers = [item["issue_number"] for item in data["items"]]
-        assert 42 in numbers
-        assert 55 in numbers
+        learnings = [item["learning"] for item in data["items"]]
+        assert "Always validate inputs" in learnings
+        assert "Use async for I/O" in learnings
 
     @pytest.mark.asyncio
-    async def test_memories_skips_non_numeric_filenames(
+    async def test_memories_returns_empty_without_hindsight(
         self, config, event_bus, state, tmp_path
     ) -> None:
-        """Non-numeric .md filenames (e.g. README.md) should be silently skipped."""
+        """Without a Hindsight client, endpoint returns empty items."""
         import json
 
-        items_dir = config.data_path("memory", "items")
-        items_dir.mkdir(parents=True, exist_ok=True)
-        (items_dir / "42.md").write_text("Valid item")
-        (items_dir / "README.md").write_text("Not a learning item")
-        (items_dir / "notes.md").write_text("Also not valid")
-
-        router = self._make_router(config, event_bus, state, tmp_path)
+        router = self._make_router(config, event_bus, state, tmp_path, hindsight=None)
         endpoint = self._find_endpoint(router, "/api/memories")
         response = await endpoint()
         data = json.loads(response.body)
-        assert data["total_items"] == 1
-        assert data["items"][0]["issue_number"] == 42
+        assert data["total_items"] == 0
+        assert data["items"] == []
 
     @pytest.mark.asyncio
     async def test_memories_caps_at_50_items(
         self, config, event_bus, state, tmp_path
     ) -> None:
-        """The endpoint should return at most 50 items."""
+        """The endpoint requests at most 50 items from Hindsight."""
         import json
+        from unittest.mock import AsyncMock, MagicMock
 
-        items_dir = config.data_path("memory", "items")
-        items_dir.mkdir(parents=True, exist_ok=True)
-        for i in range(60):
-            (items_dir / f"{i + 1}.md").write_text(f"Learning #{i + 1}")
+        mock_hindsight = AsyncMock()
+        memories = []
+        for i in range(50):
+            mem = MagicMock()
+            mem.content = f"Learning #{i + 1}"
+            memories.append(mem)
 
-        router = self._make_router(config, event_bus, state, tmp_path)
-        endpoint = self._find_endpoint(router, "/api/memories")
-        response = await endpoint()
+        with patch("hindsight.recall_safe", AsyncMock(return_value=memories)):
+            router = self._make_router(
+                config, event_bus, state, tmp_path, hindsight=mock_hindsight
+            )
+            endpoint = self._find_endpoint(router, "/api/memories")
+            response = await endpoint()
+
         data = json.loads(response.body)
-        assert data["total_items"] == 60
+        assert data["total_items"] == 50
         assert len(data["items"]) == 50
 
 
@@ -1853,38 +1857,57 @@ class TestTroubleshootingEndpoint:
         self, config, event_bus, state, tmp_path
     ) -> None:
         import json
+        from unittest.mock import patch
 
-        from troubleshooting_store import (
-            TroubleshootingPattern,
-            TroubleshootingPatternStore,
+        from hindsight import HindsightMemory
+        from troubleshooting_store import TroubleshootingPattern
+
+        pattern1 = TroubleshootingPattern(
+            language="python",
+            pattern_name="truthy_asyncmock",
+            description="AsyncMock is always truthy",
+            fix_strategy="Use .called or .call_count instead",
+            frequency=3,
+            source_issues=[10, 20, 30],
+        )
+        pattern2 = TroubleshootingPattern(
+            language="node",
+            pattern_name="jest_open_handles",
+            description="Jest hangs due to open handles",
+            fix_strategy="Use --forceExit or close resources",
+            frequency=1,
+            source_issues=[42],
         )
 
-        memory_dir = config.data_path("memory")
-        store = TroubleshootingPatternStore(memory_dir)
-        store.append_pattern(
-            TroubleshootingPattern(
-                language="python",
-                pattern_name="truthy_asyncmock",
-                description="AsyncMock is always truthy",
-                fix_strategy="Use .called or .call_count instead",
-                frequency=3,
-                source_issues=[10, 20, 30],
+        memories = [
+            HindsightMemory(content=pattern1.model_dump_json()),
+            HindsightMemory(content=pattern2.model_dump_json()),
+        ]
+
+        mock_hindsight = MagicMock()
+
+        from dashboard_routes import create_router
+        from pr_manager import PRManager
+
+        pr_mgr = PRManager(config, event_bus)
+        with patch(
+            "hindsight.recall_safe", new_callable=AsyncMock, return_value=memories
+        ):
+            router = create_router(
+                config=config,
+                event_bus=event_bus,
+                state=state,
+                pr_manager=pr_mgr,
+                get_orchestrator=lambda: None,
+                set_orchestrator=lambda o: None,
+                set_run_task=lambda t: None,
+                ui_dist_dir=tmp_path / "no-dist",
+                template_dir=tmp_path / "no-templates",
+                hindsight=mock_hindsight,
             )
-        )
-        store.append_pattern(
-            TroubleshootingPattern(
-                language="node",
-                pattern_name="jest_open_handles",
-                description="Jest hangs due to open handles",
-                fix_strategy="Use --forceExit or close resources",
-                frequency=1,
-                source_issues=[42],
-            )
-        )
+            endpoint = self._find_endpoint(router, "/api/troubleshooting")
+            response = await endpoint()
 
-        router = self._make_router(config, event_bus, state, tmp_path)
-        endpoint = self._find_endpoint(router, "/api/troubleshooting")
-        response = await endpoint()
         data = json.loads(response.body)
         assert data["total_patterns"] == 2
         assert len(data["patterns"]) == 2
@@ -1900,28 +1923,47 @@ class TestTroubleshootingEndpoint:
         self, config, event_bus, state, tmp_path
     ) -> None:
         import json
+        from unittest.mock import patch
 
-        from troubleshooting_store import (
-            TroubleshootingPattern,
-            TroubleshootingPatternStore,
-        )
+        from hindsight import HindsightMemory
+        from troubleshooting_store import TroubleshootingPattern
 
-        memory_dir = config.data_path("memory")
-        store = TroubleshootingPatternStore(memory_dir)
+        # Build 110 patterns as HindsightMemory objects
+        memories = []
         for i in range(110):
-            store.append_pattern(
-                TroubleshootingPattern(
-                    language="python",
-                    pattern_name=f"pattern_{i}",
-                    description=f"Description {i}",
-                    fix_strategy=f"Fix {i}",
-                    source_issues=[i],
-                )
+            p = TroubleshootingPattern(
+                language="python",
+                pattern_name=f"pattern_{i}",
+                description=f"Description {i}",
+                fix_strategy=f"Fix {i}",
+                source_issues=[i],
             )
+            memories.append(HindsightMemory(content=p.model_dump_json()))
 
-        router = self._make_router(config, event_bus, state, tmp_path)
-        endpoint = self._find_endpoint(router, "/api/troubleshooting")
-        response = await endpoint()
+        mock_hindsight = MagicMock()
+
+        from dashboard_routes import create_router
+        from pr_manager import PRManager
+
+        pr_mgr = PRManager(config, event_bus)
+        with patch(
+            "hindsight.recall_safe", new_callable=AsyncMock, return_value=memories
+        ):
+            router = create_router(
+                config=config,
+                event_bus=event_bus,
+                state=state,
+                pr_manager=pr_mgr,
+                get_orchestrator=lambda: None,
+                set_orchestrator=lambda o: None,
+                set_run_task=lambda t: None,
+                ui_dist_dir=tmp_path / "no-dist",
+                template_dir=tmp_path / "no-templates",
+                hindsight=mock_hindsight,
+            )
+            endpoint = self._find_endpoint(router, "/api/troubleshooting")
+            response = await endpoint()
+
         data = json.loads(response.body)
         assert data["total_patterns"] == 110
         assert len(data["patterns"]) == 100
@@ -2003,7 +2045,7 @@ class TestRepoScopedEndpoints:
 
             def get_hitl_origin(self, issue: int) -> str:
                 self.origin_calls.append(issue)
-                return config.review_label[0]
+                return Label.REVIEW
 
         runtime = SimpleNamespace(
             config=config.model_copy(),

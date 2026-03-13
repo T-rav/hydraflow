@@ -21,6 +21,7 @@ from epic_sweeper_loop import EpicSweeperLoop
 from events import EventBus
 from execution import SubprocessRunner
 from harness_insights import HarnessInsightStore
+from hindsight import HindsightClient
 from hitl_phase import HITLPhase
 from hitl_runner import HITLRunner
 from implement_phase import ImplementPhase
@@ -87,6 +88,9 @@ class ServiceRegistry:
     implementer: ImplementPhase
     reviewer: ReviewPhase
 
+    # Memory backend
+    hindsight: HindsightClient
+
     # Background workers and support
     run_recorder: RunRecorder
     metrics_manager: MetricsManager
@@ -134,15 +138,29 @@ def build_services(
 
     This replaces the 170-line orchestrator constructor body.
     """
+    # Hindsight memory backend
+    hindsight_client = HindsightClient(
+        base_url=config.hindsight_url,
+        api_key=config.hindsight_api_key,
+    )
+
     # Core runners
     worktrees = WorkspaceManager(config)
     subprocess_runner = get_docker_runner(config)
-    agents = AgentRunner(config, event_bus, runner=subprocess_runner)
-    planners = PlannerRunner(config, event_bus, runner=subprocess_runner)
+    agents = AgentRunner(
+        config, event_bus, runner=subprocess_runner, hindsight=hindsight_client
+    )
+    planners = PlannerRunner(
+        config, event_bus, runner=subprocess_runner, hindsight=hindsight_client
+    )
     prs = PRManager(config, event_bus)
     manifest_syncer = ManifestIssueSyncer(config, state, prs)
-    reviewers = ReviewRunner(config, event_bus, runner=subprocess_runner)
-    hitl_runner = HITLRunner(config, event_bus, runner=subprocess_runner)
+    reviewers = ReviewRunner(
+        config, event_bus, runner=subprocess_runner, hindsight=hindsight_client
+    )
+    hitl_runner = HITLRunner(
+        config, event_bus, runner=subprocess_runner, hindsight=hindsight_client
+    )
     triage = TriageRunner(config, event_bus, runner=subprocess_runner)
     summarizer = TranscriptSummarizer(
         config, prs, event_bus, state, runner=subprocess_runner
@@ -157,10 +175,10 @@ def build_services(
     store.set_crate_manager(crate_manager)
 
     # Harness insight store (shared across phases)
-    harness_insights = HarnessInsightStore(config.data_path("memory"))
+    harness_insights = HarnessInsightStore(hindsight_client)
 
     # Troubleshooting pattern store (CI timeout feedback loop)
-    troubleshooting_store = TroubleshootingPatternStore(config.data_path("memory"))
+    troubleshooting_store = TroubleshootingPatternStore(hindsight_client)
 
     # Epic management
     epic_checker = EpicCompletionChecker(config, prs, fetcher, state=state)
@@ -225,6 +243,7 @@ def build_services(
         event_bus=event_bus,
         state=state,
         summarizer=summarizer,
+        hindsight=hindsight_client,
     )
     pr_unsticker = PRUnsticker(
         config,
@@ -243,11 +262,13 @@ def build_services(
         config,
         state,
         event_bus,
-        runner=subprocess_runner,
+        hindsight_client,
         prs=prs,
         manifest_syncer=manifest_syncer,
     )
-    retrospective = RetrospectiveCollector(config, state, prs)
+    retrospective = RetrospectiveCollector(
+        config, state, prs, hindsight=hindsight_client
+    )
     ac_generator = AcceptanceCriteriaGenerator(
         config, prs, event_bus, runner=subprocess_runner
     )
@@ -283,6 +304,7 @@ def build_services(
         post_merge=post_merge_handler,
         update_bg_worker_status=callbacks.update_bg_worker_status,
         baseline_policy=baseline_policy,
+        hindsight=hindsight_client,
     )
 
     # Background loops
@@ -431,6 +453,7 @@ def build_services(
         fetcher=fetcher,
         store=store,
         crate_manager=crate_manager,
+        hindsight=hindsight_client,
         triager=triager,
         planner_phase=planner_phase,
         hitl_phase=hitl_phase,

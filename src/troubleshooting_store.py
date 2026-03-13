@@ -1,7 +1,7 @@
 """Troubleshooting pattern store — persists learned CI timeout fix patterns.
 
 Successful CI timeout fixes can emit a structured block in their transcript.
-This module extracts those patterns, persists them to a JSONL store, and
+This module extracts those patterns, persists them to Hindsight, and
 formats them for injection into future fix prompts — creating a feedback loop
 that makes the unsticker smarter with each resolved hang.
 """
@@ -11,11 +11,14 @@ from __future__ import annotations
 import logging
 import re
 from datetime import UTC, datetime
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
 from models import IsoTimestamp
+
+if TYPE_CHECKING:
+    from hindsight import HindsightClient
 
 logger = logging.getLogger("hydraflow.troubleshooting_store")
 
@@ -51,104 +54,67 @@ class TroubleshootingPattern(BaseModel):
 
 
 class TroubleshootingPatternStore:
-    """JSONL-backed store for learned troubleshooting patterns."""
+    """Hindsight-backed store for learned troubleshooting patterns."""
 
-    def __init__(self, memory_dir: Path) -> None:
-        self._memory_dir = memory_dir
-        self._path = memory_dir / "troubleshooting_patterns.jsonl"
+    def __init__(self, hindsight: HindsightClient) -> None:
+        self._hindsight = hindsight
 
-    def append_pattern(self, pattern: TroubleshootingPattern) -> None:
-        """Append or merge *pattern* into the store.
+    async def record_pattern(self, pattern: TroubleshootingPattern) -> None:
+        """Record a troubleshooting pattern to Hindsight."""
+        from hindsight import Bank, retain_safe
 
-        Deduplicates by ``(language, pattern_name)`` — on collision the
-        existing record's frequency and source_issues are merged.
-        """
-        all_patterns = self._load_all()
-        key = (pattern.language.lower(), pattern.pattern_name.lower())
-        merged = False
+        content = (
+            f"{pattern.pattern_name}: {pattern.description}\n"
+            f"Fix: {pattern.fix_strategy}"
+        )
+        await retain_safe(
+            self._hindsight,
+            Bank.TROUBLESHOOTING,
+            content,
+            context=f"CI troubleshooting pattern ({pattern.language})",
+            metadata={
+                "source": "troubleshooting",
+                "language": pattern.language,
+                "pattern_name": pattern.pattern_name,
+            },
+        )
 
-        for i, existing in enumerate(all_patterns):
-            if (existing.language.lower(), existing.pattern_name.lower()) == key:
-                existing.frequency += pattern.frequency
-                existing.source_issues = sorted(
-                    set(existing.source_issues) | set(pattern.source_issues)
-                )
-                all_patterns[i] = existing
-                merged = True
-                break
-
-        if not merged:
-            all_patterns.append(pattern)
-
-        self._write_all(all_patterns)
-
-    def load_patterns(
+    async def load_patterns(
         self, *, language: str | None = None, limit: int | None = 10
     ) -> list[TroubleshootingPattern]:
-        """Load patterns filtered by *language* (always includes ``"general"``).
+        """Load patterns from Hindsight, optionally filtered by *language*.
 
         Returns up to *limit* patterns sorted by frequency descending.
         Pass ``limit=None`` to return all patterns without a cap.
         """
-        all_patterns = self._load_all()
-        if language:
-            lang_lower = language.lower()
-            all_patterns = [
-                p
-                for p in all_patterns
-                if p.language.lower() == lang_lower or p.language.lower() == "general"
-            ]
-        all_patterns.sort(key=lambda p: p.frequency, reverse=True)
-        return all_patterns if limit is None else all_patterns[:limit]
+        from hindsight import Bank, recall_safe
 
-    def increment_frequency(self, language: str, pattern_name: str) -> None:
-        """Bump the frequency counter for an existing pattern."""
-        all_patterns = self._load_all()
-        key = (language.lower(), pattern_name.lower())
-        for i, existing in enumerate(all_patterns):
-            if (existing.language.lower(), existing.pattern_name.lower()) == key:
-                existing.frequency += 1
-                all_patterns[i] = existing
-                self._write_all(all_patterns)
-                return
-
-    # -- internal ---------------------------------------------------------
-
-    def _load_all(self) -> list[TroubleshootingPattern]:
-        if not self._path.exists():
-            return []
-        try:
-            lines = self._path.read_text().strip().splitlines()
-        except OSError:
-            return []
+        query = (
+            f"troubleshooting patterns for {language}"
+            if language
+            else "troubleshooting patterns"
+        )
+        recall_limit = limit or 50
+        memories = await recall_safe(
+            self._hindsight, Bank.TROUBLESHOOTING, query, limit=recall_limit
+        )
         patterns: list[TroubleshootingPattern] = []
-        for line in lines:
-            if not line.strip():
-                continue
+        for m in memories:
             try:
-                patterns.append(TroubleshootingPattern.model_validate_json(line))
+                patterns.append(TroubleshootingPattern.model_validate_json(m.content))
             except Exception:  # noqa: BLE001
                 logger.warning(
-                    "Skipping malformed troubleshooting pattern: %s", line[:80]
+                    "Skipping malformed troubleshooting pattern from Hindsight"
                 )
-        return patterns
-
-    def _write_all(self, patterns: list[TroubleshootingPattern]) -> None:
-        try:
-            import os  # noqa: PLC0415
-
-            self._memory_dir.mkdir(parents=True, exist_ok=True)
-            with self._path.open("w") as f:
-                for p in patterns:
-                    f.write(p.model_dump_json() + "\n")
-                f.flush()
-                os.fsync(f.fileno())
-        except OSError:
-            logger.warning(
-                "Could not write troubleshooting patterns to %s",
-                self._path,
-                exc_info=True,
-            )
+        if language:
+            lang_lower = language.lower()
+            patterns = [
+                p
+                for p in patterns
+                if p.language.lower() == lang_lower or p.language.lower() == "general"
+            ]
+        patterns.sort(key=lambda p: p.frequency, reverse=True)
+        return patterns if limit is None else patterns[:limit]
 
 
 # ---------------------------------------------------------------------------

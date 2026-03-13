@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from admin_tasks import _seed_context_assets
+from labels import LABEL_METADATA, Label
 from models import AuditCheckStatus
 from prep import HYDRAFLOW_LABELS, PrepResult, _list_existing_labels, ensure_labels
 from tests.conftest import SubprocessMockBuilder
@@ -134,13 +135,8 @@ class TestEnsureLabels:
     async def test_reports_already_existing_labels_in_existed_list(self) -> None:
         """Labels already in the repo are classified as 'existed'."""
         config = ConfigFactory.create()
-        # Use actual label names from config (ConfigFactory uses "test-label"
-        # for ready_label, not "hydraflow-ready")
-        existing = (
-            list(config.find_label)
-            + list(config.planner_label)
-            + list(config.ready_label)
-        )
+        # Use actual label names from the Label enum
+        existing = [Label.FIND, Label.PLAN, Label.READY]
         existing_json = json.dumps([{"name": n} for n in existing])
 
         async def side_effect(*args, **_kwargs):
@@ -161,13 +157,9 @@ class TestEnsureLabels:
         assert len(result.failed) == 0
 
     @pytest.mark.asyncio
-    async def test_uses_config_label_names(self) -> None:
-        """Custom label names from config are used for creation."""
-        config = ConfigFactory.create(
-            find_label=["my-find"],
-            planner_label=["my-plan"],
-            ready_label=["my-ready"],
-        )
+    async def test_uses_hardcoded_label_names(self) -> None:
+        """Hardcoded Label enum values are used for creation."""
+        config = ConfigFactory.create()
 
         created_labels: list[str] = []
 
@@ -188,10 +180,10 @@ class TestEnsureLabels:
         with patch("asyncio.create_subprocess_exec", side_effect=side_effect):
             result = await ensure_labels(config)
 
-        assert "my-find" in created_labels
-        assert "my-plan" in created_labels
-        assert "my-ready" in created_labels
-        assert "my-find" in result.created
+        assert Label.FIND in created_labels
+        assert Label.PLAN in created_labels
+        assert Label.READY in created_labels
+        assert Label.FIND in result.created
 
     @pytest.mark.asyncio
     async def test_dry_run_skips_creation(self) -> None:
@@ -269,9 +261,7 @@ class TestEnsureLabels:
         """All labels already present are classified as 'existed'."""
         config = ConfigFactory.create()
         # Build the list of all default label names
-        all_names = []
-        for cfg_field, _, _ in HYDRAFLOW_LABELS:
-            all_names.extend(getattr(config, cfg_field))
+        all_names = list(LABEL_METADATA.keys())
         existing_json = json.dumps([{"name": n} for n in all_names])
 
         async def side_effect(*args, **_kwargs):
@@ -1236,26 +1226,21 @@ class TestRunAudit:
 
 
 class TestContextSeed:
-    """Tests for seeding local manifest/memory assets during prep."""
+    """Tests for seeding local manifest and metrics assets during prep."""
 
-    def test_seed_creates_manifest_digest_and_metrics_cache(
-        self, tmp_path: Path
-    ) -> None:
+    def test_seed_creates_manifest_and_metrics_cache(self, tmp_path: Path) -> None:
         state_file = tmp_path / ".hydraflow" / "state.json"
         config = ConfigFactory.create(repo_root=tmp_path, state_file=state_file)
 
         log_lines = _seed_context_assets(config)
 
         manifest_path = tmp_path / ".hydraflow" / "manifest" / "manifest.md"
-        digest_path = tmp_path / ".hydraflow" / "memory" / "digest.md"
         repo_slug = config.repo.replace("/", "-") if config.repo else "unknown"
         metrics_file = state_file.parent / "metrics" / repo_slug / "snapshots.jsonl"
 
         assert manifest_path.is_file()
-        assert digest_path.is_file()
         assert metrics_file.is_file()
         assert any("Manifest seed" in line for line in log_lines)
-        assert "Seeded during prep" in digest_path.read_text()
 
     def test_seed_skipped_in_dry_run(self, tmp_path: Path) -> None:
         state_file = tmp_path / ".hydraflow" / "state.json"
@@ -1268,24 +1253,21 @@ class TestContextSeed:
         assert not (tmp_path / ".hydraflow").exists()
         assert "- Context seed skipped" in log_lines[0]
 
-    def test_seed_does_not_overwrite_existing_files(self, tmp_path: Path) -> None:
+    def test_seed_does_not_overwrite_existing_metrics(self, tmp_path: Path) -> None:
         state_file = tmp_path / ".hydraflow" / "state.json"
         config = ConfigFactory.create(repo_root=tmp_path, state_file=state_file)
         _seed_context_assets(config)
 
-        digest_path = tmp_path / ".hydraflow" / "memory" / "digest.md"
         metrics_file = (
             state_file.parent
             / "metrics"
             / config.repo.replace("/", "-")
             / "snapshots.jsonl"
         )
-        digest_path.write_text("custom digest")
         metrics_file.write_text("existing metrics line\n")
 
         _seed_context_assets(config)
 
-        assert digest_path.read_text() == "custom digest"
         assert metrics_file.read_text() == "existing metrics line\n"
 
 
