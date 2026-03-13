@@ -673,40 +673,44 @@ This closes the issue automatically. False positives waste significant human tim
                 errors.append(f"Missing required section: {section}")
 
         # --- Files to Modify must reference at least one file path ---
-        ftm_match = re.search(
+        files_to_modify_match = re.search(
             r"## Files to Modify\s*\n(.*?)(?=\n## |\Z)", plan, re.DOTALL | re.IGNORECASE
         )
-        if ftm_match:
-            ftm_body = ftm_match.group(1)
+        if files_to_modify_match:
+            files_to_modify_body = files_to_modify_match.group(1)
             # Look for path-like patterns: word/word or word.ext
-            if not re.search(r"[\w\-]+(?:/[\w\-]+)+|[\w\-]+\.[\w]+", ftm_body):
+            if not re.search(
+                r"[\w\-]+(?:/[\w\-]+)+|[\w\-]+\.[\w]+", files_to_modify_body
+            ):
                 errors.append(
                     "## Files to Modify must reference at least one file path"
                 )
 
         # --- Testing Strategy must reference at least one test file/pattern ---
-        ts_match = re.search(
+        testing_strategy_match = re.search(
             r"## Testing Strategy\s*\n(.*?)(?=\n## |\Z)",
             plan,
             re.DOTALL | re.IGNORECASE,
         )
-        if ts_match:
-            ts_body = ts_match.group(1)
-            if not re.search(r"test[\w\-]*\.[\w]+|tests/", ts_body, re.IGNORECASE):
+        if testing_strategy_match:
+            testing_strategy_body = testing_strategy_match.group(1)
+            if not re.search(
+                r"test[\w\-]*\.[\w]+|tests/", testing_strategy_body, re.IGNORECASE
+            ):
                 errors.append(
                     "## Testing Strategy must reference at least one test file or pattern"
                 )
 
         # --- Task Graph validation (full plans) ---
         if scale != "lite":
-            tg_match = re.search(
+            task_graph_match = re.search(
                 r"## Task Graph\s*\n(.*?)(?=\n## |\Z)",
                 plan,
                 re.DOTALL | re.IGNORECASE,
             )
-            if tg_match:
-                tg_body = tg_match.group(1)
-                phases = self._extract_task_graph_phases(tg_body)
+            if task_graph_match:
+                task_graph_body = task_graph_match.group(1)
+                phases = self._extract_task_graph_phases(task_graph_body)
                 if not phases:
                     errors.append(
                         "## Task Graph must contain at least one ### P{N} phase"
@@ -734,25 +738,25 @@ This closes the issue automatically. False positives waste significant human tim
                                 )
 
         # --- Implementation Steps must contain at least one actionable step ---
-        is_match = re.search(
+        impl_steps_match = re.search(
             r"## Implementation Steps\s*\n(.*?)(?=\n## |\Z)",
             plan,
             re.DOTALL | re.IGNORECASE,
         )
-        if is_match:
-            is_body = is_match.group(1)
-            step_texts = self._extract_implementation_step_texts(is_body)
-            if not step_texts:
+        if impl_steps_match:
+            impl_steps_body = impl_steps_match.group(1)
+            impl_step_texts = self._extract_implementation_step_texts(impl_steps_body)
+            if not impl_step_texts:
                 errors.append(
                     "## Implementation Steps must include at least one actionable step"
                 )
             else:
-                if scale != "lite" and len(step_texts) < 2:
+                if scale != "lite" and len(impl_step_texts) < 2:
                     errors.append(
                         "## Implementation Steps must include at least 2 steps for full plans"
                     )
                 shallow_steps = [
-                    s for s in step_texts if len(re.findall(r"\b\w+\b", s)) < 3
+                    s for s in impl_step_texts if len(re.findall(r"\b\w+\b", s)) < 3
                 ]
                 if shallow_steps:
                     errors.append(
@@ -765,7 +769,7 @@ This closes the issue automatically. False positives waste significant human tim
                             r"[\w\-]+(?:/[\w\-]+)+|[\w\-]+\.[\w]+|`[^`]+`|\w+\(",
                             s,
                         )
-                        for s in step_texts
+                        for s in impl_step_texts
                     )
                     if not has_concrete_target:
                         errors.append(
@@ -816,12 +820,14 @@ This closes the issue automatically. False positives waste significant human tim
             section_body,
             re.MULTILINE | re.IGNORECASE,
         )
-        step_texts = [s.strip() for s in list_steps]
-        step_texts.extend((s1 or s2).strip() for s1, s2 in heading_steps)
-        return [s for s in step_texts if s]
+        impl_step_texts = [s.strip() for s in list_steps]
+        impl_step_texts.extend((s1 or s2).strip() for s1, s2 in heading_steps)
+        return [s for s in impl_step_texts if s]
 
     # Regex for task graph phase headers: ### P1 — Name or ### P1 - Name
-    _PHASE_HEADER_RE = re.compile(r"^###\s+P(\d+)\s*[\u2014\-]+\s*(.+)$", re.MULTILINE)
+    _TASK_GRAPH_PHASE_RE = re.compile(
+        r"^###\s+P(\d+)\s*[\u2014\-]+\s*(.+)$", re.MULTILINE
+    )
 
     def _extract_task_graph_phases(self, section_body: str) -> list[dict[str, Any]]:
         """Extract structured phases from a Task Graph section body.
@@ -829,7 +835,7 @@ This closes the issue automatically. False positives waste significant human tim
         Returns a list of dicts with keys: ``id``, ``name``, ``files``,
         ``tests``, ``depends_on``.
         """
-        headers = list(self._PHASE_HEADER_RE.finditer(section_body))
+        headers = list(self._TASK_GRAPH_PHASE_RE.finditer(section_body))
         if not headers:
             return []
 
@@ -897,13 +903,13 @@ This closes the issue automatically. False positives waste significant human tim
         score = 0
 
         # --- Task Graph scoring (full plans) ---
-        tg_match = re.search(
+        task_graph_match = re.search(
             r"## Task Graph\s*\n(.*?)(?=\n## |\Z)",
             plan,
             re.DOTALL | re.IGNORECASE,
         )
-        if tg_match and scale != "lite":
-            phases = self._extract_task_graph_phases(tg_match.group(1))
+        if task_graph_match and scale != "lite":
+            phases = self._extract_task_graph_phases(task_graph_match.group(1))
             if phases:
                 score += 20  # Has phases
                 if len(phases) >= 2:
@@ -923,66 +929,70 @@ This closes the issue automatically. False positives waste significant human tim
 
         # --- Implementation Steps scoring (lite plans only, or fallback when
         #     no Task Graph phases were found) ---
-        tg_scored = (
-            tg_match
+        task_graph_already_scored = (
+            task_graph_match
             and scale != "lite"
             and bool(
-                self._extract_task_graph_phases(tg_match.group(1)) if tg_match else []
+                self._extract_task_graph_phases(task_graph_match.group(1))
+                if task_graph_match
+                else []
             )
         )
-        is_match = re.search(
+        impl_steps_match = re.search(
             r"## Implementation Steps\s*\n(.*?)(?=\n## |\Z)",
             plan,
             re.DOTALL | re.IGNORECASE,
         )
-        step_texts = (
-            self._extract_implementation_step_texts(is_match.group(1))
-            if is_match
+        impl_step_texts = (
+            self._extract_implementation_step_texts(impl_steps_match.group(1))
+            if impl_steps_match
             else []
         )
 
-        if not tg_scored and step_texts:
+        if not task_graph_already_scored and impl_step_texts:
             score += 20
-            if scale != "lite" and len(step_texts) >= 2:
+            if scale != "lite" and len(impl_step_texts) >= 2:
                 score += 15
-            elif scale == "lite" and step_texts:
+            elif scale == "lite" and impl_step_texts:
                 score += 10
 
             has_concrete_target = any(
                 re.search(r"[\w\-]+(?:/[\w\-]+)+|[\w\-]+\.[\w]+|`[^`]+`|\w+\(", s)
-                for s in step_texts
+                for s in impl_step_texts
             )
             if has_concrete_target:
                 score += 25
 
-            if step_texts:
+            if impl_step_texts:
                 shallow_steps = [
-                    s for s in step_texts if len(re.findall(r"\b\w+\b", s)) < 3
+                    s for s in impl_step_texts if len(re.findall(r"\b\w+\b", s)) < 3
                 ]
                 if not shallow_steps:
                     score += 10
                 avg_words = sum(
-                    len(re.findall(r"\b\w+\b", s)) for s in step_texts
-                ) / len(step_texts)
+                    len(re.findall(r"\b\w+\b", s)) for s in impl_step_texts
+                ) / len(impl_step_texts)
                 if avg_words >= 6:
                     score += 10
 
-        fd_match = re.search(
+        file_delta_match = re.search(
             r"## File Delta\s*\n(.*?)(?=\n## |\Z)", plan, re.DOTALL | re.IGNORECASE
         )
-        if fd_match and re.search(
-            r"^\s*(MODIFIED|ADDED|REMOVED):\s+\S", fd_match.group(1), re.MULTILINE
+        if file_delta_match and re.search(
+            r"^\s*(MODIFIED|ADDED|REMOVED):\s+\S",
+            file_delta_match.group(1),
+            re.MULTILINE,
         ):
             score += 10
 
-        ts_match = re.search(
+        testing_strategy_match = re.search(
             r"## Testing Strategy\s*\n(.*?)(?=\n## |\Z)",
             plan,
             re.DOTALL | re.IGNORECASE,
         )
-        if ts_match and re.search(
+        if testing_strategy_match and re.search(
             r"test[\w\-]*\.[\w]+|tests/|pytest|unit test|integration test",
-            ts_match.group(1),
+            testing_strategy_match.group(1),
             re.IGNORECASE,
         ):
             score += 10
@@ -1006,14 +1016,14 @@ This closes the issue automatically. False positives waste significant human tim
         warnings: list[str] = []
 
         # --- Simplicity gate: warn if > max_new_files_warning new files ---
-        nf_match = re.search(
+        new_files_match = re.search(
             r"## New Files\s*\n(.*?)(?=\n## |\Z)", plan, re.DOTALL | re.IGNORECASE
         )
-        if nf_match:
-            nf_body = nf_match.group(1)
+        if new_files_match:
+            new_files_body = new_files_match.group(1)
             # Count path-like entries (lines starting with - or * followed by path-like text)
             new_file_entries = re.findall(
-                r"[\w\-]+(?:/[\w\-]+)+\.[\w]+|[\w\-]+\.[\w]+", nf_body
+                r"[\w\-]+(?:/[\w\-]+)+\.[\w]+|[\w\-]+\.[\w]+", new_files_body
             )
             threshold = self._config.max_new_files_warning
             if len(new_file_entries) > threshold:
@@ -1023,16 +1033,20 @@ This closes the issue automatically. False positives waste significant human tim
                 )
 
         # --- Testing gate: reject if Testing Strategy is empty or deferred ---
-        ts_match = re.search(
+        testing_strategy_match = re.search(
             r"## Testing Strategy\s*\n(.*?)(?=\n## |\Z)",
             plan,
             re.DOTALL | re.IGNORECASE,
         )
-        if ts_match:
-            ts_body = ts_match.group(1).strip()
-            if not ts_body or ts_body.lower() in ("none", "n/a", "-"):
+        if testing_strategy_match:
+            testing_strategy_body = testing_strategy_match.group(1).strip()
+            if not testing_strategy_body or testing_strategy_body.lower() in (
+                "none",
+                "n/a",
+                "-",
+            ):
                 blocking.append("Testing gate: Testing Strategy section is empty")
-            elif self._TEST_LATER_RE.search(ts_body):
+            elif self._TEST_LATER_RE.search(testing_strategy_body):
                 blocking.append(
                     "Testing gate: Testing Strategy defers tests (e.g. 'later', 'TBD')"
                 )
