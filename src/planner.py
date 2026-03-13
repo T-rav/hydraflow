@@ -6,6 +6,7 @@ import logging
 import re
 import time
 from pathlib import Path
+from typing import Any
 
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
@@ -550,7 +551,9 @@ This closes the issue automatically. False positives waste significant human tim
         return validate_plan(issue, plan, scale, config=self._config)
 
     # Regex for task graph phase headers: ### P1 — Name or ### P1 - Name
-    _PHASE_HEADER_RE = re.compile(r"^###\s+P(\d+)\s*[\u2014\-]+\s*(.+)$", re.MULTILINE)
+    _TASK_GRAPH_PHASE_RE = re.compile(
+        r"^###\s+P(\d+)\s*[\u2014\-]+\s*(.+)$", re.MULTILINE
+    )
 
     def _extract_task_graph_phases(self, section_body: str) -> list[dict[str, Any]]:
         """Extract structured phases from a Task Graph section body.
@@ -558,7 +561,7 @@ This closes the issue automatically. False positives waste significant human tim
         Returns a list of dicts with keys: ``id``, ``name``, ``files``,
         ``tests``, ``depends_on``.
         """
-        headers = list(self._PHASE_HEADER_RE.finditer(section_body))
+        headers = list(self._TASK_GRAPH_PHASE_RE.finditer(section_body))
         if not headers:
             return []
 
