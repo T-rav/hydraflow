@@ -22,7 +22,7 @@ from review_insights import (
 )
 from runner_constants import MEMORY_SUGGESTION_PROMPT
 from subprocess_util import CreditExhaustedError
-from task_graph import has_task_graph
+from task_graph import extract_phases, has_task_graph, topological_sort
 from test_adequacy import build_test_adequacy_prompt, parse_test_adequacy_result
 
 if TYPE_CHECKING:
@@ -397,46 +397,76 @@ Run through this checklist before your final commit:
             + f"\n[Comment truncated from {len(raw):,} chars]"
         )
 
-    @staticmethod
-    def _build_tdd_subagent_plan(plan_comment: str) -> str:
+    def _build_tdd_subagent_plan(self, plan_comment: str) -> str:
         """Build a Task Graph plan that instructs the agent to use sub-agents.
 
-        When TDD isolation is enabled, each phase is executed via three
-        sub-agents launched with the Agent tool:
-          1. **RED** — writes failing tests only (no source changes)
-          2. **GREEN** — implements minimum code to pass tests (no test changes)
-          3. **REFACTOR** — runs the full test suite and fixes any failures
+        Parses phases from the plan, topologically sorts them, and builds
+        concrete per-phase RED/GREEN/REFACTOR sub-agent instructions with
+        the actual files, tests, and dependency info from each phase.
         """
-        return (
+        phases = topological_sort(extract_phases(plan_comment))
+        max_fix = self._config.tdd_max_remediation_loops
+
+        header = (
             "\n\n## Implementation Plan — TDD Sub-Agent Isolation\n\n"
-            "This plan uses a **Task Graph** with ordered phases. You MUST use "
-            "the **Agent tool** to launch a separate sub-agent for each TDD step.\n\n"
-            "### Execution Protocol\n\n"
-            "For each phase (P1, P2, ... in dependency order):\n\n"
-            "1. **RED sub-agent** — Launch a sub-agent with this instruction:\n"
-            '   > "You are the RED agent for phase {id}. Write FAILING tests that '
-            "encode the behavioral specs listed below. ONLY create or modify files "
-            "in `tests/`. Do NOT touch any source/implementation files. Commit your "
-            'test files when done."\n'
-            "   Pass the phase's **Tests** specs as context. Wait for it to complete.\n\n"
-            "2. **GREEN sub-agent** — Launch a sub-agent with this instruction:\n"
-            '   > "You are the GREEN agent for phase {id}. Implement the MINIMUM code '
-            "to make all failing tests pass. ONLY modify source/implementation files "
-            '(NOT test files). Commit your changes when done."\n'
-            "   Pass the phase's **Files** list as context. Wait for it to complete.\n\n"
-            "3. **REFACTOR sub-agent** — Launch a sub-agent with this instruction:\n"
-            '   > "Run `make test` (or the project test command). If any tests fail, '
-            "fix the implementation code (not tests) to make them pass. Repeat until "
-            'the full suite is green. Commit fixes."\n'
-            "   Wait for it to complete before moving to the next phase.\n\n"
-            "### Rules\n\n"
-            "- Execute phases in dependency order (P1 before P2, etc.)\n"
-            "- Do NOT skip ahead — each phase's REFACTOR must pass before starting "
-            "the next phase's RED\n"
-            "- Each sub-agent runs in the same worktree and sees prior phases' commits\n"
-            "- If a sub-agent fails, report the failure — do NOT retry silently\n\n"
-            f"{plan_comment}"
+            "This plan uses a **Task Graph**. For each phase below, launch "
+            "**three sub-agents** using the **Agent tool** in strict sequence.\n\n"
         )
+
+        rules = (
+            "### Rules\n\n"
+            "- Complete each phase fully (RED → GREEN → REFACTOR) before "
+            "starting the next\n"
+            "- Each sub-agent runs in the same worktree and sees prior commits\n"
+            "- If a sub-agent fails, report the failure with details — do NOT "
+            "retry silently\n"
+            f"- REFACTOR sub-agent may attempt up to **{max_fix}** fix cycles "
+            "before reporting failure\n\n"
+        )
+
+        phase_sections: list[str] = []
+        for i, phase in enumerate(phases, 1):
+            files_str = ", ".join(f"`{f}`" for f in phase.files) or "(none listed)"
+            tests_str = (
+                "\n".join(f"  - {t}" for t in phase.tests) or "  - (none listed)"
+            )
+            deps_str = ", ".join(phase.depends_on) or "none"
+
+            phase_sections.append(
+                f"### Phase {i}: {phase.name}\n\n"
+                f"**Files:** {files_str}  \n"
+                f"**Depends on:** {deps_str}\n\n"
+                f"**1. RED sub-agent** — Launch with prompt:\n"
+                f'> "Write FAILING tests for {phase.name}. '
+                f"Test these behavioral specs:\n{tests_str}\n"
+                f"ONLY create/modify files in `tests/`. Do NOT touch source files. "
+                f'Commit when done."\n\n'
+                f"**2. GREEN sub-agent** — Launch with prompt:\n"
+                f'> "Implement the MINIMUM code to make all failing tests pass '
+                f"for {phase.name}. Modify these files: {files_str}. "
+                f"ONLY change source/implementation files (NOT test files). "
+                f'Commit when done."\n\n'
+                f"**3. REFACTOR sub-agent** — Launch with prompt:\n"
+                f'> "Run `make test`. If tests fail, fix implementation code '
+                f"(not tests). Repeat until the full suite passes (max "
+                f'{max_fix} attempts). Commit fixes."\n\n'
+            )
+
+        # If parsing found no phases, include the raw plan as fallback
+        if not phase_sections:
+            return (
+                "\n\n## Implementation Plan\n\n"
+                "Follow this plan closely. It uses a **Task Graph** with "
+                "ordered phases.\n"
+                "Execute phases in order (P1 before P2, etc.). For each phase:\n"
+                "1. Write tests that encode the behavioral specs listed.\n"
+                "2. Run tests — they should FAIL.\n"
+                "3. Implement the minimum code to make tests pass.\n"
+                "4. Run the full test suite before moving to the next phase.\n\n"
+                f"{plan_comment}"
+            )
+
+        return header + rules + "\n".join(phase_sections)
 
     def _build_prompt_with_stats(
         self, issue: Task, review_feedback: str = "", prior_failure: str = ""

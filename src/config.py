@@ -554,7 +554,7 @@ class HydraFlowConfig(BaseModel):
     tdd_max_remediation_loops: int = Field(
         default=4,
         ge=0,
-        description="Max remediation attempts per TDD phase before falling back to single-agent",
+        description="Max fix attempts per TDD REFACTOR sub-agent before reporting failure",
     )
     triage_tool: Literal["claude", "codex", "pi"] = Field(
         default="claude",
