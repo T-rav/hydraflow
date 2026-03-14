@@ -1769,12 +1769,11 @@ class TestBuildHitlContextNoneBody:
                 (
                     r.endpoint
                     for r in router2.routes
-                    if getattr(r, "path", "")
-                    == "/api/hitl/{issue_number}/generate-summary"
+                    if getattr(r, "path", "") == "/api/hitl/{issue_number}/summary"
                 ),
                 None,
             )
-            assert endpoint is not None, "generate-summary endpoint not found"
+            assert endpoint is not None, "summary endpoint not found"
 
             state.set_hitl_cause(99, "test-cause")
             resp = await endpoint(99)
@@ -1782,7 +1781,7 @@ class TestBuildHitlContextNoneBody:
         import json
 
         payload = json.loads(resp.body)
-        assert payload.get("status") == "ok"
+        assert "summary" in payload
         # The context should have been built without error
         assert len(captured_context) == 1
         assert "Issue #99" in captured_context[0]
