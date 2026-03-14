@@ -251,6 +251,7 @@ export function OutcomesPanel() {
   const [columnOrder, setColumnOrder] = useState(DEFAULT_COLUMN_ORDER)
   const [sortColumn, setSortColumn] = useState(null)
   const [sortDirection, setSortDirection] = useState(null)
+  const [dragOverColumn, setDragOverColumn] = useState(null)
   const dragColumnRef = useRef(null)
 
   const gridColumns = useMemo(() => buildGridColumns(columnOrder), [columnOrder])
@@ -273,13 +274,15 @@ export function OutcomesPanel() {
     e.dataTransfer.setData('text/plain', key)
   }, [])
 
-  const handleDragOver = useCallback((e) => {
+  const handleDragOver = useCallback((e, targetKey) => {
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
+    setDragOverColumn(targetKey)
   }, [])
 
   const handleDrop = useCallback((e, targetKey) => {
     e.preventDefault()
+    setDragOverColumn(null)
     const sourceKey = dragColumnRef.current
     dragColumnRef.current = null
     if (!sourceKey || sourceKey === targetKey) return
@@ -296,6 +299,7 @@ export function OutcomesPanel() {
 
   const handleDragEnd = useCallback(() => {
     dragColumnRef.current = null
+    setDragOverColumn(null)
   }, [])
 
   const loading = !issueHistory
@@ -708,15 +712,18 @@ export function OutcomesPanel() {
           {columnOrder.map(key => {
             const col = COLUMN_MAP[key]
             const isActive = sortColumn === key
-            const cellStyle = col.align === 'right' ? styles.headerCellRight : styles.headerCell
+            const isDragTarget = dragOverColumn === key
+            const headerStyle = HEADER_CELL_VARIANTS[`${col.align}:${isActive}:${isDragTarget}`]
             return (
               <span
                 key={key}
-                style={{ ...cellStyle, ...styles.headerDraggable, ...(isActive ? styles.headerActive : {}) }}
+                style={headerStyle}
                 draggable
+                tabIndex={0}
                 onClick={() => handleHeaderClick(key)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleHeaderClick(key) } }}
                 onDragStart={(e) => handleDragStart(e, key)}
-                onDragOver={handleDragOver}
+                onDragOver={(e) => handleDragOver(e, key)}
                 onDrop={(e) => handleDrop(e, key)}
                 onDragEnd={handleDragEnd}
                 role="columnheader"
@@ -956,6 +963,11 @@ const styles = {
     transition: 'color 0.15s ease',
   },
   headerActive: {
+    color: theme.accent,
+  },
+  headerDropTarget: {
+    background: theme.accentSubtle,
+    borderBottom: `2px solid ${theme.accent}`,
     color: theme.accent,
   },
   sortArrow: {
@@ -1227,3 +1239,23 @@ const buttonActiveStyle = {
   borderColor: theme.accent,
   background: theme.accentSubtle,
 }
+
+// Pre-computed header cell style variants — keyed by `${align}:${isActive}:${isDragTarget}`
+// to avoid object spread in render loops (CLAUDE.md style consistency rule)
+const HEADER_CELL_VARIANTS = (() => {
+  const variants = {}
+  for (const align of ['left', 'right']) {
+    const base = align === 'right' ? styles.headerCellRight : styles.headerCell
+    for (const active of [false, true]) {
+      for (const dropTarget of [false, true]) {
+        variants[`${align}:${active}:${dropTarget}`] = {
+          ...base,
+          ...styles.headerDraggable,
+          ...(active ? styles.headerActive : {}),
+          ...(dropTarget ? styles.headerDropTarget : {}),
+        }
+      }
+    }
+  }
+  return variants
+})()
