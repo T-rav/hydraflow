@@ -874,56 +874,79 @@ class EpicManager:
         elif is_failed:
             child_info.status = EpicChildStatus.FAILED
 
-        # Fetch live data from GitHub
+        await self._enrich_from_github(child_info, child_num, fixed_label)
+        await self._enrich_from_branch(child_info, child_num)
+
+        return child_info
+
+    async def _enrich_from_github(
+        self,
+        child_info: EpicChildInfo,
+        child_num: int,
+        fixed_label: str,
+    ) -> None:
+        """Enrich *child_info* with live GitHub issue data."""
         try:
             gh_issue = await self._fetcher.fetch_issue_by_number(child_num)
-            if gh_issue is not None:
-                child_info.title = gh_issue.title
-                if fixed_label and fixed_label in gh_issue.labels:
-                    child_info.state = EpicChildState.CLOSED
-                # Derive stage from labels if not already set
-                if not child_info.current_stage:
-                    stage = _stage_from_labels(gh_issue.labels, self._config)
-                    child_info.stage = stage
-                    child_info.current_stage = stage
-                    if stage in ("implement", "review"):
-                        child_info.status = EpicChildStatus.RUNNING
-                    elif stage == "merged":
-                        child_info.status = EpicChildStatus.DONE
-                    elif stage:
-                        child_info.status = EpicChildStatus.QUEUED
         except RuntimeError:
             logger.debug(
                 "Could not fetch child #%d for epic detail", child_num, exc_info=True
             )
+            return
 
-        # Enrich with branch/PR data from state
+        if gh_issue is None:
+            return
+
+        child_info.title = gh_issue.title
+        if fixed_label and fixed_label in gh_issue.labels:
+            child_info.state = EpicChildState.CLOSED
+
+        if child_info.current_stage:
+            return
+
+        stage = _stage_from_labels(gh_issue.labels, self._config)
+        child_info.stage = stage
+        child_info.current_stage = stage
+        if stage in ("implement", "review"):
+            child_info.status = EpicChildStatus.RUNNING
+        elif stage == "merged":
+            child_info.status = EpicChildStatus.DONE
+        elif stage:
+            child_info.status = EpicChildStatus.QUEUED
+
+    async def _enrich_from_branch(
+        self,
+        child_info: EpicChildInfo,
+        child_num: int,
+    ) -> None:
+        """Enrich *child_info* with branch and PR data from state."""
         branch = self._state.get_branch(child_num)
-        if branch:
-            child_info.branch = branch
-            try:
-                pr_info = await self._prs.find_open_pr_for_branch(
-                    branch, issue_number=child_num
-                )
-                if pr_info is not None:
-                    child_info.pr_number = pr_info.number
-                    child_info.pr_url = pr_info.url
-                    child_info.pr_state = (
-                        EpicChildPRState.DRAFT
-                        if pr_info.draft
-                        else EpicChildPRState.OPEN
-                    )
-                    # Fetch CI and review status
-                    await self._enrich_pr_status(child_info, pr_info.number)
-            except RuntimeError:
-                logger.debug(
-                    "Could not fetch PR info for child #%d branch %s",
-                    child_num,
-                    branch,
-                    exc_info=True,
-                )
+        if not branch:
+            return
 
-        return child_info
+        child_info.branch = branch
+        try:
+            pr_info = await self._prs.find_open_pr_for_branch(
+                branch, issue_number=child_num
+            )
+        except RuntimeError:
+            logger.debug(
+                "Could not fetch PR info for child #%d branch %s",
+                child_num,
+                branch,
+                exc_info=True,
+            )
+            return
+
+        if pr_info is None:
+            return
+
+        child_info.pr_number = pr_info.number
+        child_info.pr_url = pr_info.url
+        child_info.pr_state = (
+            EpicChildPRState.DRAFT if pr_info.draft else EpicChildPRState.OPEN
+        )
+        await self._enrich_pr_status(child_info, pr_info.number)
 
     async def _enrich_pr_status(
         self, child_info: EpicChildInfo, pr_number: int

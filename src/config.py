@@ -1698,94 +1698,101 @@ def _get_env(key: str) -> str | None:
     return None
 
 
+def _validate_field_bounds(
+    field: str,
+    env_key: str,
+    value: int | float,
+    *,
+    warn_only: bool = False,
+) -> bool:
+    """Check *value* against ge/le constraints from the field's Pydantic metadata.
+
+    When *warn_only* is ``False`` (default), raises ``ValueError`` on
+    constraint violations.  When ``True``, logs a warning and returns
+    ``False`` so callers can skip the value without aborting.
+
+    Returns ``True`` if the value passes all bounds.
+    """
+    for constraint in HydraFlowConfig.model_fields[field].metadata:
+        ge = getattr(constraint, "ge", None)
+        le = getattr(constraint, "le", None)
+        if ge is not None and value < ge:
+            if warn_only:
+                logger.warning(
+                    "%s=%s is below minimum %s; ignoring env override",
+                    env_key,
+                    value,
+                    ge,
+                )
+                return False
+            raise ValueError(f"{env_key}={value} is below minimum {ge}")
+        if le is not None and value > le:
+            if warn_only:
+                logger.warning(
+                    "%s=%s is above maximum %s; ignoring env override",
+                    env_key,
+                    value,
+                    le,
+                )
+                return False
+            raise ValueError(f"{env_key}={value} is above maximum {le}")
+    return True
+
+
 def _apply_env_overrides(config: HydraFlowConfig) -> None:
     """Apply all data-driven and special-case env var overrides."""
 
     # Data-driven env var overrides (int fields)
     for field, env_key, default in _ENV_INT_OVERRIDES:
-        if getattr(config, field) == default:
-            env_val = _get_env(env_key)
-            if env_val is not None:
-                with contextlib.suppress(ValueError):
-                    new_val = int(env_val)
-                    for constraint in HydraFlowConfig.model_fields[field].metadata:
-                        ge = getattr(constraint, "ge", None)
-                        le = getattr(constraint, "le", None)
-                        if ge is not None and new_val < ge:
-                            raise ValueError(
-                                f"{env_key}={new_val} is below minimum {ge}"
-                            )
-                        if le is not None and new_val > le:
-                            raise ValueError(
-                                f"{env_key}={new_val} is above maximum {le}"
-                            )
-                    object.__setattr__(config, field, new_val)
+        if getattr(config, field) != default:
+            continue
+        env_val = _get_env(env_key)
+        if env_val is None:
+            continue
+        with contextlib.suppress(ValueError):
+            new_val = int(env_val)
+            _validate_field_bounds(field, env_key, new_val)
+            object.__setattr__(config, field, new_val)
 
     # Data-driven env var overrides (str fields)
     for field, env_key, default in _ENV_STR_OVERRIDES:
         current = getattr(config, field)
-        if str(current) == default:
-            env_val = _get_env(env_key)
-            if env_val is not None:
-                # Preserve the field's type (e.g. Path vs str)
-                field_type = type(current)
-                new_val = field_type(env_val) if field_type is not str else env_val
-                object.__setattr__(config, field, new_val)
+        if str(current) != default:
+            continue
+        env_val = _get_env(env_key)
+        if env_val is None:
+            continue
+        # Preserve the field's type (e.g. Path vs str)
+        field_type = type(current)
+        new_val = field_type(env_val) if field_type is not str else env_val
+        object.__setattr__(config, field, new_val)
 
     # Data-driven env var overrides (float fields)
     for field, env_key, default in _ENV_FLOAT_OVERRIDES:
-        if getattr(config, field) == default:
-            env_val = _get_env(env_key)
-            if env_val is not None:
-                with contextlib.suppress(ValueError):
-                    new_val = float(env_val)
-                    for constraint in HydraFlowConfig.model_fields[field].metadata:
-                        ge = getattr(constraint, "ge", None)
-                        le = getattr(constraint, "le", None)
-                        if ge is not None and new_val < ge:
-                            raise ValueError(
-                                f"{env_key}={new_val} is below minimum {ge}"
-                            )
-                        if le is not None and new_val > le:
-                            raise ValueError(
-                                f"{env_key}={new_val} is above maximum {le}"
-                            )
-                    object.__setattr__(config, field, new_val)
+        if getattr(config, field) != default:
+            continue
+        env_val = _get_env(env_key)
+        if env_val is None:
+            continue
+        with contextlib.suppress(ValueError):
+            new_val = float(env_val)
+            _validate_field_bounds(field, env_key, new_val)
+            object.__setattr__(config, field, new_val)
 
     # Ratio float overrides ([0, 1] bounds) — parse failures are silently ignored
     # but out-of-bounds values emit a warning so operators know their config was rejected.
     for field, env_key, default in _ENV_FLOAT_RATIO_OVERRIDES:
-        if getattr(config, field) == default:
-            env_val = _get_env(env_key)
-            if env_val is not None:
-                try:
-                    new_val = float(env_val)
-                except ValueError:
-                    continue
-                in_bounds = True
-                for constraint in HydraFlowConfig.model_fields[field].metadata:
-                    ge = getattr(constraint, "ge", None)
-                    le = getattr(constraint, "le", None)
-                    if ge is not None and new_val < ge:
-                        logger.warning(
-                            "%s=%s is below minimum %s; ignoring env override",
-                            env_key,
-                            new_val,
-                            ge,
-                        )
-                        in_bounds = False
-                        break
-                    if le is not None and new_val > le:
-                        logger.warning(
-                            "%s=%s is above maximum %s; ignoring env override",
-                            env_key,
-                            new_val,
-                            le,
-                        )
-                        in_bounds = False
-                        break
-                if in_bounds:
-                    object.__setattr__(config, field, new_val)
+        if getattr(config, field) != default:
+            continue
+        env_val = _get_env(env_key)
+        if env_val is None:
+            continue
+        try:
+            new_val = float(env_val)
+        except ValueError:
+            continue
+        if _validate_field_bounds(field, env_key, new_val, warn_only=True):
+            object.__setattr__(config, field, new_val)
 
     # Cross-field validation: visual_fail_threshold must remain > visual_warn_threshold
     # after env overrides (the Pydantic field_validator only fires at model construction).

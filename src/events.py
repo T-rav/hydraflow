@@ -152,6 +152,35 @@ class EventLog:
         line = event.model_dump_json()
         await asyncio.to_thread(self._append_sync, line)
 
+    @staticmethod
+    def _parse_event_line(
+        stripped: str,
+        line_num: int,
+        path: Path,
+        since: datetime | None,
+    ) -> HydraFlowEvent | None:
+        """Parse a single JSONL line into an event, returning ``None`` to skip."""
+        try:
+            event = HydraFlowEvent.model_validate_json(stripped)
+        except ValidationError:
+            logger.warning(
+                "Skipping corrupt event log line %d in %s",
+                line_num,
+                path,
+                exc_info=True,
+            )
+            return None
+
+        if since is not None:
+            try:
+                ts = datetime.fromisoformat(event.timestamp)
+                if ts < since:
+                    return None
+            except (ValueError, TypeError):
+                pass  # Keep events with unparseable timestamps
+
+        return event
+
     def _load_sync(
         self,
         since: datetime | None = None,
@@ -168,26 +197,11 @@ class EventLog:
                     stripped = raw_line.strip()
                     if not stripped:
                         continue
-                    try:
-                        event = HydraFlowEvent.model_validate_json(stripped)
-                    except ValidationError:
-                        logger.warning(
-                            "Skipping corrupt event log line %d in %s",
-                            line_num,
-                            self._path,
-                            exc_info=True,
-                        )
-                        continue
-
-                    if since is not None:
-                        try:
-                            ts = datetime.fromisoformat(event.timestamp)
-                            if ts < since:
-                                continue
-                        except (ValueError, TypeError):
-                            pass  # Keep events with unparseable timestamps
-
-                    events.append(event)
+                    event = self._parse_event_line(
+                        stripped, line_num, self._path, since
+                    )
+                    if event is not None:
+                        events.append(event)
         except OSError:
             logger.warning(
                 "Could not read event log %s",
@@ -196,7 +210,6 @@ class EventLog:
             )
             return []
 
-        # Return only the last max_events
         if len(events) > max_events:
             events = events[-max_events:]
         return events

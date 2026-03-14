@@ -273,44 +273,41 @@ def _event_issue_number(data: Mapping[str, Any]) -> int | None:
     return None
 
 
-def _normalise_event_status(
+_DONE_STATUS_MAP: dict[EventType, str] = {
+    EventType.WORKER_UPDATE: "implemented",
+    EventType.PLANNER_UPDATE: "planned",
+    EventType.TRIAGE_UPDATE: "triaged",
+    EventType.REVIEW_UPDATE: "reviewed",
+}
+
+# Derived automatically so new entries in _DONE_STATUS_MAP are never missed.
+_STATUS_DRIVEN_TYPES: frozenset[EventType] = frozenset(_DONE_STATUS_MAP)
+
+
+def _normalise_event_status(  # noqa: PLR0911
     event_type: EventType, data: Mapping[str, Any]
 ) -> str | None:
     """Map an event type and its data to a normalised history status string."""
-    status = str(data.get("status", "")).lower()
-    result: str | None = None
     if event_type == EventType.MERGE_UPDATE:
-        result = "merged" if status == "merged" else None
-    elif event_type == EventType.HITL_ESCALATION:
-        result = "hitl"
-    elif event_type == EventType.HITL_UPDATE:
-        result = "reviewed" if status == "resolved" else "hitl"
-    elif event_type == EventType.REVIEW_UPDATE:
-        if status == "done":
-            result = "reviewed"
-        elif status == "failed":
-            result = "failed"
-        else:
-            result = "active"
-    elif event_type in {
-        EventType.WORKER_UPDATE,
-        EventType.PLANNER_UPDATE,
-        EventType.TRIAGE_UPDATE,
-    }:
-        if status == "done":
-            done_map = {
-                EventType.WORKER_UPDATE: "implemented",
-                EventType.PLANNER_UPDATE: "planned",
-                EventType.TRIAGE_UPDATE: "triaged",
-            }
-            result = done_map.get(event_type, "active")
-        elif status == "failed":
-            result = "failed"
-        else:
-            result = "active"
-    elif event_type == EventType.PR_CREATED:
-        result = "in_review"
-    return result
+        return "merged" if str(data.get("status", "")).lower() == "merged" else None
+    if event_type == EventType.HITL_ESCALATION:
+        return "hitl"
+    if event_type == EventType.HITL_UPDATE:
+        return (
+            "reviewed" if str(data.get("status", "")).lower() == "resolved" else "hitl"
+        )
+    if event_type == EventType.PR_CREATED:
+        return "in_review"
+
+    if event_type not in _STATUS_DRIVEN_TYPES:
+        return None
+
+    status = str(data.get("status", "")).lower()
+    if status == "done":
+        return _DONE_STATUS_MAP.get(event_type, "active")
+    if status == "failed":
+        return "failed"
+    return "active"
 
 
 _HISTORY_STATUSES = {
@@ -3360,55 +3357,50 @@ def create_router(
         )
 
     @router.post("/api/repos")
-    async def ensure_repo(
+    async def ensure_repo(  # noqa: PLR0911
         req: dict[str, Any] | None = Body(default=None),
         req_query: str | None = Query(default=None, alias="req"),
         slug: str | None = Query(default=None),
         repo: RepoSlugParam = None,
     ) -> JSONResponse:
         """Ensure a repo is registered with the supervisor by slug."""
-        error_payload: tuple[str, int] | None = None
         if supervisor_client is None:
-            error_payload = ("supervisor unavailable", 503)
-        else:
-            target_slug = _extract_repo_slug(req, req_query, slug, repo)
-            if not target_slug:
-                error_payload = ("slug required", 400)
-            else:
-                try:
-                    repos = await _call_supervisor(supervisor_client.list_repos)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("Supervisor list_repos failed: %s", exc)
-                    error_payload = ("Supervisor unavailable", 503)
-                else:
-                    match = _find_repo_match(target_slug, repos)
-                    if not match:
-                        error_payload = (
-                            f"repo '{target_slug}' not found",
-                            404,
-                        )
-                    else:
-                        matched_slug = match.get("slug") or target_slug
-                        path = match.get("path")
-                        if not path:
-                            error_payload = (f"repo '{matched_slug}' missing path", 500)
-                        else:
-                            try:
-                                info = await _call_supervisor(
-                                    supervisor_client.add_repo,
-                                    Path(path),
-                                    matched_slug,
-                                )
-                            except Exception as exc:  # noqa: BLE001
-                                logger.warning("Supervisor add_repo failed: %s", exc)
-                                error_payload = ("Failed to add repo", 500)
-                            else:
-                                return JSONResponse(info)
+            return JSONResponse({"error": "supervisor unavailable"}, status_code=503)
 
-        if error_payload:
-            message, status_code = error_payload
-            return JSONResponse({"error": message}, status_code=status_code)
-        return JSONResponse({"status": "ok"})
+        target_slug = _extract_repo_slug(req, req_query, slug, repo)
+        if not target_slug:
+            return JSONResponse({"error": "slug required"}, status_code=400)
+
+        try:
+            repos = await _call_supervisor(supervisor_client.list_repos)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Supervisor list_repos failed: %s", exc)
+            return JSONResponse({"error": "Supervisor unavailable"}, status_code=503)
+
+        match = _find_repo_match(target_slug, repos)
+        if not match:
+            return JSONResponse(
+                {"error": f"repo '{target_slug}' not found"}, status_code=404
+            )
+
+        matched_slug = match.get("slug") or target_slug
+        path = match.get("path")
+        if not path:
+            return JSONResponse(
+                {"error": f"repo '{matched_slug}' missing path"}, status_code=500
+            )
+
+        try:
+            info = await _call_supervisor(
+                supervisor_client.add_repo,
+                Path(path),
+                matched_slug,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Supervisor add_repo failed: %s", exc)
+            return JSONResponse({"error": "Failed to add repo"}, status_code=500)
+
+        return JSONResponse(info)
 
     @router.delete("/api/repos/{slug}")
     async def remove_repo(slug: str) -> JSONResponse:
