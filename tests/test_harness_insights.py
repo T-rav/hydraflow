@@ -684,4 +684,5 @@ class TestMarkPatternProposedOSError:
             side_effect=OSError("read-only filesystem"),
         ):
             store.mark_pattern_proposed("category:ci_failure")  # should not raise
-        assert True  # confirms no exception was raised
+        # write_text failed so file should not exist
+        assert not store._proposed_path.exists()

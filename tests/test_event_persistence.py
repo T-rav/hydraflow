@@ -411,7 +411,7 @@ class TestEventBusWithPersistence:
     async def test_rotate_log_noop_without_log(self, event_bus) -> None:
         # Should not raise
         await event_bus.rotate_log(max_size_bytes=1, max_age_days=7)
-        assert True  # confirms no exception without event log
+        assert event_bus._event_log is None  # no log was configured
 
     @pytest.mark.asyncio
     async def test_persist_event_logs_error_on_failure(

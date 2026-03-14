@@ -171,10 +171,10 @@ class TestOnChildExcluded:
 
     @pytest.mark.asyncio
     async def test_noop_for_unknown_epic(self, tmp_path: Path) -> None:
-        mgr, _, _, _, _ = _make_manager(tmp_path)
+        mgr, state, _, _, _ = _make_manager(tmp_path)
         # Should not raise
         await mgr.on_child_excluded(999, 1)
-        assert True  # confirms no exception for unknown epic
+        assert state.get_epic_state(999) is None  # no state created for unknown epic
 
 
 class TestOnChildPlanned:
@@ -198,10 +198,10 @@ class TestOnChildPlanned:
 
     @pytest.mark.asyncio
     async def test_noop_for_unknown_epic(self, tmp_path: Path) -> None:
-        mgr, _, _, _, _ = _make_manager(tmp_path)
+        mgr, state, _, _, _ = _make_manager(tmp_path)
         # Should not raise
         await mgr.on_child_planned(999, 1)
-        assert True  # confirms no exception for unknown epic
+        assert state.get_epic_state(999) is None  # no state created for unknown epic
 
 
 class TestGetProgress:

@@ -24,16 +24,16 @@ from log import JSONFormatter
 
 class TestValidateRepoFormat:
     def test_valid_owner_repo_passes(self) -> None:
-        _validate_repo_format("owner/repo")  # should not raise
-        assert True  # confirms no exception was raised
+        result = _validate_repo_format("owner/repo")
+        assert result is None  # no exception raised for valid format
 
     def test_valid_with_dots_hyphens_underscores(self) -> None:
-        _validate_repo_format("my-org.com/my_repo-v2")  # should not raise
-        assert True  # confirms no exception was raised
+        result = _validate_repo_format("my-org.com/my_repo-v2")
+        assert result is None  # no exception raised for valid format
 
     def test_empty_string_allowed(self) -> None:
-        _validate_repo_format("")  # should not raise
-        assert True  # confirms no exception was raised
+        result = _validate_repo_format("")
+        assert result is None  # no exception raised for empty string
 
     def test_no_slash_raises(self) -> None:
         with pytest.raises(ValueError, match="expected 'owner/repo'"):
@@ -70,8 +70,8 @@ class TestPRManagerAssertRepo:
 
     def test_valid_repo_passes(self) -> None:
         pm = self._make_pr_manager("owner/repo")
-        pm._assert_repo()  # should not raise
-        assert True  # confirms no exception was raised
+        result = pm._assert_repo()  # should not raise
+        assert result is None  # no exception raised for valid repo
 
     def test_empty_repo_raises(self) -> None:
         pm = self._make_pr_manager("")

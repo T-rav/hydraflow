@@ -1550,13 +1550,13 @@ class TestCommitAcceptance:
             "adr_reviewer.run_subprocess",
             new_callable=AsyncMock,
             side_effect=RuntimeError("git worktree add failed"),
-        ):
+        ) as mock_run:
             # Should not raise
             await reviewer._commit_acceptance(
                 adr_path, tmp_path / "repo" / "docs" / "adr" / "README.md", result
             )
         # Verify the error-raising subprocess was invoked
-        assert True  # confirms RuntimeError was caught
+        mock_run.assert_awaited()
 
     @pytest.mark.asyncio
     async def test_pr_creation_failure_does_not_crash(self, tmp_path: Path) -> None:
