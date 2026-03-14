@@ -1531,3 +1531,69 @@ def make_tracker(tmp_path: Path, *, filename: str = "state.json") -> StateTracke
     from state import StateTracker
 
     return StateTracker(tmp_path / filename)
+
+
+def mock_fetcher_noop(orch: Any) -> None:
+    """Mock store and fetcher methods so no real gh CLI calls are made.
+
+    Required for tests that go through run() since exception isolation
+    catches errors from unmocked fetcher/store calls instead of propagating them.
+    """
+    orch._svc.store.get_triageable = lambda _max_count: []  # type: ignore[method-assign]
+    orch._svc.store.get_plannable = lambda _max_count: []  # type: ignore[method-assign]
+    orch._svc.store.get_reviewable = lambda _max_count: []  # type: ignore[method-assign]
+    orch._svc.store.start = AsyncMock()  # type: ignore[method-assign]
+    orch._svc.store.get_active_issues = lambda: {}  # type: ignore[method-assign]
+    orch._svc.fetcher.fetch_issue_by_number = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    orch._svc.fetcher.fetch_reviewable_prs = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
+    orch._enable_rerere = AsyncMock()  # type: ignore[method-assign]
+    orch._svc.worktrees.sanitize_repo = AsyncMock()  # type: ignore[method-assign]
+
+
+def make_worker_result(
+    issue_number: int = 42,
+    branch: str = "agent/issue-42",
+    success: bool = True,
+    worktree_path: str = "/tmp/worktrees/issue-42",
+    transcript: str = "Implemented the feature.",
+) -> Any:
+    """Create a WorkerResult via WorkerResultFactory."""
+    from tests.conftest import WorkerResultFactory
+
+    return WorkerResultFactory.create(
+        issue_number=issue_number,
+        branch=branch,
+        success=success,
+        transcript=transcript,
+        commits=1,
+        worktree_path=worktree_path,
+        use_defaults=True,
+    )
+
+
+def make_review_result(
+    pr_number: int = 101,
+    issue_number: int = 42,
+    verdict: Any = None,
+    transcript: str = "",
+) -> Any:
+    """Create a ReviewResult with sensible defaults."""
+    from models import ReviewResult, ReviewVerdict
+
+    if verdict is None:
+        verdict = ReviewVerdict.APPROVE
+    return ReviewResult(
+        pr_number=pr_number,
+        issue_number=issue_number,
+        verdict=verdict,
+        summary="Looks good.",
+        fixes_made=False,
+        transcript=transcript,
+    )
+
+
+def make_pr_manager(config: Any, event_bus: Any) -> Any:
+    """Create a PRManager instance for testing."""
+    from pr_manager import PRManager
+
+    return PRManager(config=config, event_bus=event_bus)

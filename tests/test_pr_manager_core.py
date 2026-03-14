@@ -15,7 +15,7 @@ from events import EventType
 from models import CodeScanningAlert, ReviewVerdict
 from pr_manager import PRManager
 from tests.conftest import PRInfoFactory, SubprocessMockBuilder
-from tests.helpers import ConfigFactory
+from tests.helpers import ConfigFactory, make_pr_manager
 
 # ---------------------------------------------------------------------------
 # _chunk_body (static method)
@@ -98,8 +98,7 @@ class TestCapBody:
 # ---------------------------------------------------------------------------
 
 
-def _make_manager(config, event_bus):
-    return PRManager(config=config, event_bus=event_bus)
+_make_manager = make_pr_manager
 
 
 # ---------------------------------------------------------------------------

@@ -7,17 +7,15 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from pr_manager import PRManager
 from tests.conftest import SubprocessMockBuilder
-from tests.helpers import ConfigFactory
+from tests.helpers import ConfigFactory, make_pr_manager
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _make_manager(config, event_bus):
-    return PRManager(config=config, event_bus=event_bus)
+_make_manager = make_pr_manager
 
 
 # ---------------------------------------------------------------------------
