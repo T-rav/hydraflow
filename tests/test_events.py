@@ -318,6 +318,15 @@ class TestEventBusPublishSubscribe:
         assert dumped["repo"] == "owner/repo"
 
     @pytest.mark.asyncio
+    async def test_set_repo_empty_string_disables_injection(self) -> None:
+        bus = EventBus()
+        bus.set_repo("owner/repo")
+        bus.set_repo("")
+        event = HydraFlowEvent(type=EventType.WORKER_UPDATE, data={"issue": 1})
+        await bus.publish(event)
+        assert event.repo is None
+
+    @pytest.mark.asyncio
     async def test_subscribe_with_custom_max_queue(self) -> None:
         bus = EventBus()
         queue = bus.subscribe(max_queue=10)
