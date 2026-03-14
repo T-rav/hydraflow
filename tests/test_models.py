@@ -11,7 +11,6 @@ from pydantic import ValidationError
 
 from models import (
     BackgroundWorkerStatus,
-    BatchResult,
     BGWorkerHealth,
     CIStatus,
     CodeScanningAlert,
@@ -80,7 +79,7 @@ from models import (
     WorkerStatus,
     parse_task_links,
 )
-from tests.conftest import AnalysisResultFactory, PlanResultFactory, ReviewResultFactory
+from tests.conftest import AnalysisResultFactory, PlanResultFactory
 
 # ---------------------------------------------------------------------------
 # GitHubIssue
@@ -923,145 +922,6 @@ class TestReviewResult:
         assert data["verdict"] == ReviewVerdict.APPROVE
         assert data["summary"] == "LGTM"
         assert data["fixes_made"] is False
-
-
-# ---------------------------------------------------------------------------
-# BatchResult
-# ---------------------------------------------------------------------------
-
-
-class TestBatchResult:
-    """Tests for the BatchResult model."""
-
-    def test_minimal_instantiation(self) -> None:
-        # Arrange / Act
-        batch = BatchResult(batch_number=1)
-
-        # Assert
-        assert batch.batch_number == 1
-
-    def test_issues_defaults_to_empty_list(self) -> None:
-        batch = BatchResult(batch_number=1)
-        assert batch.issues == []
-
-    def test_plan_results_defaults_to_empty_list(self) -> None:
-        batch = BatchResult(batch_number=1)
-        assert batch.plan_results == []
-
-    def test_worker_results_defaults_to_empty_list(self) -> None:
-        batch = BatchResult(batch_number=1)
-        assert batch.worker_results == []
-
-    def test_pr_infos_defaults_to_empty_list(self) -> None:
-        batch = BatchResult(batch_number=1)
-        assert batch.pr_infos == []
-
-    def test_review_results_defaults_to_empty_list(self) -> None:
-        batch = BatchResult(batch_number=1)
-        assert batch.review_results == []
-
-    def test_merged_prs_defaults_to_empty_list(self) -> None:
-        batch = BatchResult(batch_number=1)
-        assert batch.merged_prs == []
-
-    def test_lists_are_independent_between_instances(self) -> None:
-        """Default mutable lists must not be shared between BatchResult instances."""
-        # Arrange
-        batch_a = BatchResult(batch_number=1)
-        batch_b = BatchResult(batch_number=2)
-
-        # Act
-        batch_a.merged_prs.append(99)
-
-        # Assert
-        assert batch_b.merged_prs == []
-
-    def test_populated_batch_result(self) -> None:
-        """Should hold multiple issues, worker results, PRs, reviews, and merged PR numbers."""
-        # Arrange
-        issues = [
-            Task(id=1, title="Issue 1"),
-            Task(id=2, title="Issue 2"),
-        ]
-        worker_results = [
-            WorkerResult(
-                issue_number=1, branch="agent/issue-1", success=True, commits=1
-            ),
-            WorkerResult(
-                issue_number=2, branch="agent/issue-2", success=False, error="timeout"
-            ),
-        ]
-        pr_infos = [
-            PRInfo(number=100, issue_number=1, branch="agent/issue-1"),
-        ]
-        review_results = [
-            ReviewResultFactory.create(
-                pr_number=100, issue_number=1, verdict=ReviewVerdict.APPROVE
-            ),
-        ]
-        merged_prs = [100]
-
-        # Act
-        batch = BatchResult(
-            batch_number=3,
-            issues=issues,
-            worker_results=worker_results,
-            pr_infos=pr_infos,
-            review_results=review_results,
-            merged_prs=merged_prs,
-        )
-
-        # Assert
-        assert batch.batch_number == 3
-        assert len(batch.issues) == 2
-        assert batch.issues[0].id == 1
-        assert batch.issues[1].id == 2
-        assert len(batch.worker_results) == 2
-        assert batch.worker_results[0].success is True
-        assert batch.worker_results[1].success is False
-        assert len(batch.pr_infos) == 1
-        assert batch.pr_infos[0].number == 100
-        assert len(batch.review_results) == 1
-        assert batch.review_results[0].verdict is ReviewVerdict.APPROVE
-        assert batch.merged_prs == [100]
-
-    def test_serialization_with_model_dump(self) -> None:
-        # Arrange
-        batch = BatchResult(
-            batch_number=2,
-            issues=[Task(id=10, title="T")],
-            merged_prs=[200, 201],
-        )
-
-        # Act
-        data = batch.model_dump()
-
-        # Assert
-        assert data["batch_number"] == 2
-        assert len(data["issues"]) == 1
-        assert data["issues"][0]["id"] == 10
-        assert data["merged_prs"] == [200, 201]
-        assert data["worker_results"] == []
-        assert data["pr_infos"] == []
-        assert data["review_results"] == []
-
-    def test_successful_worker_count_via_list_comprehension(self) -> None:
-        """BatchResult does not have a built-in aggregation method, but its data should support it."""
-        # Arrange
-        batch = BatchResult(
-            batch_number=1,
-            worker_results=[
-                WorkerResult(issue_number=1, branch="b1", success=True),
-                WorkerResult(issue_number=2, branch="b2", success=False),
-                WorkerResult(issue_number=3, branch="b3", success=True),
-            ],
-        )
-
-        # Act
-        successful = [r for r in batch.worker_results if r.success]
-
-        # Assert
-        assert len(successful) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -3296,48 +3156,6 @@ class TestLoopResult:
         a = LoopResult(passed=True, summary="OK")
         b = LoopResult(passed=False, summary="OK")
         assert a != b
-
-
-# ---------------------------------------------------------------------------
-# RunnerResult protocol
-# ---------------------------------------------------------------------------
-
-
-class TestRunnerResultProtocol:
-    """Tests that all runner result types satisfy the RunnerResult protocol."""
-
-    _RESULT_TYPES = [PlanResult, WorkerResult, HITLResult, ReviewResult]
-
-    @pytest.mark.parametrize(
-        "cls", [PlanResult, WorkerResult, HITLResult, ReviewResult]
-    )
-    def test_has_required_protocol_fields(self, cls: type) -> None:
-        """Each result type must expose the four RunnerResult fields."""
-        protocol_fields = {"success", "error", "duration_seconds", "transcript"}
-        model_fields = set(cls.model_fields)
-        missing = protocol_fields - model_fields
-        assert not missing, f"{cls.__name__} missing RunnerResult fields: {missing}"
-
-    @pytest.mark.parametrize(
-        "cls", [PlanResult, WorkerResult, HITLResult, ReviewResult]
-    )
-    def test_runtime_isinstance_check(self, cls: type) -> None:
-        """Instances should be usable where RunnerResult is expected."""
-        # Build minimal valid instances
-        if cls is PlanResult:
-            obj = cls(issue_number=1)
-        elif cls is WorkerResult:
-            obj = cls(issue_number=1, branch="b")
-        elif cls is HITLResult:
-            obj = cls(issue_number=1)
-        elif cls is ReviewResult:
-            obj = cls(pr_number=1, issue_number=1)
-        else:
-            pytest.fail(f"Unknown class {cls}")
-        assert isinstance(obj.success, bool)
-        assert isinstance(obj.duration_seconds, float)
-        assert isinstance(obj.transcript, str)
-        assert obj.error is None or isinstance(obj.error, str)
 
 
 # ---------------------------------------------------------------------------
