@@ -199,18 +199,19 @@ class ReportIssueLoop(BaseBackgroundLoop):
 
             issue_url = f"https://github.com/{self._config.repo}/issues/{issue_number}"
 
-            # Mark tracked report as fixed
+            # Set linked_issue_url before update_tracked_report so both
+            # fields are persisted atomically in the same save() call.
+            tracked = self._state.get_tracked_report(report.id)
+            if tracked:
+                tracked.linked_issue_url = issue_url
+
+            # Mark tracked report as fixed (also saves state)
             self._state.update_tracked_report(
                 report.id,
                 status="fixed",
                 action_label="fixed",
                 detail=f"Created issue #{issue_number}",
             )
-            # Update the linked issue URL on the tracked report
-            tracked = self._state.get_tracked_report(report.id)
-            if tracked:
-                tracked.linked_issue_url = issue_url
-                self._state.save()
 
             # Success — remove from queue
             self._state.remove_report(report.id)

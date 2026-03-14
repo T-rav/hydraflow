@@ -854,6 +854,44 @@ class TestTrackedReportStatusTransitions:
         assert "fixed" in actions
 
     @pytest.mark.asyncio
+    async def test_history_entries_added_for_retry(self, tmp_path: Path) -> None:
+        """On a non-final failure, history records both in-progress and retry actions."""
+        loop, _stop, state, _pr = _make_loop(tmp_path)
+        report = _enqueue_with_tracking(state)
+
+        with patch(
+            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+        ) as mock_stream:
+            mock_stream.return_value = "no url"
+            await loop._do_work()
+
+        tracked = state.get_tracked_report(report.id)
+        assert tracked is not None
+        actions = [h.action for h in tracked.history]
+        assert "processing" in actions
+        assert "retry" in actions
+
+    @pytest.mark.asyncio
+    async def test_history_entries_added_for_escalation(self, tmp_path: Path) -> None:
+        """On final failure, history records both in-progress and escalated actions."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
+        report = _enqueue_with_tracking(state)
+        for _ in range(4):
+            state.fail_report(report.id)
+
+        with patch(
+            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+        ) as mock_stream:
+            mock_stream.return_value = "no url"
+            await loop._do_work()
+
+        tracked = state.get_tracked_report(report.id)
+        assert tracked is not None
+        actions = [h.action for h in tracked.history]
+        assert "processing" in actions
+        assert "escalated" in actions
+
+    @pytest.mark.asyncio
     async def test_no_tracked_report_does_not_crash(self, tmp_path: Path) -> None:
         """When no TrackedReport exists, status updates are silently skipped."""
         loop, _stop, state, _pr = _make_loop(tmp_path)
