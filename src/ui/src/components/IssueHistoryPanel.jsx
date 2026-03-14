@@ -271,7 +271,6 @@ export function OutcomesPanel() {
   const handleDragStart = useCallback((e, key) => {
     dragColumnRef.current = key
     e.dataTransfer.effectAllowed = 'move'
-    e.dataTransfer.setData('text/plain', key)
   }, [])
 
   const handleDragOver = useCallback((e, targetKey) => {
@@ -295,6 +294,10 @@ export function OutcomesPanel() {
       next.splice(tgtIdx, 0, sourceKey)
       return next
     })
+  }, [])
+
+  const handleDragLeave = useCallback(() => {
+    setDragOverColumn(null)
   }, [])
 
   const handleDragEnd = useCallback(() => {
@@ -724,6 +727,7 @@ export function OutcomesPanel() {
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleHeaderClick(key) } }}
                 onDragStart={(e) => handleDragStart(e, key)}
                 onDragOver={(e) => handleDragOver(e, key)}
+                onDragLeave={handleDragLeave}
                 onDrop={(e) => handleDrop(e, key)}
                 onDragEnd={handleDragEnd}
                 role="columnheader"

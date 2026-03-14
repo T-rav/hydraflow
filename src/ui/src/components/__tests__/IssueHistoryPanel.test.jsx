@@ -428,7 +428,7 @@ describe('OutcomesPanel (merged History+Outcomes)', () => {
         effectAllowed: '',
         dropEffect: '',
         setData: vi.fn(),
-        getData: vi.fn(() => 'title'),
+        getData: vi.fn(),
       }
 
       fireEvent.dragStart(titleHeader, { dataTransfer })
@@ -450,7 +450,7 @@ describe('OutcomesPanel (merged History+Outcomes)', () => {
         effectAllowed: '',
         dropEffect: '',
         setData: vi.fn(),
-        getData: vi.fn(() => 'title'),
+        getData: vi.fn(),
       }
 
       fireEvent.dragStart(titleHeader, { dataTransfer })
@@ -472,7 +472,7 @@ describe('OutcomesPanel (merged History+Outcomes)', () => {
         effectAllowed: '',
         dropEffect: '',
         setData: vi.fn(),
-        getData: vi.fn(() => 'title'),
+        getData: vi.fn(),
       }
       fireEvent.dragStart(headers[1], { dataTransfer })
       fireEvent.drop(headers[0], { dataTransfer })
@@ -499,7 +499,7 @@ describe('OutcomesPanel (merged History+Outcomes)', () => {
         effectAllowed: '',
         dropEffect: '',
         setData: vi.fn(),
-        getData: vi.fn(() => 'number'),
+        getData: vi.fn(),
       }
 
       fireEvent.dragStart(numHeader, { dataTransfer })
