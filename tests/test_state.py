@@ -186,8 +186,7 @@ class TestLoadSave:
 
     def test_explicit_load_returns_none(self, tmp_path: Path) -> None:
         tracker = make_tracker(tmp_path)
-        result = tracker.load()
-        assert result is None
+        assert tracker.load() is None
 
 
 class TestBackgroundWorkerStatePersistence:

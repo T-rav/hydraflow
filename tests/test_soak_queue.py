@@ -29,7 +29,6 @@ class TestSustainedQueueProcessing:
 
         # Reload
         st2 = StateTracker(tmp_path / "state.json")
-        st2.load()
         processed = st2.to_dict().get("processed_issues", {})
 
         # All 200 issues should be present
@@ -84,7 +83,6 @@ class TestDriftDetection:
             st.mark_issue(i, "merged" if i % 2 == 0 else "failed")
 
         st2 = StateTracker(tmp_path / "state.json")
-        st2.load()
         processed = st2.to_dict().get("processed_issues", {})
 
         assert len(processed) == 500, (

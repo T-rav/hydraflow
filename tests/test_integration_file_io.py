@@ -186,7 +186,6 @@ class TestStateTrackerPersistence:
 
         # Reload from the same file
         tracker2 = StateTracker(state_file)
-        tracker2.load()
         data = tracker2.to_dict()
         assert data["processed_issues"]["42"] == "planned"
         assert tracker2.get_active_worktrees() == {42: "/tmp/wt/issue-42"}
@@ -247,7 +246,6 @@ class TestStateTrackerPersistence:
         tracker.mark_pr(4, "reviewed")
 
         tracker2 = StateTracker(state_file)
-        tracker2.load()
         data = tracker2.to_dict()
         assert data["processed_issues"]["1"] == "planned"
         assert data["active_worktrees"]["2"] == "/wt/2"
