@@ -995,6 +995,33 @@ class TestBrowsableFilesystemAPI:
         assert paths == [custom_root]
 
     @pytest.mark.asyncio
+    async def test_fs_roots_includes_all_injected_roots(
+        self,
+        config,
+        event_bus: EventBus,
+        state,
+        tmp_path: Path,
+    ) -> None:
+        """All roots from allowed_repo_roots_fn are returned — no middle items dropped."""
+        import json as json_mod
+
+        root_a = str(tmp_path / "root-a")
+        root_b = str(tmp_path / "root-b")
+        router = self._make_router(
+            config,
+            event_bus,
+            state,
+            tmp_path,
+            allowed_repo_roots_fn=lambda: (root_a, root_b),
+        )
+        endpoint = self._get_endpoint(router, "/api/fs/roots")
+        resp = await endpoint()
+        data = json_mod.loads(resp.body)
+        assert resp.status_code == 200
+        paths = [r["path"] for r in data["roots"]]
+        assert paths == [root_a, root_b]
+
+    @pytest.mark.asyncio
     async def test_fs_list_rejects_disallowed_path(
         self,
         config,

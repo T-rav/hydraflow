@@ -3296,20 +3296,12 @@ def create_router(
     async def list_browsable_roots() -> JSONResponse:
         """Return filesystem roots that are safe to browse from the UI."""
         all_roots = _repo_roots_fn()
+        _root_names = {0: "Home", 1: "Temp"}
         roots = [
-            {"name": "Home", "path": all_roots[0]},
-            {"name": "Temp", "path": all_roots[-1]},
+            {"name": _root_names.get(i, f"Root {i + 1}"), "path": root}
+            for i, root in enumerate(all_roots)
         ]
-        # De-duplicate when home and temp resolve to same location.
-        seen: set[str] = set()
-        unique_roots: list[dict[str, str]] = []
-        for root in roots:
-            path = root["path"]
-            if path in seen:
-                continue
-            seen.add(path)
-            unique_roots.append(root)
-        return JSONResponse({"roots": unique_roots})
+        return JSONResponse({"roots": roots})
 
     @router.get("/api/fs/list")
     async def list_browsable_directories(
@@ -3317,6 +3309,10 @@ def create_router(
     ) -> JSONResponse:
         """List child directories for the requested path under allowed roots."""
         allowed_roots = _repo_roots_fn()
+        if not allowed_roots:
+            return JSONResponse(
+                {"error": "no allowed roots configured"}, status_code=500
+            )
         target_raw = path or allowed_roots[0]
         target_path, error = _normalize_allowed_dir(
             target_raw, allowed_roots=allowed_roots
