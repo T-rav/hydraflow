@@ -17,14 +17,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hydraflow.beads_manager")
 
+# Priority mapping: Task Graph phases without deps are P0 (critical), others P1.
+_PRIORITY_NO_DEPS = "0"
+_PRIORITY_HAS_DEPS = "1"
+
 
 class BeadTask(BaseModel):
     """A single bead task tracked by the ``bd`` CLI."""
 
-    id: str
+    id: str  # hash-based ID, e.g. "bd-a1b2"
     title: str
     status: str = "open"
-    priority: str = "medium"
+    priority: str = "1"
     depends_on: list[str] = Field(default_factory=list)
 
 
@@ -32,6 +36,15 @@ class BeadsManager:
     """Wraps the ``bd`` CLI for structured task decomposition.
 
     All methods are no-ops when ``beads_enabled`` is ``False`` in config.
+
+    CLI reference (https://github.com/steveyegge/beads):
+    - ``bd init`` — initialize project
+    - ``bd create "title" -p <priority>`` — create task
+    - ``bd dep add <child> <parent>`` — add dependency
+    - ``bd update <id> --claim`` — claim task (assignee + in_progress)
+    - ``bd close <id> "message"`` — complete task with summary
+    - ``bd ready [--json]`` — list unblocked tasks
+    - ``bd show <id>`` — view task details
     """
 
     def __init__(self, config: HydraFlowConfig) -> None:
@@ -47,7 +60,7 @@ class BeadsManager:
         if not self._enabled:
             return False
         try:
-            await run_subprocess("bd", "version", timeout=10.0)
+            await run_subprocess("bd", "ready", timeout=10.0)
             return True
         except (RuntimeError, FileNotFoundError, OSError):
             logger.warning("bd CLI not found — beads features disabled")
@@ -68,21 +81,28 @@ class BeadsManager:
             return False
 
     async def create_task(self, title: str, priority: str, cwd: Path) -> str | None:
-        """Create a bead task, returning the bead ID or ``None``."""
+        """Create a bead task, returning the bead ID or ``None``.
+
+        Uses ``bd create "title" -p <priority>``.
+        """
         if not self._enabled:
             return None
         try:
             output = await run_subprocess(
-                "bd", "add", title, "--priority", priority, cwd=cwd, timeout=30.0
+                "bd", "create", title, "-p", priority, cwd=cwd, timeout=30.0
             )
-            # Parse bead ID from output (e.g., "Created task #42" or "42")
-            match = re.search(r"#?(\d+)", output)
+            # Parse bead ID from output — bd uses hash-based IDs like "bd-a1b2"
+            match = re.search(r"(bd-[a-f0-9]+(?:\.\d+)*)", output)
             if match:
                 return match.group(1)
+            # Fallback: try numeric ID
+            num_match = re.search(r"#?(\d+)", output)
+            if num_match:
+                return num_match.group(1)
             logger.warning("Could not parse bead ID from output: %s", output)
             return None
         except (RuntimeError, FileNotFoundError, OSError):
-            logger.warning("bd add failed for %r", title, exc_info=True)
+            logger.warning("bd create failed for %r", title, exc_info=True)
             return None
 
     async def add_dependency(self, child: str, parent: str, cwd: Path) -> bool:
@@ -118,16 +138,15 @@ class BeadsManager:
             return False
 
     async def close(self, bead_id: str, reason: str, cwd: Path) -> bool:
-        """Close a bead task with a reason.
+        """Close a bead task with a summary message.
 
+        Uses ``bd close <id> "message"`` (positional, not a flag).
         Returns ``True`` on success.
         """
         if not self._enabled:
             return False
         try:
-            await run_subprocess(
-                "bd", "close", bead_id, "--reason", reason, cwd=cwd, timeout=30.0
-            )
+            await run_subprocess("bd", "close", bead_id, reason, cwd=cwd, timeout=30.0)
             return True
         except (RuntimeError, FileNotFoundError, OSError):
             logger.warning("bd close %s failed", bead_id, exc_info=True)
@@ -136,17 +155,18 @@ class BeadsManager:
     async def list_ready(self, cwd: Path) -> list[BeadTask]:
         """List unblocked (ready) bead tasks.
 
+        Uses ``bd ready --json`` for reliable parsing.
         Returns an empty list when disabled or on failure.
         """
         if not self._enabled:
             return []
         try:
             output = await run_subprocess(
-                "bd", "list", "--status", "open", cwd=cwd, timeout=30.0
+                "bd", "ready", "--json", cwd=cwd, timeout=30.0
             )
             return self._parse_task_list(output)
         except (RuntimeError, FileNotFoundError, OSError):
-            logger.warning("bd list failed", exc_info=True)
+            logger.warning("bd ready failed", exc_info=True)
             return []
 
     async def show(self, bead_id: str, cwd: Path) -> BeadTask | None:
@@ -181,7 +201,7 @@ class BeadsManager:
         # Create all tasks first
         for phase in phases:
             title = f"Issue #{issue_number} — {phase.name}"
-            priority = "high" if not phase.depends_on else "medium"
+            priority = _PRIORITY_NO_DEPS if not phase.depends_on else _PRIORITY_HAS_DEPS
             bead_id = await self.create_task(title, priority, cwd)
             if bead_id:
                 mapping[phase.id] = bead_id
@@ -212,15 +232,16 @@ class BeadsManager:
 
     @staticmethod
     def _parse_task_list(output: str) -> list[BeadTask]:
-        """Parse ``bd list`` output into :class:`BeadTask` instances."""
+        """Parse ``bd ready`` output into :class:`BeadTask` instances."""
         tasks: list[BeadTask] = []
         for raw_line in output.strip().splitlines():
             stripped = raw_line.strip()
             if not stripped:
                 continue
-            # Expected format: "#<id> <title> [<status>] [<priority>]"
+            # Match hash-based IDs: "bd-a1b2 Title [status]"
             match = re.match(
-                r"#?(\d+)\s+(.+?)(?:\s+\[(\w+)\])?(?:\s+\[(\w+)\])?$", stripped
+                r"(bd-[a-f0-9]+(?:\.\d+)*)\s+(.+?)(?:\s+\[(\w+)\])?\s*$",
+                stripped,
             )
             if match:
                 tasks.append(
@@ -228,7 +249,17 @@ class BeadsManager:
                         id=match.group(1),
                         title=match.group(2).strip(),
                         status=match.group(3) or "open",
-                        priority=match.group(4) or "medium",
+                    )
+                )
+                continue
+            # Fallback: numeric IDs "#<id> <title> [<status>]"
+            num_match = re.match(r"#?(\d+)\s+(.+?)(?:\s+\[(\w+)\])?\s*$", stripped)
+            if num_match:
+                tasks.append(
+                    BeadTask(
+                        id=num_match.group(1),
+                        title=num_match.group(2).strip(),
+                        status=num_match.group(3) or "open",
                     )
                 )
         return tasks
@@ -238,7 +269,7 @@ class BeadsManager:
         """Parse ``bd show`` output into a :class:`BeadTask`."""
         title = ""
         status = "open"
-        priority = "medium"
+        priority = "1"
         depends_on: list[str] = []
 
         for raw_line in output.strip().splitlines():
@@ -251,11 +282,11 @@ class BeadsManager:
                 priority = stripped.split(":", 1)[1].strip()
             elif stripped.lower().startswith("depends"):
                 deps_text = stripped.split(":", 1)[1].strip()
-                depends_on = re.findall(r"#?(\d+)", deps_text)
+                depends_on = re.findall(r"(bd-[a-f0-9]+(?:\.\d+)*|\d+)", deps_text)
 
         return BeadTask(
             id=bead_id,
-            title=title or f"Bead #{bead_id}",
+            title=title or f"Bead {bead_id}",
             status=status,
             priority=priority,
             depends_on=depends_on,
