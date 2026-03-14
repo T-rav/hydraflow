@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 if TYPE_CHECKING:
     from events import HydraFlowEvent
     from models import QueueStats, Task
+    from state import StateTracker
     from workspace import WorkspaceManager
 
 
@@ -1391,7 +1392,7 @@ def make_review_phase(
     return phase
 
 
-def make_tracker(tmp_path: Path, *, filename: str = "state.json"):
+def make_tracker(tmp_path: Path, *, filename: str = "state.json") -> StateTracker:
     """Return a StateTracker backed by a temp file."""
     from state import StateTracker
 
