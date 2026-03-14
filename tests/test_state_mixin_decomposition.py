@@ -256,6 +256,7 @@ class TestWorktreeStateMixin:
     def test_remove_absent_worktree_is_noop(self, tmp_path: Path) -> None:
         t = make_tracker(tmp_path)
         t.remove_worktree(999)  # should not raise
+        assert t.get_active_worktrees() == {}  # state remains empty
 
     def test_branch_tracking(self, tmp_path: Path) -> None:
         t = make_tracker(tmp_path)

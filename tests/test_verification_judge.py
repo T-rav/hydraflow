@@ -548,10 +548,13 @@ class TestSaveJudgeReport:
         verdict = JudgeVerdict(issue_number=42, summary="All good")
 
         with (
-            patch.object(Path, "write_text", side_effect=OSError("disk full")),
+            patch.object(
+                Path, "write_text", side_effect=OSError("disk full")
+            ) as mock_write,
             caplog.at_level(logging.WARNING, logger="hydraflow.verification_judge"),
         ):
             judge._save_judge_report(42, verdict)  # should not raise
+        mock_write.assert_called_once()
 
         assert "Could not save judge report" in caplog.text
 
@@ -667,10 +670,13 @@ class TestUpdateCriteriaFile:
         criteria_file.write_text(SAMPLE_CRITERIA_FILE)
 
         with (
-            patch.object(Path, "read_text", side_effect=OSError("read error")),
+            patch.object(
+                Path, "read_text", side_effect=OSError("read error")
+            ) as mock_read,
             caplog.at_level(logging.WARNING, logger="hydraflow.verification_judge"),
         ):
             judge._update_criteria_file(42, "Refined")  # should not raise
+        mock_read.assert_called_once()
 
         assert "Could not read criteria file" in caplog.text
 
@@ -683,10 +689,13 @@ class TestUpdateCriteriaFile:
         criteria_file.write_text(SAMPLE_CRITERIA_FILE)
 
         with (
-            patch.object(Path, "write_text", side_effect=OSError("disk full")),
+            patch.object(
+                Path, "write_text", side_effect=OSError("disk full")
+            ) as mock_write,
             caplog.at_level(logging.WARNING, logger="hydraflow.verification_judge"),
         ):
             judge._update_criteria_file(42, "Refined")  # should not raise
+        mock_write.assert_called_once()
 
         assert "Could not update criteria file" in caplog.text
 
@@ -1089,6 +1098,7 @@ class TestTerminate:
 
     def test_no_active_processes(self, config):
         judge = _make_judge(config)
+        assert len(judge._active_procs) == 0  # no procs to terminate
         judge.terminate()  # Should not raise
         assert len(judge._active_procs) == 0
 

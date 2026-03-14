@@ -650,6 +650,7 @@ class TestTerminateProcesses:
             "runner_utils.os.killpg", side_effect=ProcessLookupError
         ) as mock_killpg:
             terminate_processes(active)  # Should not raise
+        mock_killpg.assert_called_once()
 
         mock_killpg.assert_called_once()
 

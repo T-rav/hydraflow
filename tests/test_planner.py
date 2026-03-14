@@ -1266,6 +1266,7 @@ def test_terminate_handles_process_lookup_error(config, event_bus):
 
     with patch("runner_utils.os.killpg", side_effect=ProcessLookupError) as mock_killpg:
         runner.terminate()  # Should not raise
+    mock_killpg.assert_called_once()
 
     mock_killpg.assert_called_once()
 

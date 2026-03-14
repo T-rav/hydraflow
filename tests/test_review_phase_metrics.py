@@ -1567,6 +1567,7 @@ class TestRecordReviewInsight:
 
         # Should not raise
         await phase._record_review_insight(result)
+        mock_insights.append_review.assert_called_once()
 
         mock_insights.append_review.assert_called_once()
 

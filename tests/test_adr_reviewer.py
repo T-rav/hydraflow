@@ -1554,13 +1554,15 @@ class TestCommitAcceptance:
                 "adr_reviewer.run_subprocess",
                 new_callable=AsyncMock,
                 side_effect=RuntimeError("git worktree add failed"),
-            ),
+            ) as mock_run,
             caplog.at_level(logging.ERROR, logger="hydraflow.adr_reviewer"),
         ):
             # Should not raise
             await reviewer._commit_acceptance(
                 adr_path, tmp_path / "repo" / "docs" / "adr" / "README.md", result
             )
+        # Verify the error-raising subprocess was invoked
+        mock_run.assert_awaited()
 
         assert "Failed to commit ADR-0001 acceptance" in caplog.text
 
@@ -1595,6 +1597,7 @@ class TestCommitAcceptance:
             await reviewer._commit_acceptance(
                 adr_path, tmp_path / "repo" / "docs" / "adr" / "README.md", result
             )
+        assert call_count >= 6  # confirms PR creation step was reached
 
         assert "Failed to create PR for ADR-0001" in caplog.text
 

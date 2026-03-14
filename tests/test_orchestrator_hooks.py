@@ -941,6 +941,7 @@ class TestPostRunHooks:
                 duration_seconds=2.0,
                 log_file="log.txt",
             )
+        orch._svc.summarizer.summarize_and_comment.assert_awaited_once()
 
         assert "Failed to post transcript summary for issue #99" in caplog.text
 

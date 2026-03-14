@@ -161,6 +161,7 @@ async def test_add_pr_labels_subprocess_error_does_not_raise(config, event_bus, 
     ):
         # Should not raise
         await manager.add_pr_labels(101, ["bug"])
+    mock_create.assert_awaited_once()
 
     assert any("Could not add label" in r.message for r in caplog.records)
 
@@ -210,6 +211,7 @@ async def test_remove_pr_label_subprocess_error_does_not_raise(
     ):
         # Should not raise
         await manager.remove_pr_label(101, "hydraflow-review")
+    mock_create.assert_awaited_once()
 
     assert any("Could not remove label" in r.message for r in caplog.records)
 
@@ -291,6 +293,7 @@ class TestCommentHelper:
         ):
             # Should not raise even on subprocess failure
             await mgr._comment("pr", 99, "body")
+        mock_create.assert_awaited_once()
 
         assert any("Could not post comment" in r.message for r in caplog.records)
 
@@ -368,6 +371,7 @@ class TestAddLabelsHelper:
         ):
             # Should not raise even on subprocess failure
             await mgr._add_labels("issue", 42, ["missing-label"])
+        mock_create.assert_awaited_once()
 
         assert any("Could not add label" in r.message for r in caplog.records)
 
@@ -433,6 +437,7 @@ class TestRemoveLabelHelper:
         ):
             # Should not raise even on subprocess failure
             await mgr._remove_label("issue", 42, "missing-label")
+        mock_create.assert_awaited_once()
 
         assert any("Could not remove label" in r.message for r in caplog.records)
 

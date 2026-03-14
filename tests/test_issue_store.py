@@ -658,6 +658,7 @@ class TestLifecycle:
         # Use a very short poll interval to make the test fast
         store._config = ConfigFactory.create(data_poll_interval=10)
         await asyncio.wait_for(store.start(stop), timeout=2.0)
+        assert stop.is_set()
         await task
         assert stop.is_set()
 

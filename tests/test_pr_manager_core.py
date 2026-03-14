@@ -169,6 +169,7 @@ async def test_post_comment_handles_error(event_bus, tmp_path, caplog):
     ):
         # Should not raise
         await mgr.post_comment(42, "comment body")
+    mock_create.assert_awaited_once()
 
     assert any("Could not post comment" in r.message for r in caplog.records)
 
@@ -239,6 +240,7 @@ async def test_post_pr_comment_handles_error(event_bus, tmp_path, caplog):
     ):
         # Should not raise
         await mgr.post_pr_comment(101, "comment body")
+    mock_create.assert_awaited_once()
 
     assert any("Could not post comment" in r.message for r in caplog.records)
 
@@ -2303,6 +2305,7 @@ class TestCloseIssue:
         ):
             # Should not raise
             await manager.close_issue(999)
+        mock_create.assert_awaited_once()
 
         assert any("Could not close issue #999" in r.message for r in caplog.records)
 

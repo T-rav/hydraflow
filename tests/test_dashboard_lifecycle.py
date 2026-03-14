@@ -1032,3 +1032,6 @@ class TestStartStop:
         dashboard._server_task = task
 
         await dashboard.stop()
+        assert (
+            dashboard._server_task.done()
+        )  # already-done task stays done after stop()

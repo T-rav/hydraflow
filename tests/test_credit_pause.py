@@ -327,6 +327,7 @@ class TestStreamClaudeProcessCreditDetection:
             result = await stream_claude_process(
                 **_default_stream_kwargs(event_bus, on_output=kill_immediately)
             )
+        assert result is not None
 
         assert isinstance(result, str)
 

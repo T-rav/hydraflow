@@ -308,6 +308,8 @@ class TestInstallHooksDocker:
 
         assert "No .githooks directory found" in caplog.text
 
+        assert not (wt_path / ".git" / "hooks").exists()
+
     @pytest.mark.asyncio
     async def test_install_hooks_docker_handles_copy_error(
         self, tmp_path: Path, caplog
