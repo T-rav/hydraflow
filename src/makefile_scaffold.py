@@ -7,11 +7,9 @@ stack (Python, Node, Java, Ruby/Rails, C#, Go, Rust, C++).
 
 from __future__ import annotations
 
-import dataclasses
 import re
 from pathlib import Path
 
-from manifest import detect_language  # noqa: F401 - compatibility re-export
 from prep_ignore import PREP_IGNORED_DIRS, load_git_submodule_roots
 
 _PYTHON_TARGETS: dict[str, str] = {
@@ -225,17 +223,6 @@ _ALL_TARGET_NAMES = [
     "quality-lite",
     "quality",
 ]
-
-
-@dataclasses.dataclass
-class ScaffoldResult:
-    """Result of a Makefile scaffolding operation."""
-
-    created: bool = False
-    targets_added: list[str] = dataclasses.field(default_factory=list)
-    warnings: list[str] = dataclasses.field(default_factory=list)
-    skipped: list[str] = dataclasses.field(default_factory=list)
-    language: str = "unknown"
 
 
 _PROJECT_MARKERS: tuple[str, ...] = (
