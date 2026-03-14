@@ -1499,7 +1499,7 @@ class TestIssueHistoryCache:
         p2 = json.loads(resp2.body)
         # The new issue should appear.
         found = any(x["issue_number"] == 999 for x in p2["items"])
-        assert found
+        assert found is True
 
     @pytest.mark.asyncio
     async def test_load_restores_linked_issues_with_int_keys(
