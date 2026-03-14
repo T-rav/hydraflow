@@ -209,3 +209,125 @@ class TestFinalizeResult:
         ):
             runner._finalize_result(planner_task, result, 0.0)
         mock_save.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _build_research_section
+# ---------------------------------------------------------------------------
+
+
+class TestBuildResearchSection:
+    """Tests for PlannerRunner._build_research_section."""
+
+    def test_empty_when_no_context(self) -> None:
+        assert PlannerRunner._build_research_section("") == ""
+
+    def test_includes_research_context(self) -> None:
+        result = PlannerRunner._build_research_section("Found class Foo at line 42")
+        assert "## Pre-Plan Research" in result
+        assert "Found class Foo at line 42" in result
+
+    def test_includes_guidance_text(self) -> None:
+        result = PlannerRunner._build_research_section("context")
+        assert "do not repeat this exploration" in result
+
+
+# ---------------------------------------------------------------------------
+# _assemble_planning_prompt
+# ---------------------------------------------------------------------------
+
+
+class TestAssemblePlanningPrompt:
+    """Tests for PlannerRunner._assemble_planning_prompt."""
+
+    def test_contains_issue_info(self, runner, planner_task) -> None:
+        prompt = runner._assemble_planning_prompt(
+            planner_task,
+            body="Implement feature X",
+            image_note="",
+            comments_section="",
+            research_section="",
+            manifest_section="",
+            memory_section="",
+            mode_note="**Plan mode: FULL**\n\n",
+            schema_section="## Plan Format",
+            task_graph_guidance="",
+            pre_mortem_section="",
+        )
+        assert "issue #10" in prompt.lower()
+        assert "Add feature X" in prompt
+        assert "Implement feature X" in prompt
+
+    def test_includes_read_only_instruction(self, runner, planner_task) -> None:
+        prompt = runner._assemble_planning_prompt(
+            planner_task,
+            body="",
+            image_note="",
+            comments_section="",
+            research_section="",
+            manifest_section="",
+            memory_section="",
+            mode_note="",
+            schema_section="",
+            task_graph_guidance="",
+            pre_mortem_section="",
+        )
+        assert "READ-ONLY" in prompt
+
+    def test_includes_research_section(self, runner, planner_task) -> None:
+        prompt = runner._assemble_planning_prompt(
+            planner_task,
+            body="",
+            image_note="",
+            comments_section="",
+            research_section="\n\n## Pre-Plan Research\n\nSome research",
+            manifest_section="",
+            memory_section="",
+            mode_note="",
+            schema_section="",
+            task_graph_guidance="",
+            pre_mortem_section="",
+        )
+        assert "Pre-Plan Research" in prompt
+        assert "Some research" in prompt
+
+
+# ---------------------------------------------------------------------------
+# _compute_prompt_stats
+# ---------------------------------------------------------------------------
+
+
+class TestPlannerComputePromptStats:
+    """Tests for PlannerRunner._compute_prompt_stats."""
+
+    def test_no_pruning(self) -> None:
+        stats = PlannerRunner._compute_prompt_stats(
+            history_before=100,
+            history_after=100,
+            body_raw_len=200,
+            body_len=200,
+        )
+        assert stats["pruned_chars_total"] == 0
+
+    def test_with_pruning(self) -> None:
+        stats = PlannerRunner._compute_prompt_stats(
+            history_before=500,
+            history_after=200,
+            body_raw_len=1000,
+            body_len=600,
+        )
+        assert stats["pruned_chars_total"] == 700
+        assert stats["section_chars"]["discussion_before"] == 500
+        assert stats["section_chars"]["discussion_after"] == 200
+
+    def test_returns_expected_keys(self) -> None:
+        stats = PlannerRunner._compute_prompt_stats(
+            history_before=0,
+            history_after=0,
+            body_raw_len=0,
+            body_len=0,
+        )
+        assert "history_chars_before" in stats
+        assert "context_chars_before" in stats
+        assert "pruned_chars_total" in stats
+        assert "section_chars" in stats

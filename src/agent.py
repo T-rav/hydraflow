@@ -164,9 +164,12 @@ Run through this checklist before your final commit:
             )
             await self._emit_status(task.id, worker_id, WorkerStatus.FAILED)
 
-        result.duration_seconds = time.monotonic() - start
+        self._finalize_run(result, start)
+        return result
 
-        # Persist transcript to disk
+    def _finalize_run(self, result: WorkerResult, start: float) -> None:
+        """Set duration and persist transcript."""
+        result.duration_seconds = time.monotonic() - start
         try:
             self._save_transcript("issue", result.issue_number, result.transcript)
         except OSError:
@@ -176,8 +179,6 @@ Run through this checklist before your final commit:
                 exc_info=True,
                 extra={"issue": result.issue_number},
             )
-
-        return result
 
     async def _run_post_impl_checks(
         self,
@@ -616,10 +617,16 @@ Run through this checklist before your final commit:
             return f"\n\n## Recent Application Logs\n\n```\n{logs}\n```"
         return ""
 
-    def _build_prompt_with_stats(
+    def _gather_prompt_sections(
         self, issue: Task, review_feedback: str = "", prior_failure: str = ""
-    ) -> tuple[str, dict[str, object]]:
-        """Build the implementation prompt and pruning stats."""
+    ) -> tuple[
+        dict[str, str], list[dict[str, str | int | list[str]]], int, int, int, int
+    ]:
+        """Collect all prompt sections and their char stats.
+
+        Returns ``(sections_dict, escalations, history_before, history_after,
+        body_before, body_after)``.
+        """
         plan_section, other_comments, plan_before, plan_after = (
             self._build_plan_section(issue)
         )
@@ -650,13 +657,41 @@ Run through this checklist before your final commit:
         log_section = self._build_log_section()
         body, body_before, body_after = self._truncate_body(issue.body)
 
-        test_cmd = self._config.test_command
+        sections = {
+            "body": body,
+            "plan": plan_section,
+            "review": review_section,
+            "failure": failure_section,
+            "comments": comments_section,
+            "manifest": manifest_section,
+            "memory": memory_section,
+            "log": log_section,
+            "feedback": feedback_section,
+            "escalation": escalation_section,
+        }
+        return (
+            sections,
+            escalations,
+            history_before,
+            history_after,
+            body_before,
+            body_after,
+        )
 
-        prompt = f"""You are implementing GitHub issue #{issue.id}.
+    def _assemble_impl_prompt(
+        self,
+        issue: Task,
+        sections: dict[str, str],
+        escalations: list[dict[str, str | int | list[str]]],
+    ) -> str:
+        """Assemble the implementation prompt from pre-built sections."""
+        s = sections
+        test_cmd = self._config.test_command
+        return f"""You are implementing GitHub issue #{issue.id}.
 
 ## Issue: {issue.title}
 
-{body}{plan_section}{review_section}{failure_section}{comments_section}{manifest_section}{memory_section}{log_section}
+{s["body"]}{s["plan"]}{s["review"]}{s["failure"]}{s["comments"]}{s["manifest"]}{s["memory"]}{s["log"]}
 
 ## Instructions
 
@@ -667,7 +702,7 @@ Run through this checklist before your final commit:
 5. Run Pre-Quality Review Skill for correctness, plan adherence, and missing tests.
 6. Run Run-Tool Skill: `make lint` → `{test_cmd}` → `make quality-lite`; fix and rerun.
 7. Commit with: "Fixes #{issue.id}: <concise summary>"
-{feedback_section}{escalation_section}
+{s["feedback"]}{s["escalation"]}
 {self._build_self_check_checklist(escalations)}
 ## UI Guidelines
 
@@ -693,7 +728,17 @@ Run through this checklist before your final commit:
   write the code, not to second-guess the plan. Always produce commits.
 
 {MEMORY_SUGGESTION_PROMPT.format(context="implementation")}"""
-        stats = {
+
+    @staticmethod
+    def _compute_prompt_stats(
+        *,
+        history_before: int,
+        history_after: int,
+        body_before: int,
+        body_after: int,
+    ) -> dict[str, object]:
+        """Compute pruning statistics for telemetry."""
+        return {
             "history_chars_before": history_before,
             "history_chars_after": history_after,
             "context_chars_before": body_before,
@@ -707,6 +752,21 @@ Run through this checklist before your final commit:
                 "history_after": history_after,
             },
         }
+
+    def _build_prompt_with_stats(
+        self, issue: Task, review_feedback: str = "", prior_failure: str = ""
+    ) -> tuple[str, dict[str, object]]:
+        """Build the implementation prompt and pruning stats."""
+        sections, escalations, h_before, h_after, b_before, b_after = (
+            self._gather_prompt_sections(issue, review_feedback, prior_failure)
+        )
+        prompt = self._assemble_impl_prompt(issue, sections, escalations)
+        stats = self._compute_prompt_stats(
+            history_before=h_before,
+            history_after=h_after,
+            body_before=b_before,
+            body_after=b_after,
+        )
         return prompt, stats
 
     async def _verify_result(self, worktree_path: Path, branch: str) -> LoopResult:

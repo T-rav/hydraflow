@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -13,7 +14,10 @@ import pytest
 
 from runner_utils import (
     AuthenticationRetryError,
+    create_agent_process,
+    feed_stdin,
     prepare_command,
+    read_and_publish_stream,
     validate_post_stream,
 )
 from subprocess_util import CreditExhaustedError
@@ -220,3 +224,152 @@ class TestValidatePostStream:
         assert any(
             "exited with code" in str(c) for c in mock_logger.warning.call_args_list
         )
+
+
+# ---------------------------------------------------------------------------
+# create_agent_process
+# ---------------------------------------------------------------------------
+
+
+class TestCreateAgentProcess:
+    """Tests for create_agent_process."""
+
+    @pytest.mark.asyncio
+    async def test_creates_process_with_prompt_arg(self) -> None:
+        mock_runner = MagicMock()
+        mock_proc = MagicMock()
+        mock_runner.create_streaming_process = AsyncMock(return_value=mock_proc)
+
+        proc, use_prompt = await create_agent_process(
+            cmd=["claude", "-p"],
+            prompt="hello",
+            cwd=Path("/tmp"),
+            runner=mock_runner,
+        )
+        assert proc is mock_proc
+        assert use_prompt is True
+        mock_runner.create_streaming_process.assert_awaited_once()
+        # Verify stdin is DEVNULL when prompt is in args
+        call_kwargs = mock_runner.create_streaming_process.call_args[1]
+        assert call_kwargs["stdin"] == asyncio.subprocess.DEVNULL
+
+    @pytest.mark.asyncio
+    async def test_creates_process_with_stdin(self) -> None:
+        mock_runner = MagicMock()
+        mock_proc = MagicMock()
+        mock_runner.create_streaming_process = AsyncMock(return_value=mock_proc)
+
+        proc, use_prompt = await create_agent_process(
+            cmd=["other-tool"],
+            prompt="hello",
+            cwd=Path("/tmp"),
+            runner=mock_runner,
+        )
+        assert proc is mock_proc
+        assert use_prompt is False
+        call_kwargs = mock_runner.create_streaming_process.call_args[1]
+        assert call_kwargs["stdin"] == asyncio.subprocess.PIPE
+
+
+# ---------------------------------------------------------------------------
+# feed_stdin
+# ---------------------------------------------------------------------------
+
+
+class TestFeedStdin:
+    """Tests for feed_stdin."""
+
+    @pytest.mark.asyncio
+    async def test_writes_and_closes(self) -> None:
+        mock_stdin = MagicMock()
+        mock_stdin.drain = AsyncMock()
+        mock_proc = MagicMock()
+        mock_proc.stdin = mock_stdin
+
+        await feed_stdin(mock_proc, "test prompt")
+
+        mock_stdin.write.assert_called_once_with(b"test prompt")
+        mock_stdin.drain.assert_awaited_once()
+        mock_stdin.close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# read_and_publish_stream
+# ---------------------------------------------------------------------------
+
+
+class TestReadAndPublishStream:
+    """Tests for read_and_publish_stream."""
+
+    @pytest.mark.asyncio
+    async def test_reads_stdout_and_returns_transcript(self, event_bus) -> None:
+        mock_proc = MagicMock()
+        # Simulate stdout with stream-json lines
+        lines = [
+            b'{"type":"text","text":"hello"}\n',
+            b'{"type":"text","text":"world"}\n',
+        ]
+
+        async def _aiter():
+            for line in lines:
+                yield line
+
+        mock_proc.stdout = _aiter()
+        mock_proc.returncode = 0
+        mock_proc.wait = AsyncMock()
+
+        async def _empty_stderr() -> bytes:
+            return b""
+
+        stderr_task = asyncio.create_task(_empty_stderr())
+
+        with patch("runner_utils.StreamParser") as MockParser:
+            parser_inst = MockParser.return_value
+            parser_inst.parse.side_effect = [("hello", None), ("world", None)]
+            parser_inst.usage_snapshot = {}
+
+            transcript = await read_and_publish_stream(
+                proc=mock_proc,
+                stderr_task=stderr_task,
+                event_bus=event_bus,
+                event_data={"issue": 1, "source": "test"},
+                logger=logging.getLogger("test"),
+            )
+
+        assert "hello" in transcript
+        assert "world" in transcript
+
+    @pytest.mark.asyncio
+    async def test_early_kill_on_output_callback(self, event_bus) -> None:
+        mock_proc = MagicMock()
+        lines = [b"line1\n", b"line2\n"]
+
+        async def _aiter():
+            for line in lines:
+                yield line
+
+        mock_proc.stdout = _aiter()
+        mock_proc.returncode = -9
+        mock_proc.wait = AsyncMock()
+        mock_proc.kill = MagicMock()
+
+        async def _empty_stderr() -> bytes:
+            return b""
+
+        stderr_task = asyncio.create_task(_empty_stderr())
+
+        with patch("runner_utils.StreamParser") as MockParser:
+            parser_inst = MockParser.return_value
+            parser_inst.parse.return_value = ("display", None)
+            parser_inst.usage_snapshot = {}
+
+            await read_and_publish_stream(
+                proc=mock_proc,
+                stderr_task=stderr_task,
+                event_bus=event_bus,
+                event_data={"issue": 1, "source": "test"},
+                on_output=lambda _: True,  # Always signal kill
+                logger=logging.getLogger("test"),
+            )
+
+        mock_proc.kill.assert_called_once()

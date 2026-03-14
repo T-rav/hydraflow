@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -262,3 +263,168 @@ class TestRunPostImplChecks:
             )
         assert early is None
         assert result.success is True
+
+
+# ---------------------------------------------------------------------------
+# _gather_prompt_sections
+# ---------------------------------------------------------------------------
+
+
+class TestGatherPromptSections:
+    """Tests for AgentRunner._gather_prompt_sections."""
+
+    def test_returns_expected_section_keys(self, runner, agent_task) -> None:
+        sections, escalations, h_b, h_a, b_b, b_a = runner._gather_prompt_sections(
+            agent_task
+        )
+        expected_keys = {
+            "body",
+            "plan",
+            "review",
+            "failure",
+            "comments",
+            "manifest",
+            "memory",
+            "log",
+            "feedback",
+            "escalation",
+        }
+        assert set(sections.keys()) == expected_keys
+
+    def test_no_review_feedback_gives_empty_sections(self, runner, agent_task) -> None:
+        sections, _, _, _, _, _ = runner._gather_prompt_sections(agent_task)
+        assert sections["review"] == ""
+        assert sections["failure"] == ""
+
+    def test_review_feedback_included(self, runner, agent_task) -> None:
+        sections, _, _, _, _, _ = runner._gather_prompt_sections(
+            agent_task, review_feedback="Fix tests"
+        )
+        assert "Fix tests" in sections["review"]
+
+    def test_prior_failure_included(self, runner, agent_task) -> None:
+        sections, _, _, _, _, _ = runner._gather_prompt_sections(
+            agent_task, prior_failure="TypeError"
+        )
+        assert "TypeError" in sections["failure"]
+
+
+# ---------------------------------------------------------------------------
+# _assemble_impl_prompt
+# ---------------------------------------------------------------------------
+
+
+class TestAssembleImplPrompt:
+    """Tests for AgentRunner._assemble_impl_prompt."""
+
+    def test_contains_issue_info(self, runner, agent_task) -> None:
+        sections = dict.fromkeys(
+            [
+                "body",
+                "plan",
+                "review",
+                "failure",
+                "comments",
+                "manifest",
+                "memory",
+                "log",
+                "feedback",
+                "escalation",
+            ],
+            "",
+        )
+        sections["body"] = "The frobnicator is broken."
+        prompt = runner._assemble_impl_prompt(agent_task, sections, [])
+        assert "issue #42" in prompt.lower()
+        assert "Fix the frobnicator" in prompt
+        assert "The frobnicator is broken." in prompt
+
+    def test_includes_instructions(self, runner, agent_task) -> None:
+        sections = dict.fromkeys(
+            [
+                "body",
+                "plan",
+                "review",
+                "failure",
+                "comments",
+                "manifest",
+                "memory",
+                "log",
+                "feedback",
+                "escalation",
+            ],
+            "",
+        )
+        prompt = runner._assemble_impl_prompt(agent_task, sections, [])
+        assert "## Instructions" in prompt
+        assert "## Rules" in prompt
+
+
+# ---------------------------------------------------------------------------
+# _compute_prompt_stats
+# ---------------------------------------------------------------------------
+
+
+class TestAgentComputePromptStats:
+    """Tests for AgentRunner._compute_prompt_stats."""
+
+    def test_no_pruning(self) -> None:
+        stats = AgentRunner._compute_prompt_stats(
+            history_before=100,
+            history_after=100,
+            body_before=200,
+            body_after=200,
+        )
+        assert stats["pruned_chars_total"] == 0
+
+    def test_with_pruning(self) -> None:
+        stats = AgentRunner._compute_prompt_stats(
+            history_before=500,
+            history_after=300,
+            body_before=1000,
+            body_after=800,
+        )
+        assert stats["pruned_chars_total"] == 400
+        assert stats["section_chars"]["issue_body_before"] == 1000
+        assert stats["section_chars"]["issue_body_after"] == 800
+
+    def test_returns_expected_keys(self) -> None:
+        stats = AgentRunner._compute_prompt_stats(
+            history_before=0,
+            history_after=0,
+            body_before=0,
+            body_after=0,
+        )
+        assert "history_chars_before" in stats
+        assert "context_chars_before" in stats
+        assert "pruned_chars_total" in stats
+        assert "section_chars" in stats
+
+
+# ---------------------------------------------------------------------------
+# _finalize_run
+# ---------------------------------------------------------------------------
+
+
+class TestFinalizeRun:
+    """Tests for AgentRunner._finalize_run."""
+
+    def test_sets_duration(self, runner) -> None:
+        result = WorkerResult(issue_number=42, branch="b", worktree_path="/tmp")
+        start = time.monotonic() - 1.0
+        with patch.object(runner, "_save_transcript"):
+            runner._finalize_run(result, start)
+        assert result.duration_seconds >= 1.0
+
+    def test_saves_transcript(self, runner) -> None:
+        result = WorkerResult(issue_number=42, branch="b", worktree_path="/tmp")
+        result.transcript = "some transcript"
+        with patch.object(runner, "_save_transcript") as mock_save:
+            runner._finalize_run(result, time.monotonic())
+        mock_save.assert_called_once_with("issue", 42, "some transcript")
+
+    def test_handles_oserror_gracefully(self, runner) -> None:
+        result = WorkerResult(issue_number=42, branch="b", worktree_path="/tmp")
+        with patch.object(runner, "_save_transcript", side_effect=OSError("disk")):
+            runner._finalize_run(result, time.monotonic())
+        assert result.duration_seconds >= 0

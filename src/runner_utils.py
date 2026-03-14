@@ -112,6 +112,112 @@ def validate_post_stream(
     return transcript
 
 
+async def create_agent_process(
+    *,
+    cmd: list[str],
+    prompt: str,
+    cwd: Path,
+    runner: SubprocessRunner,
+    gh_token: str = "",
+) -> tuple[asyncio.subprocess.Process, bool]:
+    """Create and return an agent subprocess.
+
+    Returns ``(process, use_prompt_arg)`` where *use_prompt_arg* indicates
+    whether the prompt was embedded in the command (vs. piped via stdin).
+    """
+    env = make_clean_env(gh_token)
+    cmd_to_run, use_prompt_arg = prepare_command(cmd, prompt)
+    stdin_mode = (
+        asyncio.subprocess.DEVNULL if use_prompt_arg else asyncio.subprocess.PIPE
+    )
+
+    proc = await runner.create_streaming_process(
+        cmd_to_run,
+        cwd=str(cwd),
+        env=env,
+        stdin=stdin_mode,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        limit=1024 * 1024,  # 1 MB — stream-json lines can exceed 64 KB default
+        start_new_session=True,  # Own process group for reliable cleanup
+    )
+    return proc, use_prompt_arg
+
+
+async def feed_stdin(proc: asyncio.subprocess.Process, prompt: str) -> None:
+    """Write *prompt* to the process's stdin and close."""
+    assert proc.stdin is not None
+    proc.stdin.write(prompt.encode())
+    await proc.stdin.drain()
+    proc.stdin.close()
+
+
+async def read_and_publish_stream(
+    *,
+    proc: asyncio.subprocess.Process,
+    stderr_task: asyncio.Task[bytes],
+    event_bus: EventBus,
+    event_data: TranscriptEventData,
+    on_output: Callable[[str], bool] | None = None,
+    usage_stats: dict[str, object] | None = None,
+    logger: logging.Logger,
+) -> str:
+    """Read stdout lines, publish events, and return the transcript.
+
+    Handles early termination via *on_output* callback and runs
+    post-stream validation.
+    """
+    assert proc.stdout is not None
+    stdout_stream = proc.stdout
+
+    parser = StreamParser()
+    raw_lines: list[str] = []
+    result_text = ""
+    accumulated_text = ""
+    early_killed = False
+
+    async for raw in stdout_stream:
+        line = raw.decode(errors="replace").rstrip("\n")
+        raw_lines.append(line)
+        if not line.strip():
+            continue
+
+        display, result = parser.parse(line)
+        if result is not None:
+            result_text = result
+
+        if display.strip():
+            accumulated_text += display + "\n"
+            line_data: TranscriptLinePayload = {**event_data, "line": display}
+            await event_bus.publish(
+                HydraFlowEvent(
+                    type=EventType.TRANSCRIPT_LINE,
+                    data=line_data,
+                )
+            )
+
+        if on_output is not None and not early_killed and on_output(accumulated_text):
+            early_killed = True
+            proc.kill()
+            break
+
+    stderr_bytes = await stderr_task
+    await proc.wait()
+    stderr_text = stderr_bytes.decode(errors="replace").strip()
+
+    return validate_post_stream(
+        raw_lines=raw_lines,
+        stderr_text=stderr_text,
+        accumulated_text=accumulated_text,
+        result_text=result_text,
+        early_killed=early_killed,
+        returncode=proc.returncode,
+        parser=parser,
+        logger=logger,
+        usage_stats=usage_stats,
+    )
+
+
 async def stream_claude_process(
     *,
     cmd: list[str],
@@ -129,56 +235,18 @@ async def stream_claude_process(
 ) -> str:
     """Run an agent subprocess and stream its output.
 
-    Parameters
-    ----------
-    cmd:
-        Command to execute (e.g. ``["claude", "-p", ...]`` or ``["codex", "exec", ...]``).
-    prompt:
-        Prompt text for the agent. Passed via stdin for Claude-style commands;
-        passed as a positional argument for Codex `exec`.
-    cwd:
-        Working directory for the subprocess.
-    active_procs:
-        Shared set for tracking active processes (for terminate).
-    event_bus:
-        For publishing ``TRANSCRIPT_LINE`` events.
-    event_data:
-        Base dict for event data (runner-specific keys like ``issue``/``pr``/``source``).
-        ``"line"`` is added automatically per output line.
-    logger:
-        Caller's logger for warnings (preserves per-runner log context).
-    on_output:
-        Optional callback receiving accumulated display text.
-        Return ``True`` to kill the process early.
-    usage_stats:
-        Optional dict populated with normalized usage totals and metadata
-        (availability status, backend, and raw usage blobs when emitted).
-
-    Returns
-    -------
-    str
-        The transcript string, using the fallback chain:
-        result_text → accumulated_text → raw_lines.
+    Returns the transcript string, using the fallback chain:
+    result_text → accumulated_text → raw_lines.
     """
-    env = make_clean_env(gh_token)
-
     if runner is None:
         runner = get_default_runner()
 
-    cmd_to_run, use_prompt_arg = prepare_command(cmd, prompt)
-    stdin_mode = (
-        asyncio.subprocess.DEVNULL if use_prompt_arg else asyncio.subprocess.PIPE
-    )
-
-    proc = await runner.create_streaming_process(
-        cmd_to_run,
-        cwd=str(cwd),
-        env=env,
-        stdin=stdin_mode,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        limit=1024 * 1024,  # 1 MB — stream-json lines can exceed 64 KB default
-        start_new_session=True,  # Own process group for reliable cleanup
+    proc, use_prompt_arg = await create_agent_process(
+        cmd=cmd,
+        prompt=prompt,
+        cwd=cwd,
+        runner=runner,
+        gh_token=gh_token,
     )
     active_procs.add(proc)
 
@@ -187,73 +255,23 @@ async def stream_claude_process(
         assert proc.stdout is not None
         assert proc.stderr is not None
 
-        stdout_stream = proc.stdout  # capture for nested function
-
         if not use_prompt_arg:
-            assert proc.stdin is not None
-            proc.stdin.write(prompt.encode())
-            await proc.stdin.drain()
-            proc.stdin.close()
+            await feed_stdin(proc, prompt)
 
-        # Drain stderr in background to prevent deadlock
         stderr_task = asyncio.create_task(proc.stderr.read())
 
-        parser = StreamParser()
-        raw_lines: list[str] = []
-        result_text = ""
-        accumulated_text = ""
-        early_killed = False
-
-        async def _stream_body() -> str:
-            nonlocal result_text, accumulated_text, early_killed
-
-            async for raw in stdout_stream:
-                line = raw.decode(errors="replace").rstrip("\n")
-                raw_lines.append(line)
-                if not line.strip():
-                    continue
-
-                display, result = parser.parse(line)
-                if result is not None:
-                    result_text = result
-
-                if display.strip():
-                    accumulated_text += display + "\n"
-                    line_data: TranscriptLinePayload = {**event_data, "line": display}
-                    await event_bus.publish(
-                        HydraFlowEvent(
-                            type=EventType.TRANSCRIPT_LINE,
-                            data=line_data,
-                        )
-                    )
-
-                if (
-                    on_output is not None
-                    and not early_killed
-                    and on_output(accumulated_text)
-                ):
-                    early_killed = True
-                    proc.kill()
-                    break
-
-            stderr_bytes = await stderr_task
-            await proc.wait()
-
-            stderr_text = stderr_bytes.decode(errors="replace").strip()
-
-            return validate_post_stream(
-                raw_lines=raw_lines,
-                stderr_text=stderr_text,
-                accumulated_text=accumulated_text,
-                result_text=result_text,
-                early_killed=early_killed,
-                returncode=proc.returncode,
-                parser=parser,
-                logger=logger,
+        async def _body() -> str:
+            return await read_and_publish_stream(
+                proc=proc,
+                stderr_task=stderr_task,
+                event_bus=event_bus,
+                event_data=event_data,
+                on_output=on_output,
                 usage_stats=usage_stats,
+                logger=logger,
             )
 
-        return await asyncio.wait_for(_stream_body(), timeout=timeout)
+        return await asyncio.wait_for(_body(), timeout=timeout)
     except TimeoutError as exc:
         proc.kill()
         await proc.wait()
