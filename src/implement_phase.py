@@ -394,32 +394,20 @@ class ImplementPhase:
             if bead_mapping:
                 await self._beads_manager.init(wt_path)
 
-        # Use TDD isolation for Task Graph plans when enabled
-        plan_text = self._read_plan_for_recording(issue.id)
-        if (
-            self._tdd
-            and self._config.tdd_isolation_enabled
-            and not review_feedback
-            and has_task_graph(plan_text)
-        ):
-            result = await self._tdd.run_phased(
-                issue, wt_path, branch, plan_text, worker_id=worker_id
-            )
-        else:
-            run_kwargs: dict[str, object] = {
-                "worker_id": worker_id,
-                "review_feedback": review_feedback,
-                "prior_failure": prior_failure,
-            }
-            if bead_mapping:
-                run_kwargs["bead_mapping"] = bead_mapping
+        run_kwargs: dict[str, object] = {
+            "worker_id": worker_id,
+            "review_feedback": review_feedback,
+            "prior_failure": prior_failure,
+        }
+        if bead_mapping:
+            run_kwargs["bead_mapping"] = bead_mapping
 
-            result = await self._agents.run(
-                issue,
-                wt_path,
-                branch,
-                **run_kwargs,  # type: ignore[arg-type]
-            )
+        result = await self._agents.run(
+            issue,
+            wt_path,
+            branch,
+            **run_kwargs,  # type: ignore[arg-type]
+        )
 
         await self._record_impl_metrics(issue, result, review_feedback)
 
