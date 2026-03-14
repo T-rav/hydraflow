@@ -38,11 +38,33 @@ if TYPE_CHECKING:
 
 
 # --- Session-scoped environment setup ---
+#
+# NOTE ON GLOBAL STATE MUTATION:
+# The fixtures below intentionally mutate global state (os.environ and
+# module-level private variables) to create a hermetic test environment.
+#
+# - ``setup_test_environment`` removes HYDRAFLOW_*/HYDRA_*/GIT_* env vars so
+#   that tests don't accidentally read the host's configuration.  A
+#   ``finally`` block restores original values, but an abnormal termination
+#   (SIGKILL, segfault) would leave the environment corrupted for any
+#   subsequent in-process test run.  This is an acceptable trade-off because
+#   pytest does not survive such terminations anyway.
+#
+# - ``_reset_gh_semaphore`` clears module-level private state in
+#   subprocess_util to prevent cross-test leakage of semaphore/rate-limit
+#   state.  This couples tests to internal implementation details; if those
+#   internals are renamed, this fixture must be updated accordingly.
 
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_environment():
-    """Set minimal env vars and prevent real subprocess calls."""
+    """Set minimal env vars and isolate tests from host configuration.
+
+    Removes all ``HYDRAFLOW_*``, ``HYDRA_*``, and select ``GIT_*`` variables
+    from ``os.environ`` for the duration of the test session, then restores
+    them in a ``finally`` block.  This is intentional global state mutation
+    required for test isolation — see module-level note above.
+    """
     test_env = {
         "HOME": "/tmp/hydraflow-test",
         "GH_TOKEN": "test-token",
@@ -75,7 +97,12 @@ def setup_test_environment():
 
 @pytest.fixture(autouse=True)
 def _reset_gh_semaphore():
-    """Reset the global gh semaphore and rate-limit state between tests."""
+    """Reset the global gh semaphore and rate-limit state between tests.
+
+    This directly mutates module-level private state in ``subprocess_util``
+    (``_gh_semaphore`` and ``_rate_limit_until``) to prevent cross-test
+    leakage.  See module-level note above regarding the coupling trade-off.
+    """
     subprocess_util._gh_semaphore = None
     subprocess_util._rate_limit_until = None
     yield
