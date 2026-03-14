@@ -3292,11 +3292,12 @@ def create_router(
             )
         return JSONResponse({"repos": repos, "can_register": True})
 
+    _root_names: dict[int, str] = {0: "Home", 1: "Temp"}
+
     @router.get("/api/fs/roots")
     async def list_browsable_roots() -> JSONResponse:
         """Return filesystem roots that are safe to browse from the UI."""
         all_roots = _repo_roots_fn()
-        _root_names = {0: "Home", 1: "Temp"}
         roots = [
             {"name": _root_names.get(i, f"Root {i + 1}"), "path": root}
             for i, root in enumerate(all_roots)

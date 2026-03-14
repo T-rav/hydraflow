@@ -1020,6 +1020,32 @@ class TestBrowsableFilesystemAPI:
         assert resp.status_code == 200
         paths = [r["path"] for r in data["roots"]]
         assert paths == [root_a, root_b]
+        names = [r["name"] for r in data["roots"]]
+        assert names == ["Home", "Temp"]
+
+    @pytest.mark.asyncio
+    async def test_fs_list_empty_roots_returns_500(
+        self,
+        config,
+        event_bus: EventBus,
+        state,
+        tmp_path: Path,
+    ) -> None:
+        """Empty allowed_repo_roots_fn triggers the no-roots guard with 500."""
+        import json as json_mod
+
+        router = self._make_router(
+            config,
+            event_bus,
+            state,
+            tmp_path,
+            allowed_repo_roots_fn=lambda: (),
+        )
+        endpoint = self._get_endpoint(router, "/api/fs/list")
+        resp = await endpoint(path=None)
+        data = json_mod.loads(resp.body)
+        assert resp.status_code == 500
+        assert "no allowed roots configured" in data["error"]
 
     @pytest.mark.asyncio
     async def test_fs_list_rejects_disallowed_path(
