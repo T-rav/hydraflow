@@ -1597,10 +1597,14 @@ class TestEnrichmentErrorResilience:
             template_dir=tmp_path / "no-templates",
         )
         endpoint = next(
-            r.endpoint
-            for r in router.routes
-            if getattr(r, "path", "") == "/api/issues/history"
+            (
+                r.endpoint
+                for r in router.routes
+                if getattr(r, "path", "") == "/api/issues/history"
+            ),
+            None,
         )
+        assert endpoint is not None, "/api/issues/history route not found"
 
         # Create two issues
         await event_bus.publish(
@@ -1682,10 +1686,14 @@ class TestEnrichmentErrorResilience:
             template_dir=tmp_path / "no-templates",
         )
         endpoint = next(
-            r.endpoint
-            for r in router.routes
-            if getattr(r, "path", "") == "/api/issues/history"
+            (
+                r.endpoint
+                for r in router.routes
+                if getattr(r, "path", "") == "/api/issues/history"
+            ),
+            None,
         )
+        assert endpoint is not None, "/api/issues/history route not found"
 
         await event_bus.publish(
             HydraFlowEvent(
