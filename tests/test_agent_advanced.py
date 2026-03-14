@@ -73,8 +73,10 @@ class TestTerminate:
     ) -> None:
         """terminate() with empty _active_procs should be a no-op."""
         runner = AgentRunner(config, event_bus)
-        assert len(runner._active_procs) == 0
         runner.terminate()  # Should not raise
+        assert (
+            len(runner._active_procs) == 0
+        )  # empty procs remain unchanged after no-op
 
 
 class TestExecuteStreaming:
