@@ -36,8 +36,8 @@ _INSTALL_MSG = (
 class BeadsNotInstalledError(RuntimeError):
     """Raised when the ``bd`` CLI is not found on the system."""
 
-    def __init__(self) -> None:
-        super().__init__(_INSTALL_MSG)
+    def __init__(self, msg: str | None = None) -> None:
+        super().__init__(msg or _INSTALL_MSG)
 
 
 class BeadTask(BaseModel):
@@ -65,11 +65,28 @@ class BeadsManager:
     - ``bd show <id> --json`` — show task details as JSON
     """
 
-    async def check_available(self) -> None:
-        """Verify ``bd`` is installed. Raises ``BeadsNotInstalledError`` if not."""
+    async def ensure_installed(self) -> None:
+        """Ensure ``bd`` is installed, auto-installing via npm if missing."""
         try:
             await run_subprocess("bd", "status", timeout=10.0)
-        except (FileNotFoundError, OSError) as exc:
+            return
+        except (FileNotFoundError, OSError, RuntimeError):
+            pass
+
+        logger.info("bd CLI not found — installing via npm install -g @beads/bd")
+        try:
+            await run_subprocess("npm", "install", "-g", "@beads/bd", timeout=120.0)
+        except FileNotFoundError as exc:
+            raise BeadsNotInstalledError(
+                "npm is not installed. Install Node.js first, then run: "
+                "npm install -g @beads/bd"
+            ) from exc
+
+        # Verify it worked
+        try:
+            await run_subprocess("bd", "status", timeout=10.0)
+            logger.info("bd CLI installed successfully")
+        except (FileNotFoundError, OSError, RuntimeError) as exc:
             raise BeadsNotInstalledError() from exc
 
     async def init(self, cwd: Path) -> None:

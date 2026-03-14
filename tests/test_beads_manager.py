@@ -23,27 +23,69 @@ def manager():
 
 
 @pytest.mark.asyncio()
-async def test_check_available_success(manager):
+async def test_ensure_installed_already_available(manager):
     with patch("beads_manager.run_subprocess", new_callable=AsyncMock) as mock_run:
         mock_run.return_value = ""
-        await manager.check_available()  # should not raise
+        await manager.ensure_installed()
         mock_run.assert_called_once_with("bd", "status", timeout=10.0)
 
 
 @pytest.mark.asyncio()
-async def test_check_available_not_installed(manager):
-    with patch("beads_manager.run_subprocess", new_callable=AsyncMock) as mock_run:
-        mock_run.side_effect = FileNotFoundError("bd not found")
-        with pytest.raises(BeadsNotInstalledError, match="npm install -g @beads/bd"):
-            await manager.check_available()
+async def test_ensure_installed_auto_installs(manager):
+    call_count = 0
+
+    async def mock_run(*args, **_kwargs):
+        nonlocal call_count
+        call_count += 1
+        cmd = list(args)
+        if cmd[0] == "bd" and call_count == 1:
+            raise FileNotFoundError("bd not found")
+        if cmd[0] == "npm":
+            return "installed"
+        return ""  # second bd status call succeeds
+
+    with patch("beads_manager.run_subprocess", new_callable=AsyncMock) as mock_run_fn:
+        mock_run_fn.side_effect = mock_run
+        await manager.ensure_installed()
+
+    # Should have called: bd status (fail), npm install, bd status (success)
+    assert call_count == 3
 
 
 @pytest.mark.asyncio()
-async def test_check_available_os_error(manager):
-    with patch("beads_manager.run_subprocess", new_callable=AsyncMock) as mock_run:
-        mock_run.side_effect = OSError("permission denied")
+async def test_ensure_installed_no_npm_raises(manager):
+    async def mock_run(*args, **_kwargs):
+        cmd = list(args)
+        if cmd[0] == "bd":
+            raise FileNotFoundError("bd not found")
+        if cmd[0] == "npm":
+            raise FileNotFoundError("npm not found")
+        return ""
+
+    with patch("beads_manager.run_subprocess", new_callable=AsyncMock) as mock_run_fn:
+        mock_run_fn.side_effect = mock_run
+        with pytest.raises(BeadsNotInstalledError, match="npm is not installed"):
+            await manager.ensure_installed()
+
+
+@pytest.mark.asyncio()
+async def test_ensure_installed_npm_fails_to_install(manager):
+    call_count = 0
+
+    async def mock_run(*args, **_kwargs):
+        nonlocal call_count
+        call_count += 1
+        cmd = list(args)
+        if cmd[0] == "bd":
+            raise FileNotFoundError("bd not found")
+        if cmd[0] == "npm":
+            return "installed"
+        return ""
+
+    with patch("beads_manager.run_subprocess", new_callable=AsyncMock) as mock_run_fn:
+        mock_run_fn.side_effect = mock_run
         with pytest.raises(BeadsNotInstalledError):
-            await manager.check_available()
+            await manager.ensure_installed()
 
 
 # ---------------------------------------------------------------------------

@@ -216,6 +216,7 @@ class PlanPhase:
             return
 
         assert self._beads_manager is not None  # guarded by caller
+        await self._beads_manager.ensure_installed()
         repo_root = self._config.repo_root
         await self._beads_manager.init(repo_root)
         mapping = await self._beads_manager.create_from_phases(
