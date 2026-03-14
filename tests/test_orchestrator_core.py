@@ -23,13 +23,6 @@ from tests.conftest import TaskFactory
 from tests.helpers import make_worker_result, mock_fetcher_noop
 
 # ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-_mock_fetcher_noop = mock_fetcher_noop
-
-
-# ---------------------------------------------------------------------------
 # Initialization
 # ---------------------------------------------------------------------------
 
@@ -198,7 +191,7 @@ class TestRunLoop:
         """run() sets _running = True at start."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
         observed_running = False
 
         async def plan_and_stop() -> list[PlanResult]:
@@ -220,7 +213,7 @@ class TestRunLoop:
     ) -> None:
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         async def plan_and_stop() -> list[PlanResult]:
             orch._stop_event.set()
@@ -240,7 +233,7 @@ class TestRunLoop:
         """run() publishes orchestrator_status events at start and end."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         async def plan_and_stop() -> list[PlanResult]:
             orch._stop_event.set()
@@ -273,7 +266,7 @@ class TestRunLoop:
         """Setting _stop_event causes all three loops to exit."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         plan_calls = 0
 
@@ -296,7 +289,7 @@ class TestRunLoop:
         """Plan, implement, and review loops run concurrently via asyncio.gather."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         started: list[str] = []
 
@@ -329,7 +322,7 @@ class TestRunCallsSanitizeRepo:
     ) -> None:
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         async def plan_and_stop() -> list[PlanResult]:
             orch._stop_event.set()
@@ -362,7 +355,7 @@ class TestRunFinallyTerminatesRunners:
         """When run() exits via stop event, all three runner terminate() are called."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         async def plan_and_stop() -> list[PlanResult]:
             orch._stop_event.set()
@@ -389,7 +382,7 @@ class TestRunFinallyTerminatesRunners:
         """If a loop exception is caught, runners are still terminated on stop."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         call_count = 0
 
@@ -424,7 +417,7 @@ class TestRunFinallyTerminatesRunners:
         """_running must remain True while terminate() calls are in progress."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         async def plan_and_stop() -> list[PlanResult]:
             orch._stop_event.set()
@@ -641,7 +634,7 @@ class TestStopMechanism:
     ) -> None:
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
         observed_running = False
 
         async def spy_implement() -> tuple[list[WorkerResult], list[Task]]:
@@ -663,7 +656,7 @@ class TestStopMechanism:
     ) -> None:
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         async def plan_and_stop() -> list[PlanResult]:
             orch._stop_event.set()
@@ -681,7 +674,7 @@ class TestStopMechanism:
         """Setting stop event causes loops to exit after current iteration."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         call_count = 0
 
@@ -704,7 +697,7 @@ class TestStopMechanism:
         """Calling run() again after stop should reset the stop event."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
         await orch.request_stop()
         assert orch._stop_event.is_set()
 
@@ -728,7 +721,7 @@ class TestStopMechanism:
         """After stop halts the orchestrator, running should be False."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         async def stop_on_implement() -> tuple[list[WorkerResult], list[Task]]:
             await orch.request_stop()
@@ -762,7 +755,7 @@ class TestOrchestratorShutdownLifecycle:
         """_running stays True while _supervise_loops is cleaning up tasks."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
         running_after_stop = None
 
         async def plan_capture_and_stop() -> list[PlanResult]:
@@ -788,7 +781,7 @@ class TestOrchestratorShutdownLifecycle:
         """run_status returns 'stopping' after stop() but before run() exits."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
         captured_status = None
 
         async def plan_capture_and_stop() -> list[PlanResult]:
@@ -811,7 +804,7 @@ class TestOrchestratorShutdownLifecycle:
         """run_status returns 'idle' after run() fully completes."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         async def plan_and_stop() -> list[PlanResult]:
             orch._stop_event.set()
@@ -831,7 +824,7 @@ class TestOrchestratorShutdownLifecycle:
         """ORCHESTRATOR_STATUS events follow running -> stopping -> idle sequence."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         async def plan_and_stop() -> list[PlanResult]:
             await orch.stop()
@@ -865,7 +858,7 @@ class TestOrchestratorShutdownLifecycle:
         """All runner _active_procs sets are empty after run() returns."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         async def plan_and_stop() -> list[PlanResult]:
             orch._stop_event.set()
@@ -888,7 +881,7 @@ class TestOrchestratorShutdownLifecycle:
         """stop() terminates eagerly; finally block terminates again (belt-and-suspenders)."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         terminate_calls = {"planners": 0, "agents": 0, "reviewers": 0, "hitl": 0}
 
@@ -947,7 +940,7 @@ class TestConcurrentLoops:
         """Triage, plan, implement, review should all run concurrently."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         execution_order: list[str] = []
 
@@ -1070,7 +1063,7 @@ class TestPostReviewHooks:
         from models import ReviewResult
 
         orch = HydraFlowOrchestrator(config)
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
         self._mock_review_deps(orch)
 
         results = [
@@ -1099,7 +1092,7 @@ class TestPostReviewHooks:
         from models import ReviewResult
 
         orch = HydraFlowOrchestrator(config)
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
         self._mock_review_deps(orch)
 
         results = [
@@ -1125,7 +1118,7 @@ class TestPostReviewHooks:
         from models import ReviewResult
 
         orch = HydraFlowOrchestrator(config)
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
         self._mock_review_deps(orch)
 
         results = [
@@ -1149,7 +1142,7 @@ class TestPostReviewHooks:
         from models import ReviewResult
 
         orch = HydraFlowOrchestrator(config)
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
         self._mock_review_deps(orch)
 
         results = [
@@ -1175,7 +1168,7 @@ class TestPostReviewHooks:
         from models import ReviewResult
 
         orch = HydraFlowOrchestrator(config)
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
         self._mock_review_deps(orch)
 
         results = [

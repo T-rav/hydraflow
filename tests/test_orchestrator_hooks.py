@@ -27,13 +27,6 @@ from tests.conftest import IssueFactory, PRInfoFactory, TaskFactory
 from tests.helpers import make_review_result, make_worker_result, mock_fetcher_noop
 
 # ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-_mock_fetcher_noop = mock_fetcher_noop
-
-
-# ---------------------------------------------------------------------------
 # Crash recovery — active issue persistence
 # ---------------------------------------------------------------------------
 
@@ -56,7 +49,7 @@ class TestCrashRecoveryActiveIssues:
     ) -> None:
         """Recovered issues should be in _active_impl_issues for one cycle."""
         orch = HydraFlowOrchestrator(config)
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
         orch._state.set_active_issue_numbers([10, 20])
 
         # Simulate run() startup
@@ -76,7 +69,7 @@ class TestCrashRecoveryActiveIssues:
     ) -> None:
         """After one cycle, recovered issues should be cleared from active sets."""
         orch = HydraFlowOrchestrator(config)
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
         orch._state.set_active_issue_numbers([10, 20])
 
         # Simulate startup

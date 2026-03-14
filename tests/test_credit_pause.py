@@ -79,9 +79,6 @@ async def _poll_then_stop(
     await orch.stop()
 
 
-_mock_fetcher_noop = mock_fetcher_noop
-
-
 # ===========================================================================
 # subprocess_util — is_credit_exhaustion
 # ===========================================================================
@@ -416,7 +413,7 @@ class TestCreditExhaustionPauseResume:
         """Credit exhaustion in a loop should publish a SYSTEM_ALERT event."""
         orch = HydraFlowOrchestrator(config, event_bus=event_bus)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         call_count = 0
 
@@ -472,7 +469,7 @@ class TestCreditExhaustionPauseResume:
         """Credit exhaustion should pause all loops and resume after the wait."""
         orch = HydraFlowOrchestrator(config, event_bus=event_bus)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         call_count = 0
 
@@ -514,7 +511,7 @@ class TestCreditExhaustionPauseResume:
         """When no resume time is parseable, a default pause duration is used."""
         orch = HydraFlowOrchestrator(config, event_bus=event_bus)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         call_count = 0
 
@@ -559,7 +556,7 @@ class TestCreditExhaustionPauseResume:
         """Credit exhaustion should terminate all active subprocesses."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         terminate_calls = {"planners": 0, "agents": 0, "reviewers": 0, "hitl": 0}
 
@@ -625,7 +622,7 @@ class TestCreditExhaustionPauseResume:
         """Calling stop() during a credit pause should interrupt the wait."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         async def credit_failing_implement() -> None:
             raise CreditExhaustedError(
