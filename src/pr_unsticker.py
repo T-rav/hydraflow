@@ -8,6 +8,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agent_cli import build_lightweight_command
 from models import ConflictResolutionResult, HITLUpdatePayload
 from phase_utils import MemorySuggester
 from prompt_stats import build_prompt_stats, truncate_with_notice
@@ -758,8 +759,6 @@ If nothing novel, output exactly: NO_NEW_PATTERN"""
         if tool == "inherit":
             tool = "claude"
         model = self._config.background_model or "haiku"
-
-        from agent_cli import build_lightweight_command
 
         cmd, cmd_input = build_lightweight_command(
             tool=tool, model=model, prompt=prompt
