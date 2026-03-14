@@ -656,3 +656,45 @@ class TestLocalCache:
             mgr._save_to_local_cache(snapshot)  # should not raise
 
         assert "Failed to write metrics cache" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# load_local_history OSError handling (issue #2576)
+# ---------------------------------------------------------------------------
+
+
+class TestLoadLocalHistoryOSError:
+    """Verify load_local_history handles OSError when opening snapshots file."""
+
+    def test_returns_empty_list_on_oserror(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """load_local_history should return [] and log warning on OSError."""
+        import logging
+
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        snapshots_file = cache_dir / "snapshots.jsonl"
+        snapshots_file.write_text('{"timestamp":"2025-01-01T00:00:00"}\n')
+
+        state = MagicMock()
+        event_bus = MagicMock()
+        config = HydraFlowConfig(repo_slug="o/r")
+
+        mgr = MetricsManager(
+            config=config,
+            state=state,
+            event_bus=event_bus,
+            cache_dir=cache_dir,
+        )
+
+        with (
+            patch("builtins.open", side_effect=OSError("permission denied")),
+            caplog.at_level(logging.WARNING, logger="hydraflow.metrics_manager"),
+        ):
+            result = mgr.load_local_history()
+
+        assert result == []
+        assert "Could not read snapshots file" in caplog.text

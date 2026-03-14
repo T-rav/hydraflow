@@ -225,22 +225,30 @@ class EventLog:
         cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
         kept_lines: list[str] = []
 
-        with open(self._path) as f:
-            for raw_line in f:
-                stripped = raw_line.strip()
-                if not stripped:
-                    continue
-                try:
-                    event = HydraFlowEvent.model_validate_json(stripped)
-                    ts = datetime.fromisoformat(event.timestamp)
-                    if ts >= cutoff:
-                        kept_lines.append(stripped)
-                except (ValidationError, ValueError):
-                    logger.debug(
-                        "Dropping corrupt event line during rotation",
-                        exc_info=True,
-                    )
-                    continue
+        try:
+            with open(self._path) as f:
+                for raw_line in f:
+                    stripped = raw_line.strip()
+                    if not stripped:
+                        continue
+                    try:
+                        event = HydraFlowEvent.model_validate_json(stripped)
+                        ts = datetime.fromisoformat(event.timestamp)
+                        if ts >= cutoff:
+                            kept_lines.append(stripped)
+                    except (ValidationError, ValueError):
+                        logger.debug(
+                            "Dropping corrupt event line during rotation",
+                            exc_info=True,
+                        )
+                        continue
+        except OSError:
+            logger.warning(
+                "Could not read event log for rotation: %s",
+                self._path,
+                exc_info=True,
+            )
+            return
 
         content = "\n".join(kept_lines) + "\n" if kept_lines else ""
         atomic_write(self._path, content)
