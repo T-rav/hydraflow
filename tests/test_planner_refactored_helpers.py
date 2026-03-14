@@ -1,0 +1,211 @@
+"""Tests for planner.py extracted helper methods."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+import pytest
+
+from models import PlanResult, Task
+from planner import PlannerRunner
+
+
+@pytest.fixture
+def planner_task() -> Task:
+    return Task(
+        id=10,
+        title="Add feature X",
+        body="Implement feature X in the system.",
+        tags=["ready"],
+        comments=[],
+        source_url="https://github.com/test/repo/issues/10",
+    )
+
+
+@pytest.fixture
+def runner(config, event_bus):
+    return PlannerRunner(config=config, event_bus=event_bus)
+
+
+# ---------------------------------------------------------------------------
+# _build_comments_section
+# ---------------------------------------------------------------------------
+
+
+class TestPlannerBuildCommentsSection:
+    """Tests for PlannerRunner._build_comments_section."""
+
+    def test_empty_comments(self, runner) -> None:
+        section, before, after = runner._build_comments_section([])
+        assert section == ""
+        assert before == 0
+        assert after == 0
+
+    def test_single_comment(self, runner) -> None:
+        section, before, after = runner._build_comments_section(["hello world"])
+        assert "## Discussion" in section
+        assert "hello world" in section
+        assert before == len("hello world")
+
+    def test_limits_to_six_comments(self, runner) -> None:
+        comments = [f"comment {i}" for i in range(10)]
+        section, _before, _after = runner._build_comments_section(comments)
+        assert "4 more comments omitted" in section
+
+    def test_truncates_long_comments(self, runner) -> None:
+        long_comment = "a" * 2000
+        section, before, _after = runner._build_comments_section([long_comment])
+        assert before == 2000
+        assert "\u2026(truncated)" in section
+
+
+# ---------------------------------------------------------------------------
+# _build_body_with_image_note
+# ---------------------------------------------------------------------------
+
+
+class TestBuildBodyWithImageNote:
+    """Tests for PlannerRunner._build_body_with_image_note."""
+
+    def test_simple_body(self, runner, planner_task) -> None:
+        body, note, raw_len, body_len = runner._build_body_with_image_note(planner_task)
+        assert body == planner_task.body
+        assert note == ""
+        assert raw_len == body_len
+
+    def test_detects_markdown_image(self, runner, planner_task) -> None:
+        planner_task.body = "See ![screenshot](image.png) for details."
+        _body, note, _raw, _bl = runner._build_body_with_image_note(planner_task)
+        assert "images" in note.lower()
+
+    def test_detects_html_image(self, runner, planner_task) -> None:
+        planner_task.body = 'Check <img src="x.png"> this'
+        _body, note, _raw, _bl = runner._build_body_with_image_note(planner_task)
+        assert note != ""
+
+    def test_empty_body(self, runner, planner_task) -> None:
+        planner_task.body = ""
+        body, note, raw_len, body_len = runner._build_body_with_image_note(planner_task)
+        assert body == ""
+        assert note == ""
+        assert raw_len == 0
+
+    def test_none_body(self, runner, planner_task) -> None:
+        planner_task.body = None
+        body, _note, raw_len, _bl = runner._build_body_with_image_note(planner_task)
+        assert raw_len == 0
+
+
+# ---------------------------------------------------------------------------
+# _build_schema_sections
+# ---------------------------------------------------------------------------
+
+
+class TestBuildSchemaSections:
+    """Tests for PlannerRunner._build_schema_sections."""
+
+    def test_lite_schema(self) -> None:
+        mode, schema, graph, mortem = PlannerRunner._build_schema_sections("lite")
+        assert "LITE" in mode
+        assert "LITE SCHEMA" in schema
+        assert graph == ""
+        assert mortem == ""
+
+    def test_full_schema(self) -> None:
+        mode, schema, graph, mortem = PlannerRunner._build_schema_sections("full")
+        assert "FULL" in mode
+        assert "REQUIRED SCHEMA" in schema
+        assert "Task Graph Format" in graph
+        assert "Pre-Mortem" in mortem
+
+
+# ---------------------------------------------------------------------------
+# _make_plan_complete_checker
+# ---------------------------------------------------------------------------
+
+
+class TestMakePlanCompleteChecker:
+    """Tests for PlannerRunner._make_plan_complete_checker."""
+
+    def test_detects_plan_end(self, runner) -> None:
+        checker = runner._make_plan_complete_checker(10)
+        assert checker("some text PLAN_END more") is True
+
+    def test_detects_already_satisfied_end(self, runner) -> None:
+        checker = runner._make_plan_complete_checker(10)
+        assert checker("ALREADY_SATISFIED_END") is True
+
+    def test_returns_false_when_no_markers(self, runner) -> None:
+        checker = runner._make_plan_complete_checker(10)
+        assert checker("partial output") is False
+
+
+# ---------------------------------------------------------------------------
+# _collect_validation_errors
+# ---------------------------------------------------------------------------
+
+
+class TestCollectValidationErrors:
+    """Tests for PlannerRunner._collect_validation_errors."""
+
+    def test_lite_skips_gate_errors(self, runner, planner_task) -> None:
+        with patch.object(runner, "_validate_plan", return_value=["err1"]):
+            errors = runner._collect_validation_errors(
+                planner_task, "some plan", "lite"
+            )
+        assert errors == ["err1"]
+
+    def test_full_includes_gate_errors(self, runner, planner_task) -> None:
+        with (
+            patch.object(runner, "_validate_plan", return_value=["err1"]),
+            patch.object(
+                runner,
+                "_run_phase_minus_one_gates",
+                return_value=(["gate_err"], []),
+            ),
+        ):
+            errors = runner._collect_validation_errors(
+                planner_task, "some plan", "full"
+            )
+        assert "err1" in errors
+        assert "gate_err" in errors
+
+
+# ---------------------------------------------------------------------------
+# _finalize_result
+# ---------------------------------------------------------------------------
+
+
+class TestFinalizeResult:
+    """Tests for PlannerRunner._finalize_result."""
+
+    def test_sets_duration(self, runner, planner_task) -> None:
+        result = PlanResult(issue_number=10)
+        runner._finalize_result(planner_task, result, 0.0)
+        assert result.duration_seconds > 0
+
+    def test_saves_plan_on_success(self, runner, planner_task) -> None:
+        result = PlanResult(issue_number=10)
+        result.success = True
+        result.plan = "the plan"
+        result.summary = "summary"
+        with (
+            patch.object(runner, "_save_transcript"),
+            patch.object(runner, "_save_plan") as mock_save,
+        ):
+            runner._finalize_result(planner_task, result, 0.0)
+        mock_save.assert_called_once_with(10, "the plan", "summary")
+
+    def test_skips_plan_save_on_failure(self, runner, planner_task) -> None:
+        result = PlanResult(issue_number=10)
+        result.success = False
+        with (
+            patch.object(runner, "_save_transcript"),
+            patch.object(runner, "_save_plan") as mock_save,
+        ):
+            runner._finalize_result(planner_task, result, 0.0)
+        mock_save.assert_not_called()
