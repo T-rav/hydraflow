@@ -14,7 +14,7 @@ import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from pydantic import ValidationError
 
@@ -32,6 +32,8 @@ from ._worker import WorkerStateMixin
 from ._worktree import WorktreeStateMixin
 
 logger = logging.getLogger("hydraflow.state")
+
+_V = TypeVar("_V")
 
 __all__ = ["StateTracker"]
 
@@ -59,6 +61,18 @@ class StateTracker(
         self._path = state_file
         self._data: StateData = StateData()
         self.load()
+
+    # --- int↔str key conversion helpers ---
+
+    @staticmethod
+    def _key(issue_id: int) -> str:
+        """Convert an integer issue/PR number to the string key used in state dicts."""
+        return str(issue_id)
+
+    @staticmethod
+    def _int_keys(d: dict[str, _V]) -> dict[int, _V]:
+        """Return a copy of *d* with all keys converted from ``str`` to ``int``."""
+        return {int(k): v for k, v in d.items()}
 
     # --- persistence ---
 
