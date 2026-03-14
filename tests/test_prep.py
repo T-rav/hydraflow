@@ -774,6 +774,24 @@ class TestCheckLinting:
         check = auditor._check_linting()
         assert check.status == AuditCheckStatus.MISSING
 
+    def test_makefile_oserror_logs_debug(self, tmp_path: Path, caplog) -> None:
+        """Should log debug on OSError reading Makefile instead of silently passing."""
+        import logging
+
+        makefile = tmp_path / "Makefile"
+        makefile.write_text("lint:\n\t@echo ok\n")
+        makefile.chmod(0o000)
+        config = ConfigFactory.create(repo_root=tmp_path)
+        from prep import RepoAuditor
+
+        auditor = RepoAuditor(config)
+        with caplog.at_level(logging.DEBUG, logger="hydraflow.prep"):
+            check = auditor._check_linting()
+        # Should not crash — gracefully degrades
+        assert check is not None
+        assert any("Could not read Makefile" in r.message for r in caplog.records)
+        makefile.chmod(0o644)
+
 
 # ---------------------------------------------------------------------------
 # Type checking detection
@@ -944,6 +962,24 @@ class TestCheckCoveragePolicy:
         check = auditor._check_coverage_policy()
         assert check.status == AuditCheckStatus.PRESENT
         assert "70%" in check.detail
+
+    def test_coveragerc_oserror_logs_debug(self, tmp_path: Path, caplog) -> None:
+        """Should log debug on OSError reading .coveragerc instead of silently passing."""
+        import logging
+
+        coveragerc = tmp_path / ".coveragerc"
+        coveragerc.write_text("[report]\nfail_under = 80\n")
+        coveragerc.chmod(0o000)
+        config = ConfigFactory.create(repo_root=tmp_path)
+        from prep import RepoAuditor
+
+        auditor = RepoAuditor(config)
+        with caplog.at_level(logging.DEBUG, logger="hydraflow.prep"):
+            check = auditor._check_coverage_policy()
+        # Should not crash — gracefully degrades
+        assert check is not None
+        assert any("Could not read .coveragerc" in r.message for r in caplog.records)
+        coveragerc.chmod(0o644)
 
 
 # ---------------------------------------------------------------------------
