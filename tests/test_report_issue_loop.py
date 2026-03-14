@@ -598,7 +598,7 @@ class TestHfIssueSkillPrompt:
         ):
             await loop._do_work()
 
-        assert saved_path
+        assert saved_path.endswith(".png"), f"Expected .png path, got: {saved_path!r}"
         assert not Path(saved_path).exists(), "Temp screenshot should be deleted"
 
     @pytest.mark.asyncio
