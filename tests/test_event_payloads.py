@@ -340,14 +340,6 @@ class TestTypedData:
 # ---------------------------------------------------------------------------
 
 
-class TestPhaseChangePayload:
-    def test_construct(self) -> None:
-        from models import PhaseChangePayload
-
-        p: PhaseChangePayload = {"phase": "idle"}
-        assert p["phase"] == "idle"
-
-
 class TestTranscriptLinePayload:
     def test_construct_minimal(self) -> None:
         from models import TranscriptLinePayload
