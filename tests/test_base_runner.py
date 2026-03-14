@@ -78,9 +78,9 @@ class TestTerminate:
         self, config, event_bus: EventBus
     ) -> None:
         runner = _TestRunner(config, event_bus)
-        assert len(runner._active_procs) == 0
-        runner.terminate()  # Should not raise
-        assert len(runner._active_procs) == 0
+        with patch("base_runner.terminate_processes") as mock_tp:
+            runner.terminate()  # Should not raise
+        mock_tp.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

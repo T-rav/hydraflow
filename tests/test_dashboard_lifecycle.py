@@ -1033,5 +1033,5 @@ class TestStartStop:
 
         await dashboard.stop()
         assert (
-            dashboard._server_task.done()
-        )  # already-done task stays done after stop()
+            not dashboard._server_task.cancelled()
+        )  # stop() must not cancel an already-done task
