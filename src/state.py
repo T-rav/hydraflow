@@ -355,6 +355,17 @@ class StateTracker:
         self._data.active_issue_numbers = numbers
         self.save()
 
+    # --- bead mappings ---
+
+    def set_bead_mapping(self, issue_id: int, mapping: dict[str, str]) -> None:
+        """Persist the phase→bead ID mapping for *issue_id*."""
+        self._data.bead_mappings[str(issue_id)] = mapping
+        self.save()
+
+    def get_bead_mapping(self, issue_id: int) -> dict[str, str]:
+        """Return the phase→bead ID mapping for *issue_id*, or empty dict."""
+        return self._data.bead_mappings.get(str(issue_id), {})
+
     # --- interrupted issues ---
 
     def set_interrupted_issues(self, mapping: dict[int, str]) -> None:

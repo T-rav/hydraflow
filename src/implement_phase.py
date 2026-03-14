@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 from agent import AgentRunner
+from beads_manager import BeadsManager
 from config import HydraFlowConfig
 from harness_insights import FailureCategory, HarnessInsightStore
 from issue_store import IssueStore
@@ -52,6 +53,7 @@ class ImplementPhase:
         stop_event: asyncio.Event,
         run_recorder: RunRecorder | None = None,
         harness_insights: HarnessInsightStore | None = None,
+        beads_manager: BeadsManager | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -63,6 +65,7 @@ class ImplementPhase:
         self._stop_event = stop_event
         self._run_recorder = run_recorder
         self._harness_insights = harness_insights
+        self._beads_manager = beads_manager
         self._active_issues: set[int] = set()
         self._active_issues_lock = asyncio.Lock()
         self._suggest_memory = MemorySuggester(config, prs, state)
@@ -384,6 +387,13 @@ class ImplementPhase:
         # does not include comment bodies.
         issue = await self._store.enrich_with_comments(issue)
 
+        # Load bead mapping when beads are enabled
+        bead_mapping: dict[str, str] | None = None
+        if self._beads_manager and self._beads_manager.enabled:
+            bead_mapping = self._state.get_bead_mapping(issue.id) or None
+            if bead_mapping:
+                await self._beads_manager.init(wt_path)
+
         # Use TDD isolation for Task Graph plans when enabled
         plan_text = self._read_plan_for_recording(issue.id)
         if (
@@ -396,13 +406,19 @@ class ImplementPhase:
                 issue, wt_path, branch, plan_text, worker_id=worker_id
             )
         else:
+            run_kwargs: dict[str, object] = {
+                "worker_id": worker_id,
+                "review_feedback": review_feedback,
+                "prior_failure": prior_failure,
+            }
+            if bead_mapping:
+                run_kwargs["bead_mapping"] = bead_mapping
+
             result = await self._agents.run(
                 issue,
                 wt_path,
                 branch,
-                worker_id=worker_id,
-                review_feedback=review_feedback,
-                prior_failure=prior_failure,
+                **run_kwargs,  # type: ignore[arg-type]
             )
 
         await self._record_impl_metrics(issue, result, review_feedback)

@@ -102,6 +102,7 @@ Run through this checklist before your final commit:
         worker_id: int = 0,
         review_feedback: str = "",
         prior_failure: str = "",
+        bead_mapping: dict[str, str] | None = None,
     ) -> WorkerResult:
         """Run the implementation agent for *task*.
 
@@ -127,7 +128,10 @@ Run through this checklist before your final commit:
             # Build and run the configured agent command
             cmd = self._build_command(worktree_path)
             prompt, prompt_stats = self._build_prompt_with_stats(
-                task, review_feedback=review_feedback, prior_failure=prior_failure
+                task,
+                review_feedback=review_feedback,
+                prior_failure=prior_failure,
+                bead_mapping=bead_mapping,
             )
             transcript = await self._execute(
                 cmd,
@@ -397,12 +401,19 @@ Run through this checklist before your final commit:
             + f"\n[Comment truncated from {len(raw):,} chars]"
         )
 
-    def _build_tdd_subagent_plan(self, plan_comment: str) -> str:
+    def _build_tdd_subagent_plan(
+        self,
+        plan_comment: str,
+        bead_mapping: dict[str, str] | None = None,
+    ) -> str:
         """Build a Task Graph plan that instructs the agent to use sub-agents.
 
         Parses phases from the plan, topologically sorts them, and builds
         concrete per-phase RED/GREEN/REFACTOR sub-agent instructions with
         the actual files, tests, and dependency info from each phase.
+
+        When *bead_mapping* is provided, injects ``bd`` claim/close
+        lifecycle commands into each phase.
         """
         phases = topological_sort(extract_phases(plan_comment))
         max_fix = self._config.tdd_max_remediation_loops
@@ -432,11 +443,26 @@ Run through this checklist before your final commit:
             )
             deps_str = ", ".join(phase.depends_on) or "none"
 
+            # Bead lifecycle instructions
+            bead_id = (bead_mapping or {}).get(phase.id)
+            bead_header = ""
+            bead_claim = ""
+            bead_close = ""
+            if bead_id:
+                bead_header = f"**Bead:** #{bead_id}\n"
+                bead_claim = f"\n> First run: `bd update {bead_id} --claim`\n"
+                bead_close = (
+                    f"\n> After all tests pass, run: "
+                    f'`bd close {bead_id} --reason "Phase complete"`\n'
+                )
+
             phase_sections.append(
                 f"### Phase {i}: {phase.name}\n\n"
+                f"{bead_header}"
                 f"**Files:** {files_str}  \n"
                 f"**Depends on:** {deps_str}\n\n"
                 f"**1. RED sub-agent** \u2014 Launch with prompt:\n"
+                f"{bead_claim}"
                 f'> "Write FAILING tests for {phase.name}. '
                 f"Test these behavioral specs:\n{tests_str}\n"
                 f"ONLY create/modify files in `tests/`. Do NOT touch source files. "
@@ -449,7 +475,8 @@ Run through this checklist before your final commit:
                 f"**3. REFACTOR sub-agent** \u2014 Launch with prompt:\n"
                 f'> "Run `make test`. If tests fail, fix implementation code '
                 f"(not tests). Repeat until the full suite passes (max "
-                f'{max_fix} attempts). Commit fixes."\n\n'
+                f'{max_fix} attempts). Commit fixes."\n'
+                f"{bead_close}\n"
             )
 
         # If parsing found no phases, include the raw plan as fallback
@@ -469,7 +496,11 @@ Run through this checklist before your final commit:
         return header + rules + "\n".join(phase_sections)
 
     def _build_prompt_with_stats(
-        self, issue: Task, review_feedback: str = "", prior_failure: str = ""
+        self,
+        issue: Task,
+        review_feedback: str = "",
+        prior_failure: str = "",
+        bead_mapping: dict[str, str] | None = None,
     ) -> tuple[str, dict[str, object]]:
         """Build the implementation prompt and pruning stats."""
         plan_comment, other_comments = self._extract_plan_comment(issue.comments)
@@ -497,7 +528,9 @@ Run through this checklist before your final commit:
             history_after += len(plan_comment)
             # Detect whether the plan uses Task Graph format
             if has_task_graph(plan_comment):
-                plan_section = self._build_tdd_subagent_plan(plan_comment)
+                plan_section = self._build_tdd_subagent_plan(
+                    plan_comment, bead_mapping=bead_mapping
+                )
             else:
                 plan_section = (
                     f"\n\n## Implementation Plan\n\n"

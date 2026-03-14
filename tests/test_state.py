@@ -66,6 +66,7 @@ class TestInitialization:
             "active_issue_numbers",
             "active_worktrees",
             "baseline_audit",
+            "bead_mappings",
             "bg_worker_states",
             "disabled_workers",
             "epic_states",

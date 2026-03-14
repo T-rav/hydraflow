@@ -12,6 +12,7 @@ from adr_reviewer import ADRCouncilReviewer
 from adr_reviewer_loop import ADRReviewerLoop
 from agent import AgentRunner
 from baseline_policy import BaselinePolicy
+from beads_manager import BeadsManager
 from config import HydraFlowConfig
 from crate_manager import CrateManager
 from docker_runner import get_docker_runner
@@ -168,6 +169,9 @@ def build_services(
     epic_checker = EpicCompletionChecker(config, prs, fetcher, state=state)
     epic_manager = EpicManager(config, state, prs, fetcher, event_bus)
 
+    # Beads manager (optional)
+    beads_mgr = BeadsManager(config) if config.beads_enabled else None
+
     # Phase coordinators
     triager = TriagePhase(
         config,
@@ -191,6 +195,7 @@ def build_services(
         harness_insights=harness_insights,
         epic_manager=epic_manager,
         research_runner=researcher,
+        beads_manager=beads_mgr,
     )
     hitl_phase = HITLPhase(
         config,
@@ -215,6 +220,7 @@ def build_services(
         stop_event,
         run_recorder=run_recorder,
         harness_insights=harness_insights,
+        beads_manager=beads_mgr,
     )
 
     from metrics_manager import MetricsManager

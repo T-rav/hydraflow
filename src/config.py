@@ -153,6 +153,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("release_on_epic_close", "HYDRAFLOW_RELEASE_ON_EPIC_CLOSE", False),
     ("adr_review_enabled", "HYDRAFLOW_ADR_REVIEW_ENABLED", False),
     ("adr_review_auto_triage", "HYDRAFLOW_ADR_REVIEW_AUTO_TRIAGE", False),
+    ("beads_enabled", "HYDRAFLOW_BEADS_ENABLED", False),
     (
         "screenshot_redaction_enabled",
         "HYDRAFLOW_SCREENSHOT_REDACTION_ENABLED",
@@ -1066,6 +1067,12 @@ class HydraFlowConfig(BaseModel):
     adr_review_model: str = Field(
         default="sonnet",
         description="Model for the ADR council review orchestrator",
+    )
+
+    # Beads integration
+    beads_enabled: bool = Field(
+        default=False,
+        description="Enable beads (bd CLI) task decomposition layer",
     )
 
     # Session retention
