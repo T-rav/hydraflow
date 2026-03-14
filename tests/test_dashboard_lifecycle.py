@@ -1016,6 +1016,8 @@ class TestStartStop:
 
         await dashboard.stop()
 
+        assert dashboard._server_task is None  # stop() must not create a task
+
     @pytest.mark.asyncio
     async def test_stop_is_safe_when_task_already_done(
         self, config: HydraFlowConfig, event_bus: EventBus, state
