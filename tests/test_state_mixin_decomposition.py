@@ -180,6 +180,70 @@ class TestIssueStateMixin:
         t.set_active_crate_number(None)
         assert t.get_active_crate_number() is None
 
+    def test_mark_pr(self, tmp_path: Path) -> None:
+        t = make_tracker(tmp_path)
+        t.mark_pr(101, "approved")
+        assert t.to_dict()["reviewed_prs"]["101"] == "approved"
+
+    def test_worker_result_meta(self, tmp_path: Path) -> None:
+        t = make_tracker(tmp_path)
+        assert t.get_worker_result_meta(1) == {}
+        t.set_worker_result_meta(1, {"exit_code": 0, "duration": 12.5})
+        assert t.get_worker_result_meta(1) == {"exit_code": 0, "duration": 12.5}
+
+    def test_record_outcome_records_and_increments_counter(
+        self, tmp_path: Path
+    ) -> None:
+        from models import IssueOutcomeType  # noqa: PLC0415
+
+        t = make_tracker(tmp_path)
+        t.record_outcome(1, IssueOutcomeType.MERGED, "pr merged", pr_number=42)
+        outcome = t.get_outcome(1)
+        assert outcome is not None
+        assert outcome.outcome == IssueOutcomeType.MERGED
+        assert outcome.pr_number == 42
+        assert t.get_lifetime_stats().total_outcomes_merged == 1
+
+    def test_record_outcome_replaces_previous_and_adjusts_counter(
+        self, tmp_path: Path
+    ) -> None:
+        from models import IssueOutcomeType  # noqa: PLC0415
+
+        t = make_tracker(tmp_path)
+        t.record_outcome(1, IssueOutcomeType.FAILED, "first attempt failed")
+        assert t.get_lifetime_stats().total_outcomes_failed == 1
+
+        # Replace with MERGED — FAILED counter must decrement back to 0
+        t.record_outcome(1, IssueOutcomeType.MERGED, "recovered", pr_number=10)
+        stats = t.get_lifetime_stats()
+        assert stats.total_outcomes_failed == 0
+        assert stats.total_outcomes_merged == 1
+
+    def test_get_all_outcomes(self, tmp_path: Path) -> None:
+        from models import IssueOutcomeType  # noqa: PLC0415
+
+        t = make_tracker(tmp_path)
+        t.record_outcome(1, IssueOutcomeType.MERGED, "done")
+        t.record_outcome(2, IssueOutcomeType.HITL_CLOSED, "escalated")
+        all_outcomes = t.get_all_outcomes()
+        assert set(all_outcomes.keys()) == {"1", "2"}
+
+    def test_record_hook_failure_and_retrieve(self, tmp_path: Path) -> None:
+        t = make_tracker(tmp_path)
+        assert t.get_hook_failures(1) == []
+        t.record_hook_failure(1, "pre-commit", "lint failed")
+        failures = t.get_hook_failures(1)
+        assert len(failures) == 1
+        assert failures[0].hook_name == "pre-commit"
+        assert failures[0].error == "lint failed"
+        assert failures[0].timestamp is not None
+
+    def test_record_hook_failure_caps_at_max(self, tmp_path: Path) -> None:
+        t = make_tracker(tmp_path)
+        for i in range(510):
+            t.record_hook_failure(1, "hook", f"error {i}")
+        assert len(t.get_hook_failures(1)) == 500
+
 
 class TestWorktreeStateMixin:
     def test_worktree_lifecycle(self, tmp_path: Path) -> None:
