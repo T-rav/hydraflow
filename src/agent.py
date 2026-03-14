@@ -40,10 +40,6 @@ class AgentRunner(BaseRunner):
     """
 
     _log = logger
-    _MAX_DISCUSSION_COMMENT_CHARS = 500
-    _MAX_COMMON_FEEDBACK_CHARS = 2_000
-    _MAX_IMPL_PLAN_CHARS = 6_000
-    _MAX_REVIEW_FEEDBACK_CHARS = 2_000
 
     _SELF_CHECK_CHECKLIST = """
 ## Self-Check Before Committing
@@ -390,12 +386,10 @@ Run through this checklist before your final commit:
     def _truncate_comment_for_prompt(self, text: str) -> str:
         """Return one discussion comment compacted for prompt efficiency."""
         raw = (text or "").strip()
-        if len(raw) <= self._MAX_DISCUSSION_COMMENT_CHARS:
+        limit = self._config.max_discussion_comment_chars
+        if len(raw) <= limit:
             return raw
-        return (
-            raw[: self._MAX_DISCUSSION_COMMENT_CHARS]
-            + f"\n[Comment truncated from {len(raw):,} chars]"
-        )
+        return raw[:limit] + f"\n[Comment truncated from {len(raw):,} chars]"
 
     def _build_tdd_subagent_plan(self, plan_comment: str) -> str:
         """Build a Task Graph plan that instructs the agent to use sub-agents.
@@ -491,7 +485,7 @@ Run through this checklist before your final commit:
         if plan_comment:
             plan_comment = self._summarize_for_prompt(
                 plan_comment,
-                max_chars=self._MAX_IMPL_PLAN_CHARS,
+                max_chars=self._config.max_impl_plan_chars,
                 label="Implementation plan",
             )
             history_after += len(plan_comment)
@@ -511,7 +505,7 @@ Run through this checklist before your final commit:
             history_before += len(review_feedback)
             review_feedback = self._summarize_for_prompt(
                 review_feedback,
-                max_chars=self._MAX_REVIEW_FEEDBACK_CHARS,
+                max_chars=self._config.max_review_feedback_chars,
                 label="Review feedback",
             )
             history_after += len(review_feedback)
@@ -557,7 +551,7 @@ Run through this checklist before your final commit:
             history_before += len(raw_feedback_section)
             compact_feedback = self._summarize_for_prompt(
                 raw_feedback_section,
-                max_chars=self._MAX_COMMON_FEEDBACK_CHARS,
+                max_chars=self._config.max_common_feedback_chars,
                 label="Common review feedback",
             )
             history_after += len(compact_feedback)

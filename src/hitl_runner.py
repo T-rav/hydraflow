@@ -67,9 +67,6 @@ _CAUSE_INSTRUCTIONS: dict[HITLCauseKey, str] = {
     ),
 }
 
-_MAX_HITL_CORRECTION_CHARS = 4000
-_MAX_HITL_CAUSE_CHARS = 2000
-
 
 def _classify_cause(cause: str) -> HITLCauseKey:
     """Map a free-text escalation cause to a prompt template key."""
@@ -191,10 +188,12 @@ class HITLRunner(BaseRunner):
             issue.body or "", self._config.max_issue_body_chars, label="Issue body"
         )
         cause_text, cause_before, cause_after = truncate_with_notice(
-            cause or "", _MAX_HITL_CAUSE_CHARS, label="Escalation reason"
+            cause or "", self._config.max_hitl_cause_chars, label="Escalation reason"
         )
         correction_text, correction_before, correction_after = truncate_with_notice(
-            correction or "", _MAX_HITL_CORRECTION_CHARS, label="Human guidance"
+            correction or "",
+            self._config.max_hitl_correction_chars,
+            label="Human guidance",
         )
 
         manifest_section, memory_section = self._inject_manifest_and_memory()
