@@ -913,3 +913,13 @@ class TestReraiseOnCreditOrBug:
             reraise_on_credit_or_bug(exc)
             handled = True
         assert handled
+
+    def test_reraises_authentication_error(self) -> None:
+        """AuthenticationError should be re-raised like CreditExhaustedError."""
+        from subprocess_util import AuthenticationError
+
+        with pytest.raises(AuthenticationError):
+            try:
+                raise AuthenticationError("bad token")
+            except Exception as exc:
+                reraise_on_credit_or_bug(exc)

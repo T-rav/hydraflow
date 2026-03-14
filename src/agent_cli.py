@@ -62,7 +62,7 @@ def build_lightweight_command(
     tool: AgentTool,
     model: str,
     prompt: str,
-) -> tuple[list[str], None]:
+) -> tuple[list[str], bytes | None]:
     """Build a simple CLI command for lightweight (non-streaming) callers.
 
     Unlike :func:`build_agent_command` which builds streaming commands for
@@ -70,7 +70,7 @@ def build_lightweight_command(
     background workers (ADR reviewer, memory compaction, PR unsticker,
     transcript summarizer).
 
-    Returns ``(cmd, input_text)`` where *input_text* is always ``None``
+    Returns ``(cmd, input_bytes)`` where *input_bytes* is always ``None``
     (reserved for future stdin-based backends).
     """
     if tool == "codex":

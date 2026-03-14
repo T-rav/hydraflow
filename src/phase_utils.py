@@ -339,12 +339,12 @@ def is_likely_bug(exc: BaseException) -> bool:
 
 
 def reraise_on_credit_or_bug(exc: BaseException) -> None:
-    """Re-raise *exc* if it is a :class:`CreditExhaustedError` or a likely bug.
+    """Re-raise *exc* if it is a fatal infrastructure error or a likely bug.
 
     Call this at the top of an ``except Exception`` handler to replace the
     duplicated pattern::
 
-        except CreditExhaustedError:
+        except (AuthenticationError, CreditExhaustedError):
             raise
         except Exception as exc:
             if is_likely_bug(exc):
@@ -355,9 +355,9 @@ def reraise_on_credit_or_bug(exc: BaseException) -> None:
         except Exception as exc:
             reraise_on_credit_or_bug(exc)
     """
-    from subprocess_util import CreditExhaustedError
+    from subprocess_util import AuthenticationError, CreditExhaustedError
 
-    if isinstance(exc, CreditExhaustedError):
+    if isinstance(exc, (AuthenticationError, CreditExhaustedError)):
         raise exc
     if is_likely_bug(exc):
         raise exc
