@@ -216,11 +216,13 @@ class TestGoPackageName:
         go_file = tmp_path / "calc.go"
         go_file.write_text("package calc\n")
         go_file.chmod(0o000)
-        with caplog.at_level(logging.DEBUG, logger="hydraflow.polyglot_prep"):
-            result = _go_package_name(go_file)
-        assert result == "main"
-        assert any(
-            "Could not read Go file for package detection" in r.message
-            for r in caplog.records
-        )
-        go_file.chmod(0o644)
+        try:
+            with caplog.at_level(logging.DEBUG, logger="hydraflow.polyglot_prep"):
+                result = _go_package_name(go_file)
+            assert result == "main"
+            assert any(
+                "Could not read Go file for package detection" in r.message
+                for r in caplog.records
+            )
+        finally:
+            go_file.chmod(0o644)
