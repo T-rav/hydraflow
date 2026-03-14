@@ -115,3 +115,68 @@ def test_section_key_normalised_to_snake_case() -> None:
     section_chars = stats["section_chars"]
     assert "issue_body_before" in section_chars
     assert "issue_body_after" in section_chars
+
+
+# record_context / record_history (external truncation)
+
+
+def test_record_context_accumulates_context_stats() -> None:
+    builder = PromptBuilder()
+    builder.record_context("Issue body", "a" * 200, "a" * 50)
+    stats = builder.build_stats()
+    assert stats["context_chars_before"] == 200
+    assert stats["context_chars_after"] == 50
+    assert stats["history_chars_before"] == 0
+    assert stats["history_chars_after"] == 0
+
+
+def test_record_history_accumulates_history_stats() -> None:
+    builder = PromptBuilder()
+    builder.record_history("Discussion", "b" * 300, "b" * 80)
+    stats = builder.build_stats()
+    assert stats["history_chars_before"] == 300
+    assert stats["history_chars_after"] == 80
+    assert stats["context_chars_before"] == 0
+    assert stats["context_chars_after"] == 0
+
+
+def test_record_context_includes_section_chars() -> None:
+    builder = PromptBuilder()
+    builder.record_context("Issue body", "hello world", "hi")
+    stats = builder.build_stats()
+    section_chars = stats["section_chars"]
+    assert section_chars["issue_body_before"] == 11
+    assert section_chars["issue_body_after"] == 2
+
+
+def test_record_history_includes_section_chars() -> None:
+    builder = PromptBuilder()
+    builder.record_history("Review feedback", "long text here", "short")
+    stats = builder.build_stats()
+    section_chars = stats["section_chars"]
+    assert section_chars["review_feedback_before"] == 14
+    assert section_chars["review_feedback_after"] == 5
+
+
+def test_record_context_mixed_with_add_context_section() -> None:
+    builder = PromptBuilder()
+    builder.add_context_section("Diff", "x" * 100, 50)
+    builder.record_context("Issue body", "y" * 200, "y" * 200)  # no truncation
+    stats = builder.build_stats()
+    assert stats["context_chars_before"] == 300  # 100 + 200
+    # after: truncated diff + unchanged body
+    assert stats["context_chars_after"] > 200
+
+
+def test_record_returns_none_not_string() -> None:
+    """record_* helpers return None, unlike add_* which return the processed text."""
+    builder = PromptBuilder()
+    result = builder.record_context("Label", "raw", "processed")
+    assert result is None
+
+
+def test_record_history_no_truncation_when_raw_equals_processed() -> None:
+    builder = PromptBuilder()
+    builder.record_history("Comments", "same text", "same text")
+    stats = builder.build_stats()
+    assert stats["pruned_chars_total"] == 0
