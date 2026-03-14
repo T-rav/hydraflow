@@ -94,7 +94,7 @@ class TestCheckAllCheckboxes:
 def _make_epic(number: int, sub_issues: list[int]) -> GitHubIssue:
     lines = [f"- [ ] #{n} — Sub-issue {n}" for n in sub_issues]
     body = "## Epic\n\n" + "\n".join(lines)
-    return GitHubIssue(
+    return IssueFactory.create(
         number=number, title="[Epic] Test", body=body, labels=["hydraflow-epic"]
     )
 
@@ -184,7 +184,7 @@ class TestEpicCompletionChecker:
 
     @pytest.mark.asyncio
     async def test_handles_epic_with_no_checkboxes(self) -> None:
-        epic = GitHubIssue(
+        epic = IssueFactory.create(
             number=100,
             title="[Epic] No checkboxes",
             body="This epic has no checkbox sub-issues.",
@@ -319,7 +319,7 @@ class TestEpicClosedWithoutMerge:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="Issue #2",
                 labels=["wontfix"],
@@ -346,7 +346,7 @@ class TestEpicClosedWithoutMerge:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="Issue #2",
                 labels=["duplicate"],
@@ -368,10 +368,10 @@ class TestEpicClosedWithoutMerge:
         """All sub-issues closed (no fixed label) — still closes epic."""
         epic = _make_epic(100, [1, 2])
         sub_issues = {
-            1: GitHubIssue(
+            1: IssueFactory.create(
                 number=1, title="Issue #1", labels=["wontfix"], state="closed"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2, title="Issue #2", labels=["invalid"], state="closed"
             ),
         }
@@ -393,7 +393,7 @@ class TestEpicClosedWithoutMerge:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="Issue #2",
                 labels=[],
@@ -421,7 +421,7 @@ class TestEpicHITLHandling:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="Issue #2",
                 labels=["hydraflow-hitl"],
@@ -453,7 +453,7 @@ class TestEpicHITLHandling:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="Issue #2",
                 labels=["hydraflow-hitl"],
@@ -483,7 +483,7 @@ class TestEpicHITLHandling:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="Issue #2",
                 labels=["hydraflow-hitl"],
@@ -508,7 +508,7 @@ class TestEpicHITLHandling:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="Issue #2",
                 labels=["hydraflow-hitl"],
@@ -539,13 +539,13 @@ class TestEpicHITLHandling:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="Issue #2",
                 labels=["hydraflow-hitl"],
                 state="open",
             ),
-            3: GitHubIssue(
+            3: IssueFactory.create(
                 number=3,
                 title="Issue #3",
                 labels=["hydraflow-hitl"],
@@ -578,7 +578,7 @@ class TestNestedEpics:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="[Epic] Child epic",
                 labels=["hydraflow-epic"],
@@ -603,7 +603,7 @@ class TestNestedEpics:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="[Epic] Child epic",
                 labels=["hydraflow-epic"],
@@ -628,7 +628,7 @@ class TestNestedEpics:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="[Epic] Child epic",
                 labels=["hydraflow-epic", "hydraflow-fixed"],
@@ -655,7 +655,7 @@ class TestNestedEpics:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            200: GitHubIssue(
+            200: IssueFactory.create(
                 number=200,
                 title="[Epic] Child epic",
                 labels=["hydraflow-epic"],
@@ -689,13 +689,13 @@ class TestNestedEpics:
         epic_a = _make_epic(100, [200])
         epic_b = _make_epic(200, [100])
         sub_issues = {
-            100: GitHubIssue(
+            100: IssueFactory.create(
                 number=100,
                 title="[Epic] A",
                 labels=["hydraflow-epic"],
                 state="closed",
             ),
-            200: GitHubIssue(
+            200: IssueFactory.create(
                 number=200,
                 title="[Epic] B",
                 labels=["hydraflow-epic"],
@@ -760,7 +760,7 @@ class TestDynamicSubIssueAudit:
             2: IssueFactory.create(
                 number=2, labels=["hydraflow-fixed"], title="Issue #2"
             ),
-            3: GitHubIssue(
+            3: IssueFactory.create(
                 number=3,
                 title="Issue #3 (new, incomplete)",
                 labels=[],
@@ -789,7 +789,7 @@ class TestEpicExcludedStateTracking:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="Issue #2",
                 labels=["wontfix"],
@@ -817,7 +817,7 @@ class TestEpicExcludedStateTracking:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="Issue #2",
                 labels=["duplicate"],
@@ -861,7 +861,7 @@ class TestCheckAndCloseEpicsReturnValue:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(number=2, title="Issue #2", labels=[], state="open"),
+            2: IssueFactory.create(number=2, title="Issue #2", labels=[], state="open"),
         }
         checker, _, _ = _make_checker(epics=[epic], sub_issues=sub_issues)
 
@@ -945,10 +945,10 @@ class TestEpicManagerOnChildExcluded:
     async def test_triggers_auto_close_when_all_excluded(self, tmp_path: Path) -> None:
         epic_gh = _make_epic(100, [1, 2])
         sub_issues = {
-            1: GitHubIssue(
+            1: IssueFactory.create(
                 number=1, title="Issue #1", labels=["wontfix"], state="closed"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2, title="Issue #2", labels=["duplicate"], state="closed"
             ),
         }
@@ -1003,7 +1003,7 @@ class TestCloseSpecificEpic:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(number=2, title="Issue #2", labels=[], state="open"),
+            2: IssueFactory.create(number=2, title="Issue #2", labels=[], state="open"),
         }
         checker, prs, _, _ = _make_checker_with_state(
             epics=[epic],
@@ -1041,7 +1041,7 @@ class TestCloseSpecificEpic:
 
     @pytest.mark.asyncio
     async def test_returns_none_when_epic_has_no_sub_issues(self) -> None:
-        epic = GitHubIssue(
+        epic = IssueFactory.create(
             number=100,
             title="[Epic] No checkboxes",
             body="This epic has no checkbox sub-issues.",
@@ -1069,10 +1069,10 @@ class TestEpicManagerTryAutoClose:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2, title="Issue #2", labels=["wontfix"], state="closed"
             ),
-            3: GitHubIssue(number=3, title="Issue #3", labels=[], state="open"),
+            3: IssueFactory.create(number=3, title="Issue #3", labels=[], state="open"),
         }
         manager, prs, _ = _make_epic_manager(
             tmp_path, epics=[epic_gh], sub_issues=sub_issues
@@ -1104,7 +1104,7 @@ class TestEpicManagerTryAutoClose:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2, title="Issue #2", labels=["wontfix"], state="closed"
             ),
         }
@@ -1608,3 +1608,80 @@ class TestNarrowedExceptionHandling:
         child_info = EpicChildInfo(issue_number=1)
         with pytest.raises(TypeError, match="bad mergeable"):
             await manager._enrich_pr_status(child_info, 42)
+
+
+# ---------------------------------------------------------------------------
+# Epic edge cases — 0 children, duplicate children
+# ---------------------------------------------------------------------------
+
+
+class TestEpicEdgeCases:
+    """Edge cases for epic handling: empty child list, duplicate references."""
+
+    @pytest.mark.asyncio
+    async def test_epic_with_zero_children_does_not_close(self) -> None:
+        """An epic with an empty sub-issue list should not be auto-closed."""
+        epic = _make_epic(100, [])
+        checker, prs, _ = _make_checker(epics=[epic])
+
+        await checker.check_and_close_epics(1)
+
+        prs.close_issue.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_epic_with_zero_children_close_specific_returns_none(self) -> None:
+        """close_specific_epic on an epic with 0 children returns None."""
+        epic = _make_epic(100, [])
+        checker, prs, _, _ = _make_checker_with_state(epics=[epic])
+
+        result = await checker.close_specific_epic(100)
+
+        assert result is None
+        prs.close_issue.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_epic_with_duplicate_child_references(self) -> None:
+        """Duplicate child references in the epic body should not cause double-counting."""
+        # Epic body references issue #1 twice
+        body = (
+            "## Epic\n\n- [ ] #1 — Task A\n- [ ] #1 — Task A (dup)\n- [ ] #2 — Task B"
+        )
+        epic = IssueFactory.create(
+            number=100, title="[Epic] Dups", body=body, labels=["hydraflow-epic"]
+        )
+        sub_issues = {
+            1: IssueFactory.create(
+                number=1, labels=["hydraflow-fixed"], title="Issue #1"
+            ),
+            2: IssueFactory.create(
+                number=2, labels=["hydraflow-fixed"], title="Issue #2"
+            ),
+        }
+        checker, prs, _ = _make_checker(epics=[epic], sub_issues=sub_issues)
+
+        await checker.check_and_close_epics(1)
+
+        # Epic should close — both unique children are resolved
+        prs.close_issue.assert_called_once_with(100)
+
+    @pytest.mark.asyncio
+    async def test_epic_with_duplicate_child_one_unresolved(self) -> None:
+        """Duplicate references shouldn't mask an unresolved child."""
+        body = (
+            "## Epic\n\n- [ ] #1 — Task A\n- [ ] #1 — Task A (dup)\n- [ ] #2 — Task B"
+        )
+        epic = IssueFactory.create(
+            number=100, title="[Epic] Dups", body=body, labels=["hydraflow-epic"]
+        )
+        sub_issues = {
+            1: IssueFactory.create(
+                number=1, labels=["hydraflow-fixed"], title="Issue #1"
+            ),
+            2: IssueFactory.create(number=2, labels=[], title="Issue #2", state="open"),
+        }
+        checker, prs, _ = _make_checker(epics=[epic], sub_issues=sub_issues)
+
+        await checker.check_and_close_epics(1)
+
+        # Epic should NOT close — issue #2 is unresolved
+        prs.close_issue.assert_not_called()

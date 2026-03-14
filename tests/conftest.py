@@ -158,17 +158,24 @@ class IssueFactory:
         labels: list[str] | None = None,
         comments: list[str] | None = None,
         url: str = "",
+        state: str = "",
+        author: str = "",
     ):
         from models import GitHubIssue
 
-        return GitHubIssue(
-            number=number,
-            title=title,
-            body=body,
-            labels=labels or ["ready"],
-            comments=comments or [],
-            url=url or f"https://github.com/test-org/test-repo/issues/{number}",
-        )
+        kwargs: dict[str, object] = {
+            "number": number,
+            "title": title,
+            "body": body,
+            "labels": labels if labels is not None else ["ready"],
+            "comments": comments if comments is not None else [],
+            "url": url or f"https://github.com/test-org/test-repo/issues/{number}",
+        }
+        if state:
+            kwargs["state"] = state
+        if author:
+            kwargs["author"] = author
+        return GitHubIssue(**kwargs)
 
 
 @pytest.fixture
