@@ -6,12 +6,18 @@ HydraFlowConfig fields and are consumed by the respective runners.
 
 from __future__ import annotations
 
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
 from agent import AgentRunner
 from events import EventBus
-from models import JudgeResult, PRInfo, Task
+from hitl_runner import HITLRunner
+from models import GitHubIssue, JudgeResult, PRInfo, Task
 from planner import PlannerRunner
+from pr_unsticker import PRUnsticker
+from tests.conftest import make_state
 from tests.helpers import ConfigFactory
 from verification import format_verification_issue_body
 
@@ -283,3 +289,120 @@ class TestPromptBudgetValidation:
     def test_verification_instructions_too_high(self) -> None:
         with pytest.raises(ValueError):
             ConfigFactory.create(max_verification_instructions_chars=100_000)
+
+
+# ---------------------------------------------------------------------------
+# HITLRunner reads from config
+# ---------------------------------------------------------------------------
+
+
+def _make_issue(**kwargs) -> GitHubIssue:
+    defaults = {
+        "number": 1,
+        "title": "Test issue",
+        "body": "body",
+        "url": "https://github.com/o/r/issues/1",
+        "labels": [],
+        "comments": [],
+    }
+    defaults.update(kwargs)
+    return GitHubIssue(**defaults)
+
+
+class TestHITLRunnerPromptBudgets:
+    """HITLRunner should use config fields instead of module-level constants."""
+
+    def test_correction_truncated_at_config_limit(self, event_bus: EventBus) -> None:
+        cfg = ConfigFactory.create(max_hitl_correction_chars=500)
+        runner = HITLRunner(cfg, event_bus)
+        issue = _make_issue()
+        long_correction = "x" * 2000
+        prompt, stats = runner._build_prompt_with_stats(
+            issue, long_correction, "CI failed"
+        )
+        assert "x" * 2000 not in prompt
+        assert "truncated" in prompt.lower()
+
+    def test_cause_truncated_at_config_limit(self, event_bus: EventBus) -> None:
+        cfg = ConfigFactory.create(max_hitl_cause_chars=500)
+        runner = HITLRunner(cfg, event_bus)
+        issue = _make_issue()
+        long_cause = "y" * 2000
+        prompt, stats = runner._build_prompt_with_stats(issue, "Fix it", long_cause)
+        assert "y" * 2000 not in prompt
+        assert "truncated" in prompt.lower()
+
+    def test_no_truncation_when_under_limit(self, event_bus: EventBus) -> None:
+        cfg = ConfigFactory.create(
+            max_hitl_correction_chars=1000, max_hitl_cause_chars=1000
+        )
+        runner = HITLRunner(cfg, event_bus)
+        issue = _make_issue()
+        short_correction = "fix this"
+        short_cause = "CI failed"
+        prompt, _stats = runner._build_prompt_with_stats(
+            issue, short_correction, short_cause
+        )
+        assert short_correction in prompt
+        assert short_cause in prompt
+
+
+# ---------------------------------------------------------------------------
+# PRUnsticker reads from config
+# ---------------------------------------------------------------------------
+
+
+def _make_unsticker_for_test(tmp_path, **config_overrides):
+    """Build a PRUnsticker with minimal mocks for prompt-building tests."""
+    import tempfile
+
+    path = tmp_path if tmp_path else tempfile.mkdtemp()
+    cfg = ConfigFactory.create(
+        repo_root=path,
+        worktree_base=path,
+        state_file=str(path) + "/state.json",
+        **config_overrides,
+    )
+    state = make_state(path)
+    bus = AsyncMock()
+    bus.publish = AsyncMock()
+    prs = AsyncMock()
+    agents = AsyncMock()
+    worktrees = AsyncMock()
+    fetcher = AsyncMock()
+    resolver = AsyncMock()
+    resolver.save_conflict_transcript = MagicMock()
+    return PRUnsticker(
+        cfg,
+        state,
+        bus,
+        prs,
+        agents,
+        worktrees,
+        fetcher,
+        stop_event=asyncio.Event(),
+        resolver=resolver,
+    )
+
+
+class TestPRUnstickerPromptBudgets:
+    """PRUnsticker should use config fields for cause truncation."""
+
+    def test_ci_fix_prompt_truncates_cause_at_config_limit(self, tmp_path) -> None:
+        unsticker = _make_unsticker_for_test(tmp_path, max_unsticker_cause_chars=500)
+        issue = _make_issue()
+        long_cause = "E" * 1000
+        prompt, stats = unsticker._build_ci_fix_prompt(
+            issue, "https://github.com/o/r/pull/1", long_cause
+        )
+        assert "E" * 1000 not in prompt
+        assert "truncated" in prompt.lower()
+
+    def test_ci_fix_prompt_no_truncation_under_limit(self, tmp_path) -> None:
+        unsticker = _make_unsticker_for_test(tmp_path, max_unsticker_cause_chars=5000)
+        issue = _make_issue()
+        short_cause = "Tests failed in core module"
+        prompt, _stats = unsticker._build_ci_fix_prompt(
+            issue, "https://github.com/o/r/pull/1", short_cause
+        )
+        assert short_cause in prompt
