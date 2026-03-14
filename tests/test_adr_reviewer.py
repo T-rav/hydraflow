@@ -1582,8 +1582,8 @@ class TestCommitAcceptance:
         async def _mock_run(*args: object, **kwargs: object) -> None:
             nonlocal call_count
             call_count += 1
-            # Last call is `gh pr create` — make it fail
-            if call_count >= 6 and args[0] == "gh":
+            # Fail specifically on `gh pr create`
+            if args and args[0] == "gh" and "pr" in args and "create" in args:
                 raise RuntimeError("gh pr create failed")
 
         with (

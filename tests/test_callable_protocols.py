@@ -177,7 +177,6 @@ class TestStatusCallbackProtocol:
         cb: StatusCallback = lambda name, status, details=None: None  # noqa: E731
         result = cb("worker", "ok", {"key": "value"})
         assert result is None
-        assert callable(cb)
 
     def test_callable_with_optional_details(self) -> None:
         """StatusCallback should allow calling without the details arg."""
