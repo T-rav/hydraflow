@@ -323,4 +323,191 @@ describe('OutcomesPanel (merged History+Outcomes)', () => {
     // Should render without error — no repo slug shown
     expect(screen.getByText('docs-site')).toBeInTheDocument()
   })
+
+  describe('column sorting', () => {
+    it('sorts ascending on first click, descending on second, removes sort on third', () => {
+      render(<OutcomesPanel />)
+      const header = screen.getByRole('columnheader', { name: /^#/ })
+
+      // First click: ascending (issue 10 before 11 — already natural order)
+      fireEvent.click(header)
+      expect(header).toHaveAttribute('aria-sort', 'ascending')
+      expect(screen.getByTestId('sort-indicator-number')).toHaveTextContent('\u25B2')
+
+      // Second click: descending
+      fireEvent.click(header)
+      expect(header).toHaveAttribute('aria-sort', 'descending')
+      expect(screen.getByTestId('sort-indicator-number')).toHaveTextContent('\u25BC')
+
+      // Third click: remove sort
+      fireEvent.click(header)
+      expect(header).toHaveAttribute('aria-sort', 'none')
+      expect(screen.queryByTestId('sort-indicator-number')).not.toBeInTheDocument()
+    })
+
+    it('sorts rows by issue number descending', () => {
+      render(<OutcomesPanel />)
+      const header = screen.getByRole('columnheader', { name: /^#/ })
+
+      // Click twice for descending
+      fireEvent.click(header)
+      fireEvent.click(header)
+
+      // Issue 11 should appear before issue 10 in DOM order
+      const links = screen.getAllByText(/^#\d+$/).filter(el => el.tagName === 'A')
+      expect(links[0]).toHaveTextContent('#11')
+      expect(links[1]).toHaveTextContent('#10')
+    })
+
+    it('sorts rows by title ascending', () => {
+      render(<OutcomesPanel />)
+      const header = screen.getByRole('columnheader', { name: 'Title' })
+      fireEvent.click(header)
+
+      // 'Fix auth cache' < 'Merge docs' alphabetically
+      const titles = screen.getAllByText(/Fix auth cache|Merge docs/)
+      expect(titles[0]).toHaveTextContent('Fix auth cache')
+      expect(titles[1]).toHaveTextContent('Merge docs')
+    })
+
+    it('switching sort column resets to ascending', () => {
+      render(<OutcomesPanel />)
+      const numHeader = screen.getByRole('columnheader', { name: /^#/ })
+      const titleHeader = screen.getByRole('columnheader', { name: 'Title' })
+
+      // Sort by # descending
+      fireEvent.click(numHeader)
+      fireEvent.click(numHeader)
+      expect(numHeader).toHaveAttribute('aria-sort', 'descending')
+
+      // Switch to Title — should start ascending
+      fireEvent.click(titleHeader)
+      expect(titleHeader).toHaveAttribute('aria-sort', 'ascending')
+      expect(numHeader).toHaveAttribute('aria-sort', 'none')
+    })
+
+    it('sorting works in grouped view', () => {
+      const payload = makePayload()
+      payload.items[0].epic = 'epic:auth'
+      payload.items[1].epic = 'epic:auth'
+      payload.items[1].issue_number = 5
+      mockUseHydraFlow.mockReturnValue({ issueHistory: payload, selectedRepoSlug: null })
+      render(<OutcomesPanel />)
+
+      // Group by epic
+      const groupSelect = screen.getAllByRole('combobox').find(
+        el => el.querySelector('option[value="epic"]')
+      )
+      fireEvent.change(groupSelect, { target: { value: 'epic' } })
+
+      // Sort by # descending
+      const numHeader = screen.getByRole('columnheader', { name: /^#/ })
+      fireEvent.click(numHeader)
+      fireEvent.click(numHeader)
+
+      // Within the group, issue 10 should appear before issue 5
+      const links = screen.getAllByText(/^#\d+$/).filter(el => el.tagName === 'A')
+      expect(links[0]).toHaveTextContent('#10')
+      expect(links[1]).toHaveTextContent('#5')
+    })
+  })
+
+  describe('column reordering', () => {
+    it('reorders columns via drag and drop', () => {
+      render(<OutcomesPanel />)
+      const headers = screen.getAllByRole('columnheader')
+      // Default order: #, Title, Repo, Stage, Outcome, PRs, Tokens, Timing
+      expect(headers[0]).toHaveTextContent('#')
+      expect(headers[1]).toHaveTextContent('Title')
+
+      // Simulate dragging Title to before #
+      const titleHeader = headers[1]
+      const numHeader = headers[0]
+
+      const dataTransfer = {
+        effectAllowed: '',
+        dropEffect: '',
+        setData: vi.fn(),
+        getData: vi.fn(() => 'title'),
+      }
+
+      fireEvent.dragStart(titleHeader, { dataTransfer })
+      fireEvent.dragOver(numHeader, { dataTransfer })
+      fireEvent.drop(numHeader, { dataTransfer })
+
+      // After reorder, Title should be first column
+      const updatedHeaders = screen.getAllByRole('columnheader')
+      expect(updatedHeaders[0]).toHaveTextContent('Title')
+      expect(updatedHeaders[1]).toHaveTextContent('#')
+    })
+
+    it('cancelled drag does not reorder columns', () => {
+      render(<OutcomesPanel />)
+      const headers = screen.getAllByRole('columnheader')
+      const titleHeader = headers[1]
+
+      const dataTransfer = {
+        effectAllowed: '',
+        dropEffect: '',
+        setData: vi.fn(),
+        getData: vi.fn(() => 'title'),
+      }
+
+      fireEvent.dragStart(titleHeader, { dataTransfer })
+      // Drag ends without drop
+      fireEvent.dragEnd(titleHeader, { dataTransfer })
+
+      // Order should be unchanged
+      const updatedHeaders = screen.getAllByRole('columnheader')
+      expect(updatedHeaders[0]).toHaveTextContent('#')
+      expect(updatedHeaders[1]).toHaveTextContent('Title')
+    })
+
+    it('column order persists across grouping changes', () => {
+      render(<OutcomesPanel />)
+      const headers = screen.getAllByRole('columnheader')
+
+      // Reorder: drag Title before #
+      const dataTransfer = {
+        effectAllowed: '',
+        dropEffect: '',
+        setData: vi.fn(),
+        getData: vi.fn(() => 'title'),
+      }
+      fireEvent.dragStart(headers[1], { dataTransfer })
+      fireEvent.drop(headers[0], { dataTransfer })
+
+      // Switch to grouped view and back
+      const groupSelect = screen.getAllByRole('combobox').find(
+        el => el.querySelector('option[value="epic"]')
+      )
+      fireEvent.change(groupSelect, { target: { value: 'epic' } })
+      fireEvent.change(groupSelect, { target: { value: 'none' } })
+
+      // Column order should be preserved
+      const finalHeaders = screen.getAllByRole('columnheader')
+      expect(finalHeaders[0]).toHaveTextContent('Title')
+      expect(finalHeaders[1]).toHaveTextContent('#')
+    })
+
+    it('dropping column on itself does not change order', () => {
+      render(<OutcomesPanel />)
+      const headers = screen.getAllByRole('columnheader')
+      const numHeader = headers[0]
+
+      const dataTransfer = {
+        effectAllowed: '',
+        dropEffect: '',
+        setData: vi.fn(),
+        getData: vi.fn(() => 'number'),
+      }
+
+      fireEvent.dragStart(numHeader, { dataTransfer })
+      fireEvent.drop(numHeader, { dataTransfer })
+
+      const updatedHeaders = screen.getAllByRole('columnheader')
+      expect(updatedHeaders[0]).toHaveTextContent('#')
+      expect(updatedHeaders[1]).toHaveTextContent('Title')
+    })
+  })
 })
