@@ -129,8 +129,12 @@ class TestFileLock:
         the final count would be less than the expected total.
 
         A ``threading.Event`` (never set) with ``timeout=0`` is used instead of
-        ``time.sleep()`` to force a thread yield without depending on wall-clock
-        timing, which avoids flakiness under CI load.
+        ``time.sleep(0.01)`` to remove the fixed wall-clock delay.  Note that
+        ``Event.wait(timeout=0)`` completes in ~2–3 µs (well below the 5 ms GIL
+        switch interval), so it does not guarantee a thread context switch; the
+        test relies on natural OS-level thread interleaving via file-I/O GIL
+        releases and the GIL preemption timer to expose any missing mutual
+        exclusion.
         """
         from file_util import file_lock
 
@@ -139,9 +143,9 @@ class TestFileLock:
         counter_path.write_text("0")
 
         iterations = 10
-        # An Event that is never set; .wait(timeout=0) forces the thread to
-        # yield the GIL without any wall-clock delay, widening the race window
-        # deterministically rather than relying on time.sleep().
+        # An Event that is never set; .wait(timeout=0) avoids a fixed wall-clock
+        # wait.  It completes in ~2-3 µs and does not guarantee a GIL switch,
+        # so thread interleaving relies on natural OS scheduling and file-I/O.
         yield_point = threading.Event()
 
         def worker() -> None:
@@ -159,7 +163,8 @@ class TestFileLock:
         for t in threads:
             t.join()
 
-        # 3 threads × 10 iterations = 30.  Any interleaving would lose increments.
+        # 3 threads × 10 iterations = 30.  Any interleaving that bypasses mutual
+        # exclusion would produce a smaller count due to lost read-modify-write updates.
         assert int(counter_path.read_text()) == 3 * iterations
 
     def test_lock_creates_parent_dirs(self, tmp_path: Path) -> None:
