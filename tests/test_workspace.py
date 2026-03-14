@@ -512,6 +512,8 @@ class TestDestroy:
 
         # wt_path does NOT exist — destroy should not raise
         await manager.destroy(issue_number=999)
+        wt_path = config.worktree_path_for_issue(999)
+        assert not wt_path.exists()
 
     @pytest.mark.asyncio
     async def test_destroy_tolerates_missing_branch(
@@ -522,6 +524,8 @@ class TestDestroy:
 
         # Don't create the directory — destroy should handle gracefully
         await manager.destroy(issue_number=7)
+        wt_path = config.worktree_path_for_issue(7)
+        assert not wt_path.exists()
 
     @pytest.mark.asyncio
     async def test_destroy_removes_existing_directory(
@@ -988,9 +992,12 @@ class TestDeleteLocalBranch:
         manager = WorkspaceManager(config)
         fail_proc = make_proc(returncode=1, stderr=b"error: branch not found")
 
-        with patch("asyncio.create_subprocess_exec", return_value=fail_proc):
+        with patch(
+            "asyncio.create_subprocess_exec", return_value=fail_proc
+        ) as mock_exec:
             # Should not raise
             await manager._delete_local_branch("agent/issue-999")
+        mock_exec.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -1173,8 +1180,11 @@ class TestSetupEnv:
         ui_nm_src = repo_root / "ui" / "node_modules"
         ui_nm_src.mkdir(parents=True)
 
-        with patch.object(Path, "symlink_to", side_effect=OSError("perm denied")):
+        with patch.object(
+            Path, "symlink_to", side_effect=OSError("perm denied")
+        ) as mock_symlink:
             manager._setup_env(wt_path)  # should not raise
+        assert mock_symlink.call_count >= 1
 
     def test_setup_env_handles_copy_oserror(self, config, tmp_path: Path) -> None:
         """_setup_env should handle OSError when copying settings and continue."""
@@ -1190,8 +1200,11 @@ class TestSetupEnv:
         settings_src = claude_dir / "settings.local.json"
         settings_src.write_text('{"allowed": []}')
 
-        with patch.object(Path, "write_text", side_effect=OSError("read-only")):
+        with patch.object(
+            Path, "write_text", side_effect=OSError("read-only")
+        ) as mock_write:
             manager._setup_env(wt_path)  # should not raise
+        assert mock_write.call_count >= 1
 
 
 # ---------------------------------------------------------------------------
@@ -1310,8 +1323,11 @@ class TestSetupClaudeSettings:
         settings_src = claude_dir / "settings.local.json"
         settings_src.write_text('{"allowed": []}')
 
-        with patch.object(Path, "write_text", side_effect=OSError("read-only")):
+        with patch.object(
+            Path, "write_text", side_effect=OSError("read-only")
+        ) as mock_write:
             manager._setup_claude_settings(wt_path)  # should not raise
+        assert mock_write.call_count >= 1
 
 
 # ---------------------------------------------------------------------------
@@ -1520,9 +1536,12 @@ class TestConfigureGitIdentity:
         manager = WorkspaceManager(cfg)
         fail_proc = make_proc(returncode=1, stderr=b"fatal: config error")
 
-        with patch("asyncio.create_subprocess_exec", return_value=fail_proc):
+        with patch(
+            "asyncio.create_subprocess_exec", return_value=fail_proc
+        ) as mock_exec:
             # Should not raise — logs warning and continues
             await manager._configure_git_identity(tmp_path)
+        mock_exec.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_called_during_create(self, tmp_path: Path) -> None:
@@ -1583,9 +1602,12 @@ class TestCreateVenv:
         manager = WorkspaceManager(config)
         fail_proc = make_proc(returncode=1, stderr=b"uv not found")
 
-        with patch("asyncio.create_subprocess_exec", return_value=fail_proc):
+        with patch(
+            "asyncio.create_subprocess_exec", return_value=fail_proc
+        ) as mock_exec:
             # Should not raise
             await manager._create_venv(tmp_path)
+        mock_exec.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_create_venv_swallows_file_not_found_error(
@@ -1597,8 +1619,9 @@ class TestCreateVenv:
         with patch(
             "asyncio.create_subprocess_exec",
             side_effect=FileNotFoundError("uv"),
-        ):
+        ) as mock_exec:
             await manager._create_venv(tmp_path)  # should not raise
+        mock_exec.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -1634,9 +1657,12 @@ class TestInstallHooks:
         manager = WorkspaceManager(config)
         fail_proc = make_proc(returncode=1, stderr=b"error")
 
-        with patch("asyncio.create_subprocess_exec", return_value=fail_proc):
+        with patch(
+            "asyncio.create_subprocess_exec", return_value=fail_proc
+        ) as mock_exec:
             # Should not raise
             await manager._install_hooks(tmp_path)
+        mock_exec.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -1742,9 +1768,12 @@ class TestAbortMerge:
         manager = WorkspaceManager(config)
         fail_proc = make_proc(returncode=1, stderr=b"fatal: no merge in progress")
 
-        with patch("asyncio.create_subprocess_exec", return_value=fail_proc):
+        with patch(
+            "asyncio.create_subprocess_exec", return_value=fail_proc
+        ) as mock_exec:
             # Should not raise
             await manager.abort_merge(tmp_path)
+        mock_exec.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -2186,8 +2215,11 @@ class TestSetupEnvDocker:
         ui_nm_src = repo_root / "ui" / "node_modules"
         ui_nm_src.mkdir(parents=True)
 
-        with patch("workspace.shutil.copytree", side_effect=OSError("disk full")):
+        with patch(
+            "workspace.shutil.copytree", side_effect=OSError("disk full")
+        ) as mock_copytree:
             manager._setup_env(wt_path)  # should not raise
+        mock_copytree.assert_called_once()
 
     def test_setup_env_docker_adds_env_to_gitignore(self, tmp_path: Path) -> None:
         """In docker mode, .env should be appended to worktree .gitignore."""
@@ -2247,8 +2279,9 @@ class TestSetupEnvDocker:
         env_src.write_text("SECRET=val")
         (wt_path / ".env").write_text("SECRET=val")
 
-        with patch("pathlib.Path.open", side_effect=OSError("read-only")):
+        with patch("pathlib.Path.open", side_effect=OSError("read-only")) as mock_open:
             manager._setup_env(wt_path)  # should not raise
+        assert mock_open.call_count >= 1
 
     def test_setup_env_host_still_symlinks(self, config, tmp_path: Path) -> None:
         """Confirm host mode still creates symlinks (regression check)."""
@@ -2325,6 +2358,8 @@ class TestInstallHooksDocker:
 
         # Should not raise
         await manager._install_hooks(wt_path)
+        # Verify no hooks were copied since .githooks is missing
+        assert not (wt_path / ".git" / "hooks").exists()
 
     @pytest.mark.asyncio
     async def test_install_hooks_docker_handles_copy_error(
@@ -2350,9 +2385,12 @@ class TestInstallHooksDocker:
                 "workspace.run_subprocess",
                 side_effect=_make_hooks_subprocess_mock(hooks_dir),
             ),
-            patch("workspace.shutil.copy2", side_effect=OSError("perm denied")),
+            patch(
+                "workspace.shutil.copy2", side_effect=OSError("perm denied")
+            ) as mock_copy,
         ):
             await manager._install_hooks(wt_path)  # should not raise
+        assert mock_copy.call_count >= 1
 
     @pytest.mark.asyncio
     async def test_install_hooks_docker_handles_mkdir_oserror(
@@ -2805,9 +2843,10 @@ class TestPostWorkCleanup:
 
         with patch.object(
             manager, "destroy", side_effect=RuntimeError("worktree gone")
-        ):
+        ) as mock_destroy:
             # Should not raise — destroy failure is suppressed
             await manager.post_work_cleanup(42)
+        mock_destroy.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

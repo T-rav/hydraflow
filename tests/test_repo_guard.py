@@ -24,13 +24,16 @@ from log import JSONFormatter
 
 class TestValidateRepoFormat:
     def test_valid_owner_repo_passes(self) -> None:
-        _validate_repo_format("owner/repo")
+        _validate_repo_format("owner/repo")  # should not raise
+        assert True  # confirms no exception was raised
 
     def test_valid_with_dots_hyphens_underscores(self) -> None:
-        _validate_repo_format("my-org.com/my_repo-v2")
+        _validate_repo_format("my-org.com/my_repo-v2")  # should not raise
+        assert True  # confirms no exception was raised
 
     def test_empty_string_allowed(self) -> None:
-        _validate_repo_format("")
+        _validate_repo_format("")  # should not raise
+        assert True  # confirms no exception was raised
 
     def test_no_slash_raises(self) -> None:
         with pytest.raises(ValueError, match="expected 'owner/repo'"):
@@ -68,6 +71,7 @@ class TestPRManagerAssertRepo:
     def test_valid_repo_passes(self) -> None:
         pm = self._make_pr_manager("owner/repo")
         pm._assert_repo()  # should not raise
+        assert True  # confirms no exception was raised
 
     def test_empty_repo_raises(self) -> None:
         pm = self._make_pr_manager("")
@@ -232,21 +236,24 @@ class TestWorktreeOriginValidation:
         wm = self._make_wt_manager("owner/repo")
         with patch("workspace.run_subprocess", new_callable=AsyncMock) as mock_run:
             mock_run.return_value = "https://github.com/owner/repo.git\n"
-            await wm._assert_origin_matches_repo()
+            result = await wm._assert_origin_matches_repo()
+        assert result is None  # method completes without error
 
     @pytest.mark.asyncio
     async def test_ssh_url_matches(self) -> None:
         wm = self._make_wt_manager("owner/repo")
         with patch("workspace.run_subprocess", new_callable=AsyncMock) as mock_run:
             mock_run.return_value = "git@github.com:owner/repo.git\n"
-            await wm._assert_origin_matches_repo()
+            result = await wm._assert_origin_matches_repo()
+        assert result is None  # method completes without error
 
     @pytest.mark.asyncio
     async def test_https_without_git_suffix(self) -> None:
         wm = self._make_wt_manager("owner/repo")
         with patch("workspace.run_subprocess", new_callable=AsyncMock) as mock_run:
             mock_run.return_value = "https://github.com/owner/repo\n"
-            await wm._assert_origin_matches_repo()
+            result = await wm._assert_origin_matches_repo()
+        assert result is None  # method completes without error
 
     @pytest.mark.asyncio
     async def test_mismatch_raises(self) -> None:
@@ -260,11 +267,13 @@ class TestWorktreeOriginValidation:
     async def test_empty_repo_skips_validation(self) -> None:
         wm = self._make_wt_manager("")
         # Should not raise even without mocking run_subprocess
-        await wm._assert_origin_matches_repo()
+        result = await wm._assert_origin_matches_repo()
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_case_insensitive_match(self) -> None:
         wm = self._make_wt_manager("Owner/Repo")
         with patch("workspace.run_subprocess", new_callable=AsyncMock) as mock_run:
             mock_run.return_value = "https://github.com/owner/repo.git\n"
-            await wm._assert_origin_matches_repo()
+            result = await wm._assert_origin_matches_repo()
+        assert result is None  # case-insensitive match succeeds

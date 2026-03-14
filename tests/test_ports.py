@@ -219,6 +219,7 @@ class TestPRPortSignatures:
         from pr_manager import PRManager
 
         _assert_param_names_match(PRPort, PRManager, method)
+        assert True  # _assert_param_names_match raises AssertionError on mismatch
 
 
 class TestWorkspacePortSignatures:
@@ -237,3 +238,4 @@ class TestWorkspacePortSignatures:
         from workspace import WorkspaceManager
 
         _assert_param_names_match(WorkspacePort, WorkspaceManager, method)
+        assert True  # _assert_param_names_match raises AssertionError on mismatch

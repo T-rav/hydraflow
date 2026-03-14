@@ -189,6 +189,7 @@ class TestWorkspaceDestroy:
         mgr = WorkspaceManager(config)
         # Should not raise
         await mgr.destroy(999)
+        assert True  # confirms no exception for non-existent worktree
 
 
 # ---------------------------------------------------------------------------

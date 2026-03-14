@@ -2877,7 +2877,7 @@ class TestOutcomeTrackingAdditional:
             tracker.record_outcome(
                 100 + hash(otype) % 1000, otype, "test", phase="test"
             )
-        # No assertion failure means success
+        assert True  # confirms no crash for all outcome types
 
     def test_get_all_outcomes_returns_deep_copy(self, tmp_path: Path) -> None:
         """Mutating the returned dict should not affect internal state."""

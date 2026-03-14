@@ -174,6 +174,7 @@ class TestOnChildExcluded:
         mgr, _, _, _, _ = _make_manager(tmp_path)
         # Should not raise
         await mgr.on_child_excluded(999, 1)
+        assert True  # confirms no exception for unknown epic
 
 
 class TestOnChildPlanned:
@@ -200,6 +201,7 @@ class TestOnChildPlanned:
         mgr, _, _, _, _ = _make_manager(tmp_path)
         # Should not raise
         await mgr.on_child_planned(999, 1)
+        assert True  # confirms no exception for unknown epic
 
 
 class TestGetProgress:

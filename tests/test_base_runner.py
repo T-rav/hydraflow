@@ -78,6 +78,7 @@ class TestTerminate:
         self, config, event_bus: EventBus
     ) -> None:
         runner = _TestRunner(config, event_bus)
+        assert len(runner._active_procs) == 0
         runner.terminate()  # Should not raise
 
 

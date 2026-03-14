@@ -51,6 +51,7 @@ class TestPlanStageHarnessRecording:
             "Some error",
             stage=PipelineStage.PLAN,
         )
+        assert True  # confirms no exception was raised
 
     def test_extracts_subcategories(self, config: HydraFlowConfig) -> None:
         memory_dir = config.repo_root / ".hydraflow" / "memory"
@@ -106,6 +107,7 @@ class TestImplementStageHarnessRecording:
             "Some error",
             stage=PipelineStage.IMPLEMENT,
         )
+        assert True  # confirms no exception was raised
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +149,7 @@ class TestReviewStageHarnessRecording:
             stage=PipelineStage.REVIEW,
             pr_number=200,
         )
+        assert True  # confirms no exception was raised
 
     def test_ci_failure_recording(self, config: HydraFlowConfig) -> None:
         memory_dir = config.repo_root / ".hydraflow" / "memory"

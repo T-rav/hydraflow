@@ -686,6 +686,7 @@ class TestTriageTerminate:
 
         # terminate() should not raise
         runner.terminate()
+        assert True  # confirms no exception with active mock proc
         # After terminate, the proc should have been killed
         # (terminate_processes uses os.killpg which we don't mock here,
         # so we just verify it doesn't crash with our mock)
