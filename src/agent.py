@@ -15,6 +15,7 @@ from diff_sanity import build_diff_sanity_prompt, parse_diff_sanity_result
 from events import EventBus, EventType, HydraFlowEvent
 from models import LoopResult, Task, WorkerResult, WorkerStatus, WorkerUpdatePayload
 from phase_utils import is_likely_bug
+from prompt_utils import build_comments_section, summarize_for_prompt, truncate_comment
 from review_insights import (
     ReviewInsightStore,
     get_common_feedback_section,
@@ -141,74 +142,12 @@ Run through this checklist before your final commit:
             # Force-commit any uncommitted work the agent left behind
             await self._force_commit_uncommitted(task, worktree_path)
 
-            # Diff sanity check (blocking — agent must fix flagged issues)
-            sanity = await self._run_diff_sanity_loop(
-                task, worktree_path, branch, worker_id
+            # Post-implementation checks (sanity, adequacy, pre-quality, verify)
+            early_return = await self._run_post_impl_checks(
+                task, worktree_path, branch, worker_id, result, start
             )
-            if not sanity.passed:
-                logger.warning(
-                    "Diff sanity flagged issues for #%d: %s",
-                    task.id,
-                    sanity.summary,
-                )
-                result.success = False
-                result.error = f"Diff sanity check failed: {sanity.summary}"
-                result.commits = await self._count_commits(worktree_path, branch)
-                await self._emit_status(task.id, worker_id, WorkerStatus.FAILED)
-                result.duration_seconds = time.monotonic() - start
-                return result
-
-            adequacy = await self._run_test_adequacy_loop(
-                task, worktree_path, branch, worker_id
-            )
-            if not adequacy.passed:
-                logger.warning(
-                    "Test adequacy flagged gaps for #%d: %s (non-blocking)",
-                    task.id,
-                    adequacy.summary,
-                )
-
-            # Mandatory pre-quality self-review/correction loop
-            pre_quality = await self._run_pre_quality_review_loop(
-                task, worktree_path, branch, worker_id
-            )
-            result.pre_quality_review_attempts = pre_quality.attempts
-            if not pre_quality.passed:
-                result.success = False
-                result.error = pre_quality.summary
-                result.commits = await self._count_commits(worktree_path, branch)
-                await self._emit_status(task.id, worker_id, WorkerStatus.FAILED)
-                result.duration_seconds = time.monotonic() - start
-                return result
-
-            # Verify the agent produced valid work
-            await self._emit_status(task.id, worker_id, WorkerStatus.TESTING)
-            verify = await self._verify_result(worktree_path, branch)
-
-            # If quality failed but commits exist, try the fix loop
-            success = verify.passed
-            last_msg = verify.summary
-            if (
-                not success
-                and last_msg != "No commits found on branch"
-                and self._config.max_quality_fix_attempts > 0
-            ):
-                fix = await self._run_quality_fix_loop(
-                    task, worktree_path, branch, last_msg, worker_id
-                )
-                success = fix.passed
-                last_msg = fix.summary
-                result.quality_fix_attempts = fix.attempts
-
-            result.success = success
-            if not success:
-                result.error = last_msg
-
-            # Count commits
-            result.commits = await self._count_commits(worktree_path, branch)
-
-            status = WorkerStatus.DONE if success else WorkerStatus.FAILED
-            await self._emit_status(task.id, worker_id, status)
+            if early_return is not None:
+                return early_return
 
         except CreditExhaustedError:
             raise
@@ -225,9 +164,12 @@ Run through this checklist before your final commit:
             )
             await self._emit_status(task.id, worker_id, WorkerStatus.FAILED)
 
-        result.duration_seconds = time.monotonic() - start
+        self._finalize_run(result, start)
+        return result
 
-        # Persist transcript to disk
+    def _finalize_run(self, result: WorkerResult, start: float) -> None:
+        """Set duration and persist transcript."""
+        result.duration_seconds = time.monotonic() - start
         try:
             self._save_transcript("issue", result.issue_number, result.transcript)
         except OSError:
@@ -238,7 +180,88 @@ Run through this checklist before your final commit:
                 extra={"issue": result.issue_number},
             )
 
-        return result
+    async def _run_post_impl_checks(
+        self,
+        task: Task,
+        worktree_path: Path,
+        branch: str,
+        worker_id: int,
+        result: WorkerResult,
+        start: float,
+    ) -> WorkerResult | None:
+        """Run diff sanity, test adequacy, pre-quality review, and verification.
+
+        Returns a :class:`WorkerResult` for early exit on blocking failure,
+        or ``None`` to indicate the caller should continue.
+        """
+        # Diff sanity check (blocking)
+        sanity = await self._run_diff_sanity_loop(
+            task, worktree_path, branch, worker_id
+        )
+        if not sanity.passed:
+            logger.warning(
+                "Diff sanity flagged issues for #%d: %s",
+                task.id,
+                sanity.summary,
+            )
+            result.success = False
+            result.error = f"Diff sanity check failed: {sanity.summary}"
+            result.commits = await self._count_commits(worktree_path, branch)
+            await self._emit_status(task.id, worker_id, WorkerStatus.FAILED)
+            result.duration_seconds = time.monotonic() - start
+            return result
+
+        # Test adequacy (non-blocking)
+        adequacy = await self._run_test_adequacy_loop(
+            task, worktree_path, branch, worker_id
+        )
+        if not adequacy.passed:
+            logger.warning(
+                "Test adequacy flagged gaps for #%d: %s (non-blocking)",
+                task.id,
+                adequacy.summary,
+            )
+
+        # Mandatory pre-quality self-review/correction loop
+        pre_quality = await self._run_pre_quality_review_loop(
+            task, worktree_path, branch, worker_id
+        )
+        result.pre_quality_review_attempts = pre_quality.attempts
+        if not pre_quality.passed:
+            result.success = False
+            result.error = pre_quality.summary
+            result.commits = await self._count_commits(worktree_path, branch)
+            await self._emit_status(task.id, worker_id, WorkerStatus.FAILED)
+            result.duration_seconds = time.monotonic() - start
+            return result
+
+        # Verify the agent produced valid work
+        await self._emit_status(task.id, worker_id, WorkerStatus.TESTING)
+        verify = await self._verify_result(worktree_path, branch)
+
+        # If quality failed but commits exist, try the fix loop
+        success = verify.passed
+        last_msg = verify.summary
+        if (
+            not success
+            and last_msg != "No commits found on branch"
+            and self._config.max_quality_fix_attempts > 0
+        ):
+            fix = await self._run_quality_fix_loop(
+                task, worktree_path, branch, last_msg, worker_id
+            )
+            success = fix.passed
+            last_msg = fix.summary
+            result.quality_fix_attempts = fix.attempts
+
+        result.success = success
+        if not success:
+            result.error = last_msg
+
+        result.commits = await self._count_commits(worktree_path, branch)
+        status = WorkerStatus.DONE if success else WorkerStatus.FAILED
+        await self._emit_status(task.id, worker_id, status)
+        return None
 
     @staticmethod
     def _extract_plan_comment(comments: list[str]) -> tuple[str, list[str]]:
@@ -371,31 +394,11 @@ Run through this checklist before your final commit:
 
     def _summarize_for_prompt(self, text: str, max_chars: int, label: str) -> str:
         """Return text trimmed for prompt efficiency with a traceable note."""
-        if len(text) <= max_chars:
-            return text
-
-        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-        cue_lines = [
-            ln for ln in lines if re.match(r"^([-*]|\d+\.)\s+", ln) or "## " in ln
-        ]
-        selected = cue_lines[:10] if cue_lines else lines[:10]
-        compact = "\n".join(f"- {ln[:200]}" for ln in selected).strip()
-        if not compact:
-            compact = text[:max_chars]
-        return (
-            f"{compact}\n\n"
-            f"[{label} summarized from {len(text):,} chars to reduce prompt size]"
-        )
+        return summarize_for_prompt(text, max_chars, label)
 
     def _truncate_comment_for_prompt(self, text: str) -> str:
         """Return one discussion comment compacted for prompt efficiency."""
-        raw = (text or "").strip()
-        if len(raw) <= self._MAX_DISCUSSION_COMMENT_CHARS:
-            return raw
-        return (
-            raw[: self._MAX_DISCUSSION_COMMENT_CHARS]
-            + f"\n[Comment truncated from {len(raw):,} chars]"
-        )
+        return truncate_comment(text, self._MAX_DISCUSSION_COMMENT_CHARS)
 
     def _build_tdd_subagent_plan(self, plan_comment: str) -> str:
         """Build a Task Graph plan that instructs the agent to use sub-agents.
@@ -468,18 +471,17 @@ Run through this checklist before your final commit:
 
         return header + rules + "\n".join(phase_sections)
 
-    def _build_prompt_with_stats(
-        self, issue: Task, review_feedback: str = "", prior_failure: str = ""
-    ) -> tuple[str, dict[str, object]]:
-        """Build the implementation prompt and pruning stats."""
-        plan_comment, other_comments = self._extract_plan_comment(issue.comments)
-        history_before = len(plan_comment) + sum(len(c) for c in other_comments)
-        history_after = 0
+    def _build_plan_section(self, issue: Task) -> tuple[str, list[str], int, int]:
+        """Extract and format the plan section for the implementation prompt.
 
-        # Fallback to saved plan file
+        Returns ``(plan_section, other_comments, chars_before, chars_after)``.
+        """
+        plan_comment, other_comments = self._extract_plan_comment(issue.comments)
+        chars_before = len(plan_comment)
+
         if not plan_comment:
             plan_comment = self._load_plan_fallback(issue.id)
-            history_before += len(plan_comment)
+            chars_before += len(plan_comment)
             if not plan_comment:
                 logger.error(
                     "No plan found for issue #%d — implementer will proceed without a plan",
@@ -488,14 +490,14 @@ Run through this checklist before your final commit:
                 )
 
         plan_section = ""
+        chars_after = 0
         if plan_comment:
             plan_comment = self._summarize_for_prompt(
                 plan_comment,
                 max_chars=self._MAX_IMPL_PLAN_CHARS,
                 label="Implementation plan",
             )
-            history_after += len(plan_comment)
-            # Detect whether the plan uses Task Graph format
+            chars_after = len(plan_comment)
             if has_task_graph(plan_comment):
                 plan_section = self._build_tdd_subagent_plan(plan_comment)
             else:
@@ -506,100 +508,190 @@ Run through this checklist before your final commit:
                     f"{plan_comment}"
                 )
 
-        review_feedback_section = ""
+        return plan_section, other_comments, chars_before, chars_after
+
+    def _build_context_sections(
+        self, review_feedback: str, prior_failure: str
+    ) -> tuple[str, str, int, int]:
+        """Build review-feedback and prior-failure prompt sections.
+
+        Returns ``(review_section, failure_section, chars_before, chars_after)``.
+        """
+        chars_before = 0
+        chars_after = 0
+
+        review_section = ""
         if review_feedback:
-            history_before += len(review_feedback)
+            chars_before += len(review_feedback)
             review_feedback = self._summarize_for_prompt(
                 review_feedback,
                 max_chars=self._MAX_REVIEW_FEEDBACK_CHARS,
                 label="Review feedback",
             )
-            history_after += len(review_feedback)
-            review_feedback_section = (
+            chars_after += len(review_feedback)
+            review_section = (
                 f"\n\n## Review Feedback\n\n"
                 f"A reviewer rejected the previous implementation. "
                 f"Address all feedback below:\n\n"
                 f"{review_feedback}"
             )
 
-        prior_failure_section = ""
+        failure_section = ""
         if prior_failure:
-            history_before += len(prior_failure)
+            chars_before += len(prior_failure)
             prior_failure = self._summarize_for_prompt(
                 prior_failure,
                 max_chars=self._config.error_output_max_chars,
                 label="Prior failure",
             )
-            history_after += len(prior_failure)
-            prior_failure_section = (
+            chars_after += len(prior_failure)
+            failure_section = (
                 f"\n\n## Prior Attempt Failure\n\n"
                 f"Your previous implementation attempt failed with the following error. "
                 f"Avoid repeating the same mistake:\n\n"
                 f"```\n{prior_failure}\n```"
             )
 
-        comments_section = ""
-        if other_comments:
-            max_comments = 6
-            selected_comments = other_comments[:max_comments]
-            compact_comments = [
-                self._truncate_comment_for_prompt(c) for c in selected_comments
-            ]
-            formatted = "\n".join(f"- {c}" for c in compact_comments)
-            history_after += len(formatted)
-            comments_section = f"\n\n## Discussion\n{formatted}"
-            if len(other_comments) > max_comments:
-                comments_section += f"\n- ... ({len(other_comments) - max_comments} more comments omitted)"
+        return review_section, failure_section, chars_before, chars_after
 
-        raw_feedback_section = self._get_review_feedback_section()
+    def _build_insight_sections(
+        self,
+    ) -> tuple[str, str, list[dict[str, str | int | list[str]]], int, int]:
+        """Build common-feedback and escalation prompt sections.
+
+        Returns ``(feedback_section, escalation_section, escalations, chars_before, chars_after)``.
+        """
+        chars_before = 0
+        chars_after = 0
+
+        raw_feedback = self._get_review_feedback_section()
         feedback_section = ""
-        if raw_feedback_section:
-            history_before += len(raw_feedback_section)
-            compact_feedback = self._summarize_for_prompt(
-                raw_feedback_section,
+        if raw_feedback:
+            chars_before += len(raw_feedback)
+            compact = self._summarize_for_prompt(
+                raw_feedback,
                 max_chars=self._MAX_COMMON_FEEDBACK_CHARS,
                 label="Common review feedback",
             )
-            history_after += len(compact_feedback)
-            feedback_section = compact_feedback
+            chars_after += len(compact)
+            feedback_section = compact
 
         escalations = self._get_escalation_data()
         escalation_section = ""
         if escalations:
             blocks = [str(e["mandatory_block"]) for e in escalations]
             escalation_section = "\n\n" + "\n\n".join(blocks)
-            history_before += len(escalation_section)
-            history_after += len(escalation_section)
+            chars_before += len(escalation_section)
+            chars_after += len(escalation_section)
 
-        manifest_section, memory_section = self._inject_manifest_and_memory()
+        return (
+            feedback_section,
+            escalation_section,
+            escalations,
+            chars_before,
+            chars_after,
+        )
 
-        # Runtime log injection (opt-in)
-        log_section = ""
-        if self._config.inject_runtime_logs:
-            from log_context import load_runtime_logs  # noqa: PLC0415
+    def _truncate_body(self, body: str) -> tuple[str, int, int]:
+        """Truncate issue body if it exceeds the configured limit.
 
-            logs = load_runtime_logs(self._config)
-            if logs:
-                log_section = f"\n\n## Recent Application Logs\n\n```\n{logs}\n```"
-
-        # Truncate issue body if too long
-        body = issue.body
+        Returns ``(truncated_body, chars_before, chars_after)``.
+        """
         max_body = self._config.max_issue_body_chars
-        body_before = len(body)
+        chars_before = len(body)
         if len(body) > max_body:
             body = (
                 body[:max_body]
                 + f"\n\n[Body truncated at {max_body:,} chars — see full issue on GitHub]"
             )
-        body_after = len(body)
+        return body, chars_before, len(body)
 
+    def _build_log_section(self) -> str:
+        """Build optional runtime log section."""
+        if not self._config.inject_runtime_logs:
+            return ""
+        from log_context import load_runtime_logs  # noqa: PLC0415
+
+        logs = load_runtime_logs(self._config)
+        if logs:
+            return f"\n\n## Recent Application Logs\n\n```\n{logs}\n```"
+        return ""
+
+    def _gather_prompt_sections(
+        self, issue: Task, review_feedback: str = "", prior_failure: str = ""
+    ) -> tuple[
+        dict[str, str], list[dict[str, str | int | list[str]]], int, int, int, int
+    ]:
+        """Collect all prompt sections and their char stats.
+
+        Returns ``(sections_dict, escalations, history_before, history_after,
+        body_before, body_after)``.
+        """
+        plan_section, other_comments, plan_before, plan_after = (
+            self._build_plan_section(issue)
+        )
+        history_before = plan_before + sum(len(c) for c in other_comments)
+        history_after = plan_after
+
+        review_section, failure_section, ctx_before, ctx_after = (
+            self._build_context_sections(review_feedback, prior_failure)
+        )
+        history_before += ctx_before
+        history_after += ctx_after
+
+        comments_section, cmt_before, cmt_after = build_comments_section(
+            other_comments,
+            6,
+            self._MAX_DISCUSSION_COMMENT_CHARS,
+            truncate_fn=self._truncate_comment_for_prompt,
+        )
+        history_before += cmt_before
+        history_after += cmt_after
+
+        feedback_section, escalation_section, escalations, ins_before, ins_after = (
+            self._build_insight_sections()
+        )
+        history_before += ins_before
+        history_after += ins_after
+        manifest_section, memory_section = self._inject_manifest_and_memory()
+        log_section = self._build_log_section()
+        body, body_before, body_after = self._truncate_body(issue.body)
+
+        sections = {
+            "body": body,
+            "plan": plan_section,
+            "review": review_section,
+            "failure": failure_section,
+            "comments": comments_section,
+            "manifest": manifest_section,
+            "memory": memory_section,
+            "log": log_section,
+            "feedback": feedback_section,
+            "escalation": escalation_section,
+        }
+        return (
+            sections,
+            escalations,
+            history_before,
+            history_after,
+            body_before,
+            body_after,
+        )
+
+    def _assemble_impl_prompt(
+        self,
+        issue: Task,
+        sections: dict[str, str],
+        escalations: list[dict[str, str | int | list[str]]],
+    ) -> str:
+        """Assemble the implementation prompt from pre-built sections."""
+        s = sections
         test_cmd = self._config.test_command
-
-        prompt = f"""You are implementing GitHub issue #{issue.id}.
+        return f"""You are implementing GitHub issue #{issue.id}.
 
 ## Issue: {issue.title}
 
-{body}{plan_section}{review_feedback_section}{prior_failure_section}{comments_section}{manifest_section}{memory_section}{log_section}
+{s["body"]}{s["plan"]}{s["review"]}{s["failure"]}{s["comments"]}{s["manifest"]}{s["memory"]}{s["log"]}
 
 ## Instructions
 
@@ -610,7 +702,7 @@ Run through this checklist before your final commit:
 5. Run Pre-Quality Review Skill for correctness, plan adherence, and missing tests.
 6. Run Run-Tool Skill: `make lint` → `{test_cmd}` → `make quality-lite`; fix and rerun.
 7. Commit with: "Fixes #{issue.id}: <concise summary>"
-{feedback_section}{escalation_section}
+{s["feedback"]}{s["escalation"]}
 {self._build_self_check_checklist(escalations)}
 ## UI Guidelines
 
@@ -636,7 +728,17 @@ Run through this checklist before your final commit:
   write the code, not to second-guess the plan. Always produce commits.
 
 {MEMORY_SUGGESTION_PROMPT.format(context="implementation")}"""
-        stats = {
+
+    @staticmethod
+    def _compute_prompt_stats(
+        *,
+        history_before: int,
+        history_after: int,
+        body_before: int,
+        body_after: int,
+    ) -> dict[str, object]:
+        """Compute pruning statistics for telemetry."""
+        return {
             "history_chars_before": history_before,
             "history_chars_after": history_after,
             "context_chars_before": body_before,
@@ -650,6 +752,21 @@ Run through this checklist before your final commit:
                 "history_after": history_after,
             },
         }
+
+    def _build_prompt_with_stats(
+        self, issue: Task, review_feedback: str = "", prior_failure: str = ""
+    ) -> tuple[str, dict[str, object]]:
+        """Build the implementation prompt and pruning stats."""
+        sections, escalations, h_before, h_after, b_before, b_after = (
+            self._gather_prompt_sections(issue, review_feedback, prior_failure)
+        )
+        prompt = self._assemble_impl_prompt(issue, sections, escalations)
+        stats = self._compute_prompt_stats(
+            history_before=h_before,
+            history_after=h_after,
+            body_before=b_before,
+            body_after=b_after,
+        )
         return prompt, stats
 
     async def _verify_result(self, worktree_path: Path, branch: str) -> LoopResult:
