@@ -660,6 +660,7 @@ class TestLifecycle:
         await asyncio.wait_for(store.start(stop), timeout=2.0)
         assert stop.is_set()
         await task
+        assert stop.is_set()
 
 
 # ── Fetch All HydraFlow Issues ───────────────────────────────────────────

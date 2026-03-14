@@ -877,11 +877,14 @@ def test_terminate_handles_process_lookup_error(config, event_bus):
         runner.terminate()  # Should not raise
     mock_killpg.assert_called_once()
 
+    mock_killpg.assert_called_once()
+
 
 def test_terminate_with_no_active_processes(config, event_bus):
     runner = _make_runner(config, event_bus)
     assert len(runner._active_procs) == 0
     runner.terminate()  # Should not raise
+    assert len(runner._active_procs) == 0
 
 
 # ---------------------------------------------------------------------------

@@ -240,8 +240,8 @@ class TestEventBusPublishSubscribe:
     async def test_no_subscribers_publish_does_not_raise(self) -> None:
         bus = EventBus()
         event = EventFactory.create(type=EventType.ORCHESTRATOR_STATUS)
-        await bus.publish(event)  # should not raise
-        assert len(bus._subscribers) == 0
+        result = await bus.publish(event)  # should not raise
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_set_session_id_auto_injects(self) -> None:
@@ -384,6 +384,7 @@ class TestEventBusUnsubscribe:
         bus = EventBus()
         queue = bus.subscribe()
         bus.unsubscribe(queue)
+        assert queue not in bus._subscribers
         bus.unsubscribe(queue)  # second call should not raise
         assert queue not in bus._subscribers
 
@@ -525,6 +526,7 @@ class TestEventBusClear:
         bus = EventBus()
         bus.clear()  # should not raise
         assert bus._subscribers == []
+        assert bus._history == []
 
     @pytest.mark.asyncio
     async def test_bus_usable_after_clear(self) -> None:

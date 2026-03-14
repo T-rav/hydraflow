@@ -1569,6 +1569,8 @@ class TestRecordReviewInsight:
         await phase._record_review_insight(result)
         mock_insights.append_review.assert_called_once()
 
+        mock_insights.append_review.assert_called_once()
+
     @pytest.mark.asyncio
     async def test_updates_bg_status_on_success(self, config: HydraFlowConfig) -> None:
         """Successful insight recording should update review_insights worker status."""

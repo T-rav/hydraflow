@@ -57,6 +57,7 @@ class TestModelRate:
         )
         with pytest.raises(AttributeError):
             rate.input_cost_per_million = 999  # type: ignore[misc]
+        assert rate.input_cost_per_million == 3.0
 
 
 class TestModelPricingTable:

@@ -1001,7 +1001,9 @@ class TestStartStop:
 
         await dashboard.stop()
 
-        assert dashboard._server_task.cancelled() or dashboard._server_task.done()
+        task = dashboard._server_task
+        assert task is not None
+        assert task.done()
 
     @pytest.mark.asyncio
     async def test_stop_is_safe_when_no_task(
@@ -1013,6 +1015,8 @@ class TestStartStop:
         assert dashboard._server_task is None
 
         await dashboard.stop()
+
+        assert dashboard._server_task is None  # stop() must not create a task
 
     @pytest.mark.asyncio
     async def test_stop_is_safe_when_task_already_done(
@@ -1031,5 +1035,5 @@ class TestStartStop:
 
         await dashboard.stop()
         assert (
-            dashboard._server_task.done()
-        )  # already-done task stays done after stop()
+            not dashboard._server_task.cancelled()
+        )  # stop() must not cancel an already-done task

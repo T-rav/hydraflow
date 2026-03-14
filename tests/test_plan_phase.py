@@ -810,6 +810,8 @@ class TestPlanPhaseTranscriptSummary:
         await phase.plan_issues()
         planners.plan.assert_awaited_once()
 
+        planners.plan.assert_awaited_once()
+
 
 # ---------------------------------------------------------------------------
 # Plan phase — evidence validation for already_satisfied

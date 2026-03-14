@@ -441,8 +441,12 @@ class TestTerminate:
     def test_terminate_with_no_active_procs(self, hitl_runner) -> None:
         assert len(hitl_runner._active_procs) == 0
         hitl_runner.terminate()  # Should not raise
+        assert len(hitl_runner._active_procs) == 0
 
     def test_terminate_calls_terminate_processes(self, hitl_runner) -> None:
+        mock_proc = MagicMock()
+        mock_proc.pid = 99999
+        hitl_runner._active_procs.add(mock_proc)
         with patch("base_runner.terminate_processes") as mock_term:
             hitl_runner.terminate()
             mock_term.assert_called_once_with(hitl_runner._active_procs)

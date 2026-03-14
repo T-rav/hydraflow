@@ -293,7 +293,6 @@ class TestSessionPruning:
         tracker = make_state(tmp_path)
         # Should not raise
         tracker.prune_sessions("test-org/test-repo", max_keep=5)
-        # No sessions file means nothing to load
         result = tracker.load_sessions()
         assert result == []
 

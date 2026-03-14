@@ -25,15 +25,15 @@ from log import JSONFormatter
 class TestValidateRepoFormat:
     def test_valid_owner_repo_passes(self) -> None:
         result = _validate_repo_format("owner/repo")
-        assert result is None  # no exception raised for valid format
+        assert result is None
 
     def test_valid_with_dots_hyphens_underscores(self) -> None:
         result = _validate_repo_format("my-org.com/my_repo-v2")
-        assert result is None  # no exception raised for valid format
+        assert result is None
 
     def test_empty_string_allowed(self) -> None:
         result = _validate_repo_format("")
-        assert result is None  # no exception raised for empty string
+        assert result is None
 
     def test_no_slash_raises(self) -> None:
         with pytest.raises(ValueError, match="expected 'owner/repo'"):
@@ -70,8 +70,8 @@ class TestPRManagerAssertRepo:
 
     def test_valid_repo_passes(self) -> None:
         pm = self._make_pr_manager("owner/repo")
-        result = pm._assert_repo()  # should not raise
-        assert result is None  # no exception raised for valid repo
+        result = pm._assert_repo()
+        assert result is None
 
     def test_empty_repo_raises(self) -> None:
         pm = self._make_pr_manager("")
@@ -237,7 +237,7 @@ class TestWorktreeOriginValidation:
         with patch("workspace.run_subprocess", new_callable=AsyncMock) as mock_run:
             mock_run.return_value = "https://github.com/owner/repo.git\n"
             result = await wm._assert_origin_matches_repo()
-        assert result is None  # method completes without error
+            assert result is None
 
     @pytest.mark.asyncio
     async def test_ssh_url_matches(self) -> None:
@@ -245,7 +245,7 @@ class TestWorktreeOriginValidation:
         with patch("workspace.run_subprocess", new_callable=AsyncMock) as mock_run:
             mock_run.return_value = "git@github.com:owner/repo.git\n"
             result = await wm._assert_origin_matches_repo()
-        assert result is None  # method completes without error
+            assert result is None
 
     @pytest.mark.asyncio
     async def test_https_without_git_suffix(self) -> None:
@@ -253,7 +253,7 @@ class TestWorktreeOriginValidation:
         with patch("workspace.run_subprocess", new_callable=AsyncMock) as mock_run:
             mock_run.return_value = "https://github.com/owner/repo\n"
             result = await wm._assert_origin_matches_repo()
-        assert result is None  # method completes without error
+            assert result is None
 
     @pytest.mark.asyncio
     async def test_mismatch_raises(self) -> None:
@@ -276,4 +276,4 @@ class TestWorktreeOriginValidation:
         with patch("workspace.run_subprocess", new_callable=AsyncMock) as mock_run:
             mock_run.return_value = "https://github.com/owner/repo.git\n"
             result = await wm._assert_origin_matches_repo()
-        assert result is None  # case-insensitive match succeeds
+            assert result is None

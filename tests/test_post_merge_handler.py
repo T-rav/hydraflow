@@ -1329,7 +1329,7 @@ class TestNarrowedExceptionHandling:
 
     @pytest.mark.asyncio
     async def test_notify_epic_approval_catches_runtime_error(
-        self, config: HydraFlowConfig
+        self, config: HydraFlowConfig, caplog: pytest.LogCaptureFixture
     ) -> None:
         """RuntimeError in epic approval notification should be caught."""
         handler = _make_handler(config)
@@ -1341,12 +1341,17 @@ class TestNarrowedExceptionHandling:
         handler._epic_manager = mock_epic_manager
 
         # Should not raise — RuntimeError is caught
-        await handler._notify_epic_approval(42)
-        mock_epic_manager.on_child_approved.assert_awaited_once()
+        with caplog.at_level(logging.WARNING, logger="hydraflow.post_merge_handler"):
+            await handler._notify_epic_approval(42)
+
+        assert any(
+            "Epic approval notification failed" in r.message for r in caplog.records
+        )
+        mock_epic_manager.on_child_approved.assert_awaited_once_with(100, 42)
 
     @pytest.mark.asyncio
     async def test_notify_epic_approval_catches_os_error(
-        self, config: HydraFlowConfig
+        self, config: HydraFlowConfig, caplog: pytest.LogCaptureFixture
     ) -> None:
         """OSError in epic approval notification should be caught."""
         handler = _make_handler(config)
@@ -1358,8 +1363,13 @@ class TestNarrowedExceptionHandling:
         handler._epic_manager = mock_epic_manager
 
         # Should not raise — OSError is caught
-        await handler._notify_epic_approval(42)
-        mock_epic_manager.on_child_approved.assert_awaited_once()
+        with caplog.at_level(logging.WARNING, logger="hydraflow.post_merge_handler"):
+            await handler._notify_epic_approval(42)
+
+        assert any(
+            "Epic approval notification failed" in r.message for r in caplog.records
+        )
+        mock_epic_manager.on_child_approved.assert_awaited_once_with(100, 42)
 
     @pytest.mark.asyncio
     async def test_post_inference_comment_propagates_type_error(
@@ -1384,7 +1394,7 @@ class TestNarrowedExceptionHandling:
 
     @pytest.mark.asyncio
     async def test_post_inference_comment_catches_runtime_error(
-        self, config: HydraFlowConfig
+        self, config: HydraFlowConfig, caplog: pytest.LogCaptureFixture
     ) -> None:
         """RuntimeError in post_comment during inference totals should be caught."""
         handler = _make_handler(config)
@@ -1399,12 +1409,18 @@ class TestNarrowedExceptionHandling:
         issue = TaskFactory.create(id=5)
 
         # Should not raise — RuntimeError is caught
-        await handler._post_inference_totals_comment(pr, issue)
+        with caplog.at_level(logging.WARNING, logger="hydraflow.post_merge_handler"):
+            await handler._post_inference_totals_comment(pr, issue)
+
+        assert any(
+            "Could not post inference usage comment" in r.message
+            for r in caplog.records
+        )
         handler._prs.post_comment.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_post_inference_comment_catches_value_error(
-        self, config: HydraFlowConfig
+        self, config: HydraFlowConfig, caplog: pytest.LogCaptureFixture
     ) -> None:
         """ValueError (e.g. json.JSONDecodeError) in post_comment should be caught."""
         handler = _make_handler(config)
@@ -1419,7 +1435,13 @@ class TestNarrowedExceptionHandling:
         issue = TaskFactory.create(id=5)
 
         # Should not raise — ValueError is caught
-        await handler._post_inference_totals_comment(pr, issue)
+        with caplog.at_level(logging.WARNING, logger="hydraflow.post_merge_handler"):
+            await handler._post_inference_totals_comment(pr, issue)
+
+        assert any(
+            "Could not post inference usage comment" in r.message
+            for r in caplog.records
+        )
         handler._prs.post_comment.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -1495,7 +1517,7 @@ class TestNarrowedExceptionHandling:
 
     @pytest.mark.asyncio
     async def test_post_inference_comment_catches_os_error(
-        self, config: HydraFlowConfig
+        self, config: HydraFlowConfig, caplog: pytest.LogCaptureFixture
     ) -> None:
         """OSError in post_comment during inference totals should be caught."""
         handler = _make_handler(config)
@@ -1510,7 +1532,13 @@ class TestNarrowedExceptionHandling:
         issue = TaskFactory.create(id=5)
 
         # Should not raise — OSError is now caught
-        await handler._post_inference_totals_comment(pr, issue)
+        with caplog.at_level(logging.WARNING, logger="hydraflow.post_merge_handler"):
+            await handler._post_inference_totals_comment(pr, issue)
+
+        assert any(
+            "Could not post inference usage comment" in r.message
+            for r in caplog.records
+        )
         handler._prs.post_comment.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -1570,7 +1598,7 @@ class TestNarrowedExceptionHandling:
 
     @pytest.mark.asyncio
     async def test_retrospective_runtime_error_is_swallowed(
-        self, config: HydraFlowConfig
+        self, config: HydraFlowConfig, caplog: pytest.LogCaptureFixture
     ) -> None:
         """RuntimeError from retrospective.record must be caught in _run_post_merge_hooks."""
         mock_retro = AsyncMock()
@@ -1583,21 +1611,24 @@ class TestNarrowedExceptionHandling:
         handler._prs.merge_pr = AsyncMock(return_value=True)
 
         # Should not raise — RuntimeError from retrospective is caught
-        await handler.handle_approved(
-            pr,
-            issue,
-            result,
-            "diff",
-            0,
-            ci_gate_fn=AsyncMock(return_value=True),
-            escalate_fn=AsyncMock(),
-            publish_fn=AsyncMock(),
-        )
+        with caplog.at_level(logging.WARNING, logger="hydraflow.post_merge_handler"):
+            await handler.handle_approved(
+                pr,
+                issue,
+                result,
+                "diff",
+                0,
+                ci_gate_fn=AsyncMock(return_value=True),
+                escalate_fn=AsyncMock(),
+                publish_fn=AsyncMock(),
+            )
+
+        assert any("retrospective failed" in r.message for r in caplog.records)
         mock_retro.record.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_notify_epic_approval_catches_value_error(
-        self, config: HydraFlowConfig
+        self, config: HydraFlowConfig, caplog: pytest.LogCaptureFixture
     ) -> None:
         """ValueError in epic approval notification should be caught."""
         handler = _make_handler(config)
@@ -1609,5 +1640,10 @@ class TestNarrowedExceptionHandling:
         handler._epic_manager = mock_epic_manager
 
         # Should not raise — ValueError is now caught
-        await handler._notify_epic_approval(42)
-        mock_epic_manager.on_child_approved.assert_awaited_once()
+        with caplog.at_level(logging.WARNING, logger="hydraflow.post_merge_handler"):
+            await handler._notify_epic_approval(42)
+
+        assert any(
+            "Epic approval notification failed" in r.message for r in caplog.records
+        )
+        mock_epic_manager.on_child_approved.assert_awaited_once_with(100, 42)

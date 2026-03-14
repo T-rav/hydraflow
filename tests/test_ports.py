@@ -218,8 +218,10 @@ class TestPRPortSignatures:
     def test_signature_matches_pr_manager(self, method: str) -> None:
         from pr_manager import PRManager
 
-        result = _assert_param_names_match(PRPort, PRManager, method)
-        assert result is None  # raises AssertionError on mismatch
+        _assert_param_names_match(PRPort, PRManager, method)
+        # Verify both port and implementation actually have the method
+        assert hasattr(PRPort, method)
+        assert hasattr(PRManager, method)
 
 
 class TestWorkspacePortSignatures:
@@ -237,5 +239,7 @@ class TestWorkspacePortSignatures:
     def test_signature_matches_worktree_manager(self, method: str) -> None:
         from workspace import WorkspaceManager
 
-        result = _assert_param_names_match(WorkspacePort, WorkspaceManager, method)
-        assert result is None  # raises AssertionError on mismatch
+        _assert_param_names_match(WorkspacePort, WorkspaceManager, method)
+        # Verify both port and implementation actually have the method
+        assert hasattr(WorkspacePort, method)
+        assert hasattr(WorkspaceManager, method)

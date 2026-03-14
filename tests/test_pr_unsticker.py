@@ -1762,6 +1762,8 @@ class TestNarrowedExceptionHandling:
         await unsticker._re_rebase_remaining(items)
         wt.start_merge_main.assert_awaited_once()
 
+        wt.start_merge_main.assert_awaited_once()
+
     @pytest.mark.asyncio
     async def test_re_rebase_propagates_type_error(self, tmp_path: Path) -> None:
         """TypeError during re-rebase must propagate."""

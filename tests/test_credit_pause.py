@@ -329,6 +329,8 @@ class TestStreamClaudeProcessCreditDetection:
             )
         assert result is not None
 
+        assert isinstance(result, str)
+
     @pytest.mark.asyncio
     async def test_raises_credit_exhausted_on_hit_limit_message(
         self, event_bus

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import TYPE_CHECKING
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
@@ -917,7 +918,7 @@ class TestPostRunHooks:
 
     @pytest.mark.asyncio
     async def test_summarize_failure_does_not_propagate(
-        self, config: HydraFlowConfig
+        self, config: HydraFlowConfig, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Exception in summarize must not propagate to caller."""
         orch = HydraFlowOrchestrator(config)
@@ -925,7 +926,10 @@ class TestPostRunHooks:
             side_effect=RuntimeError("summarize failed")
         )
 
-        with patch("phase_utils.file_memory_suggestion", new_callable=AsyncMock):
+        with (
+            patch("phase_utils.file_memory_suggestion", new_callable=AsyncMock),
+            caplog.at_level(logging.WARNING, logger="hydraflow.orchestrator"),
+        ):
             # Should not raise
             await orch._post_run_hooks(
                 transcript="transcript",
@@ -938,6 +942,8 @@ class TestPostRunHooks:
                 log_file="log.txt",
             )
         orch._svc.summarizer.summarize_and_comment.assert_awaited_once()
+
+        assert "Failed to post transcript summary for issue #99" in caplog.text
 
     @pytest.mark.asyncio
     async def test_skips_summarize_when_issue_number_zero(

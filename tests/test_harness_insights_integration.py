@@ -51,7 +51,7 @@ class TestPlanStageHarnessRecording:
             "Some error",
             stage=PipelineStage.PLAN,
         )
-        assert result is None  # noop when store is None
+        assert result is None
 
     def test_extracts_subcategories(self, config: HydraFlowConfig) -> None:
         memory_dir = config.repo_root / ".hydraflow" / "memory"
@@ -107,7 +107,7 @@ class TestImplementStageHarnessRecording:
             "Some error",
             stage=PipelineStage.IMPLEMENT,
         )
-        assert result is None  # noop when store is None
+        assert result is None
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +149,7 @@ class TestReviewStageHarnessRecording:
             stage=PipelineStage.REVIEW,
             pr_number=200,
         )
-        assert result is None  # noop when store is None
+        assert result is None
 
     def test_ci_failure_recording(self, config: HydraFlowConfig) -> None:
         memory_dir = config.repo_root / ".hydraflow" / "memory"

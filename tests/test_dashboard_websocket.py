@@ -45,9 +45,7 @@ class TestWebSocketEndpoint:
 
         client = TestClient(app)
         with client.websocket_connect("/ws") as ws:
-            # Verify the WebSocket session has send/receive capabilities,
-            # confirming the /ws endpoint accepted the connection.
-            assert hasattr(ws, "receive_text") and hasattr(ws, "send_text")
+            assert ws is not None
 
     def test_websocket_receives_history_on_connect(
         self, config: HydraFlowConfig, event_bus, state

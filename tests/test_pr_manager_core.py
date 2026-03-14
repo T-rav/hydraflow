@@ -147,7 +147,7 @@ async def test_post_comment_dry_run(dry_config, event_bus):
 
 
 @pytest.mark.asyncio
-async def test_post_comment_handles_error(event_bus, tmp_path):
+async def test_post_comment_handles_error(event_bus, tmp_path, caplog):
     """post_comment should log warning on failure without raising."""
 
     cfg = ConfigFactory.create(
@@ -163,10 +163,15 @@ async def test_post_comment_handles_error(event_bus, tmp_path):
         .build()
     )
 
-    with patch("asyncio.create_subprocess_exec", mock_create):
+    with (
+        patch("asyncio.create_subprocess_exec", mock_create),
+        caplog.at_level(logging.WARNING),
+    ):
         # Should not raise
         await mgr.post_comment(42, "comment body")
     mock_create.assert_awaited_once()
+
+    assert any("Could not post comment" in r.message for r in caplog.records)
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +218,7 @@ async def test_post_pr_comment_dry_run(dry_config, event_bus):
 
 
 @pytest.mark.asyncio
-async def test_post_pr_comment_handles_error(event_bus, tmp_path):
+async def test_post_pr_comment_handles_error(event_bus, tmp_path, caplog):
     """post_pr_comment should log warning on failure without raising."""
 
     cfg = ConfigFactory.create(
@@ -229,10 +234,15 @@ async def test_post_pr_comment_handles_error(event_bus, tmp_path):
         .build()
     )
 
-    with patch("asyncio.create_subprocess_exec", mock_create):
+    with (
+        patch("asyncio.create_subprocess_exec", mock_create),
+        caplog.at_level(logging.WARNING),
+    ):
         # Should not raise
         await mgr.post_pr_comment(101, "comment body")
     mock_create.assert_awaited_once()
+
+    assert any("Could not post comment" in r.message for r in caplog.records)
 
 
 # ---------------------------------------------------------------------------
@@ -2281,16 +2291,23 @@ class TestCloseIssue:
         mock_create.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_close_issue_handles_error_gracefully(self, config, event_bus):
+    async def test_close_issue_handles_error_gracefully(
+        self, config, event_bus, caplog
+    ):
         manager = _make_manager(config, event_bus)
         mock_create = (
             SubprocessMockBuilder().with_returncode(1).with_stderr("not found").build()
         )
 
-        with patch("asyncio.create_subprocess_exec", mock_create):
+        with (
+            patch("asyncio.create_subprocess_exec", mock_create),
+            caplog.at_level(logging.WARNING),
+        ):
             # Should not raise
             await manager.close_issue(999)
         mock_create.assert_awaited_once()
+
+        assert any("Could not close issue #999" in r.message for r in caplog.records)
 
 
 # ---------------------------------------------------------------------------

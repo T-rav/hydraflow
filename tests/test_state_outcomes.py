@@ -354,13 +354,10 @@ class TestOutcomeTrackingAdditional:
 
         tracker = make_tracker(tmp_path)
         # All known types are in the map now; this just verifies no crash
-        for otype in IssueOutcomeType:
-            tracker.record_outcome(
-                100 + hash(otype) % 1000, otype, "test", phase="test"
-            )
-        # Verify outcomes were recorded for all types without crashing
+        for idx, otype in enumerate(IssueOutcomeType):
+            tracker.record_outcome(100 + idx, otype, "test", phase="test")
         outcomes = tracker.get_all_outcomes()
-        assert len(outcomes) >= 1
+        assert len(outcomes) == len(IssueOutcomeType)
 
     def test_get_all_outcomes_returns_deep_copy(self, tmp_path: Path) -> None:
         """Mutating the returned dict should not affect internal state."""

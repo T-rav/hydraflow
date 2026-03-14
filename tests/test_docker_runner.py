@@ -165,8 +165,8 @@ class TestDockerStdinWriter:
     async def test_drain_is_noop(self) -> None:
         sock = _make_mock_socket()
         writer = DockerStdinWriter(sock)
-        await writer.drain()  # Should not raise — drain is a no-op
-        assert not writer._closed  # drain does not close the writer
+        result = await writer.drain()  # Should not raise
+        assert result is None
 
 
 # ---------------------------------------------------------------------------

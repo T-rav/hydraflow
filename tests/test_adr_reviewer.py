@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -1536,7 +1537,9 @@ class TestCommitAcceptance:
             mock_run.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_git_failure_logs_and_returns(self, tmp_path: Path) -> None:
+    async def test_git_failure_logs_and_returns(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Worktree creation failure should be caught and logged."""
         reviewer = _make_reviewer(tmp_path)
         result = ADRCouncilResult(
@@ -1546,11 +1549,14 @@ class TestCommitAcceptance:
         adr_path.parent.mkdir(parents=True)
         adr_path.write_text("**Status:** Accepted")
 
-        with patch(
-            "adr_reviewer.run_subprocess",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("git worktree add failed"),
-        ) as mock_run:
+        with (
+            patch(
+                "adr_reviewer.run_subprocess",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("git worktree add failed"),
+            ) as mock_run,
+            caplog.at_level(logging.ERROR, logger="hydraflow.adr_reviewer"),
+        ):
             # Should not raise
             await reviewer._commit_acceptance(
                 adr_path, tmp_path / "repo" / "docs" / "adr" / "README.md", result
@@ -1558,8 +1564,12 @@ class TestCommitAcceptance:
         # Verify the error-raising subprocess was invoked
         mock_run.assert_awaited()
 
+        assert "Failed to commit ADR-0001 acceptance" in caplog.text
+
     @pytest.mark.asyncio
-    async def test_pr_creation_failure_does_not_crash(self, tmp_path: Path) -> None:
+    async def test_pr_creation_failure_does_not_crash(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """PR creation failure after successful commit should be caught."""
         reviewer = _make_reviewer(tmp_path)
         result = ADRCouncilResult(
@@ -1574,17 +1584,22 @@ class TestCommitAcceptance:
         async def _mock_run(*args: object, **kwargs: object) -> None:
             nonlocal call_count
             call_count += 1
-            # Last call is `gh pr create` — make it fail
-            if call_count >= 6 and args[0] == "gh":
+            # Fail specifically on `gh pr create`
+            if args and args[0] == "gh" and "pr" in args and "create" in args:
                 raise RuntimeError("gh pr create failed")
 
-        with patch("adr_reviewer.run_subprocess", new_callable=AsyncMock) as mock_run:
+        with (
+            patch("adr_reviewer.run_subprocess", new_callable=AsyncMock) as mock_run,
+            caplog.at_level(logging.ERROR, logger="hydraflow.adr_reviewer"),
+        ):
             mock_run.side_effect = _mock_run
             # Should not raise
             await reviewer._commit_acceptance(
                 adr_path, tmp_path / "repo" / "docs" / "adr" / "README.md", result
             )
         assert call_count >= 6  # confirms PR creation step was reached
+
+        assert "Failed to create PR for ADR-0001" in caplog.text
 
 
 class TestTitleTruncation:

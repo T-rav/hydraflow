@@ -135,8 +135,12 @@ class TestSetupEnvDocker:
             ".gitignore must not be updated when .env copy fails"
         )
 
-    def test_setup_env_docker_handles_copytree_oserror(self, tmp_path: Path) -> None:
+    def test_setup_env_docker_handles_copytree_oserror(
+        self, tmp_path: Path, caplog
+    ) -> None:
         """In docker mode, OSError during node_modules copytree should be caught."""
+        import logging
+
         manager = make_docker_manager(tmp_path)
 
         repo_root = manager._repo_root
@@ -147,12 +151,13 @@ class TestSetupEnvDocker:
         ui_nm_src = repo_root / "ui" / "node_modules"
         ui_nm_src.mkdir(parents=True)
 
-        with patch(
-            "workspace.shutil.copytree", side_effect=OSError("disk full")
-        ) as mock_copytree:
+        with (
+            patch("workspace.shutil.copytree", side_effect=OSError("disk full")),
+            caplog.at_level(logging.DEBUG, logger="hydraflow.workspace"),
+        ):
             manager._setup_env(wt_path)  # should not raise
 
-        mock_copytree.assert_called_once()
+        assert "Could not copy" in caplog.text
 
     def test_setup_env_docker_adds_env_to_gitignore(self, tmp_path: Path) -> None:
         """In docker mode, .env should be appended to worktree .gitignore."""
@@ -196,9 +201,11 @@ class TestSetupEnvDocker:
         assert lines.count(".env") == 1, "duplicate .env entries must not be added"
 
     def test_setup_env_docker_handles_gitignore_update_oserror(
-        self, tmp_path: Path
+        self, tmp_path: Path, caplog
     ) -> None:
         """In docker mode, OSError when updating .gitignore should be caught."""
+        import logging
+
         manager = make_docker_manager(tmp_path)
 
         repo_root = manager._repo_root
@@ -212,10 +219,13 @@ class TestSetupEnvDocker:
         env_src.write_text("SECRET=val")
         (wt_path / ".env").write_text("SECRET=val")
 
-        with patch("pathlib.Path.open", side_effect=OSError("read-only")) as mock_open:
+        with (
+            patch("pathlib.Path.open", side_effect=OSError("read-only")),
+            caplog.at_level(logging.DEBUG, logger="hydraflow.workspace"),
+        ):
             manager._setup_env(wt_path)  # should not raise
 
-        assert mock_open.call_count >= 1
+        assert "Could not update .gitignore" in caplog.text
 
     def test_setup_env_host_still_symlinks(self, config, tmp_path: Path) -> None:
         """Confirm host mode still creates symlinks (regression check)."""
@@ -278,9 +288,11 @@ class TestInstallHooksDocker:
 
     @pytest.mark.asyncio
     async def test_install_hooks_docker_skips_when_githooks_missing(
-        self, tmp_path: Path
+        self, tmp_path: Path, caplog
     ) -> None:
         """In docker mode, missing .githooks/ should be handled gracefully."""
+        import logging
+
         manager = make_docker_manager(tmp_path)
 
         repo_root = manager._repo_root
@@ -290,16 +302,21 @@ class TestInstallHooksDocker:
         wt_path = tmp_path / "worktree"
         wt_path.mkdir()
 
-        # Should not raise
-        await manager._install_hooks(wt_path)
+        with caplog.at_level(logging.DEBUG, logger="hydraflow.workspace"):
+            # Should not raise
+            await manager._install_hooks(wt_path)
+
+        assert "No .githooks directory found" in caplog.text
 
         assert not (wt_path / ".git" / "hooks").exists()
 
     @pytest.mark.asyncio
     async def test_install_hooks_docker_handles_copy_error(
-        self, tmp_path: Path
+        self, tmp_path: Path, caplog
     ) -> None:
         """In docker mode, OSError during hook copy should be caught."""
+        import logging
+
         manager = make_docker_manager(tmp_path)
 
         repo_root = manager._repo_root
@@ -319,13 +336,12 @@ class TestInstallHooksDocker:
                 "workspace.run_subprocess",
                 side_effect=_make_hooks_subprocess_mock(hooks_dir),
             ),
-            patch(
-                "workspace.shutil.copy2", side_effect=OSError("perm denied")
-            ) as mock_copy,
+            patch("workspace.shutil.copy2", side_effect=OSError("perm denied")),
+            caplog.at_level(logging.DEBUG, logger="hydraflow.workspace"),
         ):
             await manager._install_hooks(wt_path)  # should not raise
 
-        assert mock_copy.call_count >= 1
+        assert "Could not copy hook" in caplog.text
 
     @pytest.mark.asyncio
     async def test_install_hooks_docker_handles_mkdir_oserror(
@@ -757,16 +773,22 @@ class TestPostWorkCleanup:
         assert not any("git commit" in c for c in cmd_strs)
 
     @pytest.mark.asyncio
-    async def test_post_work_continues_if_destroy_fails(self, config) -> None:
+    async def test_post_work_continues_if_destroy_fails(self, config, caplog) -> None:
+        import logging
+
         manager = WorkspaceManager(config)
 
-        with patch.object(
-            manager, "destroy", side_effect=RuntimeError("worktree gone")
-        ) as mock_destroy:
+        with (
+            patch.object(
+                manager, "destroy", side_effect=RuntimeError("worktree gone")
+            ) as mock_destroy,
+            caplog.at_level(logging.INFO, logger="hydraflow.workspace"),
+        ):
             # Should not raise — destroy failure is suppressed
             await manager.post_work_cleanup(42)
 
-        mock_destroy.assert_called_once()
+        mock_destroy.assert_called_once_with(42)
+        assert "Post-work cleanup complete" in caplog.text
 
 
 # ---------------------------------------------------------------------------

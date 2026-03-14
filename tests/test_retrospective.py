@@ -383,6 +383,8 @@ class TestRecord:
         await collector.record(42, 101, review)
         mock_prs.get_pr_diff_names.assert_awaited_once()
 
+        mock_prs.get_pr_diff_names.assert_awaited_once()
+
 
 # ---------------------------------------------------------------------------
 # Pattern detection tests

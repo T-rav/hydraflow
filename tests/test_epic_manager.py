@@ -174,7 +174,7 @@ class TestOnChildExcluded:
         mgr, state, _, _, _ = _make_manager(tmp_path)
         # Should not raise
         await mgr.on_child_excluded(999, 1)
-        assert state.get_epic_state(999) is None  # no state created for unknown epic
+        assert state.get_epic_state(999) is None
 
 
 class TestOnChildPlanned:
@@ -201,7 +201,7 @@ class TestOnChildPlanned:
         mgr, state, _, _, _ = _make_manager(tmp_path)
         # Should not raise
         await mgr.on_child_planned(999, 1)
-        assert state.get_epic_state(999) is None  # no state created for unknown epic
+        assert state.get_epic_state(999) is None
 
 
 class TestGetProgress:

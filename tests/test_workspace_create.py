@@ -505,9 +505,12 @@ class TestDestroy:
         """destroy should not crash if the worktree directory does not exist."""
         manager = WorkspaceManager(config)
 
+        wt_path = config.worktree_path_for_issue(999)
         # wt_path does NOT exist — destroy should not raise
         wt_path = config.worktree_path_for_issue(999)
         await manager.destroy(issue_number=999)
+        assert not wt_path.exists()
+
         assert not wt_path.exists()
 
     @pytest.mark.asyncio
@@ -517,9 +520,12 @@ class TestDestroy:
         """destroy should complete without error even if directory is already gone."""
         manager = WorkspaceManager(config)
 
+        wt_path = config.worktree_path_for_issue(7)
         # Don't create the directory — destroy should handle gracefully
         wt_path = config.worktree_path_for_issue(7)
         await manager.destroy(issue_number=7)
+        assert not wt_path.exists()
+
         assert not wt_path.exists()
 
     @pytest.mark.asyncio

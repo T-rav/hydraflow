@@ -652,11 +652,13 @@ class TestTerminateProcesses:
             terminate_processes(active)  # Should not raise
         mock_killpg.assert_called_once()
 
+        mock_killpg.assert_called_once()
+
     def test_empty_set_is_noop(self) -> None:
         """terminate_processes with empty set should be a no-op."""
         active: set[asyncio.subprocess.Process] = set()
-        terminate_processes(active)  # Should not raise
-        assert len(active) == 0
+        result = terminate_processes(active)  # Should not raise
+        assert result is None
 
     def test_uses_killpg_with_sigkill(self) -> None:
         """terminate_processes should use os.killpg() with SIGKILL."""

@@ -424,9 +424,9 @@ class TestSessionStateMixin:
 
     def test_unknown_stage_ignored(self, tmp_path: Path) -> None:
         t = make_tracker(tmp_path)
-        before = t.get_session_counters().triaged
         t.increment_session_counter("nonexistent")  # should not raise
-        assert t.get_session_counters().triaged == before  # known counters unchanged
+        # Counters remain at zero — unknown stage is a silent no-op
+        assert t.get_session_counters().triaged == 0
 
     def test_session_persistence(self, tmp_path: Path) -> None:
         from models import SessionLog  # noqa: PLC0415
