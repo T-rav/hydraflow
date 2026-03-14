@@ -1595,6 +1595,29 @@ class TestSummariseWithModel:
         assert cmd[cmd.index("--model") + 1] == "pi-model"
 
     @pytest.mark.asyncio
+    async def test_default_claude_tool_uses_tool_variable(self, tmp_path: Path) -> None:
+        """Default 'claude' tool must still come from config, not a hardcoded string."""
+        config = ConfigFactory.create(
+            repo_root=tmp_path,
+            memory_compaction_tool="claude",
+            memory_compaction_model="haiku",
+        )
+        runner = AsyncMock()
+        runner.run_simple = AsyncMock(
+            return_value=SimpleResult(stdout="Summary", stderr="", returncode=0)
+        )
+        worker = MemorySyncWorker(config, MagicMock(), MagicMock(), runner=runner)
+
+        await worker._summarise_with_model("content", 4000)
+
+        runner.run_simple.assert_awaited_once()
+        cmd = runner.run_simple.call_args[0][0]
+        assert cmd[0] == "claude"
+        assert cmd[1] == "-p"
+        assert "--model" in cmd
+        assert cmd[cmd.index("--model") + 1] == "haiku"
+
+    @pytest.mark.asyncio
     async def test_codex_tool_passes_prompt_as_cli_arg(self, tmp_path: Path) -> None:
         config = ConfigFactory.create(
             repo_root=tmp_path,
