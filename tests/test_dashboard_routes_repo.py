@@ -878,7 +878,7 @@ class TestPickRepoFolder:
         endpoint = self._get_endpoint(router)
 
         with patch(
-            "dashboard_routes._pick_folder_with_dialog",
+            "dashboard_routes._repo_routes._pick_folder_with_dialog",
             new_callable=AsyncMock,
             return_value=None,
         ):
@@ -904,7 +904,7 @@ class TestPickRepoFolder:
         endpoint = self._get_endpoint(router)
 
         with patch(
-            "dashboard_routes._pick_folder_with_dialog",
+            "dashboard_routes._repo_routes._pick_folder_with_dialog",
             new_callable=AsyncMock,
             return_value=str(repo_dir),
         ):
@@ -1000,7 +1000,10 @@ class TestBrowsableFilesystemAPI:
         router = self._make_router(config, event_bus, state, tmp_path)
         endpoint = self._get_endpoint(router, "/api/fs/list")
 
-        with patch("dashboard_routes._allowed_repo_roots", return_value=(str(root),)):
+        with patch(
+            "dashboard_routes._repo_routes._allowed_repo_roots",
+            return_value=(str(root),),
+        ):
             resp = await endpoint(path=str(root))
 
         data = json_mod.loads(resp.body)

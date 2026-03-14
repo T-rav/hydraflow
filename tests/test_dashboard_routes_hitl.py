@@ -169,7 +169,9 @@ class TestHITLEndpointCause:
                 break
 
         assert get_hitl is not None
-        with patch("dashboard_routes.asyncio.create_task") as mock_create_task:
+        with patch(
+            "dashboard_routes._hitl_routes.asyncio.create_task"
+        ) as mock_create_task:
             response = await get_hitl()
             import json
 
@@ -1739,13 +1741,13 @@ class TestBuildHitlContextNoneBody:
 
         with (
             patch(
-                "dashboard_routes.IssueFetcher",
+                "dashboard_routes._context.IssueFetcher",
                 return_value=MagicMock(
                     fetch_issue_by_number=AsyncMock(return_value=issue)
                 ),
             ),
             patch(
-                "dashboard_routes.TranscriptSummarizer",
+                "dashboard_routes._context.TranscriptSummarizer",
                 return_value=MagicMock(
                     summarize_hitl_context=AsyncMock(side_effect=_mock_summarize)
                 ),
