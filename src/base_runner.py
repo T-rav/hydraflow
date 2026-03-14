@@ -55,7 +55,8 @@ class BaseRunner:
 
     def terminate(self) -> None:
         """Kill all active subprocesses."""
-        terminate_processes(self._active_procs)
+        if self._active_procs:
+            terminate_processes(self._active_procs)
 
     _AUTH_RETRY_MAX = 3
     _AUTH_RETRY_BASE_DELAY = 5.0  # seconds
