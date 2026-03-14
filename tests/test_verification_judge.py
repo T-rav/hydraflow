@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -541,13 +542,18 @@ class TestSaveJudgeReport:
         assert "Steps are vague" in content
         assert "refined" in content.lower()
 
-    def test_save_judge_report_handles_oserror_gracefully(self, tmp_path):
+    def test_save_judge_report_handles_oserror_gracefully(self, tmp_path, caplog):
         cfg = ConfigFactory.create(repo_root=tmp_path)
         judge = _make_judge(cfg)
         verdict = JudgeVerdict(issue_number=42, summary="All good")
 
-        with patch.object(Path, "write_text", side_effect=OSError("disk full")):
+        with (
+            patch.object(Path, "write_text", side_effect=OSError("disk full")),
+            caplog.at_level(logging.WARNING, logger="hydraflow.verification_judge"),
+        ):
             judge._save_judge_report(42, verdict)  # should not raise
+
+        assert "Could not save judge report" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -634,7 +640,8 @@ class TestUpdateCriteriaFile:
         cfg = ConfigFactory.create(repo_root=tmp_path)
         judge = _make_judge(cfg)
         # Should not raise
-        judge._update_criteria_file(999, "Refined text")
+        result = judge._update_criteria_file(999, "Refined text")
+        assert result is None
 
     def test_appends_instructions_section_when_none_exists(self, tmp_path):
         cfg = ConfigFactory.create(repo_root=tmp_path)
@@ -651,7 +658,7 @@ class TestUpdateCriteriaFile:
         assert "New instructions here" in content
         assert "Acceptance Criteria" in content
 
-    def test_handles_read_oserror(self, tmp_path):
+    def test_handles_read_oserror(self, tmp_path, caplog):
         cfg = ConfigFactory.create(repo_root=tmp_path)
         judge = _make_judge(cfg)
         criteria_dir = tmp_path / ".hydraflow" / "verification"
@@ -659,10 +666,15 @@ class TestUpdateCriteriaFile:
         criteria_file = criteria_dir / "issue-42.md"
         criteria_file.write_text(SAMPLE_CRITERIA_FILE)
 
-        with patch.object(Path, "read_text", side_effect=OSError("read error")):
+        with (
+            patch.object(Path, "read_text", side_effect=OSError("read error")),
+            caplog.at_level(logging.WARNING, logger="hydraflow.verification_judge"),
+        ):
             judge._update_criteria_file(42, "Refined")  # should not raise
 
-    def test_handles_write_oserror(self, tmp_path):
+        assert "Could not read criteria file" in caplog.text
+
+    def test_handles_write_oserror(self, tmp_path, caplog):
         cfg = ConfigFactory.create(repo_root=tmp_path)
         judge = _make_judge(cfg)
         criteria_dir = tmp_path / ".hydraflow" / "verification"
@@ -670,8 +682,13 @@ class TestUpdateCriteriaFile:
         criteria_file = criteria_dir / "issue-42.md"
         criteria_file.write_text(SAMPLE_CRITERIA_FILE)
 
-        with patch.object(Path, "write_text", side_effect=OSError("disk full")):
+        with (
+            patch.object(Path, "write_text", side_effect=OSError("disk full")),
+            caplog.at_level(logging.WARNING, logger="hydraflow.verification_judge"),
+        ):
             judge._update_criteria_file(42, "Refined")  # should not raise
+
+        assert "Could not update criteria file" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -1073,6 +1090,7 @@ class TestTerminate:
     def test_no_active_processes(self, config):
         judge = _make_judge(config)
         judge.terminate()  # Should not raise
+        assert len(judge._active_procs) == 0
 
 
 # ---------------------------------------------------------------------------

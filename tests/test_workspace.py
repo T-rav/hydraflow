@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import stat
 import sys
 from pathlib import Path
@@ -510,8 +511,11 @@ class TestDestroy:
         """destroy should not crash if the worktree directory does not exist."""
         manager = WorkspaceManager(config)
 
+        wt_path = config.worktree_path_for_issue(999)
         # wt_path does NOT exist — destroy should not raise
         await manager.destroy(issue_number=999)
+
+        assert not wt_path.exists()
 
     @pytest.mark.asyncio
     async def test_destroy_tolerates_missing_branch(
@@ -520,8 +524,11 @@ class TestDestroy:
         """destroy should complete without error even if directory is already gone."""
         manager = WorkspaceManager(config)
 
+        wt_path = config.worktree_path_for_issue(7)
         # Don't create the directory — destroy should handle gracefully
         await manager.destroy(issue_number=7)
+
+        assert not wt_path.exists()
 
     @pytest.mark.asyncio
     async def test_destroy_removes_existing_directory(
@@ -988,9 +995,13 @@ class TestDeleteLocalBranch:
         manager = WorkspaceManager(config)
         fail_proc = make_proc(returncode=1, stderr=b"error: branch not found")
 
-        with patch("asyncio.create_subprocess_exec", return_value=fail_proc):
+        with patch(
+            "asyncio.create_subprocess_exec", return_value=fail_proc
+        ) as mock_exec:
             # Should not raise
             await manager._delete_local_branch("agent/issue-999")
+
+        mock_exec.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -1157,7 +1168,9 @@ class TestSetupEnv:
         manager._setup_env(wt_path)
         assert env_dst.is_symlink()
 
-    def test_setup_env_handles_symlink_oserror(self, config, tmp_path: Path) -> None:
+    def test_setup_env_handles_symlink_oserror(
+        self, config, tmp_path: Path, caplog
+    ) -> None:
         """_setup_env should handle OSError on symlink and continue."""
         manager = WorkspaceManager(config)
         repo_root = config.repo_root
@@ -1173,10 +1186,17 @@ class TestSetupEnv:
         ui_nm_src = repo_root / "ui" / "node_modules"
         ui_nm_src.mkdir(parents=True)
 
-        with patch.object(Path, "symlink_to", side_effect=OSError("perm denied")):
+        with (
+            patch.object(Path, "symlink_to", side_effect=OSError("perm denied")),
+            caplog.at_level(logging.DEBUG, logger="hydraflow.workspace"),
+        ):
             manager._setup_env(wt_path)  # should not raise
 
-    def test_setup_env_handles_copy_oserror(self, config, tmp_path: Path) -> None:
+        assert "Could not symlink" in caplog.text
+
+    def test_setup_env_handles_copy_oserror(
+        self, config, tmp_path: Path, caplog
+    ) -> None:
         """_setup_env should handle OSError when copying settings and continue."""
         manager = WorkspaceManager(config)
         repo_root = config.repo_root
@@ -1190,8 +1210,13 @@ class TestSetupEnv:
         settings_src = claude_dir / "settings.local.json"
         settings_src.write_text('{"allowed": []}')
 
-        with patch.object(Path, "write_text", side_effect=OSError("read-only")):
+        with (
+            patch.object(Path, "write_text", side_effect=OSError("read-only")),
+            caplog.at_level(logging.DEBUG, logger="hydraflow.workspace"),
+        ):
             manager._setup_env(wt_path)  # should not raise
+
+        assert "Could not copy settings" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -1297,7 +1322,9 @@ class TestSetupClaudeSettings:
 
         assert not (wt_path / ".claude" / "settings.local.json").exists()
 
-    def test_oserror_during_write_is_suppressed(self, config, tmp_path: Path) -> None:
+    def test_oserror_during_write_is_suppressed(
+        self, config, tmp_path: Path, caplog
+    ) -> None:
         """_setup_claude_settings should suppress OSError during file write."""
         manager = WorkspaceManager(config)
         repo_root = config.repo_root
@@ -1310,8 +1337,13 @@ class TestSetupClaudeSettings:
         settings_src = claude_dir / "settings.local.json"
         settings_src.write_text('{"allowed": []}')
 
-        with patch.object(Path, "write_text", side_effect=OSError("read-only")):
+        with (
+            patch.object(Path, "write_text", side_effect=OSError("read-only")),
+            caplog.at_level(logging.DEBUG, logger="hydraflow.workspace"),
+        ):
             manager._setup_claude_settings(wt_path)  # should not raise
+
+        assert "Could not copy settings" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -1506,7 +1538,7 @@ class TestConfigureGitIdentity:
         assert calls[0].args == ("git", "config", "user.email", "bot@example.com")
 
     @pytest.mark.asyncio
-    async def test_runtime_error_does_not_raise(self, tmp_path: Path) -> None:
+    async def test_runtime_error_does_not_raise(self, tmp_path: Path, caplog) -> None:
         """_configure_git_identity should log warning and continue on RuntimeError."""
         from tests.helpers import ConfigFactory
 
@@ -1520,9 +1552,14 @@ class TestConfigureGitIdentity:
         manager = WorkspaceManager(cfg)
         fail_proc = make_proc(returncode=1, stderr=b"fatal: config error")
 
-        with patch("asyncio.create_subprocess_exec", return_value=fail_proc):
+        with (
+            patch("asyncio.create_subprocess_exec", return_value=fail_proc),
+            caplog.at_level(logging.WARNING, logger="hydraflow.workspace"),
+        ):
             # Should not raise — logs warning and continues
             await manager._configure_git_identity(tmp_path)
+
+        assert "git identity config failed" in caplog.text
 
     @pytest.mark.asyncio
     async def test_called_during_create(self, tmp_path: Path) -> None:
@@ -1578,27 +1615,39 @@ class TestCreateVenv:
         assert mock_exec.call_args.args[:2] == ("uv", "sync")
 
     @pytest.mark.asyncio
-    async def test_create_venv_swallows_errors(self, config, tmp_path: Path) -> None:
+    async def test_create_venv_swallows_errors(
+        self, config, tmp_path: Path, caplog
+    ) -> None:
         """_create_venv should not propagate errors if uv sync fails."""
         manager = WorkspaceManager(config)
         fail_proc = make_proc(returncode=1, stderr=b"uv not found")
 
-        with patch("asyncio.create_subprocess_exec", return_value=fail_proc):
+        with (
+            patch("asyncio.create_subprocess_exec", return_value=fail_proc),
+            caplog.at_level(logging.WARNING, logger="hydraflow.workspace"),
+        ):
             # Should not raise
             await manager._create_venv(tmp_path)
 
+        assert "uv sync failed" in caplog.text
+
     @pytest.mark.asyncio
     async def test_create_venv_swallows_file_not_found_error(
-        self, config, tmp_path: Path
+        self, config, tmp_path: Path, caplog
     ) -> None:
         """_create_venv should handle missing uv binary (FileNotFoundError)."""
         manager = WorkspaceManager(config)
 
-        with patch(
-            "asyncio.create_subprocess_exec",
-            side_effect=FileNotFoundError("uv"),
+        with (
+            patch(
+                "asyncio.create_subprocess_exec",
+                side_effect=FileNotFoundError("uv"),
+            ),
+            caplog.at_level(logging.WARNING, logger="hydraflow.workspace"),
         ):
             await manager._create_venv(tmp_path)  # should not raise
+
+        assert "uv sync failed" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -1629,14 +1678,21 @@ class TestInstallHooks:
         )
 
     @pytest.mark.asyncio
-    async def test_install_hooks_swallows_errors(self, config, tmp_path: Path) -> None:
+    async def test_install_hooks_swallows_errors(
+        self, config, tmp_path: Path, caplog
+    ) -> None:
         """_install_hooks should not propagate errors if git config fails."""
         manager = WorkspaceManager(config)
         fail_proc = make_proc(returncode=1, stderr=b"error")
 
-        with patch("asyncio.create_subprocess_exec", return_value=fail_proc):
+        with (
+            patch("asyncio.create_subprocess_exec", return_value=fail_proc),
+            caplog.at_level(logging.WARNING, logger="hydraflow.workspace"),
+        ):
             # Should not raise
             await manager._install_hooks(tmp_path)
+
+        assert "git hooks setup failed" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -1742,9 +1798,13 @@ class TestAbortMerge:
         manager = WorkspaceManager(config)
         fail_proc = make_proc(returncode=1, stderr=b"fatal: no merge in progress")
 
-        with patch("asyncio.create_subprocess_exec", return_value=fail_proc):
+        with patch(
+            "asyncio.create_subprocess_exec", return_value=fail_proc
+        ) as mock_exec:
             # Should not raise
             await manager.abort_merge(tmp_path)
+
+        mock_exec.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -2174,7 +2234,9 @@ class TestSetupEnvDocker:
             ".gitignore must not be updated when .env copy fails"
         )
 
-    def test_setup_env_docker_handles_copytree_oserror(self, tmp_path: Path) -> None:
+    def test_setup_env_docker_handles_copytree_oserror(
+        self, tmp_path: Path, caplog
+    ) -> None:
         """In docker mode, OSError during node_modules copytree should be caught."""
         manager = make_docker_manager(tmp_path)
 
@@ -2186,8 +2248,13 @@ class TestSetupEnvDocker:
         ui_nm_src = repo_root / "ui" / "node_modules"
         ui_nm_src.mkdir(parents=True)
 
-        with patch("workspace.shutil.copytree", side_effect=OSError("disk full")):
+        with (
+            patch("workspace.shutil.copytree", side_effect=OSError("disk full")),
+            caplog.at_level(logging.DEBUG, logger="hydraflow.workspace"),
+        ):
             manager._setup_env(wt_path)  # should not raise
+
+        assert "Could not copy" in caplog.text
 
     def test_setup_env_docker_adds_env_to_gitignore(self, tmp_path: Path) -> None:
         """In docker mode, .env should be appended to worktree .gitignore."""
@@ -2231,7 +2298,7 @@ class TestSetupEnvDocker:
         assert lines.count(".env") == 1, "duplicate .env entries must not be added"
 
     def test_setup_env_docker_handles_gitignore_update_oserror(
-        self, tmp_path: Path
+        self, tmp_path: Path, caplog
     ) -> None:
         """In docker mode, OSError when updating .gitignore should be caught."""
         manager = make_docker_manager(tmp_path)
@@ -2247,8 +2314,13 @@ class TestSetupEnvDocker:
         env_src.write_text("SECRET=val")
         (wt_path / ".env").write_text("SECRET=val")
 
-        with patch("pathlib.Path.open", side_effect=OSError("read-only")):
+        with (
+            patch("pathlib.Path.open", side_effect=OSError("read-only")),
+            caplog.at_level(logging.DEBUG, logger="hydraflow.workspace"),
+        ):
             manager._setup_env(wt_path)  # should not raise
+
+        assert "Could not update .gitignore" in caplog.text
 
     def test_setup_env_host_still_symlinks(self, config, tmp_path: Path) -> None:
         """Confirm host mode still creates symlinks (regression check)."""
@@ -2311,7 +2383,7 @@ class TestInstallHooksDocker:
 
     @pytest.mark.asyncio
     async def test_install_hooks_docker_skips_when_githooks_missing(
-        self, tmp_path: Path
+        self, tmp_path: Path, caplog
     ) -> None:
         """In docker mode, missing .githooks/ should be handled gracefully."""
         manager = make_docker_manager(tmp_path)
@@ -2323,12 +2395,15 @@ class TestInstallHooksDocker:
         wt_path = tmp_path / "worktree"
         wt_path.mkdir()
 
-        # Should not raise
-        await manager._install_hooks(wt_path)
+        with caplog.at_level(logging.DEBUG, logger="hydraflow.workspace"):
+            # Should not raise
+            await manager._install_hooks(wt_path)
+
+        assert "No .githooks directory found" in caplog.text
 
     @pytest.mark.asyncio
     async def test_install_hooks_docker_handles_copy_error(
-        self, tmp_path: Path
+        self, tmp_path: Path, caplog
     ) -> None:
         """In docker mode, OSError during hook copy should be caught."""
         manager = make_docker_manager(tmp_path)
@@ -2351,8 +2426,11 @@ class TestInstallHooksDocker:
                 side_effect=_make_hooks_subprocess_mock(hooks_dir),
             ),
             patch("workspace.shutil.copy2", side_effect=OSError("perm denied")),
+            caplog.at_level(logging.DEBUG, logger="hydraflow.workspace"),
         ):
             await manager._install_hooks(wt_path)  # should not raise
+
+        assert "Could not copy hook" in caplog.text
 
     @pytest.mark.asyncio
     async def test_install_hooks_docker_handles_mkdir_oserror(
@@ -2800,14 +2878,20 @@ class TestPostWorkCleanup:
         assert not any("git commit" in c for c in cmd_strs)
 
     @pytest.mark.asyncio
-    async def test_post_work_continues_if_destroy_fails(self, config) -> None:
+    async def test_post_work_continues_if_destroy_fails(self, config, caplog) -> None:
         manager = WorkspaceManager(config)
 
-        with patch.object(
-            manager, "destroy", side_effect=RuntimeError("worktree gone")
+        with (
+            patch.object(
+                manager, "destroy", side_effect=RuntimeError("worktree gone")
+            ) as mock_destroy,
+            caplog.at_level(logging.INFO, logger="hydraflow.workspace"),
         ):
             # Should not raise — destroy failure is suppressed
             await manager.post_work_cleanup(42)
+
+        mock_destroy.assert_called_once_with(42)
+        assert "Post-work cleanup complete" in caplog.text
 
 
 # ---------------------------------------------------------------------------

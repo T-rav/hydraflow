@@ -414,7 +414,11 @@ class TestEmitVisualGateTelemetry:
         issue = TaskFactory.create()
 
         # Should not raise
-        await phase._emit_visual_gate_telemetry(pr, issue, 0, "pass", "ok", 0.5, {})
+        result = await phase._emit_visual_gate_telemetry(
+            pr, issue, 0, "pass", "ok", 0.5, {}
+        )
+        assert result is None
+        assert phase._bus is None
 
 
 class TestHandleVisualGatePass:

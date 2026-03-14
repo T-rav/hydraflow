@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1264,12 +1265,14 @@ class TestNarrowedExceptionHandling:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_post_hitl_warnings_catches_runtime_error(self) -> None:
+    async def test_post_hitl_warnings_catches_runtime_error(self, caplog) -> None:
         """RuntimeError from post_comment in _post_hitl_warnings is caught."""
         checker, prs, _ = _make_checker()
         prs.post_comment = AsyncMock(side_effect=RuntimeError("post failed"))
         # Should not raise
-        await checker._post_hitl_warnings(100, [1, 2])
+        with caplog.at_level(logging.WARNING):
+            await checker._post_hitl_warnings(100, [1, 2])
+        assert "Failed to post HITL warning comment for epic #100" in caplog.text
 
     @pytest.mark.asyncio
     async def test_post_hitl_warnings_propagates_type_error(self) -> None:
@@ -1297,7 +1300,9 @@ class TestNarrowedExceptionHandling:
             with pytest.raises(TypeError, match="bad type"):
                 await checker._generate_epic_changelog(100, [1, 2])
 
-    def test_write_changelog_file_catches_os_error(self, tmp_path: Path) -> None:
+    def test_write_changelog_file_catches_os_error(
+        self, tmp_path: Path, caplog
+    ) -> None:
         """OSError from file I/O is caught gracefully."""
         config = ConfigFactory.create(repo_root=tmp_path)
         config.changelog_file = "CHANGELOG.md"
@@ -1305,9 +1310,13 @@ class TestNarrowedExceptionHandling:
         fetcher = AsyncMock()
         checker = EpicCompletionChecker(config, prs, fetcher)
         # Make repo_root resolve raise OSError
-        with patch.object(Path, "resolve", side_effect=OSError("disk error")):
+        with (
+            caplog.at_level(logging.WARNING),
+            patch.object(Path, "resolve", side_effect=OSError("disk error")),
+        ):
             # Should not raise
             checker._write_changelog_file("## v1.0")
+        assert "Failed to write changelog file" in caplog.text
 
     def test_write_changelog_file_propagates_type_error(self, tmp_path: Path) -> None:
         """TypeError from file I/O propagates (not caught by OSError handler)."""
@@ -1324,7 +1333,7 @@ class TestNarrowedExceptionHandling:
 
     @pytest.mark.asyncio
     async def test_try_auto_close_direct_close_catches_runtime_error(
-        self, tmp_path: Path
+        self, tmp_path: Path, caplog
     ) -> None:
         """RuntimeError from post_comment/close_issue in _try_auto_close is caught."""
         epic = _make_epic(100, [1])
@@ -1338,7 +1347,9 @@ class TestNarrowedExceptionHandling:
         fetcher.fetch_issues_by_labels = AsyncMock(return_value=[])
         prs.post_comment = AsyncMock(side_effect=RuntimeError("post failed"))
         # Should not raise
-        await manager._try_auto_close(100)
+        with caplog.at_level(logging.WARNING):
+            await manager._try_auto_close(100)
+        assert "Direct close failed for epic #100" in caplog.text
 
     @pytest.mark.asyncio
     async def test_try_auto_close_direct_close_propagates_type_error(
@@ -1423,14 +1434,15 @@ class TestNarrowedExceptionHandling:
 
     @pytest.mark.asyncio
     async def test_enrich_pr_status_catches_runtime_error_on_checks(
-        self, tmp_path: Path
+        self, tmp_path: Path, caplog
     ) -> None:
         """RuntimeError from get_pr_checks is caught; child_info unchanged."""
         manager, prs, _ = _make_epic_manager(tmp_path)
         prs.get_pr_checks = AsyncMock(side_effect=RuntimeError("checks failed"))
         child_info = EpicChildInfo(issue_number=1)
-        await manager._enrich_pr_status(child_info, 42)
-        # No exception; other fields may still be populated from remaining calls
+        with caplog.at_level(logging.DEBUG):
+            await manager._enrich_pr_status(child_info, 42)
+        assert "Could not fetch CI checks for PR #42" in caplog.text
 
     @pytest.mark.asyncio
     async def test_enrich_pr_status_propagates_type_error_on_checks(
@@ -1445,18 +1457,20 @@ class TestNarrowedExceptionHandling:
 
     @pytest.mark.asyncio
     async def test_enrich_pr_status_catches_runtime_error_on_reviews(
-        self, tmp_path: Path
+        self, tmp_path: Path, caplog
     ) -> None:
         """RuntimeError from get_pr_reviews is caught."""
         manager, prs, _ = _make_epic_manager(tmp_path)
         prs.get_pr_checks = AsyncMock(return_value=[])
         prs.get_pr_reviews = AsyncMock(side_effect=RuntimeError("reviews failed"))
         child_info = EpicChildInfo(issue_number=1)
-        await manager._enrich_pr_status(child_info, 42)
+        with caplog.at_level(logging.DEBUG):
+            await manager._enrich_pr_status(child_info, 42)
+        assert "Could not fetch reviews for PR #42" in caplog.text
 
     @pytest.mark.asyncio
     async def test_enrich_pr_status_catches_runtime_error_on_mergeable(
-        self, tmp_path: Path
+        self, tmp_path: Path, caplog
     ) -> None:
         """RuntimeError from get_pr_mergeable is caught."""
         manager, prs, _ = _make_epic_manager(tmp_path)
@@ -1464,16 +1478,22 @@ class TestNarrowedExceptionHandling:
         prs.get_pr_reviews = AsyncMock(return_value=[])
         prs.get_pr_mergeable = AsyncMock(side_effect=RuntimeError("mergeable failed"))
         child_info = EpicChildInfo(issue_number=1)
-        await manager._enrich_pr_status(child_info, 42)
+        with caplog.at_level(logging.DEBUG):
+            await manager._enrich_pr_status(child_info, 42)
+        assert "Could not fetch mergeable status for PR #42" in caplog.text
 
     @pytest.mark.asyncio
-    async def test_refresh_cache_catches_runtime_error(self, tmp_path: Path) -> None:
+    async def test_refresh_cache_catches_runtime_error(
+        self, tmp_path: Path, caplog
+    ) -> None:
         """RuntimeError from _build_detail in refresh_cache is caught."""
         manager, _, _ = _make_epic_manager(tmp_path)
         manager._state.upsert_epic_state(EpicState(epic_number=100, child_issues=[1]))
         manager._build_detail = AsyncMock(side_effect=RuntimeError("build failed"))
         # Should not raise
-        await manager.refresh_cache()
+        with caplog.at_level(logging.WARNING):
+            await manager.refresh_cache()
+        assert "Failed to refresh cache for epic #100" in caplog.text
 
     @pytest.mark.asyncio
     async def test_refresh_cache_propagates_type_error(self, tmp_path: Path) -> None:

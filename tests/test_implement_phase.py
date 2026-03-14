@@ -2180,6 +2180,8 @@ class TestWorktreeResetOnRetry:
         # Should not raise
         await phase._run_implementation(issue, "agent/issue-42", 0, "")
 
+        mock_wt.reset_to_main.assert_awaited_once()
+
 
 # ---------------------------------------------------------------------------
 # Prior failure context fed to agent

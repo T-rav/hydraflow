@@ -854,11 +854,10 @@ class TestCorruptFileHandling:
         state_file.write_text("null")
 
         # Constructing a tracker on a file containing 'null' should not raise
-        try:
-            tracker = StateTracker(state_file)
-            _ = tracker.get_active_worktrees()
-        except Exception as exc:  # noqa: BLE001
-            pytest.fail(f"Unexpected exception for corrupt file: {exc}")
+        tracker = StateTracker(state_file)
+        worktrees = tracker.get_active_worktrees()
+        assert worktrees == {}
+        assert tracker.to_dict().get("processed_issues") == {}
 
 
 # ---------------------------------------------------------------------------
@@ -2873,11 +2872,10 @@ class TestOutcomeTrackingAdditional:
 
         tracker = make_tracker(tmp_path)
         # All known types are in the map now; this just verifies no crash
-        for otype in IssueOutcomeType:
-            tracker.record_outcome(
-                100 + hash(otype) % 1000, otype, "test", phase="test"
-            )
-        # No assertion failure means success
+        for idx, otype in enumerate(IssueOutcomeType):
+            tracker.record_outcome(100 + idx, otype, "test", phase="test")
+        outcomes = tracker.get_all_outcomes()
+        assert len(outcomes) == len(IssueOutcomeType)
 
     def test_get_all_outcomes_returns_deep_copy(self, tmp_path: Path) -> None:
         """Mutating the returned dict should not affect internal state."""

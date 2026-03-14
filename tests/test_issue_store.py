@@ -333,6 +333,7 @@ class TestActiveTracking:
     def test_mark_complete_unknown_issue_is_safe(self) -> None:
         store = _make_store()
         store.mark_complete(999)  # Should not raise
+        assert not store.is_active(999)
 
     def test_is_active_returns_false_for_unknown_issue(self) -> None:
         store = _make_store()
@@ -658,6 +659,7 @@ class TestLifecycle:
         store._config = ConfigFactory.create(data_poll_interval=10)
         await asyncio.wait_for(store.start(stop), timeout=2.0)
         await task
+        assert stop.is_set()
 
 
 # ── Fetch All HydraFlow Issues ───────────────────────────────────────────

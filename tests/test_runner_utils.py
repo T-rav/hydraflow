@@ -646,13 +646,18 @@ class TestTerminateProcesses:
         proc.pid = 12345
         active: set[asyncio.subprocess.Process] = {proc}
 
-        with patch("runner_utils.os.killpg", side_effect=ProcessLookupError):
+        with patch(
+            "runner_utils.os.killpg", side_effect=ProcessLookupError
+        ) as mock_killpg:
             terminate_processes(active)  # Should not raise
+
+        mock_killpg.assert_called_once()
 
     def test_empty_set_is_noop(self) -> None:
         """terminate_processes with empty set should be a no-op."""
         active: set[asyncio.subprocess.Process] = set()
-        terminate_processes(active)  # Should not raise
+        result = terminate_processes(active)  # Should not raise
+        assert result is None
 
     def test_uses_killpg_with_sigkill(self) -> None:
         """terminate_processes should use os.killpg() with SIGKILL."""

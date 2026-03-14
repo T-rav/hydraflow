@@ -988,6 +988,8 @@ class TestStartStop:
         ):
             await dashboard.start()
 
+        assert dashboard._server_task is None
+
     @pytest.mark.asyncio
     async def test_stop_cancels_server_task(
         self, config: HydraFlowConfig, event_bus: EventBus, state
@@ -1033,6 +1035,8 @@ class TestStartStop:
         dashboard._server_task = task
 
         await dashboard.stop()
+
+        assert task.done()
 
 
 # ---------------------------------------------------------------------------
@@ -1341,8 +1345,8 @@ class TestWebSocketEndpoint:
         app = dashboard.create_app()
 
         client = TestClient(app)
-        with client.websocket_connect("/ws"):
-            pass  # Connection opens and closes without error
+        with client.websocket_connect("/ws") as ws:
+            assert ws is not None
 
     def test_websocket_receives_history_on_connect(
         self, config: HydraFlowConfig, event_bus, state

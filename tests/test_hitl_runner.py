@@ -439,7 +439,9 @@ class TestTerminate:
     """Tests for HITLRunner.terminate."""
 
     def test_terminate_with_no_active_procs(self, hitl_runner) -> None:
+        assert len(hitl_runner._active_procs) == 0
         hitl_runner.terminate()  # Should not raise
+        assert len(hitl_runner._active_procs) == 0
 
     def test_terminate_calls_terminate_processes(self, hitl_runner) -> None:
         with patch("base_runner.terminate_processes") as mock_term:

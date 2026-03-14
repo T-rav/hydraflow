@@ -6,7 +6,7 @@ import json
 import sys
 import unittest.mock
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -685,10 +685,9 @@ class TestTriageTerminate:
         runner._active_procs.add(mock_proc)
 
         # terminate() should not raise
-        runner.terminate()
-        # After terminate, the proc should have been killed
-        # (terminate_processes uses os.killpg which we don't mock here,
-        # so we just verify it doesn't crash with our mock)
+        with patch("base_runner.terminate_processes") as mock_term:
+            runner.terminate()
+        mock_term.assert_called_once_with(runner._active_procs)
 
 
 # ---------------------------------------------------------------------------

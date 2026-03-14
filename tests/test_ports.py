@@ -219,6 +219,9 @@ class TestPRPortSignatures:
         from pr_manager import PRManager
 
         _assert_param_names_match(PRPort, PRManager, method)
+        # Verify both port and implementation actually have the method
+        assert hasattr(PRPort, method)
+        assert hasattr(PRManager, method)
 
 
 class TestWorkspacePortSignatures:
@@ -237,3 +240,6 @@ class TestWorkspacePortSignatures:
         from workspace import WorkspaceManager
 
         _assert_param_names_match(WorkspacePort, WorkspaceManager, method)
+        # Verify both port and implementation actually have the method
+        assert hasattr(WorkspacePort, method)
+        assert hasattr(WorkspaceManager, method)

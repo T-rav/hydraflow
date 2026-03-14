@@ -596,7 +596,9 @@ class TestFailureRecordTimestamp:
         record = FailureRecord(issue_number=1, category="quality_gate")
         from datetime import datetime
 
-        datetime.fromisoformat(record.timestamp)
+        parsed = datetime.fromisoformat(record.timestamp)
+        assert parsed is not None
+        assert isinstance(parsed, datetime)
 
     def test_invalid_timestamp_rejected(self) -> None:
         from pydantic import ValidationError
@@ -673,13 +675,22 @@ class TestMarkPatternProposedOSError:
 
         assert "Could not write proposed patterns" in caplog.text
 
-    def test_does_not_raise_on_write_oserror(self, tmp_path: Path) -> None:
+    def test_does_not_raise_on_write_oserror(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """mark_pattern_proposed should not raise when write_text fails."""
+        import logging
+
         store = HarnessInsightStore(memory_dir=tmp_path)
 
-        with patch.object(
-            type(store._proposed_path),
-            "write_text",
-            side_effect=OSError("read-only filesystem"),
+        with (
+            patch.object(
+                type(store._proposed_path),
+                "write_text",
+                side_effect=OSError("read-only filesystem"),
+            ),
+            caplog.at_level(logging.WARNING, logger="hydraflow.harness_insights"),
         ):
             store.mark_pattern_proposed("category:ci_failure")  # should not raise
+
+        assert "Could not write proposed patterns" in caplog.text
