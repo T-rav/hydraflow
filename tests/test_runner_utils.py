@@ -16,7 +16,13 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from events import EventType
-from runner_utils import stream_claude_process, terminate_processes
+from runner_utils import (
+    check_post_stream_errors,
+    prepare_command,
+    resolve_transcript,
+    stream_claude_process,
+    terminate_processes,
+)
 from tests.helpers import make_streaming_proc
 
 # ---------------------------------------------------------------------------
@@ -858,3 +864,173 @@ class TestStreamClaudeProcessGhToken:
         if "GH_TOKEN" in captured_env:
             # If present, it was inherited from os.environ, not injected
             assert captured_env["GH_TOKEN"] == os.environ.get("GH_TOKEN", "")
+
+
+# ---------------------------------------------------------------------------
+# _prepare_command — extracted helper
+# ---------------------------------------------------------------------------
+
+
+class TestPrepareCommand:
+    """Tests for the _prepare_command helper extracted from stream_claude_process."""
+
+    def test_claude_print_inserts_prompt_after_flag(self) -> None:
+        cmd = ["claude", "-p", "--model", "sonnet"]
+        cmd_out, stdin_mode = prepare_command(cmd, "my prompt")
+        assert cmd_out == ["claude", "-p", "my prompt", "--model", "sonnet"]
+        assert stdin_mode == asyncio.subprocess.DEVNULL
+
+    def test_codex_exec_appends_prompt(self) -> None:
+        cmd = ["codex", "exec"]
+        cmd_out, stdin_mode = prepare_command(cmd, "do stuff")
+        assert cmd_out == ["codex", "exec", "do stuff"]
+        assert stdin_mode == asyncio.subprocess.DEVNULL
+
+    def test_pi_print_inserts_prompt_after_flag(self) -> None:
+        cmd = ["pi", "-p"]
+        cmd_out, stdin_mode = prepare_command(cmd, "plan it")
+        assert cmd_out == ["pi", "-p", "plan it"]
+        assert stdin_mode == asyncio.subprocess.DEVNULL
+
+    def test_unknown_tool_uses_stdin(self) -> None:
+        cmd = ["other-tool", "--flag"]
+        cmd_out, stdin_mode = prepare_command(cmd, "prompt")
+        assert cmd_out == ["other-tool", "--flag"]
+        assert stdin_mode == asyncio.subprocess.PIPE
+
+    def test_pi_with_long_print_flag(self) -> None:
+        cmd = ["pi", "--print"]
+        cmd_out, stdin_mode = prepare_command(cmd, "prompt")
+        assert cmd_out == ["pi", "--print", "prompt"]
+        assert stdin_mode == asyncio.subprocess.DEVNULL
+
+    def test_empty_cmd_uses_stdin(self) -> None:
+        cmd: list[str] = []
+        cmd_out, stdin_mode = prepare_command(cmd, "prompt")
+        assert cmd_out == []
+        assert stdin_mode == asyncio.subprocess.PIPE
+
+
+# ---------------------------------------------------------------------------
+# _check_post_stream_errors — extracted helper
+# ---------------------------------------------------------------------------
+
+
+class TestCheckPostStreamErrors:
+    """Tests for the _check_post_stream_errors helper."""
+
+    def test_raises_auth_error_on_authentication_failed(self) -> None:
+        from runner_utils import AuthenticationRetryError
+
+        with pytest.raises(AuthenticationRetryError):
+            check_post_stream_errors(
+                raw_lines=['{"error":"authentication_failed"}'],
+                accumulated_text="",
+                stderr_text="",
+                early_killed=False,
+                returncode=1,
+                caller_logger=logging.getLogger("test"),
+            )
+
+    def test_no_error_when_early_killed(self) -> None:
+        # Should not raise even with auth failure markers when early_killed
+        check_post_stream_errors(
+            raw_lines=['{"error":"authentication_failed"}'],
+            accumulated_text="",
+            stderr_text="",
+            early_killed=True,
+            returncode=0,
+            caller_logger=logging.getLogger("test"),
+        )
+
+    def test_raises_credit_exhausted_on_credit_limit(self) -> None:
+        from subprocess_util import CreditExhaustedError
+
+        with pytest.raises(CreditExhaustedError):
+            check_post_stream_errors(
+                raw_lines=[],
+                accumulated_text="Your credit balance is too low",
+                stderr_text="",
+                early_killed=False,
+                returncode=0,
+                caller_logger=logging.getLogger("test"),
+            )
+
+    def test_logs_warning_on_nonzero_exit(self, caplog) -> None:
+        test_logger = logging.getLogger("test_nonzero")
+        with caplog.at_level(logging.WARNING, logger="test_nonzero"):
+            check_post_stream_errors(
+                raw_lines=["normal output"],
+                accumulated_text="normal output",
+                stderr_text="some error",
+                early_killed=False,
+                returncode=1,
+                caller_logger=test_logger,
+            )
+        assert "exited with code 1" in caplog.text
+
+    def test_no_error_on_clean_exit(self) -> None:
+        # Should not raise on a clean exit
+        check_post_stream_errors(
+            raw_lines=["ok"],
+            accumulated_text="ok",
+            stderr_text="",
+            early_killed=False,
+            returncode=0,
+            caller_logger=logging.getLogger("test"),
+        )
+
+
+# ---------------------------------------------------------------------------
+# _resolve_transcript — extracted helper
+# ---------------------------------------------------------------------------
+
+
+class TestResolveTranscript:
+    """Tests for the _resolve_transcript helper."""
+
+    def test_prefers_result_text(self) -> None:
+        transcript = resolve_transcript(
+            result_text="result",
+            accumulated_text="accumulated",
+            raw_lines=["raw"],
+            stderr_text="",
+            returncode=0,
+            caller_logger=logging.getLogger("test"),
+        )
+        assert transcript == "result"
+
+    def test_falls_back_to_accumulated(self) -> None:
+        transcript = resolve_transcript(
+            result_text="",
+            accumulated_text="accumulated\n",
+            raw_lines=["raw"],
+            stderr_text="",
+            returncode=0,
+            caller_logger=logging.getLogger("test"),
+        )
+        assert transcript == "accumulated"
+
+    def test_falls_back_to_raw_lines(self) -> None:
+        transcript = resolve_transcript(
+            result_text="",
+            accumulated_text="",
+            raw_lines=["line1", "line2"],
+            stderr_text="",
+            returncode=0,
+            caller_logger=logging.getLogger("test"),
+        )
+        assert transcript == "line1\nline2"
+
+    def test_logs_warning_when_empty_with_stderr(self, caplog) -> None:
+        test_logger = logging.getLogger("test_empty_stderr")
+        with caplog.at_level(logging.WARNING, logger="test_empty_stderr"):
+            resolve_transcript(
+                result_text="",
+                accumulated_text="",
+                raw_lines=[],
+                stderr_text="something went wrong",
+                returncode=1,
+                caller_logger=test_logger,
+            )
+        assert "empty stdout" in caplog.text

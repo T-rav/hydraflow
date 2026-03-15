@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from agent_cli import build_agent_command
@@ -99,26 +100,8 @@ class PlannerRunner(BaseRunner):
             result.transcript = transcript
 
             # Check for already-satisfied before plan extraction
-            satisfied_explanation = self._extract_already_satisfied(transcript)
-            if satisfied_explanation:
-                result.already_satisfied = True
-                result.success = True
-                result.summary = satisfied_explanation[:200]
-                result.duration_seconds = time.monotonic() - start
-                try:
-                    self._save_transcript("plan-issue", task.id, result.transcript)
-                except OSError:
-                    logger.warning(
-                        "Failed to save transcript for issue #%d",
-                        task.id,
-                        exc_info=True,
-                        extra={"issue": task.id},
-                    )
+            if self._handle_already_satisfied(result, task, transcript, start):
                 await self._emit_status(task.id, worker_id, PlannerStatus.DONE)
-                logger.info(
-                    "Issue #%d already satisfied — no changes needed",
-                    task.id,
-                )
                 return result
 
             result.plan = self._extract_plan(transcript)
@@ -126,75 +109,9 @@ class PlannerRunner(BaseRunner):
             result.new_issues = self._extract_new_issues(transcript)
 
             if result.plan:
-                (
-                    result.actionability_score,
-                    result.actionability_rank,
-                ) = self._score_actionability(result.plan, scale=scale)
-                await self._emit_status(task.id, worker_id, PlannerStatus.VALIDATING)
-                validation_errors = self._validate_plan(task, result.plan, scale=scale)
-                if scale == "lite":
-                    gate_errors: list[str] = []
-                else:
-                    gate_errors, _gate_warnings = self._run_phase_minus_one_gates(
-                        result.plan
-                    )
-                all_errors = validation_errors + gate_errors
-                result.validation_errors = all_errors
-
-                if not all_errors:
-                    result.success = True
-                else:
-                    # --- Retry once with feedback ---
-                    logger.warning(
-                        "Plan for issue #%d failed validation (%d errors) — retrying",
-                        task.id,
-                        len(all_errors),
-                    )
-                    await self._emit_status(task.id, worker_id, PlannerStatus.RETRYING)
-                    retry_prompt, retry_stats = self._build_retry_prompt(
-                        task, result.plan, all_errors, scale=scale
-                    )
-                    retry_transcript = await self._execute(
-                        cmd,
-                        retry_prompt,
-                        self._config.repo_root,
-                        {"issue": task.id, "source": "planner"},
-                        on_output=_check_plan_complete,
-                        telemetry_stats=retry_stats,
-                    )
-                    result.transcript += "\n\n--- RETRY ---\n\n" + retry_transcript
-
-                    retry_plan = self._extract_plan(retry_transcript)
-                    if retry_plan:
-                        (
-                            result.actionability_score,
-                            result.actionability_rank,
-                        ) = self._score_actionability(retry_plan, scale=scale)
-                        retry_validation = self._validate_plan(
-                            task, retry_plan, scale=scale
-                        )
-                        if scale == "lite":
-                            retry_gate_errors: list[str] = []
-                        else:
-                            retry_gate_errors, _ = self._run_phase_minus_one_gates(
-                                retry_plan
-                            )
-                        retry_all_errors = retry_validation + retry_gate_errors
-                        if not retry_all_errors:
-                            result.plan = retry_plan
-                            result.summary = self._extract_summary(retry_transcript)
-                            result.new_issues = self._extract_new_issues(
-                                retry_transcript
-                            )
-                            result.validation_errors = []
-                            result.success = True
-                        else:
-                            result.validation_errors = retry_all_errors
-                            result.retry_attempted = True
-                            result.success = False
-                    else:
-                        result.retry_attempted = True
-                        result.success = False
+                await self._validate_and_retry_plan(
+                    task, cmd, result, scale, worker_id, _check_plan_complete
+                )
             else:
                 result.success = False
 
@@ -234,6 +151,120 @@ class PlannerRunner(BaseRunner):
                     extra={"issue": task.id},
                 )
         return result
+
+    def _handle_already_satisfied(
+        self,
+        result: PlanResult,
+        task: Task,
+        transcript: str,
+        start: float,
+    ) -> bool:
+        """Check for already-satisfied markers and update *result* if found.
+
+        Returns ``True`` when the issue is already satisfied and the caller
+        should return early (after emitting status), ``False`` otherwise.
+        """
+        explanation = self._extract_already_satisfied(transcript)
+        if not explanation:
+            return False
+
+        result.already_satisfied = True
+        result.success = True
+        result.summary = explanation[:200]
+        result.duration_seconds = time.monotonic() - start
+        try:
+            self._save_transcript("plan-issue", task.id, result.transcript)
+        except OSError:
+            logger.warning(
+                "Failed to save transcript for issue #%d",
+                task.id,
+                exc_info=True,
+                extra={"issue": task.id},
+            )
+        logger.info(
+            "Issue #%d already satisfied — no changes needed",
+            task.id,
+        )
+        return True
+
+    async def _validate_and_retry_plan(
+        self,
+        task: Task,
+        cmd: list[str],
+        result: PlanResult,
+        scale: PlanScale,
+        worker_id: int,
+        on_output: Callable[[str], bool],
+    ) -> None:
+        """Validate the plan and retry once if validation fails.
+
+        Mutates *result* in place with validation results, scores, and
+        retry outcome.
+        """
+        (
+            result.actionability_score,
+            result.actionability_rank,
+        ) = self._score_actionability(result.plan, scale=scale)
+        await self._emit_status(task.id, worker_id, PlannerStatus.VALIDATING)
+        validation_errors = self._validate_plan(task, result.plan, scale=scale)
+        if scale == "lite":
+            gate_errors: list[str] = []
+        else:
+            gate_errors, _gate_warnings = self._run_phase_minus_one_gates(result.plan)
+        all_errors = validation_errors + gate_errors
+        result.validation_errors = all_errors
+
+        if not all_errors:
+            result.success = True
+            return
+
+        # --- Retry once with feedback ---
+        logger.warning(
+            "Plan for issue #%d failed validation (%d errors) — retrying",
+            task.id,
+            len(all_errors),
+        )
+        await self._emit_status(task.id, worker_id, PlannerStatus.RETRYING)
+        retry_prompt, retry_stats = self._build_retry_prompt(
+            task, result.plan, all_errors, scale=scale
+        )
+        retry_transcript = await self._execute(
+            cmd,
+            retry_prompt,
+            self._config.repo_root,
+            {"issue": task.id, "source": "planner"},
+            on_output=on_output,
+            telemetry_stats=retry_stats,
+        )
+        result.transcript += "\n\n--- RETRY ---\n\n" + retry_transcript
+
+        retry_plan = self._extract_plan(retry_transcript)
+        if not retry_plan:
+            result.retry_attempted = True
+            result.success = False
+            return
+
+        (
+            result.actionability_score,
+            result.actionability_rank,
+        ) = self._score_actionability(retry_plan, scale=scale)
+        retry_validation = self._validate_plan(task, retry_plan, scale=scale)
+        if scale == "lite":
+            retry_gate_errors: list[str] = []
+        else:
+            retry_gate_errors, _ = self._run_phase_minus_one_gates(retry_plan)
+        retry_all_errors = retry_validation + retry_gate_errors
+
+        if not retry_all_errors:
+            result.plan = retry_plan
+            result.summary = self._extract_summary(retry_transcript)
+            result.new_issues = self._extract_new_issues(retry_transcript)
+            result.validation_errors = []
+            result.success = True
+        else:
+            result.validation_errors = retry_all_errors
+            result.retry_attempted = True
+            result.success = False
 
     def _build_command(self, _worktree_path: Path | None = None) -> list[str]:
         """Construct the CLI invocation for planning.
@@ -290,6 +321,87 @@ class PlannerRunner(BaseRunner):
                 lines.append(f"- `{header}` \u2014 {desc}")
         return "\n".join(lines)
 
+    @classmethod
+    def _build_scale_sections(cls, scale: PlanScale) -> tuple[str, str, str, str]:
+        """Build the scale-adaptive prompt sections.
+
+        Returns ``(mode_note, schema_section, task_graph_guidance, pre_mortem_section)``.
+        """
+        sections_bullet_list = cls._format_sections_list(scale)
+        if scale == "lite":
+            mode_note = (
+                "**Plan mode: LITE** — This is a small issue (bug fix, typo, or docs). "
+                "Only the core sections are required.\n\n"
+            )
+            schema_section = (
+                "## Plan Format — LITE SCHEMA\n\n"
+                "Your plan MUST include ALL of the following sections with these EXACT headers.\n"
+                "Plans missing any required section will be rejected and you will be asked to retry.\n\n"
+                f"{sections_bullet_list}"
+            )
+            return mode_note, schema_section, "", ""
+
+        mode_note = (
+            "**Plan mode: FULL** — This issue requires a comprehensive plan "
+            "with all sections.\n\n"
+        )
+        schema_section = (
+            "## Plan Format — REQUIRED SCHEMA\n\n"
+            "Your plan MUST include ALL of the following sections with these EXACT headers.\n"
+            "Plans missing any required section will be rejected and you will be asked to retry.\n\n"
+            f"{sections_bullet_list}"
+        )
+        task_graph_guidance = (
+            "\n\n## Task Graph Format\n\n"
+            "The `## Task Graph` section must use `### P{N} — Name` subsections.\n"
+            "Each phase includes **Files:**, **Tests:**, and **Depends on:**.\n\n"
+            "Example:\n"
+            "```\n"
+            "### P1 — Data Model\n"
+            "**Files:** src/models.py (modify), migrations/0042_add_widget.py (create)\n"
+            "**Tests:**\n"
+            "- Creating a Widget with valid fields persists and returns an id\n"
+            "- Creating a Widget with duplicate name raises IntegrityError\n"
+            "**Depends on:** (none)\n\n"
+            "### P2 — Service Layer\n"
+            "**Files:** src/widget_service.py (create)\n"
+            "**Tests:**\n"
+            "- WidgetService.create() with valid input returns a Widget\n"
+            "- WidgetService.list() returns only active widgets\n"
+            "**Depends on:** P1\n"
+            "```\n\n"
+            "Test specs must be **behavioral** — describe observable outcomes, not test code.\n"
+            "Good: 'POST /widgets with missing name returns 400'\n"
+            "Bad: 'Test the create_widget function'\n\n"
+            "Max 6 phases. If more are needed, the issue should be decomposed into an epic."
+        )
+        pre_mortem_section = (
+            "\n\n## Pre-Mortem\n\n"
+            "Before finalizing your plan, conduct a brief pre-mortem: assume this implementation\n"
+            "failed. What are the top 3 most likely reasons for failure? Add these as risks in the\n"
+            "`## Key Considerations` section."
+        )
+        return mode_note, schema_section, task_graph_guidance, pre_mortem_section
+
+    def _build_comments_section(self, issue: Task, builder: PromptBuilder) -> str:
+        """Build the discussion comments section for the planning prompt."""
+        if not issue.comments:
+            return ""
+        max_comments = 6
+        selected = issue.comments[:max_comments]
+        truncated = [
+            self._truncate_text(c, self._MAX_COMMENT_CHARS, self._MAX_LINE_CHARS)
+            for c in selected
+        ]
+        formatted = "\n".join(f"- {c}" for c in truncated)
+        builder.record_history("Discussion", "".join(issue.comments), formatted)
+        section = f"\n\n## Discussion\n{formatted}"
+        if len(issue.comments) > max_comments:
+            section += (
+                f"\n- ... ({len(issue.comments) - max_comments} more comments omitted)"
+            )
+        return section
+
     def _build_prompt_with_stats(
         self,
         issue: Task,
@@ -303,19 +415,7 @@ class PlannerRunner(BaseRunner):
         sections are required and whether to include the pre-mortem step.
         """
         builder = PromptBuilder()
-        comments_section = ""
-        if issue.comments:
-            max_comments = 6
-            selected_comments = issue.comments[:max_comments]
-            truncated = [
-                self._truncate_text(c, self._MAX_COMMENT_CHARS, self._MAX_LINE_CHARS)
-                for c in selected_comments
-            ]
-            formatted = "\n".join(f"- {c}" for c in truncated)
-            builder.record_history("Discussion", "".join(issue.comments), formatted)
-            comments_section = f"\n\n## Discussion\n{formatted}"
-            if len(issue.comments) > max_comments:
-                comments_section += f"\n- ... ({len(issue.comments) - max_comments} more comments omitted)"
+        comments_section = self._build_comments_section(issue, builder)
 
         body_raw = issue.body or ""
         body = self._truncate_text(
@@ -336,62 +436,9 @@ class PlannerRunner(BaseRunner):
 
         find_label = self._config.find_label[0]
 
-        # --- Scale-adaptive schema section ---
-        sections_bullet_list = self._format_sections_list(scale)
-        if scale == "lite":
-            mode_note = (
-                "**Plan mode: LITE** — This is a small issue (bug fix, typo, or docs). "
-                "Only the core sections are required.\n\n"
-            )
-            schema_section = (
-                "## Plan Format — LITE SCHEMA\n\n"
-                "Your plan MUST include ALL of the following sections with these EXACT headers.\n"
-                "Plans missing any required section will be rejected and you will be asked to retry.\n\n"
-                f"{sections_bullet_list}"
-            )
-            task_graph_guidance = ""
-            pre_mortem_section = ""
-        else:
-            mode_note = (
-                "**Plan mode: FULL** — This issue requires a comprehensive plan "
-                "with all sections.\n\n"
-            )
-            schema_section = (
-                "## Plan Format — REQUIRED SCHEMA\n\n"
-                "Your plan MUST include ALL of the following sections with these EXACT headers.\n"
-                "Plans missing any required section will be rejected and you will be asked to retry.\n\n"
-                f"{sections_bullet_list}"
-            )
-            task_graph_guidance = (
-                "\n\n## Task Graph Format\n\n"
-                "The `## Task Graph` section must use `### P{N} — Name` subsections.\n"
-                "Each phase includes **Files:**, **Tests:**, and **Depends on:**.\n\n"
-                "Example:\n"
-                "```\n"
-                "### P1 — Data Model\n"
-                "**Files:** src/models.py (modify), migrations/0042_add_widget.py (create)\n"
-                "**Tests:**\n"
-                "- Creating a Widget with valid fields persists and returns an id\n"
-                "- Creating a Widget with duplicate name raises IntegrityError\n"
-                "**Depends on:** (none)\n\n"
-                "### P2 — Service Layer\n"
-                "**Files:** src/widget_service.py (create)\n"
-                "**Tests:**\n"
-                "- WidgetService.create() with valid input returns a Widget\n"
-                "- WidgetService.list() returns only active widgets\n"
-                "**Depends on:** P1\n"
-                "```\n\n"
-                "Test specs must be **behavioral** — describe observable outcomes, not test code.\n"
-                "Good: 'POST /widgets with missing name returns 400'\n"
-                "Bad: 'Test the create_widget function'\n\n"
-                "Max 6 phases. If more are needed, the issue should be decomposed into an epic."
-            )
-            pre_mortem_section = (
-                "\n\n## Pre-Mortem\n\n"
-                "Before finalizing your plan, conduct a brief pre-mortem: assume this implementation\n"
-                "failed. What are the top 3 most likely reasons for failure? Add these as risks in the\n"
-                "`## Key Considerations` section."
-            )
+        mode_note, schema_section, task_graph_guidance, pre_mortem_section = (
+            self._build_scale_sections(scale)
+        )
 
         research_section = ""
         if research_context:
