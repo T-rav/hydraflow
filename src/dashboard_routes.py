@@ -820,6 +820,9 @@ def create_router(
     supervisor_client = None
     supervisor_manager = None
 
+    def _repo_roots_fn() -> tuple[str, ...]:
+        return ctx.repo_roots_fn()
+
     def _serve_spa_index() -> HTMLResponse:
         return ctx.serve_spa_index()
 
@@ -3402,7 +3405,7 @@ def create_router(
     @router.get("/api/fs/roots")
     async def list_browsable_roots() -> JSONResponse:
         """Return filesystem roots that are safe to browse from the UI."""
-        all_roots = ctx.repo_roots_fn()
+        all_roots = _repo_roots_fn()
         roots = [
             {"name": _root_names.get(i, f"Root {i + 1}"), "path": root}
             for i, root in enumerate(all_roots)
@@ -3414,7 +3417,7 @@ def create_router(
         path: str | None = Query(default=None),
     ) -> JSONResponse:
         """List child directories for the requested path under allowed roots."""
-        allowed_roots = ctx.repo_roots_fn()
+        allowed_roots = _repo_roots_fn()
         if not allowed_roots:
             return JSONResponse(
                 {"error": "no allowed roots configured"}, status_code=500
@@ -3601,7 +3604,7 @@ def create_router(
         if not raw_path:
             return JSONResponse({"error": "path required"}, status_code=400)
         repo_path, path_error = _normalize_allowed_dir(
-            raw_path, allowed_roots=ctx.repo_roots_fn()
+            raw_path, allowed_roots=_repo_roots_fn()
         )
         if path_error or repo_path is None:
             return JSONResponse(

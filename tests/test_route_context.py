@@ -504,6 +504,21 @@ class TestRouteContextExecuteAdminTask:
 
         assert response.status_code == 500
 
+    @pytest.mark.asyncio
+    async def test_returns_500_when_task_raises(
+        self,
+        config: HydraFlowConfig,
+        event_bus: EventBus,
+        state: StateTracker,
+        tmp_path: Path,
+    ) -> None:
+        task_fn = AsyncMock(side_effect=RuntimeError("unexpected failure"))
+        ctx = _make_ctx(config, event_bus, state, tmp_path)
+
+        response = await ctx.execute_admin_task("test-task", task_fn, None)
+
+        assert response.status_code == 500
+
 
 class TestCreateRouterUsesRouteContext:
     """P3 — create_router constructs a RouteContext internally."""
