@@ -763,7 +763,9 @@ This closes the issue automatically. False positives waste significant human tim
             self._config.max_planner_line_chars,
         )
         compact_failed_plan = self._truncate_text(
-            failed_plan, 4_000, self._config.max_planner_line_chars
+            failed_plan,
+            self._config.max_planner_failed_plan_chars,
+            self._config.max_planner_line_chars,
         )
 
         prompt = f"""You previously generated a plan for GitHub issue #{issue.id} but it failed validation.

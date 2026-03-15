@@ -92,6 +92,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("max_review_feedback_chars", "HYDRAFLOW_MAX_REVIEW_FEEDBACK_CHARS", 2_000),
     ("max_planner_comment_chars", "HYDRAFLOW_MAX_PLANNER_COMMENT_CHARS", 1_000),
     ("max_planner_line_chars", "HYDRAFLOW_MAX_PLANNER_LINE_CHARS", 500),
+    ("max_planner_failed_plan_chars", "HYDRAFLOW_MAX_PLANNER_FAILED_PLAN_CHARS", 4_000),
     ("max_hitl_correction_chars", "HYDRAFLOW_MAX_HITL_CORRECTION_CHARS", 4_000),
     ("max_hitl_cause_chars", "HYDRAFLOW_MAX_HITL_CAUSE_CHARS", 2_000),
     ("max_ci_log_prompt_chars", "HYDRAFLOW_MAX_CI_LOG_PROMPT_CHARS", 6_000),
@@ -773,6 +774,12 @@ class HydraFlowConfig(BaseModel):
         ge=100,
         le=5_000,
         description="Max characters per line in planner prompts (prevents unsplittable chunks)",
+    )
+    max_planner_failed_plan_chars: int = Field(
+        default=4_000,
+        ge=500,
+        le=50_000,
+        description="Max characters for failed plan text in planner retry prompts",
     )
     max_hitl_correction_chars: int = Field(
         default=4_000,

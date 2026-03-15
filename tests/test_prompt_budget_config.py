@@ -52,6 +52,9 @@ class TestPromptBudgetDefaults:
     def test_max_planner_line_chars(self, cfg: HydraFlowConfig) -> None:
         assert cfg.max_planner_line_chars == 500
 
+    def test_max_planner_failed_plan_chars(self, cfg: HydraFlowConfig) -> None:
+        assert cfg.max_planner_failed_plan_chars == 4_000
+
     def test_max_hitl_correction_chars(self, cfg: HydraFlowConfig) -> None:
         assert cfg.max_hitl_correction_chars == 4_000
 
@@ -77,7 +80,7 @@ class TestPromptBudgetOverrides:
     """Overridden config values are used by runner classes."""
 
     def test_custom_values_accepted(self, tmp_path: Path) -> None:
-        """All 11 fields accept non-default values via constructor."""
+        """All 12 fields accept non-default values via constructor."""
         cfg = ConfigFactory.create(
             repo_root=tmp_path / "repo",
             worktree_base=tmp_path / "wt",
@@ -88,6 +91,7 @@ class TestPromptBudgetOverrides:
             max_review_feedback_chars=4_000,
             max_planner_comment_chars=2_000,
             max_planner_line_chars=1_000,
+            max_planner_failed_plan_chars=8_000,
             max_hitl_correction_chars=8_000,
             max_hitl_cause_chars=4_000,
             max_ci_log_prompt_chars=12_000,
@@ -100,6 +104,7 @@ class TestPromptBudgetOverrides:
         assert cfg.max_review_feedback_chars == 4_000
         assert cfg.max_planner_comment_chars == 2_000
         assert cfg.max_planner_line_chars == 1_000
+        assert cfg.max_planner_failed_plan_chars == 8_000
         assert cfg.max_hitl_correction_chars == 8_000
         assert cfg.max_hitl_cause_chars == 4_000
         assert cfg.max_ci_log_prompt_chars == 12_000
@@ -152,6 +157,50 @@ class TestAgentRunnerUsesConfig:
 
         assert result == short_comment
 
+    def test_build_prompt_truncates_impl_plan(self, tmp_path: Path) -> None:
+        """_build_prompt_with_stats truncates plan via max_impl_plan_chars."""
+        from agent import AgentRunner
+        from events import EventBus
+
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path / "repo",
+            worktree_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+            max_impl_plan_chars=1_000,
+        )
+        runner = AgentRunner(cfg, EventBus())
+        long_plan = "## Implementation Plan\n" + "- Implement feature X\n" * 200
+        issue = TaskFactory.create(comments=[long_plan])
+
+        prompt, _stats = runner._build_prompt_with_stats(issue)
+
+        # The full plan should be summarized, not included verbatim
+        assert long_plan not in prompt
+        assert "summarized" in prompt.lower()
+
+    def test_build_prompt_truncates_review_feedback(self, tmp_path: Path) -> None:
+        """_build_prompt_with_stats truncates review feedback via max_review_feedback_chars."""
+        from agent import AgentRunner
+        from events import EventBus
+
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path / "repo",
+            worktree_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+            max_review_feedback_chars=100,
+        )
+        runner = AgentRunner(cfg, EventBus())
+        long_feedback = "- Fix error handling\n" * 100
+        issue = TaskFactory.create()
+
+        prompt, _stats = runner._build_prompt_with_stats(
+            issue, review_feedback=long_feedback
+        )
+
+        # The full feedback should be summarized, not included verbatim
+        assert long_feedback not in prompt
+        assert "summarized" in prompt.lower()
+
 
 # ---------------------------------------------------------------------------
 # PlannerRunner uses config values
@@ -185,6 +234,29 @@ class TestPlannerRunnerUsesConfig:
         # Line should be capped at 100 chars + ellipsis
         first_line = result.splitlines()[0]
         assert len(first_line) <= 101  # 100 + "…"
+
+    def test_retry_prompt_uses_failed_plan_config(self, tmp_path: Path) -> None:
+        """_build_retry_prompt truncates failed plan per max_planner_failed_plan_chars."""
+        from events import EventBus
+        from planner import PlannerRunner
+
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path / "repo",
+            worktree_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+            max_planner_failed_plan_chars=500,
+            max_planner_line_chars=500,
+        )
+        runner = PlannerRunner(cfg, EventBus())
+        long_plan = "Step 1: Do something\n" * 200
+        issue = TaskFactory.create()
+
+        prompt, _ = runner._build_retry_prompt(
+            issue, long_plan, ["Missing section: Files to Modify"]
+        )
+
+        # The full plan should be truncated
+        assert long_plan not in prompt
 
 
 # ---------------------------------------------------------------------------
