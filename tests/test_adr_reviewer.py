@@ -322,7 +322,7 @@ class TestDuplicateDetection:
         # Should detect the v2 file as duplicate (similar title/content), but not self
         # and not the unrelated kubernetes ADR (different title/content).
         assert len(result) == 1
-        assert "v2" in result[0][1]
+        assert result[0][1] == "use docker for isolation v2"
 
     def test_same_number_self_excluded_by_filename(self, tmp_path: Path) -> None:
         """Even with same ADR number, the file should not match against itself."""
