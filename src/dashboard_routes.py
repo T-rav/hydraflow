@@ -14,6 +14,7 @@ import tempfile
 import time
 from collections import Counter
 from collections.abc import Awaitable, Callable, Iterable, Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Any, Literal
@@ -586,6 +587,157 @@ def _is_likely_disconnect(exc: BaseException) -> bool:
     }
 
 
+@dataclass
+class RouteContext:
+    """Bundles all dependencies needed by dashboard route handlers.
+
+    Replaces the closure-capture pattern used by ``create_router()`` so that
+    sub-routers can receive an explicit context object instead of relying on
+    17+ closure variables.  This is a prerequisite for decomposing the
+    monolithic router into smaller sub-router modules.
+    """
+
+    # Core services
+    config: HydraFlowConfig
+    event_bus: EventBus
+    state: StateTracker
+    pr_manager: PRManager
+
+    # Orchestrator lifecycle callbacks
+    get_orchestrator: Callable[[], HydraFlowOrchestrator | None]
+    set_orchestrator: Callable[[HydraFlowOrchestrator], None]
+    set_run_task: Callable[[asyncio.Task[None]], None]
+
+    # Static asset directories
+    ui_dist_dir: Path
+    template_dir: Path
+
+    # Multi-repo support
+    registry: RepoRuntimeRegistry | None = None
+    repo_store: RepoStore | None = None
+    register_repo_cb: (
+        Callable[[Path, str | None], Awaitable[tuple[RepoRecord, HydraFlowConfig]]]
+        | None
+    ) = None
+    remove_repo_cb: Callable[[str], Awaitable[bool]] | None = None
+    list_repos_cb: Callable[[], list[RepoRecord]] | None = None
+    default_repo_slug: str | None = None
+    allowed_repo_roots_fn: Callable[[], tuple[str, ...]] | None = None
+
+    # HITL summary tuning
+    hitl_summary_cooldown_seconds: int = 300
+
+    # Derived state — initialised in __post_init__
+    issue_fetcher: IssueFetcher = field(init=False)
+    hitl_summarizer: TranscriptSummarizer = field(init=False)
+    hitl_summary_inflight: set[int] = field(init=False)
+    hitl_summary_slots: asyncio.Semaphore = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.issue_fetcher = IssueFetcher(self.config)
+        self.hitl_summarizer = TranscriptSummarizer(
+            self.config,
+            self.pr_manager,
+            self.event_bus,
+            self.state,
+        )
+        self.hitl_summary_inflight = set()
+        self.hitl_summary_slots = asyncio.Semaphore(3)
+
+    # -- Dependency resolution helpers ------------------------------------------
+
+    def resolve_runtime(
+        self,
+        slug: str | None,
+    ) -> tuple[
+        HydraFlowConfig,
+        StateTracker,
+        EventBus,
+        Callable[[], HydraFlowOrchestrator | None],
+    ]:
+        """Resolve per-repo dependencies from the registry.
+
+        When *slug* is ``None`` or no registry is configured, returns the
+        single-repo defaults for backward compatibility.
+        """
+        if self.registry is not None and slug is not None:
+            rt: RepoRuntime | None = self.registry.get(slug)
+            if rt is None:
+                raise HTTPException(status_code=404, detail=f"Unknown repo: {slug}")
+            return rt.config, rt.state, rt.event_bus, lambda: rt.orchestrator
+        return self.config, self.state, self.event_bus, self.get_orchestrator
+
+    async def execute_admin_task(
+        self,
+        task_name: str,
+        task_fn: Callable[[HydraFlowConfig], Awaitable[TaskResult]],
+        slug: str | None,
+    ) -> JSONResponse:
+        """Run an admin task against the resolved repo config."""
+        try:
+            runtime_config, _, _, _ = self.resolve_runtime(slug)
+        except HTTPException:
+            return JSONResponse({"error": "Unknown repo"}, status_code=404)
+        try:
+            result = await task_fn(runtime_config)
+        except Exception:  # noqa: BLE001
+            logger.exception("%s task failed", task_name)
+            return JSONResponse({"error": f"{task_name} failed"}, status_code=500)
+        payload: dict[str, Any] = {"status": "ok", "result": result.as_dict()}
+        status_code = 200
+        if not result.success:
+            payload["status"] = "error"
+            status_code = 500
+        return JSONResponse(payload, status_code=status_code)
+
+    def pr_manager_for(self, cfg: HydraFlowConfig, bus: EventBus) -> PRManager:
+        """Return the shared PRManager when config matches; otherwise create a new one."""
+        if cfg is self.config and bus is self.event_bus:
+            return self.pr_manager
+        return PRManager(cfg, bus)
+
+    def list_repo_records(self) -> list[RepoRecord]:
+        """Return repo records from the callback or store, with error fallback."""
+        if self.list_repos_cb is not None:
+            try:
+                return self.list_repos_cb()
+            except Exception:  # noqa: BLE001
+                logger.warning("list_repos callback failed", exc_info=True)
+        if self.repo_store is not None:
+            try:
+                return self.repo_store.list()
+            except Exception:  # noqa: BLE001
+                logger.warning("repo_store.list failed", exc_info=True)
+        return []
+
+    def serve_spa_index(self) -> HTMLResponse:
+        """Serve the SPA index.html, falling back to template or placeholder."""
+        react_index = self.ui_dist_dir / "index.html"
+        if react_index.exists():
+            return HTMLResponse(react_index.read_text())
+        template_path = self.template_dir / "index.html"
+        if template_path.exists():
+            return HTMLResponse(template_path.read_text())
+        return HTMLResponse(
+            "<h1>HydraFlow Dashboard</h1><p>Run 'make ui' to build.</p>"
+        )
+
+    def repo_roots_fn(self) -> tuple[str, ...]:
+        """Return the allowed repo roots, using the override if provided."""
+        if self.allowed_repo_roots_fn is not None:
+            return self.allowed_repo_roots_fn()
+        return _allowed_repo_roots()
+
+    def hitl_summary_retry_due(self, issue_number: int) -> bool:
+        """Return True if enough time has passed to retry a failed HITL summary."""
+        failed_at, _ = self.state.get_hitl_summary_failure(issue_number)
+        failed_dt = _parse_iso_or_none(failed_at)
+        if failed_dt is None:
+            return True
+        age = (datetime.now(UTC) - failed_dt).total_seconds()
+        return age >= self.hitl_summary_cooldown_seconds
+
+
 def create_router(
     config: HydraFlowConfig,
     event_bus: EventBus,
@@ -616,14 +768,29 @@ def create_router(
     *config*, *state*, *event_bus*, and *get_orchestrator*) are used for
     backward compatibility.
     """
-    router = APIRouter()
-    hitl_summary_cooldown_seconds = 300
-    _repo_roots_fn = (
-        allowed_repo_roots_fn
-        if allowed_repo_roots_fn is not None
-        else _allowed_repo_roots
+    # Build the shared RouteContext that bundles all dependencies.
+    ctx = RouteContext(
+        config=config,
+        event_bus=event_bus,
+        state=state,
+        pr_manager=pr_manager,
+        get_orchestrator=get_orchestrator,
+        set_orchestrator=set_orchestrator,
+        set_run_task=set_run_task,
+        ui_dist_dir=ui_dist_dir,
+        template_dir=template_dir,
+        registry=registry,
+        repo_store=repo_store,
+        register_repo_cb=register_repo_cb,
+        remove_repo_cb=remove_repo_cb,
+        list_repos_cb=list_repos_cb,
+        default_repo_slug=default_repo_slug,
+        allowed_repo_roots_fn=allowed_repo_roots_fn,
     )
 
+    router = APIRouter()
+
+    # Thin delegates — route handlers call these; logic lives on RouteContext.
     def _resolve_runtime(
         slug: str | None,
     ) -> tuple[
@@ -632,79 +799,28 @@ def create_router(
         EventBus,
         Callable[[], HydraFlowOrchestrator | None],
     ]:
-        """Resolve per-repo dependencies from the registry.
-
-        When *slug* is ``None`` or no registry is configured, returns the
-        single-repo closure defaults for backward compatibility.
-        """
-        if registry is not None and slug is not None:
-            rt: RepoRuntime | None = registry.get(slug)
-            if rt is None:
-                raise HTTPException(status_code=404, detail=f"Unknown repo: {slug}")
-            return rt.config, rt.state, rt.event_bus, lambda: rt.orchestrator
-        return config, state, event_bus, get_orchestrator
+        return ctx.resolve_runtime(slug)
 
     async def _execute_admin_task(
         task_name: str,
         task_fn: Callable[[HydraFlowConfig], Awaitable[TaskResult]],
         slug: str | None,
     ) -> JSONResponse:
-        try:
-            runtime_config, _, _, _ = _resolve_runtime(slug)
-        except HTTPException:
-            return JSONResponse({"error": "Unknown repo"}, status_code=404)
-        try:
-            result = await task_fn(runtime_config)
-        except Exception:  # noqa: BLE001
-            logger.exception("%s task failed", task_name)
-            return JSONResponse({"error": f"{task_name} failed"}, status_code=500)
-        payload = {"status": "ok", "result": result.as_dict()}
-        status_code = 200
-        if not result.success:
-            payload["status"] = "error"
-            status_code = 500
-        return JSONResponse(payload, status_code=status_code)
+        return await ctx.execute_admin_task(task_name, task_fn, slug)
 
     def _pr_manager_for(cfg: HydraFlowConfig, bus: EventBus) -> PRManager:
-        """Return the shared PRManager when config matches; otherwise create a new one."""
-        if cfg is config and bus is event_bus:
-            return pr_manager
-        return PRManager(cfg, bus)
+        return ctx.pr_manager_for(cfg, bus)
 
     def _list_repo_records() -> list[RepoRecord]:
-        """Return repo records from the callback or store, with error fallback."""
-        if list_repos_cb is not None:
-            try:
-                return list_repos_cb()
-            except Exception:  # noqa: BLE001
-                logger.warning("list_repos callback failed", exc_info=True)
-        if repo_store is not None:
-            try:
-                return repo_store.list()
-            except Exception:  # noqa: BLE001
-                logger.warning("repo_store.list failed", exc_info=True)
-        return []
+        return ctx.list_repo_records()
 
     # Supervisor client/manager removed with hf_cli package (issue #2205).
     # Supervisor endpoints now return graceful "unavailable" responses.
     supervisor_client = None
     supervisor_manager = None
-    issue_fetcher = IssueFetcher(config)
-    hitl_summarizer = TranscriptSummarizer(config, pr_manager, event_bus, state)
-    hitl_summary_inflight: set[int] = set()
-    hitl_summary_slots = asyncio.Semaphore(3)
 
     def _serve_spa_index() -> HTMLResponse:
-        """Serve the SPA index.html, falling back to template or placeholder."""
-        react_index = ui_dist_dir / "index.html"
-        if react_index.exists():
-            return HTMLResponse(react_index.read_text())
-        template_path = template_dir / "index.html"
-        if template_path.exists():
-            return HTMLResponse(template_path.read_text())
-        return HTMLResponse(
-            "<h1>HydraFlow Dashboard</h1><p>Run 'make ui' to build.</p>"
-        )
+        return ctx.serve_spa_index()
 
     def _load_local_metrics_cache(
         target_config: HydraFlowConfig,
@@ -1209,55 +1325,51 @@ def create_router(
         return "\n".join(lines[:8]).strip()
 
     def _hitl_summary_retry_due(issue_number: int) -> bool:
-        """Return True if enough time has passed to retry a failed HITL summary."""
-        failed_at, _ = state.get_hitl_summary_failure(issue_number)
-        failed_dt = _parse_iso_or_none(failed_at)
-        if failed_dt is None:
-            return True
-        age = (datetime.now(UTC) - failed_dt).total_seconds()
-        return age >= hitl_summary_cooldown_seconds
+        return ctx.hitl_summary_retry_due(issue_number)
 
     async def _compute_hitl_summary(
         issue_number: int, *, cause: str, origin: str | None
     ) -> str | None:
         """Fetch issue, generate and normalise a HITL summary, then persist to state."""
         if (
-            not config.transcript_summarization_enabled
-            or config.dry_run
-            or not config.gh_token
+            not ctx.config.transcript_summarization_enabled
+            or ctx.config.dry_run
+            or not ctx.config.gh_token
         ):
             return None
-        issue = await issue_fetcher.fetch_issue_by_number(issue_number)
+        issue = await ctx.issue_fetcher.fetch_issue_by_number(issue_number)
         if issue is None:
-            state.set_hitl_summary_failure(issue_number, "Issue fetch failed")
+            ctx.state.set_hitl_summary_failure(issue_number, "Issue fetch failed")
             return None
         context = _build_hitl_context(issue, cause=cause, origin=origin)
-        generated = await hitl_summarizer.summarize_hitl_context(context)
+        generated = await ctx.hitl_summarizer.summarize_hitl_context(context)
         if not generated:
-            state.set_hitl_summary_failure(issue_number, "Summary model returned empty")
+            ctx.state.set_hitl_summary_failure(
+                issue_number, "Summary model returned empty"
+            )
             return None
         summary = _normalise_summary_lines(generated)
         if not summary:
-            state.set_hitl_summary_failure(
+            ctx.state.set_hitl_summary_failure(
                 issue_number, "Summary normalization produced empty output"
             )
             return None
-        state.set_hitl_summary(issue_number, summary)
-        state.clear_hitl_summary_failure(issue_number)
+        ctx.state.set_hitl_summary(issue_number, summary)
+        ctx.state.clear_hitl_summary_failure(issue_number)
         return summary
 
     async def _warm_hitl_summary(
         issue_number: int, *, cause: str, origin: str | None
     ) -> None:
         """Schedule background HITL summary generation, guarded by inflight tracking."""
-        if issue_number in hitl_summary_inflight:
+        if issue_number in ctx.hitl_summary_inflight:
             return
-        hitl_summary_inflight.add(issue_number)
+        ctx.hitl_summary_inflight.add(issue_number)
         try:
-            async with hitl_summary_slots:
+            async with ctx.hitl_summary_slots:
                 await _compute_hitl_summary(issue_number, cause=cause, origin=origin)
         except Exception as exc:
-            state.set_hitl_summary_failure(
+            ctx.state.set_hitl_summary_failure(
                 issue_number,
                 f"{type(exc).__name__}: {exc}",
             )
@@ -1266,7 +1378,7 @@ def create_router(
                 issue_number,
             )
         finally:
-            hitl_summary_inflight.discard(issue_number)
+            ctx.hitl_summary_inflight.discard(issue_number)
 
     @router.get("/healthz")
     def get_health() -> JSONResponse:
@@ -3288,7 +3400,7 @@ def create_router(
     @router.get("/api/fs/roots")
     async def list_browsable_roots() -> JSONResponse:
         """Return filesystem roots that are safe to browse from the UI."""
-        all_roots = _repo_roots_fn()
+        all_roots = ctx.repo_roots_fn()
         roots = [
             {"name": _root_names.get(i, f"Root {i + 1}"), "path": root}
             for i, root in enumerate(all_roots)
@@ -3300,7 +3412,7 @@ def create_router(
         path: str | None = Query(default=None),
     ) -> JSONResponse:
         """List child directories for the requested path under allowed roots."""
-        allowed_roots = _repo_roots_fn()
+        allowed_roots = ctx.repo_roots_fn()
         if not allowed_roots:
             return JSONResponse(
                 {"error": "no allowed roots configured"}, status_code=500
@@ -3487,7 +3599,7 @@ def create_router(
         if not raw_path:
             return JSONResponse({"error": "path required"}, status_code=400)
         repo_path, path_error = _normalize_allowed_dir(
-            raw_path, allowed_roots=_repo_roots_fn()
+            raw_path, allowed_roots=ctx.repo_roots_fn()
         )
         if path_error or repo_path is None:
             return JSONResponse(
