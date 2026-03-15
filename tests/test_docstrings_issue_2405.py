@@ -70,7 +70,6 @@ class TestDashboardRoutesDocstrings:
             "remove_repo",
             "websocket_endpoint",
             "spa_catchall",
-            "_call_supervisor",
         ],
     )
     def test_route_handler_has_docstring(self, func_name: str) -> None:

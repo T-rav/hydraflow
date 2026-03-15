@@ -105,16 +105,6 @@ _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
     "adr_reviewer": (28800, 432000),
     "verify_monitor": (60, 86400),
 }
-
-_SUPERVISOR_UNAVAILABLE_PREFIXES: tuple[str, ...] = (
-    "hydraflow supervisor is not running.",
-    "hf supervisor is not running.",
-)
-_SUPERVISOR_UNAVAILABLE_MESSAGE = (
-    "HydraFlow supervisor is not running. "
-    "Start HydraFlow inside the target repository with `make run`."
-)
-
 RepoSlugParam = Annotated[
     str | None,
     Query(description="Repo slug to scope the request"),
@@ -402,75 +392,6 @@ def _status_sort_key(status: str, timestamp: str | None) -> tuple[datetime, int]
     if parsed is None:
         parsed = datetime.min.replace(tzinfo=UTC)
     return (parsed, _status_rank(status))
-
-
-def _is_expected_supervisor_unavailable(exc: Exception) -> bool:
-    """Return True for the expected local-dev supervisor-down condition."""
-    text = str(exc).strip().lower()
-    return any(text.startswith(prefix) for prefix in _SUPERVISOR_UNAVAILABLE_PREFIXES)
-
-
-def _find_repo_match(slug: str, repos: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Find a repo entry matching *slug* using cascading strategies.
-
-    1. Exact slug match (case-sensitive, then case-insensitive)
-    2. Strip owner prefix (``owner/repo`` → try ``repo``)
-    3. Path-tail match (last component of repo path equals slug)
-    4. Path component match (slug matches a ``/``-delimited segment of the path)
-    """
-    if not slug:
-        return None
-
-    # Normalise: strip whitespace and slashes to prevent "/" matching every path
-    slug = slug.strip().strip("/")
-    if not slug:
-        return None
-
-    slug_lower = slug.lower()
-    short = slug.rsplit("/", maxsplit=1)[-1] if "/" in slug else None
-    short_lower = short.lower() if short else None
-
-    def _slug_match(target: str) -> dict[str, Any] | None:
-        """Match *target* against repo slugs (case-sensitive then insensitive)."""
-        lower = target.lower()
-        for r in repos:
-            if r.get("slug") == target:
-                return r
-        for r in repos:
-            repo_slug = r.get("slug")
-            if repo_slug and repo_slug.lower() == lower:
-                return r
-        return None
-
-    # 1. Exact slug match
-    result = _slug_match(slug)
-    # 2. Strip owner prefix — e.g. "8thlight/insightmesh" → "insightmesh"
-    if not result and short:
-        result = _slug_match(short)
-
-    # 3. Path-tail match — last path component matches slug or short slug
-    if not result:
-        candidates = [slug_lower]
-        if short_lower:
-            candidates.append(short_lower)
-        for candidate in candidates:
-            for r in repos:
-                path = r.get("path") or ""
-                if path and Path(path).name.lower() == candidate:
-                    result = r
-                    break
-            if result:
-                break
-
-    # 4. Path component match — slug matches a full /-delimited path segment
-    if not result:
-        for r in repos:
-            path = r.get("path") or ""
-            if path and slug_lower in path.lower().split("/"):
-                result = r
-                break
-
-    return result
 
 
 def _parse_compat_json_object(raw: str | None) -> dict[str, Any] | None:
@@ -903,10 +824,9 @@ def create_router(
     def _list_repo_records() -> list[RepoRecord]:
         return ctx.list_repo_records()
 
-    # Supervisor client/manager removed with hf_cli package (issue #2205).
-    # Supervisor endpoints now return graceful "unavailable" responses.
-    supervisor_client = None
-    supervisor_manager = None
+    IssueFetcher(config)
+    TranscriptSummarizer(config, pr_manager, event_bus, state)
+    asyncio.Semaphore(3)
 
     def _repo_roots_fn() -> tuple[str, ...]:
         return ctx.repo_roots_fn()
@@ -3367,19 +3287,11 @@ def create_router(
                 )
         return JSONResponse({"status": "removed", "slug": slug})
 
-    # --- Multi-repo supervisor endpoints ---
-
-    async def _call_supervisor(func: Callable, *args, **kwargs) -> Any:
-        """Run a supervisor client function in a thread."""
-        if supervisor_client is None:
-            raise RuntimeError(
-                "HydraFlow supervisor client unavailable in this environment"
-            )
-        return await asyncio.to_thread(func, *args, **kwargs)
+    # --- Multi-repo endpoints ---
 
     @router.get("/api/repos")
     async def list_supervised_repos() -> JSONResponse:
-        """List repos from the store, callback, or supervisor."""
+        """List repos from the store or callback."""
         if repo_store is not None or list_repos_cb is not None:
             records = _list_repo_records()
             payload: list[dict[str, Any]] = []
@@ -3397,18 +3309,7 @@ def create_router(
                     }
                 )
             return JSONResponse({"repos": payload, "can_register": True})
-        if supervisor_client is None:
-            return JSONResponse({"repos": [], "can_register": False})
-        try:
-            repos = await _call_supervisor(supervisor_client.list_repos)
-        except Exception as exc:  # noqa: BLE001
-            if not _is_expected_supervisor_unavailable(exc):
-                logger.warning("Supervisor list_repos failed: %s", exc)
-            return JSONResponse(
-                {"error": "Supervisor unavailable", "can_register": False},
-                status_code=503,
-            )
-        return JSONResponse({"repos": repos, "can_register": True})
+        return JSONResponse({"repos": [], "can_register": False})
 
     _root_names: dict[int, str] = {0: "Home", 1: "Temp"}
 
@@ -3478,59 +3379,13 @@ def create_router(
         )
 
     @router.post("/api/repos")
-    async def ensure_repo(
-        req: dict[str, Any] | None = Body(default=None),
-        req_query: str | None = Query(default=None, alias="req"),
-        slug: str | None = Query(default=None),
-        repo: RepoSlugParam = None,
-    ) -> JSONResponse:
-        """Ensure a repo is registered with the supervisor by slug."""
-        error_payload: tuple[str, int] | None = None
-        if supervisor_client is None:
-            error_payload = ("supervisor unavailable", 503)
-        else:
-            target_slug = _extract_repo_slug(req, req_query, slug, repo)
-            if not target_slug:
-                error_payload = ("slug required", 400)
-            else:
-                try:
-                    repos = await _call_supervisor(supervisor_client.list_repos)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("Supervisor list_repos failed: %s", exc)
-                    error_payload = ("Supervisor unavailable", 503)
-                else:
-                    match = _find_repo_match(target_slug, repos)
-                    if not match:
-                        error_payload = (
-                            f"repo '{target_slug}' not found",
-                            404,
-                        )
-                    else:
-                        matched_slug = match.get("slug") or target_slug
-                        path = match.get("path")
-                        if not path:
-                            error_payload = (f"repo '{matched_slug}' missing path", 500)
-                        else:
-                            try:
-                                info = await _call_supervisor(
-                                    supervisor_client.add_repo,
-                                    Path(path),
-                                    matched_slug,
-                                )
-                            except Exception as exc:  # noqa: BLE001
-                                logger.warning("Supervisor add_repo failed: %s", exc)
-                                error_payload = ("Failed to add repo", 500)
-                            else:
-                                return JSONResponse(info)
-
-        if error_payload:
-            message, status_code = error_payload
-            return JSONResponse({"error": message}, status_code=status_code)
-        return JSONResponse({"status": "ok"})
+    async def ensure_repo() -> JSONResponse:
+        """Legacy endpoint — supervisor feature removed (issue #2205)."""
+        return JSONResponse({"error": "supervisor unavailable"}, status_code=503)
 
     @router.delete("/api/repos/{slug}")
     async def remove_repo(slug: str) -> JSONResponse:
-        """Remove a repo via the callback or supervisor."""
+        """Remove a repo via the callback."""
         if remove_repo_cb is not None:
             try:
                 removed = await remove_repo_cb(slug)
@@ -3540,14 +3395,7 @@ def create_router(
             if not removed:
                 return JSONResponse({"error": "Repo not found"}, status_code=404)
             return JSONResponse({"status": "ok"})
-        if supervisor_client is None:
-            return JSONResponse({"error": "supervisor unavailable"}, status_code=503)
-        try:
-            await _call_supervisor(supervisor_client.remove_repo, None, slug)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Supervisor remove_repo failed: %s", exc)
-            return JSONResponse({"error": "Failed to remove repo"}, status_code=500)
-        return JSONResponse({"status": "ok"})
+        return JSONResponse({"error": "supervisor unavailable"}, status_code=503)
 
     async def _detect_repo_slug_from_path(repo_path: Path) -> str | None:  # noqa: PLR0911
         """Extract ``owner/repo`` from git remote origin URL at *repo_path*."""
@@ -3671,76 +3519,10 @@ def create_router(
                 }
             )
 
-        # Register with supervisor fallback
-        if supervisor_client is None:
-            return JSONResponse(
-                {"error": _SUPERVISOR_UNAVAILABLE_MESSAGE},
-                status_code=503,
-            )
-        try:
-            await _call_supervisor(
-                supervisor_client.register_repo,
-                repo_path,
-                slug,
-            )
-        except Exception as exc:  # noqa: BLE001
-            if _is_expected_supervisor_unavailable(exc):
-                if supervisor_manager is not None:
-                    try:
-                        await _call_supervisor(supervisor_manager.ensure_running)
-                        await _call_supervisor(
-                            supervisor_client.register_repo,
-                            repo_path,
-                            slug,
-                        )
-                    except Exception as retry_exc:  # noqa: BLE001
-                        if _is_expected_supervisor_unavailable(retry_exc):
-                            return JSONResponse(
-                                {"error": _SUPERVISOR_UNAVAILABLE_MESSAGE},
-                                status_code=503,
-                            )
-                        logger.warning(
-                            "Supervisor register_repo failed after auto-start: %s",
-                            retry_exc,
-                        )
-                        return JSONResponse(
-                            {"error": "Failed to register repo"},
-                            status_code=500,
-                        )
-                else:
-                    return JSONResponse(
-                        {"error": _SUPERVISOR_UNAVAILABLE_MESSAGE},
-                        status_code=503,
-                    )
-            else:
-                logger.warning("Supervisor register_repo failed: %s", exc)
-                return JSONResponse(
-                    {"error": "Failed to register repo"},
-                    status_code=500,
-                )
-        # Create labels (best-effort, only after successful registration)
-        labels_created = False
-        if slug:
-            try:
-                from prep import ensure_labels  # noqa: PLC0415
-
-                target_cfg = config.model_copy(
-                    update={
-                        "repo_root": repo_path,
-                        "repo": slug,
-                    },
-                )
-                await ensure_labels(target_cfg)
-                labels_created = True
-            except Exception:  # noqa: BLE001
-                logger.warning("Label creation failed for %s", slug, exc_info=True)
+        # Supervisor fallback removed (issue #2205) — no register_repo_cb means 503.
         return JSONResponse(
-            {
-                "status": "ok",
-                "slug": slug or repo_path.name,
-                "path": str(repo_path),
-                "labels_created": labels_created,
-            }
+            {"error": "supervisor unavailable"},
+            status_code=503,
         )
 
     @router.post("/api/repos/pick-folder")
@@ -3910,7 +3692,7 @@ def create_router(
                     {"error": f"Clone failed: {msg}"},
                     status_code=502,
                 )
-        # Register with the callback or supervisor
+        # Register with the callback
         if register_repo_cb is not None:
             try:
                 record, repo_cfg = await register_repo_cb(clone_target, slug)
