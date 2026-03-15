@@ -91,7 +91,9 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
 
         # Phase 4: prune stale active_branches entries with no worktree
         if not self._stop_event.is_set():
-            pruned = await self._prune_stale_branch_entries()
+            pruned = await self._prune_stale_branch_entries(
+                _MAX_GC_PER_CYCLE - collected
+            )
             collected += pruned
 
         return {"collected": collected, "skipped": skipped, "errors": errors}
@@ -308,13 +310,13 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
                 logger.debug("GC: could not delete branch %s", branch, exc_info=True)
         return collected
 
-    async def _prune_stale_branch_entries(self) -> int:
+    async def _prune_stale_branch_entries(self, budget: int = _MAX_GC_PER_CYCLE) -> int:
         """Remove ``active_branches`` entries whose issue has no worktree and is safe to GC."""
         active_worktrees = self._state.get_active_worktrees()
         active_branches = self._state.get_active_branches()
         pruned = 0
         for issue_number in list(active_branches.keys()):
-            if self._stop_event.is_set():
+            if self._stop_event.is_set() or pruned >= budget:
                 break
             if issue_number in active_worktrees:
                 continue  # worktree still exists — branch entry is valid
@@ -326,7 +328,7 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
                         "GC: pruned stale branch entry for issue #%d", issue_number
                     )
             except Exception:
-                logger.debug(
+                logger.warning(
                     "GC: could not prune branch entry for issue #%d",
                     issue_number,
                     exc_info=True,
