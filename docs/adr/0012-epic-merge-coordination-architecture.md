@@ -58,17 +58,17 @@ Review approves PR
     → _notify_epic_approval(issue_number)          [unconditional w.r.t. merge strategy]
       → EpicManager.on_child_approved()
       → Records approval in EpicState.approved_children
-      → Applies hydraflow-approved label to the child PR
-    → _should_defer_merge(issue_number)
+      → Applies hydraflow-approved label to the child PR (non-independent strategies only)
+      → If strategy ≠ independent AND bundle ready (all siblings approved or completed):
+        - bundled: auto-merge all via _handle_bundled_ready() → release_epic()
+        - bundled_hitl: escalate to HITL with merge instructions
+        - ordered: merge in registration order via _handle_ordered_ready() → release_epic()
+      → If strategy ≠ independent AND bundle not yet ready: hold, await siblings
+    → _should_defer_merge(issue_number)            [boolean: should this PR skip merge_pr()?]
       → Checks parent epics via EpicManager.find_parent_epics()
-      → If all parents use "independent": proceed to merge
-      → If any parent uses bundled/bundled_hitl/ordered:
-        1. Check bundle readiness (all children approved?)
-        2. If ready:
-           - bundled: auto-merge all via release_epic()
-           - bundled_hitl: escalate to HITL with merge instructions
-           - ordered: merge in registration order via release_epic()
-        3. If not ready: hold (do not merge), log status
+      → Returns True if any parent epic uses bundled/bundled_hitl/ordered
+      → If True: return early — do not call merge_pr() for this issue now
+      → If False (all parents independent, or no parent epics): proceed to merge
 ```
 
 ### Model changes
