@@ -1698,62 +1698,35 @@ def _get_env(key: str) -> str | None:
     return None
 
 
-def _apply_env_overrides(config: HydraFlowConfig) -> None:
-    """Apply all data-driven and special-case env var overrides."""
+def _check_field_bounds(field: str, env_key: str, new_val: int | float) -> None:
+    """Raise ``ValueError`` if *new_val* violates the ge/le constraints on *field*."""
+    for constraint in HydraFlowConfig.model_fields[field].metadata:
+        ge = getattr(constraint, "ge", None)
+        le = getattr(constraint, "le", None)
+        if ge is not None and new_val < ge:
+            raise ValueError(f"{env_key}={new_val} is below minimum {ge}")
+        if le is not None and new_val > le:
+            raise ValueError(f"{env_key}={new_val} is above maximum {le}")
 
-    # Data-driven env var overrides (int fields)
-    for field, env_key, default in _ENV_INT_OVERRIDES:
+
+def _apply_numeric_overrides(
+    config: HydraFlowConfig,
+    overrides: list[tuple[str, str, int]] | list[tuple[str, str, float]],
+    cast: type,
+) -> None:
+    """Apply int or float env-var overrides with constraint checking."""
+    for field, env_key, default in overrides:
         if getattr(config, field) == default:
             env_val = _get_env(env_key)
             if env_val is not None:
                 with contextlib.suppress(ValueError):
-                    new_val = int(env_val)
-                    for constraint in HydraFlowConfig.model_fields[field].metadata:
-                        ge = getattr(constraint, "ge", None)
-                        le = getattr(constraint, "le", None)
-                        if ge is not None and new_val < ge:
-                            raise ValueError(
-                                f"{env_key}={new_val} is below minimum {ge}"
-                            )
-                        if le is not None and new_val > le:
-                            raise ValueError(
-                                f"{env_key}={new_val} is above maximum {le}"
-                            )
+                    new_val = cast(env_val)
+                    _check_field_bounds(field, env_key, new_val)
                     object.__setattr__(config, field, new_val)
 
-    # Data-driven env var overrides (str fields)
-    for field, env_key, default in _ENV_STR_OVERRIDES:
-        current = getattr(config, field)
-        if str(current) == default:
-            env_val = _get_env(env_key)
-            if env_val is not None:
-                # Preserve the field's type (e.g. Path vs str)
-                field_type = type(current)
-                new_val = field_type(env_val) if field_type is not str else env_val
-                object.__setattr__(config, field, new_val)
 
-    # Data-driven env var overrides (float fields)
-    for field, env_key, default in _ENV_FLOAT_OVERRIDES:
-        if getattr(config, field) == default:
-            env_val = _get_env(env_key)
-            if env_val is not None:
-                with contextlib.suppress(ValueError):
-                    new_val = float(env_val)
-                    for constraint in HydraFlowConfig.model_fields[field].metadata:
-                        ge = getattr(constraint, "ge", None)
-                        le = getattr(constraint, "le", None)
-                        if ge is not None and new_val < ge:
-                            raise ValueError(
-                                f"{env_key}={new_val} is below minimum {ge}"
-                            )
-                        if le is not None and new_val > le:
-                            raise ValueError(
-                                f"{env_key}={new_val} is above maximum {le}"
-                            )
-                    object.__setattr__(config, field, new_val)
-
-    # Ratio float overrides ([0, 1] bounds) — parse failures are silently ignored
-    # but out-of-bounds values emit a warning so operators know their config was rejected.
+def _apply_ratio_overrides(config: HydraFlowConfig) -> None:
+    """Apply float ratio overrides with warning-on-out-of-bounds (instead of raising)."""
     for field, env_key, default in _ENV_FLOAT_RATIO_OVERRIDES:
         if getattr(config, field) == default:
             env_val = _get_env(env_key)
@@ -1787,11 +1760,68 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
                 if in_bounds:
                     object.__setattr__(config, field, new_val)
 
-    # Cross-field validation: visual_fail_threshold must remain > visual_warn_threshold
-    # after env overrides (the Pydantic field_validator only fires at model construction).
-    # Strategy: revert only visual_fail_threshold first; if that still violates the
-    # invariant (e.g. warn was also overridden to a value >= the fail default), revert
-    # visual_warn_threshold too so we always land on a valid pair.
+
+def _apply_str_overrides(config: HydraFlowConfig) -> None:
+    """Apply string env-var overrides, preserving the original field type."""
+    for field, env_key, default in _ENV_STR_OVERRIDES:
+        current = getattr(config, field)
+        if str(current) == default:
+            env_val = _get_env(env_key)
+            if env_val is not None:
+                field_type = type(current)
+                new_val = field_type(env_val) if field_type is not str else env_val
+                object.__setattr__(config, field, new_val)
+
+
+def _apply_bool_overrides(config: HydraFlowConfig) -> None:
+    """Apply boolean env-var overrides."""
+    for field, env_key, default in _ENV_BOOL_OVERRIDES:
+        if getattr(config, field) == default:
+            env_val = _get_env(env_key)
+            if env_val is not None:
+                object.__setattr__(
+                    config,
+                    field,
+                    env_val.lower() not in ("0", "false", "no"),
+                )
+
+
+def _apply_literal_overrides(config: HydraFlowConfig) -> None:
+    """Apply Literal-typed env-var overrides with allowed-value validation."""
+    for field, env_key in _ENV_LITERAL_OVERRIDES:
+        field_info = HydraFlowConfig.model_fields[field]
+        if getattr(config, field) == field_info.default:
+            env_val = _get_env(env_key)
+            if env_val is not None:
+                allowed = get_args(field_info.annotation)
+                if env_val in allowed:
+                    object.__setattr__(config, field, env_val)
+                else:
+                    logger.warning(
+                        "Invalid %s=%r; expected one of %s",
+                        env_key,
+                        env_val,
+                        allowed,
+                    )
+
+
+def _apply_label_overrides(config: HydraFlowConfig) -> None:
+    """Apply label list env-var overrides (comma-separated)."""
+    for env_key, (field_name, default_val) in _ENV_LABEL_MAP.items():
+        current = getattr(config, field_name)
+        env_val = os.environ.get(env_key)
+        if env_val is not None and current == default_val:
+            labels = (
+                [part.strip() for part in env_val.split(",") if part.strip()]
+                if env_val
+                else []
+            )
+            if labels:
+                object.__setattr__(config, field_name, labels)
+
+
+def _enforce_visual_threshold_invariant(config: HydraFlowConfig) -> None:
+    """Ensure visual_fail_threshold > visual_warn_threshold after env overrides."""
     if config.visual_fail_threshold <= config.visual_warn_threshold:
         _fail_default: float = HydraFlowConfig.model_fields[
             "visual_fail_threshold"
@@ -1817,46 +1847,9 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
             )
             object.__setattr__(config, "visual_warn_threshold", _warn_default)
 
-    # Data-driven env var overrides (bool fields)
-    for field, env_key, default in _ENV_BOOL_OVERRIDES:
-        if getattr(config, field) == default:
-            env_val = _get_env(env_key)
-            if env_val is not None:
-                object.__setattr__(
-                    config,
-                    field,
-                    env_val.lower() not in ("0", "false", "no"),
-                )
 
-    # Data-driven env var overrides (Literal-typed fields)
-    for field, env_key in _ENV_LITERAL_OVERRIDES:
-        field_info = HydraFlowConfig.model_fields[field]
-        if getattr(config, field) == field_info.default:
-            env_val = _get_env(env_key)
-            if env_val is not None:
-                allowed = get_args(field_info.annotation)
-                if env_val in allowed:
-                    object.__setattr__(config, field, env_val)
-                else:
-                    logger.warning(
-                        "Invalid %s=%r; expected one of %s",
-                        env_key,
-                        env_val,
-                        allowed,
-                    )
-
-    # Visual validation float thresholds (bounded 0.0–1.0, special-case).
-    for field, env_key, default in (
-        ("visual_diff_threshold", "HYDRAFLOW_VISUAL_DIFF_THRESHOLD", 0.01),
-    ):
-        if getattr(config, field) == default:
-            env_val = _get_env(env_key)
-            if env_val is not None:
-                with contextlib.suppress(ValueError):
-                    new_val = float(env_val)
-                    if 0.0 <= new_val <= 1.0:
-                        object.__setattr__(config, field, new_val)
-
+def _apply_docker_overrides(config: HydraFlowConfig) -> None:
+    """Apply Docker resource limit and execution-mode env-var overrides."""
     # Backward-compat bridge: promote legacy HYDRAFLOW_DOCKER_ENABLED /
     # HYDRA_DOCKER_ENABLED to execution_mode="docker" when the canonical
     # HYDRAFLOW_EXECUTION_MODE env var was not explicitly set.
@@ -1877,21 +1870,7 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
                     "use HYDRAFLOW_EXECUTION_MODE=docker instead."
                 )
 
-    # Lite plan labels (comma-separated list, special-case)
-    env_lite_labels = os.environ.get("HYDRAFLOW_LITE_PLAN_LABELS")
-    if env_lite_labels is not None and config.lite_plan_labels == [
-        "bug",
-        "typo",
-        "docs",
-    ]:
-        parsed = [lbl.strip() for lbl in env_lite_labels.split(",") if lbl.strip()]
-        if parsed:
-            object.__setattr__(config, "lite_plan_labels", parsed)
-
-    # Docker resource limit overrides (validated fields handled manually
-    # because str/int overrides need format/bounds validation that
-    # the data-driven tables don't provide)
-    if config.docker_memory_limit == "4g":  # still at default
+    if config.docker_memory_limit == "4g":
         env_mem = os.environ.get("HYDRAFLOW_DOCKER_MEMORY_LIMIT")
         if env_mem is not None:
             if not re.fullmatch(r"\d+[bkmg]", env_mem, re.IGNORECASE):
@@ -1899,7 +1878,7 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
                 raise ValueError(msg)
             object.__setattr__(config, "docker_memory_limit", env_mem)
 
-    if config.docker_tmp_size == "1g":  # still at default
+    if config.docker_tmp_size == "1g":
         env_tmp = os.environ.get("HYDRAFLOW_DOCKER_TMP_SIZE")
         if env_tmp is not None:
             if not re.fullmatch(r"\d+[bkmg]", env_tmp, re.IGNORECASE):
@@ -1907,7 +1886,7 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
                 raise ValueError(msg)
             object.__setattr__(config, "docker_tmp_size", env_tmp)
 
-    if config.docker_pids_limit == 256:  # still at default
+    if config.docker_pids_limit == 256:
         env_pids = os.environ.get("HYDRAFLOW_DOCKER_PIDS_LIMIT")
         if env_pids is not None:
             try:
@@ -1925,6 +1904,44 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
                     msg = f"HYDRAFLOW_DOCKER_PIDS_LIMIT must be between 16 and 4096, got {pids_val}"
                     raise ValueError(msg)
                 object.__setattr__(config, "docker_pids_limit", pids_val)
+
+
+def _apply_env_overrides(config: HydraFlowConfig) -> None:
+    """Apply all data-driven and special-case env var overrides."""
+    _apply_numeric_overrides(config, _ENV_INT_OVERRIDES, int)
+    _apply_str_overrides(config)
+    _apply_numeric_overrides(config, _ENV_FLOAT_OVERRIDES, float)
+    _apply_ratio_overrides(config)
+    _enforce_visual_threshold_invariant(config)
+    _apply_bool_overrides(config)
+    _apply_literal_overrides(config)
+
+    # Visual validation float thresholds (bounded 0.0–1.0, special-case).
+    for field, env_key, default in (
+        ("visual_diff_threshold", "HYDRAFLOW_VISUAL_DIFF_THRESHOLD", 0.01),
+    ):
+        if getattr(config, field) == default:
+            env_val = _get_env(env_key)
+            if env_val is not None:
+                with contextlib.suppress(ValueError):
+                    new_val = float(env_val)
+                    if 0.0 <= new_val <= 1.0:
+                        object.__setattr__(config, field, new_val)
+
+    _apply_docker_overrides(config)
+
+    # Lite plan labels (comma-separated list, special-case)
+    env_lite_labels = os.environ.get("HYDRAFLOW_LITE_PLAN_LABELS")
+    if env_lite_labels is not None and config.lite_plan_labels == [
+        "bug",
+        "typo",
+        "docs",
+    ]:
+        parsed = [lbl.strip() for lbl in env_lite_labels.split(",") if lbl.strip()]
+        if parsed:
+            object.__setattr__(config, "lite_plan_labels", parsed)
+
+    _apply_label_overrides(config)
 
     # Label env var overrides (only apply when still at the default)
     for env_key, (field_name, default_val) in _ENV_LABEL_MAP.items():

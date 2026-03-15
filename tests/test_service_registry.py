@@ -18,7 +18,11 @@ if TYPE_CHECKING:
 from unittest.mock import patch
 
 from events import EventBus, EventType, HydraFlowEvent
-from service_registry import OrchestratorCallbacks, ServiceRegistry, build_services
+from service_registry import (
+    OrchestratorCallbacks,
+    ServiceRegistry,
+    build_services,
+)
 from state import StateTracker
 
 
@@ -194,3 +198,53 @@ class TestServiceRegistryWiring:
                 assert received is event, f"{label} did not publish via shared EventBus"
         finally:
             bus.unsubscribe(queue)
+
+
+class TestDecomposedFactoryFunctions:
+    """Tests for the decomposed _build_* helper functions."""
+
+    def test_build_core_runners_returns_all_runners(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from service_registry import _build_core_runners
+
+        bus = EventBus()
+        state = StateTracker(config.state_file)
+        runners = _build_core_runners(config, bus, state)
+        assert runners.worktrees is not None
+        assert runners.subprocess_runner is not None
+        assert runners.agents is not None
+        assert runners.planners is not None
+        assert runners.prs is not None
+        assert runners.reviewers is not None
+        assert runners.hitl_runner is not None
+        assert runners.triage is not None
+        assert runners.summarizer is not None
+
+    def test_build_data_layer_returns_all_services(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from service_registry import _build_core_runners, _build_data_layer
+
+        bus = EventBus()
+        state = StateTracker(config.state_file)
+        runners = _build_core_runners(config, bus, state)
+        data = _build_data_layer(config, bus, state, runners)
+        assert data.fetcher is not None
+        assert data.store is not None
+        assert data.crate_manager is not None
+        assert data.harness_insights is not None
+        assert data.epic_checker is not None
+        assert data.epic_manager is not None
+
+    def test_build_core_runners_shares_subprocess_runner(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from service_registry import _build_core_runners
+
+        bus = EventBus()
+        state = StateTracker(config.state_file)
+        runners = _build_core_runners(config, bus, state)
+        assert runners.agents._runner is runners.subprocess_runner
+        assert runners.planners._runner is runners.subprocess_runner
+        assert runners.reviewers._runner is runners.subprocess_runner

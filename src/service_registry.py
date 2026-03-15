@@ -125,18 +125,42 @@ class OrchestratorCallbacks:
     get_bg_worker_interval: Callable[[str], int]
 
 
-def build_services(
+@dataclass
+class _CoreRunners:
+    """Intermediate bundle of core runners built during service construction."""
+
+    worktrees: WorkspaceManager
+    subprocess_runner: SubprocessRunner
+    agents: AgentRunner
+    planners: PlannerRunner
+    researcher: ResearchRunner
+    prs: PRManager
+    manifest_syncer: ManifestIssueSyncer
+    reviewers: ReviewRunner
+    hitl_runner: HITLRunner
+    triage: TriageRunner
+    summarizer: TranscriptSummarizer
+
+
+@dataclass
+class _DataLayer:
+    """Intermediate bundle of data-layer services."""
+
+    fetcher: IssueFetcher
+    store: IssueStore
+    crate_manager: CrateManager
+    harness_insights: HarnessInsightStore
+    troubleshooting_store: TroubleshootingPatternStore
+    epic_checker: EpicCompletionChecker
+    epic_manager: EpicManager
+
+
+def _build_core_runners(
     config: HydraFlowConfig,
     event_bus: EventBus,
     state: StateTracker,
-    stop_event: asyncio.Event,
-    callbacks: OrchestratorCallbacks,
-) -> ServiceRegistry:
-    """Create all services wired together.
-
-    This replaces the 170-line orchestrator constructor body.
-    """
-    # Core runners
+) -> _CoreRunners:
+    """Build core runner services (agents, planners, PR manager, etc.)."""
     worktrees = WorkspaceManager(config)
     subprocess_runner = get_docker_runner(config)
     agents = AgentRunner(config, event_bus, runner=subprocess_runner)
@@ -150,57 +174,101 @@ def build_services(
     summarizer = TranscriptSummarizer(
         config, prs, event_bus, state, runner=subprocess_runner
     )
+    return _CoreRunners(
+        worktrees=worktrees,
+        subprocess_runner=subprocess_runner,
+        agents=agents,
+        planners=planners,
+        researcher=researcher,
+        prs=prs,
+        manifest_syncer=manifest_syncer,
+        reviewers=reviewers,
+        hitl_runner=hitl_runner,
+        triage=triage,
+        summarizer=summarizer,
+    )
 
-    # Data layer
+
+def _build_data_layer(
+    config: HydraFlowConfig,
+    event_bus: EventBus,
+    state: StateTracker,
+    runners: _CoreRunners,
+) -> _DataLayer:
+    """Build data-layer services (fetcher, store, epics, insight stores)."""
     fetcher = IssueFetcher(config)
     store = IssueStore(config, GitHubTaskFetcher(fetcher), event_bus)
-
-    # Crate management
-    crate_manager = CrateManager(config, state, prs, event_bus)
+    crate_manager = CrateManager(config, state, runners.prs, event_bus)
     store.set_crate_manager(crate_manager)
-
-    # Harness insight store (shared across phases)
     harness_insights = HarnessInsightStore(config.data_path("memory"))
-
-    # Troubleshooting pattern store (CI timeout feedback loop)
     troubleshooting_store = TroubleshootingPatternStore(config.data_path("memory"))
+    epic_checker = EpicCompletionChecker(config, runners.prs, fetcher, state=state)
+    epic_manager = EpicManager(config, state, runners.prs, fetcher, event_bus)
+    return _DataLayer(
+        fetcher=fetcher,
+        store=store,
+        crate_manager=crate_manager,
+        harness_insights=harness_insights,
+        troubleshooting_store=troubleshooting_store,
+        epic_checker=epic_checker,
+        epic_manager=epic_manager,
+    )
 
-    # Epic management
-    epic_checker = EpicCompletionChecker(config, prs, fetcher, state=state)
-    epic_manager = EpicManager(config, state, prs, fetcher, event_bus)
 
-    # Phase coordinators
+def _build_phase_coordinators(
+    config: HydraFlowConfig,
+    event_bus: EventBus,
+    state: StateTracker,
+    stop_event: asyncio.Event,
+    callbacks: OrchestratorCallbacks,
+    runners: _CoreRunners,
+    data: _DataLayer,
+) -> tuple[
+    TriagePhase,
+    PlanPhase,
+    HITLPhase,
+    RunRecorder,
+    ImplementPhase,
+    MetricsManager,
+    PRUnsticker,
+    MemorySyncWorker,
+    RetrospectiveCollector,
+    AcceptanceCriteriaGenerator,
+    VerificationJudge,
+    ReviewPhase,
+]:
+    """Build phase coordinators and their support services."""
     triager = TriagePhase(
         config,
         state,
-        store,
-        triage,
-        prs,
+        data.store,
+        runners.triage,
+        runners.prs,
         event_bus,
         stop_event,
-        epic_manager=epic_manager,
+        epic_manager=data.epic_manager,
     )
     planner_phase = PlanPhase(
         config,
         state,
-        store,
-        planners,
-        prs,
+        data.store,
+        runners.planners,
+        runners.prs,
         event_bus,
         stop_event,
-        transcript_summarizer=summarizer,
-        harness_insights=harness_insights,
-        epic_manager=epic_manager,
-        research_runner=researcher,
+        transcript_summarizer=runners.summarizer,
+        harness_insights=data.harness_insights,
+        epic_manager=data.epic_manager,
+        research_runner=runners.researcher,
     )
     hitl_phase = HITLPhase(
         config,
         state,
-        store,
-        fetcher,
-        worktrees,
-        hitl_runner,
-        prs,
+        data.store,
+        data.fetcher,
+        runners.worktrees,
+        runners.hitl_runner,
+        runners.prs,
         event_bus,
         stop_event,
         active_issues_cb=callbacks.sync_active_issue_numbers,
@@ -209,53 +277,55 @@ def build_services(
     implementer = ImplementPhase(
         config,
         state,
-        worktrees,
-        agents,
-        prs,
-        store,
+        runners.worktrees,
+        runners.agents,
+        runners.prs,
+        data.store,
         stop_event,
         run_recorder=run_recorder,
-        harness_insights=harness_insights,
+        harness_insights=data.harness_insights,
     )
 
     from metrics_manager import MetricsManager
 
-    metrics_manager = MetricsManager(config, state, prs, event_bus)
+    metrics_manager = MetricsManager(config, state, runners.prs, event_bus)
     conflict_resolver = MergeConflictResolver(
         config=config,
-        worktrees=worktrees,
-        agents=agents,
-        prs=prs,
+        worktrees=runners.worktrees,
+        agents=runners.agents,
+        prs=runners.prs,
         event_bus=event_bus,
         state=state,
-        summarizer=summarizer,
+        summarizer=runners.summarizer,
     )
     pr_unsticker = PRUnsticker(
         config,
         state,
         event_bus,
-        prs,
-        agents,
-        worktrees,
-        fetcher,
-        hitl_runner=hitl_runner,
+        runners.prs,
+        runners.agents,
+        runners.worktrees,
+        data.fetcher,
+        hitl_runner=runners.hitl_runner,
         stop_event=stop_event,
         resolver=conflict_resolver,
-        troubleshooting_store=troubleshooting_store,
+        troubleshooting_store=data.troubleshooting_store,
     )
     memory_sync = MemorySyncWorker(
         config,
         state,
         event_bus,
-        runner=subprocess_runner,
-        prs=prs,
-        manifest_syncer=manifest_syncer,
+        runner=runners.subprocess_runner,
+        prs=runners.prs,
+        manifest_syncer=runners.manifest_syncer,
     )
-    retrospective = RetrospectiveCollector(config, state, prs)
+    retrospective = RetrospectiveCollector(config, state, runners.prs)
     ac_generator = AcceptanceCriteriaGenerator(
-        config, prs, event_bus, runner=subprocess_runner
+        config, runners.prs, event_bus, runner=runners.subprocess_runner
     )
-    verification_judge = VerificationJudge(config, event_bus, runner=subprocess_runner)
+    verification_judge = VerificationJudge(
+        config, event_bus, runner=runners.subprocess_runner
+    )
     baseline_policy = BaselinePolicy(
         config=config,
         state=state,
@@ -264,32 +334,73 @@ def build_services(
     post_merge_handler = PostMergeHandler(
         config=config,
         state=state,
-        prs=prs,
+        prs=runners.prs,
         event_bus=event_bus,
         ac_generator=ac_generator,
         retrospective=retrospective,
         verification_judge=verification_judge,
-        epic_checker=epic_checker,
+        epic_checker=data.epic_checker,
         update_bg_worker_status=callbacks.update_bg_worker_status,
-        epic_manager=epic_manager,
+        epic_manager=data.epic_manager,
     )
     reviewer = ReviewPhase(
         config,
         state,
-        worktrees,
-        reviewers,
-        prs,
+        runners.worktrees,
+        runners.reviewers,
+        runners.prs,
         stop_event,
-        store,
+        data.store,
         event_bus=event_bus,
-        harness_insights=harness_insights,
+        harness_insights=data.harness_insights,
         conflict_resolver=conflict_resolver,
         post_merge=post_merge_handler,
         update_bg_worker_status=callbacks.update_bg_worker_status,
         baseline_policy=baseline_policy,
     )
+    return (
+        triager,
+        planner_phase,
+        hitl_phase,
+        run_recorder,
+        implementer,
+        metrics_manager,
+        pr_unsticker,
+        memory_sync,
+        retrospective,
+        ac_generator,
+        verification_judge,
+        reviewer,
+    )
 
-    # Background loops — shared deps bundled into a single LoopDeps object
+
+def _build_background_loops(
+    config: HydraFlowConfig,
+    event_bus: EventBus,
+    state: StateTracker,
+    callbacks: OrchestratorCallbacks,
+    stop_event: asyncio.Event,
+    runners: _CoreRunners,
+    data: _DataLayer,
+    *,
+    run_recorder: RunRecorder,
+    metrics_manager: MetricsManager,
+    pr_unsticker: PRUnsticker,
+    memory_sync: MemorySyncWorker,
+) -> tuple[
+    MemorySyncLoop,
+    MetricsSyncLoop,
+    PRUnstickerLoop,
+    ManifestRefreshLoop,
+    ReportIssueLoop,
+    EpicMonitorLoop,
+    EpicSweeperLoop,
+    VerifyMonitorLoop,
+    WorkspaceGCLoop,
+    RunsGCLoop,
+    ADRReviewerLoop,
+]:
+    """Build all background polling loops."""
     loop_deps = LoopDeps(
         event_bus=event_bus,
         stop_event=stop_event,
@@ -298,67 +409,145 @@ def build_services(
         sleep_fn=callbacks.sleep_or_stop,
         interval_cb=callbacks.get_bg_worker_interval,
     )
-    memory_sync_bg = MemorySyncLoop(config, fetcher, memory_sync, deps=loop_deps)
-    metrics_sync_bg = MetricsSyncLoop(config, store, metrics_manager, deps=loop_deps)
-    pr_unsticker_loop = PRUnstickerLoop(config, pr_unsticker, prs, deps=loop_deps)
+    memory_sync_bg = MemorySyncLoop(config, data.fetcher, memory_sync, deps=loop_deps)
+    metrics_sync_bg = MetricsSyncLoop(
+        config, data.store, metrics_manager, deps=loop_deps
+    )
+    pr_unsticker_loop = PRUnstickerLoop(
+        config, pr_unsticker, runners.prs, deps=loop_deps
+    )
     manifest_manager = ProjectManifestManager(config)
     manifest_refresh_loop = ManifestRefreshLoop(
         config,
         manifest_manager,
         state,
         deps=loop_deps,
-        manifest_syncer=manifest_syncer,
+        manifest_syncer=runners.manifest_syncer,
     )
     report_issue_loop = ReportIssueLoop(
         config=config,
         state=state,
-        pr_manager=prs,
+        pr_manager=runners.prs,
         deps=loop_deps,
-        runner=subprocess_runner,
+        runner=runners.subprocess_runner,
     )
     epic_monitor_loop = EpicMonitorLoop(
-        config=config, epic_manager=epic_manager, deps=loop_deps
+        config=config, epic_manager=data.epic_manager, deps=loop_deps
     )
     epic_sweeper_loop = EpicSweeperLoop(
         config=config,
-        fetcher=fetcher,
-        prs=prs,
+        fetcher=data.fetcher,
+        prs=runners.prs,
         state=state,
         deps=loop_deps,
     )
     verify_monitor_loop = VerifyMonitorLoop(
         config=config,
-        fetcher=fetcher,
+        fetcher=data.fetcher,
         state=state,
         deps=loop_deps,
     )
     worktree_gc_loop = WorkspaceGCLoop(
         config=config,
-        worktrees=worktrees,
-        prs=prs,
+        worktrees=runners.worktrees,
+        prs=runners.prs,
         state=state,
         deps=loop_deps,
-        is_in_pipeline_cb=store.is_in_pipeline,
+        is_in_pipeline_cb=data.store.is_in_pipeline,
     )
     runs_gc_loop = RunsGCLoop(config=config, run_recorder=run_recorder, deps=loop_deps)
-    adr_reviewer = ADRCouncilReviewer(config, event_bus, prs, subprocess_runner)
+    adr_reviewer = ADRCouncilReviewer(
+        config, event_bus, runners.prs, runners.subprocess_runner
+    )
     adr_reviewer_loop = ADRReviewerLoop(
         config=config, adr_reviewer=adr_reviewer, deps=loop_deps
     )
+    return (
+        memory_sync_bg,
+        metrics_sync_bg,
+        pr_unsticker_loop,
+        manifest_refresh_loop,
+        report_issue_loop,
+        epic_monitor_loop,
+        epic_sweeper_loop,
+        verify_monitor_loop,
+        worktree_gc_loop,
+        runs_gc_loop,
+        adr_reviewer_loop,
+    )
+
+
+def build_services(
+    config: HydraFlowConfig,
+    event_bus: EventBus,
+    state: StateTracker,
+    stop_event: asyncio.Event,
+    callbacks: OrchestratorCallbacks,
+) -> ServiceRegistry:
+    """Create all services wired together.
+
+    Construction is split into four phases: core runners, data layer,
+    phase coordinators, and background loops.
+    """
+    runners = _build_core_runners(config, event_bus, state)
+    data = _build_data_layer(config, event_bus, state, runners)
+
+    (
+        triager,
+        planner_phase,
+        hitl_phase,
+        run_recorder,
+        implementer,
+        metrics_manager,
+        pr_unsticker,
+        memory_sync,
+        retrospective,
+        ac_generator,
+        verification_judge,
+        reviewer,
+    ) = _build_phase_coordinators(
+        config, event_bus, state, stop_event, callbacks, runners, data
+    )
+
+    (
+        memory_sync_bg,
+        metrics_sync_bg,
+        pr_unsticker_loop,
+        manifest_refresh_loop,
+        report_issue_loop,
+        epic_monitor_loop,
+        epic_sweeper_loop,
+        verify_monitor_loop,
+        worktree_gc_loop,
+        runs_gc_loop,
+        adr_reviewer_loop,
+    ) = _build_background_loops(
+        config,
+        event_bus,
+        state,
+        callbacks,
+        stop_event,
+        runners,
+        data,
+        run_recorder=run_recorder,
+        metrics_manager=metrics_manager,
+        pr_unsticker=pr_unsticker,
+        memory_sync=memory_sync,
+    )
 
     return ServiceRegistry(
-        worktrees=worktrees,
-        subprocess_runner=subprocess_runner,
-        agents=agents,
-        planners=planners,
-        prs=prs,
-        reviewers=reviewers,
-        hitl_runner=hitl_runner,
-        triage=triage,
-        summarizer=summarizer,
-        fetcher=fetcher,
-        store=store,
-        crate_manager=crate_manager,
+        worktrees=runners.worktrees,
+        subprocess_runner=runners.subprocess_runner,
+        agents=runners.agents,
+        planners=runners.planners,
+        prs=runners.prs,
+        reviewers=runners.reviewers,
+        hitl_runner=runners.hitl_runner,
+        triage=runners.triage,
+        summarizer=runners.summarizer,
+        fetcher=data.fetcher,
+        store=data.store,
+        crate_manager=data.crate_manager,
         triager=triager,
         planner_phase=planner_phase,
         hitl_phase=hitl_phase,
@@ -371,8 +560,8 @@ def build_services(
         retrospective=retrospective,
         ac_generator=ac_generator,
         verification_judge=verification_judge,
-        epic_checker=epic_checker,
-        epic_manager=epic_manager,
+        epic_checker=data.epic_checker,
+        epic_manager=data.epic_manager,
         memory_sync_bg=memory_sync_bg,
         metrics_sync_bg=metrics_sync_bg,
         pr_unsticker_loop=pr_unsticker_loop,

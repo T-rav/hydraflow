@@ -472,3 +472,82 @@ class TestEnvVarOverrideTable:
                 f"_ENV_BOOL_OVERRIDES entry for '{field}' has default={table_default}, "
                 f"but HydraFlowConfig.{field} default is {pydantic_default}"
             )
+
+
+class TestCheckFieldBounds:
+    """Tests for the extracted _check_field_bounds helper."""
+
+    def test_passes_within_bounds(self) -> None:
+        from config import _check_field_bounds
+
+        # dashboard_port has ge=1, le=65535
+        _check_field_bounds("dashboard_port", "HYDRAFLOW_DASHBOARD_PORT", 8080)
+
+    def test_raises_below_minimum(self) -> None:
+        from config import _check_field_bounds
+
+        with pytest.raises(ValueError, match="below minimum"):
+            _check_field_bounds("dashboard_port", "HYDRAFLOW_DASHBOARD_PORT", 0)
+
+    def test_raises_above_maximum(self) -> None:
+        from config import _check_field_bounds
+
+        with pytest.raises(ValueError, match="above maximum"):
+            _check_field_bounds("dashboard_port", "HYDRAFLOW_DASHBOARD_PORT", 99999)
+
+
+class TestDecomposedOverrideFunctions:
+    """Tests that the decomposed override functions work correctly."""
+
+    def test_apply_str_overrides(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from config import _apply_str_overrides
+
+        monkeypatch.setenv("HYDRAFLOW_DASHBOARD_HOST", "0.0.0.0")
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            repo="test/repo",
+        )
+        _apply_str_overrides(cfg)
+        assert cfg.dashboard_host == "0.0.0.0"
+
+    def test_apply_bool_overrides(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from config import _apply_bool_overrides
+
+        monkeypatch.setenv("HYDRAFLOW_DRY_RUN", "true")
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            repo="test/repo",
+        )
+        _apply_bool_overrides(cfg)
+        assert cfg.dry_run is True
+
+    def test_apply_literal_overrides(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from config import _apply_literal_overrides
+
+        monkeypatch.setenv("HYDRAFLOW_EXECUTION_MODE", "docker")
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            repo="test/repo",
+        )
+        _apply_literal_overrides(cfg)
+        assert cfg.execution_mode == "docker"
+
+    def test_enforce_visual_threshold_invariant_reverts(self, tmp_path: Path) -> None:
+        from config import _enforce_visual_threshold_invariant
+
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            repo="test/repo",
+        )
+        # Manually set an invalid state
+        object.__setattr__(cfg, "visual_fail_threshold", 0.01)
+        object.__setattr__(cfg, "visual_warn_threshold", 0.02)
+        _enforce_visual_threshold_invariant(cfg)
+        # Should have reverted to defaults
+        assert cfg.visual_fail_threshold > cfg.visual_warn_threshold
