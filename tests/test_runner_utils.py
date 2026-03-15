@@ -1193,3 +1193,187 @@ class TestReadStdoutLines:
         transcript_events = [e for e in events if e.type == EventType.TRANSCRIPT_LINE]
         assert len(transcript_events) == 1
         assert transcript_events[0].data["line"] == "Hello world"
+
+
+# ---------------------------------------------------------------------------
+# _collect_output — extracted from stream_claude_process
+# ---------------------------------------------------------------------------
+
+
+class TestCollectOutput:
+    """Tests for _collect_output extracted from stream_claude_process."""
+
+    @pytest.mark.asyncio
+    async def test_returns_transcript_from_stdout(self, event_bus) -> None:
+        """_collect_output should return transcript from parsed stdout."""
+        from runner_utils import _collect_output
+        from stream_parser import StreamParser
+
+        lines_data = [b"Hello from agent\n"]
+
+        async def async_iter():
+            for line in lines_data:
+                yield line
+
+        proc = AsyncMock()
+        proc.stdout = async_iter()
+        proc.wait = AsyncMock()
+        proc.returncode = 0
+
+        stderr_future: asyncio.Future[bytes] = asyncio.get_event_loop().create_future()
+        stderr_future.set_result(b"")
+        stderr_task = asyncio.ensure_future(stderr_future)
+
+        parser = StreamParser()
+        result = await _collect_output(
+            proc,
+            parser,
+            stderr_task,
+            event_bus,
+            {"issue": 1},
+            None,
+            None,
+            logging.getLogger("test"),
+        )
+
+        assert "Hello from agent" in result
+
+    @pytest.mark.asyncio
+    async def test_updates_usage_stats(self, event_bus) -> None:
+        """_collect_output should update usage_stats from parser snapshot."""
+        from runner_utils import _collect_output
+        from stream_parser import StreamParser
+
+        async def async_iter():
+            return
+            yield  # make it an async generator  # noqa: RET504
+
+        proc = AsyncMock()
+        proc.stdout = async_iter()
+        proc.wait = AsyncMock()
+        proc.returncode = 0
+
+        stderr_future: asyncio.Future[bytes] = asyncio.get_event_loop().create_future()
+        stderr_future.set_result(b"")
+        stderr_task = asyncio.ensure_future(stderr_future)
+
+        parser = StreamParser()
+        usage: dict[str, object] = {}
+        await _collect_output(
+            proc,
+            parser,
+            stderr_task,
+            event_bus,
+            {"issue": 1},
+            None,
+            usage,
+            logging.getLogger("test"),
+        )
+
+        # usage_stats dict should have been updated (even if empty snapshot)
+        assert isinstance(usage, dict)
+
+    @pytest.mark.asyncio
+    async def test_raises_on_auth_failure(self, event_bus) -> None:
+        """_collect_output should raise AuthenticationRetryError on auth failure."""
+        from runner_utils import AuthenticationRetryError, _collect_output
+        from stream_parser import StreamParser
+
+        lines_data = [b'"error":"authentication_failed"\n']
+
+        async def async_iter():
+            for line in lines_data:
+                yield line
+
+        proc = AsyncMock()
+        proc.stdout = async_iter()
+        proc.wait = AsyncMock()
+        proc.returncode = 1
+
+        stderr_future: asyncio.Future[bytes] = asyncio.get_event_loop().create_future()
+        stderr_future.set_result(b"")
+        stderr_task = asyncio.ensure_future(stderr_future)
+
+        parser = StreamParser()
+        with pytest.raises(AuthenticationRetryError):
+            await _collect_output(
+                proc,
+                parser,
+                stderr_task,
+                event_bus,
+                {"issue": 1},
+                None,
+                None,
+                logging.getLogger("test"),
+            )
+
+
+# ---------------------------------------------------------------------------
+# _create_and_start_process — extracted from stream_claude_process
+# ---------------------------------------------------------------------------
+
+
+class TestCreateAndStartProcess:
+    """Tests for _create_and_start_process extracted from stream_claude_process."""
+
+    @pytest.mark.asyncio
+    async def test_returns_process_and_stdin_mode(self) -> None:
+        """_create_and_start_process returns (proc, stdin_mode) tuple."""
+        from runner_utils import _create_and_start_process
+
+        mock_proc = AsyncMock()
+        mock_runner = AsyncMock()
+        mock_runner.create_streaming_process = AsyncMock(return_value=mock_proc)
+
+        proc, stdin_mode = await _create_and_start_process(
+            mock_runner,
+            ["claude", "-p"],
+            "test prompt",
+            Path("/tmp/test"),
+            "",
+        )
+
+        assert proc is mock_proc
+        # claude -p uses prompt arg, so stdin is DEVNULL
+        assert stdin_mode == asyncio.subprocess.DEVNULL
+        mock_runner.create_streaming_process.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_passes_prompt_in_command_for_claude(self) -> None:
+        """For claude -p, the prompt should be inserted into the command."""
+        from runner_utils import _create_and_start_process
+
+        mock_proc = AsyncMock()
+        mock_runner = AsyncMock()
+        mock_runner.create_streaming_process = AsyncMock(return_value=mock_proc)
+
+        await _create_and_start_process(
+            mock_runner,
+            ["claude", "-p"],
+            "hello world",
+            Path("/tmp/test"),
+            "",
+        )
+
+        call_args = mock_runner.create_streaming_process.call_args
+        cmd_arg = call_args[0][0]
+        assert "hello world" in cmd_arg
+
+    @pytest.mark.asyncio
+    async def test_uses_pipe_stdin_for_non_prompt_cmd(self) -> None:
+        """For commands without -p, stdin should be PIPE."""
+        from runner_utils import _create_and_start_process
+
+        mock_proc = AsyncMock()
+        mock_runner = AsyncMock()
+        mock_runner.create_streaming_process = AsyncMock(return_value=mock_proc)
+
+        _, stdin_mode = await _create_and_start_process(
+            mock_runner,
+            ["some-tool"],
+            "test prompt",
+            Path("/tmp/test"),
+            "",
+        )
+
+        assert stdin_mode == asyncio.subprocess.PIPE

@@ -186,6 +186,80 @@ async def _read_stdout_lines(
     return raw_lines, result_text, accumulated_text, early_killed
 
 
+async def _collect_output(
+    proc: asyncio.subprocess.Process,
+    parser: StreamParser,
+    stderr_task: asyncio.Task[bytes],
+    event_bus: EventBus,
+    event_data: TranscriptEventData,
+    on_output: Callable[[str], bool] | None,
+    usage_stats: dict[str, object] | None,
+    caller_logger: logging.Logger,
+) -> str:
+    """Read stdout, wait for stderr, validate, and return the transcript."""
+    (
+        raw_lines,
+        result_text,
+        accumulated_text,
+        early_killed,
+    ) = await _read_stdout_lines(
+        proc.stdout,  # type: ignore[arg-type]
+        parser,
+        event_bus,
+        event_data,
+        on_output,
+        proc,
+    )
+
+    stderr_bytes = await stderr_task
+    await proc.wait()
+    stderr_text = stderr_bytes.decode(errors="replace").strip()
+
+    check_post_stream_errors(
+        raw_lines=raw_lines,
+        accumulated_text=accumulated_text,
+        stderr_text=stderr_text,
+        early_killed=early_killed,
+        returncode=proc.returncode,
+        caller_logger=caller_logger,
+    )
+
+    if usage_stats is not None:
+        usage_stats.update(parser.usage_snapshot)
+
+    return resolve_transcript(
+        result_text,
+        accumulated_text,
+        raw_lines,
+        stderr_text,
+        proc.returncode,
+        caller_logger,
+    )
+
+
+async def _create_and_start_process(
+    runner: SubprocessRunner,
+    cmd: list[str],
+    prompt: str,
+    cwd: Path,
+    gh_token: str,
+) -> tuple[asyncio.subprocess.Process, int]:
+    """Prepare command, create the subprocess, and return it with stdin mode."""
+    env = make_clean_env(gh_token)
+    cmd_to_run, stdin_mode = prepare_command(cmd, prompt)
+    proc = await runner.create_streaming_process(
+        cmd_to_run,
+        cwd=str(cwd),
+        env=env,
+        stdin=stdin_mode,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        limit=1024 * 1024,  # 1 MB — stream-json lines can exceed 64 KB default
+        start_new_session=True,  # Own process group for reliable cleanup
+    )
+    return proc, stdin_mode
+
+
 async def stream_claude_process(
     *,
     cmd: list[str],
@@ -206,22 +280,11 @@ async def stream_claude_process(
     Returns the transcript string, using the fallback chain:
     result_text -> accumulated_text -> raw_lines.
     """
-    env = make_clean_env(gh_token)
-
     if runner is None:
         runner = get_default_runner()
 
-    cmd_to_run, stdin_mode = prepare_command(cmd, prompt)
-
-    proc = await runner.create_streaming_process(
-        cmd_to_run,
-        cwd=str(cwd),
-        env=env,
-        stdin=stdin_mode,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        limit=1024 * 1024,  # 1 MB — stream-json lines can exceed 64 KB default
-        start_new_session=True,  # Own process group for reliable cleanup
+    proc, stdin_mode = await _create_and_start_process(
+        runner, cmd, prompt, cwd, gh_token
     )
     active_procs.add(proc)
 
@@ -233,51 +296,22 @@ async def stream_claude_process(
         if stdin_mode != asyncio.subprocess.DEVNULL:
             await _write_stdin(proc, prompt)
 
-        # Drain stderr in background to prevent deadlock
         stderr_task = asyncio.create_task(proc.stderr.read())
         parser = StreamParser()
 
-        async def _stream_body() -> str:
-            (
-                raw_lines,
-                result_text,
-                accumulated_text,
-                early_killed,
-            ) = await _read_stdout_lines(
-                proc.stdout,  # type: ignore[arg-type]
+        return await asyncio.wait_for(
+            _collect_output(
+                proc,
                 parser,
+                stderr_task,
                 event_bus,
                 event_data,
                 on_output,
-                proc,
-            )
-
-            stderr_bytes = await stderr_task
-            await proc.wait()
-            stderr_text = stderr_bytes.decode(errors="replace").strip()
-
-            check_post_stream_errors(
-                raw_lines=raw_lines,
-                accumulated_text=accumulated_text,
-                stderr_text=stderr_text,
-                early_killed=early_killed,
-                returncode=proc.returncode,
-                caller_logger=logger,
-            )
-
-            if usage_stats is not None:
-                usage_stats.update(parser.usage_snapshot)
-
-            return resolve_transcript(
-                result_text,
-                accumulated_text,
-                raw_lines,
-                stderr_text,
-                proc.returncode,
+                usage_stats,
                 logger,
-            )
-
-        return await asyncio.wait_for(_stream_body(), timeout=timeout)
+            ),
+            timeout=timeout,
+        )
     except TimeoutError as exc:
         proc.kill()
         await proc.wait()
