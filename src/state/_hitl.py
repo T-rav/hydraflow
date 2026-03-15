@@ -19,7 +19,7 @@ class HITLStateMixin:
     def save(self) -> None: ...  # provided by CoreMixin
 
     @staticmethod
-    def _key(issue_id: int) -> str: ...  # provided by StateTracker
+    def _key(issue_id: int | str) -> str: ...  # provided by StateTracker
 
     # --- HITL origin tracking ---
 
@@ -57,11 +57,12 @@ class HITLStateMixin:
 
     def set_hitl_summary(self, issue_number: int, summary: str) -> None:
         """Persist cached LLM summary text for *issue_number*."""
-        self._data.hitl_summaries[self._key(issue_number)] = HITLSummaryCacheEntry(
+        key = self._key(issue_number)
+        self._data.hitl_summaries[key] = HITLSummaryCacheEntry(
             summary=summary,
             updated_at=datetime.now(UTC).isoformat(),
         )
-        self._data.hitl_summary_failures.pop(self._key(issue_number), None)
+        self._data.hitl_summary_failures.pop(key, None)
         self.save()
 
     def get_hitl_summary(self, issue_number: int) -> str | None:
@@ -82,8 +83,9 @@ class HITLStateMixin:
 
     def remove_hitl_summary(self, issue_number: int) -> None:
         """Delete cached summary for *issue_number*."""
-        self._data.hitl_summaries.pop(self._key(issue_number), None)
-        self._data.hitl_summary_failures.pop(self._key(issue_number), None)
+        key = self._key(issue_number)
+        self._data.hitl_summaries.pop(key, None)
+        self._data.hitl_summary_failures.pop(key, None)
         self.save()
 
     def set_hitl_summary_failure(self, issue_number: int, error: str) -> None:

@@ -26,7 +26,7 @@ class IssueStateMixin:
     def save(self) -> None: ...  # provided by CoreMixin
 
     @staticmethod
-    def _key(issue_id: int) -> str: ...  # provided by StateTracker
+    def _key(issue_id: int | str) -> str: ...  # provided by StateTracker
 
     @staticmethod
     def _int_keys(d: dict[str, _V]) -> dict[int, _V]: ...  # provided by StateTracker
@@ -230,3 +230,14 @@ class IssueStateMixin:
         """Persist the active crate number (or clear it with None)."""
         self._data.active_crate_number = number
         self.save()
+
+    # --- bead mappings ---
+
+    def set_bead_mapping(self, issue_id: int, mapping: dict[str, str]) -> None:
+        """Persist the phase→bead ID mapping for *issue_id*."""
+        self._data.bead_mappings[self._key(issue_id)] = mapping
+        self.save()
+
+    def get_bead_mapping(self, issue_id: int) -> dict[str, str]:
+        """Return the phase→bead ID mapping for *issue_id*, or empty dict."""
+        return self._data.bead_mappings.get(self._key(issue_id), {})

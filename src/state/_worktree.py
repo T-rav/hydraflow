@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, TypeVar
 
 _V = TypeVar("_V")
 
 if TYPE_CHECKING:
     from models import StateData
-
-logger = logging.getLogger("hydraflow.state")
 
 
 class WorktreeStateMixin:
@@ -21,7 +18,7 @@ class WorktreeStateMixin:
     def save(self) -> None: ...  # provided by CoreMixin
 
     @staticmethod
-    def _key(issue_id: int) -> str: ...  # provided by StateTracker
+    def _key(issue_id: int | str) -> str: ...  # provided by StateTracker
 
     @staticmethod
     def _int_keys(d: dict[str, _V]) -> dict[int, _V]: ...  # provided by StateTracker

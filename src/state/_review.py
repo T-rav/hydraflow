@@ -16,7 +16,7 @@ class ReviewStateMixin:
     def save(self) -> None: ...  # provided by CoreMixin
 
     @staticmethod
-    def _key(issue_id: int) -> str: ...  # provided by StateTracker
+    def _key(issue_id: int | str) -> str: ...  # provided by StateTracker
 
     # --- review attempt tracking ---
 
