@@ -1539,7 +1539,6 @@ class ControlStatusConfig(BaseModel):
     max_hitl_workers: int = 0
     batch_size: int = 0
     model: str = ""
-    memory_auto_approve: bool = False
     pr_unstick_batch_size: int = 10
     worktree_base: str = ""
 
