@@ -283,6 +283,29 @@ describe('Header renders main Start/Stop controls', () => {
 })
 
 
+describe('SystemAlertBanner', () => {
+  it('renders alert message without resume time when resume_at is absent', async () => {
+    mockState.systemAlert = { message: 'Something happened.', source: 'plan' }
+    const { default: App } = await import('../../App')
+    render(<App />)
+    expect(screen.getByText(/Something happened\./)).toBeInTheDocument()
+    expect(screen.queryByText(/Resumes at/)).toBeNull()
+    mockState.systemAlert = null
+  })
+
+  it('appends local resume time when resume_at is present', async () => {
+    mockState.systemAlert = {
+      message: 'Credit limit reached. Pausing all loops. Will resume automatically.',
+      source: 'plan',
+      resume_at: '2026-03-15T18:00:00+00:00',
+    }
+    const { default: App } = await import('../../App')
+    render(<App />)
+    expect(screen.getByText(/Resumes at/)).toBeInTheDocument()
+    mockState.systemAlert = null
+  })
+})
+
 describe('Pipeline sub-tab under System', () => {
   it('Pipeline is accessible as a sub-tab under System', async () => {
     const { default: App } = await import('../../App')
