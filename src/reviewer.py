@@ -621,16 +621,15 @@ Then a brief summary on the next line starting with "SUMMARY: ".
 
         manifest_section, memory_section = self._inject_manifest_and_memory()
 
-        # Runtime log injection (opt-in)
+        # Runtime log injection
         log_section = ""
-        if self._config.inject_runtime_logs:
-            from log_context import load_runtime_logs  # noqa: PLC0415
+        from log_context import load_runtime_logs  # noqa: PLC0415
 
-            logs = load_runtime_logs(self._config)
-            if logs:
-                log_section = f"\n\n## Recent Application Logs\n\n```\n{logs}\n```"
+        logs = load_runtime_logs(self._config)
+        if logs:
+            log_section = f"\n\n## Recent Application Logs\n\n```\n{logs}\n```"
 
-        # Code scanning alerts injection (opt-in)
+        # Code scanning alerts injection
         scanning_section = ""
         if code_scanning_alerts:
             formatted = self._format_code_scanning_alerts(
