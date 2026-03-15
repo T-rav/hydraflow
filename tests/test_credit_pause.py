@@ -479,6 +479,8 @@ class TestCreditExhaustionPauseResume:
         from datetime import datetime as _dt
 
         _dt.fromisoformat(credit_alerts[0].data["resume_at"])
+        # regression: UTC time must NOT be embedded in the message string (issue #2665)
+        assert "UTC" not in credit_alerts[0].data["message"]
 
     @pytest.mark.asyncio
     async def test_credit_exhaustion_pauses_and_resumes(
