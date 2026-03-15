@@ -164,7 +164,12 @@ class ADRCouncilReviewer:
         content: str,
         all_adrs: list[tuple[int, str, str, str]],
     ) -> list[tuple[int, str, float]]:
-        """Detect potential duplicates using title + Decision section similarity."""
+        """Detect potential duplicates using title + Decision section similarity.
+
+        Self-comparison is skipped by filename so that same-numbered ADRs
+        (e.g. collision files like 0023-foo.md and 0023-bar.md) are still
+        compared against each other rather than silently excluded.
+        """
         decision = self._extract_decision(content)
         title = self._extract_title(content)
 
