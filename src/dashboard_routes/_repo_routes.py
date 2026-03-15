@@ -650,8 +650,11 @@ def register_repo_routes(router: APIRouter, ctx: RouterContext) -> None:
                 {"error": "slug contains invalid characters"},
                 status_code=400,
             )
-        owner = m_owner.group(0)
-        repo_name = m_repo.group(0)
+        # os.path.basename() is recognised by CodeQL as a path-injection
+        # sanitiser (CWE-022) because it strips directory-separator characters,
+        # breaking the taint flow from raw user input.
+        owner = os.path.basename(m_owner.group(0))
+        repo_name = os.path.basename(m_repo.group(0))
         workspace_dir = Path(
             os.path.expanduser(str(ctx.config.repos_workspace_dir))
         ).resolve()
