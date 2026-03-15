@@ -2,6 +2,7 @@
 
 **Status:** Proposed
 **Date:** 2026-03-08
+**Revised:** 2026-03-15
 
 ## Context
 
@@ -37,9 +38,9 @@ eliminate the initialization asymmetry with `_run_headless()`:
    `RepoRuntimeRegistry` for multi-repo configs) and derive `event_bus`, `state`,
    and `orchestrator` from it, eliminating the duplicate bare-object construction.
 
-2. **Preserve single-repo backward compatibility**: The `_resolve_runtime()`
-   fallback in `dashboard_routes.py` already handles the `registry=None` case.
-   Single-repo deployments continue to work without any configuration change.
+Backward compatibility is preserved by existing code: the `_resolve_runtime()`
+fallback in `dashboard_routes.py` already handles the `registry=None` case, so
+single-repo deployments require no configuration change.
 
 ### Relationship to ADR-0009
 
@@ -48,9 +49,12 @@ spawns a separate subprocess per managed repository, each with its own `asyncio`
 event loop and full service registry. This ADR does **not** revive the in-process
 multi-repo coordination model proposed in ADR-0006 (now superseded).
 
-Within a single subprocess (one repo), the `RepoRuntimeRegistry` holds **exactly
-one** `RepoRuntime` instance. The registry exists at this level for API consistency:
-the `/api/runtimes` endpoints can introspect the local runtime without special-casing
+Within a single subprocess, ADR-0009's process-per-repo model means the subprocess
+manages exactly one repository. The `RepoRuntimeRegistry` is designed to hold
+multiple `RepoRuntime` instances by slug (its API exposes `register()`, `get()`,
+`remove()`, and `all()`), but in this deployment model only one slug is ever
+registered per process. The registry exists at this level for API consistency: the
+`/api/runtimes` endpoints can introspect the local runtime without special-casing
 the single-repo case. Cross-repo coordination remains the supervisor's responsibility
 via subprocess isolation and the TCP JSON protocol, per ADR-0009.
 
@@ -91,6 +95,14 @@ across the multi-repo deployment. They serve different architectural layers:
 - **Move multi-repo wiring entirely into `orchestrator.py`**: Would centralize
   logic but conflates orchestration (loop scheduling) with runtime lifecycle
   management, violating the current separation of concerns.
+
+## Open Questions
+
+- **Integration test coverage for registry lifecycle**: Multi-repo mode remains
+  opt-in and untested. Once the `_run_with_dashboard()` refactor lands, integration
+  tests should cover `RepoRuntimeRegistry` registration, runtime start/stop, and
+  the `/api/runtimes` endpoint surface under both single-registry and no-registry
+  configurations (tracked in ADR-0022).
 
 ## Related
 
