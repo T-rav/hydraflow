@@ -9,9 +9,9 @@ import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import ValidationError
 
@@ -35,6 +35,11 @@ from repo_runtime import RepoRuntime, RepoRuntimeRegistry
 from repo_store import RepoRecord, RepoStore
 
 logger = logging.getLogger("hydraflow.dashboard")
+
+# Shared type alias for the optional ``repo`` query-parameter used across route modules.
+RepoSlugParam = Annotated[
+    str | None, Query(description="Repo slug to scope the request")
+]
 
 
 class RouterContext:

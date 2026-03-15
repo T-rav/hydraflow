@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, timedelta
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from admin_tasks import run_clean, run_ensure_labels, run_prep, run_scaffold
 from app_version import get_app_version
 from config import HydraFlowConfig, save_config_file
+from dashboard_routes._context import RepoSlugParam
 from events import EventType, HydraFlowEvent
 from models import (
     BackgroundWorkersResponse,
@@ -32,10 +33,6 @@ if TYPE_CHECKING:
     from models import BackgroundWorkerState
 
 logger = logging.getLogger("hydraflow.dashboard")
-
-RepoSlugParam = Annotated[
-    str | None, Query(description="Repo slug to scope the request")
-]
 
 # ---------------------------------------------------------------------------
 # Module-level constants
@@ -61,11 +58,9 @@ _MUTABLE_FIELDS = {
     "poll_interval",
     "pr_unstick_interval",
     "pr_unstick_batch_size",
-    "memory_auto_approve",
     "unstick_auto_merge",
     "unstick_all_causes",
     "worktree_base",
-    "auto_crate",
 }
 
 _bg_worker_defs = [
@@ -297,7 +292,6 @@ def register_control_routes(router: APIRouter, ctx: RouterContext) -> None:
                 max_hitl_workers=_cfg.max_hitl_workers,
                 batch_size=_cfg.batch_size,
                 model=_cfg.model,
-                memory_auto_approve=_cfg.memory_auto_approve,
                 pr_unstick_batch_size=_cfg.pr_unstick_batch_size,
                 worktree_base=str(_cfg.worktree_base),
             ),

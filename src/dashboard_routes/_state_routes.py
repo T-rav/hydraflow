@@ -303,7 +303,6 @@ def register_state_routes(router: APIRouter, ctx: RouterContext) -> None:
             "open_issues": 0,
             "closed_issues": 0,
             "total_issues": 0,
-            "auto_crate": ctx.config.auto_crate,
         }
         if active_number is not None and orch is not None:
             try:

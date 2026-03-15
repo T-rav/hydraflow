@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
+from dashboard_routes._context import RepoSlugParam
 from events import EventType, HydraFlowEvent
 from models import (
     HITLCloseRequest,
@@ -21,10 +22,6 @@ if TYPE_CHECKING:
     from dashboard_routes._context import RouterContext
 
 logger = logging.getLogger("hydraflow.dashboard")
-
-RepoSlugParam = Annotated[
-    str | None, Query(description="Repo slug to scope the request")
-]
 
 
 def register_hitl_routes(router: APIRouter, ctx: RouterContext) -> None:
@@ -82,8 +79,6 @@ def register_hitl_routes(router: APIRouter, ctx: RouterContext) -> None:
                     ctx.warm_hitl_summary(item.issue, cause=cause or "", origin=origin)
                 )
             enriched.append(data)
-        if ctx.config.memory_auto_approve:
-            enriched = [d for d in enriched if not d.get("isMemorySuggestion")]
         return JSONResponse(enriched)
 
     @router.get("/api/hitl/{issue_number}/summary")

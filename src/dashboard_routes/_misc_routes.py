@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import TYPE_CHECKING, Literal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
+from dashboard_routes._context import RepoSlugParam
 from models import (
     IntentRequest,
     IntentResponse,
@@ -24,10 +25,6 @@ if TYPE_CHECKING:
     from dashboard_routes._context import RouterContext
 
 logger = logging.getLogger("hydraflow.dashboard")
-
-RepoSlugParam = Annotated[
-    str | None, Query(description="Repo slug to scope the request")
-]
 
 
 def register_misc_routes(router: APIRouter, ctx: RouterContext) -> None:
