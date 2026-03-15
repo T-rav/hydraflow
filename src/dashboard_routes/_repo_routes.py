@@ -650,20 +650,24 @@ def register_repo_routes(router: APIRouter, ctx: RouterContext) -> None:
                 {"error": "slug contains invalid characters"},
                 status_code=400,
             )
-        # os.path.basename() is recognised by CodeQL as a path-injection
-        # sanitiser (CWE-022) because it strips directory-separator characters,
-        # breaking the taint flow from raw user input.
+        # Sanitise components: os.path.basename() strips directory
+        # separators and os.path.realpath()+startswith() is the canonical
+        # CodeQL-recognised barrier for CWE-022 path injection.
         owner = os.path.basename(m_owner.group(0))
         repo_name = os.path.basename(m_repo.group(0))
-        workspace_dir = Path(
+        workspace_str = os.path.realpath(
             os.path.expanduser(str(ctx.config.repos_workspace_dir))
-        ).resolve()
-        clone_target = (workspace_dir / owner / repo_name).resolve()
-        if not clone_target.is_relative_to(workspace_dir):
+        )
+        clone_target_str = os.path.realpath(
+            os.path.join(workspace_str, owner, repo_name)
+        )
+        if not clone_target_str.startswith(workspace_str + os.sep):
             return JSONResponse(
                 {"error": "slug contains invalid characters"},
                 status_code=400,
             )
+        workspace_dir = Path(workspace_str)
+        clone_target = Path(clone_target_str)
         # Reconstruct slug from sanitised components
         slug = f"{owner}/{repo_name}"
         already_cloned = clone_target.is_dir() and (clone_target / ".git").is_dir()
