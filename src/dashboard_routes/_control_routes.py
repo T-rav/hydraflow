@@ -29,7 +29,7 @@ from update_check import load_cached_update_result
 
 if TYPE_CHECKING:
     from dashboard_routes._context import RouterContext
-    from state import BackgroundWorkerState
+    from models import BackgroundWorkerState
 
 logger = logging.getLogger("hydraflow.dashboard")
 
