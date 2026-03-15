@@ -6,7 +6,7 @@ import asyncio
 import contextlib
 import itertools
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
@@ -92,11 +92,9 @@ _T = TypeVar("_T")
 
 #: The type used for ``HydraFlowEvent.data``.
 #:
-#: Pyright treats ``TypedDict`` as incompatible with ``dict[str, Any]``,
-#: so ``EventData`` must be ``Any`` to accept typed payload classes defined
-#: in ``models.py``.  Type safety at the *consumer* side comes from
-#: :meth:`HydraFlowEvent.typed_data`.
-EventData = Any
+#: All event payloads are plain dicts at runtime — either dict literals
+#: matching a ``TypedDict`` schema or the result of ``BaseModel.model_dump()``.
+EventData = Mapping[str, Any]
 
 
 class HydraFlowEvent(BaseModel):
@@ -117,6 +115,7 @@ class HydraFlowEvent(BaseModel):
         cast at runtime — no validation is performed — but gives the caller
         full type-checker support for the returned dict keys.
         """
+        _ = cls  # used only for type inference
         return cast(_T, self.data)
 
 

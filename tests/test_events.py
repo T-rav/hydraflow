@@ -153,6 +153,56 @@ class TestHydraFlowEvent:
 
 
 # ---------------------------------------------------------------------------
+# EventData type constraint
+# ---------------------------------------------------------------------------
+
+
+class TestEventDataType:
+    """EventData must reject non-dict payloads at the Pydantic level."""
+
+    def test_rejects_string_payload(self) -> None:
+        with pytest.raises(Exception):  # noqa: B017
+            HydraFlowEvent(type=EventType.ERROR, data="bad")  # type: ignore[arg-type]
+
+    def test_rejects_list_payload(self) -> None:
+        with pytest.raises(Exception):  # noqa: B017
+            HydraFlowEvent(type=EventType.ERROR, data=[1, 2])  # type: ignore[arg-type]
+
+    def test_rejects_int_payload(self) -> None:
+        with pytest.raises(Exception):  # noqa: B017
+            HydraFlowEvent(type=EventType.ERROR, data=42)  # type: ignore[arg-type]
+
+    def test_accepts_dict_payload(self) -> None:
+        event = HydraFlowEvent(type=EventType.ERROR, data={"msg": "oops"})
+        assert event.data == {"msg": "oops"}
+
+    def test_accepts_empty_dict_payload(self) -> None:
+        event = HydraFlowEvent(type=EventType.ERROR, data={})
+        assert event.data == {}
+
+
+# ---------------------------------------------------------------------------
+# typed_data
+# ---------------------------------------------------------------------------
+
+
+class TestTypedData:
+    def test_typed_data_returns_data_dict(self) -> None:
+        event = HydraFlowEvent(
+            type=EventType.WORKER_UPDATE,
+            data={"issue_number": 1, "status": "active"},
+        )
+        result = event.typed_data(dict)
+        assert result == {"issue_number": 1, "status": "active"}
+
+    def test_typed_data_preserves_nested_values(self) -> None:
+        payload = {"issue_number": 42, "nested": {"key": "value"}}
+        event = HydraFlowEvent(type=EventType.PHASE_CHANGE, data=payload)
+        result = event.typed_data(dict)
+        assert result["nested"]["key"] == "value"
+
+
+# ---------------------------------------------------------------------------
 # HydraFlowEvent ID
 # ---------------------------------------------------------------------------
 
