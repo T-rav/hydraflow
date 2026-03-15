@@ -961,14 +961,21 @@ class TestSupervisorStubsRemoved:
 
         assert not hasattr(dashboard_routes, "_find_repo_match")
 
-    def test_ensure_repo_returns_503_unconditionally(
+    @pytest.mark.asyncio
+    async def test_ensure_repo_returns_503_unconditionally(
         self, config, event_bus, state, tmp_path
     ) -> None:
         """POST /api/repos always returns 503 since supervisor was removed."""
+        import json
 
         router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
         endpoint = find_endpoint(router, "/api/repos", method="POST")
         assert endpoint is not None
+
+        resp = await endpoint()
+        data = json.loads(resp.body)
+        assert resp.status_code == 503
+        assert data["error"] == "supervisor unavailable"
 
     @pytest.mark.asyncio
     async def test_remove_repo_returns_503_without_callback(
@@ -985,11 +992,6 @@ class TestSupervisorStubsRemoved:
         data = json.loads(resp.body)
         assert resp.status_code == 503
         assert data["error"] == "supervisor unavailable"
-
-
-# ---------------------------------------------------------------------------
-# GET /api/sessions and /api/sessions/{session_id}
-# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------

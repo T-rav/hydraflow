@@ -3692,7 +3692,7 @@ def create_router(
                     {"error": f"Clone failed: {msg}"},
                     status_code=502,
                 )
-        # Register with the callback or supervisor
+        # Register with the callback
         if register_repo_cb is not None:
             try:
                 record, repo_cfg = await register_repo_cb(clone_target, slug)
