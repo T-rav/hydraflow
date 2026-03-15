@@ -137,6 +137,42 @@ class TestAccessorMethodsUseHelpers:
         tracker.remove_hitl_cause(8)
         assert tracker.get_hitl_cause(8) is None
 
+    def test_upsert_epic_state_uses_string_key(self, tmp_path: Path) -> None:
+        from models import EpicState  # noqa: PLC0415
+
+        tracker = make_tracker(tmp_path)
+        tracker.upsert_epic_state(EpicState(epic_number=55, child_issues=[1, 2]))
+        raw = tracker.to_dict()
+        assert "55" in raw["epic_states"]
+        assert 55 not in raw["epic_states"]
+
+    def test_get_epic_state_roundtrip(self, tmp_path: Path) -> None:
+        from models import EpicState  # noqa: PLC0415
+
+        tracker = make_tracker(tmp_path)
+        tracker.upsert_epic_state(EpicState(epic_number=77, child_issues=[3]))
+        result = tracker.get_epic_state(77)
+        assert result is not None
+        assert result.child_issues == [3]
+
+    def test_upsert_release_uses_string_key(self, tmp_path: Path) -> None:
+        from models import Release  # noqa: PLC0415
+
+        tracker = make_tracker(tmp_path)
+        tracker.upsert_release(Release(epic_number=33, version="1.0.0"))
+        raw = tracker.to_dict()
+        assert "33" in raw["releases"]
+        assert 33 not in raw["releases"]
+
+    def test_get_release_roundtrip(self, tmp_path: Path) -> None:
+        from models import Release  # noqa: PLC0415
+
+        tracker = make_tracker(tmp_path)
+        tracker.upsert_release(Release(epic_number=11, version="2.0.0", tag="v2"))
+        result = tracker.get_release(11)
+        assert result is not None
+        assert result.tag == "v2"
+
     def test_review_attempts_roundtrip(self, tmp_path: Path) -> None:
         tracker = make_tracker(tmp_path)
         assert tracker.get_review_attempts(3) == 0
@@ -197,6 +233,8 @@ class TestStateRoundtrip:
 
     def test_full_roundtrip(self, tmp_path: Path) -> None:
         """Save state with multiple int-keyed fields, reload, and verify."""
+        from models import EpicState, Release  # noqa: PLC0415
+
         tracker = make_tracker(tmp_path)
 
         # Populate various int-keyed fields
@@ -213,6 +251,8 @@ class TestStateRoundtrip:
         tracker.set_interrupted_issues({10: "review"})
         tracker.set_last_reviewed_sha(11, "deadbeef")
         tracker.set_review_feedback(12, "looks good")
+        tracker.upsert_epic_state(EpicState(epic_number=13, child_issues=[1, 2]))
+        tracker.upsert_release(Release(epic_number=14, version="1.0.0"))
 
         # Reload from disk
         tracker2 = StateTracker(tmp_path / "state.json")
@@ -230,6 +270,10 @@ class TestStateRoundtrip:
         assert tracker2.get_interrupted_issues() == {10: "review"}
         assert tracker2.get_last_reviewed_sha(11) == "deadbeef"
         assert tracker2.get_review_feedback(12) == "looks good"
+        epic = tracker2.get_epic_state(13)
+        assert epic is not None and epic.child_issues == [1, 2]
+        release = tracker2.get_release(14)
+        assert release is not None and release.version == "1.0.0"
 
     def test_json_uses_string_keys(self, tmp_path: Path) -> None:
         """Verify the persisted JSON file uses string keys (backwards compat)."""
