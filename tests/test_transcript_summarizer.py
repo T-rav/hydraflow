@@ -428,24 +428,3 @@ class TestSummarizeAndComment:
 
 
 # --- TranscriptSummarizer.summarize_and_publish tests ---
-
-
-class TestSummarizeAndPublish:
-    """Tests for issue-based transcript summaries (legacy path, now always off)."""
-
-    @pytest.mark.asyncio
-    async def test_noop_by_default(self, tmp_path: Path) -> None:
-        """Default config returns None immediately (feature removed)."""
-        config = ConfigFactory.create(repo_root=tmp_path)
-        prs = MagicMock()
-        prs.create_issue = AsyncMock()
-        bus = MagicMock()
-        state = MagicMock()
-
-        summarizer = TranscriptSummarizer(config, prs, bus, state)
-        result = await summarizer.summarize_and_publish(
-            transcript="x" * 1000, issue_number=42, phase="implement"
-        )
-
-        assert result is None
-        prs.create_issue.assert_not_called()
