@@ -299,6 +299,61 @@ class WorkerResultFactory:
         )
 
 
+class WorkerResultBuilder:
+    """Fluent builder for WorkerResult instances."""
+
+    def __init__(self) -> None:
+        self._kwargs: dict[str, Any] = {}
+
+    def with_issue_number(self, value: int) -> WorkerResultBuilder:
+        self._kwargs["issue_number"] = value
+        return self
+
+    def with_branch(self, value: str) -> WorkerResultBuilder:
+        self._kwargs["branch"] = value
+        return self
+
+    def with_success(self, value: bool) -> WorkerResultBuilder:
+        self._kwargs["success"] = value
+        return self
+
+    def with_transcript(self, value: str) -> WorkerResultBuilder:
+        self._kwargs["transcript"] = value
+        return self
+
+    def with_commits(self, value: int) -> WorkerResultBuilder:
+        self._kwargs["commits"] = value
+        return self
+
+    def with_worktree_path(self, value: str) -> WorkerResultBuilder:
+        self._kwargs["worktree_path"] = value
+        return self
+
+    def with_error(self, value: str) -> WorkerResultBuilder:
+        self._kwargs["error"] = value
+        return self
+
+    def with_duration_seconds(self, value: float) -> WorkerResultBuilder:
+        self._kwargs["duration_seconds"] = value
+        return self
+
+    def with_pre_quality_review_attempts(self, value: int) -> WorkerResultBuilder:
+        self._kwargs["pre_quality_review_attempts"] = value
+        return self
+
+    def with_quality_fix_attempts(self, value: int) -> WorkerResultBuilder:
+        self._kwargs["quality_fix_attempts"] = value
+        return self
+
+    def with_pr_info(self, value: PRInfo) -> WorkerResultBuilder:
+        self._kwargs["pr_info"] = value
+        return self
+
+    def build(self):
+        """Build the WorkerResult using the factory."""
+        return WorkerResultFactory.create(**self._kwargs)
+
+
 # --- Plan Result Factory ---
 
 
@@ -415,6 +470,73 @@ class PlanResultFactory:
         )
 
 
+class PlanResultBuilder:
+    """Fluent builder for PlanResult instances."""
+
+    def __init__(self) -> None:
+        self._kwargs: dict[str, Any] = {}
+
+    def with_issue_number(self, value: int) -> PlanResultBuilder:
+        self._kwargs["issue_number"] = value
+        return self
+
+    def with_success(self, value: bool) -> PlanResultBuilder:
+        self._kwargs["success"] = value
+        return self
+
+    def with_plan(self, value: str) -> PlanResultBuilder:
+        self._kwargs["plan"] = value
+        return self
+
+    def with_summary(self, value: str) -> PlanResultBuilder:
+        self._kwargs["summary"] = value
+        return self
+
+    def with_error(self, value: str) -> PlanResultBuilder:
+        self._kwargs["error"] = value
+        return self
+
+    def with_transcript(self, value: str) -> PlanResultBuilder:
+        self._kwargs["transcript"] = value
+        return self
+
+    def with_duration_seconds(self, value: float) -> PlanResultBuilder:
+        self._kwargs["duration_seconds"] = value
+        return self
+
+    def with_new_issues(self, value: list[NewIssueSpec]) -> PlanResultBuilder:
+        self._kwargs["new_issues"] = value
+        return self
+
+    def with_validation_errors(self, value: list[str]) -> PlanResultBuilder:
+        self._kwargs["validation_errors"] = value
+        return self
+
+    def with_retry_attempted(self, value: bool) -> PlanResultBuilder:
+        self._kwargs["retry_attempted"] = value
+        return self
+
+    def with_already_satisfied(self, value: bool) -> PlanResultBuilder:
+        self._kwargs["already_satisfied"] = value
+        return self
+
+    def with_actionability_score(self, value: int) -> PlanResultBuilder:
+        self._kwargs["actionability_score"] = value
+        return self
+
+    def with_actionability_rank(self, value: str) -> PlanResultBuilder:
+        self._kwargs["actionability_rank"] = value
+        return self
+
+    def with_epic_number(self, value: int) -> PlanResultBuilder:
+        self._kwargs["epic_number"] = value
+        return self
+
+    def build(self):
+        """Build the PlanResult using the factory."""
+        return PlanResultFactory.create(**self._kwargs)
+
+
 # --- PR Info Factory ---
 
 
@@ -476,6 +598,57 @@ class ReviewResultFactory:
             ci_passed=ci_passed,
             ci_fix_attempts=ci_fix_attempts,
         )
+
+
+class ReviewResultBuilder:
+    """Fluent builder for ReviewResult instances."""
+
+    def __init__(self) -> None:
+        self._kwargs: dict[str, Any] = {}
+
+    def with_pr_number(self, value: int) -> ReviewResultBuilder:
+        self._kwargs["pr_number"] = value
+        return self
+
+    def with_issue_number(self, value: int) -> ReviewResultBuilder:
+        self._kwargs["issue_number"] = value
+        return self
+
+    def with_verdict(self, value: ReviewVerdict) -> ReviewResultBuilder:
+        self._kwargs["verdict"] = value
+        return self
+
+    def with_summary(self, value: str) -> ReviewResultBuilder:
+        self._kwargs["summary"] = value
+        return self
+
+    def with_fixes_made(self, value: bool) -> ReviewResultBuilder:
+        self._kwargs["fixes_made"] = value
+        return self
+
+    def with_transcript(self, value: str) -> ReviewResultBuilder:
+        self._kwargs["transcript"] = value
+        return self
+
+    def with_merged(self, value: bool) -> ReviewResultBuilder:
+        self._kwargs["merged"] = value
+        return self
+
+    def with_duration_seconds(self, value: float) -> ReviewResultBuilder:
+        self._kwargs["duration_seconds"] = value
+        return self
+
+    def with_ci_passed(self, value: bool) -> ReviewResultBuilder:
+        self._kwargs["ci_passed"] = value
+        return self
+
+    def with_ci_fix_attempts(self, value: int) -> ReviewResultBuilder:
+        self._kwargs["ci_fix_attempts"] = value
+        return self
+
+    def build(self) -> ReviewResult:
+        """Build the ReviewResult using the factory."""
+        return ReviewResultFactory.create(**self._kwargs)
 
 
 # --- HITL Result Factory ---
