@@ -77,7 +77,7 @@ class TestPromptBudgetDefaults:
 
 
 class TestPromptBudgetOverrides:
-    """Overridden config values are used by runner classes."""
+    """All 12 prompt budget config fields accept non-default values."""
 
     def test_custom_values_accepted(self, tmp_path: Path) -> None:
         """All 12 fields accept non-default values via constructor."""
@@ -407,3 +407,51 @@ class TestVerificationMaxInstructions:
 
         assert instructions in body
         assert "truncated" not in body
+
+
+# ---------------------------------------------------------------------------
+# PRUnsticker uses config values
+# ---------------------------------------------------------------------------
+
+
+class TestPRUnstickerUsesConfig:
+    """PRUnsticker reads truncation limits from config."""
+
+    def test_ci_fix_prompt_truncates_cause_per_config(self, tmp_path: Path) -> None:
+        """_build_ci_fix_prompt truncates cause per max_unsticker_cause_chars."""
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock
+
+        from pr_unsticker import PRUnsticker
+        from tests.conftest import IssueFactory, make_state
+
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path / "repo",
+            worktree_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+            max_unsticker_cause_chars=100,
+        )
+        bus = AsyncMock()
+        bus.publish = AsyncMock()
+        rs = AsyncMock()
+        rs.save_conflict_transcript = MagicMock()
+        unsticker = PRUnsticker(
+            cfg,
+            make_state(tmp_path),
+            bus,
+            AsyncMock(),
+            AsyncMock(),
+            AsyncMock(),
+            AsyncMock(),
+            stop_event=asyncio.Event(),
+            resolver=rs,
+        )
+        issue = IssueFactory.create(number=99, title="Fix stale PR")
+        long_cause = "CI failure: " + "X" * 500
+
+        prompt, _ = unsticker._build_ci_fix_prompt(
+            issue, "https://github.com/repo/pull/1", long_cause
+        )
+
+        # Full 500+ char cause should not appear verbatim
+        assert "X" * 500 not in prompt
