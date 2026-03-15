@@ -1359,10 +1359,7 @@ class HydraFlowOrchestrator:
             )
 
             data: SystemAlertPayload = {
-                "message": (
-                    "Credit limit reached. Pausing all loops. "
-                    "Will resume automatically."
-                ),
+                "message": "Credit limit reached. Pausing all loops.",
                 "source": source,
                 "resume_at": resume_at.isoformat(),
             }

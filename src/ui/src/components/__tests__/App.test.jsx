@@ -298,7 +298,7 @@ describe('SystemAlertBanner', () => {
     const now = new Date()
     now.setHours(23, 59, 0, 0)
     mockState.systemAlert = {
-      message: 'Credit limit reached. Pausing all loops. Will resume automatically.',
+      message: 'Credit limit reached. Pausing all loops.',
       source: 'plan',
       resume_at: now.toISOString(),
     }
