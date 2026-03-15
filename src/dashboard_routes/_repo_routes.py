@@ -7,7 +7,7 @@ import contextlib
 import json
 import logging
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Body, Query
@@ -429,7 +429,10 @@ def register_repo_routes(router: APIRouter, ctx: RouterContext) -> None:
             try:
                 record, repo_cfg = await ctx.register_repo_cb(repo_path, slug)
             except ValueError as exc:
-                return JSONResponse({"error": str(exc)}, status_code=400)
+                logger.warning("register_repo validation failed: %s", exc)
+                return JSONResponse(
+                    {"error": "Invalid repository configuration"}, status_code=400
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("register_repo callback failed: %s", exc)
                 return JSONResponse(
@@ -631,10 +634,15 @@ def register_repo_routes(router: APIRouter, ctx: RouterContext) -> None:
                 {"error": "slug required in owner/repo format"},
                 status_code=400,
             )
-        # Validate path components to prevent directory traversal
+        # Validate path components to prevent directory traversal.
+        # Use re.fullmatch + .group(0) — CodeQL recognises a regex match
+        # object's .group() as a path-injection sanitiser, breaking the
+        # taint flow from raw user input.
+        m_owner = _SAFE_SLUG_COMPONENT.fullmatch(raw_owner)
+        m_repo = _SAFE_SLUG_COMPONENT.fullmatch(raw_repo)
         if (
-            not _SAFE_SLUG_COMPONENT.match(raw_owner)
-            or not _SAFE_SLUG_COMPONENT.match(raw_repo)
+            not m_owner
+            or not m_repo
             or set(raw_owner) <= {"."}
             or set(raw_repo) <= {"."}
         ):
@@ -642,16 +650,8 @@ def register_repo_routes(router: APIRouter, ctx: RouterContext) -> None:
                 {"error": "slug contains invalid characters"},
                 status_code=400,
             )
-        # Sanitise: extract only the final path component to break any
-        # traversal sequences.  PurePosixPath.name is recognised by
-        # CodeQL as a path-injection sanitiser.
-        owner = PurePosixPath(raw_owner).name
-        repo_name = PurePosixPath(raw_repo).name
-        if not owner or not repo_name:
-            return JSONResponse(
-                {"error": "slug contains invalid characters"},
-                status_code=400,
-            )
+        owner = m_owner.group(0)
+        repo_name = m_repo.group(0)
         workspace_dir = Path(
             os.path.expanduser(str(ctx.config.repos_workspace_dir))
         ).resolve()

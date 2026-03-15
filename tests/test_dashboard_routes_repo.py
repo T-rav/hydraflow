@@ -1215,7 +1215,7 @@ class TestAddRepoByPathWithCallback:
 
         data = json.loads(resp.body)
         assert resp.status_code == 400
-        assert "already registered" in data["error"]
+        assert data["error"] == "Invalid repository configuration"
 
 
 # ---------------------------------------------------------------------------
