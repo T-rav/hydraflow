@@ -430,10 +430,6 @@ class HydraFlowConfig(BaseModel):
         le=5,
         description="Max gap review + re-plan iterations (0 disables gap review)",
     )
-    epic_auto_decompose: bool = Field(
-        default=False,
-        description="Auto-decompose large issues into epics during triage",
-    )
     epic_decompose_complexity_threshold: int = Field(
         default=8,
         ge=1,
