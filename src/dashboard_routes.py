@@ -812,6 +812,7 @@ def create_router(
         return ctx.pr_manager_for(cfg, bus)
 
     def _list_repo_records() -> list[RepoRecord]:
+        """Return repo records from the callback or store, with error fallback."""
         return ctx.list_repo_records()
 
     # Supervisor client/manager removed with hf_cli package (issue #2205).
@@ -1325,6 +1326,7 @@ def create_router(
         return "\n".join(lines[:8]).strip()
 
     def _hitl_summary_retry_due(issue_number: int) -> bool:
+        """Return True if enough time has passed to retry a failed HITL summary."""
         return ctx.hitl_summary_retry_due(issue_number)
 
     async def _compute_hitl_summary(
