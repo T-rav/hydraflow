@@ -385,6 +385,40 @@ describe('WS_PIPELINE_UPDATE reducer', () => {
     })
     expect(next.pipelineIssues.merged).toHaveLength(1)
   })
+
+  it('updates triage item to failed status without moving stages', () => {
+    const state = {
+      ...initialState,
+      pipelineIssues: {
+        ...emptyPipeline,
+        triage: [{ issue_number: 20, title: 'Triage Fail', url: '', status: 'active' }],
+      },
+    }
+    const next = reducer(state, {
+      type: 'WS_PIPELINE_UPDATE',
+      data: { issueNumber: 20, fromStage: null, toStage: null, status: 'failed' },
+    })
+    expect(next.pipelineIssues.triage).toHaveLength(1)
+    expect(next.pipelineIssues.triage[0].status).toBe('failed')
+    expect(next.pipelineIssues.plan).toHaveLength(0)
+  })
+
+  it('updates plan item to failed status without moving stages', () => {
+    const state = {
+      ...initialState,
+      pipelineIssues: {
+        ...emptyPipeline,
+        plan: [{ issue_number: 21, title: 'Plan Fail', url: '', status: 'active' }],
+      },
+    }
+    const next = reducer(state, {
+      type: 'WS_PIPELINE_UPDATE',
+      data: { issueNumber: 21, fromStage: null, toStage: null, status: 'failed' },
+    })
+    expect(next.pipelineIssues.plan).toHaveLength(1)
+    expect(next.pipelineIssues.plan[0].status).toBe('failed')
+    expect(next.pipelineIssues.implement).toHaveLength(0)
+  })
 })
 
 describe('Merged state persistence', () => {

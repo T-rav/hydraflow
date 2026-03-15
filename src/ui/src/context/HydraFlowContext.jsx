@@ -1387,10 +1387,14 @@ export function HydraFlowProvider({ children }) {
         if (issueNum != null) {
           if (event.type === 'triage_update' && event.data?.status === 'done') {
             dispatch({ type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: 'triage', toStage: 'plan', status: 'queued' } })
+          } else if (event.type === 'triage_update' && event.data?.status === 'failed') {
+            dispatch({ type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: null, toStage: null, status: 'failed' } })
           } else if (event.type === 'triage_update' && event.data?.status && event.data.status !== 'done') {
             dispatch({ type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: null, toStage: null, status: 'active' } })
           } else if (event.type === 'planner_update' && event.data?.status === 'done') {
             dispatch({ type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: 'plan', toStage: 'implement', status: 'queued' } })
+          } else if (event.type === 'planner_update' && event.data?.status === 'failed') {
+            dispatch({ type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: null, toStage: null, status: 'failed' } })
           } else if (event.type === 'planner_update' && event.data?.status && event.data.status !== 'done') {
             dispatch({ type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: null, toStage: null, status: 'active' } })
           } else if (event.type === 'worker_update' && event.data?.status === 'done') {
