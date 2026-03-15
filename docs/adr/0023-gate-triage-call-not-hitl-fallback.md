@@ -1,6 +1,6 @@
 # ADR-0023: Gate Triage Call on Config Toggle, Not Just HITL Fallback
 
-**Status:** Proposed
+**Status:** Superseded
 **Date:** 2026-03-08
 
 ## Context
@@ -110,8 +110,9 @@ When reviewing any routing method that calls both `_route_to_triage` and
 
 ## Related
 
+- Note: The `adr_review_auto_triage` toggle was removed in PR #2689, making this ADR a historical record of a resolved design concern. ADR-0023 (Auto-Triage Toggle Must Gate Routing) is superseded by this ADR as a duplicate covering the same core pattern.
 - Source memory: #2345
 - Issue: #2355
 - Related learning: #2346, #2350
 - `src/adr_reviewer.py` — `_route_result`, `_route_to_triage`, `_escalate_to_hitl`
-- `src/config.py` — `HydraFlowConfig` (toggle definition)
+- `src/config.py` — `HydraFlowConfig` (toggle definition, removed)
