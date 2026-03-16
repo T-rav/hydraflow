@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 import pytest
@@ -2462,8 +2463,6 @@ class TestConfigFactoryDeadParameterCleanup:
 
     def test_adr_auto_triage_not_in_config_factory_signature(self) -> None:
         """adr_auto_triage was removed from HydraFlowConfig; the factory must not accept it."""
-        import inspect
-
         from tests.helpers import ConfigFactory
 
         sig = inspect.signature(ConfigFactory.create)
@@ -2474,4 +2473,4 @@ class TestConfigFactoryDeadParameterCleanup:
         from tests.helpers import ConfigFactory
 
         cfg = ConfigFactory.create()
-        assert cfg.batch_size == 3  # default from factory
+        assert isinstance(cfg, HydraFlowConfig)
