@@ -108,5 +108,5 @@ Adopt the following rule for config-gated routing in HydraFlow workers:
 - Superseded by: [ADR-0023 (gate-triage-call-not-hitl-fallback)](0023-gate-triage-call-not-hitl-fallback.md)
 - Source memory: #2327
 - Source issue: #2341
-- `src/adr_reviewer.py` — `_triage_or_hitl()`, `_route_to_triage()`, `_handle_pre_review_failure()`, `_handle_duplicate()`
+- `src/adr_reviewer.py` — `_execute_triage_or_hitl()`, `_route_to_triage()`, `_handle_duplicate()`
 - `src/config.py` — `adr_auto_triage` toggle definition

@@ -126,5 +126,5 @@ When reviewing any routing method that calls both `_route_to_triage` and
 - Source memory: #2345
 - Issue: #2355
 - Related learning: #2346, #2350
-- `src/adr_reviewer.py` — `_route_result`, `_execute_triage_or_hitl`, `_route_to_triage`, `_escalate_to_hitl`, `_handle_pre_review_failure`
+- `src/adr_reviewer.py` — `_route_result`, `_execute_triage_or_hitl`, `_route_to_triage`, `_escalate_to_hitl`, `_handle_duplicate`
 - `src/config.py` — `HydraFlowConfig` (toggle definition)
