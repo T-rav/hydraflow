@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agent_cli import build_lightweight_command
-from models import ConflictResolutionResult, HITLUpdatePayload
+from models import ConflictResolutionResult, HITLUpdatePayload, PRInfo
 from phase_utils import MemorySuggester
 from prompt_stats import build_prompt_stats, truncate_with_notice
 
@@ -49,7 +49,6 @@ _CI_TIMEOUT_KEYWORDS = ("timeout", "timed out")
 
 # Keywords for review fix cap exceeded
 _REVIEW_CAP_KEYWORDS = ("review fix", "fix attempt", "fix cap", "review cap")
-_MAX_UNSTICKER_CAUSE_CHARS = 3000
 
 
 class FailureCause(StrEnum):
@@ -370,8 +369,6 @@ class PRUnsticker:
                     issue_number,
                 )
                 return ConflictResolutionResult(success=False, used_rebuild=False)
-            from models import PRInfo
-
             pr = PRInfo(
                 number=pr_number,
                 issue_number=issue_number,
@@ -495,7 +492,9 @@ class PRUnsticker:
     ) -> tuple[str, dict[str, object]]:
         """Build a targeted prompt for CI/quality fix and pruning stats."""
         cause_text, cause_before, cause_after = truncate_with_notice(
-            cause or "", _MAX_UNSTICKER_CAUSE_CHARS, label="Escalation reason"
+            cause or "",
+            self._config.max_unsticker_cause_chars,
+            label="Escalation reason",
         )
         prompt = f"""You are fixing CI/quality failures for a pull request.
 
@@ -845,10 +844,14 @@ If nothing novel, output exactly: NO_NEW_PATTERN"""
     ) -> tuple[str, dict[str, object]]:
         """Build a targeted prompt for fixing hanging tests."""
         cause_text, cause_before, cause_after = truncate_with_notice(
-            cause or "", _MAX_UNSTICKER_CAUSE_CHARS, label="Escalation reason"
+            cause or "",
+            self._config.max_unsticker_cause_chars,
+            label="Escalation reason",
         )
         isolation_text, iso_before, iso_after = truncate_with_notice(
-            isolation_output or "", _MAX_UNSTICKER_CAUSE_CHARS, label="Test isolation"
+            isolation_output or "",
+            self._config.max_unsticker_cause_chars,
+            label="Test isolation",
         )
 
         learned_block = (

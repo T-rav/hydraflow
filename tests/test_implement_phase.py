@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from collections.abc import Generator
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -25,6 +26,9 @@ from tests.conftest import (
     TaskFactory,
     WorkerResultFactory,
 )
+
+# NOTE: WorkerResult is still imported for use in inline agent callbacks
+# that construct results dynamically from function parameters.
 from tests.helpers import ImplementPhaseMockBuilder, make_implement_phase
 
 # ---------------------------------------------------------------------------
@@ -643,7 +647,7 @@ class TestImplementLifecycleMetrics:
             review_feedback: str = "",
             prior_failure: str = "",
         ) -> WorkerResult:
-            return WorkerResult(
+            return WorkerResultFactory.create(
                 issue_number=issue.id,
                 branch=branch,
                 success=True,
@@ -672,7 +676,7 @@ class TestImplementLifecycleMetrics:
             review_feedback: str = "",
             prior_failure: str = "",
         ) -> WorkerResult:
-            return WorkerResult(
+            return WorkerResultFactory.create(
                 issue_number=issue.id,
                 branch=branch,
                 success=True,
@@ -701,7 +705,7 @@ class TestImplementLifecycleMetrics:
             review_feedback: str = "",
             prior_failure: str = "",
         ) -> WorkerResult:
-            return WorkerResult(
+            return WorkerResultFactory.create(
                 issue_number=issue.id,
                 branch=branch,
                 success=True,
@@ -743,7 +747,7 @@ class TestImplementLifecycleMetrics:
             review_feedback: str = "",
             prior_failure: str = "",
         ) -> WorkerResult:
-            return WorkerResult(
+            return WorkerResultFactory.create(
                 issue_number=issue.id,
                 branch=branch,
                 success=True,
@@ -976,14 +980,13 @@ class TestWorkerResultMetaPersistence:
             review_feedback: str = "",
             prior_failure: str = "",
         ) -> WorkerResult:
-            return WorkerResult(
+            return WorkerResultFactory.create(
                 issue_number=issue.id,
                 branch=branch,
                 success=True,
                 worktree_path=str(wt_path),
                 quality_fix_attempts=2,
                 duration_seconds=150.5,
-                error=None,
             )
 
         phase, _, _ = make_implement_phase(
@@ -1012,7 +1015,7 @@ class TestWorkerResultMetaPersistence:
             review_feedback: str = "",
             prior_failure: str = "",
         ) -> WorkerResult:
-            return WorkerResult(
+            return WorkerResultFactory.create(
                 issue_number=issue.id,
                 branch=branch,
                 success=False,
@@ -1053,7 +1056,7 @@ class TestZeroCommitEscalation:
             review_feedback: str = "",
             prior_failure: str = "",
         ) -> WorkerResult:
-            return WorkerResult(
+            return WorkerResultFactory.create(
                 issue_number=issue.id,
                 branch=branch,
                 success=False,
@@ -1090,7 +1093,7 @@ class TestZeroCommitEscalation:
             review_feedback: str = "",
             prior_failure: str = "",
         ) -> WorkerResult:
-            return WorkerResult(
+            return WorkerResultFactory.create(
                 issue_number=issue.id,
                 branch=branch,
                 success=False,
@@ -1122,7 +1125,7 @@ class TestZeroCommitEscalation:
             review_feedback: str = "",
             prior_failure: str = "",
         ) -> WorkerResult:
-            return WorkerResult(
+            return WorkerResultFactory.create(
                 issue_number=issue.id,
                 branch=branch,
                 success=False,
@@ -1163,7 +1166,7 @@ class TestZeroCommitEscalation:
             review_feedback: str = "",
             prior_failure: str = "",
         ) -> WorkerResult:
-            return WorkerResult(
+            return WorkerResultFactory.create(
                 issue_number=issue.id,
                 branch=branch,
                 success=False,
@@ -1207,7 +1210,7 @@ class TestPostMortemMemoryFiling:
             review_feedback: str = "",
             prior_failure: str = "",
         ) -> WorkerResult:
-            return WorkerResult(
+            return WorkerResultFactory.create(
                 issue_number=issue.id,
                 branch=branch,
                 success=False,
@@ -1249,7 +1252,7 @@ class TestPostMortemMemoryFiling:
             review_feedback: str = "",
             prior_failure: str = "",
         ) -> WorkerResult:
-            return WorkerResult(
+            return WorkerResultFactory.create(
                 issue_number=issue.id,
                 branch=branch,
                 success=False,
@@ -1284,7 +1287,7 @@ class TestPostMortemMemoryFiling:
             review_feedback: str = "",
             prior_failure: str = "",
         ) -> WorkerResult:
-            return WorkerResult(
+            return WorkerResultFactory.create(
                 issue_number=issue.id,
                 branch=branch,
                 success=True,
@@ -1446,7 +1449,7 @@ class TestCommitsPersistedInMeta:
             review_feedback: str = "",
             prior_failure: str = "",
         ) -> WorkerResult:
-            return WorkerResult(
+            return WorkerResultFactory.create(
                 issue_number=issue.id,
                 branch=branch,
                 success=True,
@@ -1692,7 +1695,7 @@ class TestRunImplementation:
             review_feedback: str = "",
             prior_failure: str = "",
         ) -> WorkerResult:
-            return WorkerResult(
+            return WorkerResultFactory.create(
                 issue_number=issue.id,
                 branch=branch,
                 success=True,
@@ -1721,9 +1724,7 @@ class TestHandleImplementationResult:
     ) -> None:
         """Zero-commit failure should mark as failed, not directly escalate to HITL."""
         issue = TaskFactory.create()
-        result = WorkerResult(
-            issue_number=42,
-            branch="agent/issue-42",
+        result = WorkerResultFactory.create(
             success=False,
             error="No commits found on branch",
             commits=0,
@@ -1867,9 +1868,7 @@ class TestHandleImplementationResult:
     ) -> None:
         """When result.worktree_path is empty, push and PR creation should be skipped."""
         issue = TaskFactory.create()
-        result = WorkerResult(
-            issue_number=42,
-            branch="agent/issue-42",
+        result = WorkerResultFactory.create(
             success=True,
             worktree_path="",
         )
@@ -2122,6 +2121,15 @@ class TestCriticalExceptionPropagation:
 class TestADRSequence:
     """Tests for ADR-specific implementation sequencing."""
 
+    @pytest.fixture(autouse=True)
+    def _clear_assigned(self) -> Generator[None, None, None]:
+        """Reset the module-level assigned set before and after each test."""
+        import phase_utils
+
+        phase_utils._assigned_adr_numbers.clear()
+        yield
+        phase_utils._assigned_adr_numbers.clear()
+
     def test_prepare_adr_plan_writes_fallback_plan_for_adr_issue(
         self, config: HydraFlowConfig
     ) -> None:
@@ -2139,6 +2147,45 @@ class TestADRSequence:
         content = plan_path.read_text()
         assert "## Implementation Plan" in content
         assert "docs/adr/" in content
+
+    def test_prepare_adr_plan_assigns_unique_adr_number(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Each ADR plan must embed a pre-assigned unique number."""
+        issue = TaskFactory.create(
+            id=600,
+            title="[ADR] First decision",
+            body="## Context\nA\n\n## Decision\nB\n\n## Consequences\nC",
+        )
+        phase, _, _ = make_implement_phase(config, [issue])
+        phase._prepare_adr_plan(issue)
+
+        content = (config.plans_dir / "issue-600.md").read_text()
+        assert "0001" in content
+        assert "do NOT pick a different number" in content
+
+    def test_prepare_adr_plan_increments_across_calls(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Successive ADR plan preparations must get different numbers."""
+        issues = [
+            TaskFactory.create(
+                id=700 + i,
+                title=f"[ADR] Decision {i}",
+                body="## Context\nA\n\n## Decision\nB\n\n## Consequences\nC",
+            )
+            for i in range(3)
+        ]
+        phase, _, _ = make_implement_phase(config, issues)
+        for issue in issues:
+            phase._prepare_adr_plan(issue)
+
+        contents = [
+            (config.plans_dir / f"issue-{700 + i}.md").read_text() for i in range(3)
+        ]
+        assert "0001" in contents[0]
+        assert "0002" in contents[1]
+        assert "0003" in contents[2]
 
     def test_prepare_adr_plan_skips_non_adr_issue(
         self, config: HydraFlowConfig
@@ -2309,9 +2356,7 @@ class TestZeroCommitCorrectiveRetry:
     ) -> None:
         """Zero-commit comment should show attempt/max info."""
         issue = TaskFactory.create()
-        result = WorkerResult(
-            issue_number=42,
-            branch="agent/issue-42",
+        result = WorkerResultFactory.create(
             success=False,
             error="No commits found on branch",
             commits=0,
@@ -2339,7 +2384,7 @@ class TestIsZeroCommitFailure:
     """Tests for the _is_zero_commit_failure static helper."""
 
     def test_returns_true_for_zero_commit_failure(self) -> None:
-        result = WorkerResult(
+        result = WorkerResultFactory.create(
             issue_number=1,
             branch="agent/issue-1",
             success=False,
@@ -2351,7 +2396,7 @@ class TestIsZeroCommitFailure:
         assert ImplementPhase._is_zero_commit_failure(result) is True
 
     def test_returns_false_when_success(self) -> None:
-        result = WorkerResult(
+        result = WorkerResultFactory.create(
             issue_number=1,
             branch="agent/issue-1",
             success=True,
@@ -2362,7 +2407,7 @@ class TestIsZeroCommitFailure:
         assert ImplementPhase._is_zero_commit_failure(result) is False
 
     def test_returns_false_when_different_error(self) -> None:
-        result = WorkerResult(
+        result = WorkerResultFactory.create(
             issue_number=1,
             branch="agent/issue-1",
             success=False,
@@ -2374,7 +2419,7 @@ class TestIsZeroCommitFailure:
         assert ImplementPhase._is_zero_commit_failure(result) is False
 
     def test_returns_false_when_has_commits(self) -> None:
-        result = WorkerResult(
+        result = WorkerResultFactory.create(
             issue_number=1,
             branch="agent/issue-1",
             success=False,
@@ -2399,9 +2444,7 @@ class TestHandleZeroCommits:
         self, config: HydraFlowConfig
     ) -> None:
         issue = TaskFactory.create()
-        result = WorkerResult(
-            issue_number=42,
-            branch="agent/issue-42",
+        result = WorkerResultFactory.create(
             success=False,
             error="No commits found on branch",
             commits=0,

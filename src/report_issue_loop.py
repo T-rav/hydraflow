@@ -11,10 +11,12 @@ import asyncio
 import base64
 import binascii
 import contextlib
+import json
 import logging
 import os
 import re
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -50,19 +52,76 @@ class ReportIssueLoop(BaseBackgroundLoop):
             worker_name="report_issue",
             config=config,
             deps=deps,
-            run_on_startup=True,
+            run_on_startup=False,
         )
         self._state = state
         self._pr_manager = pr_manager
         self._runner = runner
         self._active_procs: set[asyncio.subprocess.Process] = set()
 
+    async def run(self) -> None:
+        """Drain all queued reports on startup, then enter the normal loop.
+
+        The base polling loop processes one report per cycle.  This override
+        keeps executing cycles until the queue is empty (or stop is requested),
+        ensuring reports queued before the processor started are all handled
+        before entering steady-state polling.
+        """
+        while not self._stop_event.is_set() and self._state.peek_report() is not None:
+            await self._execute_cycle()
+
+        await super().run()
+
     def _get_default_interval(self) -> int:
         return self._config.report_issue_interval
+
+    def _sweep_stale_reports(self) -> int:
+        """Auto-close reports stuck at 'queued' longer than the configured threshold.
+
+        Returns the number of reports closed.
+        """
+        threshold_hours = self._config.stale_report_threshold_hours
+        now = datetime.now(UTC)
+        closed = 0
+        for report in self._state.get_pending_reports():
+            try:
+                created = datetime.fromisoformat(report.created_at)
+                age_hours = (now - created).total_seconds() / 3600
+            except (ValueError, TypeError):
+                logger.warning(
+                    "Skipping stale-sweep for report %s: unparseable created_at %r",
+                    report.id,
+                    report.created_at,
+                )
+                continue
+            if age_hours >= threshold_hours:
+                self._state.remove_report(report.id)
+                updated = self._state.update_tracked_report(
+                    report.id,
+                    status="closed",
+                    action_label="stale",
+                    detail=f"Auto-closed after {age_hours:.1f}h (threshold: {threshold_hours}h)",
+                )
+                if updated is None:
+                    logger.warning(
+                        "Stale report %s removed from queue but has no TrackedReport — "
+                        "no audit trail recorded",
+                        report.id,
+                    )
+                logger.info(
+                    "Auto-closed stale report %s (age %.1fh, threshold %dh)",
+                    report.id,
+                    age_hours,
+                    threshold_hours,
+                )
+                closed += 1
+        return closed
 
     async def _do_work(self) -> dict[str, Any] | None:
         if self._config.dry_run:
             return None
+
+        self._sweep_stale_reports()
 
         report = self._state.peek_report()
         if report is None:
@@ -194,22 +253,16 @@ class ReportIssueLoop(BaseBackgroundLoop):
             if tracked:
                 tracked.linked_issue_url = issue_url
 
-            # Mark tracked report as fixed (also saves state)
+            # Success — mark as "filed" (issue created, not yet resolved).
+            # The report only becomes "fixed" when the linked issue is
+            # confirmed closed/merged via the status-refresh endpoint.
             self._state.update_tracked_report(
                 report.id,
-                status="fixed",
-                action_label="fixed",
+                status="filed",
+                action_label="filed",
                 detail=f"Created issue #{issue_number}",
             )
-
-            # Success — remove from queue
             self._state.remove_report(report.id)
-            self._state.update_tracked_report(
-                report.id,
-                status="fixed",
-                detail=f"Created issue #{issue_number}",
-                action_label="processed",
-            )
             logger.info(
                 "Processed report %s as issue #%d: %s",
                 report.id,
@@ -226,15 +279,7 @@ class ReportIssueLoop(BaseBackgroundLoop):
         attempt_count = self._state.fail_report(report.id)
         if attempt_count >= _MAX_REPORT_ATTEMPTS:
             self._state.remove_report(report.id)
-            self._state.update_tracked_report(
-                report.id,
-                status="closed",
-                detail=f"Failed {attempt_count} times — escalated to HITL",
-                action_label="escalated",
-            )
             await self._escalate_failed_report(report)
-
-            # Mark tracked report as closed after escalation
             self._state.update_tracked_report(
                 report.id,
                 status="closed",
@@ -320,9 +365,7 @@ class ReportIssueLoop(BaseBackgroundLoop):
                 "--json",
                 "labels,body",
             )
-            import json as _json
-
-            data = _json.loads(output)
+            data = json.loads(output)
             labels = [lb.get("name", "") for lb in data.get("labels", [])]
             body = data.get("body", "")
 
@@ -383,11 +426,36 @@ class ReportIssueLoop(BaseBackgroundLoop):
 
     @classmethod
     def _extract_issue_number_from_transcript(cls, transcript: str) -> int:
-        """Return issue number parsed from transcript output, or 0 when absent."""
-        match = cls._ISSUE_URL_RE.search(transcript or "")
-        if not match:
+        """Return issue number parsed from transcript output, or 0 when absent.
+
+        Only matches issue URLs that appear near creation context (e.g.,
+        ``gh issue create`` output or "Created issue" text) to avoid
+        false positives from URLs mentioned in agent reasoning.
+        """
+        if not transcript:
             return 0
-        try:
-            return int(match.group(1))
-        except ValueError:
-            return 0
+
+        # Strategy 1: look for `gh issue create` output which prints the URL
+        # on its own line (the most reliable signal)
+        for line in reversed(transcript.splitlines()):
+            stripped = line.strip()
+            match = cls._ISSUE_URL_RE.fullmatch(stripped)
+            if match:
+                try:
+                    return int(match.group(1))
+                except ValueError:
+                    continue
+
+        # Strategy 2: look for "created" context near an issue URL
+        created_re = re.compile(
+            r"(?:creat|open|filed|submitt)\w*\s+.*?" + cls._ISSUE_URL_RE.pattern,
+            re.IGNORECASE,
+        )
+        match = created_re.search(transcript)
+        if match:
+            try:
+                return int(match.group(1))
+            except ValueError:
+                pass
+
+        return 0
