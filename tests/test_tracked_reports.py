@@ -637,10 +637,10 @@ class TestRefreshReportStatuses:
         assert report.status == "filed"
 
     @pytest.mark.asyncio
-    async def test_filed_report_stays_filed_when_issue_closed_not_planned(
+    async def test_filed_report_transitions_to_closed_when_issue_not_planned(
         self, config, event_bus, state, tmp_path
     ) -> None:
-        """Issue closed as 'won't fix' should NOT mark report as fixed."""
+        """Issue closed as 'won't fix' should transition report to 'closed', not 'fixed'."""
         from unittest.mock import AsyncMock, patch
 
         state.add_tracked_report(
@@ -664,11 +664,12 @@ class TestRefreshReportStatuses:
             response = await endpoint(reporter_id="u1")
 
         data = json.loads(response.body)
-        assert len(data["refreshed"]) == 0
+        assert len(data["refreshed"]) == 1
+        assert data["refreshed"][0]["new_status"] == "closed"
 
         report = state.get_tracked_report("r1")
         assert report is not None
-        assert report.status == "filed"
+        assert report.status == "closed"
 
     @pytest.mark.asyncio
     async def test_stale_queued_report_reenqueued(

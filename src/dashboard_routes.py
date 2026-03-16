@@ -3893,6 +3893,14 @@ def create_router(
                     detail=f"Issue #{issue_number} resolved",
                 )
                 refreshed.append({"id": report.id, "new_status": "fixed"})
+            elif issue_state == "NOT_PLANNED":
+                state.update_tracked_report(
+                    report.id,
+                    status="closed",
+                    action_label="closed",
+                    detail=f"Issue #{issue_number} closed as won't fix",
+                )
+                refreshed.append({"id": report.id, "new_status": "closed"})
 
         # --- stale queued → re-enqueue pending ---
         pending_ids = {p.id for p in state.get_pending_reports()}
