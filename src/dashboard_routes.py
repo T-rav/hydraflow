@@ -3939,10 +3939,6 @@ def create_router(
             str,
             tuple[
                 Literal[
-                    "queued",
-                    "in-progress",
-                    "filed",
-                    "fixed",
                     "closed",
                     "reopened",
                 ],
