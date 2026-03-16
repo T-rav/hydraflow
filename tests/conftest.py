@@ -160,16 +160,24 @@ class IssueFactory:
         labels: list[str] | None = None,
         comments: list[str] | None = None,
         url: str = "",
+        author: str = "",
+        state: Any = None,
+        milestone_number: int | None = None,
+        created_at: str = "",
     ):
-        from models import GitHubIssue
+        from models import GitHubIssue, GitHubIssueState
 
         return GitHubIssue(
             number=number,
             title=title,
             body=body,
-            labels=labels or ["ready"],
-            comments=comments or [],
+            labels=["ready"] if labels is None else labels,
+            comments=[] if comments is None else comments,
             url=url or f"https://github.com/test-org/test-repo/issues/{number}",
+            author=author,
+            state=state if state is not None else GitHubIssueState.OPEN,
+            milestone_number=milestone_number,
+            created_at=created_at,
         )
 
 
@@ -195,6 +203,9 @@ class TaskFactory:
         source_url: str = "",
         links: list[Any] | None = None,
         complexity_score: int = 0,
+        created_at: str = "",
+        metadata: dict[str, Any] | None = None,
+        parent_epic: int | None = None,
     ):
         from models import Task
 
@@ -208,6 +219,9 @@ class TaskFactory:
             or f"https://github.com/test-org/test-repo/issues/{id}",
             links=links if links is not None else [],
             complexity_score=complexity_score,
+            created_at=created_at,
+            metadata=metadata if metadata is not None else {},
+            parent_epic=parent_epic,
         )
 
 
@@ -800,13 +814,22 @@ class TriageResultFactory:
         issue_number: int = 42,
         ready: bool = True,
         reasons: list[str] | None = None,
+        complexity_score: int = 0,
+        issue_type: str = "feature",
+        enrichment: str = "",
     ) -> TriageResult:
+        from models import IssueType
         from models import TriageResult as TR
 
         return TR(
             issue_number=issue_number,
             ready=ready,
             reasons=reasons or [],
+            complexity_score=complexity_score,
+            issue_type=IssueType(issue_type)
+            if isinstance(issue_type, str)
+            else issue_type,
+            enrichment=enrichment,
         )
 
 
@@ -1039,7 +1062,6 @@ class ReviewMockBuilder:
 
     def build(self) -> tuple[AsyncMock, AsyncMock, AsyncMock]:
         """Wire mocks into orch and return (mock_reviewers, mock_prs, mock_wt)."""
-        from models import ReviewResult as RR
         from models import ReviewVerdict as RV
 
         # Reviewer mock
@@ -1048,7 +1070,7 @@ class ReviewMockBuilder:
             mock_reviewers.review = self._review_side_effect
         else:
             verdict = self._verdict if self._verdict is not None else RV.APPROVE
-            result = self._review_result or RR(
+            result = self._review_result or ReviewResultFactory.create(
                 pr_number=101,
                 issue_number=self._issue_number,
                 verdict=verdict,
