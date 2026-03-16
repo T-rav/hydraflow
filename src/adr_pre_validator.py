@@ -35,6 +35,8 @@ _SUPERSEDE_RE = re.compile(
     r"supersed(?:es?|ed|ing)\s+(?:ADR[- ]?)(\d{4})", re.IGNORECASE
 )
 _REQUIRED_SECTIONS = ("## Context", "## Decision", "## Consequences")
+# Matches patterns like "(line 42)", "(line 1122)", "(lines 10-20)"
+_LINE_CITATION_RE = re.compile(r"\(lines?\s+\d+(?:\s*[-–]\s*\d+)?\)")
 
 
 class ADRPreValidator:
@@ -59,6 +61,7 @@ class ADRPreValidator:
         self._check_required_sections(content, result)
         self._check_empty_sections(content, result)
         self._check_supersession(content, all_adrs or [], result)
+        self._check_volatile_line_citations(content, result)
         return result
 
     def _check_status_field(self, content: str, result: ADRValidationResult) -> None:
@@ -108,6 +111,24 @@ class ADRPreValidator:
                             fixable=False,
                         )
                     )
+
+    def _check_volatile_line_citations(
+        self, content: str, result: ADRValidationResult
+    ) -> None:
+        """Flag line-number citations that become stale as source files change."""
+        matches = _LINE_CITATION_RE.findall(content)
+        if matches:
+            result.issues.append(
+                ADRValidationIssue(
+                    code="volatile_line_citation",
+                    message=(
+                        f"ADR contains {len(matches)} line-number citation(s) "
+                        f"that will become stale as source files change — "
+                        f"use function/class names only"
+                    ),
+                    fixable=True,
+                )
+            )
 
     def _check_supersession(
         self,
