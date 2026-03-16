@@ -1,7 +1,7 @@
-# ADR-0023: Supersession Regex Must Include All Verb Forms
+# ADR-0025: Supersession Regex Must Include All Verb Forms
 
-**Status:** Accepted
-**Date:** 2026-03-08
+**Status:** Proposed
+**Date:** 2026-03-15
 
 ## Context
 
@@ -24,10 +24,11 @@ form in older ADRs that have already been acted upon. Because the validator uses
 the match to enforce that referenced ADRs carry `Status: Superseded`, a missed
 match means stale ADRs stay listed as active with no warning.
 
-The same concern applies to the task-link parser in `src/models.py`, which uses
-a separate `supersedes?` pattern for GitHub issue references (`#NNN`). While
-that pattern covers the base and 3rd-person forms, it does not capture
-`superseded` or `superseding` in issue bodies.
+The same concern applies to the task-link parser in `src/models.py`, which
+originally used a separate `supersedes?` pattern for GitHub issue references
+(`#NNN`). That narrower pattern covered only the base and 3rd-person forms,
+missing `superseded` or `superseding` in issue bodies. Both call sites have
+now been updated to the unified stem.
 
 ## Decision
 
@@ -44,8 +45,10 @@ Concretely, the following call sites must use this pattern:
 1. **`src/adr_pre_validator.py`** — `_SUPERSEDE_RE` for ADR-to-ADR references
    (already updated to the full pattern).
 2. **`src/models.py`** — `_LINK_PATTERNS` entry for task-link supersession
-   must use the same `supersed(?:es?|ed|ing)` stem so that issue-body
-   references such as "superseded #5" and "superseding #12" are captured.
+   must unconditionally use the same `supersed(?:es?|ed|ing)` stem.
+   The models.py call site serves issue-body references (e.g.,
+   "superseded #5", "superseding #12") and is not exempt from the
+   unified pattern — no narrower variant is acceptable here.
 
 Any future code that detects supersession language must reuse this pattern
 rather than inventing a new variant.
