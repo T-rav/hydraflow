@@ -93,15 +93,11 @@ The following `HydraFlowConfig` properties derive directories from `data_root`:
 |----------|------|-------|
 | `state_file` | `data_root / repo_slug / "state.json"` | repo-scoped |
 | `event_log_path` | `data_root / repo_slug / "events.jsonl"` | repo-scoped |
-| `sessions.jsonl` | `repo_data_root / "sessions.jsonl"` | repo-scoped |
+| `sessions.jsonl` (implicit) | `repo_data_root / "sessions.jsonl"` | repo-scoped |
 | `repo_data_root` | `data_root / repo_slug` | repo-scoped |
 | `log_dir` | `data_root / "logs"` | flat [^1] |
 | `plans_dir` | `data_root / "plans"` | flat [^1] |
 | `memory_dir` | `data_root / "memory"` | flat [^1] |
-
-[^1]: ADR-0010 (Worktree and Path Isolation Architecture) mandates repo-scoping
-these to `data_root / repo_slug / "logs"`, etc. Currently flat pending
-implementation.
 
 All paths can be individually overridden via their respective config fields,
 but the defaults ensure a single `data_root` change relocates everything.
@@ -150,7 +146,7 @@ but the defaults ensure a single `data_root` change relocates everything.
 - Source memory: [#1624 — HydraFlow persistence architecture and data layout](https://github.com/T-rav/hydra/issues/1624)
 - This ADR: [#1633](https://github.com/T-rav/hydra/issues/1633)
 - `src/state.py:StateTracker` — crash-recovery state persistence
-- `src/config.py:_resolve_paths` (line 1122) — data root and path resolution
+- `src/config.py:_resolve_base_paths`, `_resolve_repo_and_identity`, `_resolve_repo_scoped_paths` — data root and path resolution
 - `src/config.py:HydraFlowConfig.data_root` (line 701) — data root configuration
 - `src/metrics_manager.py` — repo-slug namespaced metrics
 - `src/file_util.py:atomic_write` — atomic file write helper
