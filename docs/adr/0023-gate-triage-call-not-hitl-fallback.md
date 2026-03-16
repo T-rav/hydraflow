@@ -111,6 +111,7 @@ When reviewing any routing method that calls both `_route_to_triage` and
 
 ## Related
 
+- Supersedes: ADR-0023 (0023-auto-triage-toggle-must-gate-routing.md)
 - Source memory: #2345
 - Issue: #2355
 - Related learning: #2346, #2350
