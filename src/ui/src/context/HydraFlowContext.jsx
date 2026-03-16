@@ -296,13 +296,10 @@ export function reducer(state, action) {
       return { ...state, config: action.data }
 
     case 'EXISTING_PRS': {
-      // Backend now provides merged flag on PRs — use as-is.
-      // Still preserve session-only merged flags for PRs not yet in the
-      // next API response (real-time merge_update arrives before poll).
-      const incoming = action.data || []
-      const incomingNumbers = new Set(incoming.map(p => p.pr))
-      const sessionMerged = state.prs.filter(p => p.merged && !incomingNumbers.has(p.pr))
-      return { ...state, prs: [...incoming, ...sessionMerged] }
+      // Backend provides merged flag on PRs — use as-is.
+      // Merged state is tracked authoritatively in the pipeline snapshot,
+      // so we no longer preserve session-volatile merged PRs here.
+      return { ...state, prs: action.data || [] }
     }
 
     case 'HITL_ITEMS':
@@ -507,9 +504,9 @@ export function reducer(state, action) {
 
     case 'PIPELINE_SNAPSHOT': {
       const incoming = action.data || {}
-      const openStages = ['triage', 'plan', 'implement', 'review', 'hitl']
+      const allStages = ['triage', 'plan', 'implement', 'review', 'hitl', 'merged']
 
-      const nextOpen = Object.fromEntries(openStages.map((key) => {
+      const nextStages = Object.fromEntries(allStages.map((key) => {
         if (!Object.prototype.hasOwnProperty.call(incoming, key)) {
           return [key, state.pipelineIssues[key] || []]
         }
@@ -520,13 +517,7 @@ export function reducer(state, action) {
 
       return {
         ...state,
-        pipelineIssues: {
-          ...nextOpen,
-          // Merged state comes from the PR overlay (/api/prs merged flag) rather than
-          // the pipeline snapshot — preserve session-accumulated merged items here so
-          // real-time merge_update WS events (which arrive before the next poll) are not lost.
-          merged: state.pipelineIssues.merged || [],
-        },
+        pipelineIssues: nextStages,
         pipelinePollerLastRun: new Date().toISOString(),
       }
     }
