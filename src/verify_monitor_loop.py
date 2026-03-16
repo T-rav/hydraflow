@@ -40,8 +40,6 @@ class VerifyMonitorLoop(BaseBackgroundLoop):
 
     async def _do_work(self) -> dict[str, Any] | None:
         pending = self._state.get_all_verification_issues()
-        if not pending:
-            return None
 
         resolved = 0
         checked = 0
@@ -87,8 +85,12 @@ class VerifyMonitorLoop(BaseBackgroundLoop):
                     original_issue,
                 )
 
-        # Bug B: reconcile orphaned VERIFY_PENDING outcomes with no verification_issues entry
+        # Reconcile orphaned VERIFY_PENDING outcomes that have no verification_issues entry.
+        # This must run even when pending is empty so stale outcomes are resolved.
         reconciled = self._reconcile_orphaned_outcomes(pending)
+
+        if not pending and not reconciled:
+            return None
 
         return {
             "checked": checked,

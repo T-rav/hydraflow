@@ -70,7 +70,7 @@ def _make_loop(
 class TestVerifyMonitorLoopNoPending:
     @pytest.mark.asyncio
     async def test_returns_none_when_no_pending(self, tmp_path: Path) -> None:
-        loop, fetcher, state = _make_loop(tmp_path, pending={})
+        loop, fetcher, _ = _make_loop(tmp_path, pending={})
         result = await loop._do_work()
         assert result is None
         fetcher.fetch_issue_by_number.assert_not_called()
@@ -190,30 +190,57 @@ class TestVerifyMonitorLoopNotFound:
 
 class TestVerifyMonitorLoopOrphanedOutcomes:
     @pytest.mark.asyncio
-    async def test_reconciles_orphaned_verify_pending(self, tmp_path: Path) -> None:
-        """Bug B: VERIFY_PENDING outcomes with no verification_issues entry get resolved."""
+    async def test_reconciles_orphaned_verify_pending_no_other_pending(
+        self, tmp_path: Path
+    ) -> None:
+        """Bug B: orphan reconciliation runs even when pending dict is empty."""
         from models import IssueOutcomeType
 
         orphan_outcome = _make_outcome(IssueOutcomeType.VERIFY_PENDING)
-        # pending is empty but outcome exists for issue 30
-        loop, fetcher, state = _make_loop(
+        loop, _, state = _make_loop(
             tmp_path,
             pending={},
             outcomes={"30": orphan_outcome},
         )
 
-        # No pending → returns None from early exit, so we need at least one pending
-        # to reach reconciliation. Use a different approach: call with one pending item.
-        # Actually, if pending is empty, _do_work returns None before reconciliation.
-        # We need to test with at least one pending entry to reach the reconciliation code.
+        result = await loop._do_work()
 
-        # Re-create with one pending entry so the loop runs
+        assert result is not None
+        assert result["reconciled"] == 1
+        assert result["checked"] == 0
+        assert result["resolved"] == 0
+        state.record_outcome.assert_called_once_with(
+            30,
+            IssueOutcomeType.VERIFY_RESOLVED,
+            reason="Orphaned verify_pending — verification issue missing, auto-resolved",
+            phase="verify",
+        )
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_pending_and_no_orphans(
+        self, tmp_path: Path
+    ) -> None:
+        """Returns None when there is genuinely nothing to do."""
+        loop, _, state = _make_loop(tmp_path, pending={}, outcomes={})
+
+        result = await loop._do_work()
+
+        assert result is None
+        state.record_outcome.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_reconciles_orphaned_verify_pending_alongside_pending(
+        self, tmp_path: Path
+    ) -> None:
+        """Bug B: orphan reconciliation also runs when some pending entries exist."""
+        from models import IssueOutcomeType
+
+        orphan_outcome = _make_outcome(IssueOutcomeType.VERIFY_PENDING)
         loop, fetcher, state = _make_loop(
             tmp_path,
             pending={10: 42},
             outcomes={"30": orphan_outcome},
         )
-        # Make the one pending entry resolve normally
         fetcher.fetch_issue_by_number = AsyncMock(
             return_value=_make_issue(42, state="closed")
         )
