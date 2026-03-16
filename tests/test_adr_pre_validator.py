@@ -264,6 +264,49 @@ class TestCheckVolatileLineCitations:
         codes = [i.code for i in result.issues]
         assert "volatile_line_citation" in codes
 
+    def test_inline_line_number_in_symbol_position_detected(self) -> None:
+        """A digit-only 'symbol' like `src/foo.py:419` is a volatile line citation."""
+        content = _valid_adr(
+            consequences="- `src/implement_phase.py:419` — implemented counter\n"
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content)
+        codes = [i.code for i in result.issues]
+        assert "volatile_line_citation" in codes
+
+    def test_inline_line_number_not_treated_as_phantom_symbol(self) -> None:
+        """Digit-only symbol positions should NOT produce phantom_source_symbol."""
+        content = _valid_adr(
+            consequences="- `src/implement_phase.py:419` — implemented counter\n"
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content, repo_root=Path("/fake"))
+        codes = [i.code for i in result.issues]
+        assert "phantom_source_symbol" not in codes
+
+    def test_inline_comma_separated_line_numbers_detected(self) -> None:
+        """Comma-separated line numbers like `src/foo.py:97,121` are detected."""
+        content = _valid_adr(
+            consequences="- `src/triage_phase.py:97,121` — triaged counter\n"
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content)
+        codes = [i.code for i in result.issues]
+        assert "volatile_line_citation" in codes
+
+    def test_mixed_paren_and_inline_citations_counted_together(self) -> None:
+        """Both (line N) and `src/foo.py:N` formats are summed in one issue."""
+        content = _valid_adr(
+            consequences=(
+                "- `src/foo.py:bar` (line 42) — paren style\n"
+                "- `src/baz.py:99` — inline style\n"
+            )
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content)
+        issue = next(i for i in result.issues if i.code == "volatile_line_citation")
+        assert "2 line-number citation(s)" in issue.message
+
 
 class TestCheckStaleAmendmentNotes:
     """Tests for cross-reference-aware stale amendment note detection."""

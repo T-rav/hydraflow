@@ -70,7 +70,13 @@ _ADR_EMDASH_TITLE_RE = re.compile(r"ADR[- ]\d{4}\s*—\s*(.+?)(?:\.\s|,|;|$)")
 
 # Matches source file + symbol citations like `src/config.py:_resolve_paths` or
 # `src/config.py:HydraFlowConfig`.  Group 1 = file path, Group 2 = symbol name.
-_SOURCE_SYMBOL_RE = re.compile(r"`(src/[^`:\s]+\.py):(\w+)`")
+# Symbol must start with a letter or underscore (not a digit) to exclude line numbers.
+_SOURCE_SYMBOL_RE = re.compile(r"`(src/[^`:\s]+\.py):([A-Za-z_]\w*)`")
+
+# Matches inline line-number citations in the `src/file.py:DIGITS` format.
+# These are a variant of volatile line citations that embed the number in the
+# symbol position of a source reference.  Group 1 = file path, Group 2 = digits.
+_INLINE_LINE_NUM_RE = re.compile(r"`(src/[^`:\s]+\.py):(\d[\d,]*)`")
 
 
 class ADRPreValidator:
@@ -156,13 +162,15 @@ class ADRPreValidator:
         self, content: str, result: ADRValidationResult
     ) -> None:
         """Flag line-number citations that become stale as source files change."""
-        matches = _LINE_CITATION_RE.findall(content)
-        if matches:
+        paren_matches = _LINE_CITATION_RE.findall(content)
+        inline_matches = _INLINE_LINE_NUM_RE.findall(content)
+        total = len(paren_matches) + len(inline_matches)
+        if total:
             result.issues.append(
                 ADRValidationIssue(
                     code="volatile_line_citation",
                     message=(
-                        f"ADR contains {len(matches)} line-number citation(s) "
+                        f"ADR contains {total} line-number citation(s) "
                         f"that will become stale as source files change — "
                         f"use function/class names only"
                     ),
