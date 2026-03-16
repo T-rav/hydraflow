@@ -2059,6 +2059,33 @@ def create_router(
         data["current_session_id"] = current_session
         return JSONResponse(data)
 
+    @router.post("/api/control/credit-refresh")
+    async def credit_refresh(
+        repo: RepoSlugParam = None,
+    ) -> JSONResponse:
+        """Attempt to clear credit pause and resume processing.
+
+        Probes the Anthropic API first.  If credits are still exhausted the
+        pause is kept and the client receives ``{"status": "still_exhausted"}``
+        so the UI can display immediate feedback.
+        """
+        from subprocess_util import probe_credit_availability
+
+        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
+        orch = _get_orch()
+        if not orch:
+            return JSONResponse({"error": "no orchestrator"}, status_code=400)
+        if orch.credits_paused_until is None:
+            return JSONResponse({"status": "not_paused"})
+        # Probe the API to see if credits are actually available now.
+        credits_available = await probe_credit_availability()
+        if not credits_available:
+            return JSONResponse({"status": "still_exhausted"})
+        cleared = orch.try_clear_credit_pause()
+        if not cleared:
+            return JSONResponse({"status": "not_paused"})
+        return JSONResponse({"status": "resuming"})
+
     @router.post("/api/admin/prep")
     async def admin_prep(
         repo: str | None = Query(default=None, description="Repo slug to target"),

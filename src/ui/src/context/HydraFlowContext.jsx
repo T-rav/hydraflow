@@ -1326,6 +1326,17 @@ export function HydraFlowProvider({ children }) {
     }
   }, [fetchWithRepo])
 
+  const refreshCreditStatus = useCallback(async () => {
+    try {
+      const res = await fetchWithRepo('/api/control/credit-refresh', { method: 'POST' })
+      if (!res.ok) return { ok: false, status: 'error' }
+      const data = await res.json()
+      return { ok: true, status: data.status }
+    } catch {
+      return { ok: false, status: 'error' }
+    }
+  }, [fetchWithRepo])
+
   const startOrchestrator = useCallback(async () => {
     if (state.selectedRepoSlug) {
       const result = await startRuntime(state.selectedRepoSlug)
@@ -1614,6 +1625,7 @@ export function HydraFlowProvider({ children }) {
     triggerBgWorker,
     updateBgWorkerInterval,
     dismissSystemAlert: useCallback(() => dispatch({ type: 'CLEAR_SYSTEM_ALERT' }), [dispatch]),
+    refreshCreditStatus,
     refreshHitl: fetchHitlItems,
     selectSession,
     selectRepo,

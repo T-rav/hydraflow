@@ -327,6 +327,17 @@ class HydraFlowOrchestrator:
         self._hitl_ctrl.active_hitl_issues.clear()
         self._state.clear_interrupted_issues()
 
+    def try_clear_credit_pause(self) -> bool:
+        """Attempt to clear the credit pause and resume loops early.
+
+        Returns ``True`` if a pause was active and the resume signal was sent,
+        ``False`` if no pause was active.
+        """
+        if self._credits_paused_until is None:
+            return False
+        self._credit_resume_event.set()
+        return True
+
     @property
     def _active_hitl_issues(self) -> set[int]:
         """Backward-compatible access to HITL active issues."""
@@ -1187,6 +1198,7 @@ class HydraFlowOrchestrator:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+            self._credit_resume_event.clear()
 
     async def _pause_for_credits(
         self,
