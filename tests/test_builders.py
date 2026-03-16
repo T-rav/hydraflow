@@ -66,6 +66,13 @@ class TestWorkerResultBuilder:
         assert result.pre_quality_review_attempts == 3
         assert result.quality_fix_attempts == 2
 
+    def test_with_pr_info(self):
+        from tests.conftest import PRInfoFactory
+
+        pr_info = PRInfoFactory.create(number=200, issue_number=42)
+        result = WorkerResultBuilder().with_pr_info(pr_info).build()
+        assert result.pr_info is pr_info
+
     def test_model_defaults_uses_pydantic_defaults(self):
         """with_model_defaults() uses Pydantic model defaults, not factory hardcoded values."""
         result = WorkerResultBuilder().with_model_defaults().build()
@@ -130,6 +137,13 @@ class TestPlanResultBuilder:
         builder = PlanResultBuilder()
         same = builder.with_success(True)
         assert same is builder
+
+    def test_with_new_issues(self):
+        from models import NewIssueSpec
+
+        specs = [NewIssueSpec(title="Sub-task A", body="Do A")]
+        result = PlanResultBuilder().with_new_issues(specs).build()
+        assert result.new_issues == specs
 
     def test_with_validation_errors(self):
         result = (

@@ -27,10 +27,12 @@ if TYPE_CHECKING:
         GitHubIssue,
         HITLResult,
         NewIssueSpec,
+        PlanResult,
         PRInfo,
         ReviewResult,
         ReviewVerdict,
         TriageResult,
+        WorkerResult,
     )
     from orchestrator import HydraFlowOrchestrator
     from state import StateTracker
@@ -355,7 +357,7 @@ class WorkerResultBuilder:
         self._kwargs["pr_info"] = value
         return self
 
-    def build(self):
+    def build(self) -> WorkerResult:
         """Build the WorkerResult using the factory."""
         return WorkerResultFactory.create(
             use_defaults=self._use_model_defaults, **self._kwargs
@@ -546,7 +548,7 @@ class PlanResultBuilder:
         self._kwargs["epic_number"] = value
         return self
 
-    def build(self):
+    def build(self) -> PlanResult:
         """Build the PlanResult using the factory."""
         return PlanResultFactory.create(
             use_defaults=self._use_model_defaults, **self._kwargs
