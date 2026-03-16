@@ -75,9 +75,9 @@ class TestValidateFieldBounds:
         )
 
     def test_field_without_constraints_passes(self) -> None:
-        """A field with no ge/le metadata passes any value."""
-        # repo (str field) has no numeric bounds
-        assert _validate_field_bounds("repo", "HF_REPO", "anything") is True
+        """A field with no ge/le metadata passes any numeric value."""
+        # repo (str field) has no ge/le bounds — any int value passes
+        assert _validate_field_bounds("repo", "HF_REPO", 42) is True
 
 
 # ---------------------------------------------------------------------------
