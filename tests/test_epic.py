@@ -14,6 +14,7 @@ from epic import (
     check_all_checkboxes,
     parse_epic_sub_issues,
 )
+from events import EventType
 from models import EpicChildInfo, EpicState, GitHubIssue
 from tests.conftest import IssueFactory, make_state
 from tests.helpers import ConfigFactory
@@ -1522,6 +1523,13 @@ class TestNarrowedExceptionHandling:
         await manager.refresh_cache()
         # Both epics attempted; second succeeded despite first failing
         assert manager._build_detail.await_count == 2
+        # Verify _bus.publish was called with EPIC_PROGRESS for the second epic
+        publish_calls = manager._bus.publish.call_args_list
+        progress_events = [
+            c for c in publish_calls if c.args[0].type == EventType.EPIC_PROGRESS
+        ]
+        assert len(progress_events) == 1
+        assert progress_events[0].args[0].data["epic_number"] == 200
 
     @pytest.mark.asyncio
     async def test_check_stale_epics_catches_runtime_error(
@@ -1590,6 +1598,13 @@ class TestNarrowedExceptionHandling:
         assert 100 in stale
         assert 200 in stale
         assert prs.post_comment.await_count == 2
+        # Verify _bus.publish emitted SYSTEM_ALERT for both epics
+        alert_events = [
+            c
+            for c in manager._bus.publish.call_args_list
+            if c.args[0].type == EventType.SYSTEM_ALERT
+        ]
+        assert len(alert_events) >= 2
 
     @pytest.mark.asyncio
     async def test_release_epic_merge_loop_catches_runtime_error(
@@ -1659,20 +1674,17 @@ class TestNarrowedExceptionHandling:
             epics=[epic_a, epic_b], sub_issues={1: sub1}
         )
 
-        call_count = 0
-
-        async def _close_side_effect(
-            issue_number: int, *_a: object, **_kw: object
-        ) -> None:
-            nonlocal call_count
-            call_count += 1
-            if issue_number == 100:
+        async def _try_close_side_effect(
+            epic_number: int, *_a: object, **_kw: object
+        ) -> bool:
+            if epic_number == 100:
                 raise RuntimeError("close failed")
+            return True
 
-        prs.close_issue = AsyncMock(side_effect=_close_side_effect)
+        checker._try_close_epic = AsyncMock(side_effect=_try_close_side_effect)
         result = await checker.check_and_close_epics(1)
-        # Second epic was still attempted despite first raising
-        assert call_count == 2
+        # _try_close_epic was awaited for both epics
+        assert checker._try_close_epic.await_count == 2
         # Second epic closed successfully
         assert result is True
 
