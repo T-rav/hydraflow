@@ -83,7 +83,7 @@ returns `False`), not unconditionally after the call. A separate
 
 ## Related
 
-- Supersedes: ADR-0023 (0023-auto-triage-toggle-must-gate-routing.md)
+- **Supersedes:** [ADR-0023 (Auto-Triage Toggle Must Gate Routing, Not Just Stat Tracking)](0023-auto-triage-toggle-must-gate-routing.md)
 - Source memory: #2298
 - Issue: #2306
 - ADR-0017 (Auto-Decompose Triage Counter Exclusion) — establishes the

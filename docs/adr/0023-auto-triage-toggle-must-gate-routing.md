@@ -115,7 +115,7 @@ When reviewing any routing method that calls both `_route_to_triage` and
 
 ## Related
 
-- Superseded by: ADR-0023 (0023-gate-triage-call-not-hitl-fallback.md), ADR-0023 (0023-stats-counter-placement-in-delegating-helpers.md)
+- **Superseded by:** [ADR-0023 (Gate Triage Call on Config Toggle, Not Just HITL Fallback)](0023-gate-triage-call-not-hitl-fallback.md), [ADR-0023 (Stats Counter Placement in Delegating Helpers)](0023-stats-counter-placement-in-delegating-helpers.md)
 - Source memory: #2327
 - Source issue: #2341
 - Related: #2345, #2355, #2346, #2350
