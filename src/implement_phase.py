@@ -605,7 +605,7 @@ class ImplementPhase:
             "review (explicit decision, tradeoffs, and impact).\n"
             "4. Add/update references so the ADR links back to this issue.\n"
             "   - In the Related section, cite source files by function/class name only "
-            "(e.g. `src/config.py:_resolve_paths`). Do NOT include line numbers — "
+            "(e.g. `src/config.py:_resolve_base_paths`). Do NOT include line numbers — "
             "they become stale as source files change.\n"
             "5. **Do NOT create tests for ADR markdown content.** ADRs are "
             "documentation — never add `test_adr_*.py` files that assert on "
