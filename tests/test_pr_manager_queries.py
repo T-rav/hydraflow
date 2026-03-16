@@ -1687,8 +1687,9 @@ class TestGetIssueState:
     async def test_closed_null_statereason_returns_empty_string(
         self, event_bus, tmp_path
     ):
-        """Null stateReason returns empty string so pre-stateReason issues
-        are not incorrectly treated as resolved."""
+        # When stateReason is null (issues closed before GitHub added stateReason
+        # tracking), we return "" rather than assuming "COMPLETED" to avoid
+        # incorrectly treating unresolved closures as resolved.
         mgr = self._make_manager(tmp_path, event_bus)
         payload = json.dumps({"state": "CLOSED", "stateReason": None})
         mock_create = SubprocessMockBuilder().with_stdout(payload).build()

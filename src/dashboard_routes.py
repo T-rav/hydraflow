@@ -17,7 +17,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import (
     APIRouter,
@@ -80,6 +80,7 @@ from models import (
 )
 from pr_manager import PRManager
 from prompt_telemetry import PromptTelemetry
+from route_types import RepoSlugParam  # canonical location for shared param types
 from state import StateTracker
 from timeline import TimelineBuilder
 from transcript_summarizer import TranscriptSummarizer
@@ -105,10 +106,6 @@ _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
     "adr_reviewer": (28800, 432000),
     "verify_monitor": (60, 86400),
 }
-RepoSlugParam = Annotated[
-    str | None,
-    Query(description="Repo slug to scope the request"),
-]
 
 # Internal pipeline labels that must not be treated as epic names in the history panel.
 _EPIC_INTERNAL_LABELS: frozenset[str] = frozenset(
