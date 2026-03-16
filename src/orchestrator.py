@@ -321,7 +321,6 @@ class HydraFlowOrchestrator:
         self._running = False
         self._auth_failed = False
         self._credits_paused_until = None
-        self._credit_resume_event = asyncio.Event()
         self._svc.store.clear_active()
         self._active_impl_issues.clear()
         self._active_review_issues.clear()

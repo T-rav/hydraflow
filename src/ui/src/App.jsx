@@ -34,7 +34,7 @@ function formatResumeAt(isoString) {
 }
 
 function SystemAlertBanner({ alert, onDismiss, onRefreshCredit }) {
-  const [refreshState, setRefreshState] = useState('idle') // idle | checking | still_exhausted
+  const [refreshState, setRefreshState] = useState('idle') // idle | checking | still_exhausted | error
   const timerRef = useRef(null)
   const isCreditAlert = alert?.message?.toLowerCase().includes('credit limit')
 
@@ -61,7 +61,7 @@ function SystemAlertBanner({ alert, onDismiss, onRefreshCredit }) {
       timerRef.current = setTimeout(() => setRefreshState('idle'), 5000)
     } else {
       // API error or unexpected status
-      setRefreshState('still_exhausted')
+      setRefreshState('error')
       timerRef.current = setTimeout(() => setRefreshState('idle'), 5000)
     }
   }, [onRefreshCredit, refreshState])
@@ -75,6 +75,9 @@ function SystemAlertBanner({ alert, onDismiss, onRefreshCredit }) {
       {alert.source && <span style={styles.alertSource}>Source: {alert.source}</span>}
       {refreshState === 'still_exhausted' && (
         <span style={styles.alertStillExhausted}>Credits still exhausted</span>
+      )}
+      {refreshState === 'error' && (
+        <span style={styles.alertStillExhausted}>Refresh failed</span>
       )}
       {isCreditAlert && onRefreshCredit && (
         <button
