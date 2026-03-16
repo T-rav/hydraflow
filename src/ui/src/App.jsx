@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useRef } from 'react'
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import { HydraFlowProvider, useHydraFlow } from './context/HydraFlowContext'
 import { Header } from './components/Header'
 import { HumanInputBanner } from './components/HumanInputBanner'
@@ -37,6 +37,12 @@ function SystemAlertBanner({ alert, onDismiss, onRefreshCredit }) {
   const [refreshState, setRefreshState] = useState('idle') // idle | checking | still_exhausted
   const timerRef = useRef(null)
   const isCreditAlert = alert?.message?.toLowerCase().includes('credit limit')
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
+  }, [])
 
   const handleRefresh = useCallback(async () => {
     if (!onRefreshCredit || refreshState === 'checking') return

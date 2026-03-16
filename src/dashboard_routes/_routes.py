@@ -2051,7 +2051,7 @@ def create_router(
         pause is kept and the client receives ``{"status": "still_exhausted"}``
         so the UI can display immediate feedback.
         """
-        from src.subprocess_util import probe_credit_availability
+        from subprocess_util import probe_credit_availability
 
         _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
         orch = _get_orch()
