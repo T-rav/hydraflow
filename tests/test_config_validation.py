@@ -2450,3 +2450,28 @@ class TestTieringFields:
         assert cfg.debug_model == "opus"
         assert cfg.max_debug_attempts == 1
         assert cfg.subskill_confidence_threshold == pytest.approx(0.7)
+
+
+class TestConfigFactoryParamParity:
+    """Guard: every kwarg that ConfigFactory passes to HydraFlowConfig must exist as a model field."""
+
+    def test_factory_params_match_config_fields(self) -> None:
+        import inspect
+
+        from tests.helpers import ConfigFactory
+
+        sig = inspect.signature(ConfigFactory.create)
+        # Params that ConfigFactory uses internally and does NOT forward to HydraFlowConfig
+        internal_params = {"repo_root", "config_file"}
+
+        factory_params = {
+            name
+            for name, p in sig.parameters.items()
+            if p.kind in (p.KEYWORD_ONLY, p.POSITIONAL_OR_KEYWORD)
+        } - internal_params
+
+        config_fields = set(HydraFlowConfig.model_fields.keys())
+        phantom = factory_params - config_fields
+        assert phantom == set(), (
+            f"ConfigFactory passes params not in HydraFlowConfig: {sorted(phantom)}"
+        )
