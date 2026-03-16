@@ -47,9 +47,14 @@ function SystemAlertBanner({ alert, onDismiss, onRefreshCredit }) {
       // Already cleared — banner will be removed by WebSocket event
       setRefreshState('idle')
     } else if (result.status === 'resuming') {
-      // Loops are restarting — if credits are still exhausted, a new alert will arrive
+      // Loops are restarting — banner will be auto-dismissed by status event
       setRefreshState('idle')
+    } else if (result.status === 'still_exhausted') {
+      // API probe confirmed credits are still unavailable
+      setRefreshState('still_exhausted')
+      timerRef.current = setTimeout(() => setRefreshState('idle'), 5000)
     } else {
+      // API error or unexpected status
       setRefreshState('still_exhausted')
       timerRef.current = setTimeout(() => setRefreshState('idle'), 5000)
     }

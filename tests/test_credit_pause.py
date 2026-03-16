@@ -804,10 +804,10 @@ class TestCreditRefreshEndpoint:
         assert data["status"] == "not_paused"
 
     @pytest.mark.asyncio
-    async def test_returns_resuming_when_paused(
+    async def test_returns_resuming_when_paused_and_credits_available(
         self, config: HydraFlowConfig, event_bus, state, tmp_path
     ) -> None:
-        """POST /api/control/credit-refresh returns resuming when credits are paused."""
+        """POST /api/control/credit-refresh returns resuming when probe succeeds."""
         from tests.helpers import find_endpoint, make_dashboard_router
 
         orch = HydraFlowOrchestrator(config, event_bus=event_bus, state=state)
@@ -817,10 +817,42 @@ class TestCreditRefreshEndpoint:
         )
         endpoint = find_endpoint(router, "/api/control/credit-refresh", "POST")
         assert endpoint is not None
-        response = await endpoint()
+        with patch(
+            "src.subprocess_util.probe_credit_availability",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            response = await endpoint()
         data = __import__("json").loads(response.body)
         assert data["status"] == "resuming"
         assert orch._credit_resume_event.is_set()
+
+    @pytest.mark.asyncio
+    async def test_returns_still_exhausted_when_probe_fails(
+        self, config: HydraFlowConfig, event_bus, state, tmp_path
+    ) -> None:
+        """POST /api/control/credit-refresh returns still_exhausted when
+        the probe confirms credits are still unavailable."""
+        from tests.helpers import find_endpoint, make_dashboard_router
+
+        orch = HydraFlowOrchestrator(config, event_bus=event_bus, state=state)
+        orch._credits_paused_until = datetime.now(UTC) + timedelta(hours=1)
+        router, _ = make_dashboard_router(
+            config, event_bus, state, tmp_path, get_orch=lambda: orch
+        )
+        endpoint = find_endpoint(router, "/api/control/credit-refresh", "POST")
+        assert endpoint is not None
+        with patch(
+            "src.subprocess_util.probe_credit_availability",
+            new_callable=AsyncMock,
+            return_value=False,
+        ):
+            response = await endpoint()
+        data = __import__("json").loads(response.body)
+        assert data["status"] == "still_exhausted"
+        # Pause must NOT have been cleared
+        assert not orch._credit_resume_event.is_set()
+        assert orch._credits_paused_until is not None
 
     @pytest.mark.asyncio
     async def test_returns_error_when_no_orchestrator(
@@ -836,3 +868,101 @@ class TestCreditRefreshEndpoint:
         assert endpoint is not None
         response = await endpoint()
         assert response.status_code == 400
+
+
+# ===========================================================================
+# probe_credit_availability
+# ===========================================================================
+
+
+class TestProbeCreditAvailability:
+    """Tests for the lightweight Anthropic API credit probe."""
+
+    @pytest.mark.asyncio
+    async def test_returns_true_when_no_api_key(self) -> None:
+        """Without ANTHROPIC_API_KEY, probe assumes credits are available."""
+        from subprocess_util import probe_credit_availability
+
+        with patch.dict("os.environ", {}, clear=True):
+            result = await probe_credit_availability()
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_returns_true_on_200_response(self) -> None:
+        """A 200 response means credits are available."""
+        from unittest.mock import MagicMock
+
+        from subprocess_util import probe_credit_availability
+
+        mock_response = MagicMock(status_code=200, text="ok")
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        with (
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}),
+            patch("httpx.AsyncClient", return_value=mock_client),
+        ):
+            result = await probe_credit_availability()
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_returns_false_on_credit_exhaustion_response(self) -> None:
+        """A 429 with credit exhaustion body returns False."""
+        from unittest.mock import MagicMock
+
+        from subprocess_util import probe_credit_availability
+
+        mock_response = MagicMock(
+            status_code=429,
+            text="Your credit balance is too low to access the API.",
+        )
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        with (
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}),
+            patch("httpx.AsyncClient", return_value=mock_client),
+        ):
+            result = await probe_credit_availability()
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_returns_true_on_non_credit_error(self) -> None:
+        """A non-credit error (e.g. 401 auth) should not block resume."""
+        from unittest.mock import MagicMock
+
+        from subprocess_util import probe_credit_availability
+
+        mock_response = MagicMock(status_code=401, text="Invalid API key")
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        with (
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}),
+            patch("httpx.AsyncClient", return_value=mock_client),
+        ):
+            result = await probe_credit_availability()
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_returns_true_on_network_error(self) -> None:
+        """Network failures should not block resume."""
+        from subprocess_util import probe_credit_availability
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(side_effect=ConnectionError("timeout"))
+
+        with (
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}),
+            patch("httpx.AsyncClient", return_value=mock_client),
+        ):
+            result = await probe_credit_availability()
+        assert result is True
