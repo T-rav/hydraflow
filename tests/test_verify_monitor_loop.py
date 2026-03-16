@@ -10,14 +10,15 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+from tests.conftest import IssueFactory
 from tests.helpers import make_bg_loop_deps
 
 
 def _make_issue(number: int, *, state: str = "open"):
     """Create a mock GitHubIssue."""
-    from models import GitHubIssue, GitHubIssueState
+    from models import GitHubIssueState
 
-    return GitHubIssue(
+    return IssueFactory.create(
         number=number,
         title=f"Verify issue #{number}",
         body="",

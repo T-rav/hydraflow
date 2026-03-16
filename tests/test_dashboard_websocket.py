@@ -1182,7 +1182,7 @@ class TestWebSocketErrorLogging:
         app = dashboard.create_app()
         client = TestClient(app)
 
-        with patch("dashboard_routes.logger") as mock_logger:
+        with patch("dashboard_routes._routes.logger") as mock_logger:
             with (
                 patch(
                     "starlette.websockets.WebSocket.send_text",
@@ -1215,7 +1215,7 @@ class TestWebSocketErrorLogging:
         pre_populated_queue: asyncio.Queue[HydraFlowEvent] = asyncio.Queue()
         pre_populated_queue.put_nowait(event)
 
-        with patch("dashboard_routes.logger") as mock_logger:
+        with patch("dashboard_routes._routes.logger") as mock_logger:
             # subscribe() returns the pre-populated queue (no history, so
             # send_text is only called during the live streaming phase)
             with (
@@ -1247,7 +1247,7 @@ class TestWebSocketErrorLogging:
         app = dashboard.create_app()
         client = TestClient(app)
 
-        with patch("dashboard_routes.logger") as mock_logger:
+        with patch("dashboard_routes._routes.logger") as mock_logger:
             with client.websocket_connect("/ws"):
                 # Just connect and disconnect normally
                 pass
