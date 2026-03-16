@@ -1380,3 +1380,69 @@ class TestEnrichWithComments:
         enriched = await store.enrich_with_comments(task)
 
         assert enriched is task
+
+
+# ---------------------------------------------------------------------------
+# Guard: snapshot status values must be valid PipelineIssueStatus members
+# ---------------------------------------------------------------------------
+
+
+class TestSnapshotStatusGuard:
+    """AST guard ensuring _snapshot_* methods only use PipelineIssueStatus values."""
+
+    def test_snapshot_status_values_match_pipeline_issue_status(self) -> None:
+        """Every status= keyword in _snapshot_* methods must be a PipelineIssueStatus value.
+
+        Prevents silent frontend breakage when a new snapshot method uses an
+        arbitrary string like ``"done"`` instead of a recognised enum value.
+        See issue #3146 / PR #3145.
+        """
+        import ast
+        from pathlib import Path
+
+        from models import PipelineIssueStatus
+
+        valid_values = {member.value for member in PipelineIssueStatus}
+
+        src = (Path(__file__).parent.parent / "src" / "issue_store.py").read_text()
+        tree = ast.parse(src)
+
+        issue_store_cls = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ClassDef) and node.name == "IssueStore"
+        )
+
+        bad: list[str] = []
+        for method in issue_store_cls.body:
+            if not isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if not method.name.startswith("_snapshot_"):
+                continue
+
+            for node in ast.walk(method):
+                if not isinstance(node, ast.Call):
+                    continue
+                for kw in node.keywords:
+                    if kw.arg != "status":
+                        continue
+                    # Allow PipelineIssueStatus.X attribute references
+                    if isinstance(kw.value, ast.Attribute):
+                        continue
+                    # Check string literals
+                    if (
+                        isinstance(kw.value, ast.Constant)
+                        and isinstance(kw.value.value, str)
+                        and kw.value.value not in valid_values
+                    ):
+                        bad.append(
+                            f"{method.name}() uses status="
+                            f'"{kw.value.value}" '
+                            f"(line {kw.value.lineno})"
+                        )
+
+        assert not bad, (
+            "Snapshot status values must be valid PipelineIssueStatus members "
+            f"({', '.join(sorted(valid_values))}). Violations:\n"
+            + "\n".join(f"  - {b}" for b in bad)
+        )
