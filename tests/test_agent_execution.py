@@ -36,6 +36,7 @@ class TestAgentRunnerInheritance:
         runner = AgentRunner(config, event_bus)
         assert isinstance(runner, BaseRunner)
         assert runner._config is config
+        assert runner._bus is event_bus
 
     def test_has_terminate_method(self, config, event_bus: EventBus) -> None:
         runner = AgentRunner(config, event_bus)
