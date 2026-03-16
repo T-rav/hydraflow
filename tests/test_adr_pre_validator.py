@@ -654,6 +654,146 @@ class TestMismatchedADRTitle:
         assert "mismatched_adr_title" not in codes
 
 
+class TestCheckSourceFunctionRefs:
+    """Tests for phantom source symbol detection."""
+
+    def test_valid_function_reference_passes(self, tmp_path: Path) -> None:
+        """A cited function that exists in the source file is not flagged."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "config.py").write_text("def _resolve_paths():\n    pass\n")
+        content = _valid_adr(context="See `src/config.py:_resolve_paths` for details.")
+        validator = ADRPreValidator()
+        result = validator.validate(content, repo_root=tmp_path)
+        codes = [i.code for i in result.issues]
+        assert "phantom_source_symbol" not in codes
+
+    def test_phantom_function_detected(self, tmp_path: Path) -> None:
+        """A cited function that does NOT exist in the source file is flagged."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "config.py").write_text("def _resolve_repo_scoped_paths():\n    pass\n")
+        content = _valid_adr(
+            context="See `src/config.py:_namespace_repo_paths` for details."
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content, repo_root=tmp_path)
+        codes = [i.code for i in result.issues]
+        assert "phantom_source_symbol" in codes
+        issue = next(i for i in result.issues if i.code == "phantom_source_symbol")
+        assert "_namespace_repo_paths" in issue.message
+        assert "config.py" in issue.message
+
+    def test_class_name_reference_passes(self, tmp_path: Path) -> None:
+        """A cited class name that exists in the source file is not flagged."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "config.py").write_text("class HydraFlowConfig:\n    pass\n")
+        content = _valid_adr(context="See `src/config.py:HydraFlowConfig` for details.")
+        validator = ADRPreValidator()
+        result = validator.validate(content, repo_root=tmp_path)
+        codes = [i.code for i in result.issues]
+        assert "phantom_source_symbol" not in codes
+
+    def test_indented_method_definition_passes(self, tmp_path: Path) -> None:
+        """An indented class method definition is correctly found (not a false positive)."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "config.py").write_text(
+            "class Foo:\n    def _resolve_paths(self):\n        pass\n"
+        )
+        content = _valid_adr(context="See `src/config.py:_resolve_paths` for details.")
+        validator = ADRPreValidator()
+        result = validator.validate(content, repo_root=tmp_path)
+        codes = [i.code for i in result.issues]
+        assert "phantom_source_symbol" not in codes
+
+    def test_missing_source_file_skipped(self, tmp_path: Path) -> None:
+        """A reference to a non-existent file does not produce an issue."""
+        src = tmp_path / "src"
+        src.mkdir()
+        content = _valid_adr(context="See `src/nonexistent.py:some_func` for details.")
+        validator = ADRPreValidator()
+        result = validator.validate(content, repo_root=tmp_path)
+        codes = [i.code for i in result.issues]
+        assert "phantom_source_symbol" not in codes
+
+    def test_no_repo_root_skips_check(self) -> None:
+        """When repo_root is None, phantom symbol checks are skipped entirely."""
+        content = _valid_adr(
+            context="See `src/config.py:_namespace_repo_paths` for details."
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content)
+        codes = [i.code for i in result.issues]
+        assert "phantom_source_symbol" not in codes
+
+    def test_phantom_symbol_is_fixable(self, tmp_path: Path) -> None:
+        """Phantom source symbol issues are marked as fixable."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "config.py").write_text("def real_func():\n    pass\n")
+        content = _valid_adr(context="See `src/config.py:fake_func` for details.")
+        validator = ADRPreValidator()
+        result = validator.validate(content, repo_root=tmp_path)
+        issue = next(i for i in result.issues if i.code == "phantom_source_symbol")
+        assert issue.fixable is True
+
+    def test_multiple_phantom_symbols_detected(self, tmp_path: Path) -> None:
+        """Multiple phantom symbols from different files are each flagged."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "config.py").write_text("def real_func():\n    pass\n")
+        (src / "models.py").write_text("class RealModel:\n    pass\n")
+        content = _valid_adr(
+            context=(
+                "See `src/config.py:phantom_one` and "
+                "`src/models.py:phantom_two` for details."
+            )
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content, repo_root=tmp_path)
+        phantom_issues = [i for i in result.issues if i.code == "phantom_source_symbol"]
+        assert len(phantom_issues) == 2
+
+    def test_non_src_path_not_matched(self) -> None:
+        """References to files outside src/ are not checked."""
+        content = _valid_adr(context="See `docs/config.py:some_func` for details.")
+        validator = ADRPreValidator()
+        result = validator.validate(content, repo_root=Path("/fake"))
+        codes = [i.code for i in result.issues]
+        assert "phantom_source_symbol" not in codes
+
+    def test_deeply_indented_method_passes(self, tmp_path: Path) -> None:
+        """A method nested inside a class inside another block is still found."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "config.py").write_text(
+            "class Outer:\n"
+            "    class Inner:\n"
+            "        def deeply_nested(self):\n"
+            "            pass\n"
+        )
+        content = _valid_adr(context="See `src/config.py:deeply_nested` for details.")
+        validator = ADRPreValidator()
+        result = validator.validate(content, repo_root=tmp_path)
+        codes = [i.code for i in result.issues]
+        assert "phantom_source_symbol" not in codes
+
+    def test_duplicate_references_produce_one_issue(self, tmp_path: Path) -> None:
+        """The same phantom symbol cited twice produces only one issue."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "config.py").write_text("def real():\n    pass\n")
+        content = _valid_adr(
+            context=("See `src/config.py:phantom` and also `src/config.py:phantom`.")
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content, repo_root=tmp_path)
+        phantom_issues = [i for i in result.issues if i.code == "phantom_source_symbol"]
+        assert len(phantom_issues) == 1
+
+
 class TestMultipleIssues:
     def test_multiple_issues_collected(self) -> None:
         """An ADR with multiple problems should report all issues."""

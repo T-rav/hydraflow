@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass
@@ -67,6 +68,10 @@ _ADR_PAREN_TITLE_RE = re.compile(r"ADR[- ]\d{4}\s*\(([^()]*(?:\([^()]*\)[^()]*)*
 # titles that contain dots (e.g. "Pi.dev" in ADR-0004's title).
 _ADR_EMDASH_TITLE_RE = re.compile(r"ADR[- ]\d{4}\s*—\s*(.+?)(?:\.\s|,|;|$)")
 
+# Matches source file + symbol citations like `src/config.py:_resolve_paths` or
+# `src/config.py:HydraFlowConfig`.  Group 1 = file path, Group 2 = symbol name.
+_SOURCE_SYMBOL_RE = re.compile(r"`(src/[^`:\s]+\.py):(\w+)`")
+
 
 class ADRPreValidator:
     """Validates ADR structure before sending to the council."""
@@ -75,12 +80,15 @@ class ADRPreValidator:
         self,
         content: str,
         all_adrs: list[tuple[int, str, str, str]] | None = None,
+        *,
+        repo_root: Path | None = None,
     ) -> ADRValidationResult:
         """Run all validation checks on an ADR.
 
         Args:
             content: The full markdown content of the ADR.
             all_adrs: Optional list of (number, title, content, filename) for cross-reference checks.
+            repo_root: Optional repo root path for verifying source symbol references.
 
         Returns:
             ADRValidationResult with any issues found.
@@ -93,6 +101,7 @@ class ADRPreValidator:
         self._check_volatile_line_citations(content, result)
         self._check_stale_amending_notes(content, all_adrs or [], result)
         self._check_bare_adr_references(content, all_adrs or [], result)
+        self._check_source_function_refs(content, repo_root, result)
         return result
 
     def _check_status_field(self, content: str, result: ADRValidationResult) -> None:
@@ -328,6 +337,59 @@ class ADRPreValidator:
                     fixable=True,
                 )
             )
+
+    def _check_source_function_refs(
+        self,
+        content: str,
+        repo_root: Path | None,
+        result: ADRValidationResult,
+    ) -> None:
+        """Verify that function/class names cited in source references actually exist.
+
+        Scans for backtick-quoted references like `src/config.py:_resolve_paths`
+        and greps the referenced file for a matching ``def`` or ``class`` definition.
+        Skips gracefully when *repo_root* is None or the referenced file doesn't exist.
+        """
+        if repo_root is None:
+            return
+
+        # Collect unique (file, symbol) pairs
+        refs: dict[tuple[str, str], None] = {}
+        for match in _SOURCE_SYMBOL_RE.finditer(content):
+            file_path, symbol = match.group(1), match.group(2)
+            refs[(file_path, symbol)] = None
+
+        # Cache file contents to avoid re-reading
+        file_cache: dict[str, str | None] = {}
+
+        for file_path, symbol in refs:
+            if file_path not in file_cache:
+                full_path = repo_root / file_path
+                try:
+                    file_cache[file_path] = full_path.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    file_cache[file_path] = None
+
+            source = file_cache[file_path]
+            if source is None:
+                # File doesn't exist or is unreadable — skip silently
+                continue
+
+            # Match both top-level and indented definitions (class methods)
+            pattern = re.compile(
+                rf"^\s*(?:def|class)\s+{re.escape(symbol)}\b", re.MULTILINE
+            )
+            if not pattern.search(source):
+                result.issues.append(
+                    ADRValidationIssue(
+                        code="phantom_source_symbol",
+                        message=(
+                            f"`{file_path}:{symbol}` is cited but "
+                            f"`{symbol}` is not defined in `{file_path}`"
+                        ),
+                        fixable=True,
+                    )
+                )
 
     @staticmethod
     def _check_title_accuracy(
