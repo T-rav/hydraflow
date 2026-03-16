@@ -210,6 +210,113 @@ class TestCheckSupersession:
         assert "invalid_supersession" in codes
 
 
+class TestCheckFootnoteExceptionCrossRefs:
+    def test_footnote_exception_referenced_in_body_passes(self) -> None:
+        """A footnote defining an exception that IS referenced in the body passes."""
+        content = _valid_adr(
+            decision=(
+                "Guard every gate. Exception: see [^1] for details.\n\n"
+                "[^1]: **Rule 3 exception — Status publishing.** Always active."
+            ),
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content)
+        codes = [i.code for i in result.issues]
+        assert "unreferenced_footnote_exception" not in codes
+
+    def test_footnote_exception_not_referenced_in_body_detected(self) -> None:
+        """A footnote defining an exception that is NOT referenced in the body is flagged."""
+        content = _valid_adr(
+            decision=(
+                "Guard every gate with a config boolean.\n\n"
+                "[^1]: **Rule 3 exception — Status publishing.** Always active."
+            ),
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content)
+        codes = [i.code for i in result.issues]
+        assert "unreferenced_footnote_exception" in codes
+
+    def test_footnote_without_exception_keyword_ignored(self) -> None:
+        """A footnote that does not mention exceptions is not checked."""
+        content = _valid_adr(
+            decision=(
+                "Some decision text.\n\n"
+                "[^1]: This is just a regular footnote with more details."
+            ),
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content)
+        codes = [i.code for i in result.issues]
+        assert "unreferenced_footnote_exception" not in codes
+
+    def test_multiple_footnotes_only_exception_ones_checked(self) -> None:
+        """Only footnotes with exception keywords are checked for cross-refs."""
+        content = _valid_adr(
+            decision=(
+                "Guard every gate. See [^2] for context.\n\n"
+                "[^1]: **Exception** — this gate is always active.\n\n"
+                "[^2]: Additional context about the design."
+            ),
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content)
+        codes = [i.code for i in result.issues]
+        assert "unreferenced_footnote_exception" in codes
+        # Only one issue — for [^1], not [^2]
+        exception_issues = [
+            i for i in result.issues if i.code == "unreferenced_footnote_exception"
+        ]
+        assert len(exception_issues) == 1
+        assert "[^1]" in exception_issues[0].message
+
+    def test_no_footnotes_passes(self) -> None:
+        """An ADR with no footnotes at all passes this check."""
+        validator = ADRPreValidator()
+        result = validator.validate(_valid_adr())
+        codes = [i.code for i in result.issues]
+        assert "unreferenced_footnote_exception" not in codes
+
+    def test_table_ref_counts_as_body_reference(self) -> None:
+        """A [^N] reference in a table row (body text) satisfies the check."""
+        content = _valid_adr(
+            decision=(
+                "| Gate | Config Guard |\n"
+                "|------|-------------|\n"
+                "| Status | Always active [^1] |\n\n"
+                "[^1]: **Rule 3 exception.** PublishFn is exempt from config guards."
+            ),
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content)
+        codes = [i.code for i in result.issues]
+        assert "unreferenced_footnote_exception" not in codes
+
+    def test_exempt_keyword_triggers_check(self) -> None:
+        """The keyword 'exempt' also triggers the footnote cross-ref check."""
+        content = _valid_adr(
+            decision=(
+                "Guard every gate.\n\n[^1]: PublishFn is exempt from this requirement."
+            ),
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content)
+        codes = [i.code for i in result.issues]
+        assert "unreferenced_footnote_exception" in codes
+
+    def test_issue_is_not_fixable(self) -> None:
+        """Unreferenced footnote exceptions are not auto-fixable."""
+        content = _valid_adr(
+            decision=("Guard every gate.\n\n[^1]: **Exception** — always active."),
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content)
+        issue = next(
+            i for i in result.issues if i.code == "unreferenced_footnote_exception"
+        )
+        assert issue.fixable is False
+
+
 class TestMultipleIssues:
     def test_multiple_issues_collected(self) -> None:
         """An ADR with multiple problems should report all issues."""

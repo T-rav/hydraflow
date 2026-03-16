@@ -35,6 +35,14 @@ _SUPERSEDE_RE = re.compile(
     r"supersed(?:es?|ed|ing)\s+(?:ADR[- ]?)(\d{4})", re.IGNORECASE
 )
 _REQUIRED_SECTIONS = ("## Context", "## Decision", "## Consequences")
+_FOOTNOTE_DEF_RE = re.compile(
+    r"^\[\^(\w+)\]:\s*(.+?)(?=^\[\^|\Z)", re.MULTILINE | re.DOTALL
+)
+_FOOTNOTE_REF_RE = re.compile(r"\[\^(\w+)\](?!:)")
+_EXCEPTION_KEYWORDS_RE = re.compile(
+    r"\bexception\b|\bexcept(?:ed|ing)?\b|\balways active\b|\bexempt",
+    re.IGNORECASE,
+)
 
 
 class ADRPreValidator:
@@ -59,6 +67,7 @@ class ADRPreValidator:
         self._check_required_sections(content, result)
         self._check_empty_sections(content, result)
         self._check_supersession(content, all_adrs or [], result)
+        self._check_footnote_exception_cross_refs(content, result)
         return result
 
     def _check_status_field(self, content: str, result: ADRValidationResult) -> None:
@@ -108,6 +117,38 @@ class ADRPreValidator:
                             fixable=False,
                         )
                     )
+
+    def _check_footnote_exception_cross_refs(
+        self, content: str, result: ADRValidationResult
+    ) -> None:
+        """Check that footnotes defining rule exceptions are referenced in body text."""
+        footnote_defs = _FOOTNOTE_DEF_RE.findall(content)
+        if not footnote_defs:
+            return
+
+        # Find the start of the first footnote definition to split body from footnotes
+        first_def = re.search(r"^\[\^\w+\]:", content, re.MULTILINE)
+        if not first_def:
+            return
+        body_text = content[: first_def.start()]
+
+        # Collect all footnote refs in the body text
+        body_refs = set(_FOOTNOTE_REF_RE.findall(body_text))
+
+        for fn_id, fn_body in footnote_defs:
+            if not _EXCEPTION_KEYWORDS_RE.search(fn_body):
+                continue
+            if fn_id not in body_refs:
+                result.issues.append(
+                    ADRValidationIssue(
+                        code="unreferenced_footnote_exception",
+                        message=(
+                            f"Footnote [^{fn_id}] defines a rule exception but "
+                            f"is not referenced in the body text"
+                        ),
+                        fixable=False,
+                    )
+                )
 
     def _check_supersession(
         self,
