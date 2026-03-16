@@ -428,3 +428,24 @@ class TestSummarizeAndComment:
 
 
 # --- TranscriptSummarizer.summarize_and_publish tests ---
+
+
+class TestSummarizeAndPublish:
+    """Tests for issue-based transcript summaries (deprecated no-op)."""
+
+    @pytest.mark.asyncio
+    async def test_always_returns_none(self, tmp_path: Path) -> None:
+        """summarize_and_publish is a permanent no-op after feature removal."""
+        config = ConfigFactory.create(repo_root=tmp_path)
+        prs = MagicMock()
+        prs.create_issue = AsyncMock()
+        bus = MagicMock()
+        state = MagicMock()
+
+        summarizer = TranscriptSummarizer(config, prs, bus, state)
+        result = await summarizer.summarize_and_publish(
+            transcript="x" * 1000, issue_number=42, phase="implement"
+        )
+
+        assert result is None
+        prs.create_issue.assert_not_called()
