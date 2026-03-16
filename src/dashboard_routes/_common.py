@@ -8,6 +8,8 @@ duplication.
 
 from __future__ import annotations
 
+import json
+import logging
 import re
 from datetime import UTC, datetime
 from typing import Any
@@ -91,6 +93,19 @@ _HISTORY_STATUSES: set[str] = {
     "merged",
 }
 
+_STATUS_RANKS: dict[str, int] = {
+    "unknown": 0,
+    "triaged": 1,
+    "planned": 2,
+    "implemented": 3,
+    "in_review": 4,
+    "reviewed": 5,
+    "hitl": 6,
+    "active": 7,
+    "failed": 8,
+    "merged": 9,
+}
+
 
 def _parse_iso_or_none(raw: str | None) -> datetime | None:
     """Parse an ISO 8601 string to datetime, returning None on failure."""
@@ -123,7 +138,6 @@ def _coerce_int(value: object) -> int:
 
 def _coerce_history_status(value: str) -> str:
     """Normalize dashboard history statuses and default to ``unknown``."""
-    import logging
 
     cleaned = str(value).strip().lower()
     if cleaned in _HISTORY_STATUSES:
@@ -136,19 +150,7 @@ def _coerce_history_status(value: str) -> str:
 
 def _status_rank(status: str) -> int:
     """Return a numeric rank for a history status used for ordering."""
-    ranks = {
-        "unknown": 0,
-        "triaged": 1,
-        "planned": 2,
-        "implemented": 3,
-        "in_review": 4,
-        "reviewed": 5,
-        "hitl": 6,
-        "active": 7,
-        "failed": 8,
-        "merged": 9,
-    }
-    return ranks.get(status, 0)
+    return _STATUS_RANKS.get(status, 0)
 
 
 def _is_timestamp_in_range(
@@ -175,7 +177,6 @@ def _status_sort_key(status: str, timestamp: str | None) -> tuple[datetime, int]
 
 def _parse_compat_json_object(raw: str | None) -> dict[str, Any] | None:
     """Best-effort parse of legacy query/body JSON object payloads."""
-    import json
 
     if not isinstance(raw, str):
         return None
