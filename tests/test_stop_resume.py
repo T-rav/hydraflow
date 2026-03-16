@@ -446,16 +446,6 @@ class TestOrchestratorReset:
             "across stop/start cycles."
         )
 
-    def test_reset_clears_stop_event_specifically(self, tmp_path: Path) -> None:
-        """reset() clears _stop_event so the orchestrator can restart."""
-        orch = _make_orchestrator(tmp_path)
-        orch._stop_event.set()
-        assert orch._stop_event.is_set()
-
-        orch.reset()
-
-        assert not orch._stop_event.is_set()
-
 
 # ---------------------------------------------------------------------------
 # Worktree preservation tests

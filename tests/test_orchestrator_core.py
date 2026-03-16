@@ -588,6 +588,8 @@ class TestStopMechanism:
                         and isinstance(child.value, ast.Call)
                         and isinstance(child.value.func, ast.Attribute)
                         and child.value.func.attr == "Event"
+                        and isinstance(child.value.func.value, ast.Name)
+                        and child.value.func.value.id == "asyncio"
                     ):
                         event_fields.append(child.targets[0].attr)
 
