@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass
@@ -58,6 +59,10 @@ _ADR_REF_RE = re.compile(r"ADR[- ](\d{4})")
 #   ADR-0006: Title           — heading-style (only in # headings)
 _ADR_REF_WITH_TITLE_RE = re.compile(r"ADR[- ]\d{4}\s*(?:\(|—)")
 
+# Matches backtick-delimited source citations: `src/path.py:symbol_name`
+# Group 1 = file path, Group 2 = symbol name.
+_SOURCE_CITATION_RE = re.compile(r"`([^`]+\.py):([a-zA-Z_][a-zA-Z0-9_]*)`")
+
 # Captures the title text from a parenthesized annotation: ADR-0006 (Title Here)
 # Supports one level of nested parentheses, e.g. ADR-0004 (Title (sub-info)).
 _ADR_PAREN_TITLE_RE = re.compile(r"ADR[- ]\d{4}\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)")
@@ -75,12 +80,15 @@ class ADRPreValidator:
         self,
         content: str,
         all_adrs: list[tuple[int, str, str, str]] | None = None,
+        *,
+        repo_root: Path | None = None,
     ) -> ADRValidationResult:
         """Run all validation checks on an ADR.
 
         Args:
             content: The full markdown content of the ADR.
             all_adrs: Optional list of (number, title, content, filename) for cross-reference checks.
+            repo_root: Optional path to the repository root for source symbol verification.
 
         Returns:
             ADRValidationResult with any issues found.
@@ -93,6 +101,7 @@ class ADRPreValidator:
         self._check_volatile_line_citations(content, result)
         self._check_stale_amending_notes(content, all_adrs or [], result)
         self._check_bare_adr_references(content, all_adrs or [], result)
+        self._check_phantom_source_symbols(content, repo_root, result)
         return result
 
     def _check_status_field(self, content: str, result: ADRValidationResult) -> None:
@@ -364,3 +373,54 @@ class ADRPreValidator:
         if cited_lower.startswith(real_lower):
             return
         mismatched[ref_num] = (cited_title, real_title)
+
+    def _check_phantom_source_symbols(
+        self,
+        content: str,
+        repo_root: Path | None,
+        result: ADRValidationResult,
+    ) -> None:
+        """Flag source citations where the symbol does not exist in the referenced file.
+
+        Scans for backtick-delimited citations like ``src/config.py:symbol_name``
+        and verifies the symbol exists in the file via a simple text search.
+        When the symbol is not found, the issue is marked ``fixable=False``
+        because the validator cannot determine the correct symbol — only a
+        human or an agent with codebase knowledge can resolve it.
+        """
+        if repo_root is None:
+            return
+
+        phantoms: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+
+        for match in _SOURCE_CITATION_RE.finditer(content):
+            file_path = match.group(1)
+            symbol = match.group(2)
+
+            key = (file_path, symbol)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            source_file = repo_root / file_path
+            if not source_file.is_file():
+                # File doesn't exist — separate concern from phantom symbols.
+                continue
+
+            file_content = source_file.read_text(encoding="utf-8", errors="replace")
+            if symbol not in file_content:
+                phantoms.append((file_path, symbol))
+
+        for file_path, symbol in phantoms:
+            result.issues.append(
+                ADRValidationIssue(
+                    code="phantom_source_symbol",
+                    message=(
+                        f"`{file_path}:{symbol}` cites a symbol that does not "
+                        f"exist in the source file — verify the correct "
+                        f"function/class name"
+                    ),
+                    fixable=False,
+                )
+            )

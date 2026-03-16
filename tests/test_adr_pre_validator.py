@@ -654,6 +654,109 @@ class TestMismatchedADRTitle:
         assert "mismatched_adr_title" not in codes
 
 
+class TestPhantomSourceSymbol:
+    """Tests for phantom source symbol detection."""
+
+    def test_existing_symbol_passes(self, tmp_path: Path) -> None:
+        """A citation whose symbol exists in the file is not flagged."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "config.py").write_text("def _resolve_paths():\n    pass\n")
+        content = _valid_adr(
+            context="See `src/config.py:_resolve_paths` for path resolution."
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content, repo_root=tmp_path)
+        codes = [i.code for i in result.issues]
+        assert "phantom_source_symbol" not in codes
+
+    def test_phantom_symbol_detected(self, tmp_path: Path) -> None:
+        """A citation whose symbol does NOT exist in the file is flagged."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "config.py").write_text("def real_function():\n    pass\n")
+        content = _valid_adr(
+            context="See `src/config.py:nonexistent_func` for details."
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content, repo_root=tmp_path)
+        codes = [i.code for i in result.issues]
+        assert "phantom_source_symbol" in codes
+        issue = next(i for i in result.issues if i.code == "phantom_source_symbol")
+        assert "nonexistent_func" in issue.message
+
+    def test_phantom_symbol_is_not_fixable(self, tmp_path: Path) -> None:
+        """Phantom symbol issues must be fixable=False — validator cannot determine correct symbol."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "config.py").write_text("def real_function():\n    pass\n")
+        content = _valid_adr(context="See `src/config.py:ghost_symbol` for details.")
+        validator = ADRPreValidator()
+        result = validator.validate(content, repo_root=tmp_path)
+        issue = next(i for i in result.issues if i.code == "phantom_source_symbol")
+        assert issue.fixable is False
+
+    def test_no_repo_root_skips_check(self) -> None:
+        """When repo_root is not provided, phantom symbol check is skipped."""
+        content = _valid_adr(
+            context="See `src/config.py:nonexistent_func` for details."
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content)
+        codes = [i.code for i in result.issues]
+        assert "phantom_source_symbol" not in codes
+
+    def test_missing_file_skipped(self, tmp_path: Path) -> None:
+        """Citations to files that don't exist are silently skipped."""
+        content = _valid_adr(context="See `src/missing.py:some_func` for details.")
+        validator = ADRPreValidator()
+        result = validator.validate(content, repo_root=tmp_path)
+        codes = [i.code for i in result.issues]
+        assert "phantom_source_symbol" not in codes
+
+    def test_multiple_phantoms_each_reported(self, tmp_path: Path) -> None:
+        """Each distinct phantom symbol produces its own issue."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "config.py").write_text("class HydraFlowConfig:\n    pass\n")
+        content = _valid_adr(
+            context=(
+                "- `src/config.py:ghost_one` — first\n"
+                "- `src/config.py:ghost_two` — second\n"
+            )
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content, repo_root=tmp_path)
+        phantom_issues = [i for i in result.issues if i.code == "phantom_source_symbol"]
+        assert len(phantom_issues) == 2
+
+    def test_duplicate_citations_deduplicated(self, tmp_path: Path) -> None:
+        """Same file:symbol cited twice produces only one issue."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "config.py").write_text("def real_function():\n    pass\n")
+        content = _valid_adr(
+            context=(
+                "See `src/config.py:ghost` here.\nAlso `src/config.py:ghost` there.\n"
+            )
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content, repo_root=tmp_path)
+        phantom_issues = [i for i in result.issues if i.code == "phantom_source_symbol"]
+        assert len(phantom_issues) == 1
+
+    def test_has_fixable_only_false_with_phantom(self, tmp_path: Path) -> None:
+        """An ADR with only phantom_source_symbol issues is NOT has_fixable_only."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "config.py").write_text("def real_function():\n    pass\n")
+        content = _valid_adr(context="See `src/config.py:ghost` for details.")
+        validator = ADRPreValidator()
+        result = validator.validate(content, repo_root=tmp_path)
+        assert not result.passed
+        assert result.has_fixable_only is False
+
+
 class TestMultipleIssues:
     def test_multiple_issues_collected(self) -> None:
         """An ADR with multiple problems should report all issues."""
