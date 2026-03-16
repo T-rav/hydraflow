@@ -133,7 +133,8 @@ When reviewing any routing method that calls both `_route_to_triage` and
 ## Related
 
 - **Supersedes:** [ADR-0023 (Gate Triage Call on Config Toggle, Not Just HITL Fallback)](0023-gate-triage-call-not-hitl-fallback.md)
-  - Absorbed: toggle-first guard pattern code samples (verification checklist was already present)
+  - Absorbed: toggle-first guard pattern code samples and verification checklist
+- Council resolution: #2755
 - Source memory: #2327
 - Source issue: #2341
 - Related: #2345, #2355, #2346, #2350
