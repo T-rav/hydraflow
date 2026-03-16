@@ -431,11 +431,11 @@ class TestSummarizeAndComment:
 
 
 class TestSummarizeAndPublish:
-    """Tests for deprecated issue-based transcript summaries (permanent no-op)."""
+    """Tests for issue-based transcript summaries (deprecated no-op)."""
 
     @pytest.mark.asyncio
     async def test_always_returns_none(self, tmp_path: Path) -> None:
-        """summarize_and_publish is a deprecated no-op and always returns None."""
+        """summarize_and_publish is a permanent no-op after feature removal."""
         config = ConfigFactory.create(repo_root=tmp_path)
         prs = MagicMock()
         prs.create_issue = AsyncMock(return_value=999)
