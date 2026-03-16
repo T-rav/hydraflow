@@ -414,7 +414,8 @@ class ReviewRunner(BaseRunner):
 2. Fix every issue identified by the reviewer.
 3. Run `make lint` and `{test_cmd}` to verify your fixes pass.
 4. Commit fixes with message: "review-fix: address review feedback (PR #{pr.number})"
-5. Do NOT introduce new features or refactor beyond what the review requested.
+5. **Post-commit verification:** After each commit, run `git diff --stat HEAD~1` and verify your commit by confirming that every intended file appears in the stat output. If a file is missing, your commit did NOT actually change it — go back and fix it.
+6. Do NOT introduce new features or refactor beyond what the review requested.
 
 ## Required Output
 
@@ -473,6 +474,7 @@ Then a brief summary on the next line starting with "SUMMARY: ".
 2. Fix the root causes — do NOT skip or disable tests.
 3. Run `make lint` and `{test_cmd}` to verify locally.
 4. Commit fixes with message: "ci-fix: <description> (PR #{pr.number})"
+5. **Post-commit verification:** After each commit, run `git diff --stat HEAD~1` and verify your commit by confirming that every intended file appears in the stat output. If a file is missing, your commit did NOT actually change it — go back and fix it.
 
 ## Required Output
 
@@ -757,7 +759,7 @@ If you find issues that you can fix:
 1. Make the fixes directly.
 {fix_verify}
 3. Commit with message: "review: fix <description> (PR #{pr.number})"
-4. **Post-commit verification (mandatory for scope-creep removals):** After committing a scope-creep removal, run `git diff --stat HEAD~1` and verify that every file you intended to fix appears in the stat output. If a file is missing from the stat, your commit did NOT actually revert changes in that file — go back and fix it before proceeding. For factory migrations specifically, grep for the old pattern (e.g., `TaskFactory.create()`) in all test files that were supposed to be reverted.
+4. **Post-commit verification (mandatory for each commit):** After each commit, run `git diff --stat HEAD~1` and verify your commit by confirming that every intended file appears in the stat output. If a file is missing from the stat, your commit did NOT actually change that file — go back and fix it before proceeding. This is especially critical for scope-creep removal commits. For factory migrations specifically, grep for the old pattern (e.g., `TaskFactory.create()`) in all test files that were supposed to be reverted.
 
 ## Findings Format
 

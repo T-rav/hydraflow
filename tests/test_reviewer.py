@@ -1309,6 +1309,19 @@ def test_build_review_prompt_includes_post_commit_scope_creep_verification(
     assert "scope-creep removal" in prompt.lower()
 
 
+def test_build_review_prompt_stat_verification_for_each_commit(
+    config, event_bus, pr_info, task
+):
+    """Review prompt must require stat verification for each commit, not just scope-creep."""
+    runner = _make_runner(config, event_bus)
+    prompt, _ = runner._build_review_prompt_with_stats(pr_info, task, "diff")
+    lower = prompt.lower()
+
+    assert "git diff --stat head~1" in lower
+    assert "verify your commit" in lower
+    assert "intended file appears" in lower
+
+
 # ---------------------------------------------------------------------------
 # _get_head_sha — timeout
 # ---------------------------------------------------------------------------
@@ -1799,6 +1812,34 @@ def test_build_review_fix_prompt_contains_feedback(config, event_bus):
     assert "Missing null check in foo()" in prompt
     assert "review-fix:" in prompt
     assert "VERDICT:" in prompt
+
+
+def test_build_review_fix_prompt_includes_stat_verification(config, event_bus):
+    """Review fix prompt must include git diff --stat HEAD~1 post-commit verification."""
+    from tests.conftest import PRInfoFactory, TaskFactory
+
+    runner = _make_runner(config, event_bus)
+    pr = PRInfoFactory.create()
+    issue = TaskFactory.create()
+    prompt = runner._build_review_fix_prompt(pr, issue, "Some feedback")
+    lower = prompt.lower()
+
+    assert "git diff --stat head~1" in lower
+    assert "verify your commit" in lower
+    assert "intended file appears" in lower
+
+
+def test_build_ci_fix_prompt_includes_stat_verification(
+    config, event_bus, pr_info, task
+):
+    """CI fix prompt must include git diff --stat HEAD~1 post-commit verification."""
+    runner = _make_runner(config, event_bus)
+    prompt, _ = runner._build_ci_fix_prompt(pr_info, task, "CI failed", 1)
+    lower = prompt.lower()
+
+    assert "git diff --stat head~1" in lower
+    assert "verify your commit" in lower
+    assert "intended file appears" in lower
 
 
 # ---------------------------------------------------------------------------
