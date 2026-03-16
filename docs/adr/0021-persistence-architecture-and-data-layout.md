@@ -41,15 +41,16 @@ then `_apply_env_overrides`.
 
 ```
 <data_root>/                        # default: <repo_root>/.hydraflow/
-  state.json                        # StateTracker crash-recovery state
-  events.jsonl                      # EventBus append-only event log
-  sessions.jsonl                    # Session history
   config.json                       # Persisted config snapshot
-  logs/                             # Transcript and log files
-  plans/                            # Saved implementation plans
-  memory/                           # Memory and review-insight files
-  metrics/<owner-repo>/             # Per-repo metrics (repo-slug namespaced)
-    snapshots.jsonl                 # Dashboard-consumable metric snapshots
+  <repo_slug>/                      # Per-repo namespace (owner-repo)
+    state.json                      # StateTracker crash-recovery state
+    events.jsonl                    # EventBus append-only event log
+    sessions.jsonl                  # Session history
+    logs/                           # Transcript and log files
+    plans/                          # Saved implementation plans
+    memory/                         # Memory and review-insight files
+    metrics/                        # Per-repo metrics
+      snapshots.jsonl               # Dashboard-consumable metric snapshots
   runs/                             # Run artifacts
   manifest/                         # Codebase manifest snapshots
   cache/                            # Ephemeral caches
@@ -71,8 +72,9 @@ then `_apply_env_overrides`.
 
 ### Multi-repo namespacing
 
-- `MetricsManager` scopes metric files under `metrics/{repo_slug}/` where
-  `repo_slug` is `config.repo.replace("/", "-")`.
+- All per-repo artifacts (state, events, sessions, logs, plans, memory, metrics)
+  are scoped under `data_root/<repo_slug>/` via `_namespace_repo_paths()` in
+  `config.py`, where `repo_slug` is `config.repo.replace("/", "-")`.
 - `config.repo_data_root` provides a general-purpose repo-scoped subdirectory
   at `data_root / repo_slug`.
 - The supervisor spawns isolated processes per repo with separate `HYDRAFLOW_HOME`
@@ -86,12 +88,12 @@ The following `HydraFlowConfig` properties derive directories from `data_root`:
 
 | Property | Path |
 |----------|------|
-| `log_dir` | `data_root / "logs"` |
-| `plans_dir` | `data_root / "plans"` |
-| `memory_dir` | `data_root / "memory"` |
-| `state_file` | `data_root / "state.json"` |
-| `event_log_path` | `data_root / "events.jsonl"` |
 | `repo_data_root` | `data_root / repo_slug` |
+| `log_dir` | `data_root / repo_slug / "logs"` |
+| `plans_dir` | `data_root / repo_slug / "plans"` |
+| `memory_dir` | `data_root / repo_slug / "memory"` |
+| `state_file` | `data_root / repo_slug / "state.json"` |
+| `event_log_path` | `data_root / repo_slug / "events.jsonl"` |
 
 All paths can be individually overridden via their respective config fields,
 but the defaults ensure a single `data_root` change relocates everything.
@@ -146,3 +148,5 @@ but the defaults ensure a single `data_root` change relocates everything.
 - `src/file_util.py:atomic_write` — atomic file write helper
 - ADR-0003 (Git Worktrees for Issue Isolation) — worktree isolation (complementary filesystem layout)
 - ADR-0006 (RepoRuntime Isolation Architecture) — RepoRuntime isolation (per-repo process boundaries)
+- ADR-0009 (Multi-Repo Process-Per-Repo Model) — `_namespace_repo_paths()` scoping that places state files under `data_root/<repo_slug>/`
+- ADR-0010 (Worktree and Path Isolation Architecture) — mandates repo-slug scoping for `log_dir`, `plans_dir`, `memory_dir`
