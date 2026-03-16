@@ -37,7 +37,7 @@ class TestBuildServices:
     """Tests for the build_services factory function."""
 
     def test_returns_service_registry(self, config: HydraFlowConfig) -> None:
-        """build_services should return a ServiceRegistry instance."""
+        """build_services should return a ServiceRegistry with config wired."""
         bus = EventBus()
         state = StateTracker(config.state_file)
         stop_event = asyncio.Event()
@@ -46,6 +46,7 @@ class TestBuildServices:
         registry = build_services(config, bus, state, stop_event, callbacks)
 
         assert isinstance(registry, ServiceRegistry)
+        assert registry.agents._config is config
 
     def test_all_fields_are_set(self, config: HydraFlowConfig) -> None:
         """All ServiceRegistry fields should be non-None."""
