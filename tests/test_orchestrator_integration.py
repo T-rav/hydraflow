@@ -181,6 +181,19 @@ async def test_credit_pause_publishes_alerts_and_restores_loops(tmp_path) -> Non
         history_types = [event.type for event in orch.event_bus.get_history()]
         assert history_types.count(EventType.SYSTEM_ALERT) >= 2
 
+        # Verify pause alert payload: resume_at in structured field, not in message
+        pause_alerts = [
+            e
+            for e in orch.event_bus.get_history()
+            if e.type == EventType.SYSTEM_ALERT and "resume_at" in e.data
+        ]
+        assert len(pause_alerts) >= 1
+        pause_alert = pause_alerts[0]
+        # regression (issue #2665): UTC time must NOT be embedded in the message
+        assert "UTC" not in pause_alert.data["message"]
+        # resume_at should be a valid ISO 8601 timestamp
+        datetime.fromisoformat(pause_alert.data["resume_at"])
+
         tasks["triage"].cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await tasks["triage"]

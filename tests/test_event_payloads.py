@@ -387,6 +387,20 @@ class TestSystemAlertPayload:
         }
         assert p["resume_at"] == "2026-03-15T18:00:00+00:00"
 
+    def test_resume_at_not_embedded_in_message(self) -> None:
+        """Regression (issue #2665): when resume_at is a structured field,
+        the UTC time must NOT be duplicated inside the message string."""
+        from models import SystemAlertPayload
+
+        p: SystemAlertPayload = {
+            "message": "Credit limit reached. Pausing all loops.",
+            "source": "plan",
+            "resume_at": "2026-03-15T18:00:00+00:00",
+        }
+        assert "resume_at" in p
+        assert "UTC" not in p["message"]
+        assert "18:00" not in p["message"]
+
 
 class TestTranscriptSummaryPayload:
     def test_as_comment(self) -> None:
