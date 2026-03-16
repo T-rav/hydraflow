@@ -1234,14 +1234,15 @@ class TestPlanPhaseErrorPaths:
 
         await phase.plan_issues()
 
-        # Whitespace-only plan is falsy after strip — but Python truthy check
-        # treats non-empty strings as truthy, so this DOES enter success path.
-        # This test documents the actual behavior.
+        # Non-empty strings are truthy in Python even if whitespace-only, so
+        # `result.plan` passes the truthiness check and the success path IS entered.
+        # This test documents this current behavior (potential bug: whitespace-only
+        # plans are treated as valid and trigger a label swap).
         prs.transition.assert_awaited_once_with(42, "ready")
 
     @pytest.mark.asyncio
     async def test_planner_failure_without_retry_logs_warning(
-        self, config: HydraFlowConfig
+        self, config: HydraFlowConfig, caplog: pytest.LogCaptureFixture
     ) -> None:
         """When planner fails without retry, no escalation — just logs warning."""
         phase, _state, planners, prs, store, _stop = make_plan_phase(config)
@@ -1258,11 +1259,13 @@ class TestPlanPhaseErrorPaths:
         planners.plan = AsyncMock(return_value=plan_result)
         store.get_plannable = supply_once([issue])
 
-        await phase.plan_issues()
+        with caplog.at_level("WARNING", logger="hydraflow.plan_phase"):
+            await phase.plan_issues()
 
         # No label swap, no HITL escalation, no comment
         prs.transition.assert_not_awaited()
         prs.post_comment.assert_not_awaited()
+        assert any("skipping label swap" in r.message for r in caplog.records)
 
     @pytest.mark.asyncio
     async def test_issue_with_empty_body_plans_normally(
