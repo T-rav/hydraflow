@@ -169,7 +169,9 @@ class ReviewRunner(BaseRunner):
             )
             result.fixes_made = await self._has_changes(worktree_path, before_sha)
             if result.fixes_made and result.files_changed:
-                result.commit_stat = await self._get_commit_stat(worktree_path)
+                result.commit_stat = await self._get_commit_stat(
+                    worktree_path, before_sha
+                )
                 logger.info(
                     "Review fix for PR #%d changed files: %s",
                     pr.number,
@@ -178,7 +180,7 @@ class ReviewRunner(BaseRunner):
             elif result.fixes_made and not result.files_changed:
                 logger.warning(
                     "PR #%d: fixes_made is True but no committed file changes detected "
-                    "— review commit may not have persisted all intended changes",
+                    "— agent may have left uncommitted changes or the commit was empty",
                     pr.number,
                 )
 
@@ -279,7 +281,9 @@ class ReviewRunner(BaseRunner):
             )
             result.fixes_made = await self._has_changes(worktree_path, before_sha)
             if result.fixes_made and result.files_changed:
-                result.commit_stat = await self._get_commit_stat(worktree_path)
+                result.commit_stat = await self._get_commit_stat(
+                    worktree_path, before_sha
+                )
                 logger.info(
                     "CI fix for PR #%d changed files: %s",
                     pr.number,
@@ -288,7 +292,7 @@ class ReviewRunner(BaseRunner):
             elif result.fixes_made and not result.files_changed:
                 logger.warning(
                     "PR #%d: fixes_made is True but no committed file changes detected "
-                    "— CI fix commit may not have persisted all intended changes",
+                    "— agent may have left uncommitted changes or the commit was empty",
                     pr.number,
                 )
             self._save_transcript("review-pr", pr.number, transcript)
@@ -372,7 +376,9 @@ class ReviewRunner(BaseRunner):
             )
             result.fixes_made = await self._has_changes(worktree_path, before_sha)
             if result.fixes_made and result.files_changed:
-                result.commit_stat = await self._get_commit_stat(worktree_path)
+                result.commit_stat = await self._get_commit_stat(
+                    worktree_path, before_sha
+                )
                 logger.info(
                     "Review-fix for PR #%d changed files: %s",
                     pr.number,
@@ -381,7 +387,7 @@ class ReviewRunner(BaseRunner):
             elif result.fixes_made and not result.files_changed:
                 logger.warning(
                     "PR #%d: fixes_made is True but no committed file changes detected "
-                    "— review-fix commit may not have persisted all intended changes",
+                    "— agent may have left uncommitted changes or the commit was empty",
                     pr.number,
                 )
 
@@ -900,11 +906,20 @@ Diff snippet:
             return result.stdout
         return None
 
-    async def _get_commit_stat(self, worktree_path: Path) -> str:
-        """Run ``git diff --stat HEAD~1`` and return the output for audit trail."""
+    async def _get_commit_stat(
+        self, worktree_path: Path, before_sha: str | None = None
+    ) -> str:
+        """Return ``git diff --stat`` covering all reviewer commits for audit trail.
+
+        When *before_sha* is supplied the range ``<before_sha>..HEAD`` is used so
+        that multi-commit sessions are fully captured.  Falls back to ``HEAD~1``
+        when *before_sha* is unavailable (e.g. the repo had no commits before the
+        agent ran).
+        """
+        ref = f"{before_sha}..HEAD" if before_sha else "HEAD~1"
         try:
             result = await self._runner.run_simple(
-                ["git", "diff", "--stat", "HEAD~1"],
+                ["git", "diff", "--stat", ref],
                 cwd=str(worktree_path),
                 timeout=self._config.git_command_timeout,
             )
