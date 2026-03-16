@@ -649,7 +649,10 @@ class PRManager:
             state = str(data.get("state", "")).upper()
             if state == "CLOSED":
                 # stateReason: "COMPLETED" | "NOT_PLANNED" | null
-                reason = str(data.get("stateReason") or "COMPLETED").upper()
+                # Fall back to "" (not "COMPLETED") when stateReason is null so
+                # that issues closed before GitHub added stateReason tracking are
+                # not incorrectly treated as resolved.
+                reason = str(data.get("stateReason") or "").upper()
                 return reason
             return state
         except Exception:

@@ -15,6 +15,45 @@ from models import (
 )
 
 # ---------------------------------------------------------------------------
+# Shared test helpers
+# ---------------------------------------------------------------------------
+
+
+def _build_router_and_mgr(config, event_bus, state, tmp_path):
+    """Build a dashboard router and PRManager for endpoint tests."""
+    from dashboard_routes import create_router
+    from pr_manager import PRManager
+
+    pr_mgr = PRManager(config, event_bus)
+    router = create_router(
+        config=config,
+        event_bus=event_bus,
+        state=state,
+        pr_manager=pr_mgr,
+        get_orchestrator=lambda: None,
+        set_orchestrator=lambda o: None,
+        set_run_task=lambda t: None,
+        ui_dist_dir=tmp_path / "no-dist",
+        template_dir=tmp_path / "no-templates",
+    )
+    return router, pr_mgr
+
+
+def _find_route_endpoint(router, path, method="GET"):
+    """Return the endpoint function for *path* + *method*, or None."""
+    for route in router.routes:
+        if not (
+            hasattr(route, "path") and route.path == path and hasattr(route, "endpoint")
+        ):
+            continue
+        if hasattr(route, "methods") and method in route.methods:
+            return route.endpoint
+        if not hasattr(route, "methods"):
+            return route.endpoint
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Model tests
 # ---------------------------------------------------------------------------
 
@@ -150,35 +189,10 @@ class TestTrackedReportEndpoints:
     """Tests for tracked report API endpoints."""
 
     def _make_router(self, config, event_bus, state, tmp_path):
-        from dashboard_routes import create_router
-        from pr_manager import PRManager
-
-        pr_mgr = PRManager(config, event_bus)
-        return create_router(
-            config=config,
-            event_bus=event_bus,
-            state=state,
-            pr_manager=pr_mgr,
-            get_orchestrator=lambda: None,
-            set_orchestrator=lambda o: None,
-            set_run_task=lambda t: None,
-            ui_dist_dir=tmp_path / "no-dist",
-            template_dir=tmp_path / "no-templates",
-        ), pr_mgr
+        return _build_router_and_mgr(config, event_bus, state, tmp_path)
 
     def _find_endpoint(self, router, path, method="GET"):
-        for route in router.routes:
-            if not (
-                hasattr(route, "path")
-                and route.path == path
-                and hasattr(route, "endpoint")
-            ):
-                continue
-            if hasattr(route, "methods") and method in route.methods:
-                return route.endpoint
-            if not hasattr(route, "methods"):
-                return route.endpoint
-        return None
+        return _find_route_endpoint(router, path, method)
 
     @pytest.mark.asyncio
     async def test_submit_report_creates_tracked_report(
@@ -546,33 +560,10 @@ class TestRefreshReportStatuses:
     """Tests for POST /api/reports/refresh endpoint."""
 
     def _make_router(self, config, event_bus, state, tmp_path):
-        from dashboard_routes import create_router
-        from pr_manager import PRManager
-
-        pr_mgr = PRManager(config, event_bus)
-        return create_router(
-            config=config,
-            event_bus=event_bus,
-            state=state,
-            pr_manager=pr_mgr,
-            get_orchestrator=lambda: None,
-            set_orchestrator=lambda o: None,
-            set_run_task=lambda t: None,
-            ui_dist_dir=tmp_path / "no-dist",
-            template_dir=tmp_path / "no-templates",
-        ), pr_mgr
+        return _build_router_and_mgr(config, event_bus, state, tmp_path)
 
     def _find_endpoint(self, router, path, method="POST"):
-        for route in router.routes:
-            if not (
-                hasattr(route, "path")
-                and route.path == path
-                and hasattr(route, "endpoint")
-            ):
-                continue
-            if hasattr(route, "methods") and method in route.methods:
-                return route.endpoint
-        return None
+        return _find_route_endpoint(router, path, method)
 
     @pytest.mark.asyncio
     async def test_filed_report_transitions_to_fixed_when_issue_closed(
@@ -729,6 +720,37 @@ class TestRefreshReportStatuses:
         # Should NOT be re-enqueued since it's already pending
         assert len(data["refreshed"]) == 0
 
+    @pytest.mark.asyncio
+    async def test_filed_report_stays_filed_when_state_unknown(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        """When get_issue_state returns '' (error or null stateReason), report stays filed."""
+        from unittest.mock import AsyncMock, patch
+
+        state.add_tracked_report(
+            TrackedReport(
+                id="r1",
+                reporter_id="u1",
+                description="Bug",
+                status="filed",
+                linked_issue_url="https://github.com/acme/repo/issues/99",
+            )
+        )
+        router, pr_mgr = self._make_router(config, event_bus, state, tmp_path)
+        endpoint = self._find_endpoint(router, "/api/reports/refresh")
+
+        with patch.object(
+            pr_mgr, "get_issue_state", new_callable=AsyncMock, return_value=""
+        ):
+            response = await endpoint(reporter_id="u1")
+
+        data = json.loads(response.body)
+        assert len(data["refreshed"]) == 0
+
+        report = state.get_tracked_report("r1")
+        assert report is not None
+        assert report.status == "filed"
+
 
 # ---------------------------------------------------------------------------
 # Updated state machine transition tests
@@ -739,33 +761,10 @@ class TestFiledStatusTransitions:
     """Tests for state machine transitions involving the 'filed' status."""
 
     def _make_router(self, config, event_bus, state, tmp_path):
-        from dashboard_routes import create_router
-        from pr_manager import PRManager
-
-        pr_mgr = PRManager(config, event_bus)
-        return create_router(
-            config=config,
-            event_bus=event_bus,
-            state=state,
-            pr_manager=pr_mgr,
-            get_orchestrator=lambda: None,
-            set_orchestrator=lambda o: None,
-            set_run_task=lambda t: None,
-            ui_dist_dir=tmp_path / "no-dist",
-            template_dir=tmp_path / "no-templates",
-        ), pr_mgr
+        return _build_router_and_mgr(config, event_bus, state, tmp_path)
 
     def _find_endpoint(self, router, path, method="PATCH"):
-        for route in router.routes:
-            if not (
-                hasattr(route, "path")
-                and route.path == path
-                and hasattr(route, "endpoint")
-            ):
-                continue
-            if hasattr(route, "methods") and method in route.methods:
-                return route.endpoint
-        return None
+        return _find_route_endpoint(router, path, method)
 
     @pytest.mark.asyncio
     async def test_cancel_filed_report(
