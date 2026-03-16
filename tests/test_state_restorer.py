@@ -124,12 +124,20 @@ class TestPruneStaleDisabledWorkers:
         # memory_sync stays disabled (it's in known)
         assert bg_workers.is_enabled("memory_sync") is False
 
-    def test_noop_when_no_stale(self, restorer: StateRestorer, state: Any) -> None:
+    def test_noop_when_no_stale(
+        self, restorer: StateRestorer, state: Any, bg_workers: BGWorkerManager
+    ) -> None:
         restorer.prune_stale_disabled_workers({"a", "b"})
-        # No error, no crash
+        # No workers were disabled, so all should still default to enabled
+        assert bg_workers.is_enabled("a") is True
+        assert bg_workers.is_enabled("b") is True
 
-    def test_noop_when_no_known(self, restorer: StateRestorer) -> None:
+    def test_noop_when_no_known(
+        self, restorer: StateRestorer, bg_workers: BGWorkerManager
+    ) -> None:
         restorer.prune_stale_disabled_workers(set())
+        # Empty known set means nothing to prune; state unchanged
+        assert bg_workers.worker_enabled == {}
 
 
 class TestBackfillFromEvents:
