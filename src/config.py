@@ -1788,9 +1788,11 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
         env_val = _get_env(env_key)
         if env_val is None:
             continue
-        with contextlib.suppress(ValueError):
+        try:
             new_val = int(env_val)
-            _validate_field_bounds(field, env_key, new_val)
+        except ValueError:
+            continue
+        if _validate_field_bounds(field, env_key, new_val, warn_only=True):
             object.__setattr__(config, field, new_val)
 
     # Data-driven env var overrides (str fields)
@@ -1813,9 +1815,11 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
         env_val = _get_env(env_key)
         if env_val is None:
             continue
-        with contextlib.suppress(ValueError):
+        try:
             new_val = float(env_val)
-            _validate_field_bounds(field, env_key, new_val)
+        except ValueError:
+            continue
+        if _validate_field_bounds(field, env_key, new_val, warn_only=True):
             object.__setattr__(config, field, new_val)
 
     # Ratio float overrides ([0, 1] bounds) — parse failures are silently ignored
@@ -1865,14 +1869,12 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
 
     # Data-driven env var overrides (bool fields)
     for field, env_key, default in _ENV_BOOL_OVERRIDES:
-        if getattr(config, field) == default:
-            env_val = _get_env(env_key)
-            if env_val is not None:
-                object.__setattr__(
-                    config,
-                    field,
-                    env_val.lower() not in ("0", "false", "no"),
-                )
+        if getattr(config, field) != default:
+            continue
+        env_val = _get_env(env_key)
+        if env_val is None:
+            continue
+        object.__setattr__(config, field, env_val.lower() not in ("0", "false", "no"))
 
     # Data-driven env var overrides (Literal-typed fields)
     for field, env_key in _ENV_LITERAL_OVERRIDES:
