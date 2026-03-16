@@ -165,6 +165,8 @@ class ReviewRunner(BaseRunner):
 
             # Check if the reviewer made any commits or left uncommitted changes
             result.fixes_made = await self._has_changes(worktree_path, before_sha)
+            if result.fixes_made:
+                result.commit_stat = await self._get_commit_stat(worktree_path)
 
             # Persist to disk
             self._save_transcript("review-pr", pr.number, transcript)
@@ -259,6 +261,8 @@ class ReviewRunner(BaseRunner):
             result.verdict = self._parse_verdict(transcript)
             result.summary = self._extract_summary(transcript)
             result.fixes_made = await self._has_changes(worktree_path, before_sha)
+            if result.fixes_made:
+                result.commit_stat = await self._get_commit_stat(worktree_path)
             self._save_transcript("review-pr", pr.number, transcript)
         except Exception as exc:
             reraise_on_credit_or_bug(exc)
@@ -336,6 +340,8 @@ class ReviewRunner(BaseRunner):
             result.verdict = self._parse_verdict(transcript)
             result.summary = self._extract_summary(transcript)
             result.fixes_made = await self._has_changes(worktree_path, before_sha)
+            if result.fixes_made:
+                result.commit_stat = await self._get_commit_stat(worktree_path)
             self._save_transcript("review-fix", pr.number, transcript)
         except Exception as exc:
             reraise_on_credit_or_bug(exc)
@@ -847,6 +853,22 @@ Diff snippet:
         if result.returncode == 0:
             return result.stdout
         return None
+
+    async def _get_commit_stat(self, worktree_path: Path) -> str:
+        """Run ``git diff --stat HEAD~1`` and return the output for audit trail."""
+        try:
+            result = await self._runner.run_simple(
+                ["git", "diff", "--stat", "HEAD~1"],
+                cwd=str(worktree_path),
+                timeout=self._config.git_command_timeout,
+            )
+        except (TimeoutError, FileNotFoundError):
+            return ""
+        if result.returncode == 0 and result.stdout:
+            stat = result.stdout.strip()
+            logger.info("Commit stat for %s:\n%s", worktree_path.name, stat)
+            return stat
+        return ""
 
     async def _has_changes(self, worktree_path: Path, before_sha: str | None) -> bool:
         """Check if the agent made commits or left uncommitted changes."""

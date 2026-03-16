@@ -619,6 +619,7 @@ class ReviewResultFactory:
         success: bool | None = None,
         summary: str | None = None,
         fixes_made: bool | None = None,
+        commit_stat: str | None = None,
         transcript: str | None = None,
         merged: bool | None = None,
         duration_seconds: float | None = None,
@@ -654,6 +655,8 @@ class ReviewResultFactory:
                 kwargs["summary"] = summary
             if fixes_made is not None:
                 kwargs["fixes_made"] = fixes_made
+            if commit_stat is not None:
+                kwargs["commit_stat"] = commit_stat
             if transcript is not None:
                 kwargs["transcript"] = transcript
             if merged is not None:
@@ -678,6 +681,7 @@ class ReviewResultFactory:
             summary=summary if summary is not None else "Looks good.",
             error=error,
             fixes_made=fixes_made if fixes_made is not None else False,
+            commit_stat=commit_stat if commit_stat is not None else "",
             transcript=(
                 transcript if transcript is not None else "THOROUGH_REVIEW_COMPLETE"
             ),
@@ -729,6 +733,10 @@ class ReviewResultBuilder:
 
     def with_fixes_made(self, value: bool) -> ReviewResultBuilder:
         self._kwargs["fixes_made"] = value
+        return self
+
+    def with_commit_stat(self, value: str) -> ReviewResultBuilder:
+        self._kwargs["commit_stat"] = value
         return self
 
     def with_transcript(self, value: str) -> ReviewResultBuilder:
