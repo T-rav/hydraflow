@@ -855,7 +855,7 @@ class TestTrackedReportStatusTransitions:
         assert tracked.status == "filed"
 
     @pytest.mark.asyncio
-    async def test_fixed_report_has_linked_issue_url(self, tmp_path: Path) -> None:
+    async def test_filed_report_has_linked_issue_url(self, tmp_path: Path) -> None:
         """On success, the tracked report's linked_issue_url is populated."""
         loop, _stop, state, _pr = _make_loop(tmp_path)
         report = _enqueue_with_tracking(state)
