@@ -10,11 +10,15 @@ Covers:
 from __future__ import annotations
 
 import inspect
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from task_source import TaskFetcher, TaskTransitioner
+
+if TYPE_CHECKING:
+    from pr_manager import PRManager
 
 # ---------------------------------------------------------------------------
 # Stub implementations for protocol runtime-checkable tests
@@ -157,7 +161,7 @@ class TestGitHubTaskFetcherFunctional:
 class TestPRManagerTransitionerConformance:
     """PRManager must satisfy the TaskTransitioner protocol."""
 
-    def _make_pr_manager(self) -> object:
+    def _make_pr_manager(self) -> PRManager:
         from pr_manager import PRManager
 
         config = MagicMock()
@@ -197,7 +201,7 @@ class TestPRManagerTransitionerConformance:
 class TestPRManagerTransitionerDelegation:
     """PRManager.transition/close_task/create_task delegate to underlying methods."""
 
-    def _make_pr_manager(self) -> object:
+    def _make_pr_manager(self) -> PRManager:
         from pr_manager import PRManager
 
         config = MagicMock()
@@ -216,11 +220,11 @@ class TestPRManagerTransitionerDelegation:
     async def test_transition_delegates_to_swap_pipeline_labels(self) -> None:
         """transition() calls swap_pipeline_labels with the correct label."""
         mgr = self._make_pr_manager()
-        mgr.swap_pipeline_labels = AsyncMock()  # type: ignore[attr-defined]
+        mgr.swap_pipeline_labels = AsyncMock()
 
-        await mgr.transition(42, "ready", pr_number=7)  # type: ignore[union-attr]
+        await mgr.transition(42, "ready", pr_number=7)
 
-        mgr.swap_pipeline_labels.assert_awaited_once_with(  # type: ignore[attr-defined]
+        mgr.swap_pipeline_labels.assert_awaited_once_with(
             42, "hydraflow-ready", pr_number=7
         )
 
@@ -228,11 +232,11 @@ class TestPRManagerTransitionerDelegation:
     async def test_transition_uses_plan_label(self) -> None:
         """transition('plan') resolves to the planner_label config value."""
         mgr = self._make_pr_manager()
-        mgr.swap_pipeline_labels = AsyncMock()  # type: ignore[attr-defined]
+        mgr.swap_pipeline_labels = AsyncMock()
 
-        await mgr.transition(10, "plan")  # type: ignore[union-attr]
+        await mgr.transition(10, "plan")
 
-        mgr.swap_pipeline_labels.assert_awaited_once_with(  # type: ignore[attr-defined]
+        mgr.swap_pipeline_labels.assert_awaited_once_with(
             10, "hydraflow-plan", pr_number=None
         )
 
@@ -240,52 +244,52 @@ class TestPRManagerTransitionerDelegation:
     async def test_close_task_delegates_to_close_issue(self) -> None:
         """close_task() calls close_issue with the issue number."""
         mgr = self._make_pr_manager()
-        mgr.close_issue = AsyncMock()  # type: ignore[attr-defined]
+        mgr.close_issue = AsyncMock()
 
-        await mgr.close_task(99)  # type: ignore[union-attr]
+        await mgr.close_task(99)
 
-        mgr.close_issue.assert_awaited_once_with(99)  # type: ignore[attr-defined]
+        mgr.close_issue.assert_awaited_once_with(99)
 
     @pytest.mark.asyncio
     async def test_create_task_delegates_to_create_issue(self) -> None:
         """create_task() calls create_issue and returns its result."""
         mgr = self._make_pr_manager()
-        mgr.create_issue = AsyncMock(return_value=123)  # type: ignore[attr-defined]
+        mgr.create_issue = AsyncMock(return_value=123)
 
-        result = await mgr.create_task("title", "body", labels=["bug"])  # type: ignore[union-attr]
+        result = await mgr.create_task("title", "body", labels=["bug"])
 
-        mgr.create_issue.assert_awaited_once_with("title", "body", ["bug"])  # type: ignore[attr-defined]
+        mgr.create_issue.assert_awaited_once_with("title", "body", ["bug"])
         assert result == 123
 
     @pytest.mark.asyncio
     async def test_create_task_without_labels(self) -> None:
         """create_task() passes None labels through to create_issue."""
         mgr = self._make_pr_manager()
-        mgr.create_issue = AsyncMock(return_value=456)  # type: ignore[attr-defined]
+        mgr.create_issue = AsyncMock(return_value=456)
 
-        result = await mgr.create_task("t", "b")  # type: ignore[union-attr]
+        result = await mgr.create_task("t", "b")
 
-        mgr.create_issue.assert_awaited_once_with("t", "b", None)  # type: ignore[attr-defined]
+        mgr.create_issue.assert_awaited_once_with("t", "b", None)
         assert result == 456
 
     @pytest.mark.asyncio
     async def test_post_comment_delegates_to_comment(self) -> None:
         """post_comment() calls self._comment with 'issue' type and correct args."""
         mgr = self._make_pr_manager()
-        mgr._comment = AsyncMock()  # type: ignore[attr-defined]
+        mgr._comment = AsyncMock()
 
-        await mgr.post_comment(77, "hello world")  # type: ignore[union-attr]
+        await mgr.post_comment(77, "hello world")
 
-        mgr._comment.assert_awaited_once_with("issue", 77, "hello world")  # type: ignore[attr-defined]
+        mgr._comment.assert_awaited_once_with("issue", 77, "hello world")
 
     @pytest.mark.asyncio
     async def test_transition_unknown_stage_uses_stage_as_label(self) -> None:
         """transition() with an unmapped stage passes the stage string directly as the label."""
         mgr = self._make_pr_manager()
-        mgr.swap_pipeline_labels = AsyncMock()  # type: ignore[attr-defined]
+        mgr.swap_pipeline_labels = AsyncMock()
 
-        await mgr.transition(5, "unknown-stage")  # type: ignore[union-attr]
+        await mgr.transition(5, "unknown-stage")
 
-        mgr.swap_pipeline_labels.assert_awaited_once_with(  # type: ignore[attr-defined]
+        mgr.swap_pipeline_labels.assert_awaited_once_with(
             5, "unknown-stage", pr_number=None
         )

@@ -71,12 +71,6 @@ class TestCuratedManifestPath:
         expected = config.data_path("manifest", "curated.json")
         assert store.path == expected
 
-    def test_path_is_a_path_object(self, tmp_path: Path) -> None:
-        """path property returns a Path instance."""
-        config = ConfigFactory.create(repo_root=tmp_path)
-        store = CuratedManifestStore(config)
-        assert isinstance(store.path, Path)
-
 
 class TestCuratedManifestLoad:
     """Tests for load() error paths and happy path."""
