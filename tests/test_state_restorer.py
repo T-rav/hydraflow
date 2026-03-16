@@ -112,7 +112,6 @@ class TestPruneStaleDisabledWorkers:
     def test_prunes_stale(
         self,
         restorer: StateRestorer,
-        state: Any,
         bg_workers: BGWorkerManager,
     ) -> None:
         bg_workers.set_enabled("old_worker", False)
@@ -135,7 +134,7 @@ class TestPruneStaleDisabledWorkers:
         self, restorer: StateRestorer, bg_workers: BGWorkerManager
     ) -> None:
         restorer.prune_stale_disabled_workers(set())
-        # Empty known set means nothing to prune; state unchanged
+        # No workers were disabled beforehand, so nothing to prune regardless of known
         assert bg_workers.worker_enabled == {}
 
 
