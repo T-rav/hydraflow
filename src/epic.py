@@ -1157,6 +1157,12 @@ class EpicManager:
                     f"Consider reviewing the status of child issues.\n\n"
                     f"---\n*HydraFlow Epic Monitor*",
                 )
+            except Exception:
+                logger.exception(
+                    "Failed to post stale warning for epic #%d, continuing",
+                    epic.epic_number,
+                )
+            try:
                 await self._bus.publish(
                     HydraFlowEvent(
                         type=EventType.SYSTEM_ALERT,
@@ -1170,7 +1176,7 @@ class EpicManager:
                 )
             except Exception:
                 logger.exception(
-                    "Failed to process stale warning for epic #%d, continuing",
+                    "Failed to publish stale alert for epic #%d, continuing",
                     epic.epic_number,
                 )
         return stale
