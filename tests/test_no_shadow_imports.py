@@ -22,6 +22,8 @@ _FIXED_FILES = [
     "events.py",
     "dashboard_routes/_routes.py",
     "pr_manager.py",
+    "pr_unsticker.py",
+    "triage_phase.py",
     "acceptance_criteria.py",
 ]
 

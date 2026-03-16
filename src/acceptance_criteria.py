@@ -366,5 +366,4 @@ Diff summary:
 
     def terminate(self) -> None:
         """Kill any active AC generation processes."""
-
         terminate_processes(self._active_procs)
