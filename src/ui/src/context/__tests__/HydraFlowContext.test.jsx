@@ -1973,4 +1973,88 @@ describe('SESSION_RESET reducer', () => {
     // Session fields cleared
     expect(next.workers).toEqual({})
   })
+
+  // -----------------------------------------------------------------------
+  // pr_created — title propagation
+  // -----------------------------------------------------------------------
+
+  it('pr_created stores title from event payload', () => {
+    const next = reducer(initialState, {
+      type: 'pr_created',
+      data: { pr: 10, issue: 42, branch: 'agent/issue-42', title: 'Fixes #42: Add retry' },
+    })
+    expect(next.prs).toHaveLength(1)
+    expect(next.prs[0].title).toBe('Fixes #42: Add retry')
+  })
+
+  it('pr_created without title stores PR with no title field', () => {
+    const next = reducer(initialState, {
+      type: 'pr_created',
+      data: { pr: 10, issue: 42, branch: 'agent/issue-42' },
+    })
+    expect(next.prs).toHaveLength(1)
+    expect(next.prs[0].title).toBeUndefined()
+  })
+
+  // -----------------------------------------------------------------------
+  // merge_update — title propagation
+  // -----------------------------------------------------------------------
+
+  it('merge_update sets title on matching PR when title is present', () => {
+    const state = {
+      ...initialState,
+      prs: [{ pr: 10, issue: 42, branch: 'agent/issue-42' }],
+    }
+    const next = reducer(state, {
+      type: 'merge_update',
+      data: { pr: 10, status: 'merged', title: 'Fixes #42: Add retry' },
+    })
+    expect(next.prs).toHaveLength(1)
+    expect(next.prs[0].merged).toBe(true)
+    expect(next.prs[0].title).toBe('Fixes #42: Add retry')
+  })
+
+  it('merge_update without title preserves existing title', () => {
+    const state = {
+      ...initialState,
+      prs: [{ pr: 10, issue: 42, title: 'Existing title' }],
+    }
+    const next = reducer(state, {
+      type: 'merge_update',
+      data: { pr: 10, status: 'merged' },
+    })
+    expect(next.prs[0].merged).toBe(true)
+    expect(next.prs[0].title).toBe('Existing title')
+  })
+
+  it('merge_update does not overwrite title with empty string', () => {
+    const state = {
+      ...initialState,
+      prs: [{ pr: 10, issue: 42, title: 'Existing title' }],
+    }
+    const next = reducer(state, {
+      type: 'merge_update',
+      data: { pr: 10, status: 'merged', title: '' },
+    })
+    expect(next.prs[0].merged).toBe(true)
+    expect(next.prs[0].title).toBe('Existing title')
+  })
+
+  it('merge_update adds unknown PR to prs array with title', () => {
+    const next = reducer(initialState, {
+      type: 'merge_update',
+      data: { pr: 99, status: 'merged', title: 'Fixes #50: New feature', issue: 50 },
+    })
+    expect(next.prs).toHaveLength(1)
+    expect(next.prs[0]).toEqual({ pr: 99, merged: true, title: 'Fixes #50: New feature', issue: 50 })
+  })
+
+  it('merge_update adds unknown PR without title when title missing', () => {
+    const next = reducer(initialState, {
+      type: 'merge_update',
+      data: { pr: 99, status: 'merged' },
+    })
+    expect(next.prs).toHaveLength(1)
+    expect(next.prs[0]).toEqual({ pr: 99, merged: true })
+  })
 })
