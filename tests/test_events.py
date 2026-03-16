@@ -229,7 +229,7 @@ class TestEventDataType:
 # ---------------------------------------------------------------------------
 
 
-class TestTypedData:
+class TestTypedDataCast:
     def test_typed_data_returns_data_dict(self) -> None:
         event = HydraFlowEvent(
             type=EventType.WORKER_UPDATE,
