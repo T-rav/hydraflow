@@ -901,6 +901,30 @@ class TestRotateSyncCorruptLines:
         assert "Dropping corrupt event line during rotation" in caplog.text
 
 
+class TestRotateSyncCorruptContinuance:
+    """Verify _rotate_sync keeps valid lines after dropping corrupt ones."""
+
+    def test_rotate_sync_keeps_valid_lines_after_corrupt(self, tmp_path: Path) -> None:
+        """Valid lines before and after corrupt lines are preserved in the rotated file."""
+        log_path = tmp_path / "events.jsonl"
+        event = HydraFlowEvent(type=EventType.PHASE_CHANGE, data={"batch": 1})
+        valid_line = event.model_dump_json()
+        # Mix: valid, corrupt, valid — both valid lines should survive
+        lines = [valid_line, "corrupt garbage", valid_line]
+        log_path.write_text("\n".join(lines) + "\n")
+
+        event_log = EventLog(log_path)
+        event_log._rotate_sync(max_size_bytes=10, max_age_days=365)
+
+        # Read rotated file and verify both valid lines were kept
+        content = log_path.read_text()
+        kept = [line for line in content.strip().split("\n") if line.strip()]
+        assert len(kept) == 2
+        for line in kept:
+            parsed = HydraFlowEvent.model_validate_json(line)
+            assert parsed.type == EventType.PHASE_CHANGE
+
+
 class TestLoadSyncCorruptLines:
     """Verify EventLog._load_sync skips corrupt lines with warning+exc_info."""
 
