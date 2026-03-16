@@ -1684,9 +1684,12 @@ class TestGetIssueState:
         assert result == "NOT_PLANNED"
 
     @pytest.mark.asyncio
-    async def test_closed_null_statereason_defaults_to_completed(
+    async def test_closed_null_statereason_returns_empty_string(
         self, event_bus, tmp_path
     ):
+        # When stateReason is null (issues closed before GitHub added stateReason
+        # tracking), we return "" rather than assuming "COMPLETED" to avoid
+        # incorrectly treating unresolved closures as resolved.
         mgr = self._make_manager(tmp_path, event_bus)
         payload = json.dumps({"state": "CLOSED", "stateReason": None})
         mock_create = SubprocessMockBuilder().with_stdout(payload).build()
@@ -1694,7 +1697,7 @@ class TestGetIssueState:
         with patch("asyncio.create_subprocess_exec", mock_create):
             result = await mgr.get_issue_state(42)
 
-        assert result == "COMPLETED"
+        assert result == ""
 
     @pytest.mark.asyncio
     async def test_returns_empty_string_on_error(self, event_bus, tmp_path):
