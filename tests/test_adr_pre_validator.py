@@ -658,6 +658,40 @@ class TestCheckCrossReferenceTitles:
         codes = [i.code for i in result.issues]
         assert "abbreviated_cross_ref_title" not in codes
 
+    def test_emdash_abbreviated_title_flagged(self) -> None:
+        """An em-dash cross-reference with an abbreviated title is flagged."""
+        content = _valid_adr(
+            decision="See ADR-0023 \u2014 Auto-Triage Toggle Must Gate Routing for details."
+        )
+        all_adrs = [
+            (1, "Test ADR", "content", "0001-test.md"),
+            (
+                23,
+                "Auto-Triage Toggle Must Gate Routing, Not Just Stat Tracking",
+                "c",
+                "0023-gate.md",
+            ),
+        ]
+        validator = ADRPreValidator()
+        result = validator.validate(content, all_adrs)
+        codes = [i.code for i in result.issues]
+        assert "abbreviated_cross_ref_title" in codes
+        assert "mismatched_adr_title" not in codes
+
+    def test_paren_title_with_nested_parens_not_false_positive(self) -> None:
+        """A parenthesized title containing inner parens is not flagged as abbreviated."""
+        content = _valid_adr(
+            decision="See ADR-0023 (Config (Mode) Architecture Pattern) for details."
+        )
+        all_adrs = [
+            (1, "Test ADR", "content", "0001-test.md"),
+            (23, "Config (Mode) Architecture Pattern", "c", "0023-config.md"),
+        ]
+        validator = ADRPreValidator()
+        result = validator.validate(content, all_adrs)
+        codes = [i.code for i in result.issues]
+        assert "abbreviated_cross_ref_title" not in codes
+
 
 class TestDictCollisionSharedNumbers:
     """Tests that title checking handles multiple ADRs sharing the same number."""

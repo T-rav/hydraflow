@@ -59,9 +59,6 @@ _ADR_PAREN_TITLE_RE = re.compile(r"ADR[- ]\d{4}\s*\(([^()]*(?:\([^()]*\)[^()]*)*
 # titles that contain dots (e.g. "Pi.dev" in ADR-0004's title).
 _ADR_EMDASH_TITLE_RE = re.compile(r"ADR[- ]\d{4}\s*—\s*(.+?)(?:\.\s|,|;|$)")
 
-# Captures ADR number and parenthesized title text: ADR-0023 (Title Here)
-_CROSS_REF_RE = re.compile(r"ADR[- ](\d{4})\s*\(([^)]+)\)")
-
 
 class ADRPreValidator:
     """Validates ADR structure before sending to the council."""
@@ -356,13 +353,16 @@ class ADRPreValidator:
         for line in content.splitlines():
             if line.lstrip().startswith("#") or "|" in line:
                 continue
-            for match in _CROSS_REF_RE.finditer(line):
+            for match in _ADR_REF_RE.finditer(line):
                 ref_num = int(match.group(1))
                 if ref_num == self_number:
                     continue
                 if ref_num not in adr_titles:
                     continue  # Nonexistence is flagged by _check_bare_adr_references
-                cited_title = match.group(2).strip()
+                rest = line[match.start() :]
+                cited_title = ADRPreValidator._extract_cited_title(rest)
+                if not cited_title:
+                    continue  # bare reference — handled by _check_bare_adr_references
                 titles = adr_titles[ref_num]
                 cited_lower = cited_title.lower()
 
