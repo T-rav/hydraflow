@@ -31,8 +31,9 @@ def hitl_runner(config, event_bus):
 class TestHITLRunnerInheritance:
     """HITLRunner must extend BaseRunner."""
 
-    def test_inherits_from_base_runner(self, hitl_runner) -> None:
+    def test_inherits_from_base_runner(self, hitl_runner, config) -> None:
         assert isinstance(hitl_runner, BaseRunner)
+        assert hitl_runner._config is config
 
     def test_has_terminate_method(self, hitl_runner) -> None:
         assert callable(hitl_runner.terminate)
