@@ -2877,6 +2877,60 @@ async def test_review_no_fixes_skips_entire_condition_block(
     assert not any("fixes_made is True" in r.message for r in caplog.records)
 
 
+@pytest.mark.asyncio
+async def test_fix_ci_no_fixes_skips_entire_condition_block(
+    config, event_bus, pr_info, task, tmp_path, caplog
+):
+    """fix_ci(): when fixes_made is False, neither commit_stat, log, nor warning appear."""
+    runner = _make_runner(config, event_bus)
+    transcript = "No fixes needed.\nVERDICT: APPROVE\nSUMMARY: CI OK"
+    mock_stat = AsyncMock(return_value="should not appear")
+
+    with (
+        patch.object(runner, "_get_head_sha", AsyncMock(return_value="abc123")),
+        patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
+        patch.object(runner, "_get_changed_files", AsyncMock(return_value=[])),
+        patch.object(runner, "_has_changes", AsyncMock(return_value=False)),
+        patch.object(runner, "_get_commit_stat", mock_stat),
+        patch.object(runner, "_save_transcript"),
+        caplog.at_level("DEBUG", logger="hydraflow.reviewer"),
+    ):
+        result = await runner.fix_ci(pr_info, task, tmp_path, "Failed: ci", attempt=1)
+
+    mock_stat.assert_not_called()
+    assert result.commit_stat == ""
+    assert not any("changed files" in r.message for r in caplog.records)
+    assert not any("fixes_made is True" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_fix_review_findings_no_fixes_skips_entire_condition_block(
+    config, event_bus, pr_info, task, tmp_path, caplog
+):
+    """fix_review_findings(): when fixes_made is False, neither commit_stat, log, nor warning appear."""
+    runner = _make_runner(config, event_bus)
+    transcript = "No fixes needed.\nVERDICT: APPROVE\nSUMMARY: OK"
+    mock_stat = AsyncMock(return_value="should not appear")
+
+    with (
+        patch.object(runner, "_get_head_sha", AsyncMock(return_value="abc123")),
+        patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
+        patch.object(runner, "_get_changed_files", AsyncMock(return_value=[])),
+        patch.object(runner, "_has_changes", AsyncMock(return_value=False)),
+        patch.object(runner, "_get_commit_stat", mock_stat),
+        patch.object(runner, "_save_transcript"),
+        caplog.at_level("DEBUG", logger="hydraflow.reviewer"),
+    ):
+        result = await runner.fix_review_findings(
+            pr_info, task, tmp_path, "Missing null check"
+        )
+
+    mock_stat.assert_not_called()
+    assert result.commit_stat == ""
+    assert not any("changed files" in r.message for r in caplog.records)
+    assert not any("fixes_made is True" in r.message for r in caplog.records)
+
+
 # ---------------------------------------------------------------------------
 # fix_review_findings — success path (symmetric with review & fix_ci)
 # ---------------------------------------------------------------------------
