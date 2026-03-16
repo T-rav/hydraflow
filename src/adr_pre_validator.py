@@ -60,7 +60,7 @@ _ADR_PAREN_TITLE_RE = re.compile(r"ADR[- ]\d{4}\s*\(([^()]*(?:\([^()]*\)[^()]*)*
 _ADR_EMDASH_TITLE_RE = re.compile(r"ADR[- ]\d{4}\s*—\s*(.+?)(?:\.\s|,|;|$)")
 
 # Captures ADR number and parenthesized title text: ADR-0023 (Title Here)
-_CROSS_REF_RE = re.compile(r"ADR[- ]?(\d{4})\s*\(([^)]+)\)")
+_CROSS_REF_RE = re.compile(r"ADR[- ](\d{4})\s*\(([^)]+)\)")
 
 
 class ADRPreValidator:
