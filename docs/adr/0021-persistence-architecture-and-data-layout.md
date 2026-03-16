@@ -174,7 +174,7 @@ but the defaults ensure a single `data_root` change relocates everything.
 - This ADR: [#1633](https://github.com/T-rav/hydra/issues/1633)
 - `src/state:StateTracker` — crash-recovery state persistence
 - `src/state/_session.py` — session history persistence (`sessions.jsonl`)
-- `src/config.py:_resolve_base_paths`, `_resolve_repo_and_identity`, `_resolve_repo_scoped_paths` — data root and path resolution
+- `src/config.py:_resolve_base_paths`, `src/config.py:_resolve_repo_and_identity`, `src/config.py:_resolve_repo_scoped_paths` — data root and path resolution
 - `src/config.py:load_config_file`, `save_config_file` — config snapshot persistence
 - `src/config.py:HydraFlowConfig.data_root` — data root configuration
 - `src/metrics_manager.py` — repo-slug namespaced metrics
