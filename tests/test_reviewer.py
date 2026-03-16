@@ -973,6 +973,7 @@ async def test_review_populates_commit_stat_when_fixes_made(
         result = await runner.review(pr_info, task, tmp_path, "some diff")
 
     assert result.fixes_made is True
+    assert result.files_changed == ["src/foo.py"]
     assert result.commit_stat == stat
 
 
@@ -1021,6 +1022,7 @@ async def test_fix_ci_populates_commit_stat_when_fixes_made(
         )
 
     assert result.fixes_made is True
+    assert result.files_changed == ["src/bar.py"]
     assert result.commit_stat == stat
 
 
@@ -1071,6 +1073,7 @@ async def test_fix_review_findings_populates_commit_stat_when_fixes_made(
         )
 
     assert result.fixes_made is True
+    assert result.files_changed == ["src/baz.py"]
     assert result.commit_stat == stat
 
 
@@ -2395,11 +2398,13 @@ async def test_review_warns_when_fixes_made_but_no_files_changed(
         patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
         patch.object(runner, "_get_changed_files", AsyncMock(return_value=[])),
         patch.object(runner, "_has_changes", AsyncMock(return_value=True)),
+        patch.object(runner, "_get_commit_stat", AsyncMock(return_value="should not")),
         patch.object(runner, "_save_transcript"),
         caplog.at_level("WARNING", logger="hydraflow.reviewer"),
     ):
-        await runner.review(pr_info, task, tmp_path, "diff")
+        result = await runner.review(pr_info, task, tmp_path, "diff")
 
+    assert result.commit_stat == ""
     warning_records = [r for r in caplog.records if r.levelname == "WARNING"]
     assert any(
         "fixes_made is True but no committed file changes" in r.message
@@ -2420,11 +2425,15 @@ async def test_fix_review_findings_warns_when_fixes_made_but_no_files_changed(
         patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
         patch.object(runner, "_get_changed_files", AsyncMock(return_value=[])),
         patch.object(runner, "_has_changes", AsyncMock(return_value=True)),
+        patch.object(runner, "_get_commit_stat", AsyncMock(return_value="should not")),
         patch.object(runner, "_save_transcript"),
         caplog.at_level("WARNING", logger="hydraflow.reviewer"),
     ):
-        await runner.fix_review_findings(pr_info, task, tmp_path, "Missing null check")
+        result = await runner.fix_review_findings(
+            pr_info, task, tmp_path, "Missing null check"
+        )
 
+    assert result.commit_stat == ""
     warning_records = [r for r in caplog.records if r.levelname == "WARNING"]
     assert any(
         "fixes_made is True but no committed file changes" in r.message
@@ -2445,11 +2454,13 @@ async def test_fix_ci_warns_when_fixes_made_but_no_files_changed(
         patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
         patch.object(runner, "_get_changed_files", AsyncMock(return_value=[])),
         patch.object(runner, "_has_changes", AsyncMock(return_value=True)),
+        patch.object(runner, "_get_commit_stat", AsyncMock(return_value="should not")),
         patch.object(runner, "_save_transcript"),
         caplog.at_level("WARNING", logger="hydraflow.reviewer"),
     ):
-        await runner.fix_ci(pr_info, task, tmp_path, "Failed: ci", attempt=1)
+        result = await runner.fix_ci(pr_info, task, tmp_path, "Failed: ci", attempt=1)
 
+    assert result.commit_stat == ""
     warning_records = [r for r in caplog.records if r.levelname == "WARNING"]
     assert any(
         "fixes_made is True but no committed file changes" in r.message
