@@ -39,6 +39,9 @@ then `_resolve_repo_scoped_paths` then `_apply_env_overrides`.
 
 ### Data layout
 
+> **Note:** `log_dir`, `plans_dir`, and `memory_dir` are currently flat under
+> `data_root/` rather than repo-scoped — see [^1].
+
 ```
 <data_root>/                        # default: <repo_root>/.hydraflow/
   <repo_slug>/                      # repo-scoped subdirectory (via _resolve_repo_scoped_paths)
@@ -93,7 +96,7 @@ The following `HydraFlowConfig` properties derive directories from `data_root`:
 |----------|------|-------|
 | `state_file` | `data_root / repo_slug / "state.json"` | repo-scoped |
 | `event_log_path` | `data_root / repo_slug / "events.jsonl"` | repo-scoped |
-| `sessions.jsonl` (implicit) | `repo_data_root / "sessions.jsonl"` | repo-scoped |
+| `sessions.jsonl` (no config property; implicit path) | `repo_data_root / "sessions.jsonl"` | repo-scoped |
 | `repo_data_root` | `data_root / repo_slug` | repo-scoped |
 | `log_dir` | `data_root / "logs"` | flat [^1] |
 | `plans_dir` | `data_root / "plans"` | flat [^1] |
@@ -151,5 +154,5 @@ but the defaults ensure a single `data_root` change relocates everything.
 - `src/metrics_manager.py` — repo-slug namespaced metrics
 - `src/file_util.py:atomic_write` — atomic file write helper
 - ADR-0003 (Git Worktrees for Issue Isolation) — worktree isolation (complementary filesystem layout)
-- ADR-0006 (RepoRuntime Isolation Architecture, Superseded by ADR-0009 — Multi-Repo Process-Per-Repo Model) — RepoRuntime isolation (per-repo process boundaries)
+- ADR-0006 (RepoRuntime Isolation Architecture, superseded by ADR-0009 Multi-Repo Process-Per-Repo Model) — RepoRuntime isolation (per-repo process boundaries)
 - ADR-0010 (Worktree and Path Isolation Architecture) — mandates repo-scoping `log_dir`, `plans_dir`, and `memory_dir` to `data_root/<repo_slug>/`; requires this ADR's derived-paths table and layout diagram to reflect repo-scoped paths
