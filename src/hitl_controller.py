@@ -67,9 +67,11 @@ class HITLController:
     async def do_work(self) -> None:
         """Fetch HITL issues, attempt auto-fixes, then process human corrections."""
         hitl_issues = await self._fetcher.fetch_issues_by_labels(
-            list(self._hitl_label),
+            self._hitl_label,
             limit=50,
         )
-        if hitl_issues:
-            await self._hitl_phase.attempt_auto_fixes(hitl_issues)
-        await self._hitl_phase.process_corrections()
+        try:
+            if hitl_issues:
+                await self._hitl_phase.attempt_auto_fixes(hitl_issues)
+        finally:
+            await self._hitl_phase.process_corrections()

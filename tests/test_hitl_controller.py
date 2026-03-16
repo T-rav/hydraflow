@@ -120,3 +120,14 @@ class TestDoWork:
         await controller.do_work()
         hitl_phase.attempt_auto_fixes.assert_not_awaited()
         hitl_phase.process_corrections.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_process_corrections_runs_even_if_auto_fix_raises(
+        self, controller: HITLController, fetcher: MagicMock, hitl_phase: MagicMock
+    ) -> None:
+        mock_issue = MagicMock()
+        fetcher.fetch_issues_by_labels.return_value = [mock_issue]
+        hitl_phase.attempt_auto_fixes.side_effect = RuntimeError("boom")
+        with pytest.raises(RuntimeError, match="boom"):
+            await controller.do_work()
+        hitl_phase.process_corrections.assert_awaited_once()
