@@ -758,6 +758,7 @@ def create_router(
                     number=int(pr_data["number"]),
                     url=str(pr_data.get("url", "")),
                     merged=bool(pr_data.get("merged", False)),
+                    title=str(pr_data.get("title", "")),
                 )
                 for pr_data in prs_map.values()
                 if isinstance(pr_data, dict) and _coerce_int(pr_data.get("number")) > 0
@@ -891,6 +892,9 @@ def create_router(
                     url = str(event.data.get("url", "")).strip()
                     if url.startswith(("http://", "https://")):
                         payload["url"] = url
+                    pr_title = str(event.data.get("title", "")).strip()
+                    if pr_title:
+                        payload["title"] = pr_title
                     prs[pr_number] = payload
 
             if event.type == EventType.MERGE_UPDATE:
@@ -903,6 +907,9 @@ def create_router(
                     )
                     if str(event.data.get("status", "")).lower() == "merged":
                         payload["merged"] = True
+                    merge_title = str(event.data.get("title", "")).strip()
+                    if merge_title:
+                        payload["title"] = merge_title
                     prs[pr_number] = payload
 
             normalised = _normalise_event_status(event.type, event.data)
@@ -1976,6 +1983,17 @@ def create_router(
             return JSONResponse({"error": "not running"}, status_code=400)
         await orch.request_stop()
         return JSONResponse({"status": "stopping"})
+
+    @router.post("/api/control/clear-credit-pause")
+    async def clear_credit_pause() -> JSONResponse:
+        """Clear an active credit pause, waking any sleeping loops."""
+        orch = get_orchestrator()
+        if not orch:
+            return JSONResponse({"error": "no orchestrator"}, status_code=400)
+        if orch.credits_paused_until is None:
+            return JSONResponse({"error": "not paused"}, status_code=400)
+        orch.clear_credit_pause()
+        return JSONResponse({"status": "cleared"})
 
     @router.get("/api/control/status")
     async def get_control_status(
@@ -3564,6 +3582,12 @@ def create_router(
                 ],
             )
             state.add_tracked_report(tracked)
+
+        # Trigger the report-issue worker immediately so the report
+        # doesn't wait for the next polling interval.
+        orch = get_orchestrator()
+        if orch is not None:
+            orch.trigger_bg_worker("report_issue")
 
         title = f"[Bug Report] {request.description[:100]}"
         response = ReportIssueResponse(
