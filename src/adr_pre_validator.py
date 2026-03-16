@@ -321,6 +321,11 @@ class ADRPreValidator:
             # (e.g. "Title for details") — check if a real title is a prefix.
             if cited_lower.startswith(real_lower):
                 return
+            # Abbreviated case: cited is a prefix of the real title.
+            # Let _check_cross_reference_titles flag it as abbreviated_cross_ref_title
+            # to avoid double-flagging with mismatched_adr_title.
+            if real_lower.startswith(cited_lower):
+                return
         # No match against any title for this number
         mismatched[ref_num] = (cited_title, titles[0])
 

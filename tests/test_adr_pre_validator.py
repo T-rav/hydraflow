@@ -706,6 +706,27 @@ class TestDictCollisionSharedNumbers:
         codes = [i.code for i in result.issues]
         assert "mismatched_adr_title" not in codes
 
+    def test_abbreviated_title_not_double_flagged(self) -> None:
+        """Abbreviated titles must not produce both mismatched_adr_title and abbreviated_cross_ref_title."""
+        content = _valid_adr(
+            decision="See ADR-0023 (Auto-Triage Toggle Must Gate Routing) for details."
+        )
+        all_adrs = [
+            (1, "Test ADR", "content", "0001-test.md"),
+            (
+                23,
+                "Auto-Triage Toggle Must Gate Routing, Not Just Stat Tracking",
+                "c",
+                "0023-gate.md",
+            ),
+        ]
+        validator = ADRPreValidator()
+        result = validator.validate(content, all_adrs)
+        codes = [i.code for i in result.issues]
+        # Abbreviated title is flagged exactly once as abbreviated_cross_ref_title
+        assert "abbreviated_cross_ref_title" in codes
+        assert "mismatched_adr_title" not in codes
+
 
 class TestMultipleIssues:
     def test_multiple_issues_collected(self) -> None:
