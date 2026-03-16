@@ -2664,6 +2664,7 @@ async def test_fix_review_findings_publishes_review_update_event(
             runner, "_get_changed_files", AsyncMock(return_value=["src/fix.py"])
         ),
         patch.object(runner, "_has_changes", AsyncMock(return_value=True)),
+        patch.object(runner, "_get_commit_stat", AsyncMock(return_value="")),
         patch.object(runner, "_save_transcript"),
     ):
         await runner.fix_review_findings(pr_info, task, tmp_path, "Missing null check")
@@ -2672,3 +2673,86 @@ async def test_fix_review_findings_publishes_review_update_event(
     review_events = [e for e in events if e.type == EventType.REVIEW_UPDATE]
     statuses = [e.data["status"] for e in review_events]
     assert ReviewerStatus.FIXING_REVIEW_FINDINGS.value in statuses
+
+
+@pytest.mark.asyncio
+async def test_fix_review_findings_publishes_start_and_done_events(
+    config, event_bus, pr_info, task, tmp_path
+):
+    """fix_review_findings publishes both start (FIXING_REVIEW_FINDINGS) and done (FIX_FINDINGS_DONE) events."""
+    runner = _make_runner(config, event_bus)
+    transcript = "Fixed.\nVERDICT: APPROVE\nSUMMARY: Done"
+
+    with (
+        patch.object(runner, "_get_head_sha", AsyncMock(return_value="abc123")),
+        patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
+        patch.object(
+            runner, "_get_changed_files", AsyncMock(return_value=["src/fix.py"])
+        ),
+        patch.object(runner, "_has_changes", AsyncMock(return_value=True)),
+        patch.object(runner, "_get_commit_stat", AsyncMock(return_value="")),
+        patch.object(runner, "_save_transcript"),
+    ):
+        await runner.fix_review_findings(
+            pr_info, task, tmp_path, "Missing null check", worker_id=3
+        )
+
+    events = event_bus.get_history()
+    review_events = [e for e in events if e.type == EventType.REVIEW_UPDATE]
+
+    assert len(review_events) >= 2
+
+    statuses = [e.data["status"] for e in review_events]
+    assert ReviewerStatus.FIXING_REVIEW_FINDINGS.value in statuses
+    assert ReviewerStatus.FIX_FINDINGS_DONE.value in statuses
+
+    # Done event should include verdict, duration, and role
+    done_event = next(
+        e
+        for e in review_events
+        if e.data["status"] == ReviewerStatus.FIX_FINDINGS_DONE.value
+    )
+    assert done_event.data["verdict"] == ReviewVerdict.APPROVE.value
+    assert done_event.data["role"] == "reviewer"
+    assert done_event.data["worker"] == 3
+    assert "duration" in done_event.data
+
+
+@pytest.mark.asyncio
+async def test_fix_review_findings_dry_run_publishes_done_event(
+    dry_config, event_bus, pr_info, task, tmp_path
+):
+    """fix_review_findings publishes FIX_FINDINGS_DONE even in dry-run mode."""
+    runner = _make_runner(dry_config, event_bus)
+
+    await runner.fix_review_findings(pr_info, task, tmp_path, "Missing null check")
+
+    events = event_bus.get_history()
+    review_events = [e for e in events if e.type == EventType.REVIEW_UPDATE]
+    statuses = [e.data["status"] for e in review_events]
+    assert ReviewerStatus.FIX_FINDINGS_DONE.value in statuses
+
+
+@pytest.mark.asyncio
+async def test_fix_review_findings_error_still_publishes_done_event(
+    config, event_bus, pr_info, task, tmp_path
+):
+    """fix_review_findings publishes FIX_FINDINGS_DONE even when an exception occurs."""
+    runner = _make_runner(config, event_bus)
+
+    with (
+        patch.object(runner, "_get_head_sha", AsyncMock(return_value="abc123")),
+        patch.object(
+            runner, "_execute", AsyncMock(side_effect=RuntimeError("agent crashed"))
+        ),
+    ):
+        result = await runner.fix_review_findings(
+            pr_info, task, tmp_path, "Missing null check"
+        )
+
+    assert result.verdict == ReviewVerdict.REQUEST_CHANGES
+
+    events = event_bus.get_history()
+    review_events = [e for e in events if e.type == EventType.REVIEW_UPDATE]
+    statuses = [e.data["status"] for e in review_events]
+    assert ReviewerStatus.FIX_FINDINGS_DONE.value in statuses

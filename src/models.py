@@ -696,6 +696,7 @@ class ReviewerStatus(StrEnum):
     FAILED = "failed"
     FIXING = "fixing"
     FIXING_REVIEW_FINDINGS = "fixing_review_findings"
+    FIX_FINDINGS_DONE = "fix_findings_done"
     FIX_DONE = "fix_done"
 
 
