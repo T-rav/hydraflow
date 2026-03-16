@@ -2459,7 +2459,7 @@ class TestTieringFields:
 
 
 class TestConfigFactoryDeadParameterCleanup:
-    """Verify removed config fields are not exposed by ConfigFactory."""
+    """Verify the removed adr_auto_triage field is not exposed by ConfigFactory."""
 
     def test_adr_auto_triage_not_in_config_factory_signature(self) -> None:
         """adr_auto_triage was removed from HydraFlowConfig; the factory must not accept it."""
@@ -2469,8 +2469,11 @@ class TestConfigFactoryDeadParameterCleanup:
         assert "adr_auto_triage" not in sig.parameters
 
     def test_config_factory_creates_valid_config_after_cleanup(self) -> None:
-        """ConfigFactory.create() still produces a valid HydraFlowConfig."""
+        """ConfigFactory.create() still produces a valid HydraFlowConfig without adr_auto_triage."""
         from tests.helpers import ConfigFactory
 
         cfg = ConfigFactory.create()
         assert isinstance(cfg, HydraFlowConfig)
+        assert not hasattr(cfg, "adr_auto_triage"), (
+            "adr_auto_triage must not exist on HydraFlowConfig"
+        )
