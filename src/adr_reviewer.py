@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from adr_pre_validator import ADRPreValidator, ADRValidationResult
 from agent_cli import build_lightweight_command
 from models import ADRCouncilResult, CouncilVerdict, CouncilVote
-from phase_utils import ADR_FILE_RE, is_likely_bug
+from phase_utils import is_likely_bug
 from subprocess_util import make_clean_env, run_subprocess
 
 if TYPE_CHECKING:
@@ -24,6 +24,7 @@ logger = logging.getLogger("hydraflow.adr_reviewer")
 
 # Valid statuses are single words: Proposed, Accepted, Superseded, Deprecated, Rejected.
 _STATUS_RE = re.compile(r"\*\*Status:\*\*\s*(\w+)", re.IGNORECASE)
+_ADR_FILE_RE = re.compile(r"^(\d{4})-.*\.md$")
 _DUPLICATE_THRESHOLD = 0.7
 
 
@@ -95,7 +96,7 @@ class ADRCouncilReviewer:
                 )
                 continue
 
-            duplicates = self._detect_duplicates(adr_path.name, adr_content, all_adrs)
+            duplicates = self._detect_duplicates(adr_number, adr_content, all_adrs)
             duplicate_context = self._build_duplicate_context(duplicates)
 
             result = await self._run_council_session(
@@ -113,7 +114,7 @@ class ADRCouncilReviewer:
         """Find ADR files with Status: Proposed."""
         results: list[tuple[int, Path, str]] = []
         for path in sorted(adr_dir.glob("*.md")):
-            match = ADR_FILE_RE.match(path.name)
+            match = _ADR_FILE_RE.match(path.name)
             if not match:
                 continue
             adr_number = int(match.group(1))
@@ -127,11 +128,11 @@ class ADRCouncilReviewer:
                 results.append((adr_number, path, content))
         return results
 
-    def _load_all_adrs(self, adr_dir: Path) -> list[tuple[int, str, str, str]]:
-        """Load all ADR files as (number, title, content, filename)."""
-        results: list[tuple[int, str, str, str]] = []
+    def _load_all_adrs(self, adr_dir: Path) -> list[tuple[int, str, str]]:
+        """Load all ADR files as (number, title, content)."""
+        results: list[tuple[int, str, str]] = []
         for path in sorted(adr_dir.glob("*.md")):
-            match = ADR_FILE_RE.match(path.name)
+            match = _ADR_FILE_RE.match(path.name)
             if not match:
                 continue
             adr_number = int(match.group(1))
@@ -145,13 +146,13 @@ class ADRCouncilReviewer:
             except (OSError, UnicodeDecodeError):
                 logger.warning("Skipping unreadable ADR file: %s", path)
                 continue
-            results.append((adr_number, title, content, path.name))
+            results.append((adr_number, title, content))
         return results
 
-    def _build_index_context(self, all_adrs: list[tuple[int, str, str, str]]) -> str:
+    def _build_index_context(self, all_adrs: list[tuple[int, str, str]]) -> str:
         """Build a summary index of all ADRs for council context."""
         lines: list[str] = []
-        for number, title, content, _filename in all_adrs:
+        for number, title, content in all_adrs:
             status_match = _STATUS_RE.search(content)
             status = status_match.group(1) if status_match else "Unknown"
             lines.append(f"- ADR-{number:04d}: {title} (Status: {status})")
@@ -159,22 +160,17 @@ class ADRCouncilReviewer:
 
     def _detect_duplicates(
         self,
-        adr_filename: str,
+        adr_number: int,
         content: str,
-        all_adrs: list[tuple[int, str, str, str]],
+        all_adrs: list[tuple[int, str, str]],
     ) -> list[tuple[int, str, float]]:
-        """Detect potential duplicates using title + Decision section similarity.
-
-        Self-comparison is skipped by filename so that same-numbered ADRs
-        (e.g. collision files like 0023-foo.md and 0023-bar.md) are still
-        compared against each other rather than silently excluded.
-        """
+        """Detect potential duplicates using title + Decision section similarity."""
         decision = self._extract_decision(content)
         title = self._extract_title(content)
 
         candidates: list[tuple[int, str, float]] = []
-        for other_number, other_title, other_content, other_filename in all_adrs:
-            if other_filename == adr_filename:
+        for other_number, other_title, other_content in all_adrs:
+            if other_number == adr_number:
                 continue
             other_decision = self._extract_decision(other_content)
 
@@ -638,7 +634,7 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
 
         all_adrs = self._load_all_adrs(adr_dir)
         index_context = self._build_index_context(all_adrs)
-        duplicates = self._detect_duplicates(adr_path.name, amended, all_adrs)
+        duplicates = self._detect_duplicates(result.adr_number, amended, all_adrs)
         duplicate_context = self._build_duplicate_context(duplicates)
         rerun = await self._run_council_session(
             result.adr_number,

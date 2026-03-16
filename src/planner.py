@@ -248,8 +248,11 @@ class PlannerRunner(BaseRunner):
             disallowed_tools="Write,Edit,NotebookEdit",
         )
 
-    # Comment/line char limits are now configurable via HydraFlowConfig:
-    # max_planner_comment_chars and max_planner_line_chars.
+    # Maximum characters for comments in the prompt.
+    # Keep conservative to avoid hitting Claude CLI's internal text-splitter
+    # limits (RecursiveCharacterTextSplitter fails on very long unsplittable lines).
+    _MAX_COMMENT_CHARS = 1_000
+    _MAX_LINE_CHARS = 500
 
     @staticmethod
     def _truncate_text(text: str, char_limit: int, line_limit: int) -> str:
@@ -305,11 +308,7 @@ class PlannerRunner(BaseRunner):
             max_comments = 6
             selected_comments = issue.comments[:max_comments]
             truncated = [
-                self._truncate_text(
-                    c,
-                    self._config.max_planner_comment_chars,
-                    self._config.max_planner_line_chars,
-                )
+                self._truncate_text(c, self._MAX_COMMENT_CHARS, self._MAX_LINE_CHARS)
                 for c in selected_comments
             ]
             formatted = "\n".join(f"- {c}" for c in truncated)
@@ -320,9 +319,7 @@ class PlannerRunner(BaseRunner):
 
         body_raw = issue.body or ""
         body = self._truncate_text(
-            issue.body or "",
-            self._config.max_issue_body_chars,
-            self._config.max_planner_line_chars,
+            issue.body or "", self._config.max_issue_body_chars, self._MAX_LINE_CHARS
         )
         builder.record_context("Issue body", body_raw, body)
 
@@ -758,14 +755,10 @@ This closes the issue automatically. False positives waste significant human tim
         sections_list = self._format_sections_list(scale)
         raw_body = issue.body or ""
         compact_body = self._truncate_text(
-            raw_body,
-            self._config.max_issue_body_chars,
-            self._config.max_planner_line_chars,
+            raw_body, self._config.max_issue_body_chars, self._MAX_LINE_CHARS
         )
         compact_failed_plan = self._truncate_text(
-            failed_plan,
-            self._config.max_planner_failed_plan_chars,
-            self._config.max_planner_line_chars,
+            failed_plan, 4_000, self._MAX_LINE_CHARS
         )
 
         prompt = f"""You previously generated a plan for GitHub issue #{issue.id} but it failed validation.

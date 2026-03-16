@@ -24,24 +24,12 @@ def _get_function_docstrings(filepath: Path) -> dict[str, str | None]:
     return result
 
 
-def _get_package_function_docstrings(package_dir: Path) -> dict[str, str | None]:
-    """Parse all Python files in a package and return merged {function_name: docstring}."""
-    result: dict[str, str | None] = {}
-    for filepath in sorted(package_dir.glob("*.py")):
-        result.update(_get_function_docstrings(filepath))
-    return result
-
-
 class TestDashboardRoutesDocstrings:
-    """Verify docstrings on dashboard_routes helper and route functions."""
+    """Verify docstrings on dashboard_routes.py helper and route functions."""
 
     @pytest.fixture(autouse=True)
     def _load_docstrings(self) -> None:
-        dashboard_routes_path = SRC / "dashboard_routes"
-        if dashboard_routes_path.is_dir():
-            self.docstrings = _get_package_function_docstrings(dashboard_routes_path)
-        else:
-            self.docstrings = _get_function_docstrings(SRC / "dashboard_routes.py")
+        self.docstrings = _get_function_docstrings(SRC / "dashboard_routes.py")
 
     @pytest.mark.parametrize(
         "func_name",
@@ -53,12 +41,12 @@ class TestDashboardRoutesDocstrings:
             "_coerce_int",
             "_is_timestamp_in_range",
             "_status_sort_key",
-            "list_repo_records",
-            "new_issue_history_entry",
+            "_list_repo_records",
+            "_new_issue_history_entry",
             "_touch_issue_timestamps",
-            "build_hitl_context",
-            "normalise_summary_lines",
-            "hitl_summary_retry_due",
+            "_build_hitl_context",
+            "_normalise_summary_lines",
+            "_hitl_summary_retry_due",
         ],
     )
     def test_helper_has_docstring(self, func_name: str) -> None:
@@ -84,6 +72,7 @@ class TestDashboardRoutesDocstrings:
             "remove_repo",
             "websocket_endpoint",
             "spa_catchall",
+            "_call_supervisor",
         ],
     )
     def test_route_handler_has_docstring(self, func_name: str) -> None:

@@ -1359,9 +1359,12 @@ class HydraFlowOrchestrator:
             )
 
             data: SystemAlertPayload = {
-                "message": "Credit limit reached. Pausing all loops.",
+                "message": (
+                    f"Credit limit reached. Pausing all loops until "
+                    f"{resume_at.strftime('%H:%M UTC')}. "
+                    f"Will resume automatically."
+                ),
                 "source": source,
-                "resume_at": resume_at.isoformat(),
             }
             await self._bus.publish(
                 HydraFlowEvent(
