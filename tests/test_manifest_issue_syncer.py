@@ -34,7 +34,7 @@ async def test_manifest_issue_syncer_posts_comment(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_manifest_issue_syncer_reuses_existing_issue(tmp_path: Path):
+async def test_manifest_issue_syncer_reuses_existing_issue(tmp_path: Path) -> None:
     config = ConfigFactory.create(repo_root=tmp_path, git_user_name="tester")
     state = StateTracker(config.state_file)
     prs = MagicMock()
@@ -56,7 +56,7 @@ async def test_manifest_issue_syncer_reuses_existing_issue(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_manifest_issue_syncer_creates_when_owner_missing(
     tmp_path: Path,
-):
+) -> None:
     config = ConfigFactory.create(repo_root=tmp_path, git_user_name="tester")
     state = StateTracker(config.state_file)
     prs = MagicMock()
