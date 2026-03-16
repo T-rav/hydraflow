@@ -36,6 +36,15 @@ _SUPERSEDE_RE = re.compile(
 )
 _REQUIRED_SECTIONS = ("## Context", "## Decision", "## Consequences")
 
+# Matches ADR-NNNN references. Group 1 = the 4-digit number.
+_ADR_REF_RE = re.compile(r"ADR[- ](\d{4})")
+
+# Matches an ADR-NNNN reference that is followed by a title annotation:
+#   ADR-0006 (Title)          — parenthesized title
+#   ADR-0006 — Title          — em-dash title
+#   ADR-0006: Title           — heading-style (only in # headings)
+_ADR_REF_WITH_TITLE_RE = re.compile(r"ADR[- ]\d{4}\s*(?:\(|—)")
+
 
 class ADRPreValidator:
     """Validates ADR structure before sending to the council."""
@@ -59,6 +68,7 @@ class ADRPreValidator:
         self._check_required_sections(content, result)
         self._check_empty_sections(content, result)
         self._check_supersession(content, all_adrs or [], result)
+        self._check_bare_adr_references(content, result)
         return result
 
     def _check_status_field(self, content: str, result: ADRValidationResult) -> None:
@@ -134,3 +144,55 @@ class ADRPreValidator:
                         fixable=False,
                     )
                 )
+
+    def _check_bare_adr_references(
+        self,
+        content: str,
+        result: ADRValidationResult,
+    ) -> None:
+        """Check that ADR cross-references include the referenced ADR's title.
+
+        Bare references like ``ADR-0006`` are opaque; the reader cannot tell
+        what the referenced ADR covers without opening it.  Each cross-reference
+        should include the title in parentheses — e.g. ``ADR-0006 (RepoRuntime
+        Isolation Architecture)`` — or after an em-dash.
+
+        Exceptions: the ADR's own heading line (``# ADR-NNNN: Title``) and
+        markdown table rows (which may contain example/illustration text).
+        """
+        # Extract self-number from the heading to skip self-references
+        heading_match = re.search(r"^#\s+ADR[- ](\d{4})", content, re.MULTILINE)
+        self_number = heading_match.group(1) if heading_match else None
+
+        bare_numbers: set[str] = set()
+        for line in content.splitlines():
+            # Skip heading lines (contain the ADR's own title after ':')
+            if line.lstrip().startswith("#"):
+                continue
+            # Skip markdown table rows (may contain example text)
+            if "|" in line:
+                continue
+
+            for match in _ADR_REF_RE.finditer(line):
+                ref_num = match.group(1)
+                # Skip self-references
+                if ref_num == self_number:
+                    continue
+                # Check if this specific occurrence has a title annotation
+                # Look at the text starting from this match position
+                rest = line[match.start() :]
+                if not _ADR_REF_WITH_TITLE_RE.match(rest):
+                    bare_numbers.add(ref_num)
+
+        for ref_num in sorted(bare_numbers):
+            result.issues.append(
+                ADRValidationIssue(
+                    code="bare_adr_reference",
+                    message=(
+                        f"ADR-{ref_num} is referenced without its title. "
+                        f"Add the title in parentheses, e.g. "
+                        f"ADR-{ref_num} (Title Here)"
+                    ),
+                    fixable=True,
+                )
+            )

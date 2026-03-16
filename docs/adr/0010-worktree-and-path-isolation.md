@@ -103,7 +103,7 @@ artifacts:
    scoping is simpler and requires only property changes in `config.py`.
 
 3. **Introduce a `RepoRuntime` wrapper that manages all paths.**
-   Deferred to ADR-0006. `RepoRuntime` is the right long-term abstraction but
+   Deferred to ADR-0006 (RepoRuntime Isolation Architecture). `RepoRuntime` is the right long-term abstraction but
    path scoping can be applied incrementally via config properties without
    waiting for the full `RepoRuntime` refactor.
 

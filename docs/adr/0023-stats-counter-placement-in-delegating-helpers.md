@@ -54,7 +54,7 @@ returns `False`), not unconditionally after the call. A separate
   mutually exclusive counters.
 - Co-locates counter logic with branching logic, making stats behavior
   easier to audit and reason about.
-- Consistent with the counter-placement pattern established in ADR-0017.
+- Consistent with the counter-placement pattern established in ADR-0017 (Auto-Decompose Triage Path Excluded from Session Counter).
 
 **Trade-offs:**
 - Counter increments are distributed across helper methods rather than

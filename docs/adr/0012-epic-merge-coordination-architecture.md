@@ -92,7 +92,7 @@ and the PR remains open and approved until the bundle is ready.
 
 ### Relationship to ADR-0011
 
-ADR-0011 prohibits placing **release-creation** logic in `PostMergeHandler`, directing
+ADR-0011 (Epic Release Creation Architecture) prohibits placing **release-creation** logic in `PostMergeHandler`, directing
 it instead to `EpicCompletionChecker._try_close_epic()`. ADR-0012 intentionally places
 **merge-coordination** hooks (approval notification and defer checks) in
 `PostMergeHandler` because this is the only point in the pipeline where the merge

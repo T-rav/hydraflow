@@ -60,7 +60,7 @@ Adopt a **supervisor-proxied aggregation model** for the multi-repo dashboard:
 
 1. **Embedded multi-repo in a single orchestrator process.**
    Rejected: breaks the subprocess isolation model and complicates resource
-   management. See ADR-0006 for the `RepoRuntime` isolation decision.
+   management. See ADR-0006 (RepoRuntime Isolation Architecture) for the `RepoRuntime` isolation decision.
 
 2. **Client-side aggregation (frontend fetches from multiple ports).**
    Rejected: exposes internal port topology to the browser, requires CORS

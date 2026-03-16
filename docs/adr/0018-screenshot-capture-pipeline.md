@@ -128,7 +128,7 @@ inadvertently contains sensitive information.
 
 ## Related
 
-- **Supersedes ADR-0013** — ADR-0013 documented the original screenshot pipeline
+- **Supersedes ADR-0013 (Screenshot Capture Pipeline Architecture)** — ADR-0013 documented the original screenshot pipeline
   with hardcoded `--public` gists and no DOM redaction. This ADR adds defense-in-depth
   security (DOM redaction, backend secret scanning, configurable gist visibility),
   making ADR-0013's public-gist-only design obsolete.
