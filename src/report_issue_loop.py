@@ -11,6 +11,7 @@ import asyncio
 import base64
 import binascii
 import contextlib
+import json
 import logging
 import os
 import re
@@ -61,10 +62,10 @@ class ReportIssueLoop(BaseBackgroundLoop):
     async def run(self) -> None:
         """Drain all queued reports on startup, then enter the normal loop.
 
-        The base class ``run_on_startup=True`` only processes one report
-        before entering the polling loop.  This override keeps executing
-        cycles until the queue is empty (or stop is requested), ensuring
-        stale reports queued before the processor started are all handled.
+        The base polling loop processes one report per cycle.  This override
+        keeps executing cycles until the queue is empty (or stop is requested),
+        ensuring reports queued before the processor started are all handled
+        before entering steady-state polling.
         """
         while not self._stop_event.is_set() and self._state.peek_report() is not None:
             await self._execute_cycle()
@@ -353,9 +354,7 @@ class ReportIssueLoop(BaseBackgroundLoop):
                 "--json",
                 "labels,body",
             )
-            import json as _json
-
-            data = _json.loads(output)
+            data = json.loads(output)
             labels = [lb.get("name", "") for lb in data.get("labels", [])]
             body = data.get("body", "")
 
