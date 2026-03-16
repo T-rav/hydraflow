@@ -750,18 +750,32 @@ class EpicManager:
         """Return progress for all tracked epics (for dashboard API)."""
         results: list[EpicProgress] = []
         for epic in self._state.get_all_epic_states().values():
-            progress = self.get_progress(epic.epic_number)
-            if progress is not None:
-                results.append(progress)
+            try:
+                progress = self.get_progress(epic.epic_number)
+                if progress is not None:
+                    results.append(progress)
+            except RuntimeError:
+                logger.warning(
+                    "Failed to get progress for epic #%d",
+                    epic.epic_number,
+                    exc_info=True,
+                )
         return results
 
     async def get_all_detail(self) -> list[EpicDetail]:
         """Return enriched detail for all tracked epics (for /api/epics)."""
         results: list[EpicDetail] = []
         for epic in self._state.get_all_epic_states().values():
-            detail = await self.get_detail(epic.epic_number)
-            if detail is not None:
-                results.append(detail)
+            try:
+                detail = await self.get_detail(epic.epic_number)
+                if detail is not None:
+                    results.append(detail)
+            except RuntimeError:
+                logger.warning(
+                    "Failed to get detail for epic #%d",
+                    epic.epic_number,
+                    exc_info=True,
+                )
         return results
 
     def get_cached_detail(self, epic_number: int) -> EpicDetail | None:

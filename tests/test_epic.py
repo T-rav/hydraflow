@@ -1617,6 +1617,110 @@ class TestNarrowedExceptionHandling:
         with pytest.raises(TypeError, match="bad mergeable"):
             await manager._enrich_pr_status(child_info, 42)
 
+    # -- get_all_progress per-item isolation ----------------------------------
+
+    def test_get_all_progress_catches_runtime_error(self, tmp_path: Path) -> None:
+        """RuntimeError from get_progress is caught per-item."""
+        manager, _, _ = _make_epic_manager(tmp_path)
+        manager._state.upsert_epic_state(EpicState(epic_number=100, child_issues=[1]))
+        manager.get_progress = MagicMock(side_effect=RuntimeError("boom"))
+        results = manager.get_all_progress()
+        assert results == []
+
+    def test_get_all_progress_propagates_type_error(self, tmp_path: Path) -> None:
+        """TypeError from get_progress propagates — not caught."""
+        manager, _, _ = _make_epic_manager(tmp_path)
+        manager._state.upsert_epic_state(EpicState(epic_number=100, child_issues=[1]))
+        manager.get_progress = MagicMock(side_effect=TypeError("bad"))
+        with pytest.raises(TypeError, match="bad"):
+            manager.get_all_progress()
+
+    def test_get_all_progress_continues_after_failure(self, tmp_path: Path) -> None:
+        """Processing continues to next epic after RuntimeError on the first."""
+        manager, _, _ = _make_epic_manager(tmp_path)
+        manager._state.upsert_epic_state(EpicState(epic_number=100, child_issues=[1]))
+        manager._state.upsert_epic_state(EpicState(epic_number=200, child_issues=[2]))
+        progress_200 = MagicMock()
+        manager.get_progress = MagicMock(
+            side_effect=[RuntimeError("fail"), progress_200]
+        )
+        results = manager.get_all_progress()
+        assert results == [progress_200]
+
+    # -- get_all_detail per-item isolation ------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_get_all_detail_catches_runtime_error(self, tmp_path: Path) -> None:
+        """RuntimeError from get_detail is caught per-item."""
+        manager, _, _ = _make_epic_manager(tmp_path)
+        manager._state.upsert_epic_state(EpicState(epic_number=100, child_issues=[1]))
+        manager.get_detail = AsyncMock(side_effect=RuntimeError("boom"))
+        results = await manager.get_all_detail()
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_get_all_detail_propagates_type_error(self, tmp_path: Path) -> None:
+        """TypeError from get_detail propagates — not caught."""
+        manager, _, _ = _make_epic_manager(tmp_path)
+        manager._state.upsert_epic_state(EpicState(epic_number=100, child_issues=[1]))
+        manager.get_detail = AsyncMock(side_effect=TypeError("bad"))
+        with pytest.raises(TypeError, match="bad"):
+            await manager.get_all_detail()
+
+    @pytest.mark.asyncio
+    async def test_get_all_detail_continues_after_failure(self, tmp_path: Path) -> None:
+        """Processing continues to next epic after RuntimeError on the first."""
+        manager, _, _ = _make_epic_manager(tmp_path)
+        manager._state.upsert_epic_state(EpicState(epic_number=100, child_issues=[1]))
+        manager._state.upsert_epic_state(EpicState(epic_number=200, child_issues=[2]))
+        detail_200 = MagicMock()
+        manager.get_detail = AsyncMock(side_effect=[RuntimeError("fail"), detail_200])
+        results = await manager.get_all_detail()
+        assert results == [detail_200]
+
+    # -- refresh_cache per-item continuance -----------------------------------
+
+    @pytest.mark.asyncio
+    async def test_refresh_cache_continues_after_failure(self, tmp_path: Path) -> None:
+        """Processing continues to next epic after RuntimeError on the first."""
+        manager, _, _ = _make_epic_manager(tmp_path)
+        manager._state.upsert_epic_state(EpicState(epic_number=100, child_issues=[1]))
+        manager._state.upsert_epic_state(EpicState(epic_number=200, child_issues=[2]))
+        detail_200 = MagicMock()
+        manager._build_detail = AsyncMock(
+            side_effect=[RuntimeError("fail"), detail_200]
+        )
+        await manager.refresh_cache()
+        assert manager._build_detail.await_count == 2
+
+    # -- check_stale_epics per-item continuance -------------------------------
+
+    @pytest.mark.asyncio
+    async def test_check_stale_epics_continues_after_failure(
+        self, tmp_path: Path
+    ) -> None:
+        """Processing continues to next epic after RuntimeError on the first."""
+        manager, prs, _ = _make_epic_manager(tmp_path)
+        manager._state.upsert_epic_state(
+            EpicState(
+                epic_number=100,
+                child_issues=[1],
+                last_activity="2000-01-01T00:00:00+00:00",
+            )
+        )
+        manager._state.upsert_epic_state(
+            EpicState(
+                epic_number=200,
+                child_issues=[2],
+                last_activity="2000-01-01T00:00:00+00:00",
+            )
+        )
+        prs.post_comment = AsyncMock(side_effect=[RuntimeError("fail"), None])
+        stale = await manager.check_stale_epics()
+        assert 100 in stale
+        assert 200 in stale
+        assert prs.post_comment.await_count == 2
+
 
 # ---------------------------------------------------------------------------
 # Epic edge cases — 0 children, duplicate children
