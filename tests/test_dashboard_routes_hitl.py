@@ -27,6 +27,7 @@ class TestHITLMemoryAutoApproveFiltering:
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
             memory_auto_approve=True,
+            transcript_summarization_enabled=False,
         )
         state = StateTracker(config.state_file)
         state.set_hitl_origin(42, config.improve_label[0])
@@ -51,6 +52,7 @@ class TestHITLMemoryAutoApproveFiltering:
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
             memory_auto_approve=False,
+            transcript_summarization_enabled=False,
         )
         state = StateTracker(config.state_file)
         state.set_hitl_origin(42, config.improve_label[0])
@@ -76,6 +78,7 @@ class TestHITLMemoryAutoApproveFiltering:
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
             memory_auto_approve=True,
+            transcript_summarization_enabled=False,
         )
         state = StateTracker(config.state_file)
         # No origin set — not a memory suggestion
