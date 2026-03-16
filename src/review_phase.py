@@ -139,6 +139,7 @@ class ReviewPhase:
             retrospective=None,
             verification_judge=None,
             epic_checker=None,
+            store=store,
         )
         self._baseline_policy = baseline_policy
         self._visual_validator: VisualValidator | None = None
@@ -1070,8 +1071,6 @@ class ReviewPhase:
             visual_decision=visual_decision,
             merge_conflict_fix_fn=self._attempt_post_merge_conflict_fix,
         )
-        if result.merged:
-            self._store.mark_merged(pr.issue_number)
 
     async def _attempt_post_merge_conflict_fix(
         self,
