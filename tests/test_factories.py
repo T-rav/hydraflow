@@ -109,6 +109,10 @@ class TestEventFactoryNoneSentinels:
         event = EventFactory.create()
         assert event.data == {}
 
+    def test_explicit_empty_data_preserved(self):
+        event = EventFactory.create(data={})
+        assert event.data == {}
+
 
 class TestTriageResultFactoryNoneSentinels:
     """TriageResultFactory optional params use None sentinel, not truthy checks."""
