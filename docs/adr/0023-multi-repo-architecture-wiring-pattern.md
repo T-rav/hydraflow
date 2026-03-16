@@ -3,6 +3,9 @@
 **Status:** Proposed
 **Date:** 2026-03-08
 **Revised:** 2026-03-15
+**Council revision:** 2026-03-15 — Addressed council feedback (scoped remaining
+defect, clarified activation condition and registry construction site, reconciled
+with ADR-0008 and ADR-0009)
 
 ## Context
 
@@ -18,44 +21,104 @@ parameter in its constructor and forwards it to `create_router()` (lines 51 and 
 The multi-repo API endpoints (`/api/runtimes`, `/api/runtimes/{slug}`, etc.) are
 fully implemented in the router and become operative when a registry is provided.
 
-However, a wiring gap remains in `server.py`:
+However, a single wiring gap remains in `server.py`:
 
-- **`_run_with_dashboard()`** manually assembles bare `EventBus`, `EventLog`, and
-  `StateTracker` instances instead of creating a `RepoRuntime`. The headless path
-  (`_run_headless()`) correctly uses `RepoRuntime.create()`. This means the dashboard
-  path bypasses the runtime abstraction, duplicating initialization logic and
-  preventing multi-repo use when the dashboard is active.
+- **`_run_with_dashboard()`** (lines 15–54) manually assembles bare `EventBus`,
+  `EventLog`, and `StateTracker` instances instead of delegating to
+  `RepoRuntime.create()`. The headless path (`_run_headless()`, lines 57–66)
+  correctly uses `RepoRuntime.create()`. This means the dashboard startup path
+  bypasses the runtime abstraction, duplicating the initialization sequence
+  (event-log construction, log rotation, history loading, state-tracker creation)
+  that `RepoRuntime` already encapsulates.
+
+Note: the downstream plumbing is **already complete** — `HydraFlowDashboard`
+accepts an optional `registry` parameter (line 51), forwards it to
+`create_router()` (line 127), and `RouteContext.resolve_runtime()` handles the
+`registry=None` fallback for single-repo backward compatibility. The only
+remaining defect is the construction site in `_run_with_dashboard()` itself.
 
 This gap was identified through memory issue #2266 and confirmed by code inspection.
 
 ## Decision
 
-Unify `_run_with_dashboard()` in `server.py` around `RepoRuntime.create()` to
-eliminate the initialization asymmetry with `_run_headless()`:
+Refactor `_run_with_dashboard()` in `server.py` to delegate initialization to
+`RepoRuntime.create()`, eliminating the asymmetry with `_run_headless()`:
 
-1. **Unify `_run_with_dashboard()` around `RepoRuntime`**: The dashboard path in
-   `server.py` should create a `RepoRuntime` via `RepoRuntime.create()` (or a
-   `RepoRuntimeRegistry` for multi-repo configs) and derive `event_bus`, `state`,
-   and `orchestrator` from it, eliminating the duplicate bare-object construction.
-2. **Preserve single-repo backward compatibility**: The `_resolve_runtime()`
+1. **Replace bare-object construction with `RepoRuntime.create()`**: The dashboard
+   path in `server.py` should create a `RepoRuntime` via `RepoRuntime.create(config)`
+   and derive `event_bus`, `state`, and `orchestrator` from the resulting runtime
+   object, eliminating the duplicate initialization sequence.
+2. **Wrap the runtime in a `RepoRuntimeRegistry` for API consistency**: Construct a
+   `RepoRuntimeRegistry`, register the single `RepoRuntime`, and pass the registry
+   to `HydraFlowDashboard`. This activates the `/api/runtimes` introspection
+   endpoints without requiring multi-repo configuration.
+3. **Preserve single-repo backward compatibility**: The `_resolve_runtime()`
    fallback in `dashboard_routes.py` already handles the `registry=None` case, so
-   single-repo deployments require no configuration change.
+   single-repo deployments require no configuration change even if the registry is
+   omitted.
 
-### Relationship to ADR-0009
+### Multi-Repo Mode Activation
 
-ADR-0009 established the **process-per-repo** model as canonical: the supervisor
-spawns a separate subprocess per managed repository, each with its own `asyncio`
-event loop and full service registry. This ADR does **not** revive the in-process
-multi-repo coordination model proposed in ADR-0006 (now superseded).
+Under ADR-0009's process-per-repo model, there is no in-process "multi-repo mode"
+toggle. The supervisor (defined in ADR-0008/ADR-0009) spawns one subprocess per
+managed repository; each subprocess constructs exactly one `HydraFlowConfig` from
+its environment and therefore creates exactly one `RepoRuntime`. The
+`RepoRuntimeRegistry` within each subprocess holds at most one entry.
 
-Within a single subprocess, ADR-0009's process-per-repo model means the subprocess
-manages exactly one repository. The `RepoRuntimeRegistry` is designed to hold
-multiple `RepoRuntime` instances by slug (its API exposes `register()`, `get()`,
-`remove()`, and `all()`), but in this deployment model only one slug is ever
-registered per process. The registry exists at this level for API consistency: the
-`/api/runtimes` endpoints can introspect the local runtime without special-casing
-the single-repo case. Cross-repo coordination remains the supervisor's responsibility
-via subprocess isolation and the TCP JSON protocol, per ADR-0009.
+Multi-repo coordination happens at the **supervisor layer**, not within the
+`_run_with_dashboard()` call:
+
+- The supervisor spawns N subprocesses, each running its own dashboard on a
+  dedicated port.
+- The supervisor's unified dashboard proxies API requests to per-repo dashboards
+  (ADR-0008) and aggregates cross-repo state via the TCP JSON protocol (ADR-0009).
+
+Consequently, this ADR's refactoring does not introduce or require any new
+configuration field to "enable" multi-repo mode. The activation condition is
+architectural: the supervisor spawns multiple processes, each of which is
+single-repo.
+
+### Registry Construction Site and Ownership
+
+The `RepoRuntimeRegistry` is constructed and owned by `_run_with_dashboard()` in
+`server.py` — the same function that currently performs bare-object construction.
+The ownership chain is:
+
+1. `_run_with_dashboard()` creates `RepoRuntimeRegistry` and registers one
+   `RepoRuntime` via `registry.register(config)`.
+2. The registry is passed to `HydraFlowDashboard(registry=registry)`.
+3. `HydraFlowDashboard` forwards it to `create_router(registry=registry)`.
+4. Route handlers access the runtime via `RouteContext.resolve_runtime(slug)`.
+5. On shutdown, `_run_with_dashboard()` calls `registry.stop_all()`.
+
+The registry does **not** outlive the process and is not shared across processes.
+Cross-process runtime management is the supervisor's responsibility (ADR-0008,
+ADR-0009).
+
+### Reconciliation with ADR-0008, ADR-0009, and ADR-0006
+
+**ADR-0009 (Process-Per-Repo Model):** The supervisor spawns a separate subprocess
+per managed repository, each with its own `asyncio` event loop and full service
+registry. This ADR does **not** revive the in-process multi-repo coordination model
+proposed in ADR-0006 (now superseded). Within a single subprocess, only one
+repository is managed; the `RepoRuntimeRegistry` holds at most one entry and exists
+for API consistency so the `/api/runtimes` endpoints work without special-casing
+the single-repo case.
+
+**ADR-0008 (Supervisor-Proxied Aggregation):** The supervisor exposes a unified
+dashboard that proxies API requests to per-repo subprocesses. Each subprocess runs
+its own dashboard instance via `_run_with_dashboard()`. This ADR's refactoring
+operates entirely within a single subprocess — it unifies how that subprocess
+initializes its runtime, but does not affect the supervisor's proxying or
+aggregation behavior. The `/api/repos` endpoints (supervisor-level, ADR-0007)
+remain distinct from the `/api/runtimes` endpoints (process-local).
+
+**ADR-0006 (Superseded):** ADR-0006 proposed in-process `RepoRuntime` isolation
+with multiple runtimes sharing a single event loop. ADR-0009 rejected that model
+in favor of process-per-repo. This ADR's use of `RepoRuntimeRegistry` within a
+subprocess is **not** a partial restoration of ADR-0006 — the registry holds
+exactly one entry per process, and cross-repo coordination remains the supervisor's
+responsibility via the TCP JSON protocol (ADR-0009 §Cross-Repo Coordination).
 
 ### `/api/runtimes` vs `/api/repos` Endpoint Naming
 
