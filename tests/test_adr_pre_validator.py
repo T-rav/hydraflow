@@ -359,6 +359,39 @@ class TestCheckStaleAmendmentNotes:
         codes = [i.code for i in result.issues]
         assert "stale_amendment_note" not in codes
 
+    def test_duplicate_stale_notes_for_same_adr_deduplicated(self) -> None:
+        """Two 'requires amending' phrases for the same Accepted ADR produce one issue."""
+        content = _valid_adr(
+            consequences=(
+                "- Requires amending ADR-0021.\n"
+                "- Also requires amending ADR-0021 in section 2.\n"
+            )
+        )
+        all_adrs = [self._adr_entry(21, "Persistence", status="Accepted")]
+        validator = ADRPreValidator()
+        result = validator.validate(content, all_adrs)
+        stale_issues = [i for i in result.issues if i.code == "stale_amendment_note"]
+        assert len(stale_issues) == 1
+
+    def test_referenced_adr_without_status_field_skipped(self) -> None:
+        """Amendment note referencing an ADR with no **Status:** field is silently skipped."""
+        content = _valid_adr(
+            consequences="Accepting this ADR requires amending ADR-0021.\n"
+        )
+        # ADR-0021 entry has no **Status:** line — validator should not crash or flag
+        all_adrs = [
+            (
+                21,
+                "Persistence",
+                "# ADR-0021: Persistence\n\nNo status here.\n",
+                "0021-persistence.md",
+            )
+        ]
+        validator = ADRPreValidator()
+        result = validator.validate(content, all_adrs)
+        codes = [i.code for i in result.issues]
+        assert "stale_amendment_note" not in codes
+
 
 class TestCheckBareADRReferences:
     def test_bare_reference_detected(self) -> None:

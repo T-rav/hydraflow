@@ -180,13 +180,18 @@ class ADRPreValidator:
             if status_match:
                 adr_status[num] = status_match.group(1)
 
+        seen: set[int] = set()
         for match in _REQUIRES_AMENDING_ADR_RE.finditer(content):
             ref_num = int(match.group(1))
             # Skip if the referenced ADR doesn't exist in the index
             if ref_num not in adr_status:
                 continue
+            # Deduplicate: one issue per ADR number, even if mentioned multiple times
+            if ref_num in seen:
+                continue
             # Only flag if the referenced ADR is Accepted (amendment completed)
             if adr_status[ref_num].lower() == "accepted":
+                seen.add(ref_num)
                 result.issues.append(
                     ADRValidationIssue(
                         code="stale_amendment_note",
