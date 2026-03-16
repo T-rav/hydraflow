@@ -45,6 +45,12 @@ _ADR_REF_RE = re.compile(r"ADR[- ](\d{4})")
 #   ADR-0006: Title           — heading-style (only in # headings)
 _ADR_REF_WITH_TITLE_RE = re.compile(r"ADR[- ]\d{4}\s*(?:\(|—)")
 
+# Captures the title text from a parenthesized annotation: ADR-0006 (Title Here)
+_ADR_PAREN_TITLE_RE = re.compile(r"ADR[- ]\d{4}\s*\(([^)]+)\)")
+# Captures the title text from an em-dash annotation: ADR-0006 — Title Here
+# Title runs to end of line or next sentence boundary.
+_ADR_EMDASH_TITLE_RE = re.compile(r"ADR[- ]\d{4}\s*—\s*(.+?)(?:\.|,|;|$)")
+
 
 class ADRPreValidator:
     """Validates ADR structure before sending to the council."""
@@ -68,7 +74,7 @@ class ADRPreValidator:
         self._check_required_sections(content, result)
         self._check_empty_sections(content, result)
         self._check_supersession(content, all_adrs or [], result)
-        self._check_bare_adr_references(content, result)
+        self._check_bare_adr_references(content, all_adrs or [], result)
         return result
 
     def _check_status_field(self, content: str, result: ADRValidationResult) -> None:
@@ -148,6 +154,7 @@ class ADRPreValidator:
     def _check_bare_adr_references(
         self,
         content: str,
+        all_adrs: list[tuple[int, str, str, str]],
         result: ADRValidationResult,
     ) -> None:
         """Check that ADR cross-references include the referenced ADR's title.
@@ -157,14 +164,24 @@ class ADRPreValidator:
         should include the title in parentheses — e.g. ``ADR-0006 (RepoRuntime
         Isolation Architecture)`` — or after an em-dash.
 
+        When *all_adrs* is provided, also validates that:
+        - Referenced ADR numbers actually exist.
+        - Title annotations match the real ADR title.
+
         Exceptions: the ADR's own heading line (``# ADR-NNNN: Title``) and
         markdown table rows (which may contain example/illustration text).
         """
+        # Build lookup from ADR number → title for existence and title checks
+        adr_titles: dict[int, str] = {num: title for num, title, *_ in all_adrs}
+
         # Extract self-number from the heading to skip self-references
         heading_match = re.search(r"^#\s+ADR[- ](\d{4})", content, re.MULTILINE)
         self_number = heading_match.group(1) if heading_match else None
 
         bare_numbers: set[str] = set()
+        nonexistent_numbers: set[str] = set()
+        mismatched: dict[str, tuple[str, str]] = {}  # num → (cited_title, real_title)
+
         for line in content.splitlines():
             # Skip heading lines (contain the ADR's own title after ':')
             if line.lstrip().startswith("#"):
@@ -179,10 +196,17 @@ class ADRPreValidator:
                 if ref_num == self_number:
                     continue
                 # Check if this specific occurrence has a title annotation
-                # Look at the text starting from this match position
                 rest = line[match.start() :]
-                if not _ADR_REF_WITH_TITLE_RE.match(rest):
+                has_title = _ADR_REF_WITH_TITLE_RE.match(rest)
+                if not has_title:
                     bare_numbers.add(ref_num)
+                else:
+                    # Validate the cited title against the real ADR title
+                    self._check_title_accuracy(ref_num, rest, adr_titles, mismatched)
+
+                # Check existence when all_adrs is available
+                if adr_titles and int(ref_num) not in adr_titles:
+                    nonexistent_numbers.add(ref_num)
 
         for ref_num in sorted(bare_numbers):
             result.issues.append(
@@ -196,3 +220,64 @@ class ADRPreValidator:
                     fixable=True,
                 )
             )
+
+        for ref_num in sorted(nonexistent_numbers):
+            result.issues.append(
+                ADRValidationIssue(
+                    code="nonexistent_adr_reference",
+                    message=(
+                        f"ADR-{ref_num} is referenced but does not exist "
+                        f"in the ADR index"
+                    ),
+                    fixable=False,
+                )
+            )
+
+        for ref_num in sorted(mismatched):
+            cited, real = mismatched[ref_num]
+            result.issues.append(
+                ADRValidationIssue(
+                    code="mismatched_adr_title",
+                    message=(
+                        f"ADR-{ref_num} title mismatch: cited as "
+                        f'"{cited}" but the actual title is "{real}"'
+                    ),
+                    fixable=True,
+                )
+            )
+
+    @staticmethod
+    def _check_title_accuracy(
+        ref_num: str,
+        text: str,
+        adr_titles: dict[int, str],
+        mismatched: dict[str, tuple[str, str]],
+    ) -> None:
+        """Compare a cited title annotation against the real ADR title."""
+        num = int(ref_num)
+        if num not in adr_titles:
+            return  # Can't verify — nonexistence is flagged separately.
+        real_title = adr_titles[num]
+
+        # Extract the cited title from either parenthesized or em-dash form
+        cited_title: str | None = None
+        paren_match = _ADR_PAREN_TITLE_RE.match(text)
+        if paren_match:
+            cited_title = paren_match.group(1).strip()
+        else:
+            emdash_match = _ADR_EMDASH_TITLE_RE.match(text)
+            if emdash_match:
+                cited_title = emdash_match.group(1).strip()
+
+        if not cited_title:
+            return
+
+        # For em-dash form, the captured text may include trailing words
+        # (e.g. "Title for details") — check if the real title is a prefix.
+        cited_lower = cited_title.lower()
+        real_lower = real_title.lower()
+        if cited_lower == real_lower:
+            return
+        if cited_lower.startswith(real_lower):
+            return
+        mismatched[ref_num] = (cited_title, real_title)
