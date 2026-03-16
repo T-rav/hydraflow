@@ -19,7 +19,7 @@ from models import (
     WorkerResult,
 )
 from orchestrator import HydraFlowOrchestrator
-from tests.conftest import TaskFactory
+from tests.conftest import ReviewResultFactory, TaskFactory
 from tests.helpers import make_worker_result, mock_fetcher_noop
 
 # ---------------------------------------------------------------------------
@@ -72,11 +72,11 @@ class TestInit:
 
     def test_human_input_requests_starts_empty(self, config: HydraFlowConfig) -> None:
         orch = HydraFlowOrchestrator(config)
-        assert orch._human_input_requests == {}
+        assert orch._hitl_ctrl._human_input_requests == {}
 
     def test_human_input_responses_starts_empty(self, config: HydraFlowConfig) -> None:
         orch = HydraFlowOrchestrator(config)
-        assert orch._human_input_responses == {}
+        assert orch._hitl_ctrl._human_input_responses == {}
 
     def test_dashboard_starts_as_none(self, config: HydraFlowConfig) -> None:
         orch = HydraFlowOrchestrator(config)
@@ -128,7 +128,7 @@ class TestProperties:
         self, config: HydraFlowConfig
     ) -> None:
         orch = HydraFlowOrchestrator(config)
-        assert orch.human_input_requests is orch._human_input_requests
+        assert orch.human_input_requests is orch._hitl_ctrl._human_input_requests
 
     def test_no_class_constant_default_max_reviewers(self) -> None:
         assert not hasattr(HydraFlowOrchestrator, "DEFAULT_MAX_REVIEWERS")
@@ -148,15 +148,15 @@ class TestHumanInput:
     def test_provide_human_input_stores_answer(self, config: HydraFlowConfig) -> None:
         orch = HydraFlowOrchestrator(config)
         orch.provide_human_input(42, "Use option B")
-        assert orch._human_input_responses[42] == "Use option B"
+        assert orch._hitl_ctrl._human_input_responses[42] == "Use option B"
 
     def test_provide_human_input_removes_from_requests(
         self, config: HydraFlowConfig
     ) -> None:
         orch = HydraFlowOrchestrator(config)
-        orch._human_input_requests[42] = "Which approach?"
+        orch._hitl_ctrl._human_input_requests[42] = "Which approach?"
         orch.provide_human_input(42, "Approach A")
-        assert 42 not in orch._human_input_requests
+        assert 42 not in orch._hitl_ctrl._human_input_requests
 
     def test_provide_human_input_for_non_pending_issue_is_safe(
         self, config: HydraFlowConfig
@@ -164,13 +164,13 @@ class TestHumanInput:
         orch = HydraFlowOrchestrator(config)
         # No request registered — should not raise
         orch.provide_human_input(99, "Some answer")
-        assert orch._human_input_responses[99] == "Some answer"
+        assert orch._hitl_ctrl._human_input_responses[99] == "Some answer"
 
     def test_human_input_requests_reflects_pending(
         self, config: HydraFlowConfig
     ) -> None:
         orch = HydraFlowOrchestrator(config)
-        orch._human_input_requests[7] = "What colour?"
+        orch._hitl_ctrl._human_input_requests[7] = "What colour?"
         assert orch.human_input_requests == {7: "What colour?"}
 
 
@@ -1060,14 +1060,12 @@ class TestPostReviewHooks:
     async def test_calls_post_run_hooks_for_transcripts(
         self, config: HydraFlowConfig
     ) -> None:
-        from models import ReviewResult
-
         orch = HydraFlowOrchestrator(config)
         mock_fetcher_noop(orch)
         self._mock_review_deps(orch)
 
         results = [
-            ReviewResult(
+            ReviewResultFactory.create(
                 pr_number=10,
                 issue_number=1,
                 transcript="reviewed code",
@@ -1089,14 +1087,12 @@ class TestPostReviewHooks:
     async def test_merged_result_triggers_pull_and_crate(
         self, config: HydraFlowConfig
     ) -> None:
-        from models import ReviewResult
-
         orch = HydraFlowOrchestrator(config)
         mock_fetcher_noop(orch)
         self._mock_review_deps(orch)
 
         results = [
-            ReviewResult(
+            ReviewResultFactory.create(
                 pr_number=10,
                 issue_number=1,
                 transcript="merged PR",
@@ -1115,14 +1111,12 @@ class TestPostReviewHooks:
     async def test_skips_hooks_for_empty_transcript(
         self, config: HydraFlowConfig
     ) -> None:
-        from models import ReviewResult
-
         orch = HydraFlowOrchestrator(config)
         mock_fetcher_noop(orch)
         self._mock_review_deps(orch)
 
         results = [
-            ReviewResult(
+            ReviewResultFactory.create(
                 pr_number=10,
                 issue_number=1,
                 transcript="",
@@ -1139,14 +1133,12 @@ class TestPostReviewHooks:
     async def test_review_status_failed_on_ci_failure(
         self, config: HydraFlowConfig
     ) -> None:
-        from models import ReviewResult
-
         orch = HydraFlowOrchestrator(config)
         mock_fetcher_noop(orch)
         self._mock_review_deps(orch)
 
         results = [
-            ReviewResult(
+            ReviewResultFactory.create(
                 pr_number=10,
                 issue_number=1,
                 transcript="CI failed",
@@ -1165,14 +1157,12 @@ class TestPostReviewHooks:
     async def test_review_status_success_on_merge(
         self, config: HydraFlowConfig
     ) -> None:
-        from models import ReviewResult
-
         orch = HydraFlowOrchestrator(config)
         mock_fetcher_noop(orch)
         self._mock_review_deps(orch)
 
         results = [
-            ReviewResult(
+            ReviewResultFactory.create(
                 pr_number=10,
                 issue_number=1,
                 transcript="merged successfully",

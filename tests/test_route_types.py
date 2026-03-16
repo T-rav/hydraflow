@@ -1,4 +1,4 @@
-"""Tests for route_types module — canonical type aliases and duplicate guard."""
+"""Tests for route_types — canonical parameter type aliases and duplicate guard."""
 
 from __future__ import annotations
 
@@ -6,28 +6,26 @@ import ast
 from pathlib import Path
 from typing import Annotated, get_args, get_origin
 
-from route_types import RepoSlugParam
+from src.route_types import RepoSlugParam
 
 SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 
 
 class TestRepoSlugParam:
-    """RepoSlugParam is importable and has expected metadata."""
+    """Verify the canonical RepoSlugParam definition."""
 
-    def test_is_annotated(self) -> None:
+    def test_is_annotated_type(self) -> None:
         assert get_origin(RepoSlugParam) is Annotated
 
     def test_base_type_is_optional_str(self) -> None:
         args = get_args(RepoSlugParam)
         # First arg is the base type (str | None)
-        base = args[0]
-        assert base == str | None
+        assert args[0] == str | None
 
-    def test_query_metadata_description(self) -> None:
+    def test_query_description(self) -> None:
         args = get_args(RepoSlugParam)
-        query_info = args[1]
-        assert hasattr(query_info, "description")
-        assert query_info.description == "Repo slug to scope the request"  # type: ignore[union-attr]
+        query = args[1]
+        assert query.description == "Repo slug to scope the request"
 
 
 class TestNoDuplicateAnnotatedAliases:
@@ -42,11 +40,20 @@ class TestNoDuplicateAnnotatedAliases:
             except SyntaxError:
                 continue
             for node in ast.walk(tree):
+                # Plain assignment: Name = Annotated[...]
                 if (
                     isinstance(node, ast.Assign)
                     and len(node.targets) == 1
                     and isinstance(node.targets[0], ast.Name)
                     and node.targets[0].id == name
+                    and isinstance(node.value, ast.Subscript)
+                    and isinstance(node.value.value, ast.Name)
+                    and node.value.value.id == "Annotated"
+                ) or (
+                    isinstance(node, ast.AnnAssign)
+                    and isinstance(node.target, ast.Name)
+                    and node.target.id == name
+                    and node.value is not None
                     and isinstance(node.value, ast.Subscript)
                     and isinstance(node.value.value, ast.Name)
                     and node.value.value.id == "Annotated"
