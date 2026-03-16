@@ -1574,6 +1574,7 @@ def test_build_review_prompt_stat_verification_for_each_commit(
     assert "git diff --stat head~1" in lower
     assert "verify your commit" in lower
     assert "intended file appears" in lower
+    assert "after each commit" in lower
 
 
 # ---------------------------------------------------------------------------
@@ -2444,6 +2445,7 @@ async def test_fix_review_findings_populates_files_changed(
             runner, "_get_changed_files", AsyncMock(return_value=["src/fix.py"])
         ),
         patch.object(runner, "_has_changes", AsyncMock(return_value=True)),
+        patch.object(runner, "_get_commit_stat", AsyncMock(return_value="")),
         patch.object(runner, "_save_transcript"),
     ):
         result = await runner.fix_review_findings(
@@ -2497,6 +2499,7 @@ async def test_review_logs_changed_files_when_fixes_made(
             AsyncMock(return_value=["src/reviewer.py"]),
         ),
         patch.object(runner, "_has_changes", AsyncMock(return_value=True)),
+        patch.object(runner, "_get_commit_stat", AsyncMock(return_value="")),
         patch.object(runner, "_save_transcript"),
         caplog.at_level("INFO", logger="hydraflow.reviewer"),
     ):
