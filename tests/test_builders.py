@@ -300,3 +300,49 @@ class TestReviewResultBuilder:
         builder = ReviewResultBuilder()
         same = builder.with_model_defaults()
         assert same is builder
+
+
+# --- Guard: every with_* method must have a test using a non-default value ---
+
+import inspect
+
+import pytest
+
+
+def _with_methods(builder_cls: type) -> set[str]:
+    """Return all public with_* method names on a builder class."""
+    return {
+        name
+        for name, _ in inspect.getmembers(builder_cls, predicate=inspect.isfunction)
+        if name.startswith("with_")
+    }
+
+
+def _tested_with_methods(test_cls: type) -> set[str]:
+    """Scan test source for ``.with_<name>(`` calls and return matched method names."""
+    import re
+
+    source = inspect.getsource(test_cls)
+    return set(re.findall(r"\.(with_\w+)\(", source))
+
+
+_BUILDER_TEST_PAIRS: list[tuple[type, type]] = [
+    (WorkerResultBuilder, TestWorkerResultBuilder),
+    (PlanResultBuilder, TestPlanResultBuilder),
+    (ReviewResultBuilder, TestReviewResultBuilder),
+]
+
+
+@pytest.mark.parametrize(
+    ("builder_cls", "test_cls"),
+    _BUILDER_TEST_PAIRS,
+    ids=[b.__name__ for b, _ in _BUILDER_TEST_PAIRS],
+)
+def test_all_with_methods_are_tested(builder_cls: type, test_cls: type):
+    """Every with_* method on a builder must be exercised in its test class."""
+    expected = _with_methods(builder_cls)
+    actual = _tested_with_methods(test_cls)
+    missing = expected - actual
+    assert not missing, (
+        f"{builder_cls.__name__} has untested with_* methods: {sorted(missing)}"
+    )
