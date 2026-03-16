@@ -105,7 +105,7 @@ class TestVerifyMonitorLoopClosedIssue:
             "checked": 1,
             "resolved": 1,
             "reconciled": 0,
-            "pending": 1,
+            "pending": 0,
         }
         state.record_outcome.assert_called_once_with(
             10,
@@ -138,7 +138,7 @@ class TestVerifyMonitorLoopClosedIssue:
         assert result["checked"] == 2
         assert result["resolved"] == 1
         assert result["reconciled"] == 0
-        assert result["pending"] == 2
+        assert result["pending"] == 1
         state.record_outcome.assert_called_once_with(
             21,
             IssueOutcomeType.VERIFY_RESOLVED,
@@ -164,7 +164,7 @@ class TestVerifyMonitorLoopNotFound:
             "checked": 1,
             "resolved": 1,
             "reconciled": 0,
-            "pending": 1,
+            "pending": 0,
         }
         state.record_outcome.assert_called_once_with(
             10,
@@ -345,6 +345,35 @@ class TestVerifyMonitorLoopOrphanedOutcomes:
             )
         ]
         assert len(reconcile_calls) == 2
+
+    @pytest.mark.asyncio
+    async def test_continues_on_record_outcome_exception(self, tmp_path: Path) -> None:
+        """Per-item exception handling: one failing record_outcome doesn't abort others."""
+        from models import IssueOutcomeType
+
+        orphan1 = _make_outcome(IssueOutcomeType.VERIFY_PENDING)
+        orphan2 = _make_outcome(IssueOutcomeType.VERIFY_PENDING)
+        loop, _, state = _make_loop(
+            tmp_path,
+            pending={},
+            outcomes={"30": orphan1, "31": orphan2},
+        )
+
+        call_count = 0
+
+        def _record(*_args, **_kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("State write failure")
+
+        state.record_outcome = _record
+
+        result = await loop._do_work()
+
+        # One failed, one succeeded — reconciled count = 1
+        assert result is not None
+        assert result["reconciled"] == 1
 
 
 class TestVerifyMonitorLoopErrorHandling:

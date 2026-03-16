@@ -96,7 +96,7 @@ class VerifyMonitorLoop(BaseBackgroundLoop):
             "checked": checked,
             "resolved": resolved,
             "reconciled": reconciled,
-            "pending": len(pending),
+            "pending": len(pending) - resolved,
         }
 
     def _reconcile_orphaned_outcomes(self, pending: dict[int, int]) -> int:
@@ -110,15 +110,21 @@ class VerifyMonitorLoop(BaseBackgroundLoop):
                 and key not in pending_keys
             ):
                 issue_number = int(key)
-                self._state.record_outcome(
-                    issue_number,
-                    IssueOutcomeType.VERIFY_RESOLVED,
-                    reason="Orphaned verify_pending — verification issue missing, auto-resolved",
-                    phase="verify",
-                )
-                logger.info(
-                    "Reconciled orphaned VERIFY_PENDING for issue #%d",
-                    issue_number,
-                )
-                reconciled += 1
+                try:
+                    self._state.record_outcome(
+                        issue_number,
+                        IssueOutcomeType.VERIFY_RESOLVED,
+                        reason="Orphaned verify_pending — verification issue missing, auto-resolved",
+                        phase="verify",
+                    )
+                    logger.info(
+                        "Reconciled orphaned VERIFY_PENDING for issue #%d",
+                        issue_number,
+                    )
+                    reconciled += 1
+                except Exception:
+                    logger.exception(
+                        "Error reconciling orphaned VERIFY_PENDING for issue #%d — skipping",
+                        issue_number,
+                    )
         return reconciled
