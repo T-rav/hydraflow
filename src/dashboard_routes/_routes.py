@@ -762,6 +762,7 @@ def create_router(
                     number=int(pr_data["number"]),
                     url=str(pr_data.get("url", "")),
                     merged=bool(pr_data.get("merged", False)),
+                    title=str(pr_data.get("title", "")),
                 )
                 for pr_data in prs_map.values()
                 if isinstance(pr_data, dict) and _coerce_int(pr_data.get("number")) > 0
@@ -895,6 +896,9 @@ def create_router(
                     url = str(event.data.get("url", "")).strip()
                     if url.startswith(("http://", "https://")):
                         payload["url"] = url
+                    pr_title = str(event.data.get("title", "")).strip()
+                    if pr_title:
+                        payload["title"] = pr_title
                     prs[pr_number] = payload
 
             if event.type == EventType.MERGE_UPDATE:
@@ -907,6 +911,9 @@ def create_router(
                     )
                     if str(event.data.get("status", "")).lower() == "merged":
                         payload["merged"] = True
+                    merge_title = str(event.data.get("title", "")).strip()
+                    if merge_title:
+                        payload["title"] = merge_title
                     prs[pr_number] = payload
 
             normalised = _normalise_event_status(event.type, event.data)
