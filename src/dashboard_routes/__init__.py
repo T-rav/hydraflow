@@ -23,11 +23,12 @@ from state import StateTracker
 if TYPE_CHECKING:
     from orchestrator import HydraFlowOrchestrator
 # Re-export module-level helpers that tests import directly.
+from dashboard_routes._context import RouterContext as RouteContext  # noqa: F401
+from dashboard_routes._control_routes import _INTERVAL_BOUNDS  # noqa: F401
 from dashboard_routes._helpers import (  # noqa: F401
     _extract_field_from_sources,
     _extract_repo_path,
     _extract_repo_slug,
-    _find_repo_match,
     _is_likely_disconnect,
     _parse_compat_json_object,
     logger,

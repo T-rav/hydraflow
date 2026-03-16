@@ -71,6 +71,7 @@ class RouterContext:
         list_repos_cb: Callable[[], list[RepoRecord]] | None = None,
         default_repo_slug: str | None = None,
         allowed_repo_roots_fn: Callable[[], tuple[str, ...]] | None = None,
+        hitl_summary_cooldown_seconds: int = 300,
     ) -> None:
         # Core dependencies
         self.config = config
@@ -94,6 +95,7 @@ class RouterContext:
         # Filesystem roots override
         from dashboard_routes._helpers import _allowed_repo_roots
 
+        self.allowed_repo_roots_fn = allowed_repo_roots_fn
         self.repo_roots_fn = (
             allowed_repo_roots_fn
             if allowed_repo_roots_fn is not None
@@ -109,7 +111,7 @@ class RouterContext:
         )
         self.hitl_summary_inflight: set[int] = set()
         self.hitl_summary_slots = asyncio.Semaphore(3)
-        self.hitl_summary_cooldown_seconds = 300
+        self.hitl_summary_cooldown_seconds = hitl_summary_cooldown_seconds
 
         # Issue history cache
         self.history_cache_file = config.data_path("metrics", "history_cache.json")
