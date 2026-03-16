@@ -111,9 +111,9 @@ Adopt the **process-per-repo** model as the canonical multi-repo architecture:
   adopts `subprocess.Popen` process-per-repo instead, making ADR-0006's
   supervisor integration decision obsolete.
 - Source memory: #1627
-- ADR-0001 (Five concurrent async loops — per-process architecture)
-- ADR-0006 (RepoRuntime isolation — superseded by this ADR)
-- ADR-0008 (Multi-repo dashboard — supervisor-proxied aggregation)
+- ADR-0001 (Five Concurrent Async Loops)
+- ADR-0006 (RepoRuntime Isolation Architecture) — superseded by this ADR
+- ADR-0008 (Multi-Repo Dashboard Architecture)
 - `src/hf_cli/supervisor_service.py` (`_start_repo`, `RUNNERS`, TCP protocol)
 - `src/config.py` (`_resolve_paths`, `_namespace_repo_paths`, `worktree_path_for_issue`)
 - `src/orchestrator.py` (`HydraFlowOrchestrator.__init__`)

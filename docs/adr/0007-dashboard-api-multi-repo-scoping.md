@@ -77,7 +77,7 @@ Extend the dashboard API to support multi-repo scoping through two mechanisms:
 - `src/dashboard_routes.py`, `src/dashboard.py`
 - `src/hf_cli/supervisor_service.py`, `src/hf_cli/supervisor_client.py`
 - `src/ui/src/context/HydraFlowContext.jsx`
-- ADR-0006 (RepoRuntime isolation)
+- ADR-0006 (RepoRuntime Isolation Architecture)
 ## Council Amendment Notes
 
 The following amendments were generated from council feedback:
