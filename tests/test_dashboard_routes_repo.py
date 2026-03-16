@@ -248,12 +248,6 @@ class TestDetectRepoSlugFromPath:
 
     def test_https_remote_url(self) -> None:
         """HTTPS remote URL is parsed to owner/repo slug."""
-        mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(
-            return_value=(b"https://github.com/owner/repo.git\n", b"")
-        )
-        mock_proc.returncode = 0
-
         from urllib.parse import urlparse
 
         url = "https://github.com/owner/repo.git"

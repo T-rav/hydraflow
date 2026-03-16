@@ -1025,46 +1025,54 @@ class TestPersistEventErrorHandling:
     ) -> None:
         """Done callback should not log for cancelled tasks."""
         loop = asyncio.new_event_loop()
-        future: asyncio.Future[None] = loop.create_future()
-        future.cancel()
+        try:
+            future: asyncio.Future[None] = loop.create_future()
+            future.cancel()
 
-        with caplog.at_level(logging.WARNING, logger="hydraflow.events"):
-            _log_persist_failure(future)
+            with caplog.at_level(logging.WARNING, logger="hydraflow.events"):
+                _log_persist_failure(future)
 
-        assert "Event persist task failed" not in caplog.text
-        loop.close()
+            assert "Event persist task failed" not in caplog.text
+        finally:
+            loop.close()
 
     def test_log_persist_failure_callback_logs_exception(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Done callback should log warning when task has an exception."""
         loop = asyncio.new_event_loop()
-        future: asyncio.Future[None] = loop.create_future()
-        future.set_exception(ValueError("bad serialization"))
+        try:
+            future: asyncio.Future[None] = loop.create_future()
+            future.set_exception(ValueError("bad serialization"))
 
-        with caplog.at_level(logging.WARNING, logger="hydraflow.events"):
-            _log_persist_failure(future)
+            with caplog.at_level(logging.WARNING, logger="hydraflow.events"):
+                _log_persist_failure(future)
 
-        records = [
-            r for r in caplog.records if "Event persist task failed" in r.getMessage()
-        ]
-        assert len(records) == 1
-        assert records[0].exc_info is not None
-        loop.close()
+            records = [
+                r
+                for r in caplog.records
+                if "Event persist task failed" in r.getMessage()
+            ]
+            assert len(records) == 1
+            assert records[0].exc_info is not None
+        finally:
+            loop.close()
 
     def test_log_persist_failure_callback_silent_on_success(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Done callback should not log when task completed successfully."""
         loop = asyncio.new_event_loop()
-        future: asyncio.Future[None] = loop.create_future()
-        future.set_result(None)
+        try:
+            future: asyncio.Future[None] = loop.create_future()
+            future.set_result(None)
 
-        with caplog.at_level(logging.WARNING, logger="hydraflow.events"):
-            _log_persist_failure(future)
+            with caplog.at_level(logging.WARNING, logger="hydraflow.events"):
+                _log_persist_failure(future)
 
-        assert "Event persist task failed" not in caplog.text
-        loop.close()
+            assert "Event persist task failed" not in caplog.text
+        finally:
+            loop.close()
 
 
 # ---------------------------------------------------------------------------
