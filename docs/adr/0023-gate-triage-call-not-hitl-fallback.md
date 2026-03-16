@@ -1,6 +1,6 @@
 # ADR-0023: Gate Triage Call on Config Toggle, Not Just HITL Fallback
 
-**Status:** Proposed
+**Status:** Superseded (adr_review_auto_triage flag removed — triage routing is always-on)
 **Date:** 2026-03-08
 
 ## Context

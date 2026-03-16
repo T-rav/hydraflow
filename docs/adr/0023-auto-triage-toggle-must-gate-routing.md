@@ -1,6 +1,6 @@
 # ADR-0023: Auto-Triage Toggle Must Gate Routing, Not Just Stat Tracking
 
-**Status:** Proposed
+**Status:** Superseded (adr_review_auto_triage flag removed — triage routing is always-on)
 **Date:** 2026-03-08
 
 ## Context
