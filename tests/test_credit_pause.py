@@ -705,3 +705,66 @@ class TestConfigCreditPauseBuffer:
     def test_credit_pause_buffer_accepts_custom_minutes(self) -> None:
         config = ConfigFactory.create(credit_pause_buffer_minutes=5)
         assert config.credit_pause_buffer_minutes == 5
+
+
+# ===========================================================================
+# structural guard — asyncio.Event fields must be cleared in reset()
+# ===========================================================================
+
+
+class TestAsyncioEventResetGuard:
+    """AST-based guard: every asyncio.Event field in __init__ must be cleared in reset()."""
+
+    def test_all_asyncio_events_are_cleared_in_reset(self) -> None:
+        import ast
+        from pathlib import Path
+
+        src = (Path(__file__).parent.parent / "src" / "orchestrator.py").read_text()
+        tree = ast.parse(src)
+
+        orchestrator_cls = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ClassDef) and node.name == "HydraFlowOrchestrator"
+        )
+
+        # Collect asyncio.Event() assignments in __init__: self._X = asyncio.Event()
+        init_events: set[str] = set()
+        for method in orchestrator_cls.body:
+            if isinstance(method, ast.FunctionDef) and method.name == "__init__":
+                for stmt in ast.walk(method):
+                    if (
+                        isinstance(stmt, ast.Assign)
+                        and len(stmt.targets) == 1
+                        and isinstance(stmt.targets[0], ast.Attribute)
+                        and isinstance(stmt.targets[0].value, ast.Name)
+                        and stmt.targets[0].value.id == "self"
+                        and isinstance(stmt.value, ast.Call)
+                        and isinstance(stmt.value.func, ast.Attribute)
+                        and stmt.value.func.attr == "Event"
+                        and isinstance(stmt.value.func.value, ast.Name)
+                        and stmt.value.func.value.id == "asyncio"
+                    ):
+                        init_events.add(stmt.targets[0].attr)
+
+        # Collect self._X.clear() calls in reset()
+        reset_cleared: set[str] = set()
+        for method in orchestrator_cls.body:
+            if isinstance(method, ast.FunctionDef) and method.name == "reset":
+                for stmt in ast.walk(method):
+                    if (
+                        isinstance(stmt, ast.Expr)
+                        and isinstance(stmt.value, ast.Call)
+                        and isinstance(stmt.value.func, ast.Attribute)
+                        and stmt.value.func.attr == "clear"
+                        and isinstance(stmt.value.func.value, ast.Attribute)
+                        and isinstance(stmt.value.func.value.value, ast.Name)
+                        and stmt.value.func.value.value.id == "self"
+                    ):
+                        reset_cleared.add(stmt.value.func.value.attr)
+
+        missing = init_events - reset_cleared
+        assert not missing, (
+            f"asyncio.Event field(s) in __init__ not cleared in reset(): {missing}. "
+            "Add self.<field>.clear() to HydraFlowOrchestrator.reset()."
+        )

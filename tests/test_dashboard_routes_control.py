@@ -538,19 +538,19 @@ class TestBgWorkerIntervalEndpoint:
 
 
 # ---------------------------------------------------------------------------
-# /api/clear-credit-pause endpoint
+# /api/control/clear-credit-pause endpoint
 # ---------------------------------------------------------------------------
 
 
 class TestClearCreditPauseEndpoint:
-    """Tests for POST /api/clear-credit-pause endpoint."""
+    """Tests for POST /api/control/clear-credit-pause endpoint."""
 
     @pytest.mark.asyncio
     async def test_returns_error_without_orchestrator(
         self, config, event_bus, state, tmp_path
     ) -> None:
         router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
-        endpoint = find_endpoint(router, "/api/clear-credit-pause")
+        endpoint = find_endpoint(router, "/api/control/clear-credit-pause")
         assert endpoint is not None
 
         response = await endpoint()
@@ -567,7 +567,7 @@ class TestClearCreditPauseEndpoint:
         router, _ = make_dashboard_router(
             config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
         )
-        endpoint = find_endpoint(router, "/api/clear-credit-pause")
+        endpoint = find_endpoint(router, "/api/control/clear-credit-pause")
         assert endpoint is not None
 
         response = await endpoint()
@@ -587,7 +587,7 @@ class TestClearCreditPauseEndpoint:
         router, _ = make_dashboard_router(
             config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
         )
-        endpoint = find_endpoint(router, "/api/clear-credit-pause")
+        endpoint = find_endpoint(router, "/api/control/clear-credit-pause")
         assert endpoint is not None
 
         response = await endpoint()
@@ -599,7 +599,7 @@ class TestClearCreditPauseEndpoint:
     def test_route_is_registered(self, config, event_bus, state, tmp_path) -> None:
         router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
         paths = {route.path for route in router.routes if hasattr(route, "path")}
-        assert "/api/clear-credit-pause" in paths
+        assert "/api/control/clear-credit-pause" in paths
 
 
 # ---------------------------------------------------------------------------
