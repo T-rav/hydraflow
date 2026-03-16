@@ -1554,7 +1554,7 @@ def test_build_review_prompt_includes_scope_creep_check(
 def test_build_review_prompt_includes_post_commit_scope_creep_verification(
     config, event_bus, pr_info, task
 ):
-    """Reviewer prompt must require git diff --stat verification after scope-creep removal commits."""
+    """Reviewer prompt must require git diff --stat verification after commits (scope-creep removal still mentioned)."""
     runner = _make_runner(config, event_bus)
     prompt, _ = runner._build_review_prompt_with_stats(pr_info, task, "diff")
 
@@ -2705,6 +2705,7 @@ async def test_fix_review_findings_publishes_review_update_event(
             runner, "_get_changed_files", AsyncMock(return_value=["src/fix.py"])
         ),
         patch.object(runner, "_has_changes", AsyncMock(return_value=True)),
+        patch.object(runner, "_get_commit_stat", AsyncMock(return_value="")),
         patch.object(runner, "_save_transcript"),
     ):
         await runner.fix_review_findings(pr_info, task, tmp_path, "Missing null check")
