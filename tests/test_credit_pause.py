@@ -397,6 +397,13 @@ class TestRunStatusCreditsPaused:
         orch.reset()
         assert orch._credits_paused_until is None
 
+    def test_reset_clears_credit_resume_event(self, config: HydraFlowConfig) -> None:
+        """reset() must clear _credit_resume_event to avoid stale-event bugs on restart."""
+        orch = HydraFlowOrchestrator(config)
+        orch._credit_resume_event.set()
+        orch.reset()
+        assert not orch._credit_resume_event.is_set()
+
 
 # ===========================================================================
 # orchestrator — credit exhaustion pause and resume
@@ -621,6 +628,33 @@ class TestCreditExhaustionPauseResume:
         assert terminate_calls["agents"] >= 1
         assert terminate_calls["reviewers"] >= 1
         assert terminate_calls["hitl"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_clear_credit_pause_sets_event_and_clears_timestamp(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """clear_credit_pause() should set the resume event and clear _credits_paused_until."""
+        orch = HydraFlowOrchestrator(config)
+        orch._credits_paused_until = datetime.now(UTC) + timedelta(hours=1)
+        orch.clear_credit_pause()
+        assert orch._credits_paused_until is None
+        assert orch._credit_resume_event.is_set()
+
+    @pytest.mark.asyncio
+    async def test_sleep_until_resume_wakes_on_credit_resume_event(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """_sleep_until_resume should return early when _credit_resume_event is set."""
+        orch = HydraFlowOrchestrator(config)
+        resume_at = datetime.now(UTC) + timedelta(hours=5)
+
+        async def set_resume_event() -> None:
+            await asyncio.sleep(0.05)
+            orch._credit_resume_event.set()
+
+        asyncio.create_task(set_resume_event())
+        # Should return in ~0.05s, not 5 hours
+        await asyncio.wait_for(orch._sleep_until_resume(resume_at), timeout=5.0)
 
     @pytest.mark.asyncio
     async def test_credit_pause_interrupted_by_stop(
