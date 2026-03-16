@@ -83,7 +83,7 @@ class ADRCouncilReviewer:
 
             # Pre-review validation gate
             validation = self._pre_validator.validate(
-                adr_content, all_adrs, repo_root=Path(self._config.repo_root)
+                adr_content, all_adrs, repo_root=self._config.repo_root
             )
             if not validation.passed:
                 issue_msgs = "; ".join(i.message for i in validation.issues)

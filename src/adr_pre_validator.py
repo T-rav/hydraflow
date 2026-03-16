@@ -385,7 +385,7 @@ class ADRPreValidator:
                         code="phantom_source_symbol",
                         message=(
                             f"`{file_path}:{symbol}` is cited but "
-                            f"`{symbol}` is not defined in `{file_path}`"
+                            f"`{symbol}` is not defined as a function or class in `{file_path}`"
                         ),
                         fixable=True,
                     )
