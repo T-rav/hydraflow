@@ -2489,3 +2489,195 @@ def test_review_result_files_changed_round_trips():
     data = result.model_dump()
     restored = ReviewResult(**data)
     assert restored.files_changed == ["src/foo.py"]
+
+
+# ---------------------------------------------------------------------------
+# Merged if-condition: commit_stat + log in single branch (#3184)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_review_commit_stat_not_called_when_fixes_made_but_no_files(
+    config, event_bus, pr_info, task, tmp_path
+):
+    """review(): _get_commit_stat must NOT be called when fixes_made but files_changed is empty."""
+    runner = _make_runner(config, event_bus)
+    transcript = "Fixed.\nVERDICT: APPROVE\nSUMMARY: Done"
+    mock_stat = AsyncMock(return_value="should not appear")
+
+    with (
+        patch.object(runner, "_get_head_sha", AsyncMock(return_value="abc123")),
+        patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
+        patch.object(runner, "_get_changed_files", AsyncMock(return_value=[])),
+        patch.object(runner, "_has_changes", AsyncMock(return_value=True)),
+        patch.object(runner, "_get_commit_stat", mock_stat),
+        patch.object(runner, "_save_transcript"),
+    ):
+        result = await runner.review(pr_info, task, tmp_path, "diff")
+
+    mock_stat.assert_not_called()
+    assert result.commit_stat == ""
+
+
+@pytest.mark.asyncio
+async def test_fix_ci_commit_stat_not_called_when_fixes_made_but_no_files(
+    config, event_bus, pr_info, task, tmp_path
+):
+    """fix_ci(): _get_commit_stat must NOT be called when fixes_made but files_changed is empty."""
+    runner = _make_runner(config, event_bus)
+    transcript = "Fixed CI.\nVERDICT: APPROVE\nSUMMARY: Done"
+    mock_stat = AsyncMock(return_value="should not appear")
+
+    with (
+        patch.object(runner, "_get_head_sha", AsyncMock(return_value="abc123")),
+        patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
+        patch.object(runner, "_get_changed_files", AsyncMock(return_value=[])),
+        patch.object(runner, "_has_changes", AsyncMock(return_value=True)),
+        patch.object(runner, "_get_commit_stat", mock_stat),
+        patch.object(runner, "_save_transcript"),
+    ):
+        result = await runner.fix_ci(pr_info, task, tmp_path, "Failed: ci", attempt=1)
+
+    mock_stat.assert_not_called()
+    assert result.commit_stat == ""
+
+
+@pytest.mark.asyncio
+async def test_fix_review_findings_commit_stat_not_called_when_fixes_made_but_no_files(
+    config, event_bus, pr_info, task, tmp_path
+):
+    """fix_review_findings(): _get_commit_stat must NOT be called when fixes_made but no files."""
+    runner = _make_runner(config, event_bus)
+    transcript = "Fixed.\nVERDICT: APPROVE\nSUMMARY: Done"
+    mock_stat = AsyncMock(return_value="should not appear")
+
+    with (
+        patch.object(runner, "_get_head_sha", AsyncMock(return_value="abc123")),
+        patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
+        patch.object(runner, "_get_changed_files", AsyncMock(return_value=[])),
+        patch.object(runner, "_has_changes", AsyncMock(return_value=True)),
+        patch.object(runner, "_get_commit_stat", mock_stat),
+        patch.object(runner, "_save_transcript"),
+    ):
+        result = await runner.fix_review_findings(
+            pr_info, task, tmp_path, "Missing null check"
+        )
+
+    mock_stat.assert_not_called()
+    assert result.commit_stat == ""
+
+
+@pytest.mark.asyncio
+async def test_fix_ci_logs_changed_files_when_fixes_made(
+    config, event_bus, pr_info, task, tmp_path, caplog
+):
+    """fix_ci(): when fixes are committed with file changes, an INFO log lists them."""
+    runner = _make_runner(config, event_bus)
+    transcript = "Fixed CI.\nVERDICT: APPROVE\nSUMMARY: Done"
+
+    with (
+        patch.object(runner, "_get_head_sha", AsyncMock(return_value="abc123")),
+        patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
+        patch.object(
+            runner,
+            "_get_changed_files",
+            AsyncMock(return_value=["src/ci_fix.py"]),
+        ),
+        patch.object(runner, "_has_changes", AsyncMock(return_value=True)),
+        patch.object(runner, "_get_commit_stat", AsyncMock(return_value="stat")),
+        patch.object(runner, "_save_transcript"),
+        caplog.at_level("INFO", logger="hydraflow.reviewer"),
+    ):
+        result = await runner.fix_ci(pr_info, task, tmp_path, "Failed: ci", attempt=1)
+
+    assert result.commit_stat == "stat"
+    assert any(
+        "CI fix" in r.message and "src/ci_fix.py" in r.message for r in caplog.records
+    )
+
+
+@pytest.mark.asyncio
+async def test_fix_review_findings_logs_changed_files_when_fixes_made(
+    config, event_bus, pr_info, task, tmp_path, caplog
+):
+    """fix_review_findings(): when fixes are committed with file changes, an INFO log lists them."""
+    runner = _make_runner(config, event_bus)
+    transcript = "Fixed.\nVERDICT: APPROVE\nSUMMARY: Done"
+
+    with (
+        patch.object(runner, "_get_head_sha", AsyncMock(return_value="abc123")),
+        patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
+        patch.object(
+            runner,
+            "_get_changed_files",
+            AsyncMock(return_value=["src/review_fix.py"]),
+        ),
+        patch.object(runner, "_has_changes", AsyncMock(return_value=True)),
+        patch.object(runner, "_get_commit_stat", AsyncMock(return_value="stat")),
+        patch.object(runner, "_save_transcript"),
+        caplog.at_level("INFO", logger="hydraflow.reviewer"),
+    ):
+        result = await runner.fix_review_findings(
+            pr_info, task, tmp_path, "Missing null check"
+        )
+
+    assert result.commit_stat == "stat"
+    assert any(
+        "Review-fix" in r.message and "src/review_fix.py" in r.message
+        for r in caplog.records
+    )
+
+
+@pytest.mark.asyncio
+async def test_review_commit_stat_and_log_both_set_in_single_branch(
+    config, event_bus, pr_info, task, tmp_path, caplog
+):
+    """review(): commit_stat and INFO log must both appear when fixes_made + files_changed."""
+    runner = _make_runner(config, event_bus)
+    transcript = "Fixed.\nVERDICT: APPROVE\nSUMMARY: Done"
+    stat = " src/merged.py | 3 ++-\n 1 file changed"
+
+    with (
+        patch.object(runner, "_get_head_sha", AsyncMock(return_value="abc123")),
+        patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
+        patch.object(
+            runner,
+            "_get_changed_files",
+            AsyncMock(return_value=["src/merged.py"]),
+        ),
+        patch.object(runner, "_has_changes", AsyncMock(return_value=True)),
+        patch.object(runner, "_get_commit_stat", AsyncMock(return_value=stat)),
+        patch.object(runner, "_save_transcript"),
+        caplog.at_level("INFO", logger="hydraflow.reviewer"),
+    ):
+        result = await runner.review(pr_info, task, tmp_path, "diff")
+
+    # Both commit_stat AND log must be present (merged condition)
+    assert result.commit_stat == stat
+    assert any("changed files" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_review_no_fixes_skips_entire_condition_block(
+    config, event_bus, pr_info, task, tmp_path, caplog
+):
+    """review(): when fixes_made is False, neither commit_stat, log, nor warning appear."""
+    runner = _make_runner(config, event_bus)
+    transcript = "VERDICT: APPROVE\nSUMMARY: Looks good"
+    mock_stat = AsyncMock(return_value="should not appear")
+
+    with (
+        patch.object(runner, "_get_head_sha", AsyncMock(return_value="abc123")),
+        patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
+        patch.object(runner, "_get_changed_files", AsyncMock(return_value=[])),
+        patch.object(runner, "_has_changes", AsyncMock(return_value=False)),
+        patch.object(runner, "_get_commit_stat", mock_stat),
+        patch.object(runner, "_save_transcript"),
+        caplog.at_level("DEBUG", logger="hydraflow.reviewer"),
+    ):
+        result = await runner.review(pr_info, task, tmp_path, "diff")
+
+    mock_stat.assert_not_called()
+    assert result.commit_stat == ""
+    assert not any("changed files" in r.message for r in caplog.records)
+    assert not any("fixes_made is True" in r.message for r in caplog.records)
