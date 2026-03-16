@@ -111,7 +111,8 @@ When reviewing any routing method that calls both `_route_to_triage` and
 
 ## Related
 
-- Note: The `adr_review_auto_triage` toggle was removed in PR #2689, making this ADR a historical record of a resolved design concern. ADR-0023 (Auto-Triage Toggle Must Gate Routing) is superseded by this ADR as a duplicate covering the same core pattern.
+- Superseded by: PR #2689 (removal of the `adr_review_auto_triage` toggle)
+- Note: The `adr_review_auto_triage` toggle was removed in PR #2689, making this ADR a historical record of a resolved design concern. ADR-0023 (Auto-Triage Toggle Must Gate Routing) was a duplicate of this ADR covering the same core pattern; both were retired together.
 - Source memory: #2345
 - Issue: #2355
 - Related learning: #2346, #2350

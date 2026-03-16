@@ -115,8 +115,8 @@ When reviewing any routing method that calls both `_route_to_triage` and
 
 ## Related
 
-- Superseded by: ADR-0023 (Gate Triage Call on Config Toggle, Not Just HITL Fallback)
-- Note: The `adr_auto_triage` toggle was removed in PR #2689, making both this ADR and its primary duplicate historical records of a resolved design concern.
+- Superseded by: PR #2689 (removal of the `adr_auto_triage` toggle)
+- Note: This ADR and its canonical duplicate ADR-0023 (Gate Triage Call on Config Toggle, Not Just HITL Fallback) were both retired when the `adr_auto_triage` toggle was removed in PR #2689, making both historical records of a resolved design concern.
 - Source memory: #2327
 - Source issue: #2341
 - `src/adr_reviewer.py` — `_triage_or_hitl()`, `_route_to_triage()`, `_handle_pre_review_failure()`, `_handle_duplicate()`
