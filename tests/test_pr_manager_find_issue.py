@@ -172,6 +172,74 @@ async def test_find_issue_skips_entry_with_null_number(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_find_issue_skips_null_number_returns_next_valid(tmp_path: Path) -> None:
+    """Skips a matching entry with null number and returns the next valid match."""
+    prs = _make_prs(tmp_path)
+    prs._run_gh = AsyncMock(
+        return_value=json.dumps(
+            [
+                {
+                    "number": None,
+                    "title": "HydraFlow Manifest — tester",
+                    "state": "open",
+                },
+                {
+                    "number": 99,
+                    "title": "HydraFlow Manifest — tester",
+                    "state": "closed",
+                },
+            ]
+        )
+    )
+
+    result = await prs.find_issue_number_by_label_and_title(
+        "hydraflow-manifest", "tester"
+    )
+
+    assert result == 99
+
+
+@pytest.mark.asyncio
+async def test_find_issue_handles_null_title_field(tmp_path: Path) -> None:
+    """An entry with a null title is safely skipped without error."""
+    prs = _make_prs(tmp_path)
+    prs._run_gh = AsyncMock(
+        return_value=json.dumps(
+            [
+                {"number": 7, "title": None, "state": "open"},
+                {"number": 8, "title": "HydraFlow Manifest — tester", "state": "open"},
+            ]
+        )
+    )
+
+    result = await prs.find_issue_number_by_label_and_title(
+        "hydraflow-manifest", "tester"
+    )
+
+    assert result == 8
+
+
+@pytest.mark.asyncio
+async def test_find_issue_handles_missing_title_key(tmp_path: Path) -> None:
+    """An entry missing the title key entirely is safely skipped."""
+    prs = _make_prs(tmp_path)
+    prs._run_gh = AsyncMock(
+        return_value=json.dumps(
+            [
+                {"number": 3, "state": "open"},
+                {"number": 4, "title": "HydraFlow Manifest — tester", "state": "open"},
+            ]
+        )
+    )
+
+    result = await prs.find_issue_number_by_label_and_title(
+        "hydraflow-manifest", "tester"
+    )
+
+    assert result == 4
+
+
+@pytest.mark.asyncio
 async def test_find_issue_default_state_is_all(tmp_path: Path) -> None:
     """Default state parameter is 'all'."""
     prs = _make_prs(tmp_path)
