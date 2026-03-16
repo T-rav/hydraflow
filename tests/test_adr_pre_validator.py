@@ -343,6 +343,26 @@ class TestCheckSupersession:
         codes = [i.code for i in result.issues]
         assert "status_incoherent_supersession" not in codes
 
+    def test_accepted_superseded_by_proposed_flagged(self) -> None:
+        """If ADR-0001 (Accepted) says 'Superseded by ADR-0002' but ADR-0002 is Proposed, flag it."""
+        content = _adr_with_number(
+            1, status="Accepted", decision="Superseded by ADR-0002."
+        )
+        target = _adr_with_number(
+            2, status="Proposed", decision="This supersedes ADR-0001."
+        )
+        all_adrs = [(2, "Test ADR 2", target, "0002-new-adr.md")]
+        validator = ADRPreValidator()
+        result = validator.validate(content, all_adrs)
+        codes = [i.code for i in result.issues]
+        assert "status_incoherent_supersession" in codes
+        issue = next(
+            i for i in result.issues if i.code == "status_incoherent_supersession"
+        )
+        assert "Proposed" in issue.message
+        assert "Accepted" in issue.message
+        assert issue.fixable is True
+
     def test_proposed_can_supersede_proposed(self) -> None:
         """A Proposed ADR can supersede another Proposed ADR (neither is settled)."""
         content = _adr_with_number(

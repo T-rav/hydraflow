@@ -269,6 +269,26 @@ class ADRPreValidator:
                         )
                     )
 
+                # Status coherence: superseding ADR should not be Proposed
+                # when this ADR is already settled
+                if self_status in _SETTLED_STATUSES:
+                    target_status_match = _STATUS_RE.search(target_content)
+                    if target_status_match:
+                        target_status = target_status_match.group(1).lower()
+                        if target_status == "proposed":
+                            result.issues.append(
+                                ADRValidationIssue(
+                                    code="status_incoherent_supersession",
+                                    message=(
+                                        f"ADR-{ref_num:04d} is Proposed but claims "
+                                        f"to supersede this {self_status.capitalize()}-status ADR — "
+                                        f"ADR-{ref_num:04d} must be at least Accepted "
+                                        f"before supersession takes effect"
+                                    ),
+                                    fixable=True,
+                                )
+                            )
+
     def _check_bare_adr_references(
         self,
         content: str,
