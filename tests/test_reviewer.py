@@ -2072,19 +2072,18 @@ def test_build_review_fix_prompt_contains_feedback(config, event_bus):
     assert "VERDICT:" in prompt
 
 
-def test_build_review_fix_prompt_includes_stat_verification(config, event_bus):
+def test_build_review_fix_prompt_includes_stat_verification(
+    config, event_bus, pr_info, task
+):
     """Review fix prompt must include git diff --stat HEAD~1 post-commit verification."""
-    from tests.conftest import PRInfoFactory, TaskFactory
-
     runner = _make_runner(config, event_bus)
-    pr = PRInfoFactory.create()
-    issue = TaskFactory.create()
-    prompt = runner._build_review_fix_prompt(pr, issue, "Some feedback")
+    prompt = runner._build_review_fix_prompt(pr_info, task, "Some feedback")
     lower = prompt.lower()
 
     assert "git diff --stat head~1" in lower
     assert "verify your commit" in lower
     assert "intended file appears" in lower
+    assert "after each commit" in lower
 
 
 def test_build_ci_fix_prompt_includes_stat_verification(
@@ -2098,6 +2097,7 @@ def test_build_ci_fix_prompt_includes_stat_verification(
     assert "git diff --stat head~1" in lower
     assert "verify your commit" in lower
     assert "intended file appears" in lower
+    assert "after each commit" in lower
 
 
 # ---------------------------------------------------------------------------
