@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from models import (
         AnalysisResult,
         GitHubIssue,
+        GitHubIssueState,
         HITLResult,
         NewIssueSpec,
         PlanResult,
@@ -159,18 +160,24 @@ class IssueFactory:
         body: str = "The frobnicator is broken. Please fix it.",
         labels: list[str] | None = None,
         comments: list[str] | None = None,
-        url: str = "",
+        url: str | None = None,
+        state: GitHubIssueState | None = None,
     ):
         from models import GitHubIssue
 
-        return GitHubIssue(
-            number=number,
-            title=title,
-            body=body,
-            labels=labels or ["ready"],
-            comments=comments or [],
-            url=url or f"https://github.com/test-org/test-repo/issues/{number}",
-        )
+        kwargs: dict[str, Any] = {
+            "number": number,
+            "title": title,
+            "body": body,
+            "labels": labels if labels is not None else ["ready"],
+            "comments": comments if comments is not None else [],
+            "url": url
+            if url is not None
+            else f"https://github.com/test-org/test-repo/issues/{number}",
+        }
+        if state is not None:
+            kwargs["state"] = state
+        return GitHubIssue(**kwargs)
 
 
 @pytest.fixture
@@ -192,7 +199,7 @@ class TaskFactory:
         body: str = "The frobnicator is broken. Please fix it.",
         tags: list[str] | None = None,
         comments: list[str] | None = None,
-        source_url: str = "",
+        source_url: str | None = None,
         links: list[Any] | None = None,
         complexity_score: int = 0,
     ):
@@ -202,10 +209,11 @@ class TaskFactory:
             id=id,
             title=title,
             body=body,
-            tags=tags or ["ready"],
-            comments=comments or [],
+            tags=tags if tags is not None else ["ready"],
+            comments=comments if comments is not None else [],
             source_url=source_url
-            or f"https://github.com/test-org/test-repo/issues/{id}",
+            if source_url is not None
+            else f"https://github.com/test-org/test-repo/issues/{id}",
             links=links if links is not None else [],
             complexity_score=complexity_score,
         )
