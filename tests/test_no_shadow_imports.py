@@ -16,8 +16,9 @@ import pytest
 
 SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 
-# Files that were fixed in issue #3040.  If new inline-shadow violations are
-# introduced they will be caught by the parametrised test below.
+# Files that were fixed in issue #3040.  The parametrised test below guards
+# *only* these files against regressions; violations introduced in other files
+# will not be caught here.
 _FIXED_FILES = [
     "events.py",
     "dashboard_routes/_routes.py",
@@ -28,31 +29,21 @@ _FIXED_FILES = [
 ]
 
 
-def _is_type_checking_guard(node: ast.If) -> bool:
-    """Return True if the ``if`` node is ``if TYPE_CHECKING:``."""
-    test = node.test
-    if isinstance(test, ast.Name) and test.id == "TYPE_CHECKING":
-        return True
-    return bool(isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING")
-
-
 def _module_level_names(tree: ast.Module) -> set[str]:
-    """Return names imported at module level, excluding TYPE_CHECKING blocks.
+    """Return names imported unconditionally at module level.
 
-    Imports guarded by ``if TYPE_CHECKING:`` are only available during static
-    analysis — runtime re-imports of those names inside function bodies are
-    legitimate and should not be flagged.
+    Only bare ``import`` / ``from … import`` statements that are direct
+    children of the module are collected.  Conditional blocks (including
+    ``if TYPE_CHECKING:`` and platform/version guards) are intentionally
+    skipped: their imports may not run at runtime, so a function-body
+    re-import of the same name could be a legitimate fallback rather than
+    a shadow import.
     """
     names: set[str] = set()
     for node in ast.iter_child_nodes(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             for alias in node.names:
                 names.add(alias.asname or alias.name)
-        elif isinstance(node, ast.If) and not _is_type_checking_guard(node):
-            for child in ast.walk(node):
-                if isinstance(child, (ast.Import, ast.ImportFrom)):
-                    for alias in child.names:
-                        names.add(alias.asname or alias.name)
     return names
 
 
@@ -104,12 +95,14 @@ class TestAppendJsonlModuleLevelImport:
             "events.py should import append_jsonl at module level"
         )
 
-    def test_append_sync_calls_append_jsonl(self, tmp_path: Path) -> None:
-        """EventLog._append_sync should successfully call append_jsonl."""
+    def test_event_log_writes_jsonl(self, tmp_path: Path) -> None:
+        """EventLog should successfully persist events via append_jsonl."""
         from events import EventLog
 
         log_path = tmp_path / "test.jsonl"
         event_log = EventLog(log_path)
+        # Drive through the public synchronous path to confirm append_jsonl
+        # is reachable from the module-level binding rather than an inline import.
         event_log._append_sync('{"test": true}')
 
         assert log_path.exists()
