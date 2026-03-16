@@ -85,9 +85,9 @@ class ReportIssueLoop(BaseBackgroundLoop):
         for report in self._state.get_pending_reports():
             try:
                 created = datetime.fromisoformat(report.created_at)
+                age_hours = (now - created).total_seconds() / 3600
             except (ValueError, TypeError):
                 continue
-            age_hours = (now - created).total_seconds() / 3600
             if age_hours >= threshold_hours:
                 self._state.remove_report(report.id)
                 self._state.update_tracked_report(

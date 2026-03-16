@@ -1140,3 +1140,17 @@ class TestStaleReportSweep:
         loop, _stop, state, _pr = _make_loop(tmp_path)
         closed = loop._sweep_stale_reports()
         assert closed == 0
+
+    def test_naive_datetime_skipped(self, tmp_path: Path) -> None:
+        """Reports with naive (timezone-unaware) created_at are skipped gracefully."""
+        loop, _stop, state, _pr = _make_loop(tmp_path)
+        # Naive datetime string (no UTC offset) — from old state files
+        report = PendingReport(description="Legacy report")
+        report.created_at = "2020-01-01T00:00:00"  # naive, no tz info
+        state.enqueue_report(report)
+
+        # Should not raise TypeError from aware-naive subtraction
+        closed = loop._sweep_stale_reports()
+
+        assert closed == 0
+        assert state.peek_report() is not None
