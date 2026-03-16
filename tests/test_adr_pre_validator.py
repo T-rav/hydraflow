@@ -265,49 +265,99 @@ class TestCheckVolatileLineCitations:
         assert "volatile_line_citation" in codes
 
 
-class TestCheckStaleAmendingNotes:
+class TestCheckStaleAmendmentNotes:
+    """Tests for cross-reference-aware stale amendment note detection."""
+
+    def _adr_entry(
+        self, num: int, title: str, status: str = "Proposed"
+    ) -> tuple[int, str, str, str]:
+        """Helper to build an all_adrs tuple with a given status."""
+        content = f"# ADR-{num:04d}: {title}\n\n**Status:** {status}\n"
+        return (num, title, content, f"{num:04d}-{title.lower().replace(' ', '-')}.md")
+
+    def test_stale_note_when_referenced_adr_accepted(self) -> None:
+        """'requires amending ADR-0021' is stale when ADR-0021 is Accepted."""
+        content = _valid_adr(
+            consequences="Accepting this ADR requires amending ADR-0021.\n"
+        )
+        all_adrs = [self._adr_entry(21, "Persistence", status="Accepted")]
+        validator = ADRPreValidator()
+        result = validator.validate(content, all_adrs)
+        codes = [i.code for i in result.issues]
+        assert "stale_amendment_note" in codes
+        issue = next(i for i in result.issues if i.code == "stale_amendment_note")
+        assert issue.fixable is True
+
+    def test_no_issue_when_referenced_adr_proposed(self) -> None:
+        """'requires amending ADR-0021' is NOT stale when ADR-0021 is Proposed."""
+        content = _valid_adr(
+            consequences="Accepting this ADR requires amending ADR-0021.\n"
+        )
+        all_adrs = [self._adr_entry(21, "Persistence", status="Proposed")]
+        validator = ADRPreValidator()
+        result = validator.validate(content, all_adrs)
+        codes = [i.code for i in result.issues]
+        assert "stale_amendment_note" not in codes
+
     def test_no_amending_notes_passes(self) -> None:
+        """ADR with no amendment notes produces no stale_amendment_note issue."""
         content = _valid_adr(
             consequences="- ADR-0021 — amended to reflect repo-scoped paths.\n"
         )
+        all_adrs = [self._adr_entry(21, "Persistence", status="Accepted")]
         validator = ADRPreValidator()
-        result = validator.validate(content)
+        result = validator.validate(content, all_adrs)
         codes = [i.code for i in result.issues]
-        assert "stale_amending_note" not in codes
+        assert "stale_amendment_note" not in codes
 
-    def test_single_amending_note_detected(self) -> None:
+    def test_nonexistent_adr_gracefully_skipped(self) -> None:
+        """Amendment note referencing an ADR not in all_adrs is skipped."""
         content = _valid_adr(
-            consequences=("Accepting ADR-0010 requires amending ADR-0021's table.\n")
+            consequences="Accepting this ADR requires amending ADR-0099.\n"
         )
+        all_adrs = [self._adr_entry(21, "Persistence", status="Accepted")]
         validator = ADRPreValidator()
-        result = validator.validate(content)
+        result = validator.validate(content, all_adrs)
         codes = [i.code for i in result.issues]
-        assert "stale_amending_note" in codes
+        assert "stale_amendment_note" not in codes
 
-    def test_multiple_amending_notes_counted(self) -> None:
+    def test_two_stale_notes_produce_two_issues(self) -> None:
+        """Two stale amendment notes referencing different Accepted ADRs."""
         content = _valid_adr(
             consequences=(
                 "- Requires amending ADR-0021.\n- Also requires amending ADR-0003.\n"
             )
         )
+        all_adrs = [
+            self._adr_entry(21, "Persistence", status="Accepted"),
+            self._adr_entry(3, "Worktrees", status="Accepted"),
+        ]
         validator = ADRPreValidator()
-        result = validator.validate(content)
-        issue = next(i for i in result.issues if i.code == "stale_amending_note")
-        assert "2 'requires amending'" in issue.message
-
-    def test_amending_note_is_fixable(self) -> None:
-        content = _valid_adr(consequences="This requires amending ADR-0021.\n")
-        validator = ADRPreValidator()
-        result = validator.validate(content)
-        issue = next(i for i in result.issues if i.code == "stale_amending_note")
-        assert issue.fixable is True
+        result = validator.validate(content, all_adrs)
+        stale_issues = [i for i in result.issues if i.code == "stale_amendment_note"]
+        assert len(stale_issues) == 2
+        ref_nums = {i.message for i in stale_issues}
+        assert any("ADR-0021" in m for m in ref_nums)
+        assert any("ADR-0003" in m for m in ref_nums)
 
     def test_case_insensitive_detection(self) -> None:
+        """Pattern matching is case-insensitive."""
         content = _valid_adr(consequences="This REQUIRES AMENDING ADR-0021.\n")
+        all_adrs = [self._adr_entry(21, "Persistence", status="Accepted")]
+        validator = ADRPreValidator()
+        result = validator.validate(content, all_adrs)
+        codes = [i.code for i in result.issues]
+        assert "stale_amendment_note" in codes
+
+    def test_no_all_adrs_produces_no_issues(self) -> None:
+        """When all_adrs is None/empty, no stale_amendment_note issues are produced."""
+        content = _valid_adr(
+            consequences="Accepting this ADR requires amending ADR-0021.\n"
+        )
         validator = ADRPreValidator()
         result = validator.validate(content)
         codes = [i.code for i in result.issues]
-        assert "stale_amending_note" in codes
+        assert "stale_amendment_note" not in codes
 
 
 class TestCheckBareADRReferences:
