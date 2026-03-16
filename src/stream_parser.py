@@ -218,7 +218,9 @@ class StreamParser:
         self._final_usage: dict[str, int] = {}
 
     # Event types that produce the last result text as the final result.
-    _RESULT_EVENT_TYPES = frozenset({"turn.completed", "agent_end", "turn_end"})
+    # Note: "turn.completed" is NOT listed here because it is handled by the
+    # _EVENT_HANDLERS lambda below; listing it here would be unreachable dead code.
+    _RESULT_EVENT_TYPES = frozenset({"agent_end", "turn_end"})
     # Event types that are silently consumed (no display, no result).
     _SILENT_EVENT_TYPES = frozenset(
         {
