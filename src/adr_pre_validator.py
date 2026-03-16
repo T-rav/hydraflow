@@ -375,9 +375,9 @@ class ADRPreValidator:
                 # File doesn't exist or is unreadable — skip silently
                 continue
 
-            # Match both top-level and indented definitions (class methods)
+            # Match both top-level and indented definitions (class methods, async defs)
             pattern = re.compile(
-                rf"^\s*(?:def|class)\s+{re.escape(symbol)}\b", re.MULTILINE
+                rf"^\s*(?:async\s+)?(?:def|class)\s+{re.escape(symbol)}\b", re.MULTILINE
             )
             if not pattern.search(source):
                 result.issues.append(

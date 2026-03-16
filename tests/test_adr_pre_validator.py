@@ -795,6 +795,17 @@ class TestCheckSourceFunctionRefs:
         codes = [i.code for i in result.issues]
         assert "phantom_source_symbol" not in codes
 
+    def test_async_function_reference_passes(self, tmp_path: Path) -> None:
+        """An async def function is found and not flagged as phantom."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "config.py").write_text("async def fetch_data():\n    pass\n")
+        content = _valid_adr(context="See `src/config.py:fetch_data` for details.")
+        validator = ADRPreValidator()
+        result = validator.validate(content, repo_root=tmp_path)
+        codes = [i.code for i in result.issues]
+        assert "phantom_source_symbol" not in codes
+
     def test_duplicate_references_produce_one_issue(self, tmp_path: Path) -> None:
         """The same phantom symbol cited twice produces only one issue."""
         src = tmp_path / "src"
