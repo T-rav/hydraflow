@@ -38,7 +38,12 @@ def _make_reviewer(
 
 
 def _write_adr(
-    adr_dir: Path, number: int, title: str, status: str, decision: str = ""
+    adr_dir: Path,
+    number: int,
+    title: str,
+    status: str,
+    decision: str = "",
+    date: str = "2026-01-01",
 ) -> Path:
     """Write a sample ADR file."""
     adr_dir.mkdir(parents=True, exist_ok=True)
@@ -47,6 +52,7 @@ def _write_adr(
     content = f"""# ADR-{number:04d}: {title}
 
 **Status:** {status}
+**Date:** {date}
 
 ## Context
 
@@ -901,6 +907,34 @@ class TestAcceptADR:
         content = adr_path.read_text(encoding="utf-8")
         assert "**Status:** Accepted" in content
         assert "**Status:** Proposed" not in content
+
+    @pytest.mark.asyncio
+    async def test_updates_date_on_acceptance(self, tmp_path: Path) -> None:
+        reviewer = _make_reviewer(tmp_path)
+        adr_dir = tmp_path / "repo" / "docs" / "adr"
+        adr_path = _write_adr(adr_dir, 1, "Test ADR", "Proposed", date="2026-01-15")
+        result = ADRCouncilResult(
+            adr_number=1,
+            adr_title="Test ADR",
+            final_decision="ACCEPT",
+            summary="Council approves",
+            votes=[
+                CouncilVote(
+                    role="architect", verdict=CouncilVerdict.APPROVE, reasoning="Good"
+                ),
+            ],
+        )
+
+        with patch("adr_reviewer.run_subprocess", new_callable=AsyncMock):
+            await reviewer._accept_adr(result, adr_path, adr_dir)
+
+        content = adr_path.read_text(encoding="utf-8")
+        assert "**Date:** 2026-01-15" not in content
+        # Date should be updated to today's date (UTC)
+        from datetime import UTC, datetime
+
+        expected_date = datetime.now(tz=UTC).strftime("%Y-%m-%d")
+        assert f"**Date:** {expected_date}" in content
 
     @pytest.mark.asyncio
     async def test_updates_readme_row(self, tmp_path: Path) -> None:

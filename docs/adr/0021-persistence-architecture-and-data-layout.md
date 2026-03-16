@@ -1,7 +1,7 @@
 # ADR-0021: Persistence Architecture and Data Layout
 
-**Status:** Proposed
-**Date:** 2026-02-28
+**Status:** Accepted
+**Date:** 2026-03-16
 
 ## Context
 

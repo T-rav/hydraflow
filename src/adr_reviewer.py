@@ -5,6 +5,7 @@ from __future__ import annotations
 import difflib
 import logging
 import re
+from datetime import UTC
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -24,6 +25,7 @@ logger = logging.getLogger("hydraflow.adr_reviewer")
 
 # Valid statuses are single words: Proposed, Accepted, Superseded, Deprecated, Rejected.
 _STATUS_RE = re.compile(r"\*\*Status:\*\*\s*(\w+)", re.IGNORECASE)
+_DATE_RE = re.compile(r"\*\*Date:\*\*\s*\d{4}-\d{2}-\d{2}", re.IGNORECASE)
 _DUPLICATE_THRESHOLD = 0.7
 
 
@@ -751,8 +753,12 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
             logger.exception("Failed to read ADR file: %s", adr_path)
             return
 
-        # Update status in ADR file
+        # Update status and date in ADR file
+        from datetime import datetime
+
+        today = datetime.now(tz=UTC).strftime("%Y-%m-%d")
         updated = _STATUS_RE.sub("**Status:** Accepted", content, count=1)
+        updated = _DATE_RE.sub(f"**Date:** {today}", updated, count=1)
         adr_path.write_text(updated, encoding="utf-8")
 
         # Update README if present
