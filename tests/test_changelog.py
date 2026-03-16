@@ -417,6 +417,8 @@ class TestGenerateChangelog:
             date="2026-02-28",
         )
 
+        # Both sub-issues were attempted (first raised, second succeeded)
+        assert pr_manager.get_pr_for_issue.await_count == 2
         # First sub-issue was skipped due to exception; second included
         assert "second feature" in result
         # get_pr_title_and_body only called for the successful issue
