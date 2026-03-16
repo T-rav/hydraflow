@@ -35,6 +35,14 @@ _SUPERSEDE_RE = re.compile(
     r"supersed(?:es?|ed|ing)\s+(?:ADR[- ]?)(\d{4})", re.IGNORECASE
 )
 _REQUIRED_SECTIONS = ("## Context", "## Decision", "## Consequences")
+# Matches directional references in blockquotes, e.g. "The layout below" or
+# "the diagram above".  Group 1 = subject noun, group 2 = direction word.
+_DIRECTIONAL_REF_RE = re.compile(
+    r"\b(?:the\s+)?(layout|diagram|table|tree|code\s*block|figure|example)\s+"
+    r"(above|below)\b",
+    re.IGNORECASE,
+)
+
 # Matches patterns like "(line 42)", "(line 1122)", "(lines 10-20)", "(lines 51 and 127)"
 _LINE_CITATION_RE = re.compile(
     r"\(lines?\s+\d+(?:(?:\s*[-–]\s*|\s+and\s+)\d+)?\)",
@@ -83,6 +91,7 @@ class ADRPreValidator:
         self._check_empty_sections(content, result)
         self._check_supersession(content, all_adrs or [], result)
         self._check_volatile_line_citations(content, result)
+        self._check_directional_references(content, result)
         self._check_bare_adr_references(content, all_adrs or [], result)
         return result
 
@@ -151,6 +160,68 @@ class ADRPreValidator:
                     fixable=True,
                 )
             )
+
+    def _check_directional_references(
+        self, content: str, result: ADRValidationResult
+    ) -> None:
+        """Flag blockquote notes whose 'above'/'below' doesn't match document order.
+
+        A note saying "the layout below" is wrong when the referenced block
+        (fenced code block or markdown table) actually appears *before* the note.
+        """
+        lines = content.splitlines()
+
+        # Identify line indices of fenced code blocks and markdown tables
+        block_lines: set[int] = set()
+        in_fence = False
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                in_fence = not in_fence
+                block_lines.add(i)
+                continue
+            if in_fence:
+                block_lines.add(i)
+                continue
+            # Markdown table row (at least one pipe with content)
+            if "|" in stripped and stripped.startswith("|"):
+                block_lines.add(i)
+
+        # Scan blockquote lines for directional references
+        for i, line in enumerate(lines):
+            if not line.lstrip().startswith(">"):
+                continue
+            for match in _DIRECTIONAL_REF_RE.finditer(line):
+                subject = match.group(1)
+                direction = match.group(2).lower()
+
+                has_block_before = any(idx < i for idx in block_lines)
+                has_block_after = any(idx > i for idx in block_lines)
+
+                if direction == "above" and not has_block_before and has_block_after:
+                    result.issues.append(
+                        ADRValidationIssue(
+                            code="wrong_directional_reference",
+                            message=(
+                                f'Note references "the {subject} above" but '
+                                f"the nearest block element appears after the note "
+                                f"— use 'below'"
+                            ),
+                            fixable=True,
+                        )
+                    )
+                elif direction == "below" and has_block_before and not has_block_after:
+                    result.issues.append(
+                        ADRValidationIssue(
+                            code="wrong_directional_reference",
+                            message=(
+                                f'Note references "the {subject} below" but '
+                                f"the nearest block element appears before the note "
+                                f"— use 'above'"
+                            ),
+                            fixable=True,
+                        )
+                    )
 
     def _check_supersession(
         self,

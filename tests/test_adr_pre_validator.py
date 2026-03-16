@@ -265,6 +265,161 @@ class TestCheckVolatileLineCitations:
         assert "volatile_line_citation" in codes
 
 
+class TestCheckDirectionalReferences:
+    def test_correct_below_reference_passes(self) -> None:
+        """A note saying 'below' when the block follows is correct."""
+        content = _valid_adr(
+            decision=(
+                "> **Note:** The layout below is the target.\n"
+                "\n"
+                "```\n"
+                "data_root/\n"
+                "  state.json\n"
+                "```\n"
+            )
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content)
+        codes = [i.code for i in result.issues]
+        assert "wrong_directional_reference" not in codes
+
+    def test_correct_above_reference_passes(self) -> None:
+        """A note saying 'above' when the block precedes is correct."""
+        content = _valid_adr(
+            decision=(
+                "```\n"
+                "data_root/\n"
+                "  state.json\n"
+                "```\n"
+                "\n"
+                "> **Note:** The layout above is the target.\n"
+            )
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content)
+        codes = [i.code for i in result.issues]
+        assert "wrong_directional_reference" not in codes
+
+    def test_wrong_above_detected(self) -> None:
+        """A note saying 'above' when the block only appears after is flagged."""
+        content = _valid_adr(
+            decision=(
+                "> **Note:** The layout above is the target.\n"
+                "\n"
+                "```\n"
+                "data_root/\n"
+                "  state.json\n"
+                "```\n"
+            )
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content)
+        codes = [i.code for i in result.issues]
+        assert "wrong_directional_reference" in codes
+        issue = next(
+            i for i in result.issues if i.code == "wrong_directional_reference"
+        )
+        assert "below" in issue.message
+
+    def test_wrong_below_detected(self) -> None:
+        """A note saying 'below' when the block only appears before is flagged."""
+        content = _valid_adr(
+            decision=(
+                "```\n"
+                "data_root/\n"
+                "  state.json\n"
+                "```\n"
+                "\n"
+                "> **Note:** The layout below is the target.\n"
+            )
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content)
+        codes = [i.code for i in result.issues]
+        assert "wrong_directional_reference" in codes
+        issue = next(
+            i for i in result.issues if i.code == "wrong_directional_reference"
+        )
+        assert "above" in issue.message
+
+    def test_directional_reference_is_fixable(self) -> None:
+        """Wrong directional references are marked as fixable."""
+        content = _valid_adr(
+            decision=(
+                "> **Note:** The diagram above shows the flow.\n"
+                "\n"
+                "```\n"
+                "A -> B -> C\n"
+                "```\n"
+            )
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content)
+        issue = next(
+            i for i in result.issues if i.code == "wrong_directional_reference"
+        )
+        assert issue.fixable is True
+
+    def test_table_reference_below_wrong(self) -> None:
+        """Detects wrong 'below' reference when a table only precedes the note."""
+        content = _valid_adr(
+            decision=(
+                "| Property | Path |\n"
+                "|----------|------|\n"
+                "| `state_file` | `data_root/state.json` |\n"
+                "\n"
+                "> The table below lists all properties.\n"
+            )
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content)
+        codes = [i.code for i in result.issues]
+        assert "wrong_directional_reference" in codes
+
+    def test_non_blockquote_line_ignored(self) -> None:
+        """Directional references in non-blockquote lines are not checked."""
+        content = _valid_adr(
+            decision=("The layout above is the target.\n\n```\ndata_root/\n```\n")
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content)
+        codes = [i.code for i in result.issues]
+        assert "wrong_directional_reference" not in codes
+
+    def test_both_directions_have_blocks_no_flag(self) -> None:
+        """When blocks exist both above and below, neither direction is flagged."""
+        content = _valid_adr(
+            decision=(
+                "```\n"
+                "first block\n"
+                "```\n"
+                "\n"
+                "> The layout above is referenced.\n"
+                "\n"
+                "```\n"
+                "second block\n"
+                "```\n"
+            )
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content)
+        codes = [i.code for i in result.issues]
+        assert "wrong_directional_reference" not in codes
+
+    def test_subject_variants_detected(self) -> None:
+        """Various subject nouns (diagram, tree, code block, figure) are matched."""
+        for subject in ["diagram", "tree", "code block", "figure", "example"]:
+            content = _valid_adr(
+                decision=(f"> See the {subject} above.\n\n```\ncontent\n```\n")
+            )
+            validator = ADRPreValidator()
+            result = validator.validate(content)
+            codes = [i.code for i in result.issues]
+            assert "wrong_directional_reference" in codes, (
+                f"Expected flag for subject '{subject}'"
+            )
+
+
 class TestCheckBareADRReferences:
     def test_bare_reference_detected(self) -> None:
         """A plain ADR-NNNN without title annotation is flagged."""
