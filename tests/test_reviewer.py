@@ -964,6 +964,9 @@ async def test_review_populates_commit_stat_when_fixes_made(
         patch.object(runner, "_get_head_sha", AsyncMock(return_value="abc123")),
         patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
         patch.object(runner, "_has_changes", AsyncMock(return_value=True)),
+        patch.object(
+            runner, "_get_changed_files", AsyncMock(return_value=["src/foo.py"])
+        ),
         patch.object(runner, "_get_commit_stat", AsyncMock(return_value=stat)),
         patch.object(runner, "_save_transcript"),
     ):
@@ -1007,6 +1010,9 @@ async def test_fix_ci_populates_commit_stat_when_fixes_made(
         patch.object(runner, "_get_head_sha", AsyncMock(return_value="abc123")),
         patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
         patch.object(runner, "_has_changes", AsyncMock(return_value=True)),
+        patch.object(
+            runner, "_get_changed_files", AsyncMock(return_value=["src/bar.py"])
+        ),
         patch.object(runner, "_get_commit_stat", AsyncMock(return_value=stat)),
         patch.object(runner, "_save_transcript"),
     ):
@@ -1054,6 +1060,9 @@ async def test_fix_review_findings_populates_commit_stat_when_fixes_made(
         patch.object(runner, "_get_head_sha", AsyncMock(return_value="abc123")),
         patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
         patch.object(runner, "_has_changes", AsyncMock(return_value=True)),
+        patch.object(
+            runner, "_get_changed_files", AsyncMock(return_value=["src/baz.py"])
+        ),
         patch.object(runner, "_get_commit_stat", AsyncMock(return_value=stat)),
         patch.object(runner, "_save_transcript"),
     ):
