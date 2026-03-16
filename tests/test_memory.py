@@ -825,7 +825,8 @@ class TestMemorySyncWorkerSync:
 
         # Both issues were attempted despite first failing
         assert prs.close_issue.await_count == 2
-        prs.close_issue.assert_any_await(6)
+        prs.close_issue.assert_any_await(5)  # first issue attempted (raised)
+        prs.close_issue.assert_any_await(6)  # second issue still closed
         # Stats still reflect synced items
         assert stats["item_count"] == 2
 
