@@ -1278,6 +1278,18 @@ def test_build_review_prompt_includes_scope_creep_check(
     assert "unrelated" in prompt
 
 
+def test_build_review_prompt_includes_post_commit_scope_creep_verification(
+    config, event_bus, pr_info, task
+):
+    """Reviewer prompt must require git diff --stat verification after scope-creep removal commits."""
+    runner = _make_runner(config, event_bus)
+    prompt, _ = runner._build_review_prompt_with_stats(pr_info, task, "diff")
+
+    assert "Post-commit verification" in prompt
+    assert "git diff --stat HEAD~1" in prompt
+    assert "scope-creep removal" in prompt.lower()
+
+
 # ---------------------------------------------------------------------------
 # _get_head_sha — timeout
 # ---------------------------------------------------------------------------

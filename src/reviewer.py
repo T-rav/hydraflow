@@ -709,6 +709,7 @@ If you find issues that you can fix:
 1. Make the fixes directly.
 {fix_verify}
 3. Commit with message: "review: fix <description> (PR #{pr.number})"
+4. **Post-commit verification (mandatory for scope-creep removals):** After committing a scope-creep removal, run `git diff --stat HEAD~1` and verify that every file you intended to fix appears in the stat output. If a file is missing from the stat, your commit did NOT actually revert changes in that file — go back and fix it before proceeding. For factory migrations specifically, grep for the old pattern (e.g., `TaskFactory.create()`) in all test files that were supposed to be reverted.
 
 ## Findings Format
 
