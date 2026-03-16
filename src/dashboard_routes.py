@@ -3877,7 +3877,7 @@ def create_router(
         """
         refreshed: list[dict[str, str]] = []
 
-        # --- filed → fixed when linked issue is closed ---
+        # --- filed → fixed when linked issue is closed as completed ---
         for report in state.get_filed_reports():
             if reporter_id and report.reporter_id != reporter_id:
                 continue
@@ -3885,21 +3885,21 @@ def create_router(
             if issue_number <= 0:
                 continue
             issue_state = await pr_manager.get_issue_state(issue_number)
-            if issue_state == "CLOSED":
+            if issue_state == "COMPLETED":
                 state.update_tracked_report(
                     report.id,
                     status="fixed",
                     action_label="fixed",
-                    detail=f"Issue #{issue_number} closed",
+                    detail=f"Issue #{issue_number} resolved",
                 )
                 refreshed.append({"id": report.id, "new_status": "fixed"})
 
         # --- stale queued → re-enqueue pending ---
+        pending_ids = {p.id for p in state.get_pending_reports()}
         for report in state.get_stale_queued_reports(stale_minutes=30):
             if reporter_id and report.reporter_id != reporter_id:
                 continue
             # Only re-enqueue if there's no pending entry already
-            pending_ids = {p.id for p in state.get_pending_reports()}
             if report.id not in pending_ids:
                 state.enqueue_report(
                     PendingReport(

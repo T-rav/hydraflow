@@ -627,7 +627,12 @@ class PRManager:
         await self._remove_label("issue", issue_number, label)
 
     async def get_issue_state(self, issue_number: int) -> str:
-        """Return the state of a GitHub issue (``'OPEN'`` or ``'CLOSED'``, empty on error)."""
+        """Return the resolved state of a GitHub issue.
+
+        Returns ``'COMPLETED'`` when the issue was closed as resolved,
+        ``'OPEN'`` when still open, ``'NOT_PLANNED'`` when closed as
+        won't-fix/duplicate/invalid, or ``''`` on error.
+        """
         self._assert_repo()
         try:
             output = await self._run_gh(
@@ -638,10 +643,15 @@ class PRManager:
                 "--repo",
                 self._repo,
                 "--json",
-                "state",
+                "state,stateReason",
             )
             data = json.loads(output)
-            return str(data.get("state", "")).upper()
+            state = str(data.get("state", "")).upper()
+            if state == "CLOSED":
+                # stateReason: "COMPLETED" | "NOT_PLANNED" | null
+                reason = str(data.get("stateReason") or "COMPLETED").upper()
+                return reason
+            return state
         except Exception:
             logger.warning(
                 "Could not fetch state of issue #%d",

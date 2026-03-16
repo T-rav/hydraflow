@@ -594,7 +594,7 @@ class TestRefreshReportStatuses:
         assert endpoint is not None
 
         with patch.object(
-            pr_mgr, "get_issue_state", new_callable=AsyncMock, return_value="CLOSED"
+            pr_mgr, "get_issue_state", new_callable=AsyncMock, return_value="COMPLETED"
         ):
             response = await endpoint(reporter_id="u1")
 
@@ -626,6 +626,40 @@ class TestRefreshReportStatuses:
 
         with patch.object(
             pr_mgr, "get_issue_state", new_callable=AsyncMock, return_value="OPEN"
+        ):
+            response = await endpoint(reporter_id="u1")
+
+        data = json.loads(response.body)
+        assert len(data["refreshed"]) == 0
+
+        report = state.get_tracked_report("r1")
+        assert report is not None
+        assert report.status == "filed"
+
+    @pytest.mark.asyncio
+    async def test_filed_report_stays_filed_when_issue_closed_not_planned(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        """Issue closed as 'won't fix' should NOT mark report as fixed."""
+        from unittest.mock import AsyncMock, patch
+
+        state.add_tracked_report(
+            TrackedReport(
+                id="r1",
+                reporter_id="u1",
+                description="Bug",
+                status="filed",
+                linked_issue_url="https://github.com/acme/repo/issues/42",
+            )
+        )
+        router, pr_mgr = self._make_router(config, event_bus, state, tmp_path)
+        endpoint = self._find_endpoint(router, "/api/reports/refresh")
+
+        with patch.object(
+            pr_mgr,
+            "get_issue_state",
+            new_callable=AsyncMock,
+            return_value="NOT_PLANNED",
         ):
             response = await endpoint(reporter_id="u1")
 

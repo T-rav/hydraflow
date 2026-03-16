@@ -1570,13 +1570,14 @@ export function HydraFlowProvider({ children }) {
 
   // Fetch tracked reports on mount and periodically; also refresh
   // filed/stale statuses so the UI reflects actual issue outcomes.
+  // refreshReportStatuses already calls fetchTrackedReports on success,
+  // so on mount we only need one of them to run first for an immediate display,
+  // then the refresh fills in accurate statuses.
   useEffect(() => {
     if (isSeeded) return
     fetchTrackedReports()
-    refreshReportStatuses()
     const interval = setInterval(() => {
       refreshReportStatuses()
-      fetchTrackedReports()
     }, 30_000)
     return () => clearInterval(interval)
   }, [fetchTrackedReports, refreshReportStatuses, isSeeded])
