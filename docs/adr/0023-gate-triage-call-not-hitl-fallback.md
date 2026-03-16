@@ -2,6 +2,7 @@
 
 **Status:** Superseded
 **Date:** 2026-03-08
+**Superseded:** 2026-03-15
 
 > **Superseded by [ADR-0023 (Auto-Triage Toggle Must Gate Routing, Not Just Stat Tracking)](0023-auto-triage-toggle-must-gate-routing.md).**
 > That ADR covers the same toggle-bypass bug with broader scope: centralized helper, stats coupling, and pre-review failure paths.
