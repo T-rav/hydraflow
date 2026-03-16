@@ -51,10 +51,19 @@ class VerifyMonitorLoop(BaseBackgroundLoop):
                 checked += 1
                 if issue is None:
                     logger.warning(
-                        "Verify issue #%d for original #%d not found — skipping",
+                        "Verify issue #%d for original #%d not found — treating as resolved",
                         verify_issue,
                         original_issue,
                     )
+                    self._state.record_outcome(
+                        original_issue,
+                        IssueOutcomeType.VERIFY_RESOLVED,
+                        reason=f"Verification issue #{verify_issue} not found — auto-resolved",
+                        phase="verify",
+                        verification_issue_number=verify_issue,
+                    )
+                    self._state.clear_verification_issue(original_issue)
+                    resolved += 1
                     continue
                 if issue.state == "closed":
                     self._state.record_outcome(
@@ -78,4 +87,36 @@ class VerifyMonitorLoop(BaseBackgroundLoop):
                     original_issue,
                 )
 
-        return {"checked": checked, "resolved": resolved, "pending": len(pending)}
+        # Bug B: reconcile orphaned VERIFY_PENDING outcomes with no verification_issues entry
+        reconciled = self._reconcile_orphaned_outcomes(pending)
+
+        return {
+            "checked": checked,
+            "resolved": resolved,
+            "reconciled": reconciled,
+            "pending": len(pending),
+        }
+
+    def _reconcile_orphaned_outcomes(self, pending: dict[int, int]) -> int:
+        """Resolve VERIFY_PENDING outcomes that have no matching verification_issues entry."""
+        all_outcomes = self._state.get_all_outcomes()
+        pending_keys = {str(k) for k in pending}
+        reconciled = 0
+        for key, outcome in all_outcomes.items():
+            if (
+                outcome.outcome == IssueOutcomeType.VERIFY_PENDING
+                and key not in pending_keys
+            ):
+                issue_number = int(key)
+                self._state.record_outcome(
+                    issue_number,
+                    IssueOutcomeType.VERIFY_RESOLVED,
+                    reason="Orphaned verify_pending — verification issue missing, auto-resolved",
+                    phase="verify",
+                )
+                logger.info(
+                    "Reconciled orphaned VERIFY_PENDING for issue #%d",
+                    issue_number,
+                )
+                reconciled += 1
+        return reconciled
