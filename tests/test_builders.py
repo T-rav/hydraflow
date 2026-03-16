@@ -177,6 +177,12 @@ class TestPlanResultBuilder:
         result = PlanResultBuilder().with_epic_number(10).build()
         assert result.epic_number == 10
 
+    def test_with_transcript(self):
+        result = (
+            PlanResultBuilder().with_transcript("PLAN_START\n## Plan\nPLAN_END").build()
+        )
+        assert result.transcript == "PLAN_START\n## Plan\nPLAN_END"
+
     def test_model_defaults_uses_pydantic_defaults(self):
         """with_model_defaults() uses Pydantic model defaults, not factory hardcoded values."""
         result = PlanResultBuilder().with_model_defaults().build()
@@ -228,7 +234,7 @@ class TestReviewResultBuilder:
             .with_verdict(ReviewVerdict.REQUEST_CHANGES)
             .with_summary("Needs work")
             .with_fixes_made(True)
-            .with_merged(False)
+            .with_merged(True)
             .with_duration_seconds(15.0)
             .with_ci_passed(True)
             .with_ci_fix_attempts(2)
@@ -240,7 +246,7 @@ class TestReviewResultBuilder:
         assert result.verdict == ReviewVerdict.REQUEST_CHANGES
         assert result.summary == "Needs work"
         assert result.fixes_made is True
-        assert result.merged is False
+        assert result.merged is True
         assert result.duration_seconds == 15.0
         assert result.ci_passed is True
         assert result.ci_fix_attempts == 2
