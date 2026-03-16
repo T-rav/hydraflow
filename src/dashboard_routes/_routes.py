@@ -624,10 +624,6 @@ def create_router(
     def _list_repo_records() -> list[RepoRecord]:
         return ctx.list_repo_records()
 
-    IssueFetcher(config)
-    TranscriptSummarizer(config, pr_manager, event_bus, state)
-    asyncio.Semaphore(3)
-
     def _repo_roots_fn() -> tuple[str, ...]:
         return ctx.repo_roots_fn()
 
@@ -1389,6 +1385,14 @@ def create_router(
             }
         )
         items = await manager.list_open_prs(all_labels)
+        # Overlay merged flag from IssueStore so the frontend has
+        # authoritative merged state instead of session-volatile flags.
+        orch = _get_orch()
+        if orch:
+            merged_numbers = orch.issue_store.get_merged_numbers()
+            for item in items:
+                if item.issue in merged_numbers:
+                    item.merged = True
         return JSONResponse([item.model_dump() for item in items])
 
     @router.get("/api/epics")
