@@ -1745,19 +1745,33 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
         if getattr(config, field) == default:
             env_val = _get_env(env_key)
             if env_val is not None:
-                with contextlib.suppress(ValueError):
+                try:
                     new_val = int(env_val)
-                    for constraint in HydraFlowConfig.model_fields[field].metadata:
-                        ge = getattr(constraint, "ge", None)
-                        le = getattr(constraint, "le", None)
-                        if ge is not None and new_val < ge:
-                            raise ValueError(
-                                f"{env_key}={new_val} is below minimum {ge}"
-                            )
-                        if le is not None and new_val > le:
-                            raise ValueError(
-                                f"{env_key}={new_val} is above maximum {le}"
-                            )
+                except ValueError:
+                    continue
+                in_bounds = True
+                for constraint in HydraFlowConfig.model_fields[field].metadata:
+                    ge = getattr(constraint, "ge", None)
+                    le = getattr(constraint, "le", None)
+                    if ge is not None and new_val < ge:
+                        logger.warning(
+                            "%s=%s is below minimum %s; ignoring env override",
+                            env_key,
+                            new_val,
+                            ge,
+                        )
+                        in_bounds = False
+                        break
+                    if le is not None and new_val > le:
+                        logger.warning(
+                            "%s=%s is above maximum %s; ignoring env override",
+                            env_key,
+                            new_val,
+                            le,
+                        )
+                        in_bounds = False
+                        break
+                if in_bounds:
                     object.__setattr__(config, field, new_val)
 
     # Data-driven env var overrides (str fields)
@@ -1776,19 +1790,33 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
         if getattr(config, field) == default:
             env_val = _get_env(env_key)
             if env_val is not None:
-                with contextlib.suppress(ValueError):
+                try:
                     new_val = float(env_val)
-                    for constraint in HydraFlowConfig.model_fields[field].metadata:
-                        ge = getattr(constraint, "ge", None)
-                        le = getattr(constraint, "le", None)
-                        if ge is not None and new_val < ge:
-                            raise ValueError(
-                                f"{env_key}={new_val} is below minimum {ge}"
-                            )
-                        if le is not None and new_val > le:
-                            raise ValueError(
-                                f"{env_key}={new_val} is above maximum {le}"
-                            )
+                except ValueError:
+                    continue
+                in_bounds = True
+                for constraint in HydraFlowConfig.model_fields[field].metadata:
+                    ge = getattr(constraint, "ge", None)
+                    le = getattr(constraint, "le", None)
+                    if ge is not None and new_val < ge:
+                        logger.warning(
+                            "%s=%s is below minimum %s; ignoring env override",
+                            env_key,
+                            new_val,
+                            ge,
+                        )
+                        in_bounds = False
+                        break
+                    if le is not None and new_val > le:
+                        logger.warning(
+                            "%s=%s is above maximum %s; ignoring env override",
+                            env_key,
+                            new_val,
+                            le,
+                        )
+                        in_bounds = False
+                        break
+                if in_bounds:
                     object.__setattr__(config, field, new_val)
 
     # Ratio float overrides ([0, 1] bounds) — parse failures are silently ignored

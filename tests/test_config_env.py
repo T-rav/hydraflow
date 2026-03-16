@@ -399,6 +399,82 @@ class TestEnvVarOverrideTable:
         assert env_key in caplog.text, "Expected warning to name the invalid env var"
         assert "bogus" in caplog.text, "Expected warning to include the invalid value"
 
+    def test_env_int_override_bounds_violation_warns_and_keeps_default(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Out-of-bounds int env values should warn and keep the default."""
+        # gh_max_retries has ge=0, le=10, default=3
+        monkeypatch.setenv("HYDRAFLOW_GH_MAX_RETRIES", "99")
+        with caplog.at_level(logging.WARNING, logger="hydraflow.config"):
+            cfg = HydraFlowConfig(
+                repo_root=tmp_path,
+                worktree_base=tmp_path / "wt",
+                state_file=tmp_path / "s.json",
+            )
+        assert cfg.gh_max_retries == 3
+        assert "HYDRAFLOW_GH_MAX_RETRIES" in caplog.text
+        assert "above maximum" in caplog.text
+
+    def test_env_int_override_below_minimum_warns_and_keeps_default(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Int env values below minimum should warn and keep the default."""
+        # max_issue_attempts has ge=1, le=10, default=3
+        monkeypatch.setenv("HYDRAFLOW_MAX_ISSUE_ATTEMPTS", "0")
+        with caplog.at_level(logging.WARNING, logger="hydraflow.config"):
+            cfg = HydraFlowConfig(
+                repo_root=tmp_path,
+                worktree_base=tmp_path / "wt",
+                state_file=tmp_path / "s.json",
+            )
+        assert cfg.max_issue_attempts == 3
+        assert "HYDRAFLOW_MAX_ISSUE_ATTEMPTS" in caplog.text
+        assert "below minimum" in caplog.text
+
+    def test_env_float_override_bounds_violation_warns_and_keeps_default(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Out-of-bounds float env values should warn and keep the default."""
+        # docker_cpu_limit has ge=0.5, le=16.0, default=2.0
+        monkeypatch.setenv("HYDRAFLOW_DOCKER_CPU_LIMIT", "20.0")
+        with caplog.at_level(logging.WARNING, logger="hydraflow.config"):
+            cfg = HydraFlowConfig(
+                repo_root=tmp_path,
+                worktree_base=tmp_path / "wt",
+                state_file=tmp_path / "s.json",
+            )
+        assert cfg.docker_cpu_limit == 2.0
+        assert "HYDRAFLOW_DOCKER_CPU_LIMIT" in caplog.text
+        assert "above maximum" in caplog.text
+
+    def test_env_float_override_below_minimum_warns_and_keeps_default(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Float env values below minimum should warn and keep the default."""
+        # docker_cpu_limit has ge=0.5, le=16.0, default=2.0
+        monkeypatch.setenv("HYDRAFLOW_DOCKER_CPU_LIMIT", "0.1")
+        with caplog.at_level(logging.WARNING, logger="hydraflow.config"):
+            cfg = HydraFlowConfig(
+                repo_root=tmp_path,
+                worktree_base=tmp_path / "wt",
+                state_file=tmp_path / "s.json",
+            )
+        assert cfg.docker_cpu_limit == 2.0
+        assert "HYDRAFLOW_DOCKER_CPU_LIMIT" in caplog.text
+        assert "below minimum" in caplog.text
+
     def test_override_table_field_names_are_valid(self) -> None:
         """Every field in the override tables should be a real HydraFlowConfig attribute."""
         all_fields = (
