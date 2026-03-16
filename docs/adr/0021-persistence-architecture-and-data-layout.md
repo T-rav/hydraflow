@@ -100,6 +100,7 @@ The following `HydraFlowConfig` properties derive directories from `data_root`:
 
 | Property | Path |
 |----------|------|
+| `config_file` | `data_root / "config.json"` (optional; `None` by default — persistence disabled unless explicitly set) |
 | `repo_data_root` | `data_root / repo_slug` |
 | `state_file` | `data_root / repo_slug / "state.json"` |
 | `event_log_path` | `data_root / repo_slug / "events.jsonl"` |
