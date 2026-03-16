@@ -133,6 +133,7 @@ class ReviewRunner(BaseRunner):
             logger.info("[dry-run] Would review PR #%d", pr.number)
             result.verdict = ReviewVerdict.APPROVE
             result.summary = "Dry-run: auto-approved"
+            result.success = True
             result.duration_seconds = time.monotonic() - start
             return result
 
@@ -184,6 +185,7 @@ class ReviewRunner(BaseRunner):
 
             # Persist to disk
             self._save_transcript("review-pr", pr.number, transcript)
+            result.success = True
 
         except Exception as exc:
             reraise_on_credit_or_bug(exc)
@@ -250,6 +252,7 @@ class ReviewRunner(BaseRunner):
             logger.info("[dry-run] Would fix CI for PR #%d", pr.number)
             result.verdict = ReviewVerdict.APPROVE
             result.summary = "Dry-run: CI fix skipped"
+            result.success = True
             result.duration_seconds = time.monotonic() - start
             return result
 
@@ -292,6 +295,7 @@ class ReviewRunner(BaseRunner):
                     pr.number,
                 )
             self._save_transcript("review-pr", pr.number, transcript)
+            result.success = True
         except Exception as exc:
             reraise_on_credit_or_bug(exc)
             result.verdict = ReviewVerdict.REQUEST_CHANGES
@@ -351,6 +355,7 @@ class ReviewRunner(BaseRunner):
             logger.info("[dry-run] Would fix review findings for PR #%d", pr.number)
             result.verdict = ReviewVerdict.APPROVE
             result.summary = "Dry-run: review fix skipped"
+            result.success = True
             result.duration_seconds = time.monotonic() - start
             return result
 
@@ -386,6 +391,7 @@ class ReviewRunner(BaseRunner):
                 )
 
             self._save_transcript("review-fix", pr.number, transcript)
+            result.success = True
         except Exception as exc:
             reraise_on_credit_or_bug(exc)
             result.verdict = ReviewVerdict.REQUEST_CHANGES
