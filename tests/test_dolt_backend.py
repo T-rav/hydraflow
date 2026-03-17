@@ -209,10 +209,10 @@ class TestDoltStateTrackerIntegration:
         data = json.loads(state_file.read_text())
         assert data["processed_issues"]["99"] == "merged"
 
-    def test_build_state_tracker_dolt_enabled(self, dolt_dir: Path) -> None:
+    def test_build_state_tracker_always_uses_dolt(self, dolt_dir: Path) -> None:
         from tests.helpers import ConfigFactory
 
-        cfg = ConfigFactory.create(dolt_enabled=True)
+        cfg = ConfigFactory.create()
         # Patch the dolt_dir to use our temp dir
         with patch("state.Path", return_value=dolt_dir):
             from state import build_state_tracker
@@ -220,11 +220,14 @@ class TestDoltStateTrackerIntegration:
             tracker = build_state_tracker(cfg)
             assert tracker._dolt is not None
 
-    def test_build_state_tracker_dolt_disabled(self) -> None:
+    def test_build_state_tracker_raises_without_dolt_cli(self) -> None:
         from tests.helpers import ConfigFactory
 
-        cfg = ConfigFactory.create(dolt_enabled=False)
-        from state import build_state_tracker
+        cfg = ConfigFactory.create()
+        with (
+            patch("shutil.which", return_value=None),
+            pytest.raises(FileNotFoundError, match="dolt CLI not found"),
+        ):
+            from state import build_state_tracker
 
-        tracker = build_state_tracker(cfg)
-        assert tracker._dolt is None
+            build_state_tracker(cfg)

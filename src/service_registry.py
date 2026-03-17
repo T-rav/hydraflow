@@ -150,19 +150,20 @@ def build_services(
             timeout=config.hindsight_timeout,
         )
 
-    # Dolt embedded state backend (optional)
-    dolt_backend = None
-    if config.dolt_enabled:
-        from dolt_backend import DoltBackend
+    # Dolt embedded state backend (always enabled)
+    from dolt_backend import DoltBackend
 
-        try:
-            dolt_dir = Path(str(config.state_file)).parent / "dolt"
-            dolt_backend = DoltBackend(dolt_dir)
-        except Exception:
-            logging.getLogger("hydraflow.service_registry").warning(
-                "Dolt init failed",
-                exc_info=True,
-            )
+    dolt_backend: DoltBackend | None = None
+    try:
+        dolt_dir = Path(str(config.state_file)).parent / "dolt"
+        dolt_backend = DoltBackend(dolt_dir)
+    except FileNotFoundError:
+        raise
+    except Exception:
+        logging.getLogger("hydraflow.service_registry").warning(
+            "Dolt init failed",
+            exc_info=True,
+        )
 
     # Core runners
     worktrees = WorkspaceManager(config)
