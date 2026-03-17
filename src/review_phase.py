@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from hindsight import HindsightClient
     from visual_validator import VisualValidator
 
 from baseline_policy import BaselinePolicy
@@ -105,6 +106,7 @@ class ReviewPhase:
         post_merge: PostMergeHandler | None = None,
         update_bg_worker_status: StatusCallback | None = None,
         baseline_policy: BaselinePolicy | None = None,
+        hindsight: HindsightClient | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -142,6 +144,7 @@ class ReviewPhase:
             store=store,
         )
         self._baseline_policy = baseline_policy
+        self._hindsight = hindsight
         self._visual_validator: VisualValidator | None = None
         if config.visual_validation_enabled:
             from visual_validator import VisualValidator  # noqa: PLC0415
@@ -1460,6 +1463,28 @@ class ReviewPhase:
                 categories=extract_categories(result.summary),
             )
             self._insights.append_review(record)
+
+            # Dual-write review rejections as troubleshooting context
+            if result.verdict != ReviewVerdict.APPROVE and self._hindsight:
+                from hindsight import Bank, retain_safe  # noqa: PLC0415
+
+                asyncio.create_task(
+                    retain_safe(
+                        self._hindsight,
+                        Bank.TROUBLESHOOTING,
+                        f"Review rejection pattern: {result.summary[:500]}",
+                        context=(
+                            f"PR #{result.pr_number} issue #{result.issue_number}"
+                            f" verdict={result.verdict}"
+                        ),
+                        metadata={
+                            "pr_number": str(result.pr_number),
+                            "issue_number": str(result.issue_number),
+                            "verdict": str(result.verdict),
+                            "source": "review_rejection",
+                        },
+                    )
+                )
 
             recent = self._insights.load_recent(self._config.review_insight_window)
             patterns = analyze_patterns(recent, self._config.review_pattern_threshold)

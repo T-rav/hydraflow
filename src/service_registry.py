@@ -323,6 +323,7 @@ def build_services(
         post_merge=post_merge_handler,
         update_bg_worker_status=callbacks.update_bg_worker_status,
         baseline_policy=baseline_policy,
+        hindsight=hindsight_client,
     )
 
     # Background loops — shared deps bundled into a single LoopDeps object

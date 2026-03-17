@@ -1269,6 +1269,36 @@ def create_router(
             },
         )
 
+    @router.post("/api/hindsight/audit")
+    async def hindsight_audit() -> JSONResponse:
+        """Run a memory quality audit across all Hindsight banks."""
+        if not config.hindsight_enabled or not config.hindsight_url:
+            return JSONResponse({"status": "disabled", "results": []})
+        from hindsight import HindsightClient  # noqa: PLC0415
+        from memory_audit import MemoryAuditor  # noqa: PLC0415
+
+        client = HindsightClient(
+            config.hindsight_url,
+            api_key=config.hindsight_api_key,
+            timeout=min(config.hindsight_timeout, 30),
+        )
+        try:
+            auditor = MemoryAuditor(client, config)
+            results = await auditor.audit_all()
+        finally:
+            await client.close()
+        return JSONResponse({"status": "ok", "results": results})
+
+    @router.get("/api/hindsight/banks")
+    async def hindsight_banks() -> JSONResponse:
+        """List Hindsight memory banks with stats."""
+        if not config.hindsight_enabled or not config.hindsight_url:
+            return JSONResponse({"status": "disabled", "banks": []})
+        from hindsight import Bank  # noqa: PLC0415
+
+        banks = [{"id": str(b), "name": b.name} for b in Bank]
+        return JSONResponse({"status": "ok", "banks": banks})
+
     @router.get("/", response_class=HTMLResponse)
     async def index() -> HTMLResponse:
         """Serve the single-page application root."""
