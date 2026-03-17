@@ -15,6 +15,7 @@ from models import IsoTimestamp, PlanAccuracyResult, ReviewVerdict
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
+    from hindsight import HindsightClient
     from models import ReviewResult
     from pr_manager import PRManager
     from state import StateTracker
@@ -48,10 +49,13 @@ class RetrospectiveCollector:
         config: HydraFlowConfig,
         state: StateTracker,
         prs: PRManager,
+        *,
+        hindsight: HindsightClient | None = None,
     ) -> None:
         self._config = config
         self._state = state
         self._prs = prs
+        self._hindsight = hindsight
         self._retro_path = config.data_path("memory", "retrospectives.jsonl")
         self._filed_patterns_path = config.data_path("memory", "filed_patterns.json")
 
@@ -214,6 +218,30 @@ class RetrospectiveCollector:
                 self._retro_path,
                 exc_info=True,
             )
+
+        if self._hindsight:
+            import asyncio
+
+            from hindsight import Bank, retain_safe
+
+            content = (
+                f"Issue #{entry.issue_number} PR #{entry.pr_number}: "
+                f"plan_accuracy={entry.plan_accuracy_pct}%, "
+                f"quality_fixes={entry.quality_fix_rounds}, "
+                f"review={entry.review_verdict}"
+            )
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    retain_safe(
+                        self._hindsight,
+                        Bank.RETROSPECTIVES,
+                        content,
+                        context=f"retrospective for issue #{entry.issue_number}",
+                    )
+                )
+            except RuntimeError:
+                pass  # no event loop — skip dual-write
 
     def _load_recent(self, n: int) -> list[RetrospectiveEntry]:
         """Load the last *n* entries from the retrospective log."""

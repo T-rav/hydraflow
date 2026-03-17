@@ -660,3 +660,69 @@ class TestGetEscalationData:
         ]
         escalations = get_escalation_data(records, top_n=3)
         assert escalations == []
+
+
+# ---------------------------------------------------------------------------
+# Hindsight dual-write tests
+# ---------------------------------------------------------------------------
+
+
+class TestReviewInsightHindsightDualWrite:
+    """Tests for Hindsight dual-write in ReviewInsightStore.append_review()."""
+
+    def test_dual_write_fires_via_create_task(self, tmp_path: Path) -> None:
+        """When hindsight is set, retain_safe is fire-and-forget via create_task."""
+        from unittest.mock import MagicMock, patch
+
+        mock_hindsight = MagicMock()
+        store = ReviewInsightStore(tmp_path, hindsight=mock_hindsight)
+
+        record = _make_record(
+            pr_number=10,
+            issue_number=5,
+            verdict=ReviewVerdict.REQUEST_CHANGES,
+            summary="Missing tests for edge cases",
+            categories=["missing_tests", "edge_cases"],
+        )
+
+        mock_loop = MagicMock()
+        mock_loop.create_task = MagicMock()
+
+        with (
+            patch("asyncio.get_running_loop", return_value=mock_loop),
+            patch("hindsight.retain_safe") as mock_retain,
+        ):
+            store.append_review(record)
+            mock_loop.create_task.assert_called_once()
+            call_args = mock_retain.call_args
+            assert call_args is not None
+            assert call_args.args[2] == "Missing tests for edge cases"
+            assert "PR #10" in call_args.kwargs["context"]
+
+    def test_file_write_happens_without_hindsight(self, tmp_path: Path) -> None:
+        """File write still happens when hindsight is None."""
+        store = ReviewInsightStore(tmp_path, hindsight=None)
+        record = _make_record()
+        store.append_review(record)
+
+        reviews_path = tmp_path / "reviews.jsonl"
+        assert reviews_path.exists()
+        assert "42" in reviews_path.read_text()
+
+    def test_no_event_loop_skips_dual_write(self, tmp_path: Path) -> None:
+        """When no event loop is running, dual-write is silently skipped."""
+        from unittest.mock import MagicMock, patch
+
+        mock_hindsight = MagicMock()
+        store = ReviewInsightStore(tmp_path, hindsight=mock_hindsight)
+        record = _make_record()
+
+        with patch(
+            "asyncio.get_running_loop",
+            side_effect=RuntimeError("no running event loop"),
+        ):
+            store.append_review(record)  # should not raise
+
+        # File write still happened
+        reviews_path = tmp_path / "reviews.jsonl"
+        assert reviews_path.exists()

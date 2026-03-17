@@ -797,3 +797,93 @@ class TestAppendEntryOSError:
             collector._append_entry(entry)  # should not raise
 
         assert "Could not append to retrospective log" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Hindsight dual-write tests
+# ---------------------------------------------------------------------------
+
+
+class TestRetrospectiveHindsightDualWrite:
+    """Tests for Hindsight dual-write in RetrospectiveCollector._append_entry()."""
+
+    def test_dual_write_fires_via_create_task(self, config: HydraFlowConfig) -> None:
+        """When hindsight is set, retain_safe is fire-and-forget via create_task."""
+        from unittest.mock import MagicMock
+
+        mock_hindsight = MagicMock()
+        state = StateTracker(config.state_file)
+        mock_prs = AsyncMock()
+        collector = RetrospectiveCollector(
+            config, state, mock_prs, hindsight=mock_hindsight
+        )
+
+        entry = RetrospectiveEntry(
+            issue_number=42,
+            pr_number=100,
+            timestamp="2026-02-20T10:30:00Z",
+            plan_accuracy_pct=85.0,
+            quality_fix_rounds=2,
+            review_verdict=ReviewVerdict.APPROVE,
+        )
+
+        mock_task = MagicMock()
+        mock_loop = MagicMock()
+        mock_loop.create_task = MagicMock(return_value=mock_task)
+
+        with (
+            patch("asyncio.get_running_loop", return_value=mock_loop),
+            patch("hindsight.retain_safe") as mock_retain,
+        ):
+            collector._append_entry(entry)
+            mock_loop.create_task.assert_called_once()
+            # Verify retain_safe was called with correct Bank
+            call_args = mock_retain.call_args
+            assert call_args is not None
+            assert "retrospective for issue #42" in call_args.kwargs["context"]
+
+    def test_file_write_happens_without_hindsight(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """File write still happens when hindsight is None."""
+        state = StateTracker(config.state_file)
+        mock_prs = AsyncMock()
+        collector = RetrospectiveCollector(config, state, mock_prs, hindsight=None)
+
+        entry = RetrospectiveEntry(
+            issue_number=42,
+            pr_number=100,
+            timestamp="2026-02-20T10:30:00Z",
+        )
+        collector._append_entry(entry)
+
+        retro_path = config.data_path("memory", "retrospectives.jsonl")
+        assert retro_path.exists()
+        assert "42" in retro_path.read_text()
+
+    def test_no_event_loop_skips_dual_write(self, config: HydraFlowConfig) -> None:
+        """When no event loop is running, dual-write is silently skipped."""
+        from unittest.mock import MagicMock
+
+        mock_hindsight = MagicMock()
+        state = StateTracker(config.state_file)
+        mock_prs = AsyncMock()
+        collector = RetrospectiveCollector(
+            config, state, mock_prs, hindsight=mock_hindsight
+        )
+
+        entry = RetrospectiveEntry(
+            issue_number=42,
+            pr_number=100,
+            timestamp="2026-02-20T10:30:00Z",
+        )
+
+        with patch(
+            "asyncio.get_running_loop",
+            side_effect=RuntimeError("no running event loop"),
+        ):
+            collector._append_entry(entry)  # should not raise
+
+        # File write still happened
+        retro_path = config.data_path("memory", "retrospectives.jsonl")
+        assert retro_path.exists()

@@ -12,10 +12,14 @@ import logging
 import re
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
 from models import IsoTimestamp
+
+if TYPE_CHECKING:
+    from hindsight import HindsightClient
 
 logger = logging.getLogger("hydraflow.troubleshooting_store")
 
@@ -53,9 +57,15 @@ class TroubleshootingPattern(BaseModel):
 class TroubleshootingPatternStore:
     """JSONL-backed store for learned troubleshooting patterns."""
 
-    def __init__(self, memory_dir: Path) -> None:
+    def __init__(
+        self,
+        memory_dir: Path,
+        *,
+        hindsight: HindsightClient | None = None,
+    ) -> None:
         self._memory_dir = memory_dir
         self._path = memory_dir / "troubleshooting_patterns.jsonl"
+        self._hindsight = hindsight
 
     def append_pattern(self, pattern: TroubleshootingPattern) -> None:
         """Append or merge *pattern* into the store.
@@ -81,6 +91,31 @@ class TroubleshootingPatternStore:
             all_patterns.append(pattern)
 
         self._write_all(all_patterns)
+
+        if self._hindsight:
+            import asyncio
+
+            from hindsight import Bank, retain_safe
+
+            content = f"{pattern.pattern_name}: {pattern.description}\nFix: {pattern.fix_strategy}"
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    retain_safe(
+                        self._hindsight,
+                        Bank.TROUBLESHOOTING,
+                        content,
+                        context=f"language={pattern.language} frequency={pattern.frequency}",
+                        metadata={
+                            "language": pattern.language,
+                            "pattern_name": pattern.pattern_name,
+                            "frequency": pattern.frequency,
+                            "source_issues": pattern.source_issues,
+                        },
+                    )
+                )
+            except RuntimeError:
+                pass  # no event loop — skip dual-write
 
     def load_patterns(
         self, *, language: str | None = None, limit: int | None = 10

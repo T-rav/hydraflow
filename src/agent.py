@@ -91,7 +91,7 @@ Run through this checklist before your final commit:
         hindsight: HindsightClient | None = None,
     ) -> None:
         super().__init__(config, event_bus, runner, hindsight=hindsight)
-        self._insights = ReviewInsightStore(config.memory_dir)
+        self._insights = ReviewInsightStore(config.memory_dir, hindsight=hindsight)
 
     async def run(
         self,

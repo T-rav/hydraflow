@@ -29,6 +29,7 @@ from state import StateTracker
 from subprocess_util import make_clean_env
 
 if TYPE_CHECKING:
+    from hindsight import HindsightClient
     from ports import PRPort
 
 logger = logging.getLogger("hydraflow.memory")
@@ -202,6 +203,7 @@ class MemorySyncWorker:
         manifest_store: CuratedManifestStore | None = None,
         manifest_manager: ProjectManifestManager | None = None,
         manifest_syncer: ManifestIssueSyncer | None = None,
+        hindsight: HindsightClient | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -213,6 +215,7 @@ class MemorySyncWorker:
             config, curator=self._manifest_store
         )
         self._manifest_syncer = manifest_syncer
+        self._hindsight = hindsight
 
     _TypedLearning = tuple[int, str, str, MemoryType]
     _LearningRecord = CuratedLearning | _TypedLearning
@@ -310,6 +313,24 @@ class MemorySyncWorker:
 
         # Atomic write of digest
         self._write_digest(digest)
+
+        # Dual-write learnings to Hindsight
+        if self._hindsight:
+            from hindsight import Bank, retain_safe
+
+            for record in learnings:
+                num, learning, created, mtype = self._coerce_learning_tuple(record)
+                await retain_safe(
+                    self._hindsight,
+                    Bank.LEARNINGS,
+                    learning,
+                    context=f"Issue #{num} ({mtype.value})",
+                    metadata={
+                        "issue_number": num,
+                        "memory_type": mtype.value,
+                        "created_at": created,
+                    },
+                )
 
         # Update state
         digest_hash = hashlib.sha256(digest.encode()).hexdigest()[:16]

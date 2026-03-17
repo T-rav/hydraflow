@@ -2335,3 +2335,103 @@ class TestRouteAdrCandidatesPerItemIsolation:
 
         # First call failed, second succeeded — both were attempted
         assert call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Hindsight dual-write tests
+# ---------------------------------------------------------------------------
+
+
+class TestMemorySyncHindsightDualWrite:
+    """Tests for Hindsight dual-write in MemorySyncWorker.sync()."""
+
+    @pytest.mark.asyncio
+    async def test_dual_write_fires_for_each_learning(self, tmp_path: Path) -> None:
+        """When hindsight client is set, retain_safe is called for each learning."""
+        config = ConfigFactory.create(repo_root=tmp_path)
+        state = StateTracker(config.state_file)
+        bus = MagicMock()
+        bus.publish = AsyncMock()
+        mock_hindsight = MagicMock()
+        worker = MemorySyncWorker(config, state, bus, hindsight=mock_hindsight)
+
+        issues = [
+            {
+                "number": 1,
+                "title": "[Memory] Learn A",
+                "body": "**Type:** knowledge\n\n**Learning:** First insight",
+                "labels": list(config.memory_label),
+                "createdAt": "2024-01-01",
+            },
+            {
+                "number": 2,
+                "title": "[Memory] Learn B",
+                "body": "**Type:** config\n\n**Learning:** Second insight",
+                "labels": list(config.memory_label),
+                "createdAt": "2024-01-02",
+            },
+        ]
+
+        with patch("hindsight.retain_safe", new_callable=AsyncMock) as mock_retain:
+            await worker.sync(issues)
+            assert mock_retain.await_count == 2
+            # Verify first call args
+            call_args_list = mock_retain.call_args_list
+            assert call_args_list[0].args[0] is mock_hindsight
+
+    @pytest.mark.asyncio
+    async def test_file_write_happens_without_hindsight(self, tmp_path: Path) -> None:
+        """File write still happens when hindsight is None."""
+        config = ConfigFactory.create(repo_root=tmp_path)
+        state = StateTracker(config.state_file)
+        bus = MagicMock()
+        bus.publish = AsyncMock()
+        worker = MemorySyncWorker(config, state, bus, hindsight=None)
+
+        issues = [
+            {
+                "number": 1,
+                "title": "[Memory] Test",
+                "body": "**Type:** knowledge\n\n**Learning:** Something",
+                "labels": list(config.memory_label),
+                "createdAt": "2024-01-01",
+            },
+        ]
+        await worker.sync(issues)
+
+        digest_path = config.data_path("memory", "digest.md")
+        assert digest_path.exists()
+        assert "Something" in digest_path.read_text()
+
+    @pytest.mark.asyncio
+    async def test_dual_write_passes_correct_bank_and_metadata(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify retain_safe is called with the LEARNINGS bank and correct metadata."""
+        from hindsight import Bank
+
+        config = ConfigFactory.create(repo_root=tmp_path)
+        state = StateTracker(config.state_file)
+        bus = MagicMock()
+        bus.publish = AsyncMock()
+        mock_hindsight = MagicMock()
+        worker = MemorySyncWorker(config, state, bus, hindsight=mock_hindsight)
+
+        issues = [
+            {
+                "number": 7,
+                "title": "[Memory] Config tip",
+                "body": "**Type:** config\n\n**Learning:** Use env vars",
+                "labels": list(config.memory_label),
+                "createdAt": "2024-03-15",
+            },
+        ]
+
+        with patch("hindsight.retain_safe", new_callable=AsyncMock) as mock_retain:
+            await worker.sync(issues)
+            mock_retain.assert_called_once()
+            call_kw = mock_retain.call_args
+            assert call_kw.args[1] == Bank.LEARNINGS
+            assert call_kw.args[2] == "Use env vars"
+            assert call_kw.kwargs["metadata"]["issue_number"] == 7
+            assert call_kw.kwargs["metadata"]["memory_type"] == "config"

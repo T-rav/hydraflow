@@ -12,11 +12,14 @@ from collections import Counter
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
 
 from models import IsoTimestamp, PipelineStage
+
+if TYPE_CHECKING:
+    from hindsight import HindsightClient
 
 logger = logging.getLogger("hydraflow.harness_insights")
 
@@ -132,10 +135,16 @@ def extract_subcategories(details: str) -> list[str]:
 class HarnessInsightStore:
     """File-backed store for pipeline failure records and proposed-pattern tracking."""
 
-    def __init__(self, memory_dir: Path) -> None:
+    def __init__(
+        self,
+        memory_dir: Path,
+        *,
+        hindsight: HindsightClient | None = None,
+    ) -> None:
         self._memory_dir = memory_dir
         self._failures_path = memory_dir / "harness_failures.jsonl"
         self._proposed_path = memory_dir / "harness_proposed.json"
+        self._hindsight = hindsight
 
     def append_failure(self, record: FailureRecord) -> None:
         """Append *record* as a JSON line to ``harness_failures.jsonl``."""
@@ -149,6 +158,30 @@ class HarnessInsightStore:
                 self._failures_path,
                 exc_info=True,
             )
+
+        if self._hindsight:
+            import asyncio
+
+            from hindsight import Bank, retain_safe
+
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    retain_safe(
+                        self._hindsight,
+                        Bank.HARNESS_INSIGHTS,
+                        record.details,
+                        context=f"issue #{record.issue_number} category={record.category} stage={record.stage}",
+                        metadata={
+                            "issue_number": record.issue_number,
+                            "pr_number": record.pr_number,
+                            "category": str(record.category),
+                            "subcategories": record.subcategories,
+                        },
+                    )
+                )
+            except RuntimeError:
+                pass  # no event loop — skip dual-write
 
     def load_recent(self, n: int = 20) -> list[FailureRecord]:
         """Load the last *n* failure records from disk."""

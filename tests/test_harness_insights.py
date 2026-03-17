@@ -686,3 +686,70 @@ class TestMarkPatternProposedOSError:
             store.mark_pattern_proposed("category:ci_failure")  # should not raise
         # write_text failed so file should not exist
         assert not store._proposed_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# Hindsight dual-write tests
+# ---------------------------------------------------------------------------
+
+
+class TestHarnessInsightHindsightDualWrite:
+    """Tests for Hindsight dual-write in HarnessInsightStore.append_failure()."""
+
+    def test_dual_write_fires_via_create_task(self, tmp_path: Path) -> None:
+        """When hindsight is set, retain_safe is fire-and-forget via create_task."""
+        from unittest.mock import MagicMock, patch
+
+        mock_hindsight = MagicMock()
+        store = HarnessInsightStore(tmp_path, hindsight=mock_hindsight)
+
+        record = _make_record(
+            issue_number=42,
+            pr_number=100,
+            category=FailureCategory.CI_FAILURE,
+            details="pytest timed out after 300s",
+            subcategories=["timeout"],
+        )
+
+        mock_loop = MagicMock()
+        mock_loop.create_task = MagicMock()
+
+        with (
+            patch("asyncio.get_running_loop", return_value=mock_loop),
+            patch("hindsight.retain_safe") as mock_retain,
+        ):
+            store.append_failure(record)
+            mock_loop.create_task.assert_called_once()
+            call_args = mock_retain.call_args
+            assert call_args is not None
+            assert call_args.args[2] == "pytest timed out after 300s"
+            assert "issue #42" in call_args.kwargs["context"]
+            assert call_args.kwargs["metadata"]["category"] == "ci_failure"
+
+    def test_file_write_happens_without_hindsight(self, tmp_path: Path) -> None:
+        """File write still happens when hindsight is None."""
+        store = HarnessInsightStore(tmp_path, hindsight=None)
+        record = _make_record()
+        store.append_failure(record)
+
+        failures_path = tmp_path / "harness_failures.jsonl"
+        assert failures_path.exists()
+        assert "42" in failures_path.read_text()
+
+    def test_no_event_loop_skips_dual_write(self, tmp_path: Path) -> None:
+        """When no event loop is running, dual-write is silently skipped."""
+        from unittest.mock import MagicMock, patch
+
+        mock_hindsight = MagicMock()
+        store = HarnessInsightStore(tmp_path, hindsight=mock_hindsight)
+        record = _make_record()
+
+        with patch(
+            "asyncio.get_running_loop",
+            side_effect=RuntimeError("no running event loop"),
+        ):
+            store.append_failure(record)  # should not raise
+
+        # File write still happened
+        failures_path = tmp_path / "harness_failures.jsonl"
+        assert failures_path.exists()

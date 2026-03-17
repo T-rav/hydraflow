@@ -182,10 +182,14 @@ def build_services(
     store.set_crate_manager(crate_manager)
 
     # Harness insight store (shared across phases)
-    harness_insights = HarnessInsightStore(config.data_path("memory"))
+    harness_insights = HarnessInsightStore(
+        config.data_path("memory"), hindsight=hindsight_client
+    )
 
     # Troubleshooting pattern store (CI timeout feedback loop)
-    troubleshooting_store = TroubleshootingPatternStore(config.data_path("memory"))
+    troubleshooting_store = TroubleshootingPatternStore(
+        config.data_path("memory"), hindsight=hindsight_client
+    )
 
     # Epic management
     epic_checker = EpicCompletionChecker(config, prs, fetcher, state=state)
@@ -278,8 +282,11 @@ def build_services(
         runner=subprocess_runner,
         prs=prs,
         manifest_syncer=manifest_syncer,
+        hindsight=hindsight_client,
     )
-    retrospective = RetrospectiveCollector(config, state, prs)
+    retrospective = RetrospectiveCollector(
+        config, state, prs, hindsight=hindsight_client
+    )
     ac_generator = AcceptanceCriteriaGenerator(
         config, prs, event_bus, runner=subprocess_runner
     )
