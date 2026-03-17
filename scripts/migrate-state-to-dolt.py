@@ -137,6 +137,7 @@ def main() -> None:
 
     memory_dir = state_dir / "memory"
 
+    dolt = None
     if args.dry_run:
         print(f"[DRY RUN] Would migrate from {state_dir}")
     else:

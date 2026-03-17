@@ -29,6 +29,7 @@ from state import StateTracker
 from subprocess_util import make_clean_env
 
 if TYPE_CHECKING:
+    from dolt_backend import DoltBackend
     from hindsight import HindsightClient
     from ports import PRPort
 
@@ -204,6 +205,7 @@ class MemorySyncWorker:
         manifest_manager: ProjectManifestManager | None = None,
         manifest_syncer: ManifestIssueSyncer | None = None,
         hindsight: HindsightClient | None = None,
+        dolt: DoltBackend | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -216,6 +218,7 @@ class MemorySyncWorker:
         )
         self._manifest_syncer = manifest_syncer
         self._hindsight = hindsight
+        self._dolt = dolt
 
     _TypedLearning = tuple[int, str, str, MemoryType]
     _LearningRecord = CuratedLearning | _TypedLearning
@@ -596,6 +599,8 @@ class MemorySyncWorker:
         return self._config.data_path("memory", "adr_sources.json")
 
     def _load_adr_source_ids(self) -> set[int]:
+        if self._dolt:
+            return {int(v) for v in self._dolt.get_dedup_set("adr_sources")}
         path = self._adr_sources_path()
         if not path.exists():
             return set()
@@ -608,6 +613,9 @@ class MemorySyncWorker:
         return {int(x) for x in data if isinstance(x, int)}
 
     def _save_adr_source_ids(self, issue_ids: set[int]) -> None:
+        if self._dolt:
+            self._dolt.set_dedup_set("adr_sources", {str(i) for i in issue_ids})
+            return
         path = self._adr_sources_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write(path, json.dumps(sorted(issue_ids)) + "\n")

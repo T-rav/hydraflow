@@ -27,6 +27,7 @@ from test_adequacy import build_test_adequacy_prompt, parse_test_adequacy_result
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
+    from dolt_backend import DoltBackend
     from execution import SubprocessRunner
     from hindsight import HindsightClient
 
@@ -89,9 +90,12 @@ Run through this checklist before your final commit:
         runner: SubprocessRunner | None = None,
         *,
         hindsight: HindsightClient | None = None,
+        dolt: DoltBackend | None = None,
     ) -> None:
         super().__init__(config, event_bus, runner, hindsight=hindsight)
-        self._insights = ReviewInsightStore(config.memory_dir, hindsight=hindsight)
+        self._insights = ReviewInsightStore(
+            config.memory_dir, hindsight=hindsight, dolt=dolt
+        )
 
     async def run(
         self,

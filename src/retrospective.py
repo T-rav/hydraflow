@@ -15,6 +15,7 @@ from models import IsoTimestamp, PlanAccuracyResult, ReviewVerdict
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
+    from dolt_backend import DoltBackend
     from hindsight import HindsightClient
     from models import ReviewResult
     from pr_manager import PRManager
@@ -51,11 +52,13 @@ class RetrospectiveCollector:
         prs: PRManager,
         *,
         hindsight: HindsightClient | None = None,
+        dolt: DoltBackend | None = None,
     ) -> None:
         self._config = config
         self._state = state
         self._prs = prs
         self._hindsight = hindsight
+        self._dolt = dolt
         self._retro_path = config.data_path("memory", "retrospectives.jsonl")
         self._filed_patterns_path = config.data_path("memory", "filed_patterns.json")
 
@@ -358,6 +361,8 @@ class RetrospectiveCollector:
 
     def _load_filed_patterns(self) -> set[str]:
         """Load the set of already-filed pattern keys."""
+        if self._dolt:
+            return self._dolt.get_dedup_set("filed_patterns")
         if not self._filed_patterns_path.exists():
             return set()
         try:
@@ -368,6 +373,9 @@ class RetrospectiveCollector:
 
     def _save_filed_patterns(self, patterns: set[str]) -> None:
         """Persist the set of filed pattern keys."""
+        if self._dolt:
+            self._dolt.set_dedup_set("filed_patterns", patterns)
+            return
         try:
             self._filed_patterns_path.parent.mkdir(parents=True, exist_ok=True)
             self._filed_patterns_path.write_text(json.dumps(sorted(patterns)))

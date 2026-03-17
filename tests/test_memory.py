@@ -2469,3 +2469,41 @@ class TestMemorySyncHindsightDualWrite:
         items_dir = config.data_path("memory", "items")
         item_files = list(items_dir.glob("*.md")) if items_dir.exists() else []
         assert item_files == []
+
+
+# ---------------------------------------------------------------------------
+# Dolt backend integration
+# ---------------------------------------------------------------------------
+
+
+class TestMemorySyncWorkerDolt:
+    """Tests for MemorySyncWorker ADR source tracking with Dolt backend."""
+
+    def test_load_adr_source_ids_uses_dolt(self, tmp_path: Path) -> None:
+        config = ConfigFactory.create(repo_root=tmp_path)
+        dolt = MagicMock()
+        dolt.get_dedup_set.return_value = {"10", "20", "30"}
+        worker = MemorySyncWorker(config, MagicMock(), MagicMock(), dolt=dolt)
+        result = worker._load_adr_source_ids()
+        assert result == {10, 20, 30}
+        dolt.get_dedup_set.assert_called_once_with("adr_sources")
+
+    def test_save_adr_source_ids_uses_dolt(self, tmp_path: Path) -> None:
+        config = ConfigFactory.create(repo_root=tmp_path)
+        dolt = MagicMock()
+        worker = MemorySyncWorker(config, MagicMock(), MagicMock(), dolt=dolt)
+        worker._save_adr_source_ids({10, 20})
+        dolt.set_dedup_set.assert_called_once_with("adr_sources", {"10", "20"})
+        # File should NOT be written
+        path = config.data_path("memory", "adr_sources.json")
+        assert not path.exists()
+
+    def test_file_fallback_when_dolt_is_none(self, tmp_path: Path) -> None:
+        config = ConfigFactory.create(repo_root=tmp_path)
+        worker = MemorySyncWorker(config, MagicMock(), MagicMock(), dolt=None)
+        assert worker._load_adr_source_ids() == set()
+        worker._save_adr_source_ids({5, 15})
+        assert worker._load_adr_source_ids() == {5, 15}
+        # File SHOULD be written
+        path = config.data_path("memory", "adr_sources.json")
+        assert path.exists()

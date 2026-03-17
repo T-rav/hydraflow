@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from models import IsoTimestamp, ReviewVerdict
 
 if TYPE_CHECKING:
+    from dolt_backend import DoltBackend
     from hindsight import HindsightClient
 
 logger = logging.getLogger("hydraflow.review_insights")
@@ -197,11 +198,13 @@ class ReviewInsightStore:
         memory_dir: Path,
         *,
         hindsight: HindsightClient | None = None,
+        dolt: DoltBackend | None = None,
     ) -> None:
         self._memory_dir = memory_dir
         self._reviews_path = memory_dir / "reviews.jsonl"
         self._proposed_path = memory_dir / "proposed_categories.json"
         self._hindsight = hindsight
+        self._dolt = dolt
 
     def append_review(self, record: ReviewRecord) -> None:
         """Append *record* as a JSON line to ``reviews.jsonl``."""
@@ -257,6 +260,8 @@ class ReviewInsightStore:
 
     def get_proposed_categories(self) -> set[str]:
         """Return the set of categories that already have filed proposals."""
+        if self._dolt:
+            return self._dolt.get_dedup_set("proposed_categories")
         if not self._proposed_path.exists():
             return set()
         try:
@@ -267,6 +272,9 @@ class ReviewInsightStore:
 
     def mark_category_proposed(self, category: str) -> None:
         """Record that an improvement proposal has been filed for *category*."""
+        if self._dolt:
+            self._dolt.add_to_dedup_set("proposed_categories", category)
+            return
         proposed = self.get_proposed_categories()
         proposed.add(category)
         self._memory_dir.mkdir(parents=True, exist_ok=True)

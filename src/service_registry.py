@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from acceptance_criteria import AcceptanceCriteriaGenerator
@@ -148,11 +150,29 @@ def build_services(
             timeout=config.hindsight_timeout,
         )
 
+    # Dolt embedded state backend (optional)
+    dolt_backend = None
+    if config.dolt_enabled:
+        from dolt_backend import DoltBackend
+
+        try:
+            dolt_dir = Path(str(config.state_file)).parent / "dolt"
+            dolt_backend = DoltBackend(dolt_dir)
+        except Exception:
+            logging.getLogger("hydraflow.service_registry").warning(
+                "Dolt init failed",
+                exc_info=True,
+            )
+
     # Core runners
     worktrees = WorkspaceManager(config)
     subprocess_runner = get_docker_runner(config)
     agents = AgentRunner(
-        config, event_bus, runner=subprocess_runner, hindsight=hindsight_client
+        config,
+        event_bus,
+        runner=subprocess_runner,
+        hindsight=hindsight_client,
+        dolt=dolt_backend,
     )
     planners = PlannerRunner(
         config, event_bus, runner=subprocess_runner, hindsight=hindsight_client
@@ -183,7 +203,9 @@ def build_services(
 
     # Harness insight store (shared across phases)
     harness_insights = HarnessInsightStore(
-        config.data_path("memory"), hindsight=hindsight_client
+        config.data_path("memory"),
+        hindsight=hindsight_client,
+        dolt=dolt_backend,
     )
 
     # Troubleshooting pattern store (CI timeout feedback loop)
@@ -283,9 +305,10 @@ def build_services(
         prs=prs,
         manifest_syncer=manifest_syncer,
         hindsight=hindsight_client,
+        dolt=dolt_backend,
     )
     retrospective = RetrospectiveCollector(
-        config, state, prs, hindsight=hindsight_client
+        config, state, prs, hindsight=hindsight_client, dolt=dolt_backend
     )
     ac_generator = AcceptanceCriteriaGenerator(
         config, prs, event_bus, runner=subprocess_runner
@@ -324,6 +347,7 @@ def build_services(
         update_bg_worker_status=callbacks.update_bg_worker_status,
         baseline_policy=baseline_policy,
         hindsight=hindsight_client,
+        dolt=dolt_backend,
     )
 
     # Background loops — shared deps bundled into a single LoopDeps object

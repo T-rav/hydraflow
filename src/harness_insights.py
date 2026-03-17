@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from models import IsoTimestamp, PipelineStage
 
 if TYPE_CHECKING:
+    from dolt_backend import DoltBackend
     from hindsight import HindsightClient
 
 logger = logging.getLogger("hydraflow.harness_insights")
@@ -140,11 +141,13 @@ class HarnessInsightStore:
         memory_dir: Path,
         *,
         hindsight: HindsightClient | None = None,
+        dolt: DoltBackend | None = None,
     ) -> None:
         self._memory_dir = memory_dir
         self._failures_path = memory_dir / "harness_failures.jsonl"
         self._proposed_path = memory_dir / "harness_proposed.json"
         self._hindsight = hindsight
+        self._dolt = dolt
 
     def append_failure(self, record: FailureRecord) -> None:
         """Append *record* as a JSON line to ``harness_failures.jsonl``."""
@@ -203,6 +206,8 @@ class HarnessInsightStore:
 
     def get_proposed_patterns(self) -> set[str]:
         """Return the set of pattern keys that already have filed proposals."""
+        if self._dolt:
+            return self._dolt.get_dedup_set("harness_proposed")
         if not self._proposed_path.exists():
             return set()
         try:
@@ -213,6 +218,9 @@ class HarnessInsightStore:
 
     def mark_pattern_proposed(self, key: str) -> None:
         """Record that an improvement proposal has been filed for *key*."""
+        if self._dolt:
+            self._dolt.add_to_dedup_set("harness_proposed", key)
+            return
         proposed = self.get_proposed_patterns()
         proposed.add(key)
         self._memory_dir.mkdir(parents=True, exist_ok=True)
