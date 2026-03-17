@@ -137,16 +137,37 @@ def build_services(
 
     This replaces the 170-line orchestrator constructor body.
     """
+    # Hindsight semantic memory (optional)
+    hindsight_client = None
+    if config.hindsight_enabled and config.hindsight_url:
+        from hindsight import HindsightClient
+
+        hindsight_client = HindsightClient(
+            config.hindsight_url,
+            api_key=config.hindsight_api_key,
+            timeout=config.hindsight_timeout,
+        )
+
     # Core runners
     worktrees = WorkspaceManager(config)
     subprocess_runner = get_docker_runner(config)
-    agents = AgentRunner(config, event_bus, runner=subprocess_runner)
-    planners = PlannerRunner(config, event_bus, runner=subprocess_runner)
-    researcher = ResearchRunner(config, event_bus, runner=subprocess_runner)
+    agents = AgentRunner(
+        config, event_bus, runner=subprocess_runner, hindsight=hindsight_client
+    )
+    planners = PlannerRunner(
+        config, event_bus, runner=subprocess_runner, hindsight=hindsight_client
+    )
+    researcher = ResearchRunner(
+        config, event_bus, runner=subprocess_runner, hindsight=hindsight_client
+    )
     prs = PRManager(config, event_bus)
     manifest_syncer = ManifestIssueSyncer(config, state, prs)
-    reviewers = ReviewRunner(config, event_bus, runner=subprocess_runner)
-    hitl_runner = HITLRunner(config, event_bus, runner=subprocess_runner)
+    reviewers = ReviewRunner(
+        config, event_bus, runner=subprocess_runner, hindsight=hindsight_client
+    )
+    hitl_runner = HITLRunner(
+        config, event_bus, runner=subprocess_runner, hindsight=hindsight_client
+    )
     triage = TriageRunner(config, event_bus, runner=subprocess_runner)
     summarizer = TranscriptSummarizer(
         config, prs, event_bus, state, runner=subprocess_runner

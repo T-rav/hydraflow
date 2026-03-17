@@ -142,7 +142,7 @@ class ReviewRunner(BaseRunner):
                 pr, issue, diff, worktree_path
             )
             cmd = self._build_command(worktree_path)
-            prompt, prompt_stats = self._build_review_prompt_with_stats(
+            prompt, prompt_stats = await self._build_review_prompt_with_stats(
                 pr,
                 issue,
                 diff,
@@ -642,7 +642,7 @@ Then a brief summary on the next line starting with "SUMMARY: ".
             f"{truncated_note}"
         )
 
-    def _build_review_prompt_with_stats(
+    async def _build_review_prompt_with_stats(
         self,
         pr: PRInfo,
         issue: Task,
@@ -681,7 +681,7 @@ Then a brief summary on the next line starting with "SUMMARY: ".
 
         min_findings = self._config.min_review_findings
 
-        manifest_section, memory_section = self._inject_manifest_and_memory()
+        manifest_section, memory_section = await self._inject_manifest_and_memory()
 
         # Runtime log injection
         log_section = ""
