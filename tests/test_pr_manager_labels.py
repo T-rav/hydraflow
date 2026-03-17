@@ -495,7 +495,7 @@ class TestSwapPipelineLabels:
     @pytest.mark.asyncio
     async def test_adds_before_removing(self, config, event_bus) -> None:
         """New label must be added before old labels are removed."""
-        mgr = _make_manager(config, event_bus)
+        mgr = make_pr_manager(config, event_bus)
         call_order: list[str] = []
         mgr._add_labels_strict = AsyncMock(
             side_effect=lambda *a, **kw: call_order.append("add")
@@ -518,7 +518,7 @@ class TestSwapPipelineLabels:
         self, config, event_bus
     ) -> None:
         """If the add fails, no labels should be removed."""
-        mgr = _make_manager(config, event_bus)
+        mgr = make_pr_manager(config, event_bus)
         mgr._add_labels_strict = AsyncMock(side_effect=RuntimeError("API down"))
         mgr._remove_label = AsyncMock()
 
