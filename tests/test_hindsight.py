@@ -110,7 +110,7 @@ class TestHindsightClient:
 
         assert result == {"id": "abc"}
         call_args = mock_post.call_args
-        assert "/hydraflow-learnings/memories/retain" in call_args[0][0]
+        assert "/hydraflow-learnings/memories" in call_args[0][0]
         payload = call_args[1]["json"]
         assert payload["items"][0]["content"] == "lesson learned"
         assert payload["items"][0]["context"] == "fixing bug"

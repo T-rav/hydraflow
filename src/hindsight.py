@@ -95,9 +95,10 @@ class HindsightClient:
     # -- Retain ---------------------------------------------------------------
 
     @staticmethod
-    def _bank_path(bank: Bank | str, suffix: str) -> str:
+    def _bank_path(bank: Bank | str, suffix: str = "") -> str:
         """Build the versioned bank API path."""
-        return f"/v1/default/banks/{bank}/{suffix}"
+        base = f"/v1/default/banks/{bank}"
+        return f"{base}/{suffix}" if suffix else base
 
     # -- Retain ---------------------------------------------------------------
 
@@ -119,9 +120,7 @@ class HindsightClient:
         if metadata:
             item["metadata"] = {k: str(v) for k, v in metadata.items()}
         payload: dict[str, Any] = {"items": [item]}
-        resp = await self._client.post(
-            self._bank_path(bank, "memories/retain"), json=payload
-        )
+        resp = await self._client.post(self._bank_path(bank, "memories"), json=payload)
         resp.raise_for_status()
         return resp.json()
 
@@ -146,9 +145,9 @@ class HindsightClient:
         for raw in items[:limit]:
             memories.append(
                 HindsightMemory(
-                    content=raw.get("text", ""),
-                    text=raw.get("text", ""),
-                    context=raw.get("context", ""),
+                    content=raw.get("text") or "",
+                    text=raw.get("text") or "",
+                    context=raw.get("context") or "",
                 )
             )
         return memories

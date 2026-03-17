@@ -63,7 +63,7 @@ done
 
 # 3. Retain a test memory
 info "Retaining test memory..."
-RETAIN_RESP=$(curl -fsS -X POST "$HINDSIGHT_URL/v1/default/banks/$BANK/memories/retain" \
+RETAIN_RESP=$(curl -fsS -X POST "$HINDSIGHT_URL/v1/default/banks/$BANK/memories" \
     -H "Content-Type: application/json" \
     -d '{
         "items": [{
