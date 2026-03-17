@@ -280,7 +280,9 @@ class HydraFlowOrchestrator:
                 logger.debug("Cancelled loop task %r", name)
 
         # Close the Hindsight HTTP client if present
-        if hasattr(self._svc, "hindsight") and self._svc.hindsight:
+        from hindsight import HindsightClient
+
+        if isinstance(getattr(self._svc, "hindsight", None), HindsightClient):
             await self._svc.hindsight.close()
 
         await self._publish_status()
