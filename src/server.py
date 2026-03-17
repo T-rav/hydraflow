@@ -16,7 +16,7 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
     from dashboard import HydraFlowDashboard  # noqa: PLC0415
     from events import EventBus, EventLog, EventType, HydraFlowEvent  # noqa: PLC0415
     from models import Phase  # noqa: PLC0415
-    from state import StateTracker  # noqa: PLC0415
+    from state import build_state_tracker  # noqa: PLC0415
 
     event_log = EventLog(config.event_log_path)
     bus = EventBus(event_log=event_log)
@@ -25,7 +25,7 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
         config.event_log_retention_days,
     )
     await bus.load_history_from_disk()
-    state = StateTracker(config.state_file)
+    state = build_state_tracker(config)
 
     dashboard = HydraFlowDashboard(
         config=config,

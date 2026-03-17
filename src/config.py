@@ -170,6 +170,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("screenshot_gist_public", "HYDRAFLOW_SCREENSHOT_GIST_PUBLIC", False),
     ("hindsight_enabled", "HYDRAFLOW_HINDSIGHT_ENABLED", False),
     ("hindsight_exclusive", "HYDRAFLOW_HINDSIGHT_EXCLUSIVE", False),
+    ("dolt_enabled", "HYDRAFLOW_DOLT_ENABLED", False),
 ]
 
 # Literal-typed env-var overrides.
@@ -741,6 +742,12 @@ class HydraFlowConfig(BaseModel):
     hindsight_exclusive: bool = Field(
         default=False,
         description="When True and Hindsight is enabled, skip file-based memory fallback",
+    )
+
+    # Dolt embedded state backend
+    dolt_enabled: bool = Field(
+        default=False,
+        description="Use embedded Dolt for state persistence instead of JSON files",
     )
 
     memory_prune_stale_items: bool = Field(

@@ -39,7 +39,7 @@ from phase_utils import (
     release_batch_in_flight,
 )
 from service_registry import OrchestratorCallbacks, ServiceRegistry, build_services
-from state import StateTracker
+from state import StateTracker, build_state_tracker
 from state_restorer import StateRestorer
 from subprocess_util import (
     AuthenticationError,
@@ -77,7 +77,7 @@ class HydraFlowOrchestrator:
     ) -> None:
         self._config = config
         self._bus = event_bus or EventBus()
-        self._state = state or StateTracker(config.state_file)
+        self._state = state or build_state_tracker(config)
         self._dashboard: object | None = None
         # In-memory tracking of active issues (avoids double-processing)
         self._active_impl_issues: set[int] = set()

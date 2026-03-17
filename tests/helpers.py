@@ -388,6 +388,7 @@ class ConfigFactory:
         hindsight_api_key: str = "",
         hindsight_timeout: int = 30,
         hindsight_exclusive: bool = False,
+        dolt_enabled: bool = False,
     ):
         """Create a HydraFlowConfig with test-friendly defaults."""
         from config import HydraFlowConfig
@@ -624,6 +625,7 @@ class ConfigFactory:
                 hindsight_api_key=hindsight_api_key,
                 hindsight_timeout=hindsight_timeout,
                 hindsight_exclusive=hindsight_exclusive,
+                dolt_enabled=dolt_enabled,
             )
 
 
