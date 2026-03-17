@@ -131,12 +131,21 @@ class DoltBackend:
             return None
 
     def save_state(self, data: str) -> None:
-        """Save the state JSON document (upsert)."""
-        escaped = data.replace("'", "''")
+        """Save the state JSON document (upsert).
+
+        Uses a temp SQL file for large payloads to avoid CLI argument limits.
+        """
         now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
-        self._sql_exec(  # nosec B608 — internal state data, not user input
-            f"REPLACE INTO state (id, data, updated_at) VALUES (1, '{escaped}', '{now}');"
-        )
+        escaped = data.replace("\\", "\\\\").replace("'", "\\'")
+        sql = f"REPLACE INTO state (id, data, updated_at) VALUES (1, '{escaped}', '{now}');"
+
+        # Write SQL to temp file and execute via source
+        sql_file = self._dir / ".tmp_state.sql"
+        try:
+            sql_file.write_text(sql)
+            self._run("sql", "--file", str(sql_file))
+        finally:
+            sql_file.unlink(missing_ok=True)
 
     def commit(self, message: str = "state update") -> None:
         """Stage all changes and create a Dolt commit."""
