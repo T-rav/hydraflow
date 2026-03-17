@@ -375,6 +375,51 @@ class TestInjectManifestAndMemory:
 
         assert "file digest" in memory_sec
 
+    @pytest.mark.asyncio
+    async def test_hindsight_exclusive_skips_file_fallback(
+        self, config, event_bus: EventBus
+    ) -> None:
+        config.hindsight_exclusive = True
+        mock_client = MagicMock()
+        runner = _TestRunner(config, event_bus, hindsight=mock_client)
+
+        with (
+            patch("base_runner.load_project_manifest", return_value=""),
+            patch(
+                "base_runner.load_memory_digest", return_value="file digest"
+            ) as mock_digest,
+            patch(
+                "hindsight.recall_safe",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+        ):
+            _, memory_sec = await runner._inject_manifest_and_memory(
+                query_context="Fix the widget"
+            )
+
+        # With exclusive mode and a client configured, file fallback is skipped
+        mock_digest.assert_not_called()
+        assert memory_sec == ""
+
+    @pytest.mark.asyncio
+    async def test_hindsight_exclusive_without_client_still_uses_file(
+        self, config, event_bus: EventBus
+    ) -> None:
+        config.hindsight_exclusive = True
+        runner = _TestRunner(config, event_bus)  # no hindsight client
+
+        with (
+            patch("base_runner.load_project_manifest", return_value=""),
+            patch("base_runner.load_memory_digest", return_value="file digest"),
+        ):
+            _, memory_sec = await runner._inject_manifest_and_memory(
+                query_context="Fix the widget"
+            )
+
+        # Without a client, exclusive mode is ignored — file fallback works
+        assert "file digest" in memory_sec
+
 
 # ---------------------------------------------------------------------------
 # _verify_quality

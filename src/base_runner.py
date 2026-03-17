@@ -200,8 +200,12 @@ class BaseRunner:
             if memory_raw:
                 memory_raw = memory_raw[: self._config.max_memory_prompt_chars]
 
-        # Fallback to file-based digest when Hindsight is absent or returned nothing
-        if not memory_raw:
+        # Fallback to file-based digest when Hindsight is absent or returned nothing.
+        # When hindsight_exclusive is set and a client is configured, skip file-based.
+        skip_file = self._hindsight and getattr(
+            self._config, "hindsight_exclusive", False
+        )
+        if not memory_raw and not skip_file:
             digest_path = self._config.data_path("memory", "digest.md")
             digest, digest_hit = self._context_cache.get_or_load(
                 key="memory_digest",

@@ -387,6 +387,7 @@ class ConfigFactory:
         hindsight_url: str = "",
         hindsight_api_key: str = "",
         hindsight_timeout: int = 30,
+        hindsight_exclusive: bool = False,
     ):
         """Create a HydraFlowConfig with test-friendly defaults."""
         from config import HydraFlowConfig
@@ -622,6 +623,7 @@ class ConfigFactory:
                 hindsight_url=hindsight_url,
                 hindsight_api_key=hindsight_api_key,
                 hindsight_timeout=hindsight_timeout,
+                hindsight_exclusive=hindsight_exclusive,
             )
 
 

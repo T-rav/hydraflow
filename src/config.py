@@ -169,6 +169,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ),
     ("screenshot_gist_public", "HYDRAFLOW_SCREENSHOT_GIST_PUBLIC", False),
     ("hindsight_enabled", "HYDRAFLOW_HINDSIGHT_ENABLED", False),
+    ("hindsight_exclusive", "HYDRAFLOW_HINDSIGHT_EXCLUSIVE", False),
 ]
 
 # Literal-typed env-var overrides.
@@ -736,6 +737,10 @@ class HydraFlowConfig(BaseModel):
         ge=5,
         le=120,
         description="HTTP timeout in seconds for Hindsight API calls",
+    )
+    hindsight_exclusive: bool = Field(
+        default=False,
+        description="When True and Hindsight is enabled, skip file-based memory fallback",
     )
 
     memory_prune_stale_items: bool = Field(
