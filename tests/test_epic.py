@@ -14,6 +14,7 @@ from epic import (
     check_all_checkboxes,
     parse_epic_sub_issues,
 )
+from events import EventType
 from models import EpicChildInfo, EpicState, GitHubIssue
 from tests.conftest import IssueFactory, make_state
 from tests.helpers import ConfigFactory
@@ -56,6 +57,14 @@ class TestParseEpicSubIssues:
         body = "See #100 for details.\n- [ ] #200 — Linked sub-issue"
         assert parse_epic_sub_issues(body) == [200]
 
+    def test_deduplicates_repeated_issue_numbers(self) -> None:
+        body = "- [ ] #5 — Task A\n- [ ] #5 — Task A duplicate\n- [ ] #10 — Task B"
+        assert parse_epic_sub_issues(body) == [5, 10]
+
+    def test_deduplicates_preserving_first_occurrence_order(self) -> None:
+        body = "- [ ] #7\n- [ ] #3\n- [ ] #7\n- [ ] #3\n- [ ] #1"
+        assert parse_epic_sub_issues(body) == [7, 3, 1]
+
 
 # ---------------------------------------------------------------------------
 # check_all_checkboxes
@@ -94,7 +103,7 @@ class TestCheckAllCheckboxes:
 def _make_epic(number: int, sub_issues: list[int]) -> GitHubIssue:
     lines = [f"- [ ] #{n} — Sub-issue {n}" for n in sub_issues]
     body = "## Epic\n\n" + "\n".join(lines)
-    return GitHubIssue(
+    return IssueFactory.create(
         number=number, title="[Epic] Test", body=body, labels=["hydraflow-epic"]
     )
 
@@ -184,7 +193,7 @@ class TestEpicCompletionChecker:
 
     @pytest.mark.asyncio
     async def test_handles_epic_with_no_checkboxes(self) -> None:
-        epic = GitHubIssue(
+        epic = IssueFactory.create(
             number=100,
             title="[Epic] No checkboxes",
             body="This epic has no checkbox sub-issues.",
@@ -319,7 +328,7 @@ class TestEpicClosedWithoutMerge:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="Issue #2",
                 labels=["wontfix"],
@@ -346,7 +355,7 @@ class TestEpicClosedWithoutMerge:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="Issue #2",
                 labels=["duplicate"],
@@ -368,10 +377,10 @@ class TestEpicClosedWithoutMerge:
         """All sub-issues closed (no fixed label) — still closes epic."""
         epic = _make_epic(100, [1, 2])
         sub_issues = {
-            1: GitHubIssue(
+            1: IssueFactory.create(
                 number=1, title="Issue #1", labels=["wontfix"], state="closed"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2, title="Issue #2", labels=["invalid"], state="closed"
             ),
         }
@@ -393,7 +402,7 @@ class TestEpicClosedWithoutMerge:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="Issue #2",
                 labels=[],
@@ -421,7 +430,7 @@ class TestEpicHITLHandling:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="Issue #2",
                 labels=["hydraflow-hitl"],
@@ -453,7 +462,7 @@ class TestEpicHITLHandling:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="Issue #2",
                 labels=["hydraflow-hitl"],
@@ -483,7 +492,7 @@ class TestEpicHITLHandling:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="Issue #2",
                 labels=["hydraflow-hitl"],
@@ -508,7 +517,7 @@ class TestEpicHITLHandling:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="Issue #2",
                 labels=["hydraflow-hitl"],
@@ -539,13 +548,13 @@ class TestEpicHITLHandling:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="Issue #2",
                 labels=["hydraflow-hitl"],
                 state="open",
             ),
-            3: GitHubIssue(
+            3: IssueFactory.create(
                 number=3,
                 title="Issue #3",
                 labels=["hydraflow-hitl"],
@@ -578,7 +587,7 @@ class TestNestedEpics:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="[Epic] Child epic",
                 labels=["hydraflow-epic"],
@@ -603,7 +612,7 @@ class TestNestedEpics:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="[Epic] Child epic",
                 labels=["hydraflow-epic"],
@@ -628,7 +637,7 @@ class TestNestedEpics:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="[Epic] Child epic",
                 labels=["hydraflow-epic", "hydraflow-fixed"],
@@ -655,7 +664,7 @@ class TestNestedEpics:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            200: GitHubIssue(
+            200: IssueFactory.create(
                 number=200,
                 title="[Epic] Child epic",
                 labels=["hydraflow-epic"],
@@ -689,13 +698,13 @@ class TestNestedEpics:
         epic_a = _make_epic(100, [200])
         epic_b = _make_epic(200, [100])
         sub_issues = {
-            100: GitHubIssue(
+            100: IssueFactory.create(
                 number=100,
                 title="[Epic] A",
                 labels=["hydraflow-epic"],
                 state="closed",
             ),
-            200: GitHubIssue(
+            200: IssueFactory.create(
                 number=200,
                 title="[Epic] B",
                 labels=["hydraflow-epic"],
@@ -760,7 +769,7 @@ class TestDynamicSubIssueAudit:
             2: IssueFactory.create(
                 number=2, labels=["hydraflow-fixed"], title="Issue #2"
             ),
-            3: GitHubIssue(
+            3: IssueFactory.create(
                 number=3,
                 title="Issue #3 (new, incomplete)",
                 labels=[],
@@ -789,7 +798,7 @@ class TestEpicExcludedStateTracking:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="Issue #2",
                 labels=["wontfix"],
@@ -817,7 +826,7 @@ class TestEpicExcludedStateTracking:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2,
                 title="Issue #2",
                 labels=["duplicate"],
@@ -861,7 +870,7 @@ class TestCheckAndCloseEpicsReturnValue:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(number=2, title="Issue #2", labels=[], state="open"),
+            2: IssueFactory.create(number=2, title="Issue #2", labels=[], state="open"),
         }
         checker, _, _ = _make_checker(epics=[epic], sub_issues=sub_issues)
 
@@ -945,10 +954,10 @@ class TestEpicManagerOnChildExcluded:
     async def test_triggers_auto_close_when_all_excluded(self, tmp_path: Path) -> None:
         epic_gh = _make_epic(100, [1, 2])
         sub_issues = {
-            1: GitHubIssue(
+            1: IssueFactory.create(
                 number=1, title="Issue #1", labels=["wontfix"], state="closed"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2, title="Issue #2", labels=["duplicate"], state="closed"
             ),
         }
@@ -1003,7 +1012,7 @@ class TestCloseSpecificEpic:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(number=2, title="Issue #2", labels=[], state="open"),
+            2: IssueFactory.create(number=2, title="Issue #2", labels=[], state="open"),
         }
         checker, prs, _, _ = _make_checker_with_state(
             epics=[epic],
@@ -1041,7 +1050,7 @@ class TestCloseSpecificEpic:
 
     @pytest.mark.asyncio
     async def test_returns_none_when_epic_has_no_sub_issues(self) -> None:
-        epic = GitHubIssue(
+        epic = IssueFactory.create(
             number=100,
             title="[Epic] No checkboxes",
             body="This epic has no checkbox sub-issues.",
@@ -1069,10 +1078,10 @@ class TestEpicManagerTryAutoClose:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2, title="Issue #2", labels=["wontfix"], state="closed"
             ),
-            3: GitHubIssue(number=3, title="Issue #3", labels=[], state="open"),
+            3: IssueFactory.create(number=3, title="Issue #3", labels=[], state="open"),
         }
         manager, prs, _ = _make_epic_manager(
             tmp_path, epics=[epic_gh], sub_issues=sub_issues
@@ -1104,7 +1113,7 @@ class TestEpicManagerTryAutoClose:
             1: IssueFactory.create(
                 number=1, labels=["hydraflow-fixed"], title="Issue #1"
             ),
-            2: GitHubIssue(
+            2: IssueFactory.create(
                 number=2, title="Issue #2", labels=["wontfix"], state="closed"
             ),
         }
@@ -1484,13 +1493,43 @@ class TestNarrowedExceptionHandling:
         manager._build_detail.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_refresh_cache_propagates_type_error(self, tmp_path: Path) -> None:
-        """TypeError from _build_detail propagates."""
+    async def test_refresh_cache_catches_type_error(self, tmp_path: Path) -> None:
+        """TypeError from _build_detail is now caught (widened to Exception)."""
         manager, _, _ = _make_epic_manager(tmp_path)
         manager._state.upsert_epic_state(EpicState(epic_number=100, child_issues=[1]))
         manager._build_detail = AsyncMock(side_effect=TypeError("bad type"))
-        with pytest.raises(TypeError, match="bad type"):
-            await manager.refresh_cache()
+        # Should not raise — Exception catch is wider than RuntimeError
+        await manager.refresh_cache()
+
+    @pytest.mark.asyncio
+    async def test_refresh_cache_continues_after_runtime_error(
+        self, tmp_path: Path
+    ) -> None:
+        """First epic raises RuntimeError; second epic is still processed."""
+        manager, _, _ = _make_epic_manager(tmp_path)
+        manager._state.upsert_epic_state(EpicState(epic_number=100, child_issues=[1]))
+        manager._state.upsert_epic_state(EpicState(epic_number=200, child_issues=[2]))
+
+        detail_sentinel = MagicMock()
+        detail_sentinel.model_dump.return_value = {}
+        detail_sentinel.readiness.all_implemented = False
+
+        async def _build_side_effect(epic_number: int) -> MagicMock:
+            if epic_number == 100:
+                raise RuntimeError("API flake")
+            return detail_sentinel
+
+        manager._build_detail = AsyncMock(side_effect=_build_side_effect)
+        await manager.refresh_cache()
+        # Both epics attempted; second succeeded despite first failing
+        assert manager._build_detail.await_count == 2
+        # Verify _bus.publish was called with EPIC_PROGRESS for the second epic
+        publish_calls = manager._bus.publish.call_args_list
+        progress_events = [
+            c for c in publish_calls if c.args[0].type == EventType.EPIC_PROGRESS
+        ]
+        assert len(progress_events) == 1
+        assert progress_events[0].args[0].data["epic_number"] == 200
 
     @pytest.mark.asyncio
     async def test_check_stale_epics_catches_runtime_error(
@@ -1512,10 +1551,8 @@ class TestNarrowedExceptionHandling:
         assert 100 in stale
 
     @pytest.mark.asyncio
-    async def test_check_stale_epics_propagates_type_error(
-        self, tmp_path: Path
-    ) -> None:
-        """TypeError from post_comment propagates."""
+    async def test_check_stale_epics_catches_type_error(self, tmp_path: Path) -> None:
+        """TypeError from post_comment is now caught (widened to Exception)."""
         manager, prs, _ = _make_epic_manager(tmp_path)
         manager._state.upsert_epic_state(
             EpicState(
@@ -1525,8 +1562,48 @@ class TestNarrowedExceptionHandling:
             )
         )
         prs.post_comment = AsyncMock(side_effect=TypeError("bad arg"))
-        with pytest.raises(TypeError, match="bad arg"):
-            await manager.check_stale_epics()
+        # Should not raise — Exception catch is wider than RuntimeError
+        stale = await manager.check_stale_epics()
+        assert 100 in stale
+
+    @pytest.mark.asyncio
+    async def test_check_stale_epics_continues_after_runtime_error(
+        self, tmp_path: Path
+    ) -> None:
+        """First stale epic's post_comment raises; second is still processed."""
+        manager, prs, _ = _make_epic_manager(tmp_path)
+        manager._state.upsert_epic_state(
+            EpicState(
+                epic_number=100,
+                child_issues=[1],
+                last_activity="2000-01-01T00:00:00+00:00",
+            )
+        )
+        manager._state.upsert_epic_state(
+            EpicState(
+                epic_number=200,
+                child_issues=[2],
+                last_activity="2000-01-01T00:00:00+00:00",
+            )
+        )
+
+        async def _post_side_effect(issue_number: int, body: str) -> None:
+            if issue_number == 100:
+                raise RuntimeError("post failed")
+
+        prs.post_comment = AsyncMock(side_effect=_post_side_effect)
+        stale = await manager.check_stale_epics()
+        # Both stale epics are returned despite first post_comment failing
+        assert 100 in stale
+        assert 200 in stale
+        assert prs.post_comment.await_count == 2
+        # Verify _bus.publish emitted SYSTEM_ALERT for both epics
+        alert_events = [
+            c
+            for c in manager._bus.publish.call_args_list
+            if c.args[0].type == EventType.SYSTEM_ALERT
+        ]
+        assert len(alert_events) == 2
 
     @pytest.mark.asyncio
     async def test_release_epic_merge_loop_catches_runtime_error(
@@ -1585,6 +1662,32 @@ class TestNarrowedExceptionHandling:
             await checker.check_and_close_epics(1)
 
     @pytest.mark.asyncio
+    async def test_check_and_close_epics_inner_continues_after_runtime_error(
+        self,
+    ) -> None:
+        """First epic raises RuntimeError in _try_close_epic; second is still processed."""
+        epic_a = _make_epic(100, [1])
+        epic_b = _make_epic(200, [1])
+        sub1 = IssueFactory.create(number=1, labels=["hydraflow-fixed"], title="A")
+        checker, prs, fetcher = _make_checker(
+            epics=[epic_a, epic_b], sub_issues={1: sub1}
+        )
+
+        async def _try_close_side_effect(
+            epic_number: int, *_a: object, **_kw: object
+        ) -> bool:
+            if epic_number == 100:
+                raise RuntimeError("close failed")
+            return True
+
+        checker._try_close_epic = AsyncMock(side_effect=_try_close_side_effect)
+        result = await checker.check_and_close_epics(1)
+        # _try_close_epic was awaited for both epics
+        assert checker._try_close_epic.await_count == 2
+        # Second epic closed successfully
+        assert result is True
+
+    @pytest.mark.asyncio
     async def test_enrich_pr_status_propagates_type_error_on_reviews(
         self, tmp_path: Path
     ) -> None:
@@ -1608,3 +1711,195 @@ class TestNarrowedExceptionHandling:
         child_info = EpicChildInfo(issue_number=1)
         with pytest.raises(TypeError, match="bad mergeable"):
             await manager._enrich_pr_status(child_info, 42)
+
+
+# ---------------------------------------------------------------------------
+# Epic edge cases — 0 children, duplicate children
+# ---------------------------------------------------------------------------
+
+
+class TestEpicEdgeCases:
+    """Edge cases for epic with 0 children and duplicate child references."""
+
+    @pytest.mark.asyncio
+    async def test_epic_with_zero_children_does_not_close(self) -> None:
+        """An epic whose body has no checkbox sub-issues should not be closed."""
+        epic = IssueFactory.create(
+            number=100,
+            title="[Epic] Empty",
+            body="This epic has no sub-issues yet.",
+            labels=["hydraflow-epic"],
+        )
+        checker, prs, _ = _make_checker(epics=[epic])
+
+        await checker.check_and_close_epics(1)
+
+        prs.close_issue.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_epic_with_empty_body_does_not_close(self) -> None:
+        """An epic with a completely empty body should not be closed."""
+        epic = IssueFactory.create(
+            number=100,
+            title="[Epic] Empty body",
+            body="",
+            labels=["hydraflow-epic"],
+        )
+        checker, prs, _ = _make_checker(epics=[epic])
+
+        await checker.check_and_close_epics(1)
+
+        prs.close_issue.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_epic_with_duplicate_children_closes_once(self) -> None:
+        """An epic with duplicate child references in body should close normally."""
+        lines = [
+            "- [ ] #1 — Sub-issue 1",
+            "- [ ] #2 — Sub-issue 2",
+            "- [ ] #1 — Sub-issue 1 (dup)",
+        ]
+        body = "## Epic\n\n" + "\n".join(lines)
+        epic = IssueFactory.create(
+            number=100,
+            title="[Epic] Dup children",
+            body=body,
+            labels=["hydraflow-epic"],
+        )
+        sub_issues = {
+            1: IssueFactory.create(
+                number=1, labels=["hydraflow-fixed"], title="Issue #1"
+            ),
+            2: IssueFactory.create(
+                number=2, labels=["hydraflow-fixed"], title="Issue #2"
+            ),
+        }
+        checker, prs, _ = _make_checker(epics=[epic], sub_issues=sub_issues)
+
+        await checker.check_and_close_epics(1)
+
+        prs.close_issue.assert_called_once_with(100)
+
+
+class TestPerItemErrorGuards:
+    """Tests that per-item try/except guards allow loops to continue after failure."""
+
+    def test_get_all_progress_continues_after_failure(self, tmp_path: Path) -> None:
+        """get_all_progress continues to the next epic when one raises."""
+        manager, _, _ = _make_epic_manager(tmp_path)
+        manager._state.upsert_epic_state(EpicState(epic_number=100, child_issues=[1]))
+        manager._state.upsert_epic_state(EpicState(epic_number=200, child_issues=[2]))
+
+        call_count = 0
+        original_get_progress = manager.get_progress
+
+        def _failing_progress(epic_number: int) -> object:
+            nonlocal call_count
+            call_count += 1
+            if epic_number == 100:
+                raise RuntimeError("progress failed")
+            return original_get_progress(epic_number)
+
+        manager.get_progress = _failing_progress  # type: ignore[assignment]
+        results = manager.get_all_progress()
+
+        assert call_count == 2
+        assert len(results) == 1
+
+    @pytest.mark.asyncio
+    async def test_get_all_detail_continues_after_failure(self, tmp_path: Path) -> None:
+        """get_all_detail continues to the next epic when one raises."""
+        manager, _, _ = _make_epic_manager(tmp_path)
+        manager._state.upsert_epic_state(EpicState(epic_number=100, child_issues=[1]))
+        manager._state.upsert_epic_state(EpicState(epic_number=200, child_issues=[2]))
+
+        call_count = 0
+
+        async def _failing_detail(epic_number: int) -> object:
+            nonlocal call_count
+            call_count += 1
+            if epic_number == 100:
+                raise RuntimeError("detail failed")
+            return None
+
+        manager.get_detail = _failing_detail  # type: ignore[assignment]
+        results = await manager.get_all_detail()
+
+        assert call_count == 2
+        assert len(results) == 0  # second returned None so also not appended
+
+    @pytest.mark.asyncio
+    async def test_refresh_cache_continues_after_exception(
+        self, tmp_path: Path
+    ) -> None:
+        """refresh_cache catches Exception (not just RuntimeError)."""
+        manager, _, _ = _make_epic_manager(tmp_path)
+        manager._state.upsert_epic_state(EpicState(epic_number=100, child_issues=[1]))
+        manager._state.upsert_epic_state(EpicState(epic_number=200, child_issues=[2]))
+
+        call_count = 0
+
+        async def _failing_build(epic_number: int) -> object:
+            nonlocal call_count
+            call_count += 1
+            if epic_number == 100:
+                raise ValueError("unexpected value error")
+            return None
+
+        manager._build_detail = _failing_build  # type: ignore[assignment]
+        # Should not raise
+        await manager.refresh_cache()
+
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_check_stale_epics_continues_after_publish_failure(
+        self, tmp_path: Path
+    ) -> None:
+        """check_stale_epics continues when bus.publish raises inside the try block."""
+        manager, prs, _ = _make_epic_manager(tmp_path)
+        manager._state.upsert_epic_state(
+            EpicState(
+                epic_number=100,
+                child_issues=[1],
+                last_activity="2000-01-01T00:00:00+00:00",
+            )
+        )
+        manager._state.upsert_epic_state(
+            EpicState(
+                epic_number=200,
+                child_issues=[2],
+                last_activity="2000-01-01T00:00:00+00:00",
+            )
+        )
+        # post_comment succeeds but bus.publish raises
+        prs.post_comment = AsyncMock()
+        manager._bus.publish = AsyncMock(
+            side_effect=[RuntimeError("publish failed"), None]
+        )
+
+        stale = await manager.check_stale_epics()
+
+        # Both epics are stale and both were attempted
+        assert 100 in stale
+        assert 200 in stale
+
+    @pytest.mark.asyncio
+    async def test_check_stale_epics_bus_publish_inside_try(
+        self, tmp_path: Path
+    ) -> None:
+        """bus.publish failure in check_stale_epics is caught, not raised."""
+        manager, prs, _ = _make_epic_manager(tmp_path)
+        manager._state.upsert_epic_state(
+            EpicState(
+                epic_number=100,
+                child_issues=[1],
+                last_activity="2000-01-01T00:00:00+00:00",
+            )
+        )
+        prs.post_comment = AsyncMock()
+        manager._bus.publish = AsyncMock(side_effect=ValueError("publish exploded"))
+
+        # Should not raise — the exception is caught inside the try block
+        stale = await manager.check_stale_epics()
+        assert 100 in stale

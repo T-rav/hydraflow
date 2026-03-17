@@ -19,47 +19,8 @@ from models import (
     WorkerResult,
 )
 from orchestrator import HydraFlowOrchestrator
-from tests.conftest import TaskFactory, WorkerResultFactory
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _mock_fetcher_noop(orch: HydraFlowOrchestrator) -> None:
-    """Mock store and fetcher methods so no real gh CLI calls are made.
-
-    Required for tests that go through run() since exception isolation
-    catches errors from unmocked fetcher/store calls instead of propagating them.
-    """
-    orch._svc.store.get_triageable = lambda _max_count: []  # type: ignore[method-assign]
-    orch._svc.store.get_plannable = lambda _max_count: []  # type: ignore[method-assign]
-    orch._svc.store.get_reviewable = lambda _max_count: []  # type: ignore[method-assign]
-    orch._svc.store.start = AsyncMock()  # type: ignore[method-assign]
-    orch._svc.store.get_active_issues = lambda: {}  # type: ignore[method-assign]
-    orch._svc.fetcher.fetch_issue_by_number = AsyncMock(return_value=None)  # type: ignore[method-assign]
-    orch._svc.fetcher.fetch_reviewable_prs = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
-    orch._enable_rerere = AsyncMock()  # type: ignore[method-assign]
-    orch._svc.worktrees.sanitize_repo = AsyncMock()  # type: ignore[method-assign]
-
-
-def make_worker_result(
-    issue_number: int = 42,
-    branch: str = "agent/issue-42",
-    success: bool = True,
-    worktree_path: str = "/tmp/worktrees/issue-42",
-    transcript: str = "Implemented the feature.",
-) -> WorkerResult:
-    return WorkerResultFactory.create(
-        issue_number=issue_number,
-        branch=branch,
-        success=success,
-        transcript=transcript,
-        commits=1,
-        worktree_path=worktree_path,
-        use_defaults=True,
-    )
-
+from tests.conftest import ReviewResultFactory, TaskFactory
+from tests.helpers import make_worker_result, mock_fetcher_noop
 
 # ---------------------------------------------------------------------------
 # Initialization
@@ -72,50 +33,57 @@ class TestInit:
     def test_creates_event_bus(self, config: HydraFlowConfig) -> None:
         orch = HydraFlowOrchestrator(config)
         assert isinstance(orch._bus, EventBus)
+        assert orch._bus is orch.event_bus
 
     def test_creates_state_tracker(self, config: HydraFlowConfig) -> None:
         from state import StateTracker
 
         orch = HydraFlowOrchestrator(config)
         assert isinstance(orch._state, StateTracker)
+        assert orch._state._path == config.state_file
 
     def test_creates_worktree_manager(self, config: HydraFlowConfig) -> None:
         from workspace import WorkspaceManager
 
         orch = HydraFlowOrchestrator(config)
         assert isinstance(orch._svc.worktrees, WorkspaceManager)
+        assert orch._svc.worktrees._config is config
 
     def test_creates_agent_runner(self, config: HydraFlowConfig) -> None:
         from agent import AgentRunner
 
         orch = HydraFlowOrchestrator(config)
         assert isinstance(orch._svc.agents, AgentRunner)
+        assert orch._svc.agents._config is config
 
     def test_creates_pr_manager(self, config: HydraFlowConfig) -> None:
         from pr_manager import PRManager
 
         orch = HydraFlowOrchestrator(config)
         assert isinstance(orch._svc.prs, PRManager)
+        assert orch._svc.prs._config is config
 
     def test_creates_planner_runner(self, config: HydraFlowConfig) -> None:
         from planner import PlannerRunner
 
         orch = HydraFlowOrchestrator(config)
         assert isinstance(orch._svc.planners, PlannerRunner)
+        assert orch._svc.planners._config is config
 
     def test_creates_review_runner(self, config: HydraFlowConfig) -> None:
         from reviewer import ReviewRunner
 
         orch = HydraFlowOrchestrator(config)
         assert isinstance(orch._svc.reviewers, ReviewRunner)
+        assert orch._svc.reviewers._config is config
 
     def test_human_input_requests_starts_empty(self, config: HydraFlowConfig) -> None:
         orch = HydraFlowOrchestrator(config)
-        assert orch._human_input_requests == {}
+        assert orch._hitl_ctrl._human_input_requests == {}
 
     def test_human_input_responses_starts_empty(self, config: HydraFlowConfig) -> None:
         orch = HydraFlowOrchestrator(config)
-        assert orch._human_input_responses == {}
+        assert orch._hitl_ctrl._human_input_responses == {}
 
     def test_dashboard_starts_as_none(self, config: HydraFlowConfig) -> None:
         orch = HydraFlowOrchestrator(config)
@@ -126,18 +94,21 @@ class TestInit:
 
         orch = HydraFlowOrchestrator(config)
         assert isinstance(orch._svc.fetcher, IssueFetcher)
+        assert orch._svc.fetcher._config is config
 
     def test_creates_implementer(self, config: HydraFlowConfig) -> None:
         from implement_phase import ImplementPhase
 
         orch = HydraFlowOrchestrator(config)
         assert isinstance(orch._svc.implementer, ImplementPhase)
+        assert orch._svc.implementer._config is config
 
     def test_creates_reviewer(self, config: HydraFlowConfig) -> None:
         from review_phase import ReviewPhase
 
         orch = HydraFlowOrchestrator(config)
         assert isinstance(orch._svc.reviewer, ReviewPhase)
+        assert orch._svc.reviewer._config is config
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +126,7 @@ class TestProperties:
     def test_event_bus_is_event_bus_instance(self, config: HydraFlowConfig) -> None:
         orch = HydraFlowOrchestrator(config)
         assert isinstance(orch.event_bus, EventBus)
+        assert orch.event_bus is orch._svc.agents._bus
 
     def test_state_returns_internal_state(self, config: HydraFlowConfig) -> None:
         from state import StateTracker
@@ -162,12 +134,13 @@ class TestProperties:
         orch = HydraFlowOrchestrator(config)
         assert orch.state is orch._state
         assert isinstance(orch.state, StateTracker)
+        assert orch.state._path == config.state_file
 
     def test_human_input_requests_returns_internal_dict(
         self, config: HydraFlowConfig
     ) -> None:
         orch = HydraFlowOrchestrator(config)
-        assert orch.human_input_requests is orch._human_input_requests
+        assert orch.human_input_requests is orch._hitl_ctrl._human_input_requests
 
     def test_no_class_constant_default_max_reviewers(self) -> None:
         assert not hasattr(HydraFlowOrchestrator, "DEFAULT_MAX_REVIEWERS")
@@ -187,15 +160,15 @@ class TestHumanInput:
     def test_provide_human_input_stores_answer(self, config: HydraFlowConfig) -> None:
         orch = HydraFlowOrchestrator(config)
         orch.provide_human_input(42, "Use option B")
-        assert orch._human_input_responses[42] == "Use option B"
+        assert orch._hitl_ctrl._human_input_responses[42] == "Use option B"
 
     def test_provide_human_input_removes_from_requests(
         self, config: HydraFlowConfig
     ) -> None:
         orch = HydraFlowOrchestrator(config)
-        orch._human_input_requests[42] = "Which approach?"
+        orch._hitl_ctrl._human_input_requests[42] = "Which approach?"
         orch.provide_human_input(42, "Approach A")
-        assert 42 not in orch._human_input_requests
+        assert 42 not in orch._hitl_ctrl._human_input_requests
 
     def test_provide_human_input_for_non_pending_issue_is_safe(
         self, config: HydraFlowConfig
@@ -203,13 +176,13 @@ class TestHumanInput:
         orch = HydraFlowOrchestrator(config)
         # No request registered — should not raise
         orch.provide_human_input(99, "Some answer")
-        assert orch._human_input_responses[99] == "Some answer"
+        assert orch._hitl_ctrl._human_input_responses[99] == "Some answer"
 
     def test_human_input_requests_reflects_pending(
         self, config: HydraFlowConfig
     ) -> None:
         orch = HydraFlowOrchestrator(config)
-        orch._human_input_requests[7] = "What colour?"
+        orch._hitl_ctrl._human_input_requests[7] = "What colour?"
         assert orch.human_input_requests == {7: "What colour?"}
 
 
@@ -230,7 +203,7 @@ class TestRunLoop:
         """run() sets _running = True at start."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
         observed_running = False
 
         async def plan_and_stop() -> list[PlanResult]:
@@ -252,7 +225,7 @@ class TestRunLoop:
     ) -> None:
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         async def plan_and_stop() -> list[PlanResult]:
             orch._stop_event.set()
@@ -272,7 +245,7 @@ class TestRunLoop:
         """run() publishes orchestrator_status events at start and end."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         async def plan_and_stop() -> list[PlanResult]:
             orch._stop_event.set()
@@ -305,7 +278,7 @@ class TestRunLoop:
         """Setting _stop_event causes all three loops to exit."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         plan_calls = 0
 
@@ -328,7 +301,7 @@ class TestRunLoop:
         """Plan, implement, and review loops run concurrently via asyncio.gather."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         started: list[str] = []
 
@@ -361,7 +334,7 @@ class TestRunCallsSanitizeRepo:
     ) -> None:
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         async def plan_and_stop() -> list[PlanResult]:
             orch._stop_event.set()
@@ -394,7 +367,7 @@ class TestRunFinallyTerminatesRunners:
         """When run() exits via stop event, all three runner terminate() are called."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         async def plan_and_stop() -> list[PlanResult]:
             orch._stop_event.set()
@@ -421,7 +394,7 @@ class TestRunFinallyTerminatesRunners:
         """If a loop exception is caught, runners are still terminated on stop."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         call_count = 0
 
@@ -456,7 +429,7 @@ class TestRunFinallyTerminatesRunners:
         """_running must remain True while terminate() calls are in progress."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         async def plan_and_stop() -> list[PlanResult]:
             orch._stop_event.set()
@@ -507,6 +480,9 @@ class TestConstructorInjection:
     def test_uses_provided_event_bus(self, config: HydraFlowConfig, event_bus) -> None:
         orch = HydraFlowOrchestrator(config, event_bus=event_bus)
         assert orch._bus is event_bus
+        assert orch._svc.agents._bus is event_bus
+        assert orch._svc.planners._bus is event_bus
+        assert orch._svc.reviewers._bus is event_bus
 
     def test_uses_provided_state(self, config: HydraFlowConfig) -> None:
         state = StateTracker(config.state_file)
@@ -516,12 +492,14 @@ class TestConstructorInjection:
     def test_creates_own_bus_when_none_provided(self, config: HydraFlowConfig) -> None:
         orch = HydraFlowOrchestrator(config)
         assert isinstance(orch._bus, EventBus)
+        assert orch._svc.agents._bus is orch._bus
 
     def test_creates_own_state_when_none_provided(
         self, config: HydraFlowConfig
     ) -> None:
         orch = HydraFlowOrchestrator(config)
         assert isinstance(orch._state, StateTracker)
+        assert orch._state._path == config.state_file
 
     def test_shared_bus_receives_events(
         self, config: HydraFlowConfig, event_bus
@@ -673,7 +651,7 @@ class TestStopMechanism:
     ) -> None:
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
         observed_running = False
 
         async def spy_implement() -> tuple[list[WorkerResult], list[Task]]:
@@ -695,7 +673,7 @@ class TestStopMechanism:
     ) -> None:
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         async def plan_and_stop() -> list[PlanResult]:
             orch._stop_event.set()
@@ -713,7 +691,7 @@ class TestStopMechanism:
         """Setting stop event causes loops to exit after current iteration."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         call_count = 0
 
@@ -736,7 +714,7 @@ class TestStopMechanism:
         """Calling run() again after stop should reset the stop event."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
         await orch.request_stop()
         assert orch._stop_event.is_set()
 
@@ -760,7 +738,7 @@ class TestStopMechanism:
         """After stop halts the orchestrator, running should be False."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         async def stop_on_implement() -> tuple[list[WorkerResult], list[Task]]:
             await orch.request_stop()
@@ -794,7 +772,7 @@ class TestOrchestratorShutdownLifecycle:
         """_running stays True while _supervise_loops is cleaning up tasks."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
         running_after_stop = None
 
         async def plan_capture_and_stop() -> list[PlanResult]:
@@ -820,7 +798,7 @@ class TestOrchestratorShutdownLifecycle:
         """run_status returns 'stopping' after stop() but before run() exits."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
         captured_status = None
 
         async def plan_capture_and_stop() -> list[PlanResult]:
@@ -843,7 +821,7 @@ class TestOrchestratorShutdownLifecycle:
         """run_status returns 'idle' after run() fully completes."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         async def plan_and_stop() -> list[PlanResult]:
             orch._stop_event.set()
@@ -863,7 +841,7 @@ class TestOrchestratorShutdownLifecycle:
         """ORCHESTRATOR_STATUS events follow running -> stopping -> idle sequence."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         async def plan_and_stop() -> list[PlanResult]:
             await orch.stop()
@@ -897,7 +875,7 @@ class TestOrchestratorShutdownLifecycle:
         """All runner _active_procs sets are empty after run() returns."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         async def plan_and_stop() -> list[PlanResult]:
             orch._stop_event.set()
@@ -920,7 +898,7 @@ class TestOrchestratorShutdownLifecycle:
         """stop() terminates eagerly; finally block terminates again (belt-and-suspenders)."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         terminate_calls = {"planners": 0, "agents": 0, "reviewers": 0, "hitl": 0}
 
@@ -979,7 +957,7 @@ class TestConcurrentLoops:
         """Triage, plan, implement, review should all run concurrently."""
         orch = HydraFlowOrchestrator(config)
         orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
 
         execution_order: list[str] = []
 
@@ -1028,22 +1006,16 @@ class TestOrchestratorPropertyAccessors:
         assert orch.current_session_id is None
 
     def test_issue_store_returns_store(self, config: HydraFlowConfig) -> None:
-        from issue_store import IssueStore
-
         orch = HydraFlowOrchestrator(config)
-        assert isinstance(orch.issue_store, IssueStore)
+        assert orch.issue_store is orch._svc.store
 
     def test_metrics_manager_returns_manager(self, config: HydraFlowConfig) -> None:
-        from metrics_manager import MetricsManager
-
         orch = HydraFlowOrchestrator(config)
-        assert isinstance(orch.metrics_manager, MetricsManager)
+        assert orch.metrics_manager is orch._svc.metrics_manager
 
     def test_run_recorder_returns_recorder(self, config: HydraFlowConfig) -> None:
-        from run_recorder import RunRecorder
-
         orch = HydraFlowOrchestrator(config)
-        assert isinstance(orch.run_recorder, RunRecorder)
+        assert orch.run_recorder is orch._svc.run_recorder
 
 
 # ---------------------------------------------------------------------------
@@ -1099,14 +1071,12 @@ class TestPostReviewHooks:
     async def test_calls_post_run_hooks_for_transcripts(
         self, config: HydraFlowConfig
     ) -> None:
-        from models import ReviewResult
-
         orch = HydraFlowOrchestrator(config)
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
         self._mock_review_deps(orch)
 
         results = [
-            ReviewResult(
+            ReviewResultFactory.create(
                 pr_number=10,
                 issue_number=1,
                 transcript="reviewed code",
@@ -1128,14 +1098,12 @@ class TestPostReviewHooks:
     async def test_merged_result_triggers_pull_and_crate(
         self, config: HydraFlowConfig
     ) -> None:
-        from models import ReviewResult
-
         orch = HydraFlowOrchestrator(config)
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
         self._mock_review_deps(orch)
 
         results = [
-            ReviewResult(
+            ReviewResultFactory.create(
                 pr_number=10,
                 issue_number=1,
                 transcript="merged PR",
@@ -1154,14 +1122,12 @@ class TestPostReviewHooks:
     async def test_skips_hooks_for_empty_transcript(
         self, config: HydraFlowConfig
     ) -> None:
-        from models import ReviewResult
-
         orch = HydraFlowOrchestrator(config)
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
         self._mock_review_deps(orch)
 
         results = [
-            ReviewResult(
+            ReviewResultFactory.create(
                 pr_number=10,
                 issue_number=1,
                 transcript="",
@@ -1178,14 +1144,12 @@ class TestPostReviewHooks:
     async def test_review_status_failed_on_ci_failure(
         self, config: HydraFlowConfig
     ) -> None:
-        from models import ReviewResult
-
         orch = HydraFlowOrchestrator(config)
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
         self._mock_review_deps(orch)
 
         results = [
-            ReviewResult(
+            ReviewResultFactory.create(
                 pr_number=10,
                 issue_number=1,
                 transcript="CI failed",
@@ -1204,14 +1168,12 @@ class TestPostReviewHooks:
     async def test_review_status_success_on_merge(
         self, config: HydraFlowConfig
     ) -> None:
-        from models import ReviewResult
-
         orch = HydraFlowOrchestrator(config)
-        _mock_fetcher_noop(orch)
+        mock_fetcher_noop(orch)
         self._mock_review_deps(orch)
 
         results = [
-            ReviewResult(
+            ReviewResultFactory.create(
                 pr_number=10,
                 issue_number=1,
                 transcript="merged successfully",

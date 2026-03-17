@@ -25,12 +25,15 @@ if TYPE_CHECKING:
     from models import (
         AnalysisResult,
         GitHubIssue,
+        GitHubIssueState,
         HITLResult,
         NewIssueSpec,
+        PlanResult,
         PRInfo,
         ReviewResult,
         ReviewVerdict,
         TriageResult,
+        WorkerResult,
     )
     from orchestrator import HydraFlowOrchestrator
     from state import StateTracker
@@ -157,18 +160,33 @@ class IssueFactory:
         body: str = "The frobnicator is broken. Please fix it.",
         labels: list[str] | None = None,
         comments: list[str] | None = None,
-        url: str = "",
+        url: str | None = None,
+        author: str | None = None,
+        state: GitHubIssueState | None = None,
+        milestone_number: int | None = None,
+        created_at: str | None = None,
     ):
-        from models import GitHubIssue
+        from models import GitHubIssue  # noqa: F811
 
-        return GitHubIssue(
-            number=number,
-            title=title,
-            body=body,
-            labels=labels or ["ready"],
-            comments=comments or [],
-            url=url or f"https://github.com/test-org/test-repo/issues/{number}",
-        )
+        kwargs: dict[str, Any] = {
+            "number": number,
+            "title": title,
+            "body": body,
+            "labels": labels if labels is not None else ["ready"],
+            "comments": comments if comments is not None else [],
+            "url": url
+            if url is not None
+            else f"https://github.com/test-org/test-repo/issues/{number}",
+        }
+        if author is not None:
+            kwargs["author"] = author
+        if state is not None:
+            kwargs["state"] = state
+        if milestone_number is not None:
+            kwargs["milestone_number"] = milestone_number
+        if created_at is not None:
+            kwargs["created_at"] = created_at
+        return GitHubIssue(**kwargs)
 
 
 @pytest.fixture
@@ -190,9 +208,12 @@ class TaskFactory:
         body: str = "The frobnicator is broken. Please fix it.",
         tags: list[str] | None = None,
         comments: list[str] | None = None,
-        source_url: str = "",
+        source_url: str | None = None,
         links: list[Any] | None = None,
         complexity_score: int = 0,
+        created_at: str = "",
+        metadata: dict[str, Any] | None = None,
+        parent_epic: int | None = None,
     ):
         from models import Task
 
@@ -200,12 +221,16 @@ class TaskFactory:
             id=id,
             title=title,
             body=body,
-            tags=tags or ["ready"],
-            comments=comments or [],
+            tags=tags if tags is not None else ["ready"],
+            comments=comments if comments is not None else [],
             source_url=source_url
-            or f"https://github.com/test-org/test-repo/issues/{id}",
+            if source_url is not None
+            else f"https://github.com/test-org/test-repo/issues/{id}",
             links=links if links is not None else [],
             complexity_score=complexity_score,
+            created_at=created_at,
+            metadata=metadata if metadata is not None else {},
+            parent_epic=parent_epic,
         )
 
 
@@ -296,6 +321,69 @@ class WorkerResultFactory:
                 quality_fix_attempts if quality_fix_attempts is not None else 0
             ),
             pr_info=pr_info,
+        )
+
+
+class WorkerResultBuilder:
+    """Fluent builder for WorkerResult instances."""
+
+    def __init__(self) -> None:
+        self._kwargs: dict[str, Any] = {}
+        self._use_model_defaults: bool = False
+
+    def with_model_defaults(self) -> WorkerResultBuilder:
+        """Use Pydantic model defaults instead of factory hardcoded values."""
+        self._use_model_defaults = True
+        return self
+
+    def with_issue_number(self, value: int) -> WorkerResultBuilder:
+        self._kwargs["issue_number"] = value
+        return self
+
+    def with_branch(self, value: str) -> WorkerResultBuilder:
+        self._kwargs["branch"] = value
+        return self
+
+    def with_success(self, value: bool) -> WorkerResultBuilder:
+        self._kwargs["success"] = value
+        return self
+
+    def with_transcript(self, value: str) -> WorkerResultBuilder:
+        self._kwargs["transcript"] = value
+        return self
+
+    def with_commits(self, value: int) -> WorkerResultBuilder:
+        self._kwargs["commits"] = value
+        return self
+
+    def with_worktree_path(self, value: str) -> WorkerResultBuilder:
+        self._kwargs["worktree_path"] = value
+        return self
+
+    def with_error(self, value: str) -> WorkerResultBuilder:
+        self._kwargs["error"] = value
+        return self
+
+    def with_duration_seconds(self, value: float) -> WorkerResultBuilder:
+        self._kwargs["duration_seconds"] = value
+        return self
+
+    def with_pre_quality_review_attempts(self, value: int) -> WorkerResultBuilder:
+        self._kwargs["pre_quality_review_attempts"] = value
+        return self
+
+    def with_quality_fix_attempts(self, value: int) -> WorkerResultBuilder:
+        self._kwargs["quality_fix_attempts"] = value
+        return self
+
+    def with_pr_info(self, value: PRInfo) -> WorkerResultBuilder:
+        self._kwargs["pr_info"] = value
+        return self
+
+    def build(self) -> WorkerResult:
+        """Build the WorkerResult using the factory."""
+        return WorkerResultFactory.create(
+            use_defaults=self._use_model_defaults, **self._kwargs
         )
 
 
@@ -415,6 +503,81 @@ class PlanResultFactory:
         )
 
 
+class PlanResultBuilder:
+    """Fluent builder for PlanResult instances."""
+
+    def __init__(self) -> None:
+        self._kwargs: dict[str, Any] = {}
+        self._use_model_defaults: bool = False
+
+    def with_model_defaults(self) -> PlanResultBuilder:
+        """Use Pydantic model defaults instead of factory hardcoded values."""
+        self._use_model_defaults = True
+        return self
+
+    def with_issue_number(self, value: int) -> PlanResultBuilder:
+        self._kwargs["issue_number"] = value
+        return self
+
+    def with_success(self, value: bool) -> PlanResultBuilder:
+        self._kwargs["success"] = value
+        return self
+
+    def with_plan(self, value: str) -> PlanResultBuilder:
+        self._kwargs["plan"] = value
+        return self
+
+    def with_summary(self, value: str) -> PlanResultBuilder:
+        self._kwargs["summary"] = value
+        return self
+
+    def with_error(self, value: str) -> PlanResultBuilder:
+        self._kwargs["error"] = value
+        return self
+
+    def with_transcript(self, value: str) -> PlanResultBuilder:
+        self._kwargs["transcript"] = value
+        return self
+
+    def with_duration_seconds(self, value: float) -> PlanResultBuilder:
+        self._kwargs["duration_seconds"] = value
+        return self
+
+    def with_new_issues(self, value: list[NewIssueSpec]) -> PlanResultBuilder:
+        self._kwargs["new_issues"] = value
+        return self
+
+    def with_validation_errors(self, value: list[str]) -> PlanResultBuilder:
+        self._kwargs["validation_errors"] = value
+        return self
+
+    def with_retry_attempted(self, value: bool) -> PlanResultBuilder:
+        self._kwargs["retry_attempted"] = value
+        return self
+
+    def with_already_satisfied(self, value: bool) -> PlanResultBuilder:
+        self._kwargs["already_satisfied"] = value
+        return self
+
+    def with_actionability_score(self, value: int) -> PlanResultBuilder:
+        self._kwargs["actionability_score"] = value
+        return self
+
+    def with_actionability_rank(self, value: str) -> PlanResultBuilder:
+        self._kwargs["actionability_rank"] = value
+        return self
+
+    def with_epic_number(self, value: int) -> PlanResultBuilder:
+        self._kwargs["epic_number"] = value
+        return self
+
+    def build(self) -> PlanResult:
+        """Build the PlanResult using the factory."""
+        return PlanResultFactory.create(
+            use_defaults=self._use_model_defaults, **self._kwargs
+        )
+
+
 # --- PR Info Factory ---
 
 
@@ -453,28 +616,165 @@ class ReviewResultFactory:
         pr_number: int = 101,
         issue_number: int = 42,
         verdict: ReviewVerdict | None = None,
-        summary: str = "Looks good.",
-        fixes_made: bool = False,
-        transcript: str = "THOROUGH_REVIEW_COMPLETE",
-        merged: bool = False,
-        duration_seconds: float = 0.0,
+        success: bool | None = None,
+        summary: str | None = None,
+        fixes_made: bool | None = None,
+        commit_stat: str | None = None,
+        transcript: str | None = None,
+        merged: bool | None = None,
+        duration_seconds: float | None = None,
         ci_passed: bool | None = None,
-        ci_fix_attempts: int = 0,
+        ci_fix_attempts: int | None = None,
+        error: str | None = None,
+        visual_passed: bool | None = None,
+        files_changed: list[str] | None = None,
+        use_defaults: bool = False,
     ) -> ReviewResult:
+        """Create a ReviewResult instance.
+
+        By default (``use_defaults=False``), factory-defined hardcoded values are
+        applied for all unspecified optional fields (e.g. ``verdict=APPROVE``,
+        ``summary="Looks good."``).
+
+        With ``use_defaults=True``, only explicitly provided keyword arguments are
+        forwarded to the constructor and the underlying Pydantic model's own field
+        defaults are used for everything else.
+        """
         from models import ReviewResult as RR
         from models import ReviewVerdict as RV
+
+        if use_defaults:
+            kwargs: dict[str, Any] = {
+                "pr_number": pr_number,
+                "issue_number": issue_number,
+            }
+            if verdict is not None:
+                kwargs["verdict"] = verdict
+            if success is not None:
+                kwargs["success"] = success
+            if summary is not None:
+                kwargs["summary"] = summary
+            if fixes_made is not None:
+                kwargs["fixes_made"] = fixes_made
+            if commit_stat is not None:
+                kwargs["commit_stat"] = commit_stat
+            if transcript is not None:
+                kwargs["transcript"] = transcript
+            if merged is not None:
+                kwargs["merged"] = merged
+            if duration_seconds is not None:
+                kwargs["duration_seconds"] = duration_seconds
+            if ci_passed is not None:
+                kwargs["ci_passed"] = ci_passed
+            if ci_fix_attempts is not None:
+                kwargs["ci_fix_attempts"] = ci_fix_attempts
+            if error is not None:
+                kwargs["error"] = error
+            if visual_passed is not None:
+                kwargs["visual_passed"] = visual_passed
+            if files_changed is not None:
+                kwargs["files_changed"] = files_changed
+            return RR(**kwargs)
 
         return RR(
             pr_number=pr_number,
             issue_number=issue_number,
             verdict=verdict if verdict is not None else RV.APPROVE,
-            summary=summary,
-            fixes_made=fixes_made,
-            transcript=transcript,
-            merged=merged,
-            duration_seconds=duration_seconds,
+            success=success if success is not None else False,
+            summary=summary if summary is not None else "Looks good.",
+            error=error,
+            fixes_made=fixes_made if fixes_made is not None else False,
+            commit_stat=commit_stat if commit_stat is not None else "",
+            transcript=(
+                transcript if transcript is not None else "THOROUGH_REVIEW_COMPLETE"
+            ),
+            merged=merged if merged is not None else False,
+            duration_seconds=(
+                duration_seconds if duration_seconds is not None else 0.0
+            ),
             ci_passed=ci_passed,
-            ci_fix_attempts=ci_fix_attempts,
+            ci_fix_attempts=(ci_fix_attempts if ci_fix_attempts is not None else 0),
+            visual_passed=visual_passed,
+            files_changed=files_changed if files_changed is not None else [],
+        )
+
+
+class ReviewResultBuilder:
+    """Fluent builder for ReviewResult instances."""
+
+    def __init__(self) -> None:
+        self._kwargs: dict[str, Any] = {}
+        self._use_model_defaults: bool = False
+
+    def with_model_defaults(self) -> ReviewResultBuilder:
+        """Use Pydantic model defaults instead of factory hardcoded values."""
+        self._use_model_defaults = True
+        return self
+
+    def with_pr_number(self, value: int) -> ReviewResultBuilder:
+        self._kwargs["pr_number"] = value
+        return self
+
+    def with_issue_number(self, value: int) -> ReviewResultBuilder:
+        self._kwargs["issue_number"] = value
+        return self
+
+    def with_verdict(self, value: ReviewVerdict) -> ReviewResultBuilder:
+        self._kwargs["verdict"] = value
+        return self
+
+    def with_success(self, value: bool) -> ReviewResultBuilder:
+        self._kwargs["success"] = value
+        return self
+
+    def with_error(self, value: str) -> ReviewResultBuilder:
+        self._kwargs["error"] = value
+        return self
+
+    def with_summary(self, value: str) -> ReviewResultBuilder:
+        self._kwargs["summary"] = value
+        return self
+
+    def with_fixes_made(self, value: bool) -> ReviewResultBuilder:
+        self._kwargs["fixes_made"] = value
+        return self
+
+    def with_commit_stat(self, value: str) -> ReviewResultBuilder:
+        self._kwargs["commit_stat"] = value
+        return self
+
+    def with_transcript(self, value: str) -> ReviewResultBuilder:
+        self._kwargs["transcript"] = value
+        return self
+
+    def with_merged(self, value: bool) -> ReviewResultBuilder:
+        self._kwargs["merged"] = value
+        return self
+
+    def with_duration_seconds(self, value: float) -> ReviewResultBuilder:
+        self._kwargs["duration_seconds"] = value
+        return self
+
+    def with_ci_passed(self, value: bool) -> ReviewResultBuilder:
+        self._kwargs["ci_passed"] = value
+        return self
+
+    def with_ci_fix_attempts(self, value: int) -> ReviewResultBuilder:
+        self._kwargs["ci_fix_attempts"] = value
+        return self
+
+    def with_visual_passed(self, value: bool) -> ReviewResultBuilder:
+        self._kwargs["visual_passed"] = value
+        return self
+
+    def with_files_changed(self, value: list[str]) -> ReviewResultBuilder:
+        self._kwargs["files_changed"] = value
+        return self
+
+    def build(self) -> ReviewResult:
+        """Build the ReviewResult using the factory."""
+        return ReviewResultFactory.create(
+            use_defaults=self._use_model_defaults, **self._kwargs
         )
 
 
@@ -522,7 +822,7 @@ class EventFactory:
 
         return HE(
             type=type if type is not None else ET.PHASE_CHANGE,
-            timestamp=timestamp or "",
+            timestamp=timestamp if timestamp is not None else "",
             data=data if data is not None else {},
         )
 
@@ -539,13 +839,22 @@ class TriageResultFactory:
         issue_number: int = 42,
         ready: bool = True,
         reasons: list[str] | None = None,
+        complexity_score: int = 0,
+        issue_type: str = "feature",
+        enrichment: str = "",
     ) -> TriageResult:
+        from models import IssueType
         from models import TriageResult as TR
 
         return TR(
             issue_number=issue_number,
             ready=ready,
-            reasons=reasons or [],
+            reasons=reasons if reasons is not None else [],
+            complexity_score=complexity_score,
+            issue_type=IssueType(issue_type)
+            if isinstance(issue_type, str)
+            else issue_type,
+            enrichment=enrichment,
         )
 
 
@@ -588,8 +897,8 @@ class AnalysisResultFactory:
 
         return AnalysisSection(
             name=name,
-            verdict=verdict or AnalysisVerdict.PASS,
-            details=details or [],
+            verdict=verdict if verdict is not None else AnalysisVerdict.PASS,
+            details=details if details is not None else [],
         )
 
 
@@ -614,9 +923,9 @@ class TestScaffoldResultFactory:
         from test_scaffold import TestScaffoldResult
 
         return TestScaffoldResult(
-            created_dirs=created_dirs or [],
-            created_files=created_files or [],
-            modified_files=modified_files or [],
+            created_dirs=created_dirs if created_dirs is not None else [],
+            created_files=created_files if created_files is not None else [],
+            modified_files=modified_files if modified_files is not None else [],
             skipped=skipped,
             skip_reason=skip_reason,
             language=language,
@@ -689,7 +998,7 @@ def make_orchestrator_mock(
 ) -> MagicMock:
     """Return a minimal orchestrator mock."""
     orch = MagicMock()
-    orch.human_input_requests = requests or {}
+    orch.human_input_requests = requests if requests is not None else {}
     orch.provide_human_input = MagicMock()
     orch.running = running
     orch.run_status = run_status
@@ -778,7 +1087,6 @@ class ReviewMockBuilder:
 
     def build(self) -> tuple[AsyncMock, AsyncMock, AsyncMock]:
         """Wire mocks into orch and return (mock_reviewers, mock_prs, mock_wt)."""
-        from models import ReviewResult as RR
         from models import ReviewVerdict as RV
 
         # Reviewer mock
@@ -787,7 +1095,7 @@ class ReviewMockBuilder:
             mock_reviewers.review = self._review_side_effect
         else:
             verdict = self._verdict if self._verdict is not None else RV.APPROVE
-            result = self._review_result or RR(
+            result = self._review_result or ReviewResultFactory.create(
                 pr_number=101,
                 issue_number=self._issue_number,
                 verdict=verdict,

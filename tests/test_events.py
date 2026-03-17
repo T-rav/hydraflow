@@ -230,8 +230,7 @@ class TestEventBusPublishSubscribe:
         assert queue.get_nowait() is e1
         assert queue.get_nowait() is e2
 
-    @pytest.mark.asyncio
-    async def test_subscribe_returns_asyncio_queue(self) -> None:
+    def test_subscribe_returns_asyncio_queue(self) -> None:
         bus = EventBus()
         queue = bus.subscribe()
         assert isinstance(queue, asyncio.Queue)
@@ -335,8 +334,7 @@ class TestEventBusPublishSubscribe:
         await bus.publish(event)
         assert event.repo is None
 
-    @pytest.mark.asyncio
-    async def test_subscribe_with_custom_max_queue(self) -> None:
+    def test_subscribe_with_custom_max_queue(self) -> None:
         bus = EventBus()
         queue = bus.subscribe(max_queue=10)
         assert queue.maxsize == 10
@@ -371,16 +369,14 @@ class TestEventBusUnsubscribe:
         assert q1.empty()
         assert q2.get_nowait() is event
 
-    @pytest.mark.asyncio
-    async def test_unsubscribe_nonexistent_queue_is_noop(self) -> None:
+    def test_unsubscribe_nonexistent_queue_is_noop(self) -> None:
         bus = EventBus()
         orphan: asyncio.Queue[HydraFlowEvent] = asyncio.Queue()
         # Should not raise
         bus.unsubscribe(orphan)
         assert orphan not in bus._subscribers
 
-    @pytest.mark.asyncio
-    async def test_unsubscribe_same_queue_twice_is_noop(self) -> None:
+    def test_unsubscribe_same_queue_twice_is_noop(self) -> None:
         bus = EventBus()
         queue = bus.subscribe()
         bus.unsubscribe(queue)
@@ -439,8 +435,7 @@ class TestEventBusHistory:
             )
         assert len(bus.get_history()) == 10
 
-    @pytest.mark.asyncio
-    async def test_empty_history_on_new_bus(self) -> None:
+    def test_empty_history_on_new_bus(self) -> None:
         bus = EventBus()
         assert bus.get_history() == []
 
@@ -520,8 +515,7 @@ class TestEventBusClear:
         await bus.publish(EventFactory.create(type=EventType.ORCHESTRATOR_STATUS))
         assert queue.empty()
 
-    @pytest.mark.asyncio
-    async def test_clear_on_empty_bus_does_not_raise(self) -> None:
+    def test_clear_on_empty_bus_does_not_raise(self) -> None:
         bus = EventBus()
         bus.clear()  # should not raise
         assert bus._subscribers == []
@@ -798,6 +792,30 @@ class TestRotateSyncCorruptLines:
         assert "Dropping corrupt event line during rotation" in caplog.text
 
 
+class TestRotateSyncCorruptContinuance:
+    """Verify _rotate_sync keeps valid lines after dropping corrupt ones."""
+
+    def test_rotate_sync_keeps_valid_lines_after_corrupt(self, tmp_path: Path) -> None:
+        """Valid lines before and after corrupt lines are preserved in the rotated file."""
+        log_path = tmp_path / "events.jsonl"
+        event = HydraFlowEvent(type=EventType.PHASE_CHANGE, data={"batch": 1})
+        valid_line = event.model_dump_json()
+        # Mix: valid, corrupt, valid — both valid lines should survive
+        lines = [valid_line, "corrupt garbage", valid_line]
+        log_path.write_text("\n".join(lines) + "\n")
+
+        event_log = EventLog(log_path)
+        event_log._rotate_sync(max_size_bytes=10, max_age_days=365)
+
+        # Read rotated file and verify both valid lines were kept
+        content = log_path.read_text()
+        kept = [line for line in content.strip().split("\n") if line.strip()]
+        assert len(kept) == 2
+        for line in kept:
+            parsed = HydraFlowEvent.model_validate_json(line)
+            assert parsed.type == EventType.PHASE_CHANGE
+
+
 class TestLoadSyncCorruptLines:
     """Verify EventLog._load_sync skips corrupt lines with warning+exc_info."""
 
@@ -917,48 +935,59 @@ class TestPersistEventErrorHandling:
 
         assert event in bus.get_history()
 
-    @pytest.mark.asyncio
-    async def test_log_persist_failure_callback_skips_cancelled_task(
+    def test_log_persist_failure_callback_skips_cancelled_task(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Done callback should not log for cancelled tasks."""
-        future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
-        future.cancel()
+        loop = asyncio.new_event_loop()
+        try:
+            future: asyncio.Future[None] = loop.create_future()
+            future.cancel()
 
-        with caplog.at_level(logging.WARNING, logger="hydraflow.events"):
-            _log_persist_failure(future)
+            with caplog.at_level(logging.WARNING, logger="hydraflow.events"):
+                _log_persist_failure(future)
 
-        assert "Event persist task failed" not in caplog.text
+            assert "Event persist task failed" not in caplog.text
+        finally:
+            loop.close()
 
-    @pytest.mark.asyncio
-    async def test_log_persist_failure_callback_logs_exception(
+    def test_log_persist_failure_callback_logs_exception(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Done callback should log warning when task has an exception."""
-        future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
-        future.set_exception(ValueError("bad serialization"))
+        loop = asyncio.new_event_loop()
+        try:
+            future: asyncio.Future[None] = loop.create_future()
+            future.set_exception(ValueError("bad serialization"))
 
-        with caplog.at_level(logging.WARNING, logger="hydraflow.events"):
-            _log_persist_failure(future)
+            with caplog.at_level(logging.WARNING, logger="hydraflow.events"):
+                _log_persist_failure(future)
 
-        records = [
-            r for r in caplog.records if "Event persist task failed" in r.getMessage()
-        ]
-        assert len(records) == 1
-        assert records[0].exc_info is not None
+            records = [
+                r
+                for r in caplog.records
+                if "Event persist task failed" in r.getMessage()
+            ]
+            assert len(records) == 1
+            assert records[0].exc_info is not None
+        finally:
+            loop.close()
 
-    @pytest.mark.asyncio
-    async def test_log_persist_failure_callback_silent_on_success(
+    def test_log_persist_failure_callback_silent_on_success(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Done callback should not log when task completed successfully."""
-        future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
-        future.set_result(None)
+        loop = asyncio.new_event_loop()
+        try:
+            future: asyncio.Future[None] = loop.create_future()
+            future.set_result(None)
 
-        with caplog.at_level(logging.WARNING, logger="hydraflow.events"):
-            _log_persist_failure(future)
+            with caplog.at_level(logging.WARNING, logger="hydraflow.events"):
+                _log_persist_failure(future)
 
-        assert "Event persist task failed" not in caplog.text
+            assert "Event persist task failed" not in caplog.text
+        finally:
+            loop.close()
 
 
 # ---------------------------------------------------------------------------

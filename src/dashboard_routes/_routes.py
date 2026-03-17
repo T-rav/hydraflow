@@ -15,9 +15,9 @@ import time
 from collections import Counter
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import (
     APIRouter,
@@ -34,9 +34,22 @@ from pydantic import ValidationError
 from admin_tasks import TaskResult, run_clean, run_ensure_labels, run_prep, run_scaffold
 from app_version import get_app_version
 from config import HydraFlowConfig, save_config_file
+from dashboard_routes._common import (
+    _EPIC_INTERNAL_LABELS,
+    _FRONTEND_STAGE_TO_LABEL_FIELD,
+    _INFERENCE_COUNTER_KEYS,
+    _INTERVAL_BOUNDS,
+    _SAFE_SLUG_COMPONENT,
+    _STAGE_NAME_MAP,
+    _coerce_history_status,
+    _coerce_int,
+    _extract_field_from_sources,
+    _is_timestamp_in_range,
+    _parse_iso_or_none,
+    _status_sort_key,
+)
 from events import EventBus, EventType, HydraFlowEvent
 from issue_fetcher import IssueFetcher
-from issue_store import IssueStoreStage
 from metrics_manager import get_metrics_cache_dir
 from models import (
     BackgroundWorkersResponse,
@@ -74,12 +87,14 @@ from models import (
     ReportHistoryEntry,
     ReportIssueRequest,
     ReportIssueResponse,
+    RepoRuntimeInfo,
     TrackedReport,
     TrackedReportUpdate,
     parse_task_links,
 )
 from pr_manager import PRManager
 from prompt_telemetry import PromptTelemetry
+from route_types import RepoSlugParam
 from state import StateTracker
 from timeline import TimelineBuilder
 from transcript_summarizer import TranscriptSummarizer
@@ -91,63 +106,6 @@ from repo_runtime import RepoRuntime, RepoRuntimeRegistry
 from repo_store import RepoRecord, RepoStore
 
 logger = logging.getLogger("hydraflow.dashboard")
-
-_SAFE_SLUG_COMPONENT = re.compile(r"^[A-Za-z0-9_.\-]+$")
-
-# Interval bounds per editable worker.
-# memory_sync, metrics, pr_unsticker, adr_reviewer bounds must match config.py Field constraints.
-# pipeline_poller has no config Field; 5s minimum matches the hardcoded default.
-_INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
-    "memory_sync": (10, 14400),
-    "metrics": (30, 14400),
-    "pr_unsticker": (60, 86400),
-    "pipeline_poller": (5, 14400),
-    "adr_reviewer": (28800, 432000),
-    "verify_monitor": (60, 86400),
-}
-RepoSlugParam = Annotated[
-    str | None,
-    Query(description="Repo slug to scope the request"),
-]
-
-# Internal pipeline labels that must not be treated as epic names in the history panel.
-_EPIC_INTERNAL_LABELS: frozenset[str] = frozenset(
-    {"hydraflow-epic-child", "hydraflow-epic"}
-)
-
-# Backend stage keys → frontend stage names
-_STAGE_NAME_MAP: dict[str, str] = {
-    IssueStoreStage.FIND: "triage",
-    IssueStoreStage.PLAN: "plan",
-    IssueStoreStage.READY: "implement",
-    IssueStoreStage.REVIEW: "review",
-    IssueStoreStage.HITL: "hitl",
-}
-
-# Frontend stage key → config label field name (for request-changes)
-_FRONTEND_STAGE_TO_LABEL_FIELD = {
-    "triage": "find_label",
-    "plan": "planner_label",
-    "implement": "ready_label",
-    "review": "review_label",
-}
-
-
-_INFERENCE_COUNTER_KEYS: tuple[str, ...] = (
-    "inference_calls",
-    "prompt_est_tokens",
-    "total_est_tokens",
-    "total_tokens",
-    "input_tokens",
-    "output_tokens",
-    "cache_creation_input_tokens",
-    "cache_read_input_tokens",
-    "history_chars_saved",
-    "context_chars_saved",
-    "pruned_chars_total",
-    "cache_hits",
-    "cache_misses",
-)
 
 
 async def _run_dialog_command(*cmd: str, timeout_seconds: float = 30.0) -> str | None:
@@ -253,19 +211,6 @@ def _normalize_allowed_dir(
     return None, "path must be inside your home directory or temp directory"
 
 
-def _parse_iso_or_none(raw: str | None) -> datetime | None:
-    """Parse an ISO 8601 string to datetime, returning None on failure."""
-    if not raw:
-        return None
-    try:
-        parsed = datetime.fromisoformat(raw)
-    except (ValueError, TypeError):
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
-    return parsed
-
-
 def _event_issue_number(data: Mapping[str, Any]) -> int | None:
     """Extract the issue number from an event data dict, coercing strings."""
     value = data.get("issue")
@@ -316,98 +261,6 @@ def _normalise_event_status(
     return result
 
 
-_HISTORY_STATUSES = {
-    "unknown",
-    "triaged",
-    "planned",
-    "implemented",
-    "in_review",
-    "reviewed",
-    "hitl",
-    "active",
-    "failed",
-    "merged",
-}
-
-
-def _coerce_history_status(value: str) -> str:
-    """Normalize dashboard history statuses and default to ``unknown``."""
-    cleaned = str(value).strip().lower()
-    if cleaned in _HISTORY_STATUSES:
-        return cleaned
-    logger.warning("Unknown history status %r; falling back to 'unknown'", value)
-    return "unknown"
-
-
-def _status_rank(status: str) -> int:
-    """Return a numeric rank for a history status used for ordering."""
-    ranks = {
-        "unknown": 0,
-        "triaged": 1,
-        "planned": 2,
-        "implemented": 3,
-        "in_review": 4,
-        "reviewed": 5,
-        "hitl": 6,
-        "active": 7,
-        "failed": 8,
-        "merged": 9,
-    }
-    return ranks.get(status, 0)
-
-
-def _coerce_int(value: object) -> int:
-    """Coerce a value to int, returning 0 for unconvertible inputs."""
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value)
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return 0
-    return 0
-
-
-def _is_timestamp_in_range(
-    raw: str | None, since: datetime | None, until: datetime | None
-) -> bool:
-    """Return True if the ISO timestamp falls within the [since, until] window."""
-    if raw is None:
-        return since is None and until is None
-    parsed = _parse_iso_or_none(raw)
-    if parsed is None:
-        return since is None and until is None
-    if since is not None and parsed < since:
-        return False
-    return not (until is not None and parsed > until)
-
-
-def _status_sort_key(status: str, timestamp: str | None) -> tuple[datetime, int]:
-    """Build a sort key from a timestamp and status rank for ordering updates."""
-    parsed = _parse_iso_or_none(timestamp)
-    if parsed is None:
-        parsed = datetime.min.replace(tzinfo=UTC)
-    return (parsed, _status_rank(status))
-
-
-def _parse_compat_json_object(raw: str | None) -> dict[str, Any] | None:
-    """Best-effort parse of legacy query/body JSON object payloads."""
-    if not isinstance(raw, str):
-        return None
-    text = raw.strip()
-    if not text:
-        return None
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        return None
-    return parsed if isinstance(parsed, dict) else None
-
-
 def _extract_repo_slug(
     req: dict[str, Any] | None,
     req_query: str | None,
@@ -440,66 +293,13 @@ def _extract_repo_path(
     )
 
 
-def _extract_field_from_sources(
-    field_names: tuple[str, str],
-    req: dict[str, Any] | None,
-    req_query: str | None,
-    query_params: tuple[str | None, str | None],
-    *,
-    query_params_first: bool = False,
-) -> str:
-    """Extract a value from query params, body dict, and JSON query.
+_ISSUE_URL_RE = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/issues/(\d+)")
 
-    Args:
-        field_names: Pair of field name keys to look up (primary, alias).
-        req: Parsed request body dict.
-        req_query: Raw ``req`` query parameter (may be JSON).
-        query_params: Dedicated query-parameter values (primary, alias).
-        query_params_first: When True, check query params before body;
-            otherwise check body before query params.
-    """
-    candidates: list[str] = []
 
-    def _push(value: str | int | float | bool | None) -> None:
-        if isinstance(value, str):
-            trimmed = value.strip()
-            if trimmed:
-                candidates.append(trimmed)
-
-    def _push_from_dict(src: dict[str, Any]) -> None:
-        for name in field_names:
-            _push(src.get(name))
-        nested = src.get("req")
-        if isinstance(nested, dict):
-            for name in field_names:
-                _push(nested.get(name))
-
-    def _push_query_params() -> None:
-        for qp in query_params:
-            _push(qp)
-
-    def _push_body() -> None:
-        if isinstance(req, dict):
-            _push_from_dict(req)
-
-    # Ordering: query_params_first controls whether dedicated query
-    # params are checked before or after the body dict.
-    if query_params_first:
-        _push_query_params()
-        _push_body()
-    else:
-        _push_body()
-
-    parsed_query = _parse_compat_json_object(req_query)
-    if parsed_query:
-        _push_from_dict(parsed_query)
-    else:
-        _push(req_query)
-
-    if not query_params_first:
-        _push_query_params()
-
-    return candidates[0] if candidates else ""
+def _extract_issue_number(url: str) -> int:
+    """Extract the issue number from a GitHub issue URL, or return 0."""
+    m = _ISSUE_URL_RE.search(url)
+    return int(m.group(1)) if m else 0
 
 
 def _is_likely_disconnect(exc: BaseException) -> bool:
@@ -824,10 +624,6 @@ def create_router(
     def _list_repo_records() -> list[RepoRecord]:
         return ctx.list_repo_records()
 
-    IssueFetcher(config)
-    TranscriptSummarizer(config, pr_manager, event_bus, state)
-    asyncio.Semaphore(3)
-
     def _repo_roots_fn() -> tuple[str, ...]:
         return ctx.repo_roots_fn()
 
@@ -962,6 +758,7 @@ def create_router(
                     number=int(pr_data["number"]),
                     url=str(pr_data.get("url", "")),
                     merged=bool(pr_data.get("merged", False)),
+                    title=str(pr_data.get("title", "")),
                 )
                 for pr_data in prs_map.values()
                 if isinstance(pr_data, dict) and _coerce_int(pr_data.get("number")) > 0
@@ -1095,6 +892,9 @@ def create_router(
                     url = str(event.data.get("url", "")).strip()
                     if url.startswith(("http://", "https://")):
                         payload["url"] = url
+                    pr_title = str(event.data.get("title", "")).strip()
+                    if pr_title:
+                        payload["title"] = pr_title
                     prs[pr_number] = payload
 
             if event.type == EventType.MERGE_UPDATE:
@@ -1107,6 +907,9 @@ def create_router(
                     )
                     if str(event.data.get("status", "")).lower() == "merged":
                         payload["merged"] = True
+                    merge_title = str(event.data.get("title", "")).strip()
+                    if merge_title:
+                        payload["title"] = merge_title
                     prs[pr_number] = payload
 
             normalised = _normalise_event_status(event.type, event.data)
@@ -1551,8 +1354,6 @@ def create_router(
     async def get_events(since: str | None = None) -> JSONResponse:
         """Return event history, optionally filtered by a since timestamp."""
         if since is not None:
-            from datetime import datetime
-
             try:
                 since_dt = datetime.fromisoformat(since)
                 if since_dt.tzinfo is None:
@@ -1584,6 +1385,14 @@ def create_router(
             }
         )
         items = await manager.list_open_prs(all_labels)
+        # Overlay merged flag from IssueStore so the frontend has
+        # authoritative merged state instead of session-volatile flags.
+        orch = _get_orch()
+        if orch:
+            merged_numbers = orch.issue_store.get_merged_numbers()
+            for item in items:
+                if item.issue in merged_numbers:
+                    item.merged = True
         return JSONResponse([item.model_dump() for item in items])
 
     @router.get("/api/epics")
@@ -2183,6 +1992,17 @@ def create_router(
         await orch.request_stop()
         return JSONResponse({"status": "stopping"})
 
+    @router.post("/api/control/clear-credit-pause")
+    async def clear_credit_pause() -> JSONResponse:
+        """Clear an active credit pause, waking any sleeping loops."""
+        orch = get_orchestrator()
+        if not orch:
+            return JSONResponse({"error": "no orchestrator"}, status_code=400)
+        if orch.credits_paused_until is None:
+            return JSONResponse({"error": "not paused"}, status_code=400)
+        orch.clear_credit_pause()
+        return JSONResponse({"status": "cleared"})
+
     @router.get("/api/control/status")
     async def get_control_status(
         repo: RepoSlugParam = None,
@@ -2242,6 +2062,33 @@ def create_router(
         data = response.model_dump()
         data["current_session_id"] = current_session
         return JSONResponse(data)
+
+    @router.post("/api/control/credit-refresh")
+    async def credit_refresh(
+        repo: RepoSlugParam = None,
+    ) -> JSONResponse:
+        """Attempt to clear credit pause and resume processing.
+
+        Probes the Anthropic API first.  If credits are still exhausted the
+        pause is kept and the client receives ``{"status": "still_exhausted"}``
+        so the UI can display immediate feedback.
+        """
+        from subprocess_util import probe_credit_availability
+
+        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
+        orch = _get_orch()
+        if not orch:
+            return JSONResponse({"error": "no orchestrator"}, status_code=400)
+        if orch.credits_paused_until is None:
+            return JSONResponse({"status": "not_paused"})
+        # Probe the API to see if credits are actually available now.
+        credits_available = await probe_credit_availability()
+        if not credits_available:
+            return JSONResponse({"status": "still_exhausted"})
+        cleared = orch.try_clear_credit_pause()
+        if not cleared:
+            return JSONResponse({"status": "not_paused"})
+        return JSONResponse({"status": "resuming"})
 
     @router.post("/api/admin/prep")
     async def admin_prep(
@@ -2464,8 +2311,6 @@ def create_router(
         """Compute next run ISO timestamp from last_run + interval."""
         if not last_run or not interval_seconds:
             return None
-        from datetime import datetime, timedelta
-
         try:
             last_dt = datetime.fromisoformat(last_run)
             if last_dt.tzinfo is None:
@@ -2634,8 +2479,6 @@ def create_router(
 
     def _save_history_cache() -> None:
         """Persist in-memory history cache to disk."""
-        import json
-
         rows = _history_cache.get("issue_rows")
         if rows is None:
             return
@@ -2664,8 +2507,6 @@ def create_router(
 
     def _load_history_cache() -> None:
         """Load persisted history cache from disk into memory."""
-        import json
-
         if not _history_cache_file.is_file():
             return
         try:
@@ -3190,7 +3031,6 @@ def create_router(
     @router.get("/api/runtimes")
     async def list_runtimes() -> JSONResponse:
         """List all registered repo runtimes with status."""
-        from models import RepoRuntimeInfo
 
         if registry is None:
             return JSONResponse({"runtimes": []})
@@ -3211,7 +3051,6 @@ def create_router(
     @router.get("/api/runtimes/{slug}")
     async def get_runtime_status(slug: str) -> JSONResponse:
         """Get status of a specific repo runtime."""
-        from models import RepoRuntimeInfo
 
         if registry is None:
             return JSONResponse(
@@ -3779,6 +3618,12 @@ def create_router(
             )
             state.add_tracked_report(tracked)
 
+        # Trigger the report-issue worker immediately so the report
+        # doesn't wait for the next polling interval.
+        orch = get_orchestrator()
+        if orch is not None:
+            orch.trigger_bg_worker("report_issue")
+
         title = f"[Bug Report] {request.description[:100]}"
         response = ReportIssueResponse(
             issue_number=0, title=title, url="", status="queued"
@@ -3810,8 +3655,8 @@ def create_router(
         # Validate state-machine transitions
         valid_actions: dict[str, list[str]] = {
             "confirm_fixed": ["fixed"],
-            "reopen": ["fixed", "in-progress", "closed"],
-            "cancel": ["queued", "in-progress", "fixed", "reopened"],
+            "reopen": ["filed", "fixed", "in-progress", "closed"],
+            "cancel": ["queued", "in-progress", "filed", "fixed", "reopened"],
         }
         if report.status not in valid_actions.get(body.action, []):
             return JSONResponse(
@@ -3822,7 +3667,17 @@ def create_router(
             )
         action_map: dict[
             str,
-            tuple[Literal["queued", "in-progress", "fixed", "closed", "reopened"], str],
+            tuple[
+                Literal[
+                    "queued",
+                    "in-progress",
+                    "filed",
+                    "fixed",
+                    "closed",
+                    "reopened",
+                ],
+                str,
+            ],
         ] = {
             "confirm_fixed": ("closed", "Confirmed fixed by reporter"),
             "reopen": ("reopened", "Reopened by reporter"),
@@ -3846,6 +3701,65 @@ def create_router(
         if report is None:
             return JSONResponse({"error": "Report not found"}, status_code=404)
         return JSONResponse([entry.model_dump() for entry in report.history])
+
+    @router.post("/api/reports/refresh")
+    async def refresh_report_statuses(reporter_id: str = "") -> JSONResponse:
+        """Refresh statuses for filed and stale-queued reports.
+
+        * **Filed** reports: checks the linked GitHub issue state; if
+          the issue is closed the report transitions to ``"fixed"``.
+        * **Stale queued** reports (>30 min): re-enqueues them into the
+          pending queue so the background worker retries processing.
+        """
+        refreshed: list[dict[str, str]] = []
+
+        # --- filed → fixed when linked issue is closed as completed ---
+        for report in state.get_filed_reports():
+            if reporter_id and report.reporter_id != reporter_id:
+                continue
+            issue_number = _extract_issue_number(report.linked_issue_url)
+            if issue_number <= 0:
+                continue
+            issue_state = await pr_manager.get_issue_state(issue_number)
+            if issue_state == "COMPLETED":
+                state.update_tracked_report(
+                    report.id,
+                    status="fixed",
+                    action_label="fixed",
+                    detail=f"Issue #{issue_number} resolved",
+                )
+                refreshed.append({"id": report.id, "new_status": "fixed"})
+            elif issue_state == "NOT_PLANNED":
+                state.update_tracked_report(
+                    report.id,
+                    status="closed",
+                    action_label="closed",
+                    detail=f"Issue #{issue_number} closed as won't fix",
+                )
+                refreshed.append({"id": report.id, "new_status": "closed"})
+
+        # --- stale queued → re-enqueue pending ---
+        pending_ids = {p.id for p in state.get_pending_reports()}
+        for report in state.get_stale_queued_reports(stale_minutes=30):
+            if reporter_id and report.reporter_id != reporter_id:
+                continue
+            # Only re-enqueue if there's no pending entry already
+            if report.id not in pending_ids:
+                state.enqueue_report(
+                    PendingReport(
+                        id=report.id,
+                        description=report.description,
+                        reporter_id=report.reporter_id,
+                    )
+                )
+                state.update_tracked_report(
+                    report.id,
+                    action_label="retry",
+                    detail="Stale queued report re-enqueued for processing",
+                )
+                refreshed.append({"id": report.id, "new_status": "queued"})
+
+        return JSONResponse({"refreshed": refreshed})
 
     @router.get("/api/sessions")
     async def get_sessions(

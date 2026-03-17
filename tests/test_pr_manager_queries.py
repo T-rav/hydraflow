@@ -15,15 +15,7 @@ import pytest
 
 from pr_manager import PRManager
 from tests.conftest import SubprocessMockBuilder
-from tests.helpers import ConfigFactory
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _make_manager(config, event_bus):
-    return PRManager(config=config, event_bus=event_bus)
+from tests.helpers import ConfigFactory, make_pr_manager
 
 
 def _assert_search_api_cmd(cmd: tuple[str, ...]) -> None:
@@ -44,7 +36,7 @@ class TestListOpenPrs:
 
     @pytest.mark.asyncio
     async def test_returns_empty_on_no_labels(self, config, event_bus):
-        mgr = _make_manager(config, event_bus)
+        mgr = make_pr_manager(config, event_bus)
         result = await mgr.list_open_prs([])
         assert result == []
 
@@ -57,7 +49,7 @@ class TestListOpenPrs:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
 
         pr_json = json.dumps(
             [
@@ -92,7 +84,7 @@ class TestListOpenPrs:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
 
         pr_json = json.dumps(
             [
@@ -123,7 +115,7 @@ class TestListOpenPrs:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
 
         pr_json = json.dumps(
             [
@@ -152,7 +144,7 @@ class TestListOpenPrs:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
 
         pr_json = json.dumps(
             [
@@ -180,7 +172,7 @@ class TestListOpenPrs:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         mock_create = (
             SubprocessMockBuilder().with_returncode(1).with_stderr("error").build()
         )
@@ -192,7 +184,7 @@ class TestListOpenPrs:
 
     @pytest.mark.asyncio
     async def test_returns_empty_in_dry_run(self, dry_config, event_bus):
-        mgr = _make_manager(dry_config, event_bus)
+        mgr = make_pr_manager(dry_config, event_bus)
         mock_create = SubprocessMockBuilder().build()
 
         with patch("asyncio.create_subprocess_exec", mock_create):
@@ -217,7 +209,7 @@ class TestListHitlItems:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         mock_create = SubprocessMockBuilder().with_stdout("[]").build()
 
         with patch("asyncio.create_subprocess_exec", mock_create):
@@ -234,7 +226,7 @@ class TestListHitlItems:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
 
         issues_json = json.dumps(
             [
@@ -283,7 +275,7 @@ class TestListHitlItems:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         captured: list[tuple[str, ...]] = []
 
         async def mock_run_gh(*cmd, cwd=None):
@@ -307,7 +299,7 @@ class TestListHitlItems:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
 
         issues_json = json.dumps([{"number": 10, "title": "Broken thing", "url": ""}])
 
@@ -344,7 +336,7 @@ class TestListHitlItems:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
 
         issues_json = json.dumps([{"number": 42, "title": "Fix widget", "url": ""}])
 
@@ -369,7 +361,7 @@ class TestListHitlItems:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         mock_create = (
             SubprocessMockBuilder().with_returncode(1).with_stderr("error").build()
         )
@@ -381,7 +373,7 @@ class TestListHitlItems:
 
     @pytest.mark.asyncio
     async def test_returns_empty_in_dry_run(self, dry_config, event_bus):
-        mgr = _make_manager(dry_config, event_bus)
+        mgr = make_pr_manager(dry_config, event_bus)
         mock_create = SubprocessMockBuilder().build()
 
         with patch("asyncio.create_subprocess_exec", mock_create):
@@ -402,7 +394,7 @@ class TestListHitlItems:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
 
         # 5 issues, concurrency=2 — verify all 5 are still returned
         issues = [{"number": i, "title": f"Issue {i}", "url": ""} for i in range(1, 6)]
@@ -444,7 +436,7 @@ class TestRetryWrapperUsage:
     @pytest.mark.asyncio
     async def test_push_branch_does_not_use_retry(self, config, event_bus, tmp_path):
         """push_branch must use run_subprocess (not retry) to avoid duplicate commits."""
-        mgr = _make_manager(config, event_bus)
+        mgr = make_pr_manager(config, event_bus)
         with (
             patch("pr_manager.run_subprocess", new_callable=AsyncMock) as mock_plain,
             patch(
@@ -459,24 +451,28 @@ class TestRetryWrapperUsage:
 
     @pytest.mark.asyncio
     async def test_merge_pr_does_not_use_retry(self, config, event_bus):
-        """merge_pr must use run_subprocess (not retry) to avoid race conditions."""
-        mgr = _make_manager(config, event_bus)
+        """merge_pr must use run_subprocess (not retry) for the merge command."""
+        mgr = make_pr_manager(config, event_bus)
         with (
             patch("pr_manager.run_subprocess", new_callable=AsyncMock) as mock_plain,
             patch(
                 "pr_manager.run_subprocess_with_retry", new_callable=AsyncMock
             ) as mock_retry,
         ):
+            # get_pr_title_and_body uses _run_gh → run_subprocess_with_retry
+            mock_retry.return_value = '{"title":"Fix","body":""}'
             mock_plain.return_value = ""
             await mgr.merge_pr(101)
 
+        # The merge itself uses run_subprocess (not retry)
         mock_plain.assert_awaited_once()
-        mock_retry.assert_not_awaited()
+        # get_pr_title_and_body goes through _run_gh → run_subprocess_with_retry
+        mock_retry.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_add_labels_uses_retry(self, config, event_bus):
         """add_labels should use run_subprocess_with_retry."""
-        mgr = _make_manager(config, event_bus)
+        mgr = make_pr_manager(config, event_bus)
         with patch(
             "pr_manager.run_subprocess_with_retry", new_callable=AsyncMock
         ) as mock_retry:
@@ -488,7 +484,7 @@ class TestRetryWrapperUsage:
     @pytest.mark.asyncio
     async def test_get_pr_diff_uses_retry(self, config, event_bus):
         """get_pr_diff (read operation) should use run_subprocess_with_retry."""
-        mgr = _make_manager(config, event_bus)
+        mgr = make_pr_manager(config, event_bus)
         with patch(
             "pr_manager.run_subprocess_with_retry", new_callable=AsyncMock
         ) as mock_retry:
@@ -506,7 +502,7 @@ class TestRetryWrapperUsage:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         with patch(
             "prep.run_subprocess_with_retry", new_callable=AsyncMock
         ) as mock_retry:
@@ -519,7 +515,7 @@ class TestRetryWrapperUsage:
     @pytest.mark.asyncio
     async def test_pull_main_uses_retry(self, config, event_bus):
         """pull_main should use run_subprocess_with_retry."""
-        mgr = _make_manager(config, event_bus)
+        mgr = make_pr_manager(config, event_bus)
         with patch(
             "pr_manager.run_subprocess_with_retry", new_callable=AsyncMock
         ) as mock_retry:
@@ -538,7 +534,7 @@ class TestRetryWrapperUsage:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         with patch(
             "pr_manager.run_subprocess_with_retry", new_callable=AsyncMock
         ) as mock_retry:
@@ -564,7 +560,7 @@ class TestGetLabelCounts:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
 
         # Mock _run_gh to return counts for each label query
         call_count = 0
@@ -600,7 +596,7 @@ class TestGetLabelCounts:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
 
         call_count = 0
 
@@ -628,7 +624,7 @@ class TestGetLabelCounts:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
 
         async def mock_run_gh(*cmd, cwd=None):
             raise RuntimeError("network error")
@@ -659,7 +655,7 @@ class TestListOpenPrsEdgeCases:
         self, config, event_bus
     ) -> None:
         """PR JSON missing headRefName should use empty string fallback."""
-        mgr = _make_manager(config, event_bus)
+        mgr = make_pr_manager(config, event_bus)
 
         # PR JSON with no headRefName field
         pr_json = json.dumps(
@@ -686,7 +682,7 @@ class TestListOpenPrsEdgeCases:
         self, config, event_bus
     ) -> None:
         """PR JSON entry missing 'number' key should be skipped."""
-        mgr = _make_manager(config, event_bus)
+        mgr = make_pr_manager(config, event_bus)
 
         pr_json = json.dumps(
             [
@@ -725,7 +721,7 @@ class TestListOpenPrsExceptionHandling:
     @pytest.mark.asyncio
     async def test_skips_items_missing_number_key(self, config, event_bus) -> None:
         """A PR item missing 'number' key should be silently skipped."""
-        mgr = _make_manager(config, event_bus)
+        mgr = make_pr_manager(config, event_bus)
         # JSON with one item missing the 'number' key
         pr_json = json.dumps([{"url": "...", "headRefName": "agent/issue-1"}])
         mock_create = SubprocessMockBuilder().with_stdout(pr_json).build()
@@ -742,7 +738,7 @@ class TestListOpenPrsExceptionHandling:
         """Subprocess failure should be logged at debug and return empty."""
         import logging
 
-        mgr = _make_manager(config, event_bus)
+        mgr = make_pr_manager(config, event_bus)
         mock_create = (
             SubprocessMockBuilder().with_returncode(1).with_stderr("gh error").build()
         )
@@ -776,7 +772,7 @@ class TestListHitlItemsExceptionHandling:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         mock_create = (
             SubprocessMockBuilder().with_returncode(1).with_stderr("gh error").build()
         )
@@ -806,7 +802,7 @@ class TestListHitlItemsExceptionHandling:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
 
         issues_json = json.dumps([{"number": 42, "title": "Test", "url": ""}])
         call_count = 0
@@ -861,7 +857,7 @@ class TestListHitlItemsExceptionHandling:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
 
         # Issue list succeeds, but branch_for_issue raises KeyError for every item.
         issues_json = json.dumps([{"number": 42, "title": "Test", "url": ""}])
@@ -897,7 +893,7 @@ class TestGetPrHeadSha:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         response = '{"headRefOid":"abc123def456789"}'
         mock_create = SubprocessMockBuilder().with_stdout(response).build()
 
@@ -914,7 +910,7 @@ class TestGetPrHeadSha:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         mock_create = (
             SubprocessMockBuilder().with_returncode(1).with_stderr("not found").build()
         )
@@ -927,7 +923,7 @@ class TestGetPrHeadSha:
     @pytest.mark.asyncio
     async def test_dry_run_returns_empty(self, dry_config, event_bus):
         """In dry-run mode, get_pr_head_sha should return empty string."""
-        mgr = _make_manager(dry_config, event_bus)
+        mgr = make_pr_manager(dry_config, event_bus)
         mock_create = SubprocessMockBuilder().build()
 
         with patch("asyncio.create_subprocess_exec", mock_create):
@@ -953,7 +949,7 @@ class TestGetPrReviews:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         response = json.dumps(
             [
                 {
@@ -981,7 +977,7 @@ class TestGetPrReviews:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         mock_create = (
             SubprocessMockBuilder().with_returncode(1).with_stderr("not found").build()
         )
@@ -994,7 +990,7 @@ class TestGetPrReviews:
     @pytest.mark.asyncio
     async def test_dry_run_returns_empty(self, dry_config, event_bus):
         """In dry-run mode, get_pr_reviews should return empty list."""
-        mgr = _make_manager(dry_config, event_bus)
+        mgr = make_pr_manager(dry_config, event_bus)
         mock_create = SubprocessMockBuilder().build()
 
         with patch("asyncio.create_subprocess_exec", mock_create):
@@ -1020,7 +1016,7 @@ class TestGetPrMergeable:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         mock_create = SubprocessMockBuilder().with_stdout("true\n").build()
 
         with patch("asyncio.create_subprocess_exec", mock_create):
@@ -1036,7 +1032,7 @@ class TestGetPrMergeable:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         mock_create = SubprocessMockBuilder().with_stdout("false\n").build()
 
         with patch("asyncio.create_subprocess_exec", mock_create):
@@ -1052,7 +1048,7 @@ class TestGetPrMergeable:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         mock_create = SubprocessMockBuilder().with_stdout("null\n").build()
 
         with patch("asyncio.create_subprocess_exec", mock_create):
@@ -1068,7 +1064,7 @@ class TestGetPrMergeable:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         mock_create = (
             SubprocessMockBuilder().with_returncode(1).with_stderr("not found").build()
         )
@@ -1081,7 +1077,7 @@ class TestGetPrMergeable:
     @pytest.mark.asyncio
     async def test_dry_run_returns_none(self, dry_config, event_bus):
         """In dry-run mode, get_pr_mergeable returns None."""
-        mgr = _make_manager(dry_config, event_bus)
+        mgr = make_pr_manager(dry_config, event_bus)
         mock_create = SubprocessMockBuilder().build()
 
         with patch("asyncio.create_subprocess_exec", mock_create):
@@ -1107,7 +1103,7 @@ class TestGetPrComments:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         response = json.dumps(
             [
                 {
@@ -1133,7 +1129,7 @@ class TestGetPrComments:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         mock_create = (
             SubprocessMockBuilder().with_returncode(1).with_stderr("not found").build()
         )
@@ -1146,7 +1142,7 @@ class TestGetPrComments:
     @pytest.mark.asyncio
     async def test_dry_run_returns_empty(self, dry_config, event_bus):
         """In dry-run mode, get_pr_comments should return empty list."""
-        mgr = _make_manager(dry_config, event_bus)
+        mgr = make_pr_manager(dry_config, event_bus)
         mock_create = SubprocessMockBuilder().build()
 
         with patch("asyncio.create_subprocess_exec", mock_create):
@@ -1171,7 +1167,7 @@ class TestCountHelpers:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(side_effect=[5, 7])
         result = await mgr._count_open_issues_by_label(
             {
@@ -1190,7 +1186,7 @@ class TestCountHelpers:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(side_effect=RuntimeError("network error"))
         result = await mgr._count_open_issues_by_label(
             {"hydraflow-plan": ["hydraflow-plan"]}
@@ -1206,7 +1202,7 @@ class TestCountHelpers:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(side_effect=RuntimeError("network error"))
         with caplog.at_level(logging.DEBUG, logger="hydraflow.pr_manager"):
             await mgr._count_open_issues_by_label(
@@ -1223,7 +1219,7 @@ class TestCountHelpers:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(side_effect=ValueError("bad parse"))
         result = await mgr._count_open_issues_by_label(
             {"hydraflow-plan": ["hydraflow-plan"]}
@@ -1237,7 +1233,7 @@ class TestCountHelpers:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(side_effect=[7, 8])
         result = await mgr._count_closed_issues(["hydraflow-fixed", "hf-fixed-alt"])
         assert result == 15
@@ -1251,7 +1247,7 @@ class TestCountHelpers:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(side_effect=RuntimeError("network error"))
         result = await mgr._count_closed_issues(["hydraflow-fixed"])
         assert result == 0
@@ -1265,7 +1261,7 @@ class TestCountHelpers:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(side_effect=RuntimeError("network error"))
         with caplog.at_level(logging.DEBUG, logger="hydraflow.pr_manager"):
             await mgr._count_closed_issues(["hydraflow-fixed"])
@@ -1280,7 +1276,7 @@ class TestCountHelpers:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(side_effect=ValueError("bad parse"))
         result = await mgr._count_closed_issues(["hydraflow-fixed"])
         assert result == 0
@@ -1292,7 +1288,7 @@ class TestCountHelpers:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(return_value=12)
         result = await mgr._count_merged_prs("hydraflow-fixed")
         assert result == 12
@@ -1306,7 +1302,7 @@ class TestCountHelpers:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(side_effect=RuntimeError("network error"))
         result = await mgr._count_merged_prs("hydraflow-fixed")
         assert result == 0
@@ -1320,7 +1316,7 @@ class TestCountHelpers:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(side_effect=RuntimeError("network error"))
         with caplog.at_level(logging.DEBUG, logger="hydraflow.pr_manager"):
             await mgr._count_merged_prs("hydraflow-fixed")
@@ -1335,7 +1331,7 @@ class TestCountHelpers:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         mgr._search_github_count = AsyncMock(side_effect=ValueError("bad parse"))
         result = await mgr._count_merged_prs("hydraflow-fixed")
         assert result == 0
@@ -1349,7 +1345,7 @@ class TestCountHelpers:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         captured_queries: list[str] = []
 
         async def mock_search(query: str) -> int:
@@ -1372,7 +1368,7 @@ class TestCountHelpers:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         captured_queries: list[str] = []
 
         async def mock_search(query: str) -> int:
@@ -1393,7 +1389,7 @@ class TestCountHelpers:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
         captured_queries: list[str] = []
 
         async def mock_search(query: str) -> int:
@@ -1424,7 +1420,7 @@ class TestQueryIssuesByLabels:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
 
         item = json.dumps([{"number": 7, "title": "Dup", "url": "u"}])
 
@@ -1448,7 +1444,7 @@ class TestQueryIssuesByLabels:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
 
         items = json.dumps([{"title": "No num"}, {"number": 5, "title": "OK"}])
 
@@ -1469,7 +1465,7 @@ class TestQueryIssuesByLabels:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
 
         async def mock_run_gh(*cmd, cwd=None):
             raise RuntimeError("api down")
@@ -1496,7 +1492,7 @@ class TestQueryIssuesByLabels:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
 
         call_idx = 0
 
@@ -1523,7 +1519,7 @@ class TestQueryIssuesByLabels:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
 
         call_idx = 0
 
@@ -1551,7 +1547,7 @@ class TestQueryIssuesByLabels:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
 
         call_count = 0
 
@@ -1574,7 +1570,7 @@ class TestQueryIssuesByLabels:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
 
         call_idx = 0
 
@@ -1599,7 +1595,7 @@ class TestQueryIssuesByLabels:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
 
         helper_called = False
 
@@ -1623,7 +1619,7 @@ class TestQueryIssuesByLabels:
             worktree_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
         )
-        mgr = _make_manager(cfg, event_bus)
+        mgr = make_pr_manager(cfg, event_bus)
 
         helper_called = False
         captured_level = None
@@ -1640,3 +1636,93 @@ class TestQueryIssuesByLabels:
         assert helper_called is True
         assert captured_level == "warning"
         assert len(result) == 1
+
+
+# ---------------------------------------------------------------------------
+# get_issue_state
+# ---------------------------------------------------------------------------
+
+
+class TestGetIssueState:
+    """Tests for PRManager.get_issue_state."""
+
+    def _make_manager(self, tmp_path, event_bus):
+        cfg = ConfigFactory.create(
+            repo_root=tmp_path,
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+        )
+        return make_pr_manager(cfg, event_bus)
+
+    @pytest.mark.asyncio
+    async def test_open_issue_returns_open(self, event_bus, tmp_path):
+        mgr = self._make_manager(tmp_path, event_bus)
+        payload = json.dumps({"state": "OPEN", "stateReason": None})
+        mock_create = SubprocessMockBuilder().with_stdout(payload).build()
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            result = await mgr.get_issue_state(42)
+
+        assert result == "OPEN"
+
+    @pytest.mark.asyncio
+    async def test_closed_completed_issue_returns_completed(self, event_bus, tmp_path):
+        mgr = self._make_manager(tmp_path, event_bus)
+        payload = json.dumps({"state": "CLOSED", "stateReason": "COMPLETED"})
+        mock_create = SubprocessMockBuilder().with_stdout(payload).build()
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            result = await mgr.get_issue_state(42)
+
+        assert result == "COMPLETED"
+
+    @pytest.mark.asyncio
+    async def test_closed_not_planned_returns_not_planned(self, event_bus, tmp_path):
+        mgr = self._make_manager(tmp_path, event_bus)
+        payload = json.dumps({"state": "CLOSED", "stateReason": "NOT_PLANNED"})
+        mock_create = SubprocessMockBuilder().with_stdout(payload).build()
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            result = await mgr.get_issue_state(42)
+
+        assert result == "NOT_PLANNED"
+
+    @pytest.mark.asyncio
+    async def test_closed_null_statereason_returns_empty_string(
+        self, event_bus, tmp_path
+    ):
+        # When stateReason is null (issues closed before GitHub added stateReason
+        # tracking), we return "" rather than assuming "COMPLETED" to avoid
+        # incorrectly treating unresolved closures as resolved.
+        mgr = self._make_manager(tmp_path, event_bus)
+        payload = json.dumps({"state": "CLOSED", "stateReason": None})
+        mock_create = SubprocessMockBuilder().with_stdout(payload).build()
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            result = await mgr.get_issue_state(42)
+
+        assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_string_on_error(self, event_bus, tmp_path):
+        mgr = self._make_manager(tmp_path, event_bus)
+        mock_create = SubprocessMockBuilder().with_stdout("not-json").build()
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            result = await mgr.get_issue_state(42)
+
+        assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_passes_correct_issue_number_to_gh(self, event_bus, tmp_path):
+        mgr = self._make_manager(tmp_path, event_bus)
+        payload = json.dumps({"state": "OPEN", "stateReason": None})
+        mock_create = SubprocessMockBuilder().with_stdout(payload).build()
+
+        with patch("asyncio.create_subprocess_exec", mock_create) as m:
+            await mgr.get_issue_state(99)
+
+        call_args = m.call_args[0]
+        assert "99" in call_args
+        assert "issue" in call_args
+        assert "view" in call_args

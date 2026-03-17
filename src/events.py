@@ -6,7 +6,7 @@ import asyncio
 import contextlib
 import itertools
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
@@ -14,7 +14,7 @@ from typing import Any, TypeVar, cast
 
 from pydantic import BaseModel, Field, ValidationError
 
-from file_util import atomic_write
+from file_util import append_jsonl, atomic_write
 
 
 class _Counter:
@@ -92,11 +92,9 @@ _T = TypeVar("_T")
 
 #: The type used for ``HydraFlowEvent.data``.
 #:
-#: Pyright treats ``TypedDict`` as incompatible with ``dict[str, Any]``,
-#: so ``EventData`` must be ``Any`` to accept typed payload classes defined
-#: in ``models.py``.  Type safety at the *consumer* side comes from
-#: :meth:`HydraFlowEvent.typed_data`.
-EventData = Any
+#: All event payloads are plain dicts at runtime — either dict literals
+#: matching a ``TypedDict`` schema or the result of ``BaseModel.model_dump()``.
+EventData = Mapping[str, Any]
 
 
 class HydraFlowEvent(BaseModel):
@@ -137,8 +135,6 @@ class EventLog:
     def _append_sync(self, line: str) -> None:
         """Synchronous append — called via ``asyncio.to_thread``."""
         try:
-            from file_util import append_jsonl  # noqa: PLC0415
-
             append_jsonl(self._path, line)
         except OSError:
             logger.warning(

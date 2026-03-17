@@ -280,9 +280,23 @@ export function reducer(state, action) {
 
     case 'merge_update': {
       const isMerged = action.data.status === 'merged'
-      const updatedPrs = isMerged && action.data.pr
-        ? state.prs.map(p => p.pr === action.data.pr ? { ...p, merged: true } : p)
-        : state.prs
+      if (!isMerged || !action.data.pr) {
+        return { ...addEvent(state, action), prs: state.prs }
+      }
+      const found = state.prs.some(p => p.pr === action.data.pr)
+      const updatedPrs = found
+        ? state.prs.map(p => {
+            if (p.pr !== action.data.pr) return p
+            const updates = { ...p, merged: true }
+            if (action.data.title) updates.title = action.data.title
+            return updates
+          })
+        : [...state.prs, {
+            pr: action.data.pr,
+            merged: true,
+            ...(action.data.title ? { title: action.data.title } : {}),
+            ...(action.data.issue ? { issue: action.data.issue } : {}),
+          }]
       return {
         ...addEvent(state, action),
         prs: updatedPrs,
@@ -296,12 +310,10 @@ export function reducer(state, action) {
       return { ...state, config: action.data }
 
     case 'EXISTING_PRS': {
-      // /api/prs only returns open PRs — preserve merged PRs from session
-      const existingMerged = state.prs.filter(p => p.merged)
-      const openPrs = action.data || []
-      const openNumbers = new Set(openPrs.map(p => p.pr))
-      const merged = existingMerged.filter(p => !openNumbers.has(p.pr))
-      return { ...state, prs: [...openPrs, ...merged] }
+      // Backend provides merged flag on PRs — use as-is.
+      // Merged state is tracked authoritatively in the pipeline snapshot,
+      // so we no longer preserve session-volatile merged PRs here.
+      return { ...state, prs: action.data || [] }
     }
 
     case 'HITL_ITEMS':
@@ -506,9 +518,9 @@ export function reducer(state, action) {
 
     case 'PIPELINE_SNAPSHOT': {
       const incoming = action.data || {}
-      const openStages = ['triage', 'plan', 'implement', 'review', 'hitl']
+      const allStages = ['triage', 'plan', 'implement', 'review', 'hitl', 'merged']
 
-      const nextOpen = Object.fromEntries(openStages.map((key) => {
+      const nextStages = Object.fromEntries(allStages.map((key) => {
         if (!Object.prototype.hasOwnProperty.call(incoming, key)) {
           return [key, state.pipelineIssues[key] || []]
         }
@@ -519,11 +531,7 @@ export function reducer(state, action) {
 
       return {
         ...state,
-        pipelineIssues: {
-          ...nextOpen,
-          // Server never sends merged — preserve session-accumulated merged items
-          merged: state.pipelineIssues.merged || [],
-        },
+        pipelineIssues: nextStages,
         pipelinePollerLastRun: new Date().toISOString(),
       }
     }
@@ -822,6 +830,17 @@ export function HydraFlowProvider({ children }) {
       .then(data => { if (Array.isArray(data)) dispatch({ type: 'SET_TRACKED_REPORTS', data }) })
       .catch(() => {})
   }, [])
+
+  const refreshReportStatuses = useCallback(async () => {
+    const rid = reporterIdRef.current
+    if (!rid) return
+    try {
+      await fetch(`/api/reports/refresh?reporter_id=${encodeURIComponent(rid)}`, { method: 'POST' })
+      fetchTrackedReports()
+    } catch {
+      // silently ignore
+    }
+  }, [fetchTrackedReports])
 
   const updateTrackedReport = useCallback(async (reportId, action, detail) => {
     try {
@@ -1301,6 +1320,17 @@ export function HydraFlowProvider({ children }) {
     }
   }, [fetchWithRepo])
 
+  const refreshCreditStatus = useCallback(async () => {
+    try {
+      const res = await fetchWithRepo('/api/control/credit-refresh', { method: 'POST' })
+      if (!res.ok) return { ok: false, status: 'error' }
+      const data = await res.json()
+      return { ok: true, status: data.status }
+    } catch {
+      return { ok: false, status: 'error' }
+    }
+  }, [fetchWithRepo])
+
   const startOrchestrator = useCallback(async () => {
     if (state.selectedRepoSlug) {
       const result = await startRuntime(state.selectedRepoSlug)
@@ -1557,13 +1587,19 @@ export function HydraFlowProvider({ children }) {
     return () => { cancelled = true; clearInterval(interval) }
   }, [state.connected, isSeeded])
 
-  // Fetch tracked reports on mount and periodically
+  // Fetch tracked reports on mount and periodically; also refresh
+  // filed/stale statuses so the UI reflects actual issue outcomes.
+  // refreshReportStatuses already calls fetchTrackedReports on success,
+  // so on mount we only need one of them to run first for an immediate display,
+  // then the refresh fills in accurate statuses.
   useEffect(() => {
     if (isSeeded) return
     fetchTrackedReports()
-    const interval = setInterval(fetchTrackedReports, 30_000)
+    const interval = setInterval(() => {
+      refreshReportStatuses()
+    }, 30_000)
     return () => clearInterval(interval)
-  }, [fetchTrackedReports, isSeeded])
+  }, [fetchTrackedReports, refreshReportStatuses, isSeeded])
 
   const value = {
     ...state,
@@ -1576,12 +1612,14 @@ export function HydraFlowProvider({ children }) {
     submitReport,
     trackedReports: state.trackedReports,
     updateTrackedReport,
+    refreshReportStatuses,
     submitHumanInput,
     requestChanges,
     toggleBgWorker,
     triggerBgWorker,
     updateBgWorkerInterval,
     dismissSystemAlert: useCallback(() => dispatch({ type: 'CLEAR_SYSTEM_ALERT' }), [dispatch]),
+    refreshCreditStatus,
     refreshHitl: fetchHitlItems,
     selectSession,
     selectRepo,

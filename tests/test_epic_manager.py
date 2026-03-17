@@ -15,6 +15,7 @@ import epic  # noqa: E402
 from events import EventBus, EventType
 from models import EpicState
 from state import StateTracker
+from tests.conftest import PRInfoFactory
 from tests.helpers import ConfigFactory
 
 
@@ -229,8 +230,7 @@ class TestGetProgress:
         progress = mgr.get_progress(100)
         assert progress.status == "blocked"
 
-    @pytest.mark.asyncio
-    async def test_stale_status(self, tmp_path: Path) -> None:
+    def test_stale_status(self, tmp_path: Path) -> None:
         mgr, state, _, _, _ = _make_manager(tmp_path, epic_stale_days=1)
         old_time = (datetime.now(UTC) - timedelta(days=2)).isoformat()
         es = EpicState(
@@ -482,7 +482,6 @@ class TestGetDetailEnriched:
 
     @pytest.mark.asyncio
     async def test_child_with_branch_gets_pr_info(self, tmp_path: Path) -> None:
-        from models import PRInfo
         from tests.conftest import IssueFactory
 
         mgr, state, _, prs, fetcher = _make_manager(tmp_path)
@@ -495,7 +494,7 @@ class TestGetDetailEnriched:
 
         # Set branch in state
         state.set_branch(10, "agent/issue-10")
-        pr_info = PRInfo(
+        pr_info = PRInfoFactory.create(
             number=42,
             issue_number=10,
             branch="agent/issue-10",
@@ -521,7 +520,6 @@ class TestGetDetailEnriched:
 
     @pytest.mark.asyncio
     async def test_failed_ci_status(self, tmp_path: Path) -> None:
-        from models import PRInfo
         from tests.conftest import IssueFactory
 
         mgr, state, _, prs, fetcher = _make_manager(tmp_path)
@@ -533,7 +531,9 @@ class TestGetDetailEnriched:
         fetcher.fetch_issue_by_number = AsyncMock(return_value=child_10)
 
         state.set_branch(10, "agent/issue-10")
-        pr_info = PRInfo(number=42, issue_number=10, branch="agent/issue-10", url="")
+        pr_info = PRInfoFactory.create(
+            number=42, issue_number=10, branch="agent/issue-10", url=""
+        )
         prs.find_open_pr_for_branch = AsyncMock(return_value=pr_info)
         prs.get_pr_checks = AsyncMock(
             return_value=[
@@ -1112,10 +1112,7 @@ class TestCacheInvalidation:
         assert 100 not in mgr._detail_cache
         assert 100 not in mgr._cache_timestamps
 
-    @pytest.mark.asyncio
-    async def test_cache_invalidation_no_op_for_unknown_epic(
-        self, tmp_path: Path
-    ) -> None:
+    def test_cache_invalidation_no_op_for_unknown_epic(self, tmp_path: Path) -> None:
         mgr, state, bus, prs, fetcher = _make_manager(tmp_path)
         # Should not raise even if epic doesn't exist in cache
         mgr._invalidate_cache(999)
@@ -1154,7 +1151,6 @@ class TestRefreshCacheReadyGuard:
     async def test_publishes_ready_when_all_conditions_met(
         self, tmp_path: Path
     ) -> None:
-        from models import PRInfo
         from tests.conftest import IssueFactory
 
         mgr, state, bus, prs, fetcher = _make_manager(tmp_path)
@@ -1174,7 +1170,9 @@ class TestRefreshCacheReadyGuard:
         )
 
         state.set_branch(20, "agent/issue-20")
-        pr_info = PRInfo(number=43, issue_number=20, branch="agent/issue-20", url="")
+        pr_info = PRInfoFactory.create(
+            number=43, issue_number=20, branch="agent/issue-20", url=""
+        )
         prs.find_open_pr_for_branch = AsyncMock(return_value=pr_info)
         prs.get_pr_checks = AsyncMock(return_value=[{"state": "success", "name": "CI"}])
         prs.get_pr_reviews = AsyncMock(
@@ -1192,7 +1190,6 @@ class TestRefreshCacheReadyGuard:
     async def test_does_not_publish_ready_for_released_epic(
         self, tmp_path: Path
     ) -> None:
-        from models import PRInfo
         from tests.conftest import IssueFactory
 
         mgr, state, bus, prs, fetcher = _make_manager(tmp_path)
@@ -1210,7 +1207,9 @@ class TestRefreshCacheReadyGuard:
         fetcher.fetch_issue_by_number = AsyncMock(return_value=child_10)
 
         state.set_branch(10, "agent/issue-10")
-        pr_info = PRInfo(number=42, issue_number=10, branch="agent/issue-10", url="")
+        pr_info = PRInfoFactory.create(
+            number=42, issue_number=10, branch="agent/issue-10", url=""
+        )
         prs.find_open_pr_for_branch = AsyncMock(return_value=pr_info)
         prs.get_pr_checks = AsyncMock(return_value=[{"state": "success", "name": "CI"}])
         prs.get_pr_reviews = AsyncMock(
@@ -1317,7 +1316,6 @@ class TestReadinessEdgeCases:
 
     @pytest.mark.asyncio
     async def test_draft_pr_detected(self, tmp_path: Path) -> None:
-        from models import PRInfo
         from tests.conftest import IssueFactory
 
         mgr, state, _, prs, fetcher = _make_manager(tmp_path)
@@ -1327,7 +1325,7 @@ class TestReadinessEdgeCases:
         fetcher.fetch_issue_by_number = AsyncMock(return_value=child_10)
 
         state.set_branch(10, "agent/issue-10")
-        pr_info = PRInfo(
+        pr_info = PRInfoFactory.create(
             number=42,
             issue_number=10,
             branch="agent/issue-10",
@@ -1345,7 +1343,6 @@ class TestReadinessEdgeCases:
 
     @pytest.mark.asyncio
     async def test_pending_ci_status(self, tmp_path: Path) -> None:
-        from models import PRInfo
         from tests.conftest import IssueFactory
 
         mgr, state, _, prs, fetcher = _make_manager(tmp_path)
@@ -1357,7 +1354,9 @@ class TestReadinessEdgeCases:
         fetcher.fetch_issue_by_number = AsyncMock(return_value=child_10)
 
         state.set_branch(10, "agent/issue-10")
-        pr_info = PRInfo(number=42, issue_number=10, branch="agent/issue-10", url="")
+        pr_info = PRInfoFactory.create(
+            number=42, issue_number=10, branch="agent/issue-10", url=""
+        )
         prs.find_open_pr_for_branch = AsyncMock(return_value=pr_info)
         prs.get_pr_checks = AsyncMock(return_value=[{"state": "pending", "name": "CI"}])
         prs.get_pr_reviews = AsyncMock(return_value=[])
@@ -1516,3 +1515,167 @@ class TestFindParentEpics:
 
         parents = mgr.find_parent_epics(999)
         assert parents == []
+
+
+class TestPerItemIsolation:
+    """Per-item try/except must not abort the whole loop on a single failure."""
+
+    def test_get_all_progress_continues_after_exception(self, tmp_path: Path) -> None:
+        """get_all_progress skips a failing epic and returns the rest."""
+        from unittest.mock import MagicMock, patch
+
+        from models import EpicProgress, EpicState
+
+        mgr, _, _, _, _ = _make_manager(tmp_path)
+        mgr._state.upsert_epic_state(
+            EpicState(epic_number=100, title="Epic A", child_issues=[1])
+        )
+        mgr._state.upsert_epic_state(
+            EpicState(epic_number=200, title="Epic B", child_issues=[2])
+        )
+
+        stub_progress = MagicMock(spec=EpicProgress)
+        stub_progress.epic_number = 200
+
+        call_count = 0
+
+        def _mock_get_progress(epic_number: int):
+            nonlocal call_count
+            call_count += 1
+            if epic_number == 100:
+                raise RuntimeError("boom")
+            return stub_progress
+
+        with patch.object(mgr, "get_progress", side_effect=_mock_get_progress):
+            results = mgr.get_all_progress()
+
+        assert call_count == 2
+        assert all(r.epic_number != 100 for r in results)
+        assert any(r.epic_number == 200 for r in results)
+
+    @pytest.mark.asyncio
+    async def test_get_all_detail_continues_after_exception(
+        self, tmp_path: Path
+    ) -> None:
+        """get_all_detail skips a failing epic and returns the rest."""
+        from unittest.mock import patch
+
+        mgr, _, _, _, fetcher = _make_manager(tmp_path)
+        from models import EpicState
+        from tests.conftest import IssueFactory
+
+        mgr._state.upsert_epic_state(
+            EpicState(epic_number=100, title="Epic A", child_issues=[1])
+        )
+        mgr._state.upsert_epic_state(
+            EpicState(epic_number=200, title="Epic B", child_issues=[2])
+        )
+
+        child = IssueFactory.create(number=2, title="Child 2", labels=[])
+        fetcher.fetch_issue_by_number = AsyncMock(return_value=child)
+        mgr._prs.find_open_pr_for_branch = AsyncMock(return_value=None)
+
+        call_count = 0
+        original_build = mgr._build_detail
+
+        async def _mock_build(epic_number: int):
+            nonlocal call_count
+            call_count += 1
+            if epic_number == 100:
+                raise RuntimeError("detail exploded")
+            return await original_build(epic_number)
+
+        with patch.object(mgr, "_build_detail", side_effect=_mock_build):
+            details = await mgr.get_all_detail()
+
+        assert call_count == 2
+        numbers = {d.epic_number for d in details}
+        assert 100 not in numbers
+
+    @pytest.mark.asyncio
+    async def test_refresh_cache_continues_after_exception(
+        self, tmp_path: Path
+    ) -> None:
+        """refresh_cache skips a failing epic and processes the rest."""
+        from unittest.mock import patch
+
+        mgr, _, bus, _, fetcher = _make_manager(tmp_path)
+        from models import EpicState
+        from tests.conftest import IssueFactory
+
+        mgr._state.upsert_epic_state(
+            EpicState(epic_number=100, title="Epic A", child_issues=[1])
+        )
+        mgr._state.upsert_epic_state(
+            EpicState(epic_number=200, title="Epic B", child_issues=[2])
+        )
+
+        child = IssueFactory.create(number=2, title="Child 2", labels=[])
+        fetcher.fetch_issue_by_number = AsyncMock(return_value=child)
+        mgr._prs.find_open_pr_for_branch = AsyncMock(return_value=None)
+
+        call_count = 0
+        original_build = mgr._build_detail
+
+        async def _mock_build(epic_number: int):
+            nonlocal call_count
+            call_count += 1
+            if epic_number == 100:
+                raise RuntimeError("cache build exploded")
+            return await original_build(epic_number)
+
+        with patch.object(mgr, "_build_detail", side_effect=_mock_build):
+            # Must not raise
+            await mgr.refresh_cache()
+
+        assert call_count == 2
+        # Epic 200 should have emitted a progress event
+        progress_events = [
+            e for e in bus.get_history() if e.type == EventType.EPIC_PROGRESS
+        ]
+        assert any(e.data["epic_number"] == 200 for e in progress_events)
+
+    @pytest.mark.asyncio
+    async def test_check_stale_epics_continues_after_exception(
+        self, tmp_path: Path
+    ) -> None:
+        """check_stale_epics posts comment failures don't abort stale detection."""
+        from datetime import UTC, datetime, timedelta
+
+        mgr, state, _, prs, _ = _make_manager(tmp_path, epic_stale_days=1)
+        old_time = (datetime.now(UTC) - timedelta(days=3)).isoformat()
+
+        from models import EpicState
+
+        state.upsert_epic_state(
+            EpicState(
+                epic_number=100,
+                title="Stale A",
+                child_issues=[1],
+                last_activity=old_time,
+            )
+        )
+        state.upsert_epic_state(
+            EpicState(
+                epic_number=200,
+                title="Stale B",
+                child_issues=[2],
+                last_activity=old_time,
+            )
+        )
+
+        call_count = 0
+
+        async def _mock_post_comment(issue_number: int, body: str) -> None:
+            nonlocal call_count
+            call_count += 1
+            if issue_number == 100:
+                raise RuntimeError("comment failed")
+
+        prs.post_comment = AsyncMock(side_effect=_mock_post_comment)
+
+        stale = await mgr.check_stale_epics()
+
+        assert call_count == 2
+        # Both epics are stale — the failure on #100 must not remove it from list
+        assert set(stale) == {100, 200}

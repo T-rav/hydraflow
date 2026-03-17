@@ -86,8 +86,8 @@ def _coerce_merge_strategy(value: str | MergeStrategy) -> MergeStrategy:
 
 
 def parse_epic_sub_issues(body: str) -> list[int]:
-    """Extract issue numbers from checkbox lines in an epic body."""
-    return [int(m) for m in _CHECKBOX_PATTERN.findall(body)]
+    """Extract unique issue numbers from checkbox lines in an epic body, preserving first-occurrence order."""
+    return list(dict.fromkeys(int(m) for m in _CHECKBOX_PATTERN.findall(body)))
 
 
 def check_all_checkboxes(body: str) -> str:
@@ -750,18 +750,30 @@ class EpicManager:
         """Return progress for all tracked epics (for dashboard API)."""
         results: list[EpicProgress] = []
         for epic in self._state.get_all_epic_states().values():
-            progress = self.get_progress(epic.epic_number)
-            if progress is not None:
-                results.append(progress)
+            try:
+                progress = self.get_progress(epic.epic_number)
+                if progress is not None:
+                    results.append(progress)
+            except Exception:
+                logger.exception(
+                    "Failed to get progress for epic #%d, continuing",
+                    epic.epic_number,
+                )
         return results
 
     async def get_all_detail(self) -> list[EpicDetail]:
         """Return enriched detail for all tracked epics (for /api/epics)."""
         results: list[EpicDetail] = []
         for epic in self._state.get_all_epic_states().values():
-            detail = await self.get_detail(epic.epic_number)
-            if detail is not None:
-                results.append(detail)
+            try:
+                detail = await self.get_detail(epic.epic_number)
+                if detail is not None:
+                    results.append(detail)
+            except Exception:
+                logger.exception(
+                    "Failed to get detail for epic #%d, continuing",
+                    epic.epic_number,
+                )
         return results
 
     def get_cached_detail(self, epic_number: int) -> EpicDetail | None:
@@ -1043,11 +1055,10 @@ class EpicManager:
                                 ),
                             )
                         )
-            except RuntimeError:
-                logger.warning(
-                    "Failed to refresh cache for epic #%d",
+            except Exception:
+                logger.exception(
+                    "Failed to refresh cache for epic #%d, continuing",
                     epic.epic_number,
-                    exc_info=True,
                 )
 
     async def trigger_release(self, epic_number: int) -> dict[str, object]:
@@ -1146,23 +1157,28 @@ class EpicManager:
                     f"Consider reviewing the status of child issues.\n\n"
                     f"---\n*HydraFlow Epic Monitor*",
                 )
-            except RuntimeError:
-                logger.warning(
-                    "Failed to post stale warning for epic #%d",
+            except Exception:
+                logger.exception(
+                    "Failed to post stale warning for epic #%d, continuing",
                     epic.epic_number,
-                    exc_info=True,
                 )
-            await self._bus.publish(
-                HydraFlowEvent(
-                    type=EventType.SYSTEM_ALERT,
-                    data=SystemAlertPayload(
-                        message=f"Epic #{epic.epic_number} is stale "
-                        f"(no activity for {self._config.epic_stale_days} days)",
-                        source="epic_monitor",
-                        epic_number=epic.epic_number,
-                    ),
+            try:
+                await self._bus.publish(
+                    HydraFlowEvent(
+                        type=EventType.SYSTEM_ALERT,
+                        data=SystemAlertPayload(
+                            message=f"Epic #{epic.epic_number} is stale "
+                            f"(no activity for {self._config.epic_stale_days} days)",
+                            source="epic_monitor",
+                            epic_number=epic.epic_number,
+                        ),
+                    )
                 )
-            )
+            except Exception:
+                logger.exception(
+                    "Failed to publish stale alert for epic #%d, continuing",
+                    epic.epic_number,
+                )
         return stale
 
     def _get_merge_order(self, epic: EpicState) -> list[int]:
