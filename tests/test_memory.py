@@ -2157,34 +2157,35 @@ class TestMemoryAutoApproveRouting:
         assert config.hitl_label[0] in call_labels
 
     @pytest.mark.asyncio
-    async def test_auto_approve_on__all_actionable_types_skip_hitl(
-        self, tmp_path: Path
+    @pytest.mark.parametrize("memory_type", ["config", "instruction", "code"])
+    async def test_auto_approve_on__actionable_types_skip_hitl(
+        self, tmp_path: Path, memory_type: str
     ) -> None:
-        """All actionable types (config, instruction, code) should skip HITL when auto-approve on."""
-        for idx, mtype in enumerate(["config", "instruction", "code"]):
-            config = ConfigFactory.create(
-                repo_root=tmp_path / f"repo_{mtype}",
-                memory_auto_approve=True,
-            )
-            state = StateTracker(config.state_file)
-            mock_prs = AsyncMock()
-            issue_num = 600 + idx
-            mock_prs.create_issue = AsyncMock(return_value=issue_num)
+        """All actionable types should skip HITL when auto-approve is enabled."""
+        config = ConfigFactory.create(
+            repo_root=tmp_path / "repo",
+            memory_auto_approve=True,
+        )
+        state = StateTracker(config.state_file)
+        mock_prs = AsyncMock()
+        mock_prs.create_issue = AsyncMock(return_value=777)
 
-            await file_memory_suggestion(
-                self._make_transcript(mtype),
-                "implementer",
-                f"issue #{issue_num}",
-                config,
-                mock_prs,
-                state,
-            )
+        await file_memory_suggestion(
+            self._make_transcript(memory_type),
+            "implementer",
+            "issue #777",
+            config,
+            mock_prs,
+            state,
+        )
 
-            assert state.get_hitl_cause(issue_num) is None, f"{mtype} should skip HITL"
-            call_labels = mock_prs.create_issue.call_args.args[2]
-            assert config.hitl_label[0] not in call_labels, (
-                f"{mtype} should not have HITL label"
-            )
+        assert state.get_hitl_cause(777) is None, (
+            f"{memory_type} suggestions should skip HITL"
+        )
+        call_labels = mock_prs.create_issue.call_args.args[2]
+        assert config.hitl_label[0] not in call_labels, (
+            f"{memory_type} suggestions should not include HITL label"
+        )
 
 
 class TestSyncWithTypedIssues:

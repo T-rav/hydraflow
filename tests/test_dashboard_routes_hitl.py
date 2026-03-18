@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -39,7 +40,6 @@ class TestHITLMemoryAutoApproveFiltering:
         get_hitl = find_endpoint(router, "/api/hitl")
         assert get_hitl is not None
         response = await get_hitl()
-        import json
 
         items = json.loads(response.body)
         assert len(items) == 0
@@ -64,7 +64,6 @@ class TestHITLMemoryAutoApproveFiltering:
         get_hitl = find_endpoint(router, "/api/hitl")
         assert get_hitl is not None
         response = await get_hitl()
-        import json
 
         items = json.loads(response.body)
         assert len(items) == 1
@@ -90,7 +89,6 @@ class TestHITLMemoryAutoApproveFiltering:
         get_hitl = find_endpoint(router, "/api/hitl")
         assert get_hitl is not None
         response = await get_hitl()
-        import json
 
         items = json.loads(response.body)
         assert len(items) == 1
@@ -119,7 +117,6 @@ class TestHITLEndpointCause:
         assert get_hitl is not None
         response = await get_hitl()
         data = response.body  # JSONResponse stores body as bytes
-        import json
 
         items = json.loads(data)
         assert len(items) == 1
@@ -149,7 +146,6 @@ class TestHITLEndpointCause:
         assert get_hitl_summary is not None
 
         response = await get_hitl()
-        import json
 
         items = json.loads(response.body)
         assert items[0]["llmSummary"].startswith("Line one")
@@ -180,7 +176,6 @@ class TestHITLEndpointCause:
         assert get_hitl is not None
         with patch("dashboard_routes._routes.asyncio.create_task") as mock_create_task:
             response = await get_hitl()
-            import json
 
             payload = json.loads(response.body)
             assert payload[0]["llmSummary"] == ""
@@ -225,7 +220,6 @@ class TestHITLEndpointCause:
         get_hitl = find_endpoint(router, "/api/hitl")
         assert get_hitl is not None
         response = await get_hitl()
-        import json
 
         items = json.loads(response.body)
         issue_numbers = {item["issue"] for item in items}
@@ -245,7 +239,6 @@ class TestHITLEndpointCause:
         get_hitl = find_endpoint(router, "/api/hitl")
         assert get_hitl is not None
         response = await get_hitl()
-        import json
 
         items = json.loads(response.body)
         assert len(items) == 1
@@ -266,7 +259,6 @@ class TestHITLEndpointCause:
         get_hitl = find_endpoint(router, "/api/hitl")
         assert get_hitl is not None
         response = await get_hitl()
-        import json
 
         items = json.loads(response.body)
         assert len(items) == 1
@@ -286,7 +278,6 @@ class TestHITLEndpointCause:
         get_hitl = find_endpoint(router, "/api/hitl")
         assert get_hitl is not None
         response = await get_hitl()
-        import json
 
         items = json.loads(response.body)
         assert len(items) == 1
@@ -305,7 +296,6 @@ class TestHITLEndpointCause:
         get_hitl = find_endpoint(router, "/api/hitl")
         assert get_hitl is not None
         response = await get_hitl()
-        import json
 
         items = json.loads(response.body)
         assert len(items) == 1
@@ -327,7 +317,6 @@ class TestHITLEndpointCause:
         get_hitl = find_endpoint(router, "/api/hitl")
         assert get_hitl is not None
         response = await get_hitl()
-        import json
 
         items = json.loads(response.body)
         assert len(items) == 1
@@ -348,7 +337,6 @@ class TestHITLEndpointCause:
         get_hitl = find_endpoint(router, "/api/hitl")
         assert get_hitl is not None
         response = await get_hitl()
-        import json
 
         items = json.loads(response.body)
         assert len(items) == 1
@@ -370,7 +358,6 @@ class TestHITLEndpointCause:
         get_hitl = find_endpoint(router, "/api/hitl")
         assert get_hitl is not None
         response = await get_hitl()
-        import json
 
         items = json.loads(response.body)
         assert len(items) == 1
@@ -402,7 +389,6 @@ class TestHITLEndpointCause:
         get_hitl = find_endpoint(router, "/api/hitl")
         assert get_hitl is not None
         response = await get_hitl()
-        import json
 
         items = json.loads(response.body)
         assert len(items) == 1
@@ -427,7 +413,6 @@ class TestHITLEndpointCause:
         get_hitl = find_endpoint(router, "/api/hitl")
         assert get_hitl is not None
         response = await get_hitl()
-        import json
 
         items = json.loads(response.body)
         assert len(items) == 1
@@ -654,7 +639,6 @@ class TestHITLCloseEndpoint:
     async def test_close_issue_with_orchestrator(
         self, config, event_bus, state, tmp_path
     ) -> None:
-        import json
 
         from models import HITLCloseRequest
 
@@ -704,7 +688,6 @@ class TestHITLCloseEndpoint:
         self, config, event_bus, state, tmp_path
     ) -> None:
         """Close should succeed even if post_comment raises."""
-        import json
 
         from models import HITLCloseRequest
 
@@ -756,7 +739,6 @@ class TestHITLSkipCommentResilience:
         self, config, event_bus, state, tmp_path
     ) -> None:
         """Skip should succeed even if post_comment raises."""
-        import json
 
         from models import HITLSkipRequest
 
@@ -809,7 +791,6 @@ class TestHITLApproveMemoryEndpoint:
     async def test_approve_memory_removes_pipeline_labels(
         self, config, event_bus, state, tmp_path
     ) -> None:
-        import json
 
         mock_orch = MagicMock()
         mock_orch.skip_hitl_issue = MagicMock()
@@ -839,7 +820,6 @@ class TestHITLApproveMemoryEndpoint:
     async def test_approve_memory_works_without_orchestrator(
         self, config, event_bus, state, tmp_path
     ) -> None:
-        import json
 
         router, pr_mgr = make_dashboard_router(config, event_bus, state, tmp_path)
         pr_mgr.remove_label = AsyncMock()  # type: ignore[method-assign]
@@ -911,7 +891,6 @@ class TestHITLApproveProcessEndpoint:
     async def test_approve_process_returns_400_without_orchestrator(
         self, config, event_bus, state, tmp_path
     ) -> None:
-        import json
 
         router, pr_mgr = make_dashboard_router(config, event_bus, state, tmp_path)
         endpoint = find_endpoint(router, "/api/hitl/{issue_number}/approve-process")
@@ -925,7 +904,6 @@ class TestHITLApproveProcessEndpoint:
     async def test_approve_process_swaps_labels_and_clears_state(
         self, config, event_bus, state, tmp_path
     ) -> None:
-        import json
 
         mock_orch = MagicMock()
         mock_orch.skip_hitl_issue = MagicMock()
@@ -996,7 +974,6 @@ class TestHITLApproveProcessEndpoint:
     async def test_approve_process_succeeds_if_comment_fails(
         self, config, event_bus, state, tmp_path
     ) -> None:
-        import json
 
         mock_orch = MagicMock()
         mock_orch.skip_hitl_issue = MagicMock()
@@ -1049,7 +1026,6 @@ class TestResolveHitlItemHelper:
         self, config, event_bus, state, tmp_path
     ) -> None:
         """_resolve_hitl_item should record outcome and publish HITL_UPDATE event."""
-        import json
 
         from models import HITLCloseRequest
 
@@ -1113,7 +1089,6 @@ class TestResolveHitlItemHelper:
         self, config, event_bus, state, tmp_path
     ) -> None:
         """Comment posting failure in _resolve_hitl_item should not prevent success."""
-        import json
 
         from models import HITLSkipRequest
 
@@ -1139,7 +1114,6 @@ class TestResolveHitlItemHelper:
         self, config, event_bus, state, tmp_path
     ) -> None:
         """skip, close, and approve-process all clear state via _resolve_hitl_item."""
-        import json
 
         from models import HITLCloseRequest, HITLSkipRequest
 
@@ -1225,8 +1199,6 @@ class TestBuildHitlContextNoneBody:
 
             state.set_hitl_cause(99, "test-cause")
             resp = await endpoint(99)
-
-        import json
 
         payload = json.loads(resp.body)
         assert payload.get("summary") == "summary line"
