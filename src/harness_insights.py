@@ -20,6 +20,7 @@ from models import IsoTimestamp, PipelineStage
 if TYPE_CHECKING:
     from dolt_backend import DoltBackend
     from hindsight import HindsightClient
+    from hindsight_wal import HindsightWAL
 
 logger = logging.getLogger("hydraflow.harness_insights")
 
@@ -141,6 +142,7 @@ class HarnessInsightStore:
         *,
         hindsight: HindsightClient | None = None,
         dolt: DoltBackend | None = None,
+        wal: HindsightWAL | None = None,
     ) -> None:
         from dedup_store import DedupStore  # noqa: PLC0415
 
@@ -153,6 +155,7 @@ class HarnessInsightStore:
         )
         self._hindsight = hindsight
         self._dolt = dolt
+        self._wal = wal
 
     def append_failure(self, record: FailureRecord) -> None:
         """Append *record* as a JSON line to ``harness_failures.jsonl``."""
@@ -182,6 +185,7 @@ class HarnessInsightStore:
                     "category": str(record.category),
                     "subcategories": record.subcategories,
                 },
+                wal=self._wal,
             )
 
     def load_recent(self, n: int = 20) -> list[FailureRecord]:

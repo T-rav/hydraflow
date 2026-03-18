@@ -20,6 +20,7 @@ from models import IsoTimestamp
 
 if TYPE_CHECKING:
     from hindsight import HindsightClient
+    from hindsight_wal import HindsightWAL
 
 logger = logging.getLogger("hydraflow.troubleshooting_store")
 
@@ -62,10 +63,12 @@ class TroubleshootingPatternStore:
         memory_dir: Path,
         *,
         hindsight: HindsightClient | None = None,
+        wal: HindsightWAL | None = None,
     ) -> None:
         self._memory_dir = memory_dir
         self._path = memory_dir / "troubleshooting_patterns.jsonl"
         self._hindsight = hindsight
+        self._wal = wal
 
     def append_pattern(self, pattern: TroubleshootingPattern) -> None:
         """Append or merge *pattern* into the store.
@@ -112,6 +115,7 @@ class TroubleshootingPatternStore:
                     "frequency": pattern.frequency,
                     "source_issues": pattern.source_issues,
                 },
+                wal=self._wal,
             )
 
     def load_patterns(

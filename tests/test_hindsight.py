@@ -44,6 +44,7 @@ class TestScheduleRetain:
                 "test content",
                 context="ctx",
                 metadata={"key": "val"},
+                wal=None,
             )
 
     def test_noop_when_no_event_loop(self) -> None:

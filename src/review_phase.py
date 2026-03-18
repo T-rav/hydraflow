@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from dolt_backend import DoltBackend
     from hindsight import HindsightClient
+    from hindsight_wal import HindsightWAL
     from visual_validator import VisualValidator
 
 from baseline_policy import BaselinePolicy
@@ -109,6 +110,7 @@ class ReviewPhase:
         baseline_policy: BaselinePolicy | None = None,
         hindsight: HindsightClient | None = None,
         dolt: DoltBackend | None = None,
+        wal: HindsightWAL | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -122,7 +124,8 @@ class ReviewPhase:
         self._suggest_memory = MemorySuggester(config, prs, state)
         self._update_bg_worker_status = update_bg_worker_status
         self._harness_insights = harness_insights
-        self._insights = ReviewInsightStore(config.memory_dir, dolt=dolt)
+        self._insights = ReviewInsightStore(config.memory_dir, dolt=dolt, wal=wal)
+        self._wal = wal
         self._active_issues: set[int] = set()
         self._active_issues_lock = asyncio.Lock()
         self._conflict_resolver = conflict_resolver or MergeConflictResolver(
@@ -1484,6 +1487,7 @@ class ReviewPhase:
                         "verdict": str(result.verdict),
                         "source": "review_rejection",
                     },
+                    wal=self._wal,
                 )
 
             recent = self._insights.load_recent(self._config.review_insight_window)

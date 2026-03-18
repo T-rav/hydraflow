@@ -10,7 +10,10 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from hindsight_wal import HindsightWAL
 
 import httpx
 from pydantic import BaseModel, Field
@@ -182,14 +185,26 @@ async def retain_safe(
     *,
     context: str = "",
     metadata: dict[str, Any] | None = None,
+    wal: HindsightWAL | None = None,
 ) -> None:
-    """Fire-and-forget retain — logs and swallows all errors."""
+    """Fire-and-forget retain — on failure, buffers to WAL for retry."""
     if client is None:
         return
     try:
         await client.retain(bank, content, context=context, metadata=metadata)
     except Exception:
         logger.warning("Hindsight retain failed for bank=%s", bank, exc_info=True)
+        if wal:
+            from hindsight_wal import WALEntry
+
+            wal.append(
+                WALEntry(
+                    bank=str(bank),
+                    content=content,
+                    context=context,
+                    metadata=metadata or {},
+                )
+            )
 
 
 async def recall_safe(
@@ -216,9 +231,11 @@ def schedule_retain(
     *,
     context: str = "",
     metadata: dict[str, Any] | None = None,
+    wal: HindsightWAL | None = None,
 ) -> None:
     """Schedule a fire-and-forget retain as an asyncio task.
 
+    On failure, the operation is buffered to *wal* for later replay.
     No-op when *client* is None or no event loop is running.
     """
     import asyncio  # noqa: PLC0415
@@ -228,7 +245,9 @@ def schedule_retain(
     try:
         loop = asyncio.get_running_loop()
         loop.create_task(
-            retain_safe(client, bank, content, context=context, metadata=metadata)
+            retain_safe(
+                client, bank, content, context=context, metadata=metadata, wal=wal
+            )
         )
     except RuntimeError:
         pass  # no event loop — skip

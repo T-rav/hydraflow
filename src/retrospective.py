@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from config import HydraFlowConfig
     from dolt_backend import DoltBackend
     from hindsight import HindsightClient
+    from hindsight_wal import HindsightWAL
     from models import ReviewResult
     from pr_manager import PRManager
     from state import StateTracker
@@ -53,6 +54,7 @@ class RetrospectiveCollector:
         *,
         hindsight: HindsightClient | None = None,
         dolt: DoltBackend | None = None,
+        wal: HindsightWAL | None = None,
     ) -> None:
         from dedup_store import DedupStore  # noqa: PLC0415
 
@@ -61,6 +63,7 @@ class RetrospectiveCollector:
         self._prs = prs
         self._hindsight = hindsight
         self._dolt = dolt
+        self._wal = wal
         self._retro_path = config.data_path("memory", "retrospectives.jsonl")
         self._filed = DedupStore(
             "filed_patterns",
@@ -243,6 +246,7 @@ class RetrospectiveCollector:
                 Bank.RETROSPECTIVES,
                 content,
                 context=f"retrospective for issue #{entry.issue_number}",
+                wal=self._wal,
             )
 
     def _load_recent(self, n: int) -> list[RetrospectiveEntry]:

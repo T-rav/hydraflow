@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from dolt_backend import DoltBackend
     from execution import SubprocessRunner
     from hindsight import HindsightClient
+    from hindsight_wal import HindsightWAL
 
 logger = logging.getLogger("hydraflow.agent")
 
@@ -91,10 +92,11 @@ Run through this checklist before your final commit:
         *,
         hindsight: HindsightClient | None = None,
         dolt: DoltBackend | None = None,
+        wal: HindsightWAL | None = None,
     ) -> None:
         super().__init__(config, event_bus, runner, hindsight=hindsight)
         self._insights = ReviewInsightStore(
-            config.memory_dir, hindsight=hindsight, dolt=dolt
+            config.memory_dir, hindsight=hindsight, dolt=dolt, wal=wal
         )
 
     async def run(

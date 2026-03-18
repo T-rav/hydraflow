@@ -14,6 +14,7 @@ from models import IsoTimestamp, ReviewVerdict
 if TYPE_CHECKING:
     from dolt_backend import DoltBackend
     from hindsight import HindsightClient
+    from hindsight_wal import HindsightWAL
 
 logger = logging.getLogger("hydraflow.review_insights")
 
@@ -199,6 +200,7 @@ class ReviewInsightStore:
         *,
         hindsight: HindsightClient | None = None,
         dolt: DoltBackend | None = None,
+        wal: HindsightWAL | None = None,
     ) -> None:
         self._memory_dir = memory_dir
         self._reviews_path = memory_dir / "reviews.jsonl"
@@ -209,6 +211,7 @@ class ReviewInsightStore:
         )
         self._hindsight = hindsight
         self._dolt = dolt
+        self._wal = wal
 
     def append_review(self, record: ReviewRecord) -> None:
         """Append *record* as a JSON line to ``reviews.jsonl``."""
@@ -238,6 +241,7 @@ class ReviewInsightStore:
                     "verdict": str(record.verdict),
                     "categories": record.categories,
                 },
+                wal=self._wal,
             )
 
     def load_recent(self, n: int = 10) -> list[ReviewRecord]:

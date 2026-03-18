@@ -784,6 +784,19 @@ class HydraFlowOrchestrator:
             ("adr_reviewer", self._svc.adr_reviewer_loop.run),
             ("pipeline_stats", self._pipeline_stats_loop),
         ]
+
+        # Optional: WAL replay loop for Hindsight crash recovery
+        if self._svc.hindsight and self._svc.hindsight_wal:
+            from hindsight_wal import run_wal_replay_loop  # noqa: PLC0415
+
+            wal = self._svc.hindsight_wal
+            client = self._svc.hindsight
+            stop = self._stop_event
+
+            async def _wal_replay() -> None:
+                await run_wal_replay_loop(wal, client, stop)
+
+            loop_factories.append(("wal_replay", _wal_replay))
         self._state_restorer.prune_stale_disabled_workers(
             {n for n, _ in loop_factories}
         )

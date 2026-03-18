@@ -29,6 +29,7 @@ from subprocess_util import make_clean_env
 if TYPE_CHECKING:
     from dolt_backend import DoltBackend
     from hindsight import HindsightClient
+    from hindsight_wal import HindsightWAL
     from ports import PRPort
 
 logger = logging.getLogger("hydraflow.memory")
@@ -204,6 +205,7 @@ class MemorySyncWorker:
         manifest_syncer: ManifestIssueSyncer | None = None,
         hindsight: HindsightClient | None = None,
         dolt: DoltBackend | None = None,
+        wal: HindsightWAL | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -217,6 +219,7 @@ class MemorySyncWorker:
         self._manifest_syncer = manifest_syncer
         self._hindsight = hindsight
         self._dolt = dolt
+        self._wal = wal
         from dedup_store import DedupStore  # noqa: PLC0415
 
         self._adr_sources = DedupStore(
@@ -340,6 +343,7 @@ class MemorySyncWorker:
                         "memory_type": mtype.value,
                         "created_at": created,
                     },
+                    wal=self._wal,
                 )
 
         # Update state

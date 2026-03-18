@@ -63,6 +63,7 @@ from workspace_gc_loop import WorkspaceGCLoop
 
 if TYPE_CHECKING:
     from hindsight import HindsightClient
+    from hindsight_wal import HindsightWAL
     from metrics_manager import MetricsManager
 
 
@@ -119,6 +120,7 @@ class ServiceRegistry:
 
     # Optional integrations
     hindsight: HindsightClient | None = None
+    hindsight_wal: HindsightWAL | None = None
 
 
 @dataclass
@@ -145,14 +147,17 @@ def build_services(
     """
     # Hindsight semantic memory (optional)
     hindsight_client = None
+    hindsight_wal: HindsightWAL | None = None
     if config.hindsight_enabled and config.hindsight_url:
         from hindsight import HindsightClient
+        from hindsight_wal import HindsightWAL
 
         hindsight_client = HindsightClient(
             config.hindsight_url,
             api_key=config.hindsight_api_key,
             timeout=config.hindsight_timeout,
         )
+        hindsight_wal = HindsightWAL(config.data_path("memory", "hindsight_wal.jsonl"))
 
     # Dolt embedded state backend (always enabled)
     from dolt_backend import DoltBackend
@@ -178,6 +183,7 @@ def build_services(
         runner=subprocess_runner,
         hindsight=hindsight_client,
         dolt=dolt_backend,
+        wal=hindsight_wal,
     )
     planners = PlannerRunner(
         config, event_bus, runner=subprocess_runner, hindsight=hindsight_client
@@ -211,11 +217,12 @@ def build_services(
         config.data_path("memory"),
         hindsight=hindsight_client,
         dolt=dolt_backend,
+        wal=hindsight_wal,
     )
 
     # Troubleshooting pattern store (CI timeout feedback loop)
     troubleshooting_store = TroubleshootingPatternStore(
-        config.data_path("memory"), hindsight=hindsight_client
+        config.data_path("memory"), hindsight=hindsight_client, wal=hindsight_wal
     )
 
     # Epic management
@@ -311,9 +318,15 @@ def build_services(
         manifest_syncer=manifest_syncer,
         hindsight=hindsight_client,
         dolt=dolt_backend,
+        wal=hindsight_wal,
     )
     retrospective = RetrospectiveCollector(
-        config, state, prs, hindsight=hindsight_client, dolt=dolt_backend
+        config,
+        state,
+        prs,
+        hindsight=hindsight_client,
+        dolt=dolt_backend,
+        wal=hindsight_wal,
     )
     ac_generator = AcceptanceCriteriaGenerator(
         config, prs, event_bus, runner=subprocess_runner
@@ -353,6 +366,7 @@ def build_services(
         baseline_policy=baseline_policy,
         hindsight=hindsight_client,
         dolt=dolt_backend,
+        wal=hindsight_wal,
     )
 
     # Background loops — shared deps bundled into a single LoopDeps object
@@ -451,4 +465,5 @@ def build_services(
         runs_gc_loop=runs_gc_loop,
         adr_reviewer_loop=adr_reviewer_loop,
         hindsight=hindsight_client,
+        hindsight_wal=hindsight_wal,
     )
