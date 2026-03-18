@@ -159,14 +159,20 @@ class StateTracker(
 
 
 def build_state_tracker(config: Any) -> StateTracker:
-    """Construct a ``StateTracker`` with Dolt as the state backend.
+    """Construct a ``StateTracker`` with the best available backend.
 
-    Dolt is always enabled in production.  The ``dolt`` CLI must be
-    installed or a ``FileNotFoundError`` is raised.
+    Uses embedded Dolt when the ``dolt`` CLI is installed, otherwise
+    falls back to JSON-file persistence.
     """
-    from dolt_backend import DoltBackend
+    dolt_backend = None
+    try:
+        from dolt_backend import DoltBackend
 
-    dolt_dir = Path(str(config.state_file)).parent / "dolt"
-    dolt_backend = DoltBackend(dolt_dir)
-    logger.info("Dolt state backend enabled at %s", dolt_dir)
+        dolt_dir = Path(str(config.state_file)).parent / "dolt"
+        dolt_backend = DoltBackend(dolt_dir)
+        logger.info("Dolt state backend enabled at %s", dolt_dir)
+    except FileNotFoundError:
+        logger.info("dolt CLI not found — using file-based state")
+    except Exception:
+        logger.warning("Dolt init failed — using file-based state", exc_info=True)
     return StateTracker(config.state_file, dolt=dolt_backend)

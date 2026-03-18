@@ -220,17 +220,16 @@ class TestDoltStateTrackerIntegration:
             tracker = build_state_tracker(cfg)
             assert tracker._dolt is not None
 
-    def test_build_state_tracker_raises_without_dolt_cli(self) -> None:
+    def test_build_state_tracker_falls_back_without_dolt_cli(self) -> None:
         from tests.helpers import ConfigFactory
 
         cfg = ConfigFactory.create()
-        with (
-            patch("shutil.which", return_value=None),
-            pytest.raises(FileNotFoundError, match="dolt CLI not found"),
-        ):
+        with patch("shutil.which", return_value=None):
             from state import build_state_tracker
 
-            build_state_tracker(cfg)
+            tracker = build_state_tracker(cfg)
+            # Falls back to file-based — no Dolt backend
+            assert tracker._dolt is None
 
 
 # ---------------------------------------------------------------------------

@@ -159,7 +159,7 @@ def build_services(
         )
         hindsight_wal = HindsightWAL(config.data_path("memory", "hindsight_wal.jsonl"))
 
-    # Dolt embedded state backend (always enabled)
+    # Dolt embedded state backend (preferred, graceful fallback)
     from dolt_backend import DoltBackend
 
     dolt_backend: DoltBackend | None = None
@@ -167,7 +167,9 @@ def build_services(
         dolt_dir = Path(str(config.state_file)).parent / "dolt"
         dolt_backend = DoltBackend(dolt_dir)
     except FileNotFoundError:
-        raise
+        logging.getLogger("hydraflow.service_registry").info(
+            "dolt CLI not found — stores will use file-based fallback",
+        )
     except Exception:
         logging.getLogger("hydraflow.service_registry").warning(
             "Dolt init failed",
