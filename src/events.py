@@ -86,6 +86,12 @@ class EventType(StrEnum):
     BASELINE_UPDATE = "baseline_update"
     CRATE_ACTIVATED = "crate_activated"
     CRATE_COMPLETED = "crate_completed"
+    CONFIDENCE_SCORE = "confidence_score"
+    RELEASE_DECISION = "release_decision"
+    CONFIDENCE_CALIBRATION = "confidence_calibration"
+    DORA_HEALTH = "dora_health"
+    SYSTEM_HEALTH_ALERT = "system_health_alert"
+    STABILITY_ASSESSMENT = "stability_assessment"
 
 
 _T = TypeVar("_T")

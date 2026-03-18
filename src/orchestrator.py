@@ -136,6 +136,8 @@ class HydraFlowOrchestrator:
             "runs_gc": svc.runs_gc_loop,
             "adr_reviewer": svc.adr_reviewer_loop,
         }
+        if svc.confidence_calibration_loop is not None:
+            bg_loop_registry["confidence_calibration"] = svc.confidence_calibration_loop
         self._bg_workers = BGWorkerManager(config, self._state, bg_loop_registry)
         self._hitl_ctrl = HITLController(svc.hitl_phase, svc.fetcher, config.hitl_label)
         self._state_restorer = StateRestorer(self._state, self._bus, self._bg_workers)

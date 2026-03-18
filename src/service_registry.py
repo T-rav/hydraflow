@@ -60,6 +60,7 @@ from workspace import WorkspaceManager
 from workspace_gc_loop import WorkspaceGCLoop
 
 if TYPE_CHECKING:
+    from confidence_loop import ConfidenceCalibrationLoop
     from metrics_manager import MetricsManager
 
 
@@ -113,6 +114,7 @@ class ServiceRegistry:
     worktree_gc_loop: WorkspaceGCLoop
     runs_gc_loop: RunsGCLoop
     adr_reviewer_loop: ADRReviewerLoop
+    confidence_calibration_loop: ConfidenceCalibrationLoop | None
 
 
 @dataclass
@@ -124,6 +126,49 @@ class OrchestratorCallbacks:
     is_bg_worker_enabled: Callable[[str], bool]
     sleep_or_stop: Callable[[int | float], Coroutine[Any, Any, None]]
     get_bg_worker_interval: Callable[[str], int]
+
+
+def _build_confidence_system(
+    config: HydraFlowConfig,
+    state: StateTracker,
+    event_bus: EventBus,
+    post_merge_handler: PostMergeHandler,
+    loop_deps: LoopDeps,
+) -> ConfidenceCalibrationLoop | None:
+    """Wire confidence-driven release system if enabled.
+
+    Returns a ConfidenceCalibrationLoop if calibration is enabled, else None.
+    """
+    from confidence_calibration import CalibrationStore  # noqa: PLC0415
+    from confidence_loop import ConfidenceCalibrationLoop  # noqa: PLC0415
+    from dora_tracker import DORATracker  # noqa: PLC0415
+
+    if config.release_confidence_mode == "off":
+        return None
+
+    calibration_store = CalibrationStore(
+        config.data_path("confidence") / "outcomes.jsonl"
+    )
+    dora_tracker = DORATracker(state, event_bus)
+    post_merge_handler._calibration_store = calibration_store
+
+    if not config.confidence_calibration_enabled:
+        return None
+
+    from stability_reflector import StabilityReflector  # noqa: PLC0415
+
+    reflector = (
+        StabilityReflector(dora_tracker, calibration_store, config)
+        if config.stability_reflection_enabled
+        else None
+    )
+    return ConfidenceCalibrationLoop(
+        config=config,
+        deps=loop_deps,
+        calibration_store=calibration_store,
+        dora_tracker=dora_tracker,
+        reflector=reflector,
+    )
 
 
 def build_services(
@@ -355,6 +400,13 @@ def build_services(
     )
 
     return ServiceRegistry(
+        confidence_calibration_loop=_build_confidence_system(
+            config,
+            state,
+            event_bus,
+            post_merge_handler,
+            loop_deps,
+        ),
         worktrees=worktrees,
         subprocess_runner=subprocess_runner,
         agents=agents,

@@ -87,6 +87,12 @@ class TestEventTypeEnum:
             "BASELINE_UPDATE",
             "CRATE_ACTIVATED",
             "CRATE_COMPLETED",
+            "CONFIDENCE_SCORE",
+            "RELEASE_DECISION",
+            "CONFIDENCE_CALIBRATION",
+            "DORA_HEALTH",
+            "SYSTEM_HEALTH_ALERT",
+            "STABILITY_ASSESSMENT",
         }
         actual = {member.name for member in EventType}
         assert expected == actual

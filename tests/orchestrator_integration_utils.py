@@ -451,6 +451,7 @@ def build_scripted_services(
     services.worktree_gc_loop = FakeBackgroundLoop()
     services.runs_gc_loop = FakeBackgroundLoop()
     services.adr_reviewer_loop = FakeBackgroundLoop()
+    services.confidence_calibration_loop = None
     services.crate_manager = SimpleNamespace(
         active_crate_number=None,
         check_and_advance=AsyncMock(),

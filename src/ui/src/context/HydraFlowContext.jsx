@@ -54,6 +54,10 @@ export const initialState = {
   troubleshooting: null,
   memories: null,
   trackedReports: [],
+  confidenceScores: [],
+  releaseDecisions: [],
+  doraHealth: null,
+  stabilityAssessment: null,
 }
 
 function normalizeRepoSlug(value) {
@@ -737,6 +741,26 @@ export function reducer(state, action) {
           ? null
           : state.selectedSessionId,
       }
+
+    case 'confidence_score': {
+      const scores = [action.data, ...state.confidenceScores].slice(0, 50)
+      return { ...addEvent(state, action), confidenceScores: scores }
+    }
+
+    case 'release_decision': {
+      const decisions = [action.data, ...state.releaseDecisions].slice(0, 50)
+      return { ...addEvent(state, action), releaseDecisions: decisions }
+    }
+
+    case 'dora_health':
+      return { ...addEvent(state, action), doraHealth: action.data }
+
+    case 'stability_assessment':
+      return { ...addEvent(state, action), stabilityAssessment: action.data }
+
+    case 'confidence_calibration':
+    case 'system_health_alert':
+      return addEvent(state, action)
 
     default:
       return addEvent(state, action)

@@ -260,6 +260,53 @@ export const seedState = {
   troubleshooting: null,
   memories: null,
   trackedReports: [],
+  confidenceScores: [
+    {
+      pr: 207, issue: 207, worker: 1,
+      score: 0.87, rank: 'high',
+      components: {
+        complexity: 0.8, plan_quality: 0.9, delta_fidelity: 1.0,
+        review_clean: 1.0, ci_clean: 1.0, visual_clean: 0.5,
+        escalation_free: 1.0, security_clean: 1.0, history: 0.72, rework_penalty: 0.95,
+      },
+      summary: 'All signals healthy (rank=high)',
+    },
+    {
+      pr: 204, issue: 204, worker: 2,
+      score: 0.62, rank: 'medium',
+      components: {
+        complexity: 0.5, plan_quality: 0.7, delta_fidelity: 0.5,
+        review_clean: 0.7, ci_clean: 0.6, visual_clean: 0.5,
+        escalation_free: 0.75, security_clean: 0.8, history: 0.6, rework_penalty: 0.9,
+      },
+      summary: 'Weak signals: delta_fidelity=0.50, complexity=0.50 (rank=medium)',
+    },
+  ],
+  releaseDecisions: [
+    { pr: 207, issue: 207, worker: 1, action: 'auto_merge', confidence_score: 0.87, confidence_rank: 'high', risk_score: 0.15, risk_level: 'low', blast_radius: 'isolated', reasons: ['confidence 0.87 >= 0.80 with low risk'], mode: 'observe' },
+    { pr: 204, issue: 204, worker: 2, action: 'stage', confidence_score: 0.62, confidence_rank: 'medium', risk_score: 0.35, risk_level: 'medium', blast_radius: 'module', reasons: ['confidence 0.62 between stage and auto-merge thresholds'], mode: 'observe' },
+    { pr: 205, issue: 205, worker: 1, action: 'hold_for_review', confidence_score: 0.48, confidence_rank: 'low', risk_score: 0.55, risk_level: 'high', blast_radius: 'cross-cutting', reasons: ['confidence 0.48 < 0.50'], mode: 'advisory' },
+  ],
+  doraHealth: {
+    deployment_frequency: 3.4,
+    lead_time_seconds: 5400,
+    change_failure_rate: 0.08,
+    recovery_time_seconds: 2700,
+    rework_rate: 0.04,
+    healthy: true,
+  },
+  stabilityAssessment: {
+    dora_trend: 'stable',
+    confidence_accuracy: 0.82,
+    calibration_drift: 0.015,
+    suggested_mode: 'enforce',
+    risk_posture: 'balanced',
+    reasoning: [
+      'DORA trend: stable',
+      'Decision accuracy: 82.0%',
+      'Recommended posture: balanced',
+    ],
+  },
 }
 
 /**
@@ -283,4 +330,8 @@ export const seedStateEmpty = {
   sessions: [],
   currentSessionId: null,
   epics: [],
+  confidenceScores: [],
+  releaseDecisions: [],
+  doraHealth: null,
+  stabilityAssessment: null,
 }
