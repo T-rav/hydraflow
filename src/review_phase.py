@@ -1266,6 +1266,48 @@ class ReviewPhase:
             comment = _format_confidence_comment(confidence, risk, decision)
             await self._prs.post_pr_comment(pr.number, comment)
 
+    async def check_release_gate(
+        self,
+        pr: PRInfo,
+        issue: Task,
+        result: ReviewResult,
+        worker_id: int,
+    ) -> bool:
+        """Check the most recent release decision for this PR.
+
+        Returns True if the PR should proceed to merge, False to block.
+        Only called in enforce mode.
+        """
+        from release_decision import ReleaseAction  # noqa: PLC0415
+
+        for event in reversed(self._bus.get_history()):
+            if (
+                event.type == EventType.RELEASE_DECISION
+                and event.data.get("pr") == pr.number
+            ):
+                action = event.data.get("action", "")
+                if action == ReleaseAction.AUTO_MERGE:
+                    logger.info(
+                        "PR #%d: release gate PASS (action=%s)",
+                        pr.number,
+                        action,
+                    )
+                    return True
+                logger.warning(
+                    "PR #%d: release gate BLOCKED (action=%s, reasons=%s)",
+                    pr.number,
+                    action,
+                    event.data.get("reasons", []),
+                )
+                return False
+
+        # No decision event found — allow merge (fail-open)
+        logger.warning(
+            "PR #%d: no RELEASE_DECISION event found — allowing merge (fail-open)",
+            pr.number,
+        )
+        return True
+
     async def _handle_approved_merge(
         self,
         pr: PRInfo,
@@ -1299,6 +1341,7 @@ class ReviewPhase:
             visual_gate_fn=self.check_visual_gate,
             visual_decision=visual_decision,
             merge_conflict_fix_fn=self._attempt_post_merge_conflict_fix,
+            release_gate_fn=self.check_release_gate,
         )
 
     async def _attempt_post_merge_conflict_fix(

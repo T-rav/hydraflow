@@ -220,3 +220,56 @@ class TestCollectRiskDimensions:
 
         dims = phase._collect_risk_dimensions(result, "diff\n", task, None)
         assert dims.is_epic_child is True
+
+
+@pytest.mark.asyncio
+class TestCheckReleaseGate:
+    async def test_auto_merge_returns_true(self, tmp_path: Path) -> None:
+        phase, bus = _make_review_phase(tmp_path, mode="enforce")
+        pr = _make_pr()
+        task = _make_task()
+        result = _make_result()
+
+        # Simulate a RELEASE_DECISION event
+        from events import HydraFlowEvent
+
+        await bus.publish(
+            HydraFlowEvent(
+                type=EventType.RELEASE_DECISION,
+                data={"pr": 42, "action": "auto_merge", "reasons": []},
+            )
+        )
+
+        gate_ok = await phase.check_release_gate(pr, task, result, worker_id=1)
+        assert gate_ok is True
+
+    async def test_hold_returns_false(self, tmp_path: Path) -> None:
+        phase, bus = _make_review_phase(tmp_path, mode="enforce")
+        pr = _make_pr()
+        task = _make_task()
+        result = _make_result()
+
+        from events import HydraFlowEvent
+
+        await bus.publish(
+            HydraFlowEvent(
+                type=EventType.RELEASE_DECISION,
+                data={
+                    "pr": 42,
+                    "action": "hold_for_review",
+                    "reasons": ["low confidence"],
+                },
+            )
+        )
+
+        gate_ok = await phase.check_release_gate(pr, task, result, worker_id=1)
+        assert gate_ok is False
+
+    async def test_no_event_fail_open(self, tmp_path: Path) -> None:
+        phase, bus = _make_review_phase(tmp_path, mode="enforce")
+        pr = _make_pr()
+        task = _make_task()
+        result = _make_result()
+
+        gate_ok = await phase.check_release_gate(pr, task, result, worker_id=1)
+        assert gate_ok is True  # fail-open
