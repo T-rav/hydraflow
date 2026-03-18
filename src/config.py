@@ -1260,6 +1260,128 @@ class HydraFlowConfig(BaseModel):
         description="Maximum baseline audit records to retain per issue",
     )
 
+    # --- Release confidence system ---
+    release_confidence_mode: str = Field(
+        default="off",
+        description="Confidence system mode: off, observe, advisory, enforce",
+    )
+    confidence_auto_merge_threshold: float = Field(
+        default=0.80,
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence score for auto-merge",
+    )
+    confidence_stage_threshold: float = Field(
+        default=0.65,
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence score for staging (progressive delivery)",
+    )
+    confidence_hold_threshold: float = Field(
+        default=0.50,
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence score before holding for human review",
+    )
+    confidence_reject_threshold: float = Field(
+        default=0.30,
+        ge=0.0,
+        le=1.0,
+        description="Confidence below this with high risk triggers rejection",
+    )
+    # DORA health gates
+    dora_max_rework_rate: float = Field(
+        default=0.15,
+        ge=0.0,
+        le=1.0,
+        description="Block auto-merge if system rework rate exceeds this",
+    )
+    dora_max_change_failure_rate: float = Field(
+        default=0.20,
+        ge=0.0,
+        le=1.0,
+        description="Block auto-merge if system change failure rate exceeds this",
+    )
+    # Risk thresholds
+    risk_high_diff_lines: int = Field(
+        default=500,
+        ge=1,
+        description="Diff line count above which risk increases",
+    )
+    risk_critical_diff_lines: int = Field(
+        default=1000,
+        ge=1,
+        description="Diff line count above which risk increases further",
+    )
+    # Calibration
+    confidence_calibration_enabled: bool = Field(
+        default=False,
+        description="Enable automatic weight calibration from outcomes",
+    )
+    confidence_calibration_interval: int = Field(
+        default=14400,
+        ge=60,
+        le=86400,
+        description="Seconds between calibration cycles (default: 4 hours)",
+    )
+    confidence_calibration_min_samples: int = Field(
+        default=20,
+        ge=1,
+        description="Minimum outcome samples before calibration adjusts weights",
+    )
+    confidence_calibration_max_adjustment: float = Field(
+        default=0.02,
+        ge=0.001,
+        le=0.10,
+        description="Maximum weight adjustment per calibration cycle",
+    )
+    # Weight overrides
+    confidence_weight_complexity: float = Field(
+        default=0.10, ge=0.05, le=0.40, description="Confidence weight: complexity"
+    )
+    confidence_weight_plan_quality: float = Field(
+        default=0.15, ge=0.05, le=0.40, description="Confidence weight: plan quality"
+    )
+    confidence_weight_delta_fidelity: float = Field(
+        default=0.05, ge=0.05, le=0.40, description="Confidence weight: delta fidelity"
+    )
+    confidence_weight_review_clean: float = Field(
+        default=0.20,
+        ge=0.05,
+        le=0.40,
+        description="Confidence weight: review cleanliness",
+    )
+    confidence_weight_ci_clean: float = Field(
+        default=0.15, ge=0.05, le=0.40, description="Confidence weight: CI cleanliness"
+    )
+    confidence_weight_visual_clean: float = Field(
+        default=0.10,
+        ge=0.05,
+        le=0.40,
+        description="Confidence weight: visual validation",
+    )
+    confidence_weight_escalation_free: float = Field(
+        default=0.05, ge=0.05, le=0.40, description="Confidence weight: escalation-free"
+    )
+    confidence_weight_security_clean: float = Field(
+        default=0.05, ge=0.05, le=0.40, description="Confidence weight: security"
+    )
+    confidence_weight_history: float = Field(
+        default=0.10, ge=0.05, le=0.40, description="Confidence weight: historical"
+    )
+    confidence_weight_rework_penalty: float = Field(
+        default=0.05, ge=0.05, le=0.40, description="Confidence weight: rework penalty"
+    )
+    # Stability reflection
+    stability_reflection_enabled: bool = Field(
+        default=False,
+        description="Enable periodic stability assessment",
+    )
+    stability_auto_adapt: bool = Field(
+        default=False,
+        description="Auto-adjust thresholds based on stability reflection",
+    )
+
     # GitHub authentication
     gh_token: str = Field(
         default="",

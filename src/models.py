@@ -1868,6 +1868,48 @@ class CrateCompletedPayload(TypedDict, total=False):
     repo: str
 
 
+class ConfidenceScorePayload(TypedDict, total=False):
+    """Payload for ``EventType.CONFIDENCE_SCORE``."""
+
+    pr: int
+    issue: int
+    worker: int
+    score: float
+    rank: str
+    components: dict[str, float]
+    summary: str
+    repo: str
+
+
+class ReleaseDecisionPayload(TypedDict, total=False):
+    """Payload for ``EventType.RELEASE_DECISION``."""
+
+    pr: int
+    issue: int
+    worker: int
+    action: str
+    confidence_score: float
+    confidence_rank: str
+    risk_score: float
+    risk_level: str
+    blast_radius: str
+    reasons: list[str]
+    mode: str
+    repo: str
+
+
+class DORAHealthPayload(TypedDict, total=False):
+    """Payload for ``EventType.DORA_HEALTH``."""
+
+    deployment_frequency: float
+    lead_time_seconds: float
+    change_failure_rate: float
+    recovery_time_seconds: float
+    rework_rate: float
+    healthy: bool
+    repo: str
+
+
 class PlannerUpdatePayload(TypedDict, total=False):
     """Payload for ``EventType.PLANNER_UPDATE``."""
 
@@ -2405,6 +2447,22 @@ class MergeConflictFixFn(Protocol):
         self,
         pr: PRInfo,
         issue: Task,
+        worker_id: int,
+    ) -> bool: ...
+
+
+class ReleaseGateFn(Protocol):
+    """Async callback for confidence-based release gating.
+
+    Returns ``True`` when the PR should proceed to merge.
+    Matches ``ReviewPhase.check_release_gate``.
+    """
+
+    async def __call__(
+        self,
+        pr: PRInfo,
+        issue: Task,
+        result: ReviewResult,
         worker_id: int,
     ) -> bool: ...
 
