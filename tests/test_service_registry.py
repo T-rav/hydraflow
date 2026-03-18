@@ -57,7 +57,11 @@ class TestBuildServices:
 
         registry = build_services(config, bus, state, stop_event, callbacks)
 
+        # confidence_calibration_loop is None when release_confidence_mode="off"
+        nullable_fields = {"confidence_calibration_loop"}
         for field_name in ServiceRegistry.__dataclass_fields__:
+            if field_name in nullable_fields:
+                continue
             assert getattr(registry, field_name) is not None, f"{field_name} is None"
 
     def test_agents_runner_is_shared(self, config: HydraFlowConfig) -> None:
