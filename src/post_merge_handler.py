@@ -30,6 +30,7 @@ from models import (
     MergeConflictFixFn,
     PRInfo,
     PublishFn,
+    ReleaseGateFn,
     ReviewResult,
     StatusCallback,
     SystemAlertPayload,
@@ -192,6 +193,7 @@ class PostMergeHandler:
         visual_gate_fn: VisualGateFn | None = None,
         visual_decision: VisualValidationDecision | None = None,
         merge_conflict_fix_fn: MergeConflictFixFn | None = None,
+        release_gate_fn: ReleaseGateFn | None = None,
     ) -> None:
         """Attempt merge for an approved PR (with optional CI gate).
 
@@ -211,6 +213,15 @@ class PostMergeHandler:
                 pr.issue_number,
             )
             return
+
+        # Release confidence gate (enforce mode)
+        if (
+            self._config.release_confidence_mode == "enforce"
+            and release_gate_fn is not None
+        ):
+            release_ok = await release_gate_fn(pr, issue, result, worker_id)
+            if not release_ok:
+                return
 
         should_merge = True
         if self._config.max_ci_fix_attempts > 0:
