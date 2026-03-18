@@ -74,6 +74,12 @@ export const EVENT_PROCESS_MAP = {
   ci_check: 'ci',
   issue_created: 'triage',
   background_worker_status: 'bg_worker',
+  confidence_score: 'confidence',
+  release_decision: 'confidence',
+  dora_health: 'confidence',
+  stability_assessment: 'confidence',
+  confidence_calibration: 'confidence',
+  system_health_alert: 'system',
 }
 
 /**
@@ -176,6 +182,7 @@ export const SYSTEM_WORKER_INTERVALS = {
   adr_reviewer: 86400,
   epic_sweeper: 3600,
   verify_monitor: 3600,
+  confidence_calibration: 14400,
 }
 
 /**
@@ -207,4 +214,5 @@ export const BACKGROUND_WORKERS = [
   { key: 'adr_reviewer',   label: 'ADR Reviewer',   description: 'Reviews proposed ADRs via a 3-judge council and routes to accept, reject, or escalate.', color: theme.accent },
   { key: 'epic_sweeper',    label: 'Epic Sweeper',    description: 'Periodically sweeps open epics and auto-closes those with all sub-issues resolved.', color: theme.purple, system: true },
   { key: 'verify_monitor', label: 'Verify Monitor', description: 'Watches pending verification issues and resolves them when closed by a human.', color: theme.accent, system: true },
+  { key: 'confidence_calibration', label: 'Confidence Calibration', description: 'Recalibrates confidence weights from decision outcomes and publishes DORA health snapshots.', color: theme.triageGreen, system: true },
 ]

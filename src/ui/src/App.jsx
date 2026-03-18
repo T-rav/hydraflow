@@ -6,15 +6,17 @@ import { HITLTable } from './components/HITLTable'
 import { SystemPanel } from './components/SystemPanel'
 import { OutcomesPanel } from './components/IssueHistoryPanel'
 import { StreamView } from './components/StreamView'
+import { ConfidencePanel } from './components/ConfidencePanel'
 import { SessionSidebar } from './components/SessionSidebar'
 import { theme } from './theme'
 
-const TABS = ['issues', 'hitl', 'outcomes', 'system']
+const TABS = ['issues', 'hitl', 'outcomes', 'confidence', 'system']
 
 const TAB_LABELS = {
   issues: 'Work Stream',
   outcomes: 'Outcomes',
   hitl: 'HITL',
+  confidence: 'Confidence',
   system: 'System',
 }
 
@@ -246,6 +248,7 @@ function AppContent() {
             />
           )}
           {activeTab === 'outcomes' && <OutcomesPanel />}
+          {activeTab === 'confidence' && <ConfidencePanel />}
           {activeTab === 'hitl' && <HITLTable items={hitlItems} onRefresh={refreshHitl} />}
           {activeTab === 'system' && (
             <SystemPanel
