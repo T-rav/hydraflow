@@ -82,7 +82,7 @@ when **any** of the following conditions is met:
   whether the duplicates were caught in review.
 - **Trigger C — Calendar deadline:** If neither Trigger A nor B fires by
   2026-06-01, a tracking issue must be opened to implement the automated check
-  within the next sprint. The manual process must not run indefinitely.
+  within two calendar weeks. The manual process must not run indefinitely.
 
 Once any trigger fires, the automated rule replaces Rule 2 entirely — the manual
 grep step is removed from the review checklist.
@@ -95,7 +95,9 @@ Before this ADR moves to Accepted, a time-boxed audit must be completed:
   use `@dataclass`, or extend `TypedDict`.
 - **Method:** Run `grep -rn "^class " src/ | awk -F: '{print $3, $1}' | sort` and
   group by class name. Flag any name that appears in more than one module
-  (excluding `tests/`).
+  (excluding `tests/`). Note: this command captures all class definitions; apply
+  Rule 4 exclusions manually — skip Protocol/ABC interfaces, Exception/Enum
+  subclasses, and any intentionally-duplicated classes documented under Rule 4.
 - **Time box:** The audit must be completed within one calendar week of this ADR
   being accepted. Open a tracking issue for the audit before acceptance.
 - **Output:** Each confirmed duplicate is resolved per Rule 3 (conflict resolution
@@ -154,4 +156,5 @@ Before this ADR moves to Accepted, a time-boxed audit must be completed:
 - Source memory: [#2380 — Duplicate class definitions across modules — merge-artifact pattern](https://github.com/T-rav/hydra/issues/2380)
 - Implementing issue: [#2382](https://github.com/T-rav/hydra/issues/2382)
 - Related learning: [#2381 — Duplicate class definitions](https://github.com/T-rav/hydra/issues/2381)
+- Scope boundary: [ADR-0023 (Require Instantiation Verification for Test-Local Classes)](0023-dead-class-artifacts-in-mock-based-tests.md) — covers dead test-local class detection; ADR-0027 covers duplicate production model classes across modules. The two ADRs are complementary, not overlapping.
 - Council review: [#3244 — ADR council requested changes](https://github.com/T-rav/hydraflow/issues/3244)
