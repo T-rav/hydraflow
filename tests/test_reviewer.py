@@ -3273,3 +3273,79 @@ async def test_fix_review_findings_dry_run_sets_success_true(
     )
 
     assert result.success is True
+
+
+# ---------------------------------------------------------------------------
+# Nested guard: _get_commit_stat is never called when fixes_made is False
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_review_skips_commit_stat_when_no_fixes(
+    config, event_bus, pr_info, task, tmp_path
+):
+    """review() must not call _get_commit_stat when fixes_made is False."""
+    runner = _make_runner(config, event_bus)
+    transcript = "VERDICT: APPROVE\nSUMMARY: Clean"
+    commit_stat_mock = AsyncMock(return_value="should not be called")
+
+    with (
+        patch.object(runner, "_get_head_sha", AsyncMock(return_value="abc123")),
+        patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
+        patch.object(runner, "_get_changed_files", AsyncMock(return_value=[])),
+        patch.object(runner, "_has_changes", AsyncMock(return_value=False)),
+        patch.object(runner, "_get_commit_stat", commit_stat_mock),
+        patch.object(runner, "_save_transcript"),
+    ):
+        result = await runner.review(pr_info, task, tmp_path, "diff")
+
+    commit_stat_mock.assert_not_called()
+    assert result.commit_stat == ""
+
+
+@pytest.mark.asyncio
+async def test_fix_ci_skips_commit_stat_when_no_fixes(
+    config, event_bus, pr_info, task, tmp_path
+):
+    """fix_ci() must not call _get_commit_stat when fixes_made is False."""
+    runner = _make_runner(config, event_bus)
+    transcript = "VERDICT: APPROVE\nSUMMARY: CI green"
+    commit_stat_mock = AsyncMock(return_value="should not be called")
+
+    with (
+        patch.object(runner, "_get_head_sha", AsyncMock(return_value="abc123")),
+        patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
+        patch.object(runner, "_get_changed_files", AsyncMock(return_value=[])),
+        patch.object(runner, "_has_changes", AsyncMock(return_value=False)),
+        patch.object(runner, "_get_commit_stat", commit_stat_mock),
+        patch.object(runner, "_save_transcript"),
+    ):
+        result = await runner.fix_ci(pr_info, task, tmp_path, "CI log")
+
+    commit_stat_mock.assert_not_called()
+    assert result.commit_stat == ""
+
+
+@pytest.mark.asyncio
+async def test_fix_review_findings_skips_commit_stat_when_no_fixes(
+    config, event_bus, pr_info, task, tmp_path
+):
+    """fix_review_findings() must not call _get_commit_stat when fixes_made is False."""
+    runner = _make_runner(config, event_bus)
+    transcript = "VERDICT: APPROVE\nSUMMARY: Nothing to fix"
+    commit_stat_mock = AsyncMock(return_value="should not be called")
+
+    with (
+        patch.object(runner, "_get_head_sha", AsyncMock(return_value="abc123")),
+        patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
+        patch.object(runner, "_get_changed_files", AsyncMock(return_value=[])),
+        patch.object(runner, "_has_changes", AsyncMock(return_value=False)),
+        patch.object(runner, "_get_commit_stat", commit_stat_mock),
+        patch.object(runner, "_save_transcript"),
+    ):
+        result = await runner.fix_review_findings(
+            pr_info, task, tmp_path, "Findings text"
+        )
+
+    commit_stat_mock.assert_not_called()
+    assert result.commit_stat == ""
