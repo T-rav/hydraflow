@@ -2192,10 +2192,11 @@ def create_router(
             object.__setattr__(_cfg, key, validated_value)
             applied[key] = validated_value
 
-        if repo and repo_store is not None and applied:
-            repo_store.update_overrides(repo, applied)
-        elif persist and applied:
-            save_config_file(_cfg.config_file, applied)
+        if applied:
+            if repo and repo_store is not None:
+                repo_store.update_overrides(repo, applied)
+            elif persist:
+                save_config_file(_cfg.config_file, applied)
 
         return JSONResponse({"status": "ok", "updated": applied})
 

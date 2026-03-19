@@ -1609,6 +1609,21 @@ def test_build_review_prompt_includes_test_coverage_audit(
     assert "New branches/conditions" in prompt
 
 
+def test_build_review_prompt_includes_redundant_guard_audit(
+    config, event_bus, pr_info, task
+):
+    """Reviewer prompt must remind reviewers to flag redundant guard chains."""
+    runner = _make_runner(config, event_bus)
+    prompt, _ = runner._build_review_prompt_with_stats(pr_info, task, "diff")
+
+    audits_index = prompt.index("Run project audits on changed code:")
+    guard_index = prompt.index("redundant guard conditions in if/elif chains")
+    merge_index = prompt.index("Merge-artifact check")
+
+    assert guard_index > audits_index
+    assert guard_index < merge_index
+
+
 def test_build_review_prompt_includes_scope_creep_check(
     config, event_bus, pr_info, task
 ):
@@ -1696,6 +1711,197 @@ async def test_has_changes_timeout_returns_false(config, event_bus, tmp_path):
         result = await runner._has_changes(tmp_path, before_sha="abc123")
 
     assert result is False
+
+
+# ---------------------------------------------------------------------------
+# _record_fix_outcome
+# ---------------------------------------------------------------------------
+
+
+class TestRecordFixOutcome:
+    """Tests for ReviewRunner._record_fix_outcome."""
+
+    @pytest.fixture
+    def runner(self, config, event_bus):
+        return _make_runner(config, event_bus)
+
+    @pytest.fixture
+    def result(self):
+        from models import ReviewResult
+
+        return ReviewResult(pr_number=42, issue_number=7)
+
+    @pytest.mark.asyncio
+    async def test_populates_fields_when_changes_committed(
+        self, runner, result, tmp_path
+    ) -> None:
+        """_record_fix_outcome populates files_changed, fixes_made, commit_stat,
+        and sets success=True when the agent made committed changes."""
+        with (
+            patch.object(
+                runner,
+                "_get_changed_files",
+                AsyncMock(return_value=["src/foo.py", "src/bar.py"]),
+            ),
+            patch.object(runner, "_has_changes", AsyncMock(return_value=True)),
+            patch.object(
+                runner,
+                "_get_commit_stat",
+                AsyncMock(return_value=" 2 files changed, 10 insertions(+)"),
+            ),
+            patch.object(runner, "_save_transcript"),
+        ):
+            await runner._record_fix_outcome(
+                result,
+                tmp_path,
+                "abc123",
+                "transcript text",
+                transcript_prefix="review-pr",
+                label="CI fix",
+            )
+
+        assert result.files_changed == ["src/foo.py", "src/bar.py"]
+        assert result.fixes_made is True
+        assert result.commit_stat == " 2 files changed, 10 insertions(+)"
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_success_true_no_commit_stat_when_no_fixes(
+        self, runner, result, tmp_path
+    ) -> None:
+        """_record_fix_outcome sets success=True and leaves commit_stat empty
+        when no fixes were made."""
+        with (
+            patch.object(runner, "_get_changed_files", AsyncMock(return_value=[])),
+            patch.object(runner, "_has_changes", AsyncMock(return_value=False)),
+            patch.object(runner, "_save_transcript"),
+        ):
+            await runner._record_fix_outcome(
+                result,
+                tmp_path,
+                "abc123",
+                "transcript text",
+                transcript_prefix="review-pr",
+                label="Review fix",
+            )
+
+        assert result.success is True
+        assert result.commit_stat == ""
+        assert result.fixes_made is False
+
+    @pytest.mark.asyncio
+    async def test_logs_warning_when_fixes_made_but_no_files(
+        self, runner, result, tmp_path, caplog
+    ) -> None:
+        """_record_fix_outcome logs a warning when fixes_made is True but
+        files_changed is empty."""
+        import logging
+
+        caplog.set_level(logging.WARNING, logger="hydraflow.reviewer")
+        with (
+            patch.object(runner, "_get_changed_files", AsyncMock(return_value=[])),
+            patch.object(runner, "_has_changes", AsyncMock(return_value=True)),
+            patch.object(runner, "_save_transcript"),
+        ):
+            await runner._record_fix_outcome(
+                result,
+                tmp_path,
+                "abc123",
+                "transcript text",
+                transcript_prefix="review-pr",
+                label="Review fix",
+            )
+
+        assert result.success is True
+        assert any(
+            "fixes_made is True but no committed file changes" in r.message
+            for r in caplog.records
+            if r.levelname == "WARNING"
+        )
+
+    @pytest.mark.asyncio
+    async def test_calls_save_transcript_with_prefix_and_pr(
+        self, runner, result, tmp_path
+    ) -> None:
+        """_record_fix_outcome calls _save_transcript with the provided
+        transcript_prefix and pr_number."""
+        mock_save = MagicMock()
+        with (
+            patch.object(runner, "_get_changed_files", AsyncMock(return_value=[])),
+            patch.object(runner, "_has_changes", AsyncMock(return_value=False)),
+            patch.object(runner, "_save_transcript", mock_save),
+        ):
+            await runner._record_fix_outcome(
+                result,
+                tmp_path,
+                "abc123",
+                "my transcript",
+                transcript_prefix="review-fix",
+                label="Review-fix",
+            )
+
+        mock_save.assert_called_once_with("review-fix", 42, "my transcript")
+
+    @pytest.mark.asyncio
+    async def test_label_appears_in_info_log(
+        self, runner, result, tmp_path, caplog
+    ) -> None:
+        """_record_fix_outcome passes the label parameter into the info log
+        message."""
+        import logging
+
+        caplog.set_level(logging.INFO, logger="hydraflow.reviewer")
+        with (
+            patch.object(
+                runner,
+                "_get_changed_files",
+                AsyncMock(return_value=["src/a.py"]),
+            ),
+            patch.object(runner, "_has_changes", AsyncMock(return_value=True)),
+            patch.object(runner, "_get_commit_stat", AsyncMock(return_value="stat")),
+            patch.object(runner, "_save_transcript"),
+        ):
+            await runner._record_fix_outcome(
+                result,
+                tmp_path,
+                "abc123",
+                "transcript",
+                transcript_prefix="review-pr",
+                label="CI fix",
+            )
+
+        assert any(
+            "CI fix" in r.message and "PR #42" in r.message
+            for r in caplog.records
+            if r.levelname == "INFO"
+        )
+
+    @pytest.mark.asyncio
+    async def test_before_sha_none_skips_commit_stat(
+        self, runner, result, tmp_path
+    ) -> None:
+        """_record_fix_outcome with before_sha=None still sets success=True.
+
+        _get_changed_files returns [] immediately for None before_sha;
+        _has_changes only checks uncommitted changes (no SHA comparison).
+        """
+        with (
+            patch.object(runner, "_get_changed_files", AsyncMock(return_value=[])),
+            patch.object(runner, "_has_changes", AsyncMock(return_value=False)),
+            patch.object(runner, "_save_transcript"),
+        ):
+            await runner._record_fix_outcome(
+                result,
+                tmp_path,
+                None,
+                "transcript text",
+                transcript_prefix="review-pr",
+                label="Review fix",
+            )
+
+        assert result.success is True
+        assert result.commit_stat == ""
+        assert result.files_changed == []
 
 
 # ---------------------------------------------------------------------------
@@ -3082,3 +3288,79 @@ async def test_fix_review_findings_dry_run_sets_success_true(
     )
 
     assert result.success is True
+
+
+# ---------------------------------------------------------------------------
+# Nested guard: _get_commit_stat is never called when fixes_made is False
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_review_skips_commit_stat_when_no_fixes(
+    config, event_bus, pr_info, task, tmp_path
+):
+    """review() must not call _get_commit_stat when fixes_made is False."""
+    runner = _make_runner(config, event_bus)
+    transcript = "VERDICT: APPROVE\nSUMMARY: Clean"
+    commit_stat_mock = AsyncMock(return_value="should not be called")
+
+    with (
+        patch.object(runner, "_get_head_sha", AsyncMock(return_value="abc123")),
+        patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
+        patch.object(runner, "_get_changed_files", AsyncMock(return_value=[])),
+        patch.object(runner, "_has_changes", AsyncMock(return_value=False)),
+        patch.object(runner, "_get_commit_stat", commit_stat_mock),
+        patch.object(runner, "_save_transcript"),
+    ):
+        result = await runner.review(pr_info, task, tmp_path, "diff")
+
+    commit_stat_mock.assert_not_called()
+    assert result.commit_stat == ""
+
+
+@pytest.mark.asyncio
+async def test_fix_ci_skips_commit_stat_when_no_fixes(
+    config, event_bus, pr_info, task, tmp_path
+):
+    """fix_ci() must not call _get_commit_stat when fixes_made is False."""
+    runner = _make_runner(config, event_bus)
+    transcript = "VERDICT: APPROVE\nSUMMARY: CI green"
+    commit_stat_mock = AsyncMock(return_value="should not be called")
+
+    with (
+        patch.object(runner, "_get_head_sha", AsyncMock(return_value="abc123")),
+        patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
+        patch.object(runner, "_get_changed_files", AsyncMock(return_value=[])),
+        patch.object(runner, "_has_changes", AsyncMock(return_value=False)),
+        patch.object(runner, "_get_commit_stat", commit_stat_mock),
+        patch.object(runner, "_save_transcript"),
+    ):
+        result = await runner.fix_ci(pr_info, task, tmp_path, "CI log")
+
+    commit_stat_mock.assert_not_called()
+    assert result.commit_stat == ""
+
+
+@pytest.mark.asyncio
+async def test_fix_review_findings_skips_commit_stat_when_no_fixes(
+    config, event_bus, pr_info, task, tmp_path
+):
+    """fix_review_findings() must not call _get_commit_stat when fixes_made is False."""
+    runner = _make_runner(config, event_bus)
+    transcript = "VERDICT: APPROVE\nSUMMARY: Nothing to fix"
+    commit_stat_mock = AsyncMock(return_value="should not be called")
+
+    with (
+        patch.object(runner, "_get_head_sha", AsyncMock(return_value="abc123")),
+        patch.object(runner, "_execute", AsyncMock(return_value=transcript)),
+        patch.object(runner, "_get_changed_files", AsyncMock(return_value=[])),
+        patch.object(runner, "_has_changes", AsyncMock(return_value=False)),
+        patch.object(runner, "_get_commit_stat", commit_stat_mock),
+        patch.object(runner, "_save_transcript"),
+    ):
+        result = await runner.fix_review_findings(
+            pr_info, task, tmp_path, "Findings text"
+        )
+
+    commit_stat_mock.assert_not_called()
+    assert result.commit_stat == ""
