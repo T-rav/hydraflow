@@ -379,6 +379,14 @@ class RouteContext:
 
     # -- Dependency resolution helpers ------------------------------------------
 
+    def _is_default_repo(self, slug: str) -> bool:
+        """Check if *slug* refers to the default (host) repo."""
+        default = self.config.repo
+        if not default:
+            return False
+        normalized = default.replace("/", "-")
+        return slug in (default, normalized)
+
     def resolve_runtime(
         self,
         slug: str | None,
@@ -390,10 +398,12 @@ class RouteContext:
     ]:
         """Resolve per-repo dependencies from the registry.
 
-        When *slug* is ``None`` or no registry is configured, returns the
-        single-repo defaults for backward compatibility.
+        When *slug* is ``None``, matches the default repo, or no registry is
+        configured, returns the single-repo defaults for backward compatibility.
         """
         if self.registry is not None and slug is not None:
+            if self._is_default_repo(slug):
+                return self.config, self.state, self.event_bus, self.get_orchestrator
             rt: RepoRuntime | None = self.registry.get(slug)
             if rt is None:
                 raise HTTPException(status_code=404, detail=f"Unknown repo: {slug}")
@@ -1733,7 +1743,11 @@ def create_router(
                     cause = "Escalation (reason not recorded)"
             if cause:
                 data["cause"] = cause
-            if origin and origin in _cfg.improve_label:
+            is_memory_suggestion = bool(origin and origin in _cfg.improve_label)
+            # When memory auto-approve is on, filter out memory suggestions
+            if _cfg.memory_auto_approve and is_memory_suggestion:
+                continue
+            if is_memory_suggestion:
                 data["isMemorySuggestion"] = True
             # Flag items held for issue type review
             if cause and (
@@ -2200,6 +2214,7 @@ def create_router(
         "pr_unstick_batch_size",
         "unstick_auto_merge",
         "unstick_all_causes",
+        "memory_auto_approve",
         "worktree_base",
     }
 
@@ -2250,10 +2265,11 @@ def create_router(
             object.__setattr__(_cfg, key, validated_value)
             applied[key] = validated_value
 
-        if repo and repo_store is not None and applied:
-            repo_store.update_overrides(repo, applied)
-        elif persist and applied:
-            save_config_file(_cfg.config_file, applied)
+        if applied:
+            if repo and repo_store is not None:
+                repo_store.update_overrides(repo, applied)
+            elif persist:
+                save_config_file(_cfg.config_file, applied)
 
         return JSONResponse({"status": "ok", "updated": applied})
 
@@ -3091,29 +3107,59 @@ def create_router(
 
     # --- Repo runtime lifecycle endpoints ---
 
+    def _is_default_repo(slug: str) -> bool:
+        """Check if *slug* refers to the default (host) repo."""
+        return ctx._is_default_repo(slug)
+
     @router.get("/api/runtimes")
     async def list_runtimes() -> JSONResponse:
         """List all registered repo runtimes with status."""
 
-        if registry is None:
-            return JSONResponse({"runtimes": []})
-        infos = []
-        for rt in registry.all:
+        infos: list[dict[str, Any]] = []
+
+        # Always include the default (host) repo.
+        orch = get_orchestrator()
+        pipeline_active = _default_repo_pipeline_running()
+        if config.repo:
             infos.append(
                 RepoRuntimeInfo(
-                    slug=rt.slug,
-                    repo=rt.config.repo,
-                    running=rt.running,
-                    session_id=rt.orchestrator.current_session_id
-                    if rt.running
+                    slug=config.repo,
+                    repo=config.repo,
+                    running=pipeline_active,
+                    session_id=orch.current_session_id
+                    if orch and orch.running
                     else None,
                 ).model_dump()
             )
+
+        if registry is not None:
+            for rt in registry.all:
+                infos.append(
+                    RepoRuntimeInfo(
+                        slug=rt.slug,
+                        repo=rt.config.repo,
+                        running=rt.running,
+                        session_id=rt.orchestrator.current_session_id
+                        if rt.running
+                        else None,
+                    ).model_dump()
+                )
         return JSONResponse({"runtimes": infos})
 
     @router.get("/api/runtimes/{slug}")
     async def get_runtime_status(slug: str) -> JSONResponse:
         """Get status of a specific repo runtime."""
+
+        if _is_default_repo(slug):
+            orch = get_orchestrator()
+            pipeline_active = _default_repo_pipeline_running()
+            info = RepoRuntimeInfo(
+                slug=config.repo,
+                repo=config.repo,
+                running=pipeline_active,
+                session_id=orch.current_session_id if orch and orch.running else None,
+            )
+            return JSONResponse(info.model_dump())
 
         if registry is None:
             return JSONResponse(
@@ -3130,9 +3176,28 @@ def create_router(
         )
         return JSONResponse(info.model_dump())
 
+    _DEFAULT_PIPELINE_WORKERS = ("triage", "plan", "implement", "review", "hitl")
+
+    def _default_repo_pipeline_running() -> bool:
+        """Return True if any pipeline worker is enabled on the default repo."""
+        orch = get_orchestrator()
+        if not orch or not orch.running:
+            return False
+        return any(orch.is_bg_worker_enabled(w) for w in _DEFAULT_PIPELINE_WORKERS)
+
     @router.post("/api/runtimes/{slug}/start")
     async def start_runtime(slug: str) -> JSONResponse:
         """Start a specific repo runtime."""
+        if _is_default_repo(slug):
+            orch = get_orchestrator()
+            if not orch or not orch.running:
+                return JSONResponse(
+                    {"error": "Orchestrator not running"}, status_code=400
+                )
+            for w in _DEFAULT_PIPELINE_WORKERS:
+                orch.set_bg_worker_enabled(w, True)
+            return JSONResponse({"status": "started", "slug": slug})
+
         if registry is None:
             return JSONResponse(
                 {"error": "No runtime registry configured"}, status_code=501
@@ -3148,6 +3213,14 @@ def create_router(
     @router.post("/api/runtimes/{slug}/stop")
     async def stop_runtime(slug: str) -> JSONResponse:
         """Stop a specific repo runtime."""
+        if _is_default_repo(slug):
+            orch = get_orchestrator()
+            if not orch or not orch.running:
+                return JSONResponse({"error": "Not running"}, status_code=400)
+            for w in _DEFAULT_PIPELINE_WORKERS:
+                orch.set_bg_worker_enabled(w, False)
+            return JSONResponse({"status": "stopped", "slug": slug})
+
         if registry is None:
             return JSONResponse(
                 {"error": "No runtime registry configured"}, status_code=501
@@ -3629,7 +3702,7 @@ def create_router(
         return JSONResponse(
             {
                 "status": "ok",
-                "slug": slug.replace("/", "-"),
+                "slug": slug,
                 "path": str(clone_target),
                 "already_cloned": already_cloned,
                 "labels_created": False,

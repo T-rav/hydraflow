@@ -865,8 +865,20 @@ class HydraFlowOrchestrator:
                 display = name.replace("_", " ").capitalize()
                 exc_type = type(exc)
 
+                # Docker/network transient errors should not count toward
+                # the circuit breaker — they resolve on their own when the
+                # daemon restarts or the network recovers.
+                is_transient = (
+                    isinstance(exc, ConnectionError | FileNotFoundError | OSError)
+                    or "closed pipe" in str(exc).lower()
+                )
+
                 # Track consecutive failures of the same type
-                if exc_type is last_exc_type:
+                if is_transient:
+                    # Don't escalate transient infra errors
+                    consecutive_failures = 0
+                    last_exc_type = None
+                elif exc_type is last_exc_type:
                     consecutive_failures += 1
                 else:
                     consecutive_failures = 1
@@ -1141,7 +1153,10 @@ class HydraFlowOrchestrator:
                 active_in_store, prefetched_issues=[gh_issue]
             )
             if not prs:
-                # PR not visible yet — re-queue for next cycle
+                # PR not visible yet — wait before re-queuing so the
+                # review pool doesn't tight-loop on issues whose PRs
+                # haven't propagated to the GitHub API yet.
+                await self._sleep_or_stop(min(self._config.poll_interval, 30))
                 self._svc.store.enqueue_transition(issue, "review")
                 return False
 

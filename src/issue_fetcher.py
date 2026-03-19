@@ -32,6 +32,35 @@ class IssueFetcher:
         self._collaborators: set[str] | None = None
         self._collaborators_fetched_at: datetime | None = None
         self._api_cache_ttl = f"{config.data_poll_interval}s"
+        # PR cache: {branch_name: {number, url, isDraft}}
+        self._pr_cache: dict[str, dict[str, Any]] | None = None
+        self._pr_cache_fetched_at: datetime | None = None
+
+    @staticmethod
+    def _normalize_graphql_issue(node: dict[str, Any]) -> dict[str, Any]:
+        """Map a GraphQL issue node to the GitHubIssue-compatible payload."""
+        labels_raw = node.get("labels", {})
+        labels = (
+            labels_raw.get("nodes", []) if isinstance(labels_raw, dict) else labels_raw
+        )
+        author_raw = node.get("author") or {}
+        author = author_raw.get("login", "") if isinstance(author_raw, dict) else ""
+        milestone_raw = node.get("milestone")
+        milestone_number = (
+            milestone_raw.get("number") if isinstance(milestone_raw, dict) else None
+        )
+        return {
+            "number": node.get("number"),
+            "title": node.get("title", ""),
+            "body": node.get("body", ""),
+            "labels": labels,
+            "comments": [],
+            "url": node.get("url", ""),
+            "state": (node.get("state", "OPEN")).lower(),
+            "createdAt": node.get("createdAt", ""),
+            "author": author,
+            "milestone_number": milestone_number,
+        }
 
     @staticmethod
     def _normalize_issue_payload(item: dict[str, Any]) -> dict[str, Any]:
@@ -293,8 +322,9 @@ class IssueFetcher:
     async def fetch_all_hydraflow_issues(self) -> list[GitHubIssue]:
         """Fetch all open issues with any HydraFlow pipeline label in one batch.
 
-        Collects all configured pipeline labels and calls
-        :meth:`fetch_issues_by_labels` once, deduplicating by issue number.
+        Uses a single GraphQL request (one alias per label) instead of
+        firing a separate REST call per label.  Falls back to REST on
+        GraphQL failure.
         """
         all_labels = list(
             {
@@ -308,11 +338,74 @@ class IssueFetcher:
         )
         if not all_labels:
             return []
-        return await self.fetch_issues_by_labels(
-            all_labels,
-            limit=500,
-            require_complete=True,
+        if self._config.dry_run:
+            logger.info("[dry-run] Would fetch all HydraFlow issues")
+            return []
+        try:
+            return await self._fetch_all_graphql(all_labels)
+        except Exception as exc:
+            logger.warning(
+                "GraphQL batch issue fetch failed, falling back to REST: %s", exc
+            )
+            return await self.fetch_issues_by_labels(
+                all_labels, limit=500, require_complete=True
+            )
+
+    async def _fetch_all_graphql(self, all_labels: list[str]) -> list[GitHubIssue]:
+        """Single GraphQL request with one alias per label."""
+        owner, name = self._config.repo.split("/", 1)
+
+        fragments = []
+        for i, label in enumerate(all_labels):
+            escaped = label.replace("\\", "\\\\").replace('"', '\\"')
+            fragments.append(
+                f"  lbl_{i}: issues(first: 100, states: OPEN, "
+                f'labels: ["{escaped}"], '
+                f"orderBy: {{field: CREATED_AT, direction: ASC}}) {{\n"
+                f"    nodes {{\n"
+                f"      number title body url state createdAt\n"
+                f"      author {{ login }}\n"
+                f"      milestone {{ number }}\n"
+                f"      labels(first: 20) {{ nodes {{ name }} }}\n"
+                f"    }}\n"
+                f"  }}"
+            )
+
+        query = (
+            f'{{ repository(owner: "{owner}", name: "{name}") {{\n'
+            + "\n".join(fragments)
+            + "\n}}"
         )
+
+        raw = await run_subprocess(
+            "gh",
+            "api",
+            "graphql",
+            "-f",
+            f"query={query}",
+            gh_token=self._config.gh_token,
+        )
+        data = json.loads(raw)
+
+        errors = data.get("errors")
+        if errors:
+            raise RuntimeError(f"GraphQL errors: {errors}")
+
+        repo_data = data.get("data", {}).get("repository", {})
+
+        seen: dict[int, dict[str, Any]] = {}
+        for i in range(len(all_labels)):
+            nodes = repo_data.get(f"lbl_{i}", {}).get("nodes", [])
+            for node in nodes:
+                number = node.get("number")
+                if isinstance(number, int) and number not in seen:
+                    seen[number] = self._normalize_graphql_issue(node)
+
+        issues = [GitHubIssue.model_validate(v) for v in seen.values()]
+        if self._config.collaborator_check_enabled:
+            collaborators = await self._get_collaborators()
+            issues = self._filter_non_collaborators(issues, collaborators)
+        return issues[:500]
 
     async def fetch_issue_by_number(self, issue_number: int) -> GitHubIssue | None:
         """Fetch a single issue by its number.
@@ -370,6 +463,58 @@ class IssueFetcher:
         logger.info("Fetched %d issues to implement", len(issues))
         return issues[:queue_size]
 
+    async def _get_open_prs_by_branch(self) -> dict[str, dict[str, Any]]:
+        """Fetch all open PRs in one call and return ``{branch: pr_data}``.
+
+        Cached for ``data_poll_interval`` seconds to avoid repeated fetches
+        across poll cycles.
+        """
+        now = datetime.now(UTC)
+        if (
+            self._pr_cache is not None
+            and self._pr_cache_fetched_at is not None
+            and (now - self._pr_cache_fetched_at).total_seconds()
+            < self._config.data_poll_interval
+        ):
+            return self._pr_cache
+
+        raw = await run_subprocess(
+            "gh",
+            "api",
+            f"repos/{self._config.repo}/pulls",
+            "--paginate",
+            "--method",
+            "GET",
+            "--field",
+            "state=open",
+            "--field",
+            "per_page=100",
+            gh_token=self._config.gh_token,
+        )
+        all_prs = json.loads(raw)
+
+        by_branch: dict[str, dict[str, Any]] = {}
+        for pr in all_prs:
+            if not isinstance(pr, dict):
+                continue
+            head = pr.get("head", {})
+            branch = head.get("ref", "") if isinstance(head, dict) else ""
+            if branch:
+                by_branch[branch] = {
+                    "number": pr.get("number", 0),
+                    "url": pr.get("html_url", ""),
+                    "isDraft": pr.get("draft", False),
+                }
+
+        self._pr_cache = by_branch
+        self._pr_cache_fetched_at = now
+        return by_branch
+
+    def invalidate_pr_cache(self) -> None:
+        """Clear the PR cache so the next lookup fetches fresh data."""
+        self._pr_cache = None
+        self._pr_cache_fetched_at = None
+
     async def fetch_reviewable_prs(
         self,
         active_issues: set[int],
@@ -380,6 +525,9 @@ class IssueFetcher:
         When *prefetched_issues* is provided, skip the GitHub issue fetch
         and use those issues directly (they come from the ``IssueStore``).
         Returns ``(pr_infos, issues)`` so the reviewer has both.
+
+        Uses a single batch fetch of all open PRs (cached) instead of
+        one API call per issue.
         """
         if prefetched_issues is not None:
             issues = [i for i in prefetched_issues if i.number not in active_issues]
@@ -393,31 +541,19 @@ class IssueFetcher:
         if not issues:
             return [], []
 
-        # For each issue, look up the open PR on its branch
+        # Single batch fetch instead of per-issue PR lookups
+        try:
+            pr_by_branch = await self._get_open_prs_by_branch()
+        except (RuntimeError, json.JSONDecodeError) as exc:
+            logger.warning("Batch PR fetch failed: %s", exc)
+            pr_by_branch = {}
+
         pr_infos: list[PRInfo] = []
         for issue in issues:
             branch = f"agent/issue-{issue.number}"
-            head_filter = f"{self._repo_owner}:{branch}" if self._repo_owner else branch
-            try:
-                raw = await run_subprocess(
-                    "gh",
-                    "api",
-                    f"repos/{self._config.repo}/pulls",
-                    "--method",
-                    "GET",
-                    "--field",
-                    "state=open",
-                    "--field",
-                    f"head={head_filter}",
-                    "--field",
-                    "per_page=1",
-                    "--jq",
-                    "[.[] | {number, url: .html_url, isDraft: .draft}]",
-                    gh_token=self._config.gh_token,
-                )
-                prs_json = json.loads(raw)
-                if prs_json:
-                    pr_data = prs_json[0]
+            pr_data = pr_by_branch.get(branch)
+            if pr_data:
+                try:
                     pr_infos.append(
                         PRInfo(
                             number=pr_data["number"],
@@ -427,8 +563,10 @@ class IssueFetcher:
                             draft=pr_data.get("isDraft", False),
                         )
                     )
-            except (RuntimeError, json.JSONDecodeError, KeyError) as exc:
-                logger.warning("Could not find PR for issue #%d: %s", issue.number, exc)
+                except KeyError as exc:
+                    logger.warning(
+                        "Could not find PR for issue #%d: %s", issue.number, exc
+                    )
 
         non_draft = [p for p in pr_infos if not p.draft and p.number > 0]
         logger.info("Fetched %d reviewable PRs", len(non_draft))
