@@ -19,11 +19,12 @@ data layers so they see the same routing logic implemented in
 
 Several concrete requirements flow from the production code:
 
-- `IssueStore.refresh()` pulls tasks via a `TaskFetcher` protocol
-  (`src/task_source.py`). Tests must provide a fetcher that implements
-  `fetch_all()` so refresh() repopulates the queues exactly like production.
+- `IssueStore` manages internal queues via `enqueue_transition()`, which places a
+  `Task` into the appropriate stage queue and publishes queue-update events.
+  Integration tests need a mechanism to seed work directly into these queues without
+  going through external fetcher polling.
 - Label routing depends on config-driven tags (`hydraflow-find`, `hydraflow-plan`,
-  `hydraflow-ready`, `hydraflow-review`). Without realistic tags, the `_build_label_map`
+  `hydraflow-ready`, `hydraflow-review`). Without realistic tags, the queue-stage
   logic in `IssueStore` will route nothing to downstream phases, so integration tests
   would give false confidence.
 - Queue updates are published via `_publish_queue_update_nowait()`, which calls
@@ -45,18 +46,16 @@ controlled mocks for external systems.
 
 ### Harness composition
 
-1. **Core services:** `PipelineHarness.__init__` instantiates `HydraFlowConfig`,
-   `StateTracker`, `EventBus`, and `IssueStore` exactly as production code does.
-   The tracker persists to a temporary directory so repeated phase invocations
-   observe real disk writes.
-2. **Task ingestion:** Two implementations satisfy the `TaskFetcher.fetch_all()`
-   protocol. `PipelineHarness` uses an `AsyncMock` fetcher whose return value tests
-   control directly. `tests/orchestrator_integration_utils.py:StaticTaskFetcher`
-   provides a reusable concrete implementation that returns `Task` instances whose
-   `tags` already match the configured HydraFlow labels. Both approaches call
-   `await IssueStore.refresh()` inside harness setup so queues populate from the
-   fetcher instead of hand-inserting tasks.
-3. **Phase runners:** Runners that invoke external AI agents or GitHub APIs are
+1. **Core services:** Instantiate `HydraFlowConfig`, `StateTracker`, `EventBus`, and
+   `IssueStore` exactly as production code does. The tracker persists to a
+   temporary directory so repeated phase invocations observe real disk writes.
+2. **Task seeding:** Seed work into `IssueStore` queues via `seed_issue()`, which
+   calls `IssueStore.enqueue_transition(task, stage)` to place a `Task` directly
+   into the target stage queue. This bypasses the external `TaskFetcher` polling
+   path (`refresh()`) and instead exercises the same `enqueue_transition` machinery
+   that phase hand-offs use in production. The `TaskFetcher` passed to `IssueStore`
+   is an `AsyncMock` that is not invoked during normal harness operation.
+3. **Phase runners:** Keep runners that invoke external AI agents or GitHub APIs
    mocked (`TriageRunner`, `PlannerRunner`, `AgentRunner`, `ReviewRunner`, and the
    `PRManager`). They expose deterministic hooks (e.g., `AsyncMock` side effects)
    that tests assert on while allowing the harness to drive real orchestrator loops.
@@ -70,38 +69,41 @@ controlled mocks for external systems.
 
 ### Execution semantics
 
-- After each `refresh()` or queue-modifying action, `await asyncio.sleep(0)` (or an
-  explicit helper) flushes `loop.create_task()` callbacks emitted by
+- After each queue-modifying action, `await asyncio.sleep(0)` (or an explicit
+  helper) to flush `loop.create_task()` callbacks emitted by
   `_publish_queue_update_nowait()`. This keeps queue stats observed by the harness in
   sync with expectations.
-- When tests need to seed new work mid-run, they update the fetcher's return value
-  and call `await IssueStore.refresh()` again rather than mutating queues directly.
-  That guarantees `_route_issues()` and `IssueStoreStage` priorities are exercised
-  end-to-end.
-- Tests use `pytest-asyncio` to provide the event loop and rely on the same config
-  labels used in production (read from `HydraFlowConfig.find_label`, `planner_label`,
+- Use `pytest-asyncio` to provide the event loop and rely on the same config labels
+  used in production (read from `HydraFlowConfig.find_label`, `planner_label`,
   `ready_label`, and `review_label`).
+
+### PipelineRunResult contract
+
+`PipelineHarness.run_full_lifecycle()` returns a `PipelineRunResult` dataclass that
+serves as the primary assertion surface for integration tests. Its fields are:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `task` | `Task` | The seeded task that entered the pipeline. |
+| `triaged_count` | `int` | Number of issues triaged in the triage phase. |
+| `plan_results` | `list` | Results returned by `PlanPhase.plan_issues()`. |
+| `worker_results` | `list` | Results returned by `ImplementPhase.run_batch()`. |
+| `review_results` | `list` | Results returned by `ReviewPhase.review_prs()`. |
+| `snapshots` | `dict[str, QueueStats]` | Queue-stats snapshots captured after each phase (`after_triage`, `after_plan`, `after_implement`, `after_review`). |
+| `events` | `list[HydraFlowEvent]` | Full event history from the shared `EventBus`. |
+
+The `snapshot(label)` helper method provides keyed access to queue stats at each
+phase boundary, raising `KeyError` with available labels if the requested snapshot
+does not exist.
 
 ### Scope boundaries
 
 - The harness stops at the PR boundary: `PRManager`, `WorktreeManager`, and
   external CLI invocations remain mocked so tests stay hermetic.
-- Background GitHub polling is replaced by deterministic fetcher responses, but the
-  harness deliberately leaves `IssueStore.refresh()` untouched so routing logic,
-  deduplication, and queue statistics are validated.
-
-### Operational impact on HydraFlow workers
-
-- Each HydraFlow worker loop (triage, planner, implement, review) runs against the
-  same `EventBus` instance and async stop flag, matching the orchestration model in
-  production so queue-drain behaviour and worker lifecycle hooks are validated.
-- Using the real `StateTracker` preserves worker counters, crash-recovery markers,
-  and pause/resume semantics so integration tests detect regressions that would
-  otherwise only surface when supervisors restart HydraFlow processes.
-- Config-driven tags flowing through `IssueStore.refresh()` ensure workers see the
-  same label transitions and queue membership rules enforced in live runs, giving
-  reviewers confidence that scheduler decisions stay aligned with operational
-  limits (max planners, reviewers, etc.).
+- Background GitHub polling is omitted; work is seeded directly via
+  `enqueue_transition()`. The `refresh()` → `_build_label_map` → `_route_issues`
+  path is intentionally not exercised by the harness; it is covered by dedicated
+  `IssueStore` unit tests instead.
 
 ## Consequences
 
@@ -112,8 +114,10 @@ controlled mocks for external systems.
   than leaking into production orchestrator runs.
 - Shared harness code reduces bespoke mock setups across test files and increases
   confidence that future multi-phase scenarios reuse the same proven fixture.
-- EventBus metrics and queue snapshots emitted during tests provide observability
-  into cross-phase event flow, aiding reviewers and future ADRs.
+- EventBus metrics and queue snapshots emitted during tests double as living
+  documentation for the dashboard contract, aiding reviewers and future ADRs.
+- The `PipelineRunResult` return contract gives tests a structured assertion surface
+  with queue snapshots at each phase boundary, reducing boilerplate assertions.
 
 **Negative / Trade-offs**
 
@@ -124,6 +128,10 @@ controlled mocks for external systems.
   in Worktree orchestration continue to rely on dedicated implement-phase tests.
 - The harness introduces more moving parts per test case, raising the bar for
   contributors who only need to cover a single phase.
+- The `enqueue_transition`-based seeding strategy deliberately skips the external
+  polling path (see Scope boundaries), which means label-routing correctness for
+  `_build_label_map` and `_route_issues` depends entirely on dedicated `IssueStore`
+  unit tests — a gap contributors must remember to maintain.
 
 ## Alternatives considered
 
@@ -132,11 +140,11 @@ controlled mocks for external systems.
 2. **Full end-to-end tests with live GitHub** — rejected for cost and brittleness; a
    hermetic harness with mocked runners provides 90% coverage without network IO or
    secrets management.
-3. **pytest fixtures instead of a helper class** — considered but rejected because a
-   standalone `PipelineHarness` class encapsulates the wiring of five phases, their
-   shared stores, and mock setup in one place. A fixture-based approach would scatter
-   this wiring across conftest files or require a factory fixture that duplicates the
-   class structure, with no clear advantage.
+3. **MockTaskFetcher + refresh()-based seeding** — considered but not adopted. This
+   approach would exercise `_build_label_map` and `_route_issues` end-to-end but
+   couples test setup to the external-polling path. The `enqueue_transition` approach
+   was chosen for simplicity and directness, with `refresh()` coverage deferred to
+   IssueStore unit tests.
 
 ## Related
 
