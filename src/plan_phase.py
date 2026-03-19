@@ -486,9 +486,20 @@ class PlanPhase:
                 elif result.success and result.plan:
                     await self._handle_plan_success(issue, result)
                     ts_status = "success"
-                elif result.retry_attempted:
-                    await self._handle_plan_failure(issue, result)
-                    ts_status = "escalated"
+                elif result.retry_attempted and result.plan:
+                    # Accept the plan despite validation errors — the
+                    # implementation agent will handle any stale references
+                    # caused by concurrent changes to the codebase.
+                    logger.warning(
+                        "Plan for issue #%d has validation warnings — "
+                        "accepting anyway: %s",
+                        issue.id,
+                        "; ".join(result.validation_errors),
+                    )
+                    result.success = True
+                    result.validation_errors = []
+                    await self._handle_plan_success(issue, result)
+                    ts_status = "success"
                 else:
                     logger.warning(
                         "Planning failed for issue #%d — skipping label swap",

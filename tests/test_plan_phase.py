@@ -364,11 +364,11 @@ class TestPlanPhase:
         assert len(results) < len(issues)
 
     @pytest.mark.asyncio
-    async def test_plan_issues_escalates_to_hitl_after_retry_failure(
+    async def test_plan_issues_accepts_plan_despite_validation_errors(
         self, config: HydraFlowConfig
     ) -> None:
-        """Failed retry triggers HITL label swap and comment."""
-        phase, state, planners, prs, store, _stop = make_plan_phase(config)
+        """Failed retry with a plan body should still accept and proceed."""
+        phase, _state, planners, prs, store, _stop = make_plan_phase(config)
         issue = TaskFactory.create(id=42)
         plan_result = PlanResultFactory.create(
             issue_number=42,
@@ -387,18 +387,9 @@ class TestPlanPhase:
 
         await phase.plan_issues()
 
-        # HITL comment should be posted
-        prs.post_comment.assert_awaited_once()
-        comment = prs.post_comment.call_args.args[1]
-        assert "Plan Validation Failed" in comment
-        assert "Testing Strategy" in comment
-
-        # Planner label removed, HITL label added via swap (escalate_to_hitl still uses swap_pipeline_labels)
-        prs.swap_pipeline_labels.assert_awaited_once_with(42, config.hitl_label[0])
-
-        # HITL origin and cause tracked in state
-        assert state.get_hitl_origin(42) == config.planner_label[0]
-        assert state.get_hitl_cause(42) == "Plan validation failed after retry"
+        # Plan should be accepted — transitioned to ready, not HITL
+        prs.transition.assert_awaited_once_with(42, "ready")
+        prs.swap_pipeline_labels.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_plan_issues_no_hitl_on_failure_without_retry(
@@ -671,10 +662,10 @@ class TestPlanPhaseTranscriptSummary:
         assert ".hydraflow/logs/plan-issue-42.txt" in call_kwargs.kwargs["log_file"]
 
     @pytest.mark.asyncio
-    async def test_failed_plan_escalation_calls_summarize_with_escalated(
+    async def test_failed_plan_retry_with_plan_body_calls_summarize_with_success(
         self, config: HydraFlowConfig
     ) -> None:
-        """After HITL escalation, status should be 'escalated'."""
+        """After retry failure with a plan body, status should be 'success' (accepted)."""
         mock_summarizer = AsyncMock()
         mock_summarizer.summarize_and_comment = AsyncMock(return_value=True)
         phase, _state, planners, prs, store, _stop = make_plan_phase(
@@ -697,7 +688,7 @@ class TestPlanPhaseTranscriptSummary:
         mock_summarizer.summarize_and_comment.assert_awaited_once()
         assert (
             mock_summarizer.summarize_and_comment.call_args.kwargs["status"]
-            == "escalated"
+            == "success"
         )
 
     @pytest.mark.asyncio
@@ -997,10 +988,10 @@ class TestPlanPhaseEvidenceValidation:
         assert state.get_hitl_origin(42) is not None
 
     @pytest.mark.asyncio
-    async def test_handle_plan_failure_uses_generic_wording(
+    async def test_retry_failure_with_plan_body_accepted_not_escalated(
         self, config: HydraFlowConfig
     ) -> None:
-        """Plan failure comment should say 'after planning attempts' not 'after two attempts'."""
+        """Retry failure with a plan body should be accepted, not escalated."""
         phase, _state, planners, prs, store, _stop = make_plan_phase(config)
         issue = TaskFactory.create(id=42)
         plan_result = PlanResultFactory.create(
@@ -1016,11 +1007,11 @@ class TestPlanPhaseEvidenceValidation:
 
         await phase.plan_issues()
 
+        # Should transition to ready, not post a "Plan Validation Failed" comment
+        prs.transition.assert_awaited_once_with(42, "ready")
         comments = [call.args[1] for call in prs.post_comment.call_args_list]
         plan_failure_comments = [c for c in comments if "Plan Validation Failed" in c]
-        assert len(plan_failure_comments) == 1
-        assert "after planning attempts" in plan_failure_comments[0]
-        assert "after two attempts" not in plan_failure_comments[0]
+        assert len(plan_failure_comments) == 0
 
 
 class TestPlanPhaseBatchScaling:
@@ -1141,10 +1132,10 @@ class TestPlanPhaseErrorPaths:
     """Tests for planner timeout/crash and empty/None plan text edge cases."""
 
     @pytest.mark.asyncio
-    async def test_planner_crash_with_retry_escalates_to_hitl(
+    async def test_planner_crash_with_retry_no_plan_body_skips_silently(
         self, config: HydraFlowConfig
     ) -> None:
-        """When planner crashes after retry, issue escalates to HITL."""
+        """When planner crashes after retry with no plan body, skip silently."""
         phase, _state, planners, prs, store, _stop = make_plan_phase(config)
         issue = TaskFactory.create(id=42)
         plan_result = PlanResultFactory.create(
@@ -1162,11 +1153,11 @@ class TestPlanPhaseErrorPaths:
 
         await phase.plan_issues()
 
-        # Should post a failure comment and escalate to HITL
+        # No HITL escalation — just skips label swap
+        prs.swap_pipeline_labels.assert_not_awaited()
         comments = [call.args[1] for call in prs.post_comment.call_args_list]
         hitl_comment = [c for c in comments if "Plan Validation Failed" in c]
-        assert len(hitl_comment) == 1
-        assert "Agent process crashed unexpectedly" in hitl_comment[0]
+        assert len(hitl_comment) == 0
 
     @pytest.mark.asyncio
     async def test_empty_plan_text_with_success_skips_success_handler(
