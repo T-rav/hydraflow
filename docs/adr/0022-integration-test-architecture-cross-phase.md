@@ -15,7 +15,7 @@ debugging those regressions: integration tests must exercise the real queueing a
 data layers so they see the same routing logic implemented in
 `src/issue_store.py:IssueStore`, the label-to-stage mapping in
 `src/config.py:HydraFlowConfig`, and the persistence semantics inside
-`src/state.py:StateTracker`.
+`src/state:StateTracker`.
 
 Several concrete requirements flow from the production code:
 
@@ -33,7 +33,7 @@ Several concrete requirements flow from the production code:
   `await asyncio.sleep(0)` so those fire-and-forget `EventBus.publish()` tasks drain
   before making assertions.
 - Planner/implement/review loops need the persisted state transitions tracked by
-  `StateTracker` (`src/state.py`). Using the real tracker against a `tmp_path`
+  `StateTracker` (`src/state`). Using the real tracker against a `tmp_path`
   ensures the harness observes activity counters, crate membership, and crash
   recovery semantics that single-phase mocks currently skip.
 
