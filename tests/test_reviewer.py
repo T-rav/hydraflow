@@ -2460,6 +2460,25 @@ async def test_fix_ci_still_catches_runtime_errors(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
+async def test_fix_review_findings_reraises_likely_bug_exceptions(
+    config, event_bus, pr_info, task, tmp_path
+):
+    """Code bugs (TypeError, KeyError, etc.) must propagate, not be swallowed."""
+    runner = _make_runner(config, event_bus)
+
+    for exc_cls in (TypeError, KeyError, AttributeError):
+        mock_execute = AsyncMock(side_effect=exc_cls("code bug"))
+        with (
+            patch.object(runner, "_get_head_sha", AsyncMock(return_value="abc123")),
+            patch.object(runner, "_execute", mock_execute),
+            pytest.raises(exc_cls, match="code bug"),
+        ):
+            await runner.fix_review_findings(
+                pr_info, task, tmp_path, "Missing null check"
+            )
+
+
 # ---------------------------------------------------------------------------
 # fix_review_findings — success path
 # ---------------------------------------------------------------------------
