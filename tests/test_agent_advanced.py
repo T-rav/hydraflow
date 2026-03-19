@@ -623,3 +623,100 @@ class TestPriorFailureInPrompt:
             prompt, _ = runner._build_prompt_with_stats(issue, prior_failure="")
 
         assert "## Prior Attempt Failure" not in prompt
+
+
+# ---------------------------------------------------------------------------
+# Extracted helper methods (refactor #2606)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildPlanSection:
+    """Tests for AgentRunner._build_plan_section()."""
+
+    def test_returns_empty_when_no_plan(self, config, event_bus: EventBus) -> None:
+        runner = AgentRunner(config, event_bus)
+        issue = TaskFactory.create(comments=[])
+        from prompt_builder import PromptBuilder
+
+        builder = PromptBuilder()
+        section, remaining = runner._build_plan_section(issue, builder)
+        assert section == ""
+        assert remaining == []
+
+    def test_extracts_plan_from_comments(self, config, event_bus: EventBus) -> None:
+        plan_comment = "## Implementation Plan\n\n1. Do the thing\n2. Test the thing"
+        runner = AgentRunner(config, event_bus)
+        issue = TaskFactory.create(comments=[plan_comment, "Other comment"])
+        from prompt_builder import PromptBuilder
+
+        builder = PromptBuilder()
+        section, remaining = runner._build_plan_section(issue, builder)
+        assert "Implementation Plan" in section
+        assert len(remaining) == 1
+        assert remaining[0] == "Other comment"
+
+
+class TestBuildReviewFeedbackSection:
+    """Tests for AgentRunner._build_review_feedback_section()."""
+
+    def test_returns_empty_when_no_feedback(self, config, event_bus: EventBus) -> None:
+        runner = AgentRunner(config, event_bus)
+        from prompt_builder import PromptBuilder
+
+        builder = PromptBuilder()
+        result = runner._build_review_feedback_section("", builder)
+        assert result == ""
+
+    def test_includes_feedback_text(self, config, event_bus: EventBus) -> None:
+        runner = AgentRunner(config, event_bus)
+        from prompt_builder import PromptBuilder
+
+        builder = PromptBuilder()
+        result = runner._build_review_feedback_section("Fix the bug", builder)
+        assert "Review Feedback" in result
+        assert "Fix the bug" in result
+
+
+class TestBuildPriorFailureSection:
+    """Tests for AgentRunner._build_prior_failure_section()."""
+
+    def test_returns_empty_when_no_failure(self, config, event_bus: EventBus) -> None:
+        runner = AgentRunner(config, event_bus)
+        from prompt_builder import PromptBuilder
+
+        builder = PromptBuilder()
+        result = runner._build_prior_failure_section("", builder)
+        assert result == ""
+
+    def test_includes_failure_text(self, config, event_bus: EventBus) -> None:
+        runner = AgentRunner(config, event_bus)
+        from prompt_builder import PromptBuilder
+
+        builder = PromptBuilder()
+        result = runner._build_prior_failure_section("TypeError: foo", builder)
+        assert "Prior Attempt Failure" in result
+        assert "TypeError: foo" in result
+
+
+class TestTruncateIssueBody:
+    """Tests for AgentRunner._truncate_issue_body()."""
+
+    def test_short_body_unchanged(self, config, event_bus: EventBus) -> None:
+        runner = AgentRunner(config, event_bus)
+        issue = TaskFactory.create(body="short body")
+        from prompt_builder import PromptBuilder
+
+        builder = PromptBuilder()
+        result = runner._truncate_issue_body(issue, builder)
+        assert result == "short body"
+
+    def test_long_body_truncated(self, config, event_bus: EventBus) -> None:
+        runner = AgentRunner(config, event_bus)
+        long_body = "x" * (config.max_issue_body_chars + 500)
+        issue = TaskFactory.create(body=long_body)
+        from prompt_builder import PromptBuilder
+
+        builder = PromptBuilder()
+        result = runner._truncate_issue_body(issue, builder)
+        assert "[Body truncated at" in result
+        assert len(result) < len(long_body)

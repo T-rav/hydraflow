@@ -16,7 +16,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from events import EventType
-from runner_utils import stream_claude_process, terminate_processes
+from runner_utils import (
+    stream_claude_process,
+    terminate_processes,
+)
 from tests.helpers import make_streaming_proc
 
 # ---------------------------------------------------------------------------
@@ -858,3 +861,140 @@ class TestStreamClaudeProcessGhToken:
         if "GH_TOKEN" in captured_env:
             # If present, it was inherited from os.environ, not injected
             assert captured_env["GH_TOKEN"] == os.environ.get("GH_TOKEN", "")
+
+
+# ---------------------------------------------------------------------------
+# _prepare_command
+# ---------------------------------------------------------------------------
+
+
+class TestPrepareCommand:
+    """Tests for _prepare_command()."""
+
+    def test_claude_print_inserts_prompt_after_flag(self) -> None:
+        from runner_utils import _prepare_command
+
+        cmd = ["claude", "-p", "--model", "opus"]
+        cmd_to_run, stdin_mode = _prepare_command(cmd, "my prompt")
+        assert cmd_to_run == ["claude", "-p", "my prompt", "--model", "opus"]
+        assert stdin_mode == asyncio.subprocess.DEVNULL
+
+    def test_codex_exec_appends_prompt(self) -> None:
+        from runner_utils import _prepare_command
+
+        cmd = ["codex", "exec"]
+        cmd_to_run, stdin_mode = _prepare_command(cmd, "my prompt")
+        assert cmd_to_run == ["codex", "exec", "my prompt"]
+        assert stdin_mode == asyncio.subprocess.DEVNULL
+
+    def test_pi_print_inserts_prompt_after_flag(self) -> None:
+        from runner_utils import _prepare_command
+
+        cmd = ["pi", "-p", "--json"]
+        cmd_to_run, stdin_mode = _prepare_command(cmd, "my prompt")
+        assert cmd_to_run == ["pi", "-p", "my prompt", "--json"]
+        assert stdin_mode == asyncio.subprocess.DEVNULL
+
+    def test_unknown_tool_uses_stdin(self) -> None:
+        from runner_utils import _prepare_command
+
+        cmd = ["some-tool", "--flag"]
+        cmd_to_run, stdin_mode = _prepare_command(cmd, "my prompt")
+        assert cmd_to_run == ["some-tool", "--flag"]
+        assert stdin_mode == asyncio.subprocess.PIPE
+
+    def test_pi_with_print_long_flag(self) -> None:
+        from runner_utils import _prepare_command
+
+        cmd = ["pi", "--print", "--json"]
+        cmd_to_run, stdin_mode = _prepare_command(cmd, "prompt")
+        assert cmd_to_run == ["pi", "--print", "prompt", "--json"]
+        assert stdin_mode == asyncio.subprocess.DEVNULL
+
+
+# ---------------------------------------------------------------------------
+# _validate_post_stream
+# ---------------------------------------------------------------------------
+
+
+class TestValidatePostStream:
+    """Tests for _validate_post_stream()."""
+
+    def test_no_error_on_clean_exit(self) -> None:
+        from runner_utils import _validate_post_stream
+
+        _validate_post_stream(
+            raw_lines=["line1"],
+            stderr_text="",
+            accumulated_text="line1\n",
+            early_killed=False,
+            returncode=0,
+            logger=logging.getLogger("test"),
+        )
+
+    def test_raises_auth_error_on_auth_failure(self) -> None:
+        from runner_utils import AuthenticationRetryError, _validate_post_stream
+
+        with pytest.raises(AuthenticationRetryError):
+            _validate_post_stream(
+                raw_lines=['{"error":"authentication_failed"}'],
+                stderr_text="",
+                accumulated_text="",
+                early_killed=False,
+                returncode=1,
+                logger=logging.getLogger("test"),
+            )
+
+    def test_skips_auth_check_when_early_killed(self) -> None:
+        from runner_utils import _validate_post_stream
+
+        # Should NOT raise even though auth_failed is in output
+        _validate_post_stream(
+            raw_lines=['{"error":"authentication_failed"}'],
+            stderr_text="",
+            accumulated_text="",
+            early_killed=True,
+            returncode=0,
+            logger=logging.getLogger("test"),
+        )
+
+    def test_raises_credit_exhausted_on_credit_limit(self) -> None:
+        from runner_utils import _validate_post_stream
+        from subprocess_util import CreditExhaustedError
+
+        with pytest.raises(CreditExhaustedError):
+            _validate_post_stream(
+                raw_lines=[],
+                stderr_text="Your credit balance is too low",
+                accumulated_text="",
+                early_killed=False,
+                returncode=1,
+                logger=logging.getLogger("test"),
+            )
+
+    def test_skips_credit_check_when_early_killed(self) -> None:
+        from runner_utils import _validate_post_stream
+
+        _validate_post_stream(
+            raw_lines=[],
+            stderr_text="Your credit balance is too low",
+            accumulated_text="",
+            early_killed=True,
+            returncode=0,
+            logger=logging.getLogger("test"),
+        )
+
+    def test_logs_warning_on_nonzero_exit(self) -> None:
+        from runner_utils import _validate_post_stream
+
+        test_logger = logging.getLogger("test.validate")
+        with patch.object(test_logger, "warning") as mock_warn:
+            _validate_post_stream(
+                raw_lines=[],
+                stderr_text="some error",
+                accumulated_text="",
+                early_killed=False,
+                returncode=1,
+                logger=test_logger,
+            )
+        mock_warn.assert_called_once()

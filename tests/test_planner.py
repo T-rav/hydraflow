@@ -2244,3 +2244,133 @@ class TestValidateAlreadySatisfiedEvidence:
             summary, issue_body=issue_body, repo_root=tmp_path
         )
         assert any("do not exist" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Extracted helper methods (refactor #2606)
+# ---------------------------------------------------------------------------
+
+
+class TestIsPlanComplete:
+    """Tests for PlannerRunner._is_plan_complete()."""
+
+    def test_returns_true_on_plan_end_marker(self, config, event_bus) -> None:
+        runner = _make_runner(config, event_bus)
+        assert runner._is_plan_complete("some text\nPLAN_END\nmore", 42) is True
+
+    def test_returns_true_on_already_satisfied_marker(self, config, event_bus) -> None:
+        runner = _make_runner(config, event_bus)
+        assert runner._is_plan_complete("ALREADY_SATISFIED_END", 42) is True
+
+    def test_returns_false_when_no_markers(self, config, event_bus) -> None:
+        runner = _make_runner(config, event_bus)
+        assert runner._is_plan_complete("just normal text", 42) is False
+
+
+class TestValidatePlanWithGates:
+    """Tests for PlannerRunner._validate_plan_with_gates()."""
+
+    def test_lite_scale_skips_phase_gates(self, config, event_bus) -> None:
+        runner = _make_runner(config, event_bus)
+        task = TaskFactory.create()
+        errors = runner._validate_plan_with_gates(task, "minimal plan", "lite")
+        assert isinstance(errors, list)
+
+    def test_full_scale_includes_phase_gates(self, config, event_bus) -> None:
+        runner = _make_runner(config, event_bus)
+        task = TaskFactory.create()
+        errors = runner._validate_plan_with_gates(task, _valid_plan(), "full")
+        assert isinstance(errors, list)
+
+
+class TestPersistPlanArtifacts:
+    """Tests for PlannerRunner._persist_plan_artifacts()."""
+
+    def test_saves_transcript_and_plan(self, config, event_bus) -> None:
+        runner = _make_runner(config, event_bus)
+        task = TaskFactory.create(id=99)
+        from tests.conftest import PlanResultFactory
+
+        result = PlanResultFactory.create(
+            issue_number=99, success=True, plan="## Plan\n\nDo things"
+        )
+        runner._persist_plan_artifacts(task, result)
+        plan_path = config.plans_dir / "issue-99.md"
+        assert plan_path.exists()
+
+    def test_handles_oserror_gracefully(self, config, event_bus) -> None:
+        runner = _make_runner(config, event_bus)
+        task = TaskFactory.create(id=99)
+        from tests.conftest import PlanResultFactory
+
+        result = PlanResultFactory.create(issue_number=99, success=True)
+        with patch.object(runner, "_save_transcript", side_effect=OSError("fail")):
+            runner._persist_plan_artifacts(task, result)  # should not raise
+
+
+class TestBuildCommentsSection:
+    """Tests for PlannerRunner._build_comments_section()."""
+
+    def test_returns_empty_when_no_comments(self, config, event_bus) -> None:
+        runner = _make_runner(config, event_bus)
+        task = TaskFactory.create(comments=[])
+        from prompt_builder import PromptBuilder
+
+        builder = PromptBuilder()
+        result = runner._build_comments_section(task, builder)
+        assert result == ""
+
+    def test_returns_discussion_section(self, config, event_bus) -> None:
+        runner = _make_runner(config, event_bus)
+        task = TaskFactory.create(comments=["Comment 1", "Comment 2"])
+        from prompt_builder import PromptBuilder
+
+        builder = PromptBuilder()
+        result = runner._build_comments_section(task, builder)
+        assert "## Discussion" in result
+        assert "Comment 1" in result
+
+
+class TestBuildBodyAndImageNote:
+    """Tests for PlannerRunner._build_body_and_image_note()."""
+
+    def test_returns_body_and_empty_image_note(self, config, event_bus) -> None:
+        runner = _make_runner(config, event_bus)
+        task = TaskFactory.create(body="Simple body text")
+        from prompt_builder import PromptBuilder
+
+        builder = PromptBuilder()
+        body, image_note = runner._build_body_and_image_note(task, builder)
+        assert "Simple body text" in body
+        assert image_note == ""
+
+    def test_detects_markdown_images(self, config, event_bus) -> None:
+        runner = _make_runner(config, event_bus)
+        task = TaskFactory.create(body="See ![screenshot](img.png) for details")
+        from prompt_builder import PromptBuilder
+
+        builder = PromptBuilder()
+        _, image_note = runner._build_body_and_image_note(task, builder)
+        assert "attached images" in image_note
+
+
+class TestBuildScaleSections:
+    """Tests for PlannerRunner._build_scale_sections()."""
+
+    def test_lite_returns_no_pre_mortem(self) -> None:
+        mode, schema, task_graph, pre_mortem = PlannerRunner._build_scale_sections(
+            "lite"
+        )
+        assert "LITE" in mode
+        assert "LITE SCHEMA" in schema
+        assert task_graph == ""
+        assert pre_mortem == ""
+
+    def test_full_returns_all_sections(self) -> None:
+        mode, schema, task_graph, pre_mortem = PlannerRunner._build_scale_sections(
+            "full"
+        )
+        assert "FULL" in mode
+        assert "REQUIRED SCHEMA" in schema
+        assert "Task Graph" in task_graph
+        assert "Pre-Mortem" in pre_mortem
