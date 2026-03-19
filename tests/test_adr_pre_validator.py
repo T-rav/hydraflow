@@ -934,6 +934,39 @@ class TestMismatchedADRTitle:
         codes = [i.code for i in result.issues]
         assert "mismatched_adr_title" not in codes
 
+    def test_h1_title_matches_when_multiple_adrs_share_number(self) -> None:
+        """Cited H1 title matches when multiple ADRs share the same number.
+
+        Regression test for issue #3331: when all_adrs contains H1-derived
+        titles (not filename slugs), the pre-validator must match against
+        them correctly — even when multiple files share the same ADR number.
+        """
+        content = _valid_adr(
+            decision=(
+                "See ADR-0023 (Require Instantiation Verification for Test-Local Classes) "
+                "for the test-local class pattern."
+            ),
+        )
+        # Simulate multiple ADR-0023 files with H1-derived titles
+        all_adrs = [
+            (
+                23,
+                "ADR Reviewer Proposed-Only Filter and Validator Scope",
+                "# ADR-0023: ADR Reviewer Proposed-Only Filter\n\n**Status:** Rejected",
+                "0023-adr-reviewer-proposed-only-filter.md",
+            ),
+            (
+                23,
+                "Require Instantiation Verification for Test-Local Classes",
+                "# ADR-0023: Require Instantiation Verification\n\n**Status:** Proposed",
+                "0023-dead-class-artifacts-in-mock-based-tests.md",
+            ),
+        ]
+        validator = ADRPreValidator()
+        result = validator.validate(content, all_adrs)
+        codes = [i.code for i in result.issues]
+        assert "mismatched_adr_title" not in codes
+
 
 class TestCheckSourceFunctionRefs:
     """Tests for phantom source symbol detection."""

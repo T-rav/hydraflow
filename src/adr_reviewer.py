@@ -75,11 +75,7 @@ class ADRCouncilReviewer:
 
         for adr_number, adr_path, adr_content in proposed:
             try:
-                adr_title = (
-                    adr_path.stem.split("-", 1)[-1].replace("-", " ")
-                    if "-" in adr_path.stem
-                    else adr_path.stem
-                )
+                adr_title = self._extract_h1_title(adr_content, adr_path.stem)
                 logger.info("Reviewing ADR-%04d: %s", adr_number, adr_title)
 
                 # Pre-review validation gate
@@ -144,18 +140,25 @@ class ADRCouncilReviewer:
             if not match:
                 continue
             adr_number = int(match.group(1))
-            title = (
-                path.stem.split("-", 1)[-1].replace("-", " ")
-                if "-" in path.stem
-                else path.stem
-            )
             try:
                 content = path.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
                 logger.warning("Skipping unreadable ADR file: %s", path)
                 continue
+            title = self._extract_h1_title(content, path.stem)
             results.append((adr_number, title, content, path.name))
         return results
+
+    @staticmethod
+    def _extract_h1_title(content: str, stem: str) -> str:
+        """Extract the ADR title from the H1 heading, stripping the ADR-NNNN: prefix.
+
+        Falls back to filename-derived slug when no H1 heading is found.
+        """
+        h1_match = re.search(r"^#\s+(?:ADR[- ]\d{4}:\s*)?(.+)$", content, re.MULTILINE)
+        if h1_match:
+            return h1_match.group(1).strip()
+        return stem.split("-", 1)[-1].replace("-", " ") if "-" in stem else stem
 
     def _build_index_context(self, all_adrs: list[tuple[int, str, str, str]]) -> str:
         """Build a summary index of all ADRs for council context."""
@@ -179,7 +182,7 @@ class ADRCouncilReviewer:
         compared against each other rather than silently excluded.
         """
         decision = self._extract_decision(content)
-        title = self._extract_title(content)
+        title = self._extract_h1_title(content, adr_filename.rsplit(".", 1)[0])
 
         candidates: list[tuple[int, str, float]] = []
         for other_number, other_title, other_content, other_filename in all_adrs:
@@ -206,11 +209,6 @@ class ADRCouncilReviewer:
     def _extract_decision(self, content: str) -> str:
         """Extract the Decision section from an ADR."""
         match = re.search(r"## Decision\s*\n(.*?)(?=\n## |\Z)", content, re.DOTALL)
-        return match.group(1).strip() if match else ""
-
-    def _extract_title(self, content: str) -> str:
-        """Extract the title from an ADR (first H1 heading)."""
-        match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
         return match.group(1).strip() if match else ""
 
     def _build_duplicate_context(self, duplicates: list[tuple[int, str, float]]) -> str:

@@ -190,9 +190,21 @@ class TestLoadAllADRs:
         assert len(result) == 1
         assert result[0][0] == 1
 
-    def test_extracts_title_from_filename(self, tmp_path: Path) -> None:
+    def test_extracts_title_from_h1_heading(self, tmp_path: Path) -> None:
         adr_dir = tmp_path / "docs" / "adr"
         _write_adr(adr_dir, 5, "Use Docker Containers", "Accepted")
+        reviewer = _make_reviewer(tmp_path)
+        result = reviewer._load_all_adrs(adr_dir)
+        assert result[0][1] == "Use Docker Containers"
+
+    def test_falls_back_to_filename_slug_when_no_h1(self, tmp_path: Path) -> None:
+        adr_dir = tmp_path / "docs" / "adr"
+        adr_dir.mkdir(parents=True, exist_ok=True)
+        path = adr_dir / "0005-use-docker-containers.md"
+        path.write_text(
+            "**Status:** Accepted\n\nNo H1 heading in this file.\n",
+            encoding="utf-8",
+        )
         reviewer = _make_reviewer(tmp_path)
         result = reviewer._load_all_adrs(adr_dir)
         assert result[0][1] == "use docker containers"
@@ -204,6 +216,41 @@ class TestLoadAllADRs:
         result = reviewer._load_all_adrs(adr_dir)
         assert len(result[0]) == 4
         assert result[0][3] == "0005-use-docker-containers.md"
+
+
+class TestExtractH1Title:
+    """Tests for _extract_h1_title."""
+
+    def test_strips_adr_prefix(self) -> None:
+        content = "# ADR-0005: Use Docker Containers\n\n**Status:** Accepted"
+        result = ADRCouncilReviewer._extract_h1_title(
+            content, "0005-use-docker-containers"
+        )
+        assert result == "Use Docker Containers"
+
+    def test_strips_adr_prefix_with_hyphen(self) -> None:
+        content = "# ADR 0005: Use Docker Containers\n\n**Status:** Accepted"
+        result = ADRCouncilReviewer._extract_h1_title(
+            content, "0005-use-docker-containers"
+        )
+        assert result == "Use Docker Containers"
+
+    def test_h1_without_adr_prefix(self) -> None:
+        content = "# My Custom Title\n\nSome content."
+        result = ADRCouncilReviewer._extract_h1_title(content, "0005-my-custom-title")
+        assert result == "My Custom Title"
+
+    def test_fallback_to_filename_slug(self) -> None:
+        content = "No heading here, just text.\n"
+        result = ADRCouncilReviewer._extract_h1_title(
+            content, "0005-use-docker-containers"
+        )
+        assert result == "use docker containers"
+
+    def test_fallback_stem_without_hyphen(self) -> None:
+        content = "No heading.\n"
+        result = ADRCouncilReviewer._extract_h1_title(content, "README")
+        assert result == "README"
 
 
 class TestBuildIndexContext:
