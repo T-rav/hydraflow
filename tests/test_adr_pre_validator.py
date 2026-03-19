@@ -1173,7 +1173,7 @@ class TestCheckCrossReferenceTitles:
     def test_multiple_shared_numbers_exact_match(self) -> None:
         """When multiple ADRs share a number, exact match to any passes."""
         content = _valid_adr(
-            decision="See ADR-0023 (CLI Argparse Config Builder Pattern)."
+            decision="See ADR-0023 (Auto-Triage Toggle Must Gate Routing, Not Just Stat Tracking)."
         )
         all_adrs = [
             (1, "Test ADR", "content", "0001-test.md"),
@@ -1183,7 +1183,6 @@ class TestCheckCrossReferenceTitles:
                 "c",
                 "0023-gate.md",
             ),
-            (23, "CLI Argparse Config Builder Pattern", "c", "0023-cli.md"),
             (23, "Multi-Repo Architecture Wiring Pattern", "c", "0023-multi.md"),
         ]
         validator = ADRPreValidator()
@@ -1378,12 +1377,12 @@ class TestDictCollisionSharedNumbers:
     def test_correct_title_with_shared_numbers_passes(self) -> None:
         """Correct title for one of multiple ADRs sharing a number passes."""
         content = _valid_adr(
-            decision="See ADR-0023 (CLI Argparse Config Builder Pattern) for details."
+            decision="See ADR-0028 (CLI Argparse Config Builder Pattern) for details."
         )
         all_adrs = [
             (1, "Test ADR", "content", "0001-test.md"),
             (23, "Auto-Triage Toggle Must Gate Routing", "c", "0023-gate.md"),
-            (23, "CLI Argparse Config Builder Pattern", "c", "0023-cli.md"),
+            (28, "CLI Argparse Config Builder Pattern", "c", "0028-cli.md"),
         ]
         validator = ADRPreValidator()
         result = validator.validate(content, all_adrs)

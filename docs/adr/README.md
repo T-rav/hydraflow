@@ -42,7 +42,6 @@ Consequences), use `module:function_or_class` format (e.g. `src/config.py:HydraF
 | [0023](0023-tests-must-match-toggle-state-they-assert.md) | Tests Must Match Toggle State They Assert | Proposed |
 | [0023](0023-auto-triage-toggle-must-gate-routing.md) | Auto-Triage Toggle Must Gate Routing, Not Just Stat Tracking | Accepted |
 | [0023](0023-stats-counter-placement-in-delegating-helpers.md) | Stats Counter Placement in Delegating Helpers | Rejected |
-| [0023](0023-cli-argparse-config-builder-pattern.md) | CLI Architecture — argparse with Config Builder Pattern | Proposed |
 | [0023](0023-multi-repo-architecture-wiring-pattern.md) | Multi-Repo Architecture Wiring Pattern | Proposed |
 | [0023](0023-supersession-regex-all-verb-forms.md) | Supersession Regex Must Include All Verb Forms | Proposed |
 | [0023](0023-adr-reviewer-proposed-only-filter.md) | ADR Reviewer Proposed-Only Filter and Validator Scope | Rejected |
@@ -50,6 +49,7 @@ Consequences), use `module:function_or_class` format (e.g. `src/config.py:HydraF
 | [0025](0025-symmetric-field-assertion-checklist-shared-return-types.md) | Symmetric Field Assertion Checklist for Shared Return Types | Accepted |
 | [0026](0026-dead-class-artifacts-in-mock-based-tests.md) | Require Instantiation Verification for Test-Local Classes | Proposed |
 | [0027](0027-duplicate-class-merge-artifact-pattern.md) | Duplicate Class Definitions — Merge-Artifact Pattern | Proposed |
+| [0028](0028-cli-argparse-config-builder-pattern.md) | CLI Architecture — argparse with Config Builder Pattern | Proposed |
 
 ## Adding a new ADR
 

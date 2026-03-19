@@ -1,4 +1,4 @@
-# ADR-0023: CLI Architecture — argparse with Config Builder Pattern
+# ADR-0028: CLI Architecture — argparse with Config Builder Pattern
 
 **Status:** Proposed
 **Date:** 2026-03-08
@@ -53,9 +53,37 @@ explicit precedence (lowest to highest):
 4. **CLI arguments** — Highest priority; only explicitly-provided args override.
 5. **Repo-scoped overlay** — Applied post-validation for fields not set by CLI.
 
-The builder tracks which CLI args were explicitly provided (`cli_explicit` set)
-so that repo-scoped overlays only fill in gaps rather than clobbering intentional
-CLI overrides.
+#### The `cli_explicit` population mechanism
+
+When `load_runtime_config()` receives an `overrides` dict (from CLI arguments or
+programmatic callers such as `src/server.py`), it iterates the dict and adds each
+key that matches a known `HydraFlowConfig` field to a local `explicit_fields: set[str]`.
+This set is passed to `apply_repo_config_overlay()` as the `cli_explicit` parameter.
+The set is also stored on the config object via the `cli_explicit_fields` frozen-set
+field (marked `exclude=True` so it never appears in serialized output).
+
+The purpose is to distinguish "caller intentionally set this value" from "value
+happens to be present because Pydantic assigned a default." Without this tracking,
+a repo-scoped overlay could silently overwrite a flag the operator explicitly passed
+on the command line.
+
+#### Repo-scoped overlay
+
+The repo-scoped overlay is a JSON config file (typically at
+`<data_root>/<repo_slug>/config.json`) that stores persistent per-repository
+configuration. It is the fifth and final layer in the merge chain.
+
+`apply_repo_config_overlay()` in `src/runtime_config.py` loads this file via
+`load_config_file()` and iterates its key-value pairs. For each key that exists
+in `HydraFlowConfig.model_fields` **and** is **not** in the `cli_explicit` set,
+the value is written directly onto the config object via `object.__setattr__()`.
+Fields that *are* in `cli_explicit` are skipped, preserving intentional CLI
+overrides.
+
+This overlay sits within the repo isolation model established by ADR-0003 and
+ADR-0010: each repository gets its own data directory under `data_root`, and the
+overlay file lives inside that directory so configuration is scoped per-repo
+rather than shared globally.
 
 ### Two-layer dispatch
 
@@ -90,6 +118,23 @@ without requiring a shared CLI framework.
   (clean, prep, scaffold, labels, audit). Parity will require either extending
   the API or invoking `cli.main()` programmatically from the dashboard.
 
+**Pydantic startup-validation failure behavior:**
+
+- When `HydraFlowConfig` construction fails (e.g., invalid field combinations,
+  malformed Docker size notation, unrecognized repo format), Pydantic raises a
+  `ValidationError` containing structured error details (field path, constraint
+  violated, input value). Field validators (`@field_validator`) and the
+  `resolve_defaults` model validator (`@model_validator(mode="after")`) raise
+  `ValueError` for domain-specific checks (e.g., empty label list, invalid
+  `visual_fail_threshold` range, unreachable Docker daemon).
+- The calling layer (`load_runtime_config()` or direct construction) does not
+  catch `ValidationError` — it propagates to the process entry point, producing
+  a Pydantic-formatted error message on stderr and a non-zero exit code. This is
+  intentional: configuration errors should halt startup immediately with a clear
+  diagnostic rather than allowing a partially-configured orchestrator to run.
+- No fallback config is loaded on failure. The operator must correct the
+  invalid field(s) and restart.
+
 ## Alternatives considered
 
 - **Click:** Would provide richer help formatting and subcommand composition, but
@@ -108,5 +153,9 @@ without requiring a shared CLI framework.
 - `src/cli.py` — `build_config()`, `parse_args()`, `main()`
 - `src/hf_cli/__main__.py` — Two-layer CLI dispatcher
 - `src/config.py` — `HydraFlowConfig` Pydantic model
-- ADR-0004 (agent cli as runtime) — related but distinct: that ADR covers
+- `src/runtime_config.py` — `load_runtime_config()`, `apply_repo_config_overlay()`
+- ADR-0003 (Git Worktrees for Issue Isolation) — repo isolation model
+- ADR-0004 (Agent CLI as Runtime) — related but distinct: that ADR covers
   agent invocation via CLI subprocesses, this ADR covers HydraFlow's own CLI
+- ADR-0010 (Worktree and Path Isolation) — path isolation that scopes the
+  repo-scoped overlay to per-repository data directories
