@@ -34,9 +34,8 @@ Several concrete requirements flow from the production code:
   before making assertions.
 - Planner/implement/review loops need the persisted state transitions tracked by
   `src/state:StateTracker`. Using the real tracker against a `tmp_path`
-  ensures the harness observes activity counters, active-crate gating
-  (`src/crate_manager.py:CrateManager`), and crash recovery semantics that
-  single-phase mocks currently skip.
+  ensures the harness observes activity counters and crash recovery semantics
+  that single-phase mocks currently skip.
 
 ## Decision
 
