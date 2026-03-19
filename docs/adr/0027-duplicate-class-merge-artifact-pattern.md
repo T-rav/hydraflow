@@ -67,13 +67,47 @@ models (Pydantic, dataclass, TypedDict). It does not apply to:
 - Identically-named classes in unrelated namespaces where the duplication is
   intentional and documented.
 
+### 5. Automation triggers
+
+The manual review check in Rule 2 is a stopgap. Switch to automated enforcement
+when **any** of the following conditions is met:
+
+- **Trigger A — Duplicate slips through review:** A duplicate class definition
+  reaches `main` despite the manual grep check. The post-mortem for that incident
+  must include adding an automated lint rule (custom Ruff rule or a CI script) as
+  a corrective action.
+- **Trigger B — Third occurrence in memory/issue history:** If HydraFlow's memory
+  or issue tracker records three or more incidents of duplicate class definitions
+  (including the original #2380), automation becomes mandatory regardless of
+  whether the duplicates were caught in review.
+- **Trigger C — Calendar deadline:** If neither Trigger A nor B fires by
+  2026-06-01, a tracking issue must be opened to implement the automated check
+  within the next sprint. The manual process must not run indefinitely.
+
+Once any trigger fires, the automated rule replaces Rule 2 entirely — the manual
+grep step is removed from the review checklist.
+
+### 6. One-time codebase audit
+
+Before this ADR moves to Accepted, a time-boxed audit must be completed:
+
+- **Scope:** All Python class definitions in `src/` that subclass `BaseModel`,
+  use `@dataclass`, or extend `TypedDict`.
+- **Method:** Run `grep -rn "^class " src/ | sort -t: -k2` and group by class
+  name. Flag any name that appears in more than one module (excluding `tests/`).
+- **Time box:** The audit must be completed within one calendar week of this ADR
+  being accepted. Open a tracking issue for the audit before acceptance.
+- **Output:** Each confirmed duplicate is resolved per Rule 3 (conflict resolution
+  strategy) in a dedicated PR. The tracking issue is closed when all duplicates
+  are resolved or explicitly documented as intentional exceptions under Rule 4.
+
 ### Operational impact on HydraFlow workers
 
-- **Review agent** (`reviewer.py`): Should be configured to flag duplicate class names
-  as a review finding. A grep-based check during the review phase can catch this
-  pattern automatically.
+- **Review agent** (`reviewer.py`): Must flag duplicate class names as a review
+  finding. A grep-based check during the review phase catches this pattern until
+  an automated lint rule replaces it (see Rule 5 automation triggers).
 - **Implementation agent** (`agent.py`): When adding new model classes, the agent
-  should search for existing classes with the same name before creating a new
+  must search for existing classes with the same name before creating a new
   definition.
 - No runtime behaviour changes — this is a development and review discipline.
 
@@ -91,20 +125,21 @@ models (Pydantic, dataclass, TypedDict). It does not apply to:
 
 **Negative / Trade-offs**
 
-- Adds a manual review step that relies on reviewer discipline. Until an automated
-  lint rule is implemented, duplicates can still slip through if reviewers skip the
-  check.
+- Adds a manual review step that relies on reviewer discipline until automation is
+  triggered (see Rule 5). The automation triggers ensure this manual phase has a
+  hard deadline of 2026-06-01 at the latest.
 - Strictly enforcing single-definition may occasionally force a type into `models.py`
   earlier than desired (when a second consumer appears), creating a small refactoring
   cost.
-- Resolving existing duplicates requires an audit of the current codebase, which is
-  a one-time effort.
+- The one-time codebase audit (Rule 6) must be completed within one week of
+  acceptance. This is a bounded effort but requires dedicated time.
 
 ## Alternatives considered
 
 1. **Automated lint rule (e.g., custom Ruff or Pyright plugin)** — desirable but
-   deferred. Writing a reliable cross-module duplicate-class detector is non-trivial;
-   the manual review check is practical today and can be replaced by automation later.
+   deferred with explicit activation triggers (Rule 5). The manual review check is
+   practical today and will be replaced by automation no later than 2026-06-01 or
+   upon the next duplicate slipping through review, whichever comes first.
 2. **Namespace-scoped uniqueness only (allow duplicates across packages)** — rejected
    because HydraFlow's `src/` tree is a single flat package; cross-module imports are
    common and namespace boundaries do not provide meaningful isolation.
