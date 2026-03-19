@@ -33,7 +33,7 @@ Several concrete requirements flow from the production code:
   `await asyncio.sleep(0)` so those fire-and-forget `EventBus.publish()` tasks drain
   before making assertions.
 - Planner/implement/review loops need the persisted state transitions tracked by
-  `StateTracker` (`src/state`). Using the real tracker against a `tmp_path`
+  `src/state:StateTracker`. Using the real tracker against a `tmp_path`
   ensures the harness observes activity counters, crate membership, and crash
   recovery semantics that single-phase mocks currently skip.
 
