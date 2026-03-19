@@ -71,6 +71,10 @@ _ADR_PAREN_TITLE_RE = re.compile(r"ADR[- ]\d{4}\s*\(([^()]*(?:\([^()]*\)[^()]*)*
 # titles that contain dots (e.g. "Pi.dev" in ADR-0004's title).
 _ADR_EMDASH_TITLE_RE = re.compile(r"ADR[- ]\d{4}\s*—\s*(.+?)(?:\.\s|,|;|$)")
 
+# Matches bold-numbered list entries like "1. **Title** — description".
+# Group 1 = the bold title text (lowercased for comparison).
+_BOLD_LIST_ENTRY_RE = re.compile(r"^\s*\d+\.\s+\*\*(.+?)\*\*", re.MULTILINE)
+
 # Matches source file + symbol citations like `src/config.py:_resolve_paths` or
 # `src/config.py:HydraFlowConfig`.  Group 1 = file path, Group 2 = symbol name.
 # Symbol must start with a letter or underscore (not a digit) to exclude line numbers.
@@ -112,6 +116,7 @@ class ADRPreValidator:
         self._check_bare_adr_references(content, all_adrs or [], result)
         self._check_source_function_refs(content, repo_root, result)
         self._check_cross_reference_titles(content, all_adrs or [], result)
+        self._check_duplicate_alternatives(content, result)
         return result
 
     def _check_status_field(self, content: str, result: ADRValidationResult) -> None:
@@ -658,3 +663,40 @@ class ADRPreValidator:
                             fixable=True,
                         )
                     )
+
+    def _check_duplicate_alternatives(
+        self, content: str, result: ADRValidationResult
+    ) -> None:
+        """Detect duplicate bold-titled entries in the Alternatives section.
+
+        Scans the ``## Alternatives considered`` section for numbered entries
+        like ``1. **Title** — description`` and flags any entry whose bold
+        title appears more than once (case-insensitive comparison).
+        """
+        alt_match = re.search(
+            r"^## Alternatives considered[ \t]*\n(.*?)(?=^##\s|\Z)",
+            content,
+            re.DOTALL | re.MULTILINE | re.IGNORECASE,
+        )
+        if not alt_match:
+            return
+
+        section_body = alt_match.group(1)
+        titles: list[str] = []
+        for entry in _BOLD_LIST_ENTRY_RE.finditer(section_body):
+            titles.append(entry.group(1).strip().lower())
+
+        seen: set[str] = set()
+        for title in titles:
+            if title in seen:
+                result.issues.append(
+                    ADRValidationIssue(
+                        code="duplicate_alternative",
+                        message=(
+                            f"Alternatives section contains a duplicate entry: "
+                            f'"{title}"'
+                        ),
+                        fixable=True,
+                    )
+                )
+            seen.add(title)

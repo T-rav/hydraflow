@@ -17,6 +17,25 @@ gates its call site. Because the toggle defaults to `False`, the patched method 
 never reached, and the test either silently passes (if it asserts `called` without
 checking call count) or gives a false-negative that masks real regressions.
 
+**Anti-pattern** (toggle not set — assertion passes vacuously):
+
+```python
+async def test_visual_gate_called(review_phase):
+    with patch.object(review_phase, "check_visual_gate") as mock_gate:
+        await review_phase.finalize_merge(pr)
+        mock_gate.assert_called_once()  # never reached — toggle is False
+```
+
+**Correct** (toggle explicitly enabled):
+
+```python
+async def test_visual_gate_called(review_phase):
+    review_phase._config.visual_gate_enabled = True
+    with patch.object(review_phase, "check_visual_gate") as mock_gate:
+        await review_phase.finalize_merge(pr)
+        mock_gate.assert_called_once()  # gate is enabled, method is reached
+```
+
 This pattern was first discovered during review of toggle-gated routing in the review
 phase (see memory issue #2350) and confirmed by a related finding (issue #2346). While
 the original motivating toggle (`adr_auto_triage`) has since been removed as part of a
@@ -92,12 +111,11 @@ consistency rule is satisfied.
 
 1. **Rely on integration tests only** — rejected because integration tests are slower
    and the toggle-consistency bug is a unit-level concern that should be caught early.
-2. **Automated lint rule to detect unset toggles** — considered for future work but
-   deferred because static analysis of mock/fixture setups is fragile; a review
-   checklist is more practical today.
-3. **Default toggles to enabled in test configs** — rejected because it would mask
-   the disabled-path and invert the same class of bug (tests would miss the fallback
-   path instead).
+2. **Automated lint rule or test-config defaults** — a static-analysis rule to detect
+   unset toggles was considered but deferred because introspecting mock/fixture setups
+   is fragile. Changing toggle defaults to `True` in test configs was also rejected
+   because it would invert the same class of bug: tests would miss the disabled
+   fallback path instead of the enabled path.
 
 ## Related
 

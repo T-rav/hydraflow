@@ -1387,6 +1387,73 @@ class TestDictCollisionSharedNumbers:
         assert "mismatched_adr_title" not in codes
 
 
+class TestCheckDuplicateAlternatives:
+    def test_no_alternatives_section_passes(self) -> None:
+        """ADR without an Alternatives section should not trigger the check."""
+        validator = ADRPreValidator()
+        result = validator.validate(_valid_adr())
+        codes = [i.code for i in result.issues]
+        assert "duplicate_alternative" not in codes
+
+    def test_unique_alternatives_pass(self) -> None:
+        """Alternatives with distinct bold titles should pass."""
+        content = _valid_adr(
+            consequences="Some consequences.\n\n"
+            "## Alternatives considered\n\n"
+            "1. **Integration tests only** — too slow.\n"
+            "2. **Lint rule** — too fragile.\n"
+            "3. **Default toggles** — inverts the bug.\n"
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content)
+        codes = [i.code for i in result.issues]
+        assert "duplicate_alternative" not in codes
+
+    def test_duplicate_alternative_detected(self) -> None:
+        """Exact duplicate bold titles in alternatives should be flagged."""
+        content = _valid_adr(
+            consequences="Some consequences.\n\n"
+            "## Alternatives considered\n\n"
+            "1. **Lint rule** — considered but deferred.\n"
+            "2. **Default toggles** — rejected.\n"
+            "3. **Lint rule** — also considered separately.\n"
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content)
+        codes = [i.code for i in result.issues]
+        assert "duplicate_alternative" in codes
+        dup_issue = next(i for i in result.issues if i.code == "duplicate_alternative")
+        assert "lint rule" in dup_issue.message
+        assert dup_issue.fixable is True
+
+    def test_case_insensitive_duplicate_detected(self) -> None:
+        """Duplicate detection should be case-insensitive."""
+        content = _valid_adr(
+            consequences="Some consequences.\n\n"
+            "## Alternatives considered\n\n"
+            "1. **Rely on integration tests** — too slow.\n"
+            "2. **rely on integration tests** — also slow.\n"
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content)
+        codes = [i.code for i in result.issues]
+        assert "duplicate_alternative" in codes
+
+    def test_duplicate_reported_once_per_title(self) -> None:
+        """Three entries with the same title should produce one issue, not two."""
+        content = _valid_adr(
+            consequences="Some consequences.\n\n"
+            "## Alternatives considered\n\n"
+            "1. **Same title** — first.\n"
+            "2. **Same title** — second.\n"
+            "3. **Same title** — third.\n"
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content)
+        dup_issues = [i for i in result.issues if i.code == "duplicate_alternative"]
+        assert len(dup_issues) == 2
+
+
 class TestMultipleIssues:
     def test_multiple_issues_collected(self) -> None:
         """An ADR with multiple problems should report all issues."""
