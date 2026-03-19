@@ -1426,6 +1426,87 @@ class TestDictCollisionSharedNumbers:
         assert "mismatched_adr_title" not in codes
 
 
+class TestADR0023TitleFixes:
+    """Regression tests for ADR-0023 cross-reference title mismatches (#3330)."""
+
+    _REFERENCED_ADRS: list[tuple[int, str, str, str]] = [
+        (6, "repo runtime isolation", "content", "0006-repo-runtime-isolation.md"),
+        (
+            7,
+            "dashboard api multi repo scoping",
+            "content",
+            "0007-dashboard-api-multi-repo-scoping.md",
+        ),
+        (
+            8,
+            "multi repo dashboard architecture",
+            "content",
+            "0008-multi-repo-dashboard-architecture.md",
+        ),
+        (
+            9,
+            "multi repo process per repo model",
+            "content",
+            "0009-multi-repo-process-per-repo-model.md",
+        ),
+        (
+            22,
+            "integration test architecture cross phase",
+            "content",
+            "0022-integration-test-architecture-cross-phase.md",
+        ),
+        (
+            23,
+            "multi repo architecture wiring pattern",
+            "content",
+            "0023-multi-repo-architecture-wiring-pattern.md",
+        ),
+    ]
+
+    def test_filename_derived_titles_pass_validation(self) -> None:
+        """ADR cross-refs using filename-derived titles should not be flagged."""
+        content = _valid_adr(
+            decision=(
+                "ADR-0009 (multi repo process per repo model) established the model. "
+                "ADR-0006 (repo runtime isolation; now superseded) was the prior approach. "
+                "See ADR-0022 — integration test architecture cross phase for testing."
+            ),
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content, self._REFERENCED_ADRS)
+        title_codes = [
+            i.code for i in result.issues if i.code == "mismatched_adr_title"
+        ]
+        assert title_codes == []
+
+    def test_h1_titles_cause_mismatch(self) -> None:
+        """H1-style titles that differ from filename-derived titles are flagged."""
+        content = _valid_adr(
+            decision=(
+                "ADR-0006 (RepoRuntime Isolation Architecture) was superseded. "
+                "ADR-0009 (Multi-Repo Process-Per-Repo Model) is current."
+            ),
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content, self._REFERENCED_ADRS)
+        mismatched = [i for i in result.issues if i.code == "mismatched_adr_title"]
+        flagged_nums = {i.message.split("-")[1][:4] for i in mismatched}
+        assert "0006" in flagged_nums
+        assert "0009" in flagged_nums
+
+    def test_em_dash_title_with_filename_derived_passes(self) -> None:
+        """Em-dash annotations using filename-derived titles pass."""
+        content = _valid_adr(
+            decision="See ADR-0007 — dashboard api multi repo scoping for details.",
+        )
+        validator = ADRPreValidator()
+        result = validator.validate(content, self._REFERENCED_ADRS)
+        title_codes = [
+            i.code for i in result.issues if i.code == "mismatched_adr_title"
+        ]
+        assert title_codes == []
+
+
 class TestMultipleIssues:
     def test_multiple_issues_collected(self) -> None:
         """An ADR with multiple problems should report all issues."""
