@@ -1670,7 +1670,11 @@ def create_router(
                     cause = "Escalation (reason not recorded)"
             if cause:
                 data["cause"] = cause
-            if origin and origin in _cfg.improve_label:
+            is_memory_suggestion = bool(origin and origin in _cfg.improve_label)
+            # When memory auto-approve is on, filter out memory suggestions
+            if _cfg.memory_auto_approve and is_memory_suggestion:
+                continue
+            if is_memory_suggestion:
                 data["isMemorySuggestion"] = True
             # Flag items held for issue type review
             if cause and (
@@ -2137,6 +2141,7 @@ def create_router(
         "pr_unstick_batch_size",
         "unstick_auto_merge",
         "unstick_all_causes",
+        "memory_auto_approve",
         "worktree_base",
     }
 
@@ -2187,10 +2192,11 @@ def create_router(
             object.__setattr__(_cfg, key, validated_value)
             applied[key] = validated_value
 
-        if repo and repo_store is not None and applied:
-            repo_store.update_overrides(repo, applied)
-        elif persist and applied:
-            save_config_file(_cfg.config_file, applied)
+        if applied:
+            if repo and repo_store is not None:
+                repo_store.update_overrides(repo, applied)
+            elif persist:
+                save_config_file(_cfg.config_file, applied)
 
         return JSONResponse({"status": "ok", "updated": applied})
 
