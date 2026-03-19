@@ -101,7 +101,6 @@ class ReviewRunner(BaseRunner):
         result: ReviewResult,
         worktree_path: Path,
         before_sha: str | None,
-        pr_number: int,
         transcript: str,
         *,
         transcript_prefix: str,
@@ -111,7 +110,8 @@ class ReviewRunner(BaseRunner):
 
         Shared by :meth:`review`, :meth:`fix_ci`, and
         :meth:`fix_review_findings` to avoid duplicating the
-        change-detection / transcript-saving block.
+        change-detection / transcript-saving block.  Also saves the
+        transcript to disk via :meth:`~BaseRunner._save_transcript`.
         """
         result.files_changed = await self._get_changed_files(worktree_path, before_sha)
         result.fixes_made = await self._has_changes(worktree_path, before_sha)
@@ -120,16 +120,16 @@ class ReviewRunner(BaseRunner):
             logger.info(
                 "%s for PR #%d changed files: %s",
                 label,
-                pr_number,
+                result.pr_number,
                 result.files_changed,
             )
         elif result.fixes_made and not result.files_changed:
             logger.warning(
                 "PR #%d: fixes_made is True but no committed file changes detected "
                 "— agent may have left uncommitted changes or the commit was empty",
-                pr_number,
+                result.pr_number,
             )
-        self._save_transcript(transcript_prefix, pr_number, transcript)
+        self._save_transcript(transcript_prefix, result.pr_number, transcript)
         result.success = True
 
     async def review(
@@ -205,7 +205,6 @@ class ReviewRunner(BaseRunner):
                 result,
                 worktree_path,
                 before_sha,
-                pr.number,
                 transcript,
                 transcript_prefix="review-pr",
                 label="Review fix",
@@ -305,7 +304,6 @@ class ReviewRunner(BaseRunner):
                 result,
                 worktree_path,
                 before_sha,
-                pr.number,
                 transcript,
                 transcript_prefix="review-pr",
                 label="CI fix",
@@ -390,7 +388,6 @@ class ReviewRunner(BaseRunner):
                 result,
                 worktree_path,
                 before_sha,
-                pr.number,
                 transcript,
                 transcript_prefix="review-fix",
                 label="Review-fix",
