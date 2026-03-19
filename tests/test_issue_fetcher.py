@@ -263,7 +263,28 @@ class TestFetchReadyIssues:
 
 
 class TestFetchReviewablePrs:
-    """Tests for fetch_reviewable_prs: skip logic, parsing, and error handling."""
+    """Tests for fetch_reviewable_prs: skip logic, parsing, and error handling.
+
+    The batch PR fetch returns full REST PR objects with ``head.ref`` for
+    branch matching, rather than per-issue lookups.
+    """
+
+    @staticmethod
+    def _batch_pr_json(
+        prs: list[dict[str, Any]],
+    ) -> str:
+        """Build a batch PR response matching the REST ``/pulls`` shape."""
+        return json.dumps(
+            [
+                {
+                    "number": pr.get("number", 0),
+                    "html_url": pr.get("url", ""),
+                    "draft": pr.get("isDraft", False),
+                    "head": {"ref": pr.get("branch", "")},
+                }
+                for pr in prs
+            ]
+        )
 
     @pytest.mark.asyncio
     async def test_skips_active_issues(self, config: HydraFlowConfig) -> None:
@@ -287,14 +308,13 @@ class TestFetchReviewablePrs:
     ) -> None:
         """Issues reviewed in a prior run should be picked up again."""
         fetcher = IssueFetcher(config)
-        # NOT in active_issues → should be picked up
 
-        pr_json = json.dumps(
+        batch_json = self._batch_pr_json(
             [
                 {
                     "number": 200,
                     "url": "https://github.com/o/r/pull/200",
-                    "isDraft": False,
+                    "branch": "agent/issue-42",
                 }
             ]
         )
@@ -302,7 +322,7 @@ class TestFetchReviewablePrs:
         async def fake_run(*args: str, **kwargs: Any) -> str:
             if any("issues" in arg for arg in args):
                 return RAW_ISSUE_JSON
-            return pr_json
+            return batch_json
 
         with patch("issue_fetcher.run_subprocess", side_effect=fake_run):
             prs, issues = await fetcher.fetch_reviewable_prs(set())
@@ -312,15 +332,15 @@ class TestFetchReviewablePrs:
 
     @pytest.mark.asyncio
     async def test_parses_pr_json_into_pr_info(self, config: HydraFlowConfig) -> None:
-        """Successfully parses PR JSON and maps to PRInfo objects."""
+        """Successfully parses batch PR JSON and maps to PRInfo objects."""
         fetcher = IssueFetcher(config)
 
-        pr_json = json.dumps(
+        batch_json = self._batch_pr_json(
             [
                 {
                     "number": 200,
                     "url": "https://github.com/o/r/pull/200",
-                    "isDraft": False,
+                    "branch": "agent/issue-42",
                 }
             ]
         )
@@ -328,7 +348,7 @@ class TestFetchReviewablePrs:
         async def fake_run(*args: str, **kwargs: Any) -> str:
             if any("issues" in arg for arg in args):
                 return RAW_ISSUE_JSON
-            return pr_json
+            return batch_json
 
         with patch("issue_fetcher.run_subprocess", side_effect=fake_run):
             prs, issues = await fetcher.fetch_reviewable_prs(set())
@@ -343,25 +363,26 @@ class TestFetchReviewablePrs:
         assert issues[0].number == 42
 
     @pytest.mark.asyncio
-    async def test_fetch_reviewable_prs_uses_get_for_pr_lookup(
-        self, config: HydraFlowConfig
-    ) -> None:
+    async def test_batch_pr_fetch_uses_get(self, config: HydraFlowConfig) -> None:
+        """The batch PR fetch should use GET method."""
         fetcher = IssueFetcher(config)
         captured: list[tuple[str, ...]] = []
+
+        batch_json = self._batch_pr_json(
+            [
+                {
+                    "number": 200,
+                    "url": "https://github.com/o/r/pull/200",
+                    "branch": "agent/issue-42",
+                }
+            ]
+        )
 
         async def fake_run(*args: str, **kwargs: Any) -> str:
             captured.append(args)
             if any("issues" in arg for arg in args):
                 return RAW_ISSUE_JSON
-            return json.dumps(
-                [
-                    {
-                        "number": 200,
-                        "url": "https://github.com/o/r/pull/200",
-                        "isDraft": False,
-                    }
-                ]
-            )
+            return batch_json
 
         with patch("issue_fetcher.run_subprocess", side_effect=fake_run):
             prs, _issues = await fetcher.fetch_reviewable_prs(set())
@@ -374,10 +395,10 @@ class TestFetchReviewablePrs:
         assert "GET" in pr_lookup_cmd
 
     @pytest.mark.asyncio
-    async def test_gh_cli_failure_skips_pr_for_that_issue(
+    async def test_gh_cli_failure_returns_empty_prs(
         self, config: HydraFlowConfig
     ) -> None:
-        """gh CLI failure (RuntimeError) skips that issue's PR but preserves issues."""
+        """gh CLI failure on batch PR fetch returns empty PRs but preserves issues."""
         fetcher = IssueFetcher(config)
 
         async def fake_run(*args: str, **kwargs: Any) -> str:
@@ -393,10 +414,10 @@ class TestFetchReviewablePrs:
         assert issues[0].number == 42
 
     @pytest.mark.asyncio
-    async def test_json_decode_error_skips_pr_for_that_issue(
+    async def test_json_decode_error_returns_empty_prs(
         self, config: HydraFlowConfig
     ) -> None:
-        """Invalid JSON from gh CLI skips that issue's PR but preserves issues."""
+        """Invalid JSON from batch PR fetch returns empty PRs but preserves issues."""
         fetcher = IssueFetcher(config)
 
         async def fake_run(*args: str, **kwargs: Any) -> str:
@@ -418,12 +439,13 @@ class TestFetchReviewablePrs:
         """Draft PRs are filtered out of the returned PR list."""
         fetcher = IssueFetcher(config)
 
-        pr_json = json.dumps(
+        batch_json = self._batch_pr_json(
             [
                 {
                     "number": 200,
                     "url": "https://github.com/o/r/pull/200",
                     "isDraft": True,
+                    "branch": "agent/issue-42",
                 }
             ]
         )
@@ -431,7 +453,7 @@ class TestFetchReviewablePrs:
         async def fake_run(*args: str, **kwargs: Any) -> str:
             if any("issues" in arg for arg in args):
                 return RAW_ISSUE_JSON
-            return pr_json
+            return batch_json
 
         with patch("issue_fetcher.run_subprocess", side_effect=fake_run):
             prs, issues = await fetcher.fetch_reviewable_prs(set())
@@ -444,13 +466,24 @@ class TestFetchReviewablePrs:
     async def test_no_matching_pr_returns_empty_pr_list(
         self, config: HydraFlowConfig
     ) -> None:
-        """Empty JSON array from PR lookup means no PRInfo is created."""
+        """No branch match in batch PR response means no PRInfo is created."""
         fetcher = IssueFetcher(config)
+
+        # PRs exist but none match agent/issue-42
+        batch_json = self._batch_pr_json(
+            [
+                {
+                    "number": 300,
+                    "url": "https://github.com/o/r/pull/300",
+                    "branch": "some-other-branch",
+                }
+            ]
+        )
 
         async def fake_run(*args: str, **kwargs: Any) -> str:
             if any("issues" in arg for arg in args):
                 return RAW_ISSUE_JSON
-            return "[]"
+            return batch_json
 
         with patch("issue_fetcher.run_subprocess", side_effect=fake_run):
             prs, issues = await fetcher.fetch_reviewable_prs(set())
@@ -475,35 +508,74 @@ class TestFetchReviewablePrs:
         assert issues == []
 
     @pytest.mark.asyncio
-    async def test_missing_number_key_in_pr_json_skips_pr(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """PR JSON missing 'number' key should be caught by KeyError handler and PR skipped."""
+    async def test_pr_cache_reused_within_ttl(self, config: HydraFlowConfig) -> None:
+        """Batch PR fetch should be cached and reused within TTL."""
         fetcher = IssueFetcher(config)
+        call_count = 0
 
-        # PR data is missing the "number" key
-        pr_json_missing_number = json.dumps(
+        batch_json = self._batch_pr_json(
             [
                 {
+                    "number": 200,
                     "url": "https://github.com/o/r/pull/200",
-                    "isDraft": False,
+                    "branch": "agent/issue-42",
                 }
             ]
         )
 
         async def fake_run(*args: str, **kwargs: Any) -> str:
+            nonlocal call_count
+            if any("/pulls" in arg for arg in args):
+                call_count += 1
             if any("issues" in arg for arg in args):
                 return RAW_ISSUE_JSON
-            return pr_json_missing_number
+            return batch_json
 
         with patch("issue_fetcher.run_subprocess", side_effect=fake_run):
-            prs, issues = await fetcher.fetch_reviewable_prs(set())
+            await fetcher.fetch_reviewable_prs(set())
+            fetcher.invalidate_pr_cache()  # reset for second round
+            fetcher._pr_cache_fetched_at = None
+            # Fetch again — should hit the API
+            await fetcher.fetch_reviewable_prs(set())
 
-        # PR should be skipped due to KeyError on "number"
-        assert prs == []
-        # Issue should still be returned
-        assert len(issues) == 1
-        assert issues[0].number == 42
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_invalidate_pr_cache_forces_refetch(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """invalidate_pr_cache clears the cache so next call fetches fresh."""
+        fetcher = IssueFetcher(config)
+        call_count = 0
+
+        batch_json = self._batch_pr_json(
+            [
+                {
+                    "number": 200,
+                    "url": "https://github.com/o/r/pull/200",
+                    "branch": "agent/issue-42",
+                }
+            ]
+        )
+
+        async def fake_run(*args: str, **kwargs: Any) -> str:
+            nonlocal call_count
+            if any("/pulls" in arg for arg in args):
+                call_count += 1
+            if any("issues" in arg for arg in args):
+                return RAW_ISSUE_JSON
+            return batch_json
+
+        with patch("issue_fetcher.run_subprocess", side_effect=fake_run):
+            await fetcher.fetch_reviewable_prs(set())
+            assert call_count == 1
+            # Without invalidation, cache hit → no new call
+            await fetcher.fetch_reviewable_prs(set())
+            assert call_count == 1
+            # After invalidation → new call
+            fetcher.invalidate_pr_cache()
+            await fetcher.fetch_reviewable_prs(set())
+            assert call_count == 2
 
     @pytest.mark.asyncio
     async def test_dry_run_returns_empty_tuple(
@@ -1364,3 +1436,216 @@ class TestCollaboratorCheck:
         payload = {"number": 1, "title": "Test", "milestone": None}
         result = IssueFetcher._normalize_issue_payload(payload)
         assert result["milestone_number"] is None
+
+
+# ---------------------------------------------------------------------------
+# _normalize_graphql_issue
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeGraphQLIssue:
+    """Tests for the GraphQL payload normalizer."""
+
+    def test_maps_standard_graphql_node(self) -> None:
+        node = {
+            "number": 42,
+            "title": "Fix bug",
+            "body": "Details",
+            "url": "https://github.com/o/r/issues/42",
+            "state": "OPEN",
+            "createdAt": "2026-01-01T00:00:00Z",
+            "author": {"login": "alice"},
+            "milestone": {"number": 5},
+            "labels": {"nodes": [{"name": "hydraflow-plan"}]},
+        }
+        result = IssueFetcher._normalize_graphql_issue(node)
+        assert result["number"] == 42
+        assert result["title"] == "Fix bug"
+        assert result["body"] == "Details"
+        assert result["url"] == "https://github.com/o/r/issues/42"
+        assert result["state"] == "open"
+        assert result["createdAt"] == "2026-01-01T00:00:00Z"
+        assert result["author"] == "alice"
+        assert result["milestone_number"] == 5
+        assert result["labels"] == [{"name": "hydraflow-plan"}]
+        assert result["comments"] == []
+
+    def test_handles_null_author(self) -> None:
+        node = {"number": 1, "title": "T", "author": None}
+        result = IssueFetcher._normalize_graphql_issue(node)
+        assert result["author"] == ""
+
+    def test_handles_missing_author(self) -> None:
+        node = {"number": 1, "title": "T"}
+        result = IssueFetcher._normalize_graphql_issue(node)
+        assert result["author"] == ""
+
+    def test_handles_null_milestone(self) -> None:
+        node = {"number": 1, "title": "T", "milestone": None}
+        result = IssueFetcher._normalize_graphql_issue(node)
+        assert result["milestone_number"] is None
+
+    def test_lowercases_state(self) -> None:
+        node = {"number": 1, "title": "T", "state": "CLOSED"}
+        result = IssueFetcher._normalize_graphql_issue(node)
+        assert result["state"] == "closed"
+
+
+# ---------------------------------------------------------------------------
+# _fetch_all_graphql (GraphQL batch fetch)
+# ---------------------------------------------------------------------------
+
+
+class TestFetchAllGraphQL:
+    """Tests for the GraphQL batch issue fetch."""
+
+    @pytest.mark.asyncio
+    async def test_graphql_batch_returns_deduplicated_issues(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """GraphQL batch merges issues across labels and deduplicates."""
+        fetcher = IssueFetcher(config)
+
+        graphql_response = json.dumps(
+            {
+                "data": {
+                    "repository": {
+                        "lbl_0": {
+                            "nodes": [
+                                {
+                                    "number": 1,
+                                    "title": "Issue 1",
+                                    "body": "",
+                                    "url": "",
+                                    "state": "OPEN",
+                                    "createdAt": "",
+                                    "author": {"login": "alice"},
+                                    "milestone": None,
+                                    "labels": {"nodes": [{"name": "hydraflow-find"}]},
+                                }
+                            ]
+                        },
+                        "lbl_1": {
+                            "nodes": [
+                                {
+                                    "number": 1,
+                                    "title": "Issue 1",
+                                    "body": "",
+                                    "url": "",
+                                    "state": "OPEN",
+                                    "createdAt": "",
+                                    "author": {"login": "alice"},
+                                    "milestone": None,
+                                    "labels": {"nodes": [{"name": "hydraflow-plan"}]},
+                                },
+                                {
+                                    "number": 2,
+                                    "title": "Issue 2",
+                                    "body": "",
+                                    "url": "",
+                                    "state": "OPEN",
+                                    "createdAt": "",
+                                    "author": {"login": "bob"},
+                                    "milestone": None,
+                                    "labels": {"nodes": [{"name": "hydraflow-plan"}]},
+                                },
+                            ]
+                        },
+                    }
+                }
+            }
+        )
+
+        async def fake_run(*args: str, **_kwargs: Any) -> str:
+            return graphql_response
+
+        with patch("issue_fetcher.run_subprocess", side_effect=fake_run):
+            issues = await fetcher.fetch_all_hydraflow_issues()
+
+        assert len(issues) == 2
+        numbers = {i.number for i in issues}
+        assert numbers == {1, 2}
+
+    @pytest.mark.asyncio
+    async def test_graphql_makes_single_api_call(self, config: HydraFlowConfig) -> None:
+        """GraphQL batch should make exactly one subprocess call."""
+        fetcher = IssueFetcher(config)
+        call_count = 0
+
+        graphql_response = json.dumps({"data": {"repository": {}}})
+
+        async def fake_run(*args: str, **_kwargs: Any) -> str:
+            nonlocal call_count
+            call_count += 1
+            return graphql_response
+
+        with patch("issue_fetcher.run_subprocess", side_effect=fake_run):
+            await fetcher.fetch_all_hydraflow_issues()
+
+        assert call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_graphql_failure_falls_back_to_rest(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """GraphQL failure should fall back to REST fetch_issues_by_labels."""
+        fetcher = IssueFetcher(config)
+        calls: list[tuple[str, ...]] = []
+
+        rest_response = json.dumps(
+            [
+                {
+                    "number": 1,
+                    "title": "Issue 1",
+                    "body": "",
+                    "labels": [{"name": "hydraflow-find"}],
+                    "comments": [],
+                    "url": "",
+                }
+            ]
+        )
+
+        async def fake_run(*args: str, **_kwargs: Any) -> str:
+            calls.append(args)
+            if "graphql" in args:
+                raise RuntimeError("GraphQL unavailable")
+            return rest_response
+
+        with patch("issue_fetcher.run_subprocess", side_effect=fake_run):
+            issues = await fetcher.fetch_all_hydraflow_issues()
+
+        # Should have attempted GraphQL first, then fallen back to REST
+        assert any("graphql" in cmd for cmd in calls)
+        rest_calls = [cmd for cmd in calls if "graphql" not in cmd]
+        assert len(rest_calls) >= 1
+        assert len(issues) >= 1
+
+    @pytest.mark.asyncio
+    async def test_graphql_error_response_falls_back_to_rest(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """GraphQL errors in response body trigger REST fallback."""
+        fetcher = IssueFetcher(config)
+
+        rest_response = json.dumps(
+            [
+                {
+                    "number": 1,
+                    "title": "Issue 1",
+                    "body": "",
+                    "labels": [{"name": "hydraflow-find"}],
+                    "comments": [],
+                    "url": "",
+                }
+            ]
+        )
+
+        async def fake_run(*args: str, **_kwargs: Any) -> str:
+            if "graphql" in args:
+                return json.dumps({"errors": [{"message": "rate limited"}]})
+            return rest_response
+
+        with patch("issue_fetcher.run_subprocess", side_effect=fake_run):
+            issues = await fetcher.fetch_all_hydraflow_issues()
+
+        assert len(issues) >= 1
