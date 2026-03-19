@@ -787,6 +787,50 @@ class TestMemorySyncWorkerSync:
         prs.close_issue.assert_awaited_once_with(5)
 
     @pytest.mark.asyncio
+    async def test_close_synced_issues_continues_after_failure(
+        self, tmp_path: Path
+    ) -> None:
+        """First issue close fails; second issue is still closed."""
+        config = ConfigFactory.create(repo_root=tmp_path)
+        state = MagicMock()
+        state.get_memory_state.return_value = ([], "", None)
+        bus = MagicMock()
+        prs = MagicMock()
+        prs.create_issue = AsyncMock(return_value=0)
+
+        async def _close_side_effect(issue_number: int) -> None:
+            if issue_number == 5:
+                raise RuntimeError("close failed")
+
+        prs.close_issue = AsyncMock(side_effect=_close_side_effect)
+
+        worker = MemorySyncWorker(config, state, bus, prs=prs)
+        issues = [
+            {
+                "number": 5,
+                "title": "[Memory] First",
+                "body": "**Learning:** A",
+                "createdAt": "",
+                "labels": ["hydraflow-memory"],
+            },
+            {
+                "number": 6,
+                "title": "[Memory] Second",
+                "body": "**Learning:** B",
+                "createdAt": "",
+                "labels": ["hydraflow-memory"],
+            },
+        ]
+        stats = await worker.sync(issues)
+
+        # Both issues were attempted despite first failing
+        assert prs.close_issue.await_count == 2
+        prs.close_issue.assert_any_await(5)  # first issue attempted (raised)
+        prs.close_issue.assert_any_await(6)  # second issue still closed
+        # Stats still reflect synced items
+        assert stats["item_count"] == 2
+
+    @pytest.mark.asyncio
     async def test_sync_does_not_close_non_memory_style_issues(
         self, tmp_path: Path
     ) -> None:
@@ -2303,3 +2347,116 @@ class TestWriteDigestUsesAtomicWrite:
         call_args = mock_aw.call_args[0]
         assert call_args[0] == tmp_path / ".hydraflow" / "memory" / "digest.md"
         assert call_args[1] == "# Digest content"
+
+
+# --- Per-item isolation tests ---
+
+
+class TestSyncPerItemIsolation:
+    """Per-item try/except in sync() prevents one bad issue from aborting the batch."""
+
+    @pytest.mark.asyncio
+    async def test_bad_issue_skipped_good_issue_still_synced(
+        self, tmp_path: Path
+    ) -> None:
+        config = ConfigFactory.create(repo_root=tmp_path)
+        state = MagicMock()
+        state.get_memory_state.return_value = ([], "", None)
+        bus = MagicMock()
+
+        worker = MemorySyncWorker(config, state, bus)
+
+        # Issue 10 has a body that will cause _extract_learning to raise
+        # Issue 20 is normal and should still be processed
+        issues = [
+            {
+                "number": 10,
+                "title": "[Memory] Bad issue",
+                "body": "**Learning:** Good learning",
+                "createdAt": "2024-06-01T00:00:00Z",
+            },
+            {
+                "number": 20,
+                "title": "[Memory] Good issue",
+                "body": "**Learning:** Always test first",
+                "createdAt": "2024-05-01T00:00:00Z",
+            },
+        ]
+
+        # Make _extract_learning blow up for issue 10
+        original_extract = MemorySyncWorker._extract_learning
+
+        def exploding_extract(body: str) -> str:
+            if "Good learning" in body:
+                raise RuntimeError("parse error")
+            return original_extract(body)
+
+        with patch.object(
+            MemorySyncWorker, "_extract_learning", staticmethod(exploding_extract)
+        ):
+            stats = await worker.sync(issues)
+
+        # Issue 10 failed — skipped; issue 20 succeeded
+        assert stats["item_count"] == 1
+        digest_path = tmp_path / ".hydraflow" / "memory" / "digest.md"
+        assert digest_path.exists()
+        content = digest_path.read_text()
+        assert "Always test first" in content
+
+
+class TestRouteAdrCandidatesPerItemIsolation:
+    """Per-item try/except in _route_adr_candidates prevents one failure from aborting routing."""
+
+    @pytest.mark.asyncio
+    async def test_create_issue_error_skips_candidate_continues_to_next(
+        self, tmp_path: Path
+    ) -> None:
+        config = ConfigFactory.create(repo_root=tmp_path)
+        state = MagicMock()
+        state.get_memory_state.return_value = ([], "", None)
+        bus = MagicMock()
+        prs = AsyncMock()
+
+        call_count = 0
+
+        async def fail_then_succeed(*args: object, **kwargs: object) -> int:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("GitHub API failure")
+            return 999
+
+        prs.create_issue = AsyncMock(side_effect=fail_then_succeed)
+
+        worker = MemorySyncWorker(config, state, bus, prs=prs)
+
+        # Both issues are architecture candidates (contain "architecture" keyword)
+        issues = [
+            {
+                "number": 10,
+                "title": "[Memory] Architecture shift alpha",
+                "body": "**Type:** knowledge\n\n**Learning:** Major architecture change alpha",
+                "labels": list(config.memory_label),
+                "createdAt": "2024-06-01",
+            },
+            {
+                "number": 20,
+                "title": "[Memory] Architecture shift beta",
+                "body": "**Type:** knowledge\n\n**Learning:** Major architecture change beta",
+                "labels": list(config.memory_label),
+                "createdAt": "2024-06-02",
+            },
+        ]
+
+        # Ensure no existing ADR sources
+        adr_sources_path = config.data_path("memory", "adr_sources.json")
+        adr_sources_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with (
+            patch("phase_utils.load_existing_adr_topics", return_value=set()),
+            patch("phase_utils.normalize_adr_topic", side_effect=lambda t: t.lower()),
+        ):
+            await worker._route_adr_candidates(issues)
+
+        # First call failed, second succeeded — both were attempted
+        assert call_count == 2

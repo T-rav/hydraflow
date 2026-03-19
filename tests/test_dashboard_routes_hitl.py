@@ -469,7 +469,7 @@ class TestHITLSkipImproveTransition:
     async def test_hitl_skip_non_improve_origin_no_triage_transition(
         self, config, event_bus, state, tmp_path
     ) -> None:
-        """Non-improve HITL items should not get triage label on skip."""
+        """Non-improve HITL items should be closed on skip (not orphaned)."""
         from models import HITLSkipRequest
 
         state.set_hitl_origin(42, "hydraflow-review")
@@ -482,22 +482,21 @@ class TestHITLSkipImproveTransition:
         pr_mgr.remove_label = AsyncMock()
         pr_mgr.add_labels = AsyncMock()
         pr_mgr.swap_pipeline_labels = AsyncMock()
+        pr_mgr.close_issue = AsyncMock()
         pr_mgr.post_comment = AsyncMock()
 
         skip = find_endpoint(router, "/api/hitl/{issue_number}/skip")
         assert skip is not None
         await skip(42, HITLSkipRequest(reason="Not needed"))
 
-        # Should NOT add find label for non-improve origins
-        add_calls = [c.args for c in pr_mgr.add_labels.call_args_list]
-        for call in add_calls:
-            assert call[1] != [config.find_label[0]]
+        # Non-improve origin should close the issue, not strip labels
+        pr_mgr.close_issue.assert_awaited_once_with(42)
 
     @pytest.mark.asyncio
     async def test_hitl_skip_no_origin_no_triage_transition(
         self, config, event_bus, state, tmp_path
     ) -> None:
-        """When no origin is set, skip should not add find label."""
+        """When no origin is set, skip should close the issue."""
         from models import HITLSkipRequest
 
         mock_orch = MagicMock()
@@ -508,16 +507,15 @@ class TestHITLSkipImproveTransition:
         pr_mgr.remove_label = AsyncMock()
         pr_mgr.add_labels = AsyncMock()
         pr_mgr.swap_pipeline_labels = AsyncMock()
+        pr_mgr.close_issue = AsyncMock()
         pr_mgr.post_comment = AsyncMock()
 
         skip = find_endpoint(router, "/api/hitl/{issue_number}/skip")
         assert skip is not None
         await skip(42, HITLSkipRequest(reason="Skipping"))
 
-        # Should NOT add find label when no origin
-        add_calls = [c.args for c in pr_mgr.add_labels.call_args_list]
-        for call in add_calls:
-            assert call[1] != [config.find_label[0]]
+        # No origin → close the issue instead of stripping labels
+        pr_mgr.close_issue.assert_awaited_once_with(42)
 
     @pytest.mark.asyncio
     async def test_hitl_skip_cleans_up_hitl_cause(
@@ -538,6 +536,7 @@ class TestHITLSkipImproveTransition:
         pr_mgr.remove_label = AsyncMock()
         pr_mgr.add_labels = AsyncMock()
         pr_mgr.swap_pipeline_labels = AsyncMock()
+        pr_mgr.close_issue = AsyncMock()
         pr_mgr.post_comment = AsyncMock()
 
         skip = find_endpoint(router, "/api/hitl/{issue_number}/skip")
@@ -563,6 +562,7 @@ class TestHITLSkipImproveTransition:
         pr_mgr.remove_label = AsyncMock()
         pr_mgr.add_labels = AsyncMock()
         pr_mgr.swap_pipeline_labels = AsyncMock()
+        pr_mgr.close_issue = AsyncMock()
         pr_mgr.post_comment = AsyncMock()
 
         skip = find_endpoint(router, "/api/hitl/{issue_number}/skip")
@@ -574,8 +574,7 @@ class TestHITLSkipImproveTransition:
         assert outcome.outcome.value == "hitl_skipped"
         assert outcome.reason == "Not actionable"
 
-    @pytest.mark.asyncio
-    async def test_hitl_skip_rejects_empty_reason(
+    def test_hitl_skip_rejects_empty_reason(
         self, config, event_bus, state, tmp_path
     ) -> None:
         """Skip with empty reason should raise a Pydantic validation error."""
@@ -601,6 +600,7 @@ class TestHITLSkipImproveTransition:
         pr_mgr.remove_label = AsyncMock()
         pr_mgr.add_labels = AsyncMock()
         pr_mgr.swap_pipeline_labels = AsyncMock()
+        pr_mgr.close_issue = AsyncMock()
         pr_mgr.post_comment = AsyncMock()
 
         skip = find_endpoint(router, "/api/hitl/{issue_number}/skip")
@@ -671,8 +671,7 @@ class TestHITLCloseEndpoint:
         assert outcome.outcome.value == "hitl_closed"
         assert outcome.reason == "Duplicate of #123"
 
-    @pytest.mark.asyncio
-    async def test_hitl_close_rejects_empty_reason(
+    def test_hitl_close_rejects_empty_reason(
         self, config, event_bus, state, tmp_path
     ) -> None:
         """Close with empty reason should raise a Pydantic validation error."""
@@ -750,6 +749,7 @@ class TestHITLSkipCommentResilience:
         pr_mgr.remove_label = AsyncMock()
         pr_mgr.add_labels = AsyncMock()
         pr_mgr.swap_pipeline_labels = AsyncMock()
+        pr_mgr.close_issue = AsyncMock()
         pr_mgr.post_comment = AsyncMock(side_effect=RuntimeError("GitHub down"))
 
         # Pre-populate HITL state
@@ -806,11 +806,11 @@ class TestHITLApproveMemoryEndpoint:
         response = await endpoint(42)
         data = json.loads(response.body)
         assert data["status"] == "ok"
+        # Should add memory label (first, before removing pipeline labels)
+        pr_mgr.add_labels.assert_called_once_with(42, config.memory_label)
         # Should remove all pipeline labels
         removed = {call.args[1] for call in pr_mgr.remove_label.call_args_list}
         assert removed == set(config.all_pipeline_labels)
-        # Should add memory label
-        pr_mgr.add_labels.assert_called_once_with(42, config.memory_label)
         # State should be cleaned up
         assert state.get_hitl_origin(42) is None
         assert state.get_hitl_cause(42) is None
@@ -848,6 +848,7 @@ class TestClearHitlStateHelper:
         pr_mgr.remove_label = AsyncMock()
         pr_mgr.add_labels = AsyncMock()
         pr_mgr.swap_pipeline_labels = AsyncMock()
+        pr_mgr.close_issue = AsyncMock()
         pr_mgr.post_comment = AsyncMock()
 
         state.set_hitl_origin(99, "hydraflow-review")
@@ -1100,6 +1101,7 @@ class TestResolveHitlItemHelper:
         pr_mgr.remove_label = AsyncMock()
         pr_mgr.add_labels = AsyncMock()
         pr_mgr.swap_pipeline_labels = AsyncMock()
+        pr_mgr.close_issue = AsyncMock()
         pr_mgr.post_comment = AsyncMock(side_effect=RuntimeError("API error"))
 
         endpoint = find_endpoint(router, "/api/hitl/{issue_number}/skip")

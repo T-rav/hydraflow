@@ -741,6 +741,10 @@ class ReviewResult(BaseModel):
     fixes_made: bool = Field(
         default=False, description="Whether the reviewer applied fixes to the PR"
     )
+    files_changed: list[str] = Field(
+        default_factory=list,
+        description="Files changed by the reviewer during fix commits",
+    )
     transcript: str = Field(default="", description="Raw agent transcript")
     merged: bool = Field(
         default=False, description="Whether the PR was merged after review"
@@ -753,6 +757,10 @@ class ReviewResult(BaseModel):
     )
     duration_seconds: float = Field(
         default=0.0, ge=0, description="Wall-clock seconds for the review run"
+    )
+    commit_stat: str = Field(
+        default="",
+        description="Output of git diff --stat covering all reviewer commits, for audit trail",
     )
     visual_passed: bool | None = Field(
         default=None,
@@ -1392,6 +1400,7 @@ class PipelineIssueStatus(StrEnum):
     ACTIVE = "active"
     PROCESSING = "processing"
     HITL = "hitl"
+    MERGED = "merged"
 
 
 class PipelineIssue(BaseModel):
@@ -1500,6 +1509,7 @@ class PRListItem(BaseModel):
     url: HttpUrl = ""
     draft: bool = False
     title: str = ""
+    merged: bool = False
 
 
 class HITLItem(BaseModel):
@@ -1621,6 +1631,7 @@ class PRCreatedPayload(TypedDict, total=False):
     draft: bool
     url: str
     repo: str
+    title: str
 
 
 class CICheckPayload(TypedDict, total=False):
@@ -1871,6 +1882,7 @@ class MergeUpdatePayload(TypedDict, total=False):
 
     pr: int
     status: str
+    title: str
 
 
 class TriageUpdatePayload(TypedDict, total=False):
@@ -2126,6 +2138,7 @@ class IssueHistoryPR(BaseModel):
     number: int
     url: HttpUrl = ""
     merged: bool = False
+    title: str = ""
 
 
 class IssueHistoryEntry(BaseModel):

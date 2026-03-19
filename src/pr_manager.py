@@ -331,6 +331,7 @@ class PRManager:
                         branch=branch,
                         draft=draft,
                         url=pr_url,
+                        title=title,
                     ),
                 )
             )
@@ -432,6 +433,19 @@ class PRManager:
             logger.info("[dry-run] Would merge PR #%d", pr_number)
             return True
 
+        # Fetch title before merging so we can include it in the event.
+        # Isolated from the merge try/except so a title-fetch failure
+        # cannot prevent the merge itself.
+        pr_title = ""
+        try:
+            pr_title, _ = await self.get_pr_title_and_body(pr_number)
+        except Exception:
+            logger.debug(
+                "Could not fetch title for PR #%d before merge",
+                pr_number,
+                exc_info=True,
+            )
+
         try:
             await run_subprocess(
                 "gh",
@@ -446,10 +460,13 @@ class PRManager:
                 gh_token=self._config.gh_token,
             )
 
+            payload = MergeUpdatePayload(pr=pr_number, status="merged")
+            if pr_title:
+                payload["title"] = pr_title
             await self._bus.publish(
                 HydraFlowEvent(
                     type=EventType.MERGE_UPDATE,
-                    data=MergeUpdatePayload(pr=pr_number, status="merged"),
+                    data=payload,
                 )
             )
             return True
@@ -584,6 +601,39 @@ class PRManager:
                     number,
                     exc,
                 )
+
+    async def _add_labels_strict(
+        self, target: Literal["issue", "pr"], number: int, labels: list[str]
+    ) -> None:
+        """Add *labels* to a GitHub issue or PR — raises on failure.
+
+        Unlike :meth:`_add_labels` this does **not** swallow errors, so
+        callers (e.g. :meth:`swap_pipeline_labels`) can abort before
+        removing old labels.
+        """
+        self._assert_repo()
+        if self._config.dry_run or not labels:
+            return
+        for label in labels:
+            try:
+                await self._run_gh(
+                    "gh",
+                    "api",
+                    f"repos/{self._repo}/issues/{number}/labels",
+                    "-X",
+                    "POST",
+                    "--raw-field",
+                    f"labels[]={label}",
+                )
+            except RuntimeError:
+                logger.error(
+                    "Failed to add label %r to %s #%d during swap — "
+                    "aborting to prevent orphan",
+                    label,
+                    target,
+                    number,
+                )
+                raise
 
     async def add_labels(self, issue_number: int, labels: list[str]) -> None:
         """Add *labels* to a GitHub issue."""
@@ -772,22 +822,25 @@ class PRManager:
         *,
         pr_number: int | None = None,
     ) -> None:
-        """Atomically swap to *new_label*, removing all other pipeline labels.
+        """Swap to *new_label*, removing all other pipeline labels.
 
-        This prevents the dual-label bug where a crash between remove and add
-        leaves an issue with conflicting pipeline labels (e.g. hydraflow-ready +
-        hydraflow-hitl simultaneously).
+        Adds the new label **first** so the issue is never left without a
+        pipeline label.  If the add fails the old labels remain intact and
+        the exception propagates — callers can retry or escalate.
         """
         self._assert_repo()
+        # --- add new label first (raises on failure) ---
+        await self._add_labels_strict("issue", issue_number, [new_label])
+        if pr_number is not None:
+            await self._add_labels_strict("pr", pr_number, [new_label])
+
+        # --- then remove stale labels (best-effort) ---
         all_labels = self._config.all_pipeline_labels
         for lbl in all_labels:
             if lbl != new_label:
                 await self._remove_label("issue", issue_number, lbl)
                 if pr_number is not None:
                     await self._remove_label("pr", pr_number, lbl)
-        await self._add_labels("issue", issue_number, [new_label])
-        if pr_number is not None:
-            await self._add_labels("pr", pr_number, [new_label])
 
     async def create_issue(
         self,

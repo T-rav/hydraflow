@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from events import EventBus
     from hitl_runner import HITLRunner
     from issue_fetcher import IssueFetcher
+    from issue_store import IssueStore
     from merge_conflict_resolver import MergeConflictResolver
     from models import GitHubIssue, HITLItem, UnstickResult
     from pr_manager import PRManager
@@ -111,6 +112,7 @@ class PRUnsticker:
         stop_event: asyncio.Event | None = None,
         resolver: MergeConflictResolver | None = None,
         troubleshooting_store: TroubleshootingPatternStore | None = None,
+        store: IssueStore | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -123,6 +125,7 @@ class PRUnsticker:
         self._stop_event = stop_event or asyncio.Event()
         self._resolver = resolver
         self._troubleshooting_store = troubleshooting_store
+        self._store = store
         self._suggest_memory = MemorySuggester(config, pr_manager, state)
 
     async def unstick(self, hitl_items: list[HITLItem]) -> UnstickResult:
@@ -301,16 +304,14 @@ class PRUnsticker:
                 if not self._config.unstick_auto_merge:
                     # Restore origin label when not auto-merging
                     origin = self._state.get_hitl_origin(issue_number)
-                    if origin:
-                        origin_kwargs: dict[str, int] = {}
-                        if item.pr is not None and item.pr > 0:
-                            origin_kwargs["pr_number"] = item.pr
-                        await self._prs.swap_pipeline_labels(
-                            issue_number, origin, **origin_kwargs
-                        )
-                    else:
-                        for lbl in self._config.hitl_active_label:
-                            await self._prs.remove_label(issue_number, lbl)
+                    # Fall back to HITL label so the issue stays visible
+                    target = origin or self._config.hitl_label[0]
+                    origin_kwargs: dict[str, int] = {}
+                    if item.pr is not None and item.pr > 0:
+                        origin_kwargs["pr_number"] = item.pr
+                    await self._prs.swap_pipeline_labels(
+                        issue_number, target, **origin_kwargs
+                    )
 
                     self._state.remove_hitl_origin(issue_number)
                     self._state.remove_hitl_cause(issue_number)
@@ -975,6 +976,8 @@ TROUBLESHOOTING_PATTERN_END
         success = await self._prs.merge_pr(pr_number)
         if success:
             self._finalize_resolved(issue_number, merged=True)
+            if self._store is not None:
+                self._store.mark_merged(issue_number)
             await self._prs.post_comment(
                 issue_number,
                 "**PR Unsticker** merged PR successfully after fix.\n\n"
