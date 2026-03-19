@@ -1,7 +1,7 @@
-# ADR-0023: Require Instantiation Verification for Test-Local Classes
+# ADR-0026: Require Instantiation Verification for Test-Local Classes
 
 **Status:** Proposed
-**Date:** 2026-03-08
+**Date:** 2026-03-18
 
 ## Context
 
@@ -33,8 +33,9 @@ Current tooling gaps:
 
 ## Decision
 
-Adopt a review-time and CI-enforced policy that every class defined inside a test
-function body must be instantiated or explicitly referenced within that test.
+Adopt a review-time and agent-heuristic-enforced policy that every class defined
+inside a test function body must be instantiated or explicitly referenced within
+that test.
 
 ### Review checklist addition
 
@@ -57,13 +58,14 @@ During code review of test files, reviewers must verify:
   helper classes are outside scope because they are visible to linters and easier
   to audit.
 - No custom lint rule or AST-walking CI check is required at this stage; the
-  review checklist is sufficient given the low frequency of the pattern. If dead
-  class artifacts recur despite the checklist, a follow-up task should introduce
-  an automated check.
+  review checklist and agent heuristic together are sufficient given the low
+  frequency of the pattern. If dead class artifacts recur despite these
+  mechanisms, a follow-up task should introduce a heavier automated check (e.g.,
+  a vulture rule or custom AST walk in CI).
 
 ### Operational impact on HydraFlow workers
 
-- **Review agent** (`reviewer.py`): The review prompt can be augmented with a
+- **Review agent** (`reviewer.py`): The review prompt will be augmented with a
   heuristic check — scan `class` definitions inside test functions and verify each
   class name appears at least once more in the same function body. This is a
   string-level check that does not require AST parsing and fits within the existing
@@ -107,5 +109,5 @@ During code review of test files, reviewers must verify:
 
 ## Related
 
-- Source memory: [#2362 — Dead class artifacts in tests using mock-based failure injection](https://github.com/T-rav/hydra/issues/2362)
-- Implementing issue: [#2373](https://github.com/T-rav/hydra/issues/2373)
+- Source memory: [#2362 — Dead class artifacts in tests using mock-based failure injection](https://github.com/T-rav/hydraflow/issues/2362)
+- Implementing issue: [#3222](https://github.com/T-rav/hydraflow/issues/3222)
