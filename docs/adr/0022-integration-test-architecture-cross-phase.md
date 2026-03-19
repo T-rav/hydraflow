@@ -1,7 +1,7 @@
 # ADR-0022: Integration Test Architecture — Cross-Phase Pipeline Harness
 
 **Status:** Accepted
-**Date:** 2026-03-06
+**Date:** 2026-03-18
 
 ## Context
 
@@ -34,12 +34,13 @@ Several concrete requirements flow from the production code:
   before making assertions.
 - Planner/implement/review loops need the persisted state transitions tracked by
   `src/state:StateTracker`. Using the real tracker against a `tmp_path`
-  ensures the harness observes activity counters, crate membership, and crash
-  recovery semantics that single-phase mocks currently skip.
+  ensures the harness observes activity counters, active-crate gating
+  (`src/crate_manager.py:CrateManager`), and crash recovery semantics that
+  single-phase mocks currently skip.
 
 ## Decision
 
-Ratify the existing **Pipeline Harness** pattern for cross-phase integration tests.
+Ratified the existing **Pipeline Harness** pattern for cross-phase integration tests.
 The harness, already implemented in `tests/helpers.py:PipelineHarness` and exercised
 by `tests/test_integration_pipeline.py`, uses real queueing and state components with
 controlled mocks for external systems.
@@ -51,14 +52,17 @@ controlled mocks for external systems.
    temporary directory so repeated phase invocations observe real disk writes.
 2. **Task seeding:** Seed work into `IssueStore` queues via `seed_issue()`, which
    calls `IssueStore.enqueue_transition(task, stage)` to place a `Task` directly
-   into the target stage queue. This bypasses the external `TaskFetcher` polling
+   into the target stage queue (where `stage` is an `IssueStoreStage` value, the
+   `StrEnum` defined in `src/issue_store.py:IssueStoreStage`). This bypasses the
+   external `TaskFetcher` polling
    path (`refresh()`) and instead exercises the same `enqueue_transition` machinery
    that phase hand-offs use in production. The `TaskFetcher` passed to `IssueStore`
    is an `AsyncMock` that is not invoked during normal harness operation.
 3. **Phase runners:** Keep runners that invoke external AI agents or GitHub APIs
-   mocked (`TriageRunner`, `PlannerRunner`, `AgentRunner`, `ReviewRunner`, and the
-   `PRManager`). They expose deterministic hooks (e.g., `AsyncMock` side effects)
-   that tests assert on while allowing the harness to drive real orchestrator loops.
+   mocked (`TriageRunner`, `PlannerRunner`, `AgentRunner`, `ReviewRunner`,
+   `HITLRunner`, and the `PRManager`). They expose deterministic hooks (e.g.,
+   `AsyncMock` side effects) that tests assert on while allowing the harness to
+   drive real orchestrator loops.
 4. **Event propagation:** The `EventBus` instance is shared with every phase so
    queue metrics, worker updates, and transcript events mirror production routing.
    Integration tests subscribe to the bus via `async for` iterators or capture
@@ -100,6 +104,11 @@ does not exist.
 
 - The harness stops at the PR boundary: `PRManager`, `WorktreeManager`, and
   external CLI invocations remain mocked so tests stay hermetic.
+- The HITL phase is included in the harness (`HITLPhase` is wired with
+  `HITLRunner` and issue-fetcher mocks) but is not exercised by the default
+  `run_full_lifecycle()` path, which covers triage → plan → implement → review.
+  HITL-specific integration scenarios can be tested by seeding issues into the
+  HITL queue and invoking `hitl_phase` directly.
 - Background GitHub polling is omitted; work is seeded directly via
   `enqueue_transition()`. The `refresh()` → `_build_label_map` → `_route_issues`
   path is intentionally not exercised by the harness; it is covered by dedicated
@@ -140,11 +149,12 @@ does not exist.
 2. **Full end-to-end tests with live GitHub** — rejected for cost and brittleness; a
    hermetic harness with mocked runners provides 90% coverage without network IO or
    secrets management.
-3. **MockTaskFetcher + refresh()-based seeding** — considered but not adopted. This
-   approach would exercise `_build_label_map` and `_route_issues` end-to-end but
-   couples test setup to the external-polling path. The `enqueue_transition` approach
-   was chosen for simplicity and directness, with `refresh()` coverage deferred to
-   IssueStore unit tests.
+3. **Fetcher mock + `refresh()`-based seeding** — considered but not adopted. This
+   approach would wire the fetcher `AsyncMock` to return pre-built issues and call
+   `refresh()` to exercise `_build_label_map` and `_route_issues` end-to-end, but
+   it couples test setup to the external-polling path. The `enqueue_transition`
+   approach was chosen for simplicity and directness, with `refresh()` coverage
+   deferred to `IssueStore` unit tests.
 
 ## Related
 
