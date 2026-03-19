@@ -1,7 +1,7 @@
 # ADR-0026: Require Instantiation Verification for Test-Local Classes
 
 **Status:** Proposed
-**Date:** 2026-03-08
+**Date:** 2026-03-18
 
 ## Context
 
@@ -58,9 +58,10 @@ During code review of test files, reviewers must verify:
   helper classes are outside scope because they are visible to linters and easier
   to audit.
 - No custom lint rule or AST-walking CI check is required at this stage; the
-  review checklist is sufficient given the low frequency of the pattern. If dead
-  class artifacts recur despite the checklist, a follow-up task should introduce
-  an automated check.
+  review checklist and agent heuristic together are sufficient given the low
+  frequency of the pattern. If dead class artifacts recur despite these
+  mechanisms, a follow-up task should introduce a heavier automated check (e.g.,
+  a vulture rule or custom AST walk in CI).
 
 ### Operational impact on HydraFlow workers
 
