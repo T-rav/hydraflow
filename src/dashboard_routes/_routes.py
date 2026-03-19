@@ -385,7 +385,8 @@ class RouteContext:
         if not default:
             return False
         normalized = default.replace("/", "-")
-        return slug in (default, normalized)
+        slug_lower = slug.lower()
+        return slug_lower in (default.lower(), normalized.lower())
 
     def resolve_runtime(
         self,
@@ -405,9 +406,19 @@ class RouteContext:
             if self._is_default_repo(slug):
                 return self.config, self.state, self.event_bus, self.get_orchestrator
             rt: RepoRuntime | None = self.registry.get(slug)
-            if rt is None:
-                raise HTTPException(status_code=404, detail=f"Unknown repo: {slug}")
-            return rt.config, rt.state, rt.event_bus, lambda: rt.orchestrator
+            if rt is not None:
+                return rt.config, rt.state, rt.event_bus, lambda: rt.orchestrator
+            # Also try case-insensitive match before giving up
+            slug_lower = slug.lower()
+            for registered_rt in self.registry.all:
+                if registered_rt.slug.lower() == slug_lower:
+                    return (
+                        registered_rt.config,
+                        registered_rt.state,
+                        registered_rt.event_bus,
+                        lambda _rt=registered_rt: _rt.orchestrator,
+                    )
+            raise HTTPException(status_code=404, detail=f"Unknown repo: {slug}")
         return self.config, self.state, self.event_bus, self.get_orchestrator
 
     async def execute_admin_task(
