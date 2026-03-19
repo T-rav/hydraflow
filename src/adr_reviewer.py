@@ -75,11 +75,7 @@ class ADRCouncilReviewer:
 
         for adr_number, adr_path, adr_content in proposed:
             try:
-                adr_title = (
-                    adr_path.stem.split("-", 1)[-1].replace("-", " ")
-                    if "-" in adr_path.stem
-                    else adr_path.stem
-                )
+                adr_title = self._extract_h1_title(adr_content, adr_path.stem)
                 logger.info("Reviewing ADR-%04d: %s", adr_number, adr_title)
 
                 # Pre-review validation gate
@@ -144,16 +140,12 @@ class ADRCouncilReviewer:
             if not match:
                 continue
             adr_number = int(match.group(1))
-            title = (
-                path.stem.split("-", 1)[-1].replace("-", " ")
-                if "-" in path.stem
-                else path.stem
-            )
             try:
                 content = path.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
                 logger.warning("Skipping unreadable ADR file: %s", path)
                 continue
+            title = self._extract_h1_title(content, path.stem)
             results.append((adr_number, title, content, path.name))
         return results
 
@@ -179,7 +171,10 @@ class ADRCouncilReviewer:
         compared against each other rather than silently excluded.
         """
         decision = self._extract_decision(content)
-        title = self._extract_title(content)
+        # Derive the fallback stem from the filename for consistency with
+        # _load_all_adrs (see #3302).
+        stem = adr_filename.removesuffix(".md")
+        title = self._extract_h1_title(content, stem)
 
         candidates: list[tuple[int, str, float]] = []
         for other_number, other_title, other_content, other_filename in all_adrs:
@@ -208,10 +203,22 @@ class ADRCouncilReviewer:
         match = re.search(r"## Decision\s*\n(.*?)(?=\n## |\Z)", content, re.DOTALL)
         return match.group(1).strip() if match else ""
 
-    def _extract_title(self, content: str) -> str:
-        """Extract the title from an ADR (first H1 heading)."""
+    def _extract_h1_title(self, content: str, fallback_stem: str) -> str:
+        """Extract the title from the H1 heading, stripping any ADR-NNNN prefix.
+
+        Falls back to a filename-derived slug when no H1 is found.
+        """
         match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
-        return match.group(1).strip() if match else ""
+        if match:
+            raw = match.group(1).strip()
+            # Strip "ADR-NNNN: " or "ADR-NNNN — " prefix
+            prefix_match = re.match(r"ADR-\d+[:\u2014\u2013]\s*", raw)
+            if prefix_match:
+                return raw[prefix_match.end() :].strip()
+            return raw
+        # Fallback: filename-derived slug
+        parts = fallback_stem.split("-", 1)
+        return parts[-1].replace("-", " ") if len(parts) > 1 else fallback_stem
 
     def _build_duplicate_context(self, duplicates: list[tuple[int, str, float]]) -> str:
         """Format duplicate warnings for the orchestrator prompt."""

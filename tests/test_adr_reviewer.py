@@ -190,12 +190,13 @@ class TestLoadAllADRs:
         assert len(result) == 1
         assert result[0][0] == 1
 
-    def test_extracts_title_from_filename(self, tmp_path: Path) -> None:
+    def test_extracts_title_from_h1_heading(self, tmp_path: Path) -> None:
+        """_load_all_adrs returns the H1 title, not the filename slug."""
         adr_dir = tmp_path / "docs" / "adr"
         _write_adr(adr_dir, 5, "Use Docker Containers", "Accepted")
         reviewer = _make_reviewer(tmp_path)
         result = reviewer._load_all_adrs(adr_dir)
-        assert result[0][1] == "use docker containers"
+        assert result[0][1] == "Use Docker Containers"
 
     def test_includes_filename_in_tuple(self, tmp_path: Path) -> None:
         adr_dir = tmp_path / "docs" / "adr"
@@ -204,6 +205,70 @@ class TestLoadAllADRs:
         result = reviewer._load_all_adrs(adr_dir)
         assert len(result[0]) == 4
         assert result[0][3] == "0005-use-docker-containers.md"
+
+    def test_falls_back_to_filename_slug_without_h1(self, tmp_path: Path) -> None:
+        """When no H1 heading exists, title is derived from filename."""
+        adr_dir = tmp_path / "docs" / "adr"
+        adr_dir.mkdir(parents=True)
+        path = adr_dir / "0005-use-docker-containers.md"
+        path.write_text(
+            "**Status:** Accepted\n\n## Decision\nWe use Docker.\n",
+            encoding="utf-8",
+        )
+        reviewer = _make_reviewer(tmp_path)
+        result = reviewer._load_all_adrs(adr_dir)
+        assert result[0][1] == "use docker containers"
+
+    def test_em_dash_title_captured_in_full(self, tmp_path: Path) -> None:
+        """H1 with em-dash like 'Foo — Bar' is captured completely."""
+        adr_dir = tmp_path / "docs" / "adr"
+        adr_dir.mkdir(parents=True)
+        path = adr_dir / "0022-integration-test-architecture.md"
+        path.write_text(
+            "# ADR-0022: Integration Test Architecture \u2014 Cross-Phase Pipeline Harness\n\n"
+            "**Status:** Accepted\n\n## Decision\nDone.\n",
+            encoding="utf-8",
+        )
+        reviewer = _make_reviewer(tmp_path)
+        result = reviewer._load_all_adrs(adr_dir)
+        assert (
+            result[0][1]
+            == "Integration Test Architecture \u2014 Cross-Phase Pipeline Harness"
+        )
+
+
+class TestExtractH1Title:
+    """Tests for _extract_h1_title."""
+
+    def test_strips_adr_prefix(self, tmp_path: Path) -> None:
+        reviewer = _make_reviewer(tmp_path)
+        content = "# ADR-0005: Use Docker Containers\n\nSome text."
+        assert (
+            reviewer._extract_h1_title(content, "0005-use-docker")
+            == "Use Docker Containers"
+        )
+
+    def test_em_dash_prefix(self, tmp_path: Path) -> None:
+        reviewer = _make_reviewer(tmp_path)
+        content = "# ADR-0022: Foo \u2014 Bar\n"
+        assert reviewer._extract_h1_title(content, "0022-foo-bar") == "Foo \u2014 Bar"
+
+    def test_no_adr_prefix_in_h1(self, tmp_path: Path) -> None:
+        reviewer = _make_reviewer(tmp_path)
+        content = "# Just a Title\n"
+        assert reviewer._extract_h1_title(content, "0001-fallback") == "Just a Title"
+
+    def test_fallback_to_filename_stem(self, tmp_path: Path) -> None:
+        reviewer = _make_reviewer(tmp_path)
+        content = "No heading here, just text."
+        assert (
+            reviewer._extract_h1_title(content, "0005-some-feature") == "some feature"
+        )
+
+    def test_fallback_stem_without_hyphen(self, tmp_path: Path) -> None:
+        reviewer = _make_reviewer(tmp_path)
+        content = "No heading."
+        assert reviewer._extract_h1_title(content, "readme") == "readme"
 
 
 class TestBuildIndexContext:
@@ -366,6 +431,29 @@ class TestDuplicateDetection:
         content = "# Use Docker\n\n## Decision\nUse Docker."
         result = reviewer._detect_duplicates("0023-use-docker.md", content, all_adrs)
         assert len(result) == 0
+
+    def test_uses_h1_title_not_extract_title(self, tmp_path: Path) -> None:
+        """_detect_duplicates extracts H1 title (sans ADR prefix) for the proposed ADR."""
+        reviewer = _make_reviewer(tmp_path)
+        all_adrs = [
+            (
+                6,
+                "RepoRuntime Isolation Architecture",
+                "# ADR-0006: RepoRuntime Isolation Architecture\n\n"
+                "## Decision\nIsolate repos.",
+                "0006-repo-runtime-isolation.md",
+            ),
+        ]
+        content = (
+            "# ADR-0023: RepoRuntime Isolation Architecture\n\n"
+            "## Decision\nIsolate repos."
+        )
+        result = reviewer._detect_duplicates(
+            "0023-multi-repo-wiring.md", content, all_adrs
+        )
+        # Both should resolve to "RepoRuntime Isolation Architecture" → high similarity
+        assert len(result) == 1
+        assert result[0][0] == 6
 
 
 class TestBuildOrchestratorPrompt:
