@@ -405,6 +405,22 @@ class ReviewRunner(BaseRunner):
             logger.error("Review fix failed for PR #%d: %s", pr.number, exc)
 
         result.duration_seconds = time.monotonic() - start
+
+        await self._bus.publish(
+            HydraFlowEvent(
+                type=EventType.REVIEW_UPDATE,
+                data=ReviewUpdatePayload(
+                    pr=pr.number,
+                    issue=issue.id,
+                    worker=worker_id,
+                    status=ReviewerStatus.FIX_FINDINGS_DONE.value,
+                    verdict=result.verdict.value,
+                    duration=result.duration_seconds,
+                    role="reviewer",
+                ),
+            )
+        )
+
         return result
 
     def _build_review_fix_prompt(

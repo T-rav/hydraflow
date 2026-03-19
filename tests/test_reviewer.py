@@ -2393,9 +2393,13 @@ async def test_fix_review_findings_publishes_review_update_events(
 
     events = event_bus.get_history()
     review_events = [e for e in events if e.type == EventType.REVIEW_UPDATE]
-    assert len(review_events) >= 1
+
+    # Should have at least two: one for start and one for done
+    assert len(review_events) >= 2
+
     statuses = [e.data["status"] for e in review_events]
     assert ReviewerStatus.FIXING_REVIEW_FINDINGS.value in statuses
+    assert ReviewerStatus.FIX_FINDINGS_DONE.value in statuses
 
 
 # ---------------------------------------------------------------------------
@@ -2901,7 +2905,7 @@ def test_review_result_files_changed_round_trips():
 async def test_fix_review_findings_publishes_review_update_event(
     config, event_bus, pr_info, task, tmp_path
 ):
-    """fix_review_findings publishes a REVIEW_UPDATE event with FIXING_REVIEW_FINDINGS status."""
+    """fix_review_findings publishes start and done REVIEW_UPDATE events."""
     runner = _make_runner(config, event_bus)
     transcript = "Fixed.\nVERDICT: APPROVE\nSUMMARY: Done"
 
@@ -2919,8 +2923,47 @@ async def test_fix_review_findings_publishes_review_update_event(
 
     events = event_bus.get_history()
     review_events = [e for e in events if e.type == EventType.REVIEW_UPDATE]
+    assert len(review_events) >= 2
     statuses = [e.data["status"] for e in review_events]
     assert ReviewerStatus.FIXING_REVIEW_FINDINGS.value in statuses
+    assert ReviewerStatus.FIX_FINDINGS_DONE.value in statuses
+
+    # Done event should include verdict and duration
+    done_event = next(
+        e
+        for e in review_events
+        if e.data["status"] == ReviewerStatus.FIX_FINDINGS_DONE.value
+    )
+    assert done_event.data["verdict"] == "approve"
+    assert done_event.data["duration"] is not None
+
+
+@pytest.mark.asyncio
+async def test_fix_review_findings_failure_publishes_done_event(
+    config, event_bus, pr_info, task, tmp_path
+):
+    """fix_review_findings publishes FIX_FINDINGS_DONE even when execution fails."""
+    runner = _make_runner(config, event_bus)
+
+    with (
+        patch.object(runner, "_get_head_sha", AsyncMock(return_value="abc123")),
+        patch.object(
+            runner, "_execute", AsyncMock(side_effect=RuntimeError("agent crashed"))
+        ),
+    ):
+        await runner.fix_review_findings(pr_info, task, tmp_path, "Missing null check")
+
+    events = event_bus.get_history()
+    review_events = [e for e in events if e.type == EventType.REVIEW_UPDATE]
+    statuses = [e.data["status"] for e in review_events]
+    assert ReviewerStatus.FIX_FINDINGS_DONE.value in statuses
+
+    done_event = next(
+        e
+        for e in review_events
+        if e.data["status"] == ReviewerStatus.FIX_FINDINGS_DONE.value
+    )
+    assert done_event.data["verdict"] == "request-changes"
 
 
 # ---------------------------------------------------------------------------
