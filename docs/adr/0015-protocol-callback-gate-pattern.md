@@ -70,16 +70,22 @@ for all merge-phase gates in HydraFlow. Specifically:
 | Visual validation decision | Sync decision object | `VisualValidationDecision` | `visual_validation_enabled` |
 | Visual gate | Async callback | `VisualGateFn` | `visual_gate_enabled` |
 | Merge conflict fix | Async callback | `MergeConflictFixFn` | `max_merge_conflict_fix_attempts > 0` |
+| Escalation decision | Sync decision object | `EscalationDecision` | `debug_escalation_enabled` |
 | Escalation | Async callback | `EscalateFn` | `debug_escalation_enabled` |
 | Status publishing | Async callback | `PublishFn` | Always active [^1] |
 | Adversarial threshold | Async method (not yet injected) | `_check_adversarial_threshold` | `min_review_findings > 0` |
 
-**Note:** The visual validation row represents the pre-gate decision object that
-determines *whether* validation is required. The visual gate row (`VisualGateFn`)
-is the actual async callback that enforces the gate at merge time. The adversarial
-threshold is currently an embedded async method on `ReviewPhase` rather than an
-injected Protocol callback — it follows the four-phase protocol pattern but does
-not yet conform to Rule 2 (injection as a parameter).
+**Note:** Two gates use a paired decision-object / async-callback design. The
+visual validation decision row represents the pre-gate decision object that
+determines *whether* validation is required; the visual gate row (`VisualGateFn`)
+is the actual async callback that enforces the gate at merge time. Similarly, the
+escalation decision row (`EscalationDecision`, returned by `should_escalate_debug()`)
+evaluates multi-factor signals to determine *whether* escalation is warranted; the
+escalation row (`EscalateFn`) is the async callback that carries out the HITL
+escalation itself. The adversarial threshold is currently an embedded async method
+on `ReviewPhase` rather than an injected Protocol callback — it follows the
+four-phase protocol pattern but does not yet conform to Rule 2 (injection as a
+parameter).
 
 [^1]: **Rule 3 exception — Status publishing.** `PublishFn` is an infrastructure
 callback that broadcasts state transitions to the dashboard via WebSocket. It is
@@ -127,4 +133,4 @@ and does not warrant a config toggle.
 - `src/post_merge_handler.py` — `handle_approved()` callback injection
 - `src/review_phase.py` — `check_visual_gate()`, `_fetch_code_scanning_alerts()`
 - `src/visual_validation.py` — `compute_visual_validation()`
-- `src/escalation_gate.py` — `should_escalate_debug()`
+- `src/escalation_gate.py` — `EscalationDecision`, `should_escalate_debug()`
