@@ -6,21 +6,22 @@
 ## Context
 
 HydraFlow uses boolean config toggles (fields on `HydraFlowConfig` in `src/config.py`)
-to gate code paths at runtime. For example, `adr_review_auto_triage` controls whether
-the review phase routes issues through automatic triage (`_route_to_triage`) or
-escalates them to human-in-the-loop (`_escalate_to_hitl`). The toggle check happens
-at the call site (e.g., `_execute_triage_or_hitl`), and the gated method is only
+to gate code paths at runtime. For example, `visual_gate_enabled` controls whether
+the review phase runs visual validation via `ReviewPhase.check_visual_gate` or skips
+it entirely. The toggle check happens at the call site, and the gated method is only
 invoked when the toggle is in the correct state.
 
 A recurring test bug pattern has been identified: tests patch the inner method (e.g.,
-`_route_to_triage`) and assert it was called, but never enable the config toggle that
+`check_visual_gate`) and assert it was called, but never enable the config toggle that
 gates its call site. Because the toggle defaults to `False`, the patched method is
 never reached, and the test either silently passes (if it asserts `called` without
 checking call count) or gives a false-negative that masks real regressions.
 
-This pattern was discovered during review of toggle-gated routing in the review phase
-(see memory issue #2350) and confirmed by a related finding (issue #2346) showing
-that the triage call itself must be gated on the toggle — not just the HITL fallback.
+This pattern was first discovered during review of toggle-gated routing in the review
+phase (see memory issue #2350) and confirmed by a related finding (issue #2346). While
+the original motivating toggle (`adr_auto_triage`) has since been removed as part of a
+feature-flag cleanup, the underlying discipline remains relevant — any boolean config
+field that gates a code path is susceptible to the same class of silent test bug.
 
 The root cause is that test fixtures and config construction are decoupled from the
 assertions they support. Nothing in the test infrastructure enforces that a fixture
