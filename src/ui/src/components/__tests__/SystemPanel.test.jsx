@@ -835,6 +835,26 @@ describe('MemoryAutoApproveToggle', () => {
     fetchSpy.mockRestore()
   })
 
+  it('sends PATCH request with repo param when selectedRepoSlug is set', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true })
+    mockUseHydraFlow.mockReturnValue(defaultMockContext({
+      orchestratorStatus: 'running',
+      config: { memory_auto_approve: false },
+      selectedRepoSlug: 'my-repo',
+    }))
+    render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
+    const btn = screen.getByTestId('memory-auto-approve-btn')
+    fireEvent.click(btn)
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith('/api/control/config?repo=my-repo', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ memory_auto_approve: true, persist: true }),
+      })
+    })
+    fetchSpy.mockRestore()
+  })
+
   it('reverts toggle state when PATCH request fails', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: false })
     mockUseHydraFlow.mockReturnValue(defaultMockContext({

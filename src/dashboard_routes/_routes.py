@@ -1671,11 +1671,11 @@ def create_router(
             if cause:
                 data["cause"] = cause
             is_memory_suggestion = bool(origin and origin in _cfg.improve_label)
-            if is_memory_suggestion:
-                data["isMemorySuggestion"] = True
             # When memory auto-approve is on, filter out memory suggestions
             if _cfg.memory_auto_approve and is_memory_suggestion:
                 continue
+            if is_memory_suggestion:
+                data["isMemorySuggestion"] = True
             # Flag items held for issue type review
             if cause and (
                 "epic detected" in cause.lower()

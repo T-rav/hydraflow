@@ -18,7 +18,11 @@ from tests.helpers import ConfigFactory, find_endpoint, make_dashboard_router
 
 
 class TestHITLMemoryAutoApproveFiltering:
-    """Tests that /api/hitl filters out memory suggestions when memory_auto_approve is enabled."""
+    """Tests that /api/hitl filters out memory suggestions when memory_auto_approve is enabled.
+
+    The filter check precedes the isMemorySuggestion flag assignment so that filtered
+    items never reach the enriched list.
+    """
 
     @pytest.mark.asyncio
     async def test_memory_suggestions_filtered_when_auto_approve_enabled(
