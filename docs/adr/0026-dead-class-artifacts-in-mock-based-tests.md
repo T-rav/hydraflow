@@ -109,5 +109,5 @@ During code review of test files, reviewers must verify:
 
 ## Related
 
-- Source memory: [#2362 — Dead class artifacts in tests using mock-based failure injection](https://github.com/T-rav/hydra/issues/2362)
-- Implementing issue: [#2373](https://github.com/T-rav/hydra/issues/2373)
+- Source memory: [#2362 — Dead class artifacts in tests using mock-based failure injection](https://github.com/T-rav/hydraflow/issues/2362)
+- Implementing issue: [#3222](https://github.com/T-rav/hydraflow/issues/3222)
