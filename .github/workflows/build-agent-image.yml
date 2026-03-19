@@ -6,15 +6,15 @@ on:
     paths:
       - "Dockerfile.agent"
       - "scripts/docker-smoke-test.sh"
-      - "pyproject.toml"
-      - "uv.lock"
   pull_request:
     branches: [main]
     paths:
       - "Dockerfile.agent"
       - "scripts/docker-smoke-test.sh"
-      - "pyproject.toml"
-      - "uv.lock"
+  workflow_run:
+    workflows: ["Build Agent Base Image"]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
@@ -23,12 +23,16 @@ jobs:
   build:
     name: Build & Test
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set lowercase image name
-        run: echo "IMAGE_NAME=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/hydraflow-agent" >> "$GITHUB_ENV"
+      - name: Set lowercase image names
+        run: |
+          OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE_NAME=ghcr.io/${OWNER}/hydraflow-agent" >> "$GITHUB_ENV"
+          echo "BASE_IMAGE=ghcr.io/${OWNER}/hydraflow-agent-base:latest" >> "$GITHUB_ENV"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -41,6 +45,7 @@ jobs:
           platforms: linux/amd64
           load: true
           tags: ${{ env.IMAGE_NAME }}:test
+          build-args: BASE_IMAGE=${{ env.BASE_IMAGE }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -60,16 +65,19 @@ jobs:
   push:
     name: Push to GHCR
     needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     permissions:
       packages: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set lowercase image name
-        run: echo "IMAGE_NAME=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/hydraflow-agent" >> "$GITHUB_ENV"
+      - name: Set lowercase image names
+        run: |
+          OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE_NAME=ghcr.io/${OWNER}/hydraflow-agent" >> "$GITHUB_ENV"
+          echo "BASE_IMAGE=ghcr.io/${OWNER}/hydraflow-agent-base:latest" >> "$GITHUB_ENV"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -91,5 +99,6 @@ jobs:
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          build-args: BASE_IMAGE=${{ env.BASE_IMAGE }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
