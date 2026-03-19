@@ -31,28 +31,30 @@ class AuthenticationRetryError(RuntimeError):
     """
 
 
-def _prepare_command(cmd: list[str], prompt: str) -> tuple[list[str], int]:
+def prepare_command(cmd: list[str], prompt: str) -> tuple[list[str], int]:
     """Build the final command and determine stdin mode.
 
-    Returns ``(cmd_to_run, stdin_mode)`` where *stdin_mode* is suitable
-    for :func:`asyncio.create_subprocess_exec`.
+    Detects whether the CLI (claude, pi, codex) expects the prompt as a
+    positional argument or via stdin, and inserts the prompt accordingly.
+
+    Returns ``(cmd_to_run, stdin_mode)`` where *stdin_mode* is an
+    ``asyncio.subprocess`` constant.
     """
     use_codex_exec = len(cmd) >= 2 and cmd[0] == "codex" and cmd[1] == "exec"
     use_pi_print = cmd and cmd[0] == "pi" and ("-p" in cmd or "--print" in cmd)
     use_claude_print = cmd and cmd[0] == "claude" and "-p" in cmd
     use_prompt_arg = use_codex_exec or use_pi_print or use_claude_print
+
     if use_prompt_arg:
         if use_claude_print or use_pi_print:
-            # Claude/Pi CLI require the prompt immediately after -p/--print;
-            # placing it at the end causes "Input must be provided" errors.
             flag = "-p" if "-p" in cmd else "--print"
             idx = cmd.index(flag)
             cmd_to_run = [*cmd[: idx + 1], prompt, *cmd[idx + 1 :]]
         else:
-            # Codex exec: prompt is a trailing positional argument.
             cmd_to_run = [*cmd, prompt]
     else:
         cmd_to_run = cmd
+
     stdin_mode = (
         asyncio.subprocess.DEVNULL if use_prompt_arg else asyncio.subprocess.PIPE
     )
@@ -61,22 +63,25 @@ def _prepare_command(cmd: list[str], prompt: str) -> tuple[list[str], int]:
 
 def _validate_post_stream(
     *,
-    raw_lines: list[str],
-    stderr_text: str,
-    accumulated_text: str,
     early_killed: bool,
-    returncode: int | None,
-    logger: logging.Logger,
-) -> None:
-    """Run post-stream checks: log warnings, detect auth failures, and credit exhaustion.
+    raw_lines: list[str],
+    accumulated_text: str,
+    stderr_text: str,
+    result_text: str,
+    proc_returncode: int | None,
+    log: logging.Logger,
+    parser: StreamParser,
+    usage_stats: dict[str, object] | None,
+) -> str:
+    """Validate stream output and return the transcript string.
 
-    Raises :class:`AuthenticationRetryError` or :class:`CreditExhaustedError`
-    when the corresponding condition is detected.
+    Checks for authentication failures, credit exhaustion, and empty output.
+    Raises on detected errors when *early_killed* is ``False``.
     """
-    if not early_killed and returncode != 0:
-        logger.warning(
+    if not early_killed and proc_returncode != 0:
+        log.warning(
             "Process exited with code %d: %s",
-            returncode,
+            proc_returncode,
             stderr_text[:500],
         )
 
@@ -91,6 +96,20 @@ def _validate_post_stream(
     if not early_killed and is_credit_exhaustion(combined):
         resume_at = parse_credit_resume_time(combined)
         raise CreditExhaustedError("API credit limit reached", resume_at=resume_at)
+
+    if usage_stats is not None:
+        usage_stats.update(parser.usage_snapshot)
+
+    transcript = result_text or accumulated_text.rstrip("\n") or "\n".join(raw_lines)
+
+    if not transcript.strip() and stderr_text:
+        log.warning(
+            "Process produced empty stdout (rc=%d), stderr: %s",
+            proc_returncode or 0,
+            stderr_text[:500],
+        )
+
+    return transcript
 
 
 async def stream_claude_process(
@@ -110,43 +129,14 @@ async def stream_claude_process(
 ) -> str:
     """Run an agent subprocess and stream its output.
 
-    Parameters
-    ----------
-    cmd:
-        Command to execute (e.g. ``["claude", "-p", ...]`` or ``["codex", "exec", ...]``).
-    prompt:
-        Prompt text for the agent. Passed via stdin for Claude-style commands;
-        passed as a positional argument for Codex `exec`.
-    cwd:
-        Working directory for the subprocess.
-    active_procs:
-        Shared set for tracking active processes (for terminate).
-    event_bus:
-        For publishing ``TRANSCRIPT_LINE`` events.
-    event_data:
-        Base dict for event data (runner-specific keys like ``issue``/``pr``/``source``).
-        ``"line"`` is added automatically per output line.
-    logger:
-        Caller's logger for warnings (preserves per-runner log context).
-    on_output:
-        Optional callback receiving accumulated display text.
-        Return ``True`` to kill the process early.
-    usage_stats:
-        Optional dict populated with normalized usage totals and metadata
-        (availability status, backend, and raw usage blobs when emitted).
-
-    Returns
-    -------
-    str
-        The transcript string, using the fallback chain:
-        result_text → accumulated_text → raw_lines.
+    Returns the transcript string, using the fallback chain:
+    result_text → accumulated_text → raw_lines.
     """
     env = make_clean_env(gh_token)
-
     if runner is None:
         runner = get_default_runner()
 
-    cmd_to_run, stdin_mode = _prepare_command(cmd, prompt)
+    cmd_to_run, stdin_mode = prepare_command(cmd, prompt)
 
     proc = await runner.create_streaming_process(
         cmd_to_run,
@@ -165,7 +155,7 @@ async def stream_claude_process(
         assert proc.stdout is not None
         assert proc.stderr is not None
 
-        stdout_stream = proc.stdout  # capture for nested function
+        stdout_stream = proc.stdout
 
         if stdin_mode == asyncio.subprocess.PIPE:
             assert proc.stdin is not None
@@ -173,7 +163,6 @@ async def stream_claude_process(
             await proc.stdin.drain()
             proc.stdin.close()
 
-        # Drain stderr in background to prevent deadlock
         stderr_task = asyncio.create_task(proc.stderr.read())
 
         parser = StreamParser()
@@ -216,36 +205,19 @@ async def stream_claude_process(
 
             stderr_bytes = await stderr_task
             await proc.wait()
-
             stderr_text = stderr_bytes.decode(errors="replace").strip()
 
-            _validate_post_stream(
-                raw_lines=raw_lines,
-                stderr_text=stderr_text,
-                accumulated_text=accumulated_text,
+            return _validate_post_stream(
                 early_killed=early_killed,
-                returncode=proc.returncode,
-                logger=logger,
+                raw_lines=raw_lines,
+                accumulated_text=accumulated_text,
+                stderr_text=stderr_text,
+                result_text=result_text,
+                proc_returncode=proc.returncode,
+                log=logger,
+                parser=parser,
+                usage_stats=usage_stats,
             )
-
-            if usage_stats is not None:
-                usage_stats.update(parser.usage_snapshot)
-
-            transcript = (
-                result_text or accumulated_text.rstrip("\n") or "\n".join(raw_lines)
-            )
-
-            # Log stderr when transcript is empty — this is the only place
-            # stderr content is available and it's critical for diagnosing
-            # silent subprocess failures (e.g. CLI auth errors, missing flags).
-            if not transcript.strip() and stderr_text:
-                logger.warning(
-                    "Process produced empty stdout (rc=%d), stderr: %s",
-                    proc.returncode or 0,
-                    stderr_text[:500],
-                )
-
-            return transcript
 
         return await asyncio.wait_for(_stream_body(), timeout=timeout)
     except TimeoutError as exc:

@@ -5,11 +5,8 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
@@ -27,9 +24,12 @@ from plan_constants import (
 from plan_scoring import score_actionability
 from plan_validation import run_phase_gates, validate_plan
 from prompt_builder import PromptBuilder
+from prompt_utils import build_comments_section, truncate_text
 from runner_constants import MEMORY_SUGGESTION_PROMPT
 
 logger = logging.getLogger("hydraflow.planner")
+
+_OutputCallback = Callable[[str], bool]
 
 
 class PlannerRunner(BaseRunner):
@@ -78,7 +78,19 @@ class PlannerRunner(BaseRunner):
             )
 
             def _check_plan_complete(accumulated: str) -> bool:
-                return self._is_plan_complete(accumulated, task.id)
+                if "PLAN_END" in accumulated:
+                    logger.info(
+                        "Plan markers found for issue #%d — terminating planner",
+                        task.id,
+                    )
+                    return True
+                if "ALREADY_SATISFIED_END" in accumulated:
+                    logger.info(
+                        "Already-satisfied markers found for issue #%d — terminating planner",
+                        task.id,
+                    )
+                    return True
+                return False
 
             transcript = await self._execute(
                 cmd,
@@ -90,7 +102,9 @@ class PlannerRunner(BaseRunner):
             )
             result.transcript = transcript
 
-            if await self._handle_already_satisfied(task, result, start, worker_id):
+            # Check for already-satisfied before plan extraction
+            if self._handle_already_satisfied(task, result, start):
+                await self._emit_status(task.id, worker_id, PlannerStatus.DONE)
                 return result
 
             result.plan = self._extract_plan(transcript)
@@ -99,7 +113,7 @@ class PlannerRunner(BaseRunner):
 
             if result.plan:
                 await self._validate_and_retry(
-                    task, result, cmd, _check_plan_complete, scale, worker_id
+                    task, result, cmd, scale, worker_id, _check_plan_complete
                 )
             else:
                 result.success = False
@@ -123,41 +137,20 @@ class PlannerRunner(BaseRunner):
         self._persist_plan_artifacts(task, result)
         return result
 
-    def _is_plan_complete(self, accumulated: str, issue_id: int) -> bool:
-        """Check if the plan output contains completion markers."""
-        if "PLAN_END" in accumulated:
-            logger.info(
-                "Plan markers found for issue #%d — terminating planner",
-                issue_id,
-            )
-            return True
-        if "ALREADY_SATISFIED_END" in accumulated:
-            logger.info(
-                "Already-satisfied markers found for issue #%d — terminating planner",
-                issue_id,
-            )
-            return True
-        return False
-
-    async def _handle_already_satisfied(
-        self,
-        task: Task,
-        result: PlanResult,
-        start: float,
-        worker_id: int,
+    def _handle_already_satisfied(
+        self, task: Task, result: PlanResult, start: float
     ) -> bool:
-        """Check for already-satisfied and populate *result* if found.
+        """Check if the transcript indicates the issue is already satisfied.
 
-        Returns ``True`` if the issue is already satisfied (caller should
-        return early), ``False`` otherwise.
+        If so, populates *result* and returns ``True``.
         """
-        satisfied_explanation = self._extract_already_satisfied(result.transcript)
-        if not satisfied_explanation:
+        satisfied = self._extract_already_satisfied(result.transcript)
+        if not satisfied:
             return False
 
         result.already_satisfied = True
         result.success = True
-        result.summary = satisfied_explanation[:200]
+        result.summary = satisfied[:200]
         result.duration_seconds = time.monotonic() - start
         try:
             self._save_transcript("plan-issue", task.id, result.transcript)
@@ -168,21 +161,20 @@ class PlannerRunner(BaseRunner):
                 exc_info=True,
                 extra={"issue": task.id},
             )
-        await self._emit_status(task.id, worker_id, PlannerStatus.DONE)
         logger.info(
             "Issue #%d already satisfied — no changes needed",
             task.id,
         )
         return True
 
-    def _validate_plan_with_gates(
+    def _collect_validation_errors(
         self, task: Task, plan: str, scale: PlanScale
     ) -> list[str]:
-        """Run plan validation and phase gates, returning combined errors."""
+        """Run validation and phase gates on *plan*, returning combined errors."""
         validation_errors = self._validate_plan(task, plan, scale=scale)
         if scale == "lite":
             return validation_errors
-        gate_errors, _warnings = self._run_phase_minus_one_gates(plan)
+        gate_errors, _ = self._run_phase_minus_one_gates(plan)
         return validation_errors + gate_errors
 
     async def _validate_and_retry(
@@ -190,27 +182,24 @@ class PlannerRunner(BaseRunner):
         task: Task,
         result: PlanResult,
         cmd: list[str],
-        on_output_cb: Callable[[str], bool],
         scale: PlanScale,
         worker_id: int,
+        on_output_callback: _OutputCallback | None,
     ) -> None:
-        """Validate the plan and retry once on failure.
-
-        Populates *result* fields in-place.
-        """
-        result.actionability_score, result.actionability_rank = (
-            self._score_actionability(result.plan, scale=scale)
-        )
+        """Validate the plan and retry once on failure. Mutates *result* in-place."""
+        (
+            result.actionability_score,
+            result.actionability_rank,
+        ) = self._score_actionability(result.plan, scale=scale)
         await self._emit_status(task.id, worker_id, PlannerStatus.VALIDATING)
 
-        all_errors = self._validate_plan_with_gates(task, result.plan, scale)
+        all_errors = self._collect_validation_errors(task, result.plan, scale)
         result.validation_errors = all_errors
 
         if not all_errors:
             result.success = True
             return
 
-        # --- Retry once with feedback ---
         logger.warning(
             "Plan for issue #%d failed validation (%d errors) — retrying",
             task.id,
@@ -225,7 +214,7 @@ class PlannerRunner(BaseRunner):
             retry_prompt,
             self._config.repo_root,
             {"issue": task.id, "source": "planner"},
-            on_output=on_output_cb,
+            on_output=on_output_callback,
             telemetry_stats=retry_stats,
         )
         result.transcript += "\n\n--- RETRY ---\n\n" + retry_transcript
@@ -236,10 +225,12 @@ class PlannerRunner(BaseRunner):
             result.success = False
             return
 
-        result.actionability_score, result.actionability_rank = (
-            self._score_actionability(retry_plan, scale=scale)
-        )
-        retry_all_errors = self._validate_plan_with_gates(task, retry_plan, scale)
+        (
+            result.actionability_score,
+            result.actionability_rank,
+        ) = self._score_actionability(retry_plan, scale=scale)
+        retry_all_errors = self._collect_validation_errors(task, retry_plan, scale)
+
         if not retry_all_errors:
             result.plan = retry_plan
             result.summary = self._extract_summary(retry_transcript)
@@ -252,7 +243,7 @@ class PlannerRunner(BaseRunner):
             result.success = False
 
     def _persist_plan_artifacts(self, task: Task, result: PlanResult) -> None:
-        """Save transcript and plan files, swallowing OSError."""
+        """Save transcript and plan to disk."""
         try:
             self._save_transcript("plan-issue", task.id, result.transcript)
         except OSError:
@@ -291,12 +282,7 @@ class PlannerRunner(BaseRunner):
 
     @staticmethod
     def _truncate_text(text: str, char_limit: int, line_limit: int) -> str:
-        """Truncate *text* at a line boundary, also breaking long lines.
-
-        Delegates to :func:`prompt_utils.truncate_text`.
-        """
-        from prompt_utils import truncate_text
-
+        """Truncate *text* at a line boundary, also breaking long lines."""
         return truncate_text(text, char_limit, line_limit)
 
     # Patterns for detecting images in issue bodies (markdown and HTML).
@@ -313,56 +299,12 @@ class PlannerRunner(BaseRunner):
                 lines.append(f"- `{header}` \u2014 {desc}")
         return "\n".join(lines)
 
-    def _build_comments_section(self, issue: Task, builder: PromptBuilder) -> str:
-        """Build the discussion comments section for the planner prompt."""
-        if not issue.comments:
-            return ""
-
-        from prompt_utils import build_comments_section
-
-        def _truncate(c: str) -> str:
-            return self._truncate_text(
-                c,
-                self._config.max_planner_comment_chars,
-                self._config.max_planner_line_chars,
-            )
-
-        section, raw, formatted = build_comments_section(issue.comments, _truncate)
-        if formatted:
-            builder.record_history("Discussion", raw, formatted)
-        return section
-
-    def _build_body_and_image_note(
-        self, issue: Task, builder: PromptBuilder
-    ) -> tuple[str, str]:
-        """Truncate the issue body and detect attached images.
-
-        Returns ``(body, image_note)``.
-        """
-        body_raw = issue.body or ""
-        body = self._truncate_text(
-            body_raw,
-            self._config.max_issue_body_chars,
-            self._config.max_planner_line_chars,
-        )
-        builder.record_context("Issue body", body_raw, body)
-
-        image_note = ""
-        if self._IMAGE_RE.search(issue.body or ""):
-            image_note = (
-                "\n\n**Note:** This issue contains attached images providing "
-                "visual context. The images cannot be rendered here, but "
-                "the surrounding text describes what they show."
-            )
-        return body, image_note
-
-    @classmethod
-    def _build_scale_sections(cls, scale: PlanScale) -> tuple[str, str, str, str]:
-        """Build scale-adaptive prompt sections.
+    def _build_scale_sections(self, scale: PlanScale) -> tuple[str, str, str, str]:
+        """Build scale-adaptive schema, task graph, pre-mortem, and mode sections.
 
         Returns ``(mode_note, schema_section, task_graph_guidance, pre_mortem_section)``.
         """
-        sections_bullet_list = cls._format_sections_list(scale)
+        sections_bullet_list = self._format_sections_list(scale)
         if scale == "lite":
             mode_note = (
                 "**Plan mode: LITE** — This is a small issue (bug fix, typo, or docs). "
@@ -431,8 +373,34 @@ class PlannerRunner(BaseRunner):
         sections are required and whether to include the pre-mortem step.
         """
         builder = PromptBuilder()
-        comments_section = self._build_comments_section(issue, builder)
-        body, image_note = self._build_body_and_image_note(issue, builder)
+
+        truncate_fn = lambda c: self._truncate_text(  # noqa: E731
+            c,
+            self._config.max_planner_comment_chars,
+            self._config.max_planner_line_chars,
+        )
+        comments_section, raw_comments, formatted_comments = build_comments_section(
+            issue.comments,
+            truncate_fn=truncate_fn,
+        )
+        if formatted_comments:
+            builder.record_history("Discussion", raw_comments, formatted_comments)
+
+        body_raw = issue.body or ""
+        body = self._truncate_text(
+            body_raw,
+            self._config.max_issue_body_chars,
+            self._config.max_planner_line_chars,
+        )
+        builder.record_context("Issue body", body_raw, body)
+
+        image_note = ""
+        if self._IMAGE_RE.search(issue.body or ""):
+            image_note = (
+                "\n\n**Note:** This issue contains attached images providing "
+                "visual context. The images cannot be rendered here, but "
+                "the surrounding text describes what they show."
+            )
 
         manifest_section, memory_section = self._inject_manifest_and_memory()
         find_label = self._config.find_label[0]

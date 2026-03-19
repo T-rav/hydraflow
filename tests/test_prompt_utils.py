@@ -1,12 +1,11 @@
-"""Tests for prompt_utils.py — shared text truncation and prompt-building utilities."""
+"""Tests for prompt_utils — shared prompt text utilities."""
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from prompt_utils import (
     build_comments_section,
@@ -21,33 +20,38 @@ from prompt_utils import (
 
 
 class TestTruncateText:
-    """Tests for truncate_text()."""
+    """Tests for the truncate_text function."""
 
-    def test_short_text_returned_unchanged(self) -> None:
-        text = "hello\nworld"
-        assert truncate_text(text, char_limit=1000, line_limit=500) == text
+    def test_short_text_unchanged(self) -> None:
+        """Text within limits should be returned unchanged."""
+        result = truncate_text("hello world", char_limit=100, line_limit=200)
+        assert result == "hello world"
 
     def test_truncates_at_char_limit(self) -> None:
-        text = "aaa\nbbb\nccc\nddd"
-        result = truncate_text(text, char_limit=8, line_limit=500)
-        assert "aaa" in result
-        assert "bbb" in result
-        assert "ccc" not in result
+        """Text exceeding char_limit should be truncated with marker."""
+        text = "line one\nline two\nline three\nline four"
+        result = truncate_text(text, char_limit=20, line_limit=200)
+        assert "\u2026(truncated)" in result
+        assert "line one" in result
 
-    def test_long_lines_capped_at_line_limit(self) -> None:
+    def test_truncates_long_lines(self) -> None:
+        """Lines exceeding line_limit should be hard-truncated with ellipsis."""
         text = "a" * 200
-        result = truncate_text(text, char_limit=5000, line_limit=50)
-        assert len(result.splitlines()[0]) <= 52  # 50 + "…"
+        result = truncate_text(text, char_limit=10000, line_limit=50)
+        assert len(result.splitlines()[0]) == 51  # 50 chars + ellipsis char
 
-    def test_appends_truncated_marker(self) -> None:
-        text = "line1\nline2\nline3\nline4\nline5"
-        result = truncate_text(text, char_limit=12, line_limit=500)
-        assert "…(truncated)" in result
+    def test_empty_text(self) -> None:
+        """Empty text should be returned unchanged."""
+        result = truncate_text("", char_limit=100, line_limit=200)
+        assert result == ""
 
-    def test_no_truncated_marker_when_no_truncation(self) -> None:
-        text = "short"
-        result = truncate_text(text, char_limit=1000, line_limit=500)
-        assert "truncated" not in result
+    def test_multiline_respects_char_limit(self) -> None:
+        """Should stop adding lines when char_limit would be exceeded."""
+        lines = [f"line {i}" for i in range(100)]
+        text = "\n".join(lines)
+        result = truncate_text(text, char_limit=50, line_limit=200)
+        assert "\u2026(truncated)" in result
+        assert len(result) < len(text)
 
 
 # ---------------------------------------------------------------------------
@@ -56,37 +60,37 @@ class TestTruncateText:
 
 
 class TestSummarizeForPrompt:
-    """Tests for summarize_for_prompt()."""
+    """Tests for the summarize_for_prompt function."""
 
-    def test_short_text_returned_unchanged(self) -> None:
-        text = "short text"
-        assert summarize_for_prompt(text, max_chars=1000, label="test") == text
+    def test_short_text_unchanged(self) -> None:
+        """Text within max_chars should be returned unchanged."""
+        result = summarize_for_prompt("short text", max_chars=100, label="Test")
+        assert result == "short text"
 
-    def test_extracts_bullet_lines(self) -> None:
-        lines = ["- bullet one", "- bullet two", "plain line", "- bullet three"]
-        text = "\n".join(lines)
-        result = summarize_for_prompt(text, max_chars=5, label="Bullets")
+    def test_long_text_summarized(self) -> None:
+        """Text exceeding max_chars should be summarized with label."""
+        text = "## Header\n" + "\n".join(f"- item {i}" for i in range(50))
+        result = summarize_for_prompt(text, max_chars=50, label="Plan")
+        assert "[Plan summarized from" in result
+        assert "chars to reduce prompt size]" in result
+
+    def test_prefers_cue_lines(self) -> None:
+        """Summarization should prefer bullet/header lines."""
+        text = "plain text\n- bullet one\n- bullet two\n" + "x" * 1000
+        result = summarize_for_prompt(text, max_chars=50, label="Test")
         assert "bullet one" in result
-        assert "bullet two" in result
-        assert "[Bullets summarized from" in result
 
-    def test_extracts_heading_lines(self) -> None:
-        text = "## Heading\nplain text\n## Another"
-        result = summarize_for_prompt(text, max_chars=5, label="Heads")
-        assert "Heading" in result
-        assert "[Heads summarized from" in result
+    def test_fallback_to_first_lines(self) -> None:
+        """When no cue lines, should use first non-empty lines."""
+        text = "\n".join(f"paragraph {i}" for i in range(50))
+        result = summarize_for_prompt(text, max_chars=50, label="Test")
+        assert "paragraph 0" in result
 
-    def test_falls_back_to_first_lines_when_no_cues(self) -> None:
-        text = "\n".join(f"plain line {i}" for i in range(20))
-        result = summarize_for_prompt(text, max_chars=5, label="Plain")
-        assert "plain line 0" in result
-        assert "[Plain summarized from" in result
-
-    def test_falls_back_to_raw_slice_when_empty_lines(self) -> None:
-        text = "   \n  \n  "
-        result = summarize_for_prompt(text, max_chars=2, label="Empty")
-        # Should return raw slice since no non-empty lines
-        assert len(result) > 0
+    def test_fallback_to_raw_slice(self) -> None:
+        """When no lines at all, should slice the raw text."""
+        text = "x" * 1000  # single line, no cue markers
+        result = summarize_for_prompt(text, max_chars=50, label="Test")
+        assert "[Test summarized from" in result
 
 
 # ---------------------------------------------------------------------------
@@ -95,22 +99,29 @@ class TestSummarizeForPrompt:
 
 
 class TestTruncateComment:
-    """Tests for truncate_comment()."""
+    """Tests for the truncate_comment function."""
 
-    def test_short_comment_returned_unchanged(self) -> None:
-        assert truncate_comment("hello", 100) == "hello"
+    def test_short_comment_unchanged(self) -> None:
+        """Comment within limit should be returned stripped."""
+        result = truncate_comment("  hello  ", limit=100)
+        assert result == "hello"
 
-    def test_long_comment_truncated_with_marker(self) -> None:
+    def test_long_comment_truncated(self) -> None:
+        """Comment exceeding limit should be truncated with marker."""
         text = "a" * 200
-        result = truncate_comment(text, 50)
-        assert len(result.splitlines()[0]) == 50
+        result = truncate_comment(text, limit=50)
         assert "[Comment truncated from 200 chars]" in result
+        assert len(result.split("\n")[0]) == 50
 
-    def test_none_input_returns_empty(self) -> None:
-        assert truncate_comment(None, 100) == ""
+    def test_none_input(self) -> None:
+        """None should be treated as empty string."""
+        result = truncate_comment(None, limit=100)  # type: ignore[arg-type]
+        assert result == ""
 
-    def test_whitespace_stripped(self) -> None:
-        assert truncate_comment("  hello  ", 100) == "hello"
+    def test_empty_input(self) -> None:
+        """Empty string should be returned as-is."""
+        result = truncate_comment("", limit=100)
+        assert result == ""
 
 
 # ---------------------------------------------------------------------------
@@ -119,33 +130,42 @@ class TestTruncateComment:
 
 
 class TestBuildCommentsSection:
-    """Tests for build_comments_section()."""
+    """Tests for the build_comments_section function."""
 
-    def test_empty_comments_returns_empty_tuple(self) -> None:
-        section, raw, fmt = build_comments_section([], lambda c: c)
+    def test_empty_comments(self) -> None:
+        """Empty list should return empty strings."""
+        section, raw, formatted = build_comments_section([])
         assert section == ""
         assert raw == ""
-        assert fmt == ""
+        assert formatted == ""
 
-    def test_formats_comments_as_discussion(self) -> None:
-        comments = ["Comment A", "Comment B"]
-        section, raw, fmt = build_comments_section(comments, lambda c: c)
+    def test_basic_comments(self) -> None:
+        """Should format comments as bullet list in Discussion section."""
+        comments = ["comment one", "comment two"]
+        section, raw, formatted = build_comments_section(comments)
         assert "## Discussion" in section
-        assert "- Comment A" in section
-        assert "- Comment B" in section
-        assert raw == "Comment AComment B"
-        assert "Comment A" in fmt
+        assert "- comment one" in section
+        assert "- comment two" in section
+        assert raw == "comment onecomment two"
 
-    def test_limits_to_max_comments(self) -> None:
-        comments = [f"Comment {i}" for i in range(10)]
-        section, raw, fmt = build_comments_section(
-            comments, lambda c: c, max_comments=3
-        )
-        assert "Comment 0" in section
-        assert "Comment 2" in section
+    def test_max_comments_limit(self) -> None:
+        """Should only include up to max_comments entries."""
+        comments = [f"c{i}" for i in range(10)]
+        section, _, _ = build_comments_section(comments, max_comments=3)
         assert "7 more comments omitted" in section
+        assert "- c0" in section
+        assert "- c2" in section
+        assert "- c3" not in section
 
-    def test_applies_truncate_fn(self) -> None:
-        comments = ["long " * 100]
-        section, raw, fmt = build_comments_section(comments, lambda c: c[:10] + "...")
-        assert "long long ..." in section
+    def test_truncate_fn_applied(self) -> None:
+        """Custom truncation function should be applied to each comment."""
+        comments = ["long comment text"]
+        section, _, _ = build_comments_section(comments, truncate_fn=lambda c: c[:4])
+        assert "- long" in section
+        assert "comment text" not in section
+
+    def test_no_truncate_fn_strips(self) -> None:
+        """Without truncate_fn, comments should be stripped."""
+        comments = ["  spaced  "]
+        section, _, _ = build_comments_section(comments)
+        assert "- spaced" in section

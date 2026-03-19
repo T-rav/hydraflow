@@ -16,6 +16,7 @@ from events import EventBus, EventType, HydraFlowEvent
 from models import LoopResult, Task, WorkerResult, WorkerStatus, WorkerUpdatePayload
 from phase_utils import is_likely_bug, reraise_on_credit_or_bug
 from prompt_builder import PromptBuilder
+from prompt_utils import build_comments_section, summarize_for_prompt, truncate_comment
 from review_insights import (
     ReviewInsightStore,
     get_common_feedback_section,
@@ -138,7 +139,7 @@ Run through this checklist before your final commit:
             result.transcript = transcript
             await self._force_commit_uncommitted(task, worktree_path)
 
-            await self._run_verification_pipeline(
+            await self._run_post_implementation_checks(
                 task, worktree_path, branch, worker_id, result, start
             )
 
@@ -168,7 +169,7 @@ Run through this checklist before your final commit:
 
         return result
 
-    async def _run_verification_pipeline(
+    async def _run_post_implementation_checks(
         self,
         task: Task,
         worktree_path: Path,
@@ -177,9 +178,10 @@ Run through this checklist before your final commit:
         result: WorkerResult,
         start: float,
     ) -> None:
-        """Run post-implementation checks: diff sanity, test adequacy, pre-quality, and quality gate.
+        """Run diff sanity, test adequacy, pre-quality review, and quality verification.
 
-        Populates *result* fields in-place.  May return early on blocking failures.
+        Mutates *result* in-place with success/error/commits fields.
+        Early returns on blocking failures.
         """
         sanity = await self._run_diff_sanity_loop(
             task, worktree_path, branch, worker_id
@@ -376,14 +378,10 @@ Run through this checklist before your final commit:
 
     def _summarize_for_prompt(self, text: str, max_chars: int, label: str) -> str:
         """Return text trimmed for prompt efficiency with a traceable note."""
-        from prompt_utils import summarize_for_prompt
-
         return summarize_for_prompt(text, max_chars, label)
 
     def _truncate_comment_for_prompt(self, text: str) -> str:
         """Return one discussion comment compacted for prompt efficiency."""
-        from prompt_utils import truncate_comment
-
         return truncate_comment(text, self._config.max_discussion_comment_chars)
 
     def _build_tdd_subagent_plan(
@@ -485,12 +483,9 @@ Run through this checklist before your final commit:
         issue: Task,
         builder: PromptBuilder,
         bead_mapping: dict[str, str] | None = None,
-    ) -> tuple[str, list[str]]:
-        """Extract the plan and build the plan prompt section.
-
-        Returns ``(plan_section, remaining_comments)``.
-        """
-        plan_comment, other_comments = self._extract_plan_comment(issue.comments)
+    ) -> str:
+        """Build the implementation plan section of the prompt."""
+        plan_comment, _ = self._extract_plan_comment(issue.comments)
         raw_plan = plan_comment
 
         if not plan_comment:
@@ -502,9 +497,7 @@ Run through this checklist before your final commit:
                     issue.id,
                     extra={"issue": issue.id},
                 )
-
-        if not plan_comment:
-            return "", other_comments
+                return ""
 
         plan_comment = self._summarize_for_prompt(
             plan_comment,
@@ -514,22 +507,20 @@ Run through this checklist before your final commit:
         builder.record_history("Implementation plan", raw_plan, plan_comment)
 
         if has_task_graph(plan_comment):
-            section = self._build_tdd_subagent_plan(
+            return self._build_tdd_subagent_plan(
                 plan_comment, bead_mapping=bead_mapping
             )
-        else:
-            section = (
-                f"\n\n## Implementation Plan\n\n"
-                f"Follow this plan closely. It was created by a planner agent "
-                f"that already analyzed the codebase.\n\n"
-                f"{plan_comment}"
-            )
-        return section, other_comments
+        return (
+            f"\n\n## Implementation Plan\n\n"
+            f"Follow this plan closely. It was created by a planner agent "
+            f"that already analyzed the codebase.\n\n"
+            f"{plan_comment}"
+        )
 
     def _build_review_feedback_section(
         self, review_feedback: str, builder: PromptBuilder
     ) -> str:
-        """Build the review feedback prompt section."""
+        """Build the review feedback section of the prompt."""
         if not review_feedback:
             return ""
         raw = review_feedback
@@ -549,7 +540,7 @@ Run through this checklist before your final commit:
     def _build_prior_failure_section(
         self, prior_failure: str, builder: PromptBuilder
     ) -> str:
-        """Build the prior failure prompt section."""
+        """Build the prior failure section of the prompt."""
         if not prior_failure:
             return ""
         raw = prior_failure
@@ -569,7 +560,7 @@ Run through this checklist before your final commit:
     def _build_feedback_and_escalation_sections(
         self, builder: PromptBuilder
     ) -> tuple[str, str, list[dict[str, str | int | list[str]]]]:
-        """Build the common review feedback and escalation sections.
+        """Build common review feedback and escalation sections.
 
         Returns ``(feedback_section, escalation_section, escalations)``.
         """
@@ -595,27 +586,6 @@ Run through this checklist before your final commit:
 
         return feedback_section, escalation_section, escalations
 
-    def _build_log_section(self) -> str:
-        """Build the runtime log section for the prompt."""
-        from log_context import load_runtime_logs  # noqa: PLC0415
-
-        logs = load_runtime_logs(self._config)
-        if logs:
-            return f"\n\n## Recent Application Logs\n\n```\n{logs}\n```"
-        return ""
-
-    def _truncate_issue_body(self, issue: Task, builder: PromptBuilder) -> str:
-        """Truncate the issue body and record context in the builder."""
-        body = issue.body
-        max_body = self._config.max_issue_body_chars
-        if len(body) > max_body:
-            body = (
-                body[:max_body]
-                + f"\n\n[Body truncated at {max_body:,} chars — see full issue on GitHub]"
-            )
-        builder.record_context("Issue body", issue.body, body)
-        return body
-
     def _build_prompt_with_stats(
         self,
         issue: Task,
@@ -625,10 +595,9 @@ Run through this checklist before your final commit:
     ) -> tuple[str, dict[str, object]]:
         """Build the implementation prompt and pruning stats."""
         builder = PromptBuilder()
+        _, other_comments = self._extract_plan_comment(issue.comments)
 
-        plan_section, other_comments = self._build_plan_section(
-            issue, builder, bead_mapping=bead_mapping
-        )
+        plan_section = self._build_plan_section(issue, builder, bead_mapping)
         review_feedback_section = self._build_review_feedback_section(
             review_feedback, builder
         )
@@ -636,10 +605,9 @@ Run through this checklist before your final commit:
             prior_failure, builder
         )
 
-        from prompt_utils import build_comments_section
-
         comments_section, raw_comments, formatted_comments = build_comments_section(
-            other_comments, self._truncate_comment_for_prompt
+            other_comments,
+            truncate_fn=self._truncate_comment_for_prompt,
         )
         if formatted_comments:
             builder.record_history("Discussion", raw_comments, formatted_comments)
@@ -649,8 +617,22 @@ Run through this checklist before your final commit:
         )
 
         manifest_section, memory_section = self._inject_manifest_and_memory()
-        log_section = self._build_log_section()
-        body = self._truncate_issue_body(issue, builder)
+
+        from log_context import load_runtime_logs  # noqa: PLC0415
+
+        logs = load_runtime_logs(self._config)
+        log_section = (
+            f"\n\n## Recent Application Logs\n\n```\n{logs}\n```" if logs else ""
+        )
+
+        body = issue.body
+        max_body = self._config.max_issue_body_chars
+        if len(body) > max_body:
+            body = (
+                body[:max_body]
+                + f"\n\n[Body truncated at {max_body:,} chars — see full issue on GitHub]"
+            )
+        builder.record_context("Issue body", issue.body, body)
 
         test_cmd = self._config.test_command
 

@@ -20,6 +20,7 @@ from runner_utils import (
     stream_claude_process,
     terminate_processes,
 )
+from stream_parser import StreamParser
 from tests.helpers import make_streaming_proc
 
 # ---------------------------------------------------------------------------
@@ -864,137 +865,235 @@ class TestStreamClaudeProcessGhToken:
 
 
 # ---------------------------------------------------------------------------
-# _prepare_command
+# prepare_command — extracted helper
 # ---------------------------------------------------------------------------
 
 
 class TestPrepareCommand:
-    """Tests for _prepare_command()."""
+    """Tests for the prepare_command function."""
 
     def test_claude_print_inserts_prompt_after_flag(self) -> None:
-        from runner_utils import _prepare_command
+        """Claude -p should insert prompt right after the -p flag."""
+        from runner_utils import prepare_command
 
-        cmd = ["claude", "-p", "--model", "opus"]
-        cmd_to_run, stdin_mode = _prepare_command(cmd, "my prompt")
-        assert cmd_to_run == ["claude", "-p", "my prompt", "--model", "opus"]
+        cmd = ["claude", "-p", "--output-format", "stream-json"]
+        cmd_out, stdin_mode = prepare_command(cmd, "hello")
+        p_idx = cmd_out.index("-p")
+        assert cmd_out[p_idx + 1] == "hello"
         assert stdin_mode == asyncio.subprocess.DEVNULL
 
     def test_codex_exec_appends_prompt(self) -> None:
-        from runner_utils import _prepare_command
+        """Codex exec should append prompt at end."""
+        from runner_utils import prepare_command
 
-        cmd = ["codex", "exec"]
-        cmd_to_run, stdin_mode = _prepare_command(cmd, "my prompt")
-        assert cmd_to_run == ["codex", "exec", "my prompt"]
+        cmd = ["codex", "exec", "--json"]
+        cmd_out, stdin_mode = prepare_command(cmd, "do thing")
+        assert cmd_out[-1] == "do thing"
         assert stdin_mode == asyncio.subprocess.DEVNULL
 
     def test_pi_print_inserts_prompt_after_flag(self) -> None:
-        from runner_utils import _prepare_command
+        """Pi -p should insert prompt right after the -p flag."""
+        from runner_utils import prepare_command
 
-        cmd = ["pi", "-p", "--json"]
-        cmd_to_run, stdin_mode = _prepare_command(cmd, "my prompt")
-        assert cmd_to_run == ["pi", "-p", "my prompt", "--json"]
+        cmd = ["pi", "-p", "--mode", "json"]
+        cmd_out, stdin_mode = prepare_command(cmd, "plan this")
+        p_idx = cmd_out.index("-p")
+        assert cmd_out[p_idx + 1] == "plan this"
         assert stdin_mode == asyncio.subprocess.DEVNULL
 
-    def test_unknown_tool_uses_stdin(self) -> None:
-        from runner_utils import _prepare_command
+    def test_unknown_cli_uses_stdin(self) -> None:
+        """Unknown CLI tools should use stdin pipe."""
+        from runner_utils import prepare_command
 
         cmd = ["some-tool", "--flag"]
-        cmd_to_run, stdin_mode = _prepare_command(cmd, "my prompt")
-        assert cmd_to_run == ["some-tool", "--flag"]
+        cmd_out, stdin_mode = prepare_command(cmd, "prompt text")
+        assert cmd_out == cmd  # unmodified
         assert stdin_mode == asyncio.subprocess.PIPE
 
-    def test_pi_with_print_long_flag(self) -> None:
-        from runner_utils import _prepare_command
+    def test_pi_with_long_print_flag(self) -> None:
+        """Pi --print should also work."""
+        from runner_utils import prepare_command
 
-        cmd = ["pi", "--print", "--json"]
-        cmd_to_run, stdin_mode = _prepare_command(cmd, "prompt")
-        assert cmd_to_run == ["pi", "--print", "prompt", "--json"]
+        cmd = ["pi", "--print", "--mode", "json"]
+        cmd_out, stdin_mode = prepare_command(cmd, "test")
+        idx = cmd_out.index("--print")
+        assert cmd_out[idx + 1] == "test"
         assert stdin_mode == asyncio.subprocess.DEVNULL
+
+    def test_empty_command_uses_stdin(self) -> None:
+        """Empty command list should use stdin pipe."""
+        from runner_utils import prepare_command
+
+        cmd_out, stdin_mode = prepare_command([], "prompt")
+        assert cmd_out == []
+        assert stdin_mode == asyncio.subprocess.PIPE
 
 
 # ---------------------------------------------------------------------------
-# _validate_post_stream
+# _validate_post_stream — extracted helper
 # ---------------------------------------------------------------------------
 
 
 class TestValidatePostStream:
-    """Tests for _validate_post_stream()."""
+    """Tests for the _validate_post_stream function."""
 
-    def test_no_error_on_clean_exit(self) -> None:
+    def _make_parser(self) -> StreamParser:
+        return StreamParser()
+
+    def test_returns_result_text_when_available(self) -> None:
+        """Should prefer result_text over accumulated_text and raw_lines."""
         from runner_utils import _validate_post_stream
 
-        _validate_post_stream(
-            raw_lines=["line1"],
-            stderr_text="",
-            accumulated_text="line1\n",
+        transcript = _validate_post_stream(
             early_killed=False,
-            returncode=0,
-            logger=logging.getLogger("test"),
+            raw_lines=["raw"],
+            accumulated_text="accumulated",
+            stderr_text="",
+            result_text="result",
+            proc_returncode=0,
+            log=logging.getLogger("test"),
+            parser=self._make_parser(),
+            usage_stats=None,
         )
+        assert transcript == "result"
 
-    def test_raises_auth_error_on_auth_failure(self) -> None:
+    def test_falls_back_to_accumulated_text(self) -> None:
+        """Should fall back to accumulated_text when result_text is empty."""
+        from runner_utils import _validate_post_stream
+
+        transcript = _validate_post_stream(
+            early_killed=False,
+            raw_lines=["raw"],
+            accumulated_text="accumulated\n",
+            stderr_text="",
+            result_text="",
+            proc_returncode=0,
+            log=logging.getLogger("test"),
+            parser=self._make_parser(),
+            usage_stats=None,
+        )
+        assert transcript == "accumulated"
+
+    def test_falls_back_to_raw_lines(self) -> None:
+        """Should fall back to raw_lines when both result and accumulated are empty."""
+        from runner_utils import _validate_post_stream
+
+        transcript = _validate_post_stream(
+            early_killed=False,
+            raw_lines=["line1", "line2"],
+            accumulated_text="",
+            stderr_text="",
+            result_text="",
+            proc_returncode=0,
+            log=logging.getLogger("test"),
+            parser=self._make_parser(),
+            usage_stats=None,
+        )
+        assert transcript == "line1\nline2"
+
+    def test_raises_auth_error_when_not_early_killed(self) -> None:
+        """Should raise AuthenticationRetryError on auth failure."""
         from runner_utils import AuthenticationRetryError, _validate_post_stream
 
         with pytest.raises(AuthenticationRetryError):
             _validate_post_stream(
-                raw_lines=['{"error":"authentication_failed"}'],
-                stderr_text="",
-                accumulated_text="",
                 early_killed=False,
-                returncode=1,
-                logger=logging.getLogger("test"),
+                raw_lines=["authentication_failed"],
+                accumulated_text="",
+                stderr_text="",
+                result_text="",
+                proc_returncode=1,
+                log=logging.getLogger("test"),
+                parser=self._make_parser(),
+                usage_stats=None,
             )
 
     def test_skips_auth_check_when_early_killed(self) -> None:
+        """Should NOT raise auth error when early_killed is True."""
         from runner_utils import _validate_post_stream
 
-        # Should NOT raise even though auth_failed is in output
-        _validate_post_stream(
-            raw_lines=['{"error":"authentication_failed"}'],
+        transcript = _validate_post_stream(
+            early_killed=True,
+            raw_lines=["authentication_failed"],
+            accumulated_text="output",
             stderr_text="",
-            accumulated_text="",
-            early_killed=True,
-            returncode=0,
-            logger=logging.getLogger("test"),
+            result_text="",
+            proc_returncode=0,
+            log=logging.getLogger("test"),
+            parser=self._make_parser(),
+            usage_stats=None,
         )
-
-    def test_raises_credit_exhausted_on_credit_limit(self) -> None:
-        from runner_utils import _validate_post_stream
-        from subprocess_util import CreditExhaustedError
-
-        with pytest.raises(CreditExhaustedError):
-            _validate_post_stream(
-                raw_lines=[],
-                stderr_text="Your credit balance is too low",
-                accumulated_text="",
-                early_killed=False,
-                returncode=1,
-                logger=logging.getLogger("test"),
-            )
-
-    def test_skips_credit_check_when_early_killed(self) -> None:
-        from runner_utils import _validate_post_stream
-
-        _validate_post_stream(
-            raw_lines=[],
-            stderr_text="Your credit balance is too low",
-            accumulated_text="",
-            early_killed=True,
-            returncode=0,
-            logger=logging.getLogger("test"),
-        )
+        assert transcript == "output"
 
     def test_logs_warning_on_nonzero_exit(self) -> None:
+        """Should log warning when process exits non-zero."""
         from runner_utils import _validate_post_stream
 
-        test_logger = logging.getLogger("test.validate")
-        with patch.object(test_logger, "warning") as mock_warn:
-            _validate_post_stream(
-                raw_lines=[],
-                stderr_text="some error",
-                accumulated_text="",
-                early_killed=False,
-                returncode=1,
-                logger=test_logger,
-            )
-        mock_warn.assert_called_once()
+        mock_log = MagicMock()
+        _validate_post_stream(
+            early_killed=False,
+            raw_lines=[],
+            accumulated_text="output",
+            stderr_text="error info",
+            result_text="",
+            proc_returncode=1,
+            log=mock_log,
+            parser=self._make_parser(),
+            usage_stats=None,
+        )
+        mock_log.warning.assert_called_once()
+
+    def test_no_warning_on_zero_exit(self) -> None:
+        """Should not log warning on successful exit."""
+        from runner_utils import _validate_post_stream
+
+        mock_log = MagicMock()
+        _validate_post_stream(
+            early_killed=False,
+            raw_lines=[],
+            accumulated_text="output",
+            stderr_text="",
+            result_text="",
+            proc_returncode=0,
+            log=mock_log,
+            parser=self._make_parser(),
+            usage_stats=None,
+        )
+        mock_log.warning.assert_not_called()
+
+    def test_updates_usage_stats_when_provided(self) -> None:
+        """Should update usage_stats dict from parser."""
+        from runner_utils import _validate_post_stream
+
+        stats: dict[str, object] = {}
+        _validate_post_stream(
+            early_killed=False,
+            raw_lines=[],
+            accumulated_text="output",
+            stderr_text="",
+            result_text="",
+            proc_returncode=0,
+            log=logging.getLogger("test"),
+            parser=self._make_parser(),
+            usage_stats=stats,
+        )
+        # Parser initializes with default values
+        assert "usage_status" in stats
+
+    def test_logs_warning_on_empty_stdout_with_stderr(self) -> None:
+        """Should warn when stdout is empty but stderr has content."""
+        from runner_utils import _validate_post_stream
+
+        mock_log = MagicMock()
+        _validate_post_stream(
+            early_killed=False,
+            raw_lines=[],
+            accumulated_text="",
+            stderr_text="some error",
+            result_text="",
+            proc_returncode=0,
+            log=mock_log,
+            parser=self._make_parser(),
+            usage_stats=None,
+        )
+        assert mock_log.warning.call_count == 1

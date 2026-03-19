@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -13,7 +14,7 @@ import pytest
 
 from base_runner import BaseRunner
 from events import EventType
-from models import PlannerStatus
+from models import PlannerStatus, PlanResult
 from planner import PlannerRunner
 from tests.conftest import TaskFactory
 from tests.helpers import ConfigFactory, make_streaming_proc
@@ -2054,6 +2055,165 @@ def test_build_prompt_no_task_graph_guidance_for_lite(config, event_bus, issue):
 
 
 # ---------------------------------------------------------------------------
+# Extracted helper: _build_scale_sections
+# ---------------------------------------------------------------------------
+
+
+class TestBuildScaleSections:
+    """Tests for the extracted _build_scale_sections helper."""
+
+    def test_lite_returns_lite_mode_note(self, config, event_bus) -> None:
+        runner = _make_runner(config, event_bus)
+        mode_note, schema, tg, pm = runner._build_scale_sections("lite")
+        assert "LITE" in mode_note
+        assert "LITE SCHEMA" in schema
+        assert tg == ""
+        assert pm == ""
+
+    def test_full_returns_full_mode_note(self, config, event_bus) -> None:
+        runner = _make_runner(config, event_bus)
+        mode_note, schema, tg, pm = runner._build_scale_sections("full")
+        assert "FULL" in mode_note
+        assert "REQUIRED SCHEMA" in schema
+        assert "Task Graph Format" in tg
+        assert "pre-mortem" in pm.lower()
+
+    def test_full_schema_includes_all_sections(self, config, event_bus) -> None:
+        runner = _make_runner(config, event_bus)
+        _, schema, _, _ = runner._build_scale_sections("full")
+        assert "Files to Modify" in schema
+        assert "Testing Strategy" in schema
+        assert "Key Considerations" in schema
+
+    def test_lite_schema_excludes_full_only_sections(self, config, event_bus) -> None:
+        runner = _make_runner(config, event_bus)
+        _, schema, _, _ = runner._build_scale_sections("lite")
+        assert "Acceptance Criteria" not in schema
+        assert "Key Considerations" not in schema
+
+
+# ---------------------------------------------------------------------------
+# Extracted helper: _handle_already_satisfied
+# ---------------------------------------------------------------------------
+
+
+class TestHandleAlreadySatisfied:
+    """Tests for the extracted _handle_already_satisfied helper."""
+
+    def test_returns_false_when_no_markers(self, config, event_bus, issue) -> None:
+        runner = _make_runner(config, event_bus)
+        task = issue.to_task()
+        result = PlanResult(issue_number=task.id)
+        result.transcript = "Normal transcript with plan"
+        assert runner._handle_already_satisfied(task, result, time.monotonic()) is False
+        assert result.already_satisfied is False
+
+    def test_returns_true_and_populates_result(self, config, event_bus, issue) -> None:
+        runner = _make_runner(config, event_bus)
+        task = issue.to_task()
+        result = PlanResult(issue_number=task.id)
+        result.transcript = (
+            "ALREADY_SATISFIED_START\n"
+            "Feature is already implemented.\n"
+            "ALREADY_SATISFIED_END"
+        )
+        with patch.object(runner, "_save_transcript"):
+            ret = runner._handle_already_satisfied(task, result, time.monotonic())
+        assert ret is True
+        assert result.already_satisfied is True
+        assert result.success is True
+
+
+# ---------------------------------------------------------------------------
+# Extracted helper: _collect_validation_errors
+# ---------------------------------------------------------------------------
+
+
+class TestCollectValidationErrors:
+    """Tests for the extracted _collect_validation_errors helper."""
+
+    def test_returns_errors_for_invalid_plan(self, config, event_bus, issue) -> None:
+        runner = _make_runner(config, event_bus)
+        task = issue.to_task()
+        errors = runner._collect_validation_errors(task, "short plan", "full")
+        assert len(errors) > 0
+
+    def test_returns_empty_for_valid_plan(self, config, event_bus, issue) -> None:
+        runner = _make_runner(config, event_bus)
+        task = issue.to_task()
+        errors = runner._collect_validation_errors(task, _valid_plan(), "full")
+        assert errors == []
+
+    def test_lite_skips_phase_gates(self, config, event_bus, issue) -> None:
+        runner = _make_runner(config, event_bus)
+        task = issue.to_task()
+        with patch.object(runner, "_run_phase_minus_one_gates") as mock_gates:
+            runner._collect_validation_errors(task, _lite_plan(), "lite")
+        mock_gates.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Extracted helper: _persist_plan_artifacts
+# ---------------------------------------------------------------------------
+
+
+class TestPersistPlanArtifacts:
+    """Tests for the extracted _persist_plan_artifacts helper."""
+
+    def test_saves_transcript_and_plan_on_success(
+        self, config, event_bus, issue
+    ) -> None:
+        runner = _make_runner(config, event_bus)
+        task = issue.to_task()
+        result = PlanResult(issue_number=task.id)
+        result.success = True
+        result.plan = "The plan"
+        result.summary = "Summary"
+        result.transcript = "transcript"
+
+        with (
+            patch.object(runner, "_save_transcript") as mock_save_t,
+            patch.object(runner, "_save_plan") as mock_save_p,
+        ):
+            runner._persist_plan_artifacts(task, result)
+        mock_save_t.assert_called_once()
+        mock_save_p.assert_called_once()
+
+    def test_saves_transcript_only_on_failure(self, config, event_bus, issue) -> None:
+        runner = _make_runner(config, event_bus)
+        task = issue.to_task()
+        result = PlanResult(issue_number=task.id)
+        result.success = False
+        result.transcript = "transcript"
+
+        with (
+            patch.object(runner, "_save_transcript") as mock_save_t,
+            patch.object(runner, "_save_plan") as mock_save_p,
+        ):
+            runner._persist_plan_artifacts(task, result)
+        mock_save_t.assert_called_once()
+        mock_save_p.assert_not_called()
+
+    def test_handles_transcript_save_oserror(
+        self, config, event_bus, issue, caplog
+    ) -> None:
+        runner = _make_runner(config, event_bus)
+        task = issue.to_task()
+        result = PlanResult(issue_number=task.id)
+        result.success = True
+        result.plan = "plan"
+        result.summary = "s"
+        result.transcript = "t"
+
+        with (
+            patch.object(runner, "_save_transcript", side_effect=OSError("disk")),
+            patch.object(runner, "_save_plan"),
+        ):
+            runner._persist_plan_artifacts(task, result)  # should not raise
+        assert "Failed to save transcript" in caplog.text
+
+
+# ---------------------------------------------------------------------------
 # validate_already_satisfied_evidence
 # ---------------------------------------------------------------------------
 
@@ -2244,133 +2404,3 @@ class TestValidateAlreadySatisfiedEvidence:
             summary, issue_body=issue_body, repo_root=tmp_path
         )
         assert any("do not exist" in e for e in errors)
-
-
-# ---------------------------------------------------------------------------
-# Extracted helper methods (refactor #2606)
-# ---------------------------------------------------------------------------
-
-
-class TestIsPlanComplete:
-    """Tests for PlannerRunner._is_plan_complete()."""
-
-    def test_returns_true_on_plan_end_marker(self, config, event_bus) -> None:
-        runner = _make_runner(config, event_bus)
-        assert runner._is_plan_complete("some text\nPLAN_END\nmore", 42) is True
-
-    def test_returns_true_on_already_satisfied_marker(self, config, event_bus) -> None:
-        runner = _make_runner(config, event_bus)
-        assert runner._is_plan_complete("ALREADY_SATISFIED_END", 42) is True
-
-    def test_returns_false_when_no_markers(self, config, event_bus) -> None:
-        runner = _make_runner(config, event_bus)
-        assert runner._is_plan_complete("just normal text", 42) is False
-
-
-class TestValidatePlanWithGates:
-    """Tests for PlannerRunner._validate_plan_with_gates()."""
-
-    def test_lite_scale_skips_phase_gates(self, config, event_bus) -> None:
-        runner = _make_runner(config, event_bus)
-        task = TaskFactory.create()
-        errors = runner._validate_plan_with_gates(task, "minimal plan", "lite")
-        assert isinstance(errors, list)
-
-    def test_full_scale_includes_phase_gates(self, config, event_bus) -> None:
-        runner = _make_runner(config, event_bus)
-        task = TaskFactory.create()
-        errors = runner._validate_plan_with_gates(task, _valid_plan(), "full")
-        assert isinstance(errors, list)
-
-
-class TestPersistPlanArtifacts:
-    """Tests for PlannerRunner._persist_plan_artifacts()."""
-
-    def test_saves_transcript_and_plan(self, config, event_bus) -> None:
-        runner = _make_runner(config, event_bus)
-        task = TaskFactory.create(id=99)
-        from tests.conftest import PlanResultFactory
-
-        result = PlanResultFactory.create(
-            issue_number=99, success=True, plan="## Plan\n\nDo things"
-        )
-        runner._persist_plan_artifacts(task, result)
-        plan_path = config.plans_dir / "issue-99.md"
-        assert plan_path.exists()
-
-    def test_handles_oserror_gracefully(self, config, event_bus) -> None:
-        runner = _make_runner(config, event_bus)
-        task = TaskFactory.create(id=99)
-        from tests.conftest import PlanResultFactory
-
-        result = PlanResultFactory.create(issue_number=99, success=True)
-        with patch.object(runner, "_save_transcript", side_effect=OSError("fail")):
-            runner._persist_plan_artifacts(task, result)  # should not raise
-
-
-class TestBuildCommentsSection:
-    """Tests for PlannerRunner._build_comments_section()."""
-
-    def test_returns_empty_when_no_comments(self, config, event_bus) -> None:
-        runner = _make_runner(config, event_bus)
-        task = TaskFactory.create(comments=[])
-        from prompt_builder import PromptBuilder
-
-        builder = PromptBuilder()
-        result = runner._build_comments_section(task, builder)
-        assert result == ""
-
-    def test_returns_discussion_section(self, config, event_bus) -> None:
-        runner = _make_runner(config, event_bus)
-        task = TaskFactory.create(comments=["Comment 1", "Comment 2"])
-        from prompt_builder import PromptBuilder
-
-        builder = PromptBuilder()
-        result = runner._build_comments_section(task, builder)
-        assert "## Discussion" in result
-        assert "Comment 1" in result
-
-
-class TestBuildBodyAndImageNote:
-    """Tests for PlannerRunner._build_body_and_image_note()."""
-
-    def test_returns_body_and_empty_image_note(self, config, event_bus) -> None:
-        runner = _make_runner(config, event_bus)
-        task = TaskFactory.create(body="Simple body text")
-        from prompt_builder import PromptBuilder
-
-        builder = PromptBuilder()
-        body, image_note = runner._build_body_and_image_note(task, builder)
-        assert "Simple body text" in body
-        assert image_note == ""
-
-    def test_detects_markdown_images(self, config, event_bus) -> None:
-        runner = _make_runner(config, event_bus)
-        task = TaskFactory.create(body="See ![screenshot](img.png) for details")
-        from prompt_builder import PromptBuilder
-
-        builder = PromptBuilder()
-        _, image_note = runner._build_body_and_image_note(task, builder)
-        assert "attached images" in image_note
-
-
-class TestBuildScaleSections:
-    """Tests for PlannerRunner._build_scale_sections()."""
-
-    def test_lite_returns_no_pre_mortem(self) -> None:
-        mode, schema, task_graph, pre_mortem = PlannerRunner._build_scale_sections(
-            "lite"
-        )
-        assert "LITE" in mode
-        assert "LITE SCHEMA" in schema
-        assert task_graph == ""
-        assert pre_mortem == ""
-
-    def test_full_returns_all_sections(self) -> None:
-        mode, schema, task_graph, pre_mortem = PlannerRunner._build_scale_sections(
-            "full"
-        )
-        assert "FULL" in mode
-        assert "REQUIRED SCHEMA" in schema
-        assert "Task Graph" in task_graph
-        assert "Pre-Mortem" in pre_mortem

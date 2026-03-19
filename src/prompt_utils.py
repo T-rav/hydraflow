@@ -1,16 +1,13 @@
-"""Shared text truncation and prompt-building utilities.
+"""Shared prompt text utilities for agent runners.
 
-Used by ``agent.py`` and ``planner.py`` to reduce duplication of
-text-trimming logic in their ``_build_prompt_with_stats`` methods.
+Provides text truncation and summarization helpers used by both
+``AgentRunner`` and ``PlannerRunner`` when building prompts.
 """
 
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
+from collections.abc import Callable
 
 
 def truncate_text(text: str, char_limit: int, line_limit: int) -> str:
@@ -22,23 +19,21 @@ def truncate_text(text: str, char_limit: int, line_limit: int) -> str:
     lines: list[str] = []
     total = 0
     for raw_line in text.splitlines():
-        capped = raw_line[:line_limit] + "…" if len(raw_line) > line_limit else raw_line
+        capped = (
+            raw_line[:line_limit] + "\u2026" if len(raw_line) > line_limit else raw_line
+        )
         if total + len(capped) + 1 > char_limit:
             break
         lines.append(capped)
         total += len(capped) + 1  # +1 for newline
     result = "\n".join(lines)
     if len(result) < len(text):
-        result += "\n\n…(truncated)"
+        result += "\n\n\u2026(truncated)"
     return result
 
 
 def summarize_for_prompt(text: str, max_chars: int, label: str) -> str:
-    """Return *text* trimmed for prompt efficiency with a traceable note.
-
-    Extracts cue lines (bullets, numbered items, headings) when available,
-    otherwise takes the first 10 non-empty lines.
-    """
+    """Return *text* trimmed for prompt efficiency with a traceable note."""
     if len(text) <= max_chars:
         return text
 
@@ -64,35 +59,29 @@ def truncate_comment(text: str, limit: int) -> str:
 
 def build_comments_section(
     comments: list[str],
-    truncate_fn: Callable[[str], str],
+    *,
     max_comments: int = 6,
+    truncate_fn: Callable[[str], str] | None = None,
 ) -> tuple[str, str, str]:
-    """Build a formatted discussion section from issue comments.
+    """Build a discussion comments section from issue comments.
 
-    Parameters
-    ----------
-    comments:
-        Raw comment strings.
-    truncate_fn:
-        A callable that truncates a single comment string.
-    max_comments:
-        Maximum comments to include.
-
-    Returns
-    -------
-    tuple of (section_text, raw_joined, formatted_text):
-        *section_text* is the full ``## Discussion`` block (empty if no
-        comments).  *raw_joined* is the original comments joined for
-        history tracking.  *formatted_text* is the truncated/formatted
-        version for history tracking.
+    Returns ``(section_text, raw_joined, formatted)`` where
+    *section_text* is the ready-to-use prompt section (empty string if
+    no comments), *raw_joined* is the concatenated raw comments, and
+    *formatted* is the truncated/formatted text for stats recording.
     """
     if not comments:
         return "", "", ""
 
     selected = comments[:max_comments]
-    compact = [truncate_fn(c) for c in selected]
+    if truncate_fn is not None:
+        compact = [truncate_fn(c) for c in selected]
+    else:
+        compact = [c.strip() for c in selected]
+
     formatted = "\n".join(f"- {c}" for c in compact)
     section = f"\n\n## Discussion\n{formatted}"
     if len(comments) > max_comments:
         section += f"\n- ... ({len(comments) - max_comments} more comments omitted)"
+
     return section, "".join(comments), formatted
