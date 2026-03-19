@@ -1,4 +1,4 @@
-# ADR-0023: ADR Reviewer Proposed-Only Filter and Validator Scope
+# ADR-0026: ADR Reviewer Proposed-Only Filter and Validator Scope
 
 **Status:** Proposed
 **Date:** 2026-03-07
@@ -21,9 +21,6 @@ Tests that exercise status-specific branches (such as superseded-status validati
 test the validator in isolation rather than through the review flow. This creates a
 gap: the tests pass, but the code paths they cover are never triggered in production.
 
-**Source memory:** Issue #2251 — [Memory] ADR pre-review validator only processes
-Status: Proposed ADRs.
-
 ## Decision
 
 Accept the Proposed-only filter as the intentional design for the automated review
@@ -45,15 +42,16 @@ pipeline and document the following boundaries:
    return ADRs in those states. Otherwise, place them in a separate utility or guard
    that callers can invoke independently.
 
+4. **Tests for standalone validator paths must be clearly separated.** Tests covering
+   status-specific branches should be grouped under a "standalone validator" test
+   class or clearly annotated, so reviewers understand these paths are not exercised
+   in the orchestrated flow.
+
 ## Consequences
 
 - **Clarity:** Developers know that the automated review loop intentionally skips
   non-Proposed ADRs. No one will add supersession or deprecation logic to the
   pipeline expecting it to run.
-
-- **Test accuracy:** Tests for status-specific branches should be grouped under a
-  "standalone validator" test class or clearly annotated, so reviewers understand
-  these paths are not exercised in the orchestrated flow.
 
 - **Future extension:** If the pipeline needs to handle other statuses (e.g.
   re-validating Superseded ADRs for dangling references), the filter in
@@ -80,7 +78,7 @@ pipeline and document the following boundaries:
 
 ## Related
 
-- Issue #2251 — Source memory: ADR pre-review validator only processes Status: Proposed ADRs
+- Issue #2251 — ADR pre-review validator only processes Status: Proposed ADRs
 - Issue #2253 — This ADR task
 - `src/adr_reviewer.py` — `ADRCouncilReviewer._find_proposed_adrs`
 - `src/adr_reviewer.py` — `ADRCouncilReviewer.review_proposed_adrs`
