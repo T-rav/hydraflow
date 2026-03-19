@@ -1,7 +1,7 @@
 # ADR-0015: Protocol-Based Callback Injection for Merge-Phase Gates
 
-**Status:** Proposed
-**Date:** 2026-03-01
+**Status:** Accepted
+**Date:** 2026-03-18
 
 ## Context
 
@@ -90,7 +90,7 @@ and does not warrant a config toggle.
 
 [^2]: **Rule 4 exception — `EscalationDecision`.** `EscalationDecision` is a
 `@dataclass` defined in `src/escalation_gate.py` rather than a `BaseModel` in
-`models.py`. The established convention (set by `VisualValidationDecision` in
+`src/models.py`. The established convention (set by `VisualValidationDecision` in
 `models.py`) places decision objects centrally, but `EscalationDecision` is
 co-located with `should_escalate_debug()` in `escalation_gate.py` because the
 decision type is tightly coupled to that gate module. Its only external caller
