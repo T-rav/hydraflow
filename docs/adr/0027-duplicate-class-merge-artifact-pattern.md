@@ -1,7 +1,7 @@
 # ADR-0027: Duplicate Class Definitions — Merge-Artifact Pattern
 
 **Status:** Proposed
-**Date:** 2026-03-08
+**Date:** 2026-03-18
 
 ## Context
 
@@ -152,3 +152,4 @@ Before this ADR moves to Accepted, a time-boxed audit must be completed:
 - Source memory: [#2380 — Duplicate class definitions across modules — merge-artifact pattern](https://github.com/T-rav/hydra/issues/2380)
 - Implementing issue: [#2382](https://github.com/T-rav/hydra/issues/2382)
 - Related learning: [#2381 — Duplicate class definitions](https://github.com/T-rav/hydra/issues/2381)
+- Council review: [#3244 — ADR council requested changes](https://github.com/T-rav/hydraflow/issues/3244)
