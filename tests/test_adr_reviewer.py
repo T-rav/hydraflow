@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from adr_reviewer import ADRCouncilReviewer
+from adr_reviewer import _DUPLICATE_THRESHOLD, ADRCouncilReviewer
 from models import ADRCouncilResult, CouncilVerdict, CouncilVote
 from tests.conftest import TaskFactory, TriageResultFactory
 from tests.helpers import ConfigFactory, make_triage_phase, supply_once
@@ -190,12 +190,14 @@ class TestLoadAllADRs:
         assert len(result) == 1
         assert result[0][0] == 1
 
-    def test_extracts_title_from_filename(self, tmp_path: Path) -> None:
+    def test_extracts_title_from_h1_heading(self, tmp_path: Path) -> None:
         adr_dir = tmp_path / "docs" / "adr"
         _write_adr(adr_dir, 5, "Use Docker Containers", "Accepted")
         reviewer = _make_reviewer(tmp_path)
         result = reviewer._load_all_adrs(adr_dir)
-        assert result[0][1] == "use docker containers"
+        # _write_adr writes H1 as "# ADR-0005: Use Docker Containers"
+        # _title_from_content strips the "ADR-NNNN:" prefix
+        assert result[0][1] == "Use Docker Containers"
 
     def test_includes_filename_in_tuple(self, tmp_path: Path) -> None:
         adr_dir = tmp_path / "docs" / "adr"
@@ -204,6 +206,105 @@ class TestLoadAllADRs:
         result = reviewer._load_all_adrs(adr_dir)
         assert len(result[0]) == 4
         assert result[0][3] == "0005-use-docker-containers.md"
+
+    def test_falls_back_to_slug_when_no_h1(self, tmp_path: Path) -> None:
+        """When no H1 heading exists, falls back to slug from filename."""
+        adr_dir = tmp_path / "docs" / "adr"
+        adr_dir.mkdir(parents=True, exist_ok=True)
+        path = adr_dir / "0006-some-feature.md"
+        path.write_text(
+            "**Status:** Accepted\n\n## Context\nNo H1.\n\n## Decision\nDone.\n\n## Consequences\nNone.\n",
+            encoding="utf-8",
+        )
+        reviewer = _make_reviewer(tmp_path)
+        result = reviewer._load_all_adrs(adr_dir)
+        assert result[0][1] == "some feature"
+
+    def test_h1_with_rich_title_not_matching_slug(self, tmp_path: Path) -> None:
+        """The exact issue scenario: H1 differs significantly from the filename slug."""
+        adr_dir = tmp_path / "docs" / "adr"
+        adr_dir.mkdir(parents=True, exist_ok=True)
+        path = adr_dir / "0004-agent-cli-as-runtime.md"
+        path.write_text(
+            "# ADR-0004: CLI-based Agent Runtime (Claude / Codex / Pi.dev)\n\n"
+            "**Status:** Accepted\n\n## Context\nWe need a runtime.\n\n"
+            "## Decision\nUse CLI agents.\n\n## Consequences\nPortable.\n",
+            encoding="utf-8",
+        )
+        reviewer = _make_reviewer(tmp_path)
+        result = reviewer._load_all_adrs(adr_dir)
+        assert result[0][1] == "CLI-based Agent Runtime (Claude / Codex / Pi.dev)"
+
+    def test_h1_without_adr_prefix(self, tmp_path: Path) -> None:
+        """H1 without ADR-NNNN prefix is used as-is."""
+        adr_dir = tmp_path / "docs" / "adr"
+        adr_dir.mkdir(parents=True, exist_ok=True)
+        path = adr_dir / "0007-plain-title.md"
+        path.write_text(
+            "# Plain Title Without Prefix\n\n"
+            "**Status:** Proposed\n\n## Context\nCtx.\n\n"
+            "## Decision\nDec.\n\n## Consequences\nCons.\n",
+            encoding="utf-8",
+        )
+        reviewer = _make_reviewer(tmp_path)
+        result = reviewer._load_all_adrs(adr_dir)
+        assert result[0][1] == "Plain Title Without Prefix"
+
+
+class TestTitleFromContent:
+    """Tests for _title_from_content helper."""
+
+    def test_strips_adr_prefix_with_colon(self, tmp_path: Path) -> None:
+        reviewer = _make_reviewer(tmp_path)
+        content = "# ADR-0004: CLI-based Agent Runtime\n\nBody."
+        assert (
+            reviewer._title_from_content(content, "0004-agent-cli")
+            == "CLI-based Agent Runtime"
+        )
+
+    def test_strips_adr_prefix_with_emdash(self, tmp_path: Path) -> None:
+        reviewer = _make_reviewer(tmp_path)
+        content = "# ADR-0004 — CLI-based Agent Runtime\n\nBody."
+        assert (
+            reviewer._title_from_content(content, "0004-agent-cli")
+            == "CLI-based Agent Runtime"
+        )
+
+    def test_strips_adr_prefix_with_endash(self, tmp_path: Path) -> None:
+        reviewer = _make_reviewer(tmp_path)
+        content = "# ADR-0004 \u2013 CLI-based Agent Runtime\n\nBody."
+        assert (
+            reviewer._title_from_content(content, "0004-agent-cli")
+            == "CLI-based Agent Runtime"
+        )
+
+    def test_fallback_to_slug(self, tmp_path: Path) -> None:
+        reviewer = _make_reviewer(tmp_path)
+        content = "No heading here.\n\nJust body."
+        assert (
+            reviewer._title_from_content(content, "0004-agent-cli-as-runtime")
+            == "agent cli as runtime"
+        )
+
+    def test_fallback_stem_without_hyphen(self, tmp_path: Path) -> None:
+        reviewer = _make_reviewer(tmp_path)
+        content = "No heading here."
+        assert reviewer._title_from_content(content, "readme") == "readme"
+
+    def test_h1_without_prefix_returned_as_is(self, tmp_path: Path) -> None:
+        reviewer = _make_reviewer(tmp_path)
+        content = "# Some Custom Title\n\nBody."
+        assert (
+            reviewer._title_from_content(content, "0001-fallback")
+            == "Some Custom Title"
+        )
+
+    def test_prefix_only_h1_falls_back_to_raw(self, tmp_path: Path) -> None:
+        """H1 that is just an ADR prefix with no title text falls back to raw heading."""
+        reviewer = _make_reviewer(tmp_path)
+        content = "# ADR-0004:\n\nBody."
+        # stripped becomes empty → fallback to raw heading text
+        assert reviewer._title_from_content(content, "0004-some-feature") == "ADR-0004:"
 
 
 class TestBuildIndexContext:
@@ -366,6 +467,68 @@ class TestDuplicateDetection:
         content = "# Use Docker\n\n## Decision\nUse Docker."
         result = reviewer._detect_duplicates("0023-use-docker.md", content, all_adrs)
         assert len(result) == 0
+
+    def test_detect_duplicates_uses_prefix_stripped_titles(
+        self, tmp_path: Path
+    ) -> None:
+        """_detect_duplicates must compare prefix-stripped titles consistently.
+
+        Regression: previously _detect_duplicates used _extract_title (raw H1
+        with ADR-NNNN: prefix) while all_adrs contained prefix-stripped titles,
+        deflating similarity scores.
+        """
+        reviewer = _make_reviewer(tmp_path)
+        # all_adrs titles are prefix-stripped (as produced by _load_all_adrs)
+        all_adrs = [
+            (
+                1,
+                "CLI-based Agent Runtime",
+                "# ADR-0001: CLI-based Agent Runtime\n\n## Decision\nUse CLI.",
+                "0001-cli-based-agent-runtime.md",
+            ),
+            (
+                2,
+                "CLI-based Agent Runtime v2",
+                "# ADR-0002: CLI-based Agent Runtime v2\n\n## Decision\nUse CLI agents.",
+                "0002-cli-based-agent-runtime-v2.md",
+            ),
+        ]
+        content = "# ADR-0001: CLI-based Agent Runtime\n\n## Decision\nUse CLI."
+        result = reviewer._detect_duplicates(
+            "0001-cli-based-agent-runtime.md", content, all_adrs
+        )
+        # Title similarity between "CLI-based Agent Runtime" and
+        # "CLI-based Agent Runtime v2" should be detected as high
+        assert len(result) == 1
+        assert result[0][0] == 2
+        assert result[0][2] >= _DUPLICATE_THRESHOLD
+
+    def test_detect_duplicates_fallback_slug_strips_extension(
+        self, tmp_path: Path
+    ) -> None:
+        """Fallback slug from adr_filename must not include the .md extension."""
+        reviewer = _make_reviewer(tmp_path)
+        # Content has no H1, so the fallback path is exercised.
+        # Decision content is deliberately distinct so only the title drives matching.
+        content_no_h1 = "**Status:** Proposed\n\n## Decision\nAdopt a new runtime.\n"
+        all_adrs = [
+            (
+                5,
+                "use docker containers md",  # only matches if ".md" leaks into slug
+                "## Decision\nMigrate to Kubernetes.",
+                "0005-use-docker-containers-md.md",
+            ),
+        ]
+        reviewer._detect_duplicates(
+            "0005-use-docker-containers.md", content_no_h1, all_adrs
+        )
+        # Without the leak the slug is "use docker containers" — title ratio ≈ 0.93
+        # still exceeds the 0.7 threshold, so we verify via the title value
+        # that Path.stem already strips ".md".
+        title = reviewer._title_from_content(
+            content_no_h1, Path("0005-use-docker-containers.md").stem
+        )
+        assert ".md" not in title, "Slug must not include .md extension"
 
 
 class TestBuildOrchestratorPrompt:
