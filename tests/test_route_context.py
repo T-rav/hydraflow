@@ -6,7 +6,6 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from fastapi import HTTPException
 
 from config import HydraFlowConfig
 from dashboard_routes import RouteContext
@@ -173,7 +172,7 @@ class TestRouteContextResolveRuntime:
         assert bus is rt.event_bus
         assert get_orch() is rt.orchestrator
 
-    def test_raises_404_for_unknown_slug(
+    def test_falls_back_to_defaults_for_unknown_slug(
         self,
         config: HydraFlowConfig,
         event_bus: EventBus,
@@ -182,12 +181,15 @@ class TestRouteContextResolveRuntime:
     ) -> None:
         registry = MagicMock()
         registry.get.return_value = None
+        registry.all = []
         ctx = _make_ctx(config, event_bus, state, tmp_path, registry=registry)
 
-        with pytest.raises(HTTPException) as exc_info:
-            ctx.resolve_runtime("missing-repo")
+        cfg, st, bus, get_orch = ctx.resolve_runtime("missing-repo")
 
-        assert exc_info.value.status_code == 404
+        # Falls back to defaults instead of 404
+        assert cfg is config
+        assert st is state
+        assert bus is event_bus
 
 
 class TestRouteContextPrManagerFor:
@@ -440,7 +442,6 @@ class TestRouteContextHitlSummaryRetryDue:
         state: StateTracker,
         tmp_path: Path,
     ) -> None:
-
         ctx = _make_ctx(config, event_bus, state, tmp_path)
         # Record a recent failure
         state.set_hitl_summary_failure(123, "test failure")
@@ -497,7 +498,7 @@ class TestRouteContextExecuteAdminTask:
         task_fn.assert_awaited_once_with(config)
 
     @pytest.mark.asyncio
-    async def test_returns_404_for_unknown_repo(
+    async def test_falls_back_to_defaults_for_unknown_repo(
         self,
         config: HydraFlowConfig,
         event_bus: EventBus,
@@ -506,11 +507,14 @@ class TestRouteContextExecuteAdminTask:
     ) -> None:
         registry = MagicMock()
         registry.get.return_value = None
+        registry.all = []
+        task_fn = AsyncMock(return_value=MagicMock(success=True, as_dict=lambda: {}))
         ctx = _make_ctx(config, event_bus, state, tmp_path, registry=registry)
 
-        response = await ctx.execute_admin_task("test-task", AsyncMock(), "missing")
+        response = await ctx.execute_admin_task("test-task", task_fn, "missing")
 
-        assert response.status_code == 404
+        # Falls back to default config instead of 404
+        assert response.status_code == 200
 
     @pytest.mark.asyncio
     async def test_returns_500_on_task_failure(
