@@ -14,12 +14,15 @@ import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic import ValidationError
 
 from file_util import atomic_write
 from models import StateData
+
+if TYPE_CHECKING:
+    from dolt_backend import DoltBackend
 
 from ._epic import EpicStateMixin
 from ._hitl import HITLStateMixin
@@ -35,7 +38,7 @@ logger = logging.getLogger("hydraflow.state")
 
 _V = TypeVar("_V")
 
-__all__ = ["StateTracker"]
+__all__ = ["StateTracker", "build_state_tracker"]
 
 
 class StateTracker(
@@ -78,15 +81,39 @@ class StateTracker(
                 logger.warning("Skipping non-integer state key: %r", k)
         return result
 
-    def __init__(self, state_file: Path) -> None:
+    def __init__(
+        self,
+        state_file: Path,
+        *,
+        dolt: DoltBackend | None = None,
+    ) -> None:
         self._path = state_file
+        self._dolt = dolt
         self._data: StateData = StateData()
         self.load()
 
     # --- persistence ---
 
     def load(self) -> None:
-        """Load state from disk, or initialise defaults."""
+        """Load state from Dolt (if configured) or disk."""
+        if self._dolt:
+            try:
+                loaded = self._dolt.load_state()
+                if loaded and isinstance(loaded, dict):
+                    self._data = StateData.model_validate(loaded)
+                    logger.info("State loaded from Dolt")
+                else:
+                    # Dolt empty — try file fallback for initial migration
+                    self._load_from_file()
+            except (ValueError, ValidationError) as exc:
+                logger.warning("Corrupt Dolt state, resetting: %s", exc, exc_info=True)
+                self._data = StateData()
+        else:
+            self._load_from_file()
+        self._maybe_migrate_worker_states()
+
+    def _load_from_file(self) -> None:
+        """Load state from the JSON file."""
         if self._path.exists():
             try:
                 loaded = json.loads(self._path.read_text())
@@ -103,13 +130,20 @@ class StateTracker(
             ) as exc:
                 logger.warning("Corrupt state file, resetting: %s", exc, exc_info=True)
                 self._data = StateData()
-        self._maybe_migrate_worker_states()
 
     def save(self) -> None:
-        """Flush current state to disk atomically."""
+        """Flush current state to Dolt (if configured) or disk."""
         self._data.last_updated = datetime.now(UTC).isoformat()
         data = self._data.model_dump_json(indent=2)
-        atomic_write(self._path, data)
+        if self._dolt:
+            self._dolt.save_state(data)
+        else:
+            atomic_write(self._path, data)
+
+    def commit_state(self, message: str = "state update") -> None:
+        """Create a Dolt version commit (no-op when using file backend)."""
+        if self._dolt:
+            self._dolt.commit(message)
 
     # --- reset ---
 
@@ -122,3 +156,23 @@ class StateTracker(
     def to_dict(self) -> dict[str, Any]:
         """Return a copy of the raw state dict."""
         return self._data.model_dump()
+
+
+def build_state_tracker(config: Any) -> StateTracker:
+    """Construct a ``StateTracker`` with the best available backend.
+
+    Uses embedded Dolt when the ``dolt`` CLI is installed, otherwise
+    falls back to JSON-file persistence.
+    """
+    dolt_backend = None
+    try:
+        from dolt_backend import DoltBackend
+
+        dolt_dir = Path(str(config.state_file)).parent / "dolt"
+        dolt_backend = DoltBackend(dolt_dir)
+        logger.info("Dolt state backend enabled at %s", dolt_dir)
+    except FileNotFoundError:
+        logger.info("dolt CLI not found — using file-based state")
+    except Exception:
+        logger.warning("Dolt init failed — using file-based state", exc_info=True)
+    return StateTracker(config.state_file, dolt=dolt_backend)
