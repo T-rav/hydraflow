@@ -2046,12 +2046,13 @@ def create_router(
 
         from orchestrator import HydraFlowOrchestrator
 
-        # Persist pipeline workers as disabled BEFORE creating the
-        # orchestrator.  _restore_state() reads this on startup so the
-        # workers are disabled from the very first loop iteration —
-        # no race window where they can pick up work.
+        # Remove pipeline workers from the disabled set — pipeline gating
+        # is handled solely by pipeline_enabled flag, not bg_worker_enabled.
         existing_disabled = state.get_disabled_workers()
-        state.set_disabled_workers(existing_disabled | set(_DEFAULT_PIPELINE_WORKERS))
+        pipeline_names = set(_DEFAULT_PIPELINE_WORKERS)
+        cleaned = existing_disabled - pipeline_names
+        if cleaned != existing_disabled:
+            state.set_disabled_workers(cleaned)
 
         new_orch = HydraFlowOrchestrator(
             config,
