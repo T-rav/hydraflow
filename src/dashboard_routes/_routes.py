@@ -2043,31 +2043,20 @@ def create_router(
 
         from orchestrator import HydraFlowOrchestrator
 
+        # Persist pipeline workers as disabled BEFORE creating the
+        # orchestrator.  _restore_state() reads this on startup so the
+        # workers are disabled from the very first loop iteration —
+        # no race window where they can pick up work.
+        existing_disabled = state.get_disabled_workers()
+        state.set_disabled_workers(existing_disabled | set(_DEFAULT_PIPELINE_WORKERS))
+
         new_orch = HydraFlowOrchestrator(
             config,
             event_bus=event_bus,
             state=state,
         )
         set_orchestrator(new_orch)
-
-        async def _run_with_pipeline_paused() -> None:
-            """Start the orchestrator then immediately disable pipeline workers.
-
-            _restore_state() runs inside run() and may re-enable workers from
-            persisted state, so we disable AFTER run() has started and the
-            orchestrator is running.
-            """
-            # Start run() in background, wait for it to be running
-            run_task = asyncio.create_task(new_orch.run())
-            # Wait until the orchestrator marks itself running
-            while not new_orch.running:
-                await asyncio.sleep(0.05)
-            # Now disable pipeline workers — after _restore_state() has completed
-            for w in _DEFAULT_PIPELINE_WORKERS:
-                new_orch.set_bg_worker_enabled(w, False)
-            await run_task
-
-        set_run_task(asyncio.create_task(_run_with_pipeline_paused()))
+        set_run_task(asyncio.create_task(new_orch.run()))
         await event_bus.publish(
             HydraFlowEvent(
                 type=EventType.ORCHESTRATOR_STATUS,
