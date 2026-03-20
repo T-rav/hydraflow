@@ -192,7 +192,24 @@ class HydraFlowOrchestrator:
 
     @pipeline_enabled.setter
     def pipeline_enabled(self, value: bool) -> None:
+        was_disabled = not self._pipeline_enabled
         self._pipeline_enabled = value
+        if value and was_disabled and self._running:
+            # Pipeline just turned on — run deferred repo init in background
+            asyncio.create_task(self._deferred_pipeline_start())
+
+    async def _deferred_pipeline_start(self) -> None:
+        """Run repo initialization that was skipped when pipeline was disabled."""
+        try:
+            await self._svc.worktrees.sanitize_repo()
+            await self._svc.prs.ensure_labels_exist()
+            await self._enable_rerere()
+            self._warn_if_agents_md_missing()
+            if self._current_session is None:
+                await self._start_session()
+            logger.info("Pipeline enabled — repo initialized and session started")
+        except Exception:
+            logger.exception("Failed deferred pipeline start")
 
     @property
     def current_session_id(self) -> str | None:
@@ -638,23 +655,32 @@ class HydraFlowOrchestrator:
         self._restore_state()
         await self._publish_status()
         logger.info(
-            "HydraFlow starting — repo=%s label=%s workers=%d poll=%ds",
+            "HydraFlow starting — repo=%s label=%s workers=%d poll=%ds pipeline=%s",
             self._config.repo,
             ",".join(self._config.ready_label),
             self._config.max_workers,
             self._config.poll_interval,
+            "enabled" if self._pipeline_enabled else "paused",
         )
 
-        await self._svc.worktrees.sanitize_repo()
-        await self._svc.prs.ensure_labels_exist()
-        await self._enable_rerere()
-        self._warn_if_agents_md_missing()
-        await self._start_session()
+        # Only initialize the repo and create a session when the pipeline
+        # is enabled.  When pipeline_enabled=False (dashboard mode), the
+        # orchestrator only runs background workers — no issue fetching,
+        # no repo sanitization, no session.
+        session_started = False
+        if self._pipeline_enabled:
+            await self._svc.worktrees.sanitize_repo()
+            await self._svc.prs.ensure_labels_exist()
+            await self._enable_rerere()
+            self._warn_if_agents_md_missing()
+            await self._start_session()
+            session_started = True
 
         try:
             await self._supervise_loops()
         finally:
-            await self._end_session()
+            if session_started:
+                await self._end_session()
             self._svc.planners.terminate()
             self._svc.agents.terminate()
             self._svc.reviewers.terminate()
@@ -774,7 +800,12 @@ class HydraFlowOrchestrator:
         """Run all loops plus the IssueStore poller, restarting any that crash."""
 
         async def _store_loop() -> None:
-            await self._svc.store.start(self._stop_event)
+            # Only poll GitHub for issues when pipeline is enabled
+            while not self._stop_event.is_set():
+                if self._pipeline_enabled:
+                    await self._svc.store.start(self._stop_event)
+                    return
+                await self._sleep_or_stop(self._config.poll_interval)
 
         loop_factories: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]] = [
             ("store", _store_loop),
