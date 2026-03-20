@@ -1,7 +1,13 @@
 # ADR-0023: CLI Architecture — argparse with Config Builder Pattern
 
-**Status:** Proposed
+**Status:** Superseded
 **Date:** 2026-03-08
+**Superseded:** 2026-03-19
+
+> **Superseded by PR #2457 — Remove CLI layer and consolidate into server API.**
+> Both `src/cli.py` and `src/hf_cli/__main__.py` were deliberately removed in commit `a914647`.
+> The config-merge behavior now lives in `src/runtime_config.py:load_runtime_config`,
+> and admin tasks are handled by `scripts/run_admin_task.py`.
 
 ## Context
 
@@ -104,6 +110,7 @@ without requiring a shared CLI framework.
 
 ## Related
 
+- Superseded by: PR #2457 — Remove CLI layer and consolidate into server API
 - Source memory: Issue #2268
 - `src/cli.py` — `build_config()`, `parse_args()`, `main()`
 - `src/hf_cli/__main__.py` — Two-layer CLI dispatcher
