@@ -1019,6 +1019,8 @@ export function HydraFlowProvider({ children }) {
         method: 'POST',
       })
       if (runtimeRes.ok) {
+        // Brief delay for async runtime startup to complete, then refresh
+        await new Promise(r => setTimeout(r, 1000))
         await Promise.all([fetchRuntimes(), fetchRepos()])
         return { ok: true }
       }
