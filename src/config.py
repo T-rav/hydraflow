@@ -1205,7 +1205,7 @@ class HydraFlowConfig(BaseModel):
         description="CPU cores per container",
     )
     docker_memory_limit: str = Field(
-        default="4g",
+        default="8g",
         description="Memory limit per container",
     )
     docker_network_mode: Literal["bridge", "none", "host"] = Field(
@@ -1947,7 +1947,7 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
     # Docker resource limit overrides (validated fields handled manually
     # because str/int overrides need format/bounds validation that
     # the data-driven tables don't provide)
-    if config.docker_memory_limit == "4g":  # still at default
+    if config.docker_memory_limit == "8g":  # still at default
         env_mem = os.environ.get("HYDRAFLOW_DOCKER_MEMORY_LIMIT")
         if env_mem is not None:
             if not re.fullmatch(r"\d+[bkmg]", env_mem, re.IGNORECASE):

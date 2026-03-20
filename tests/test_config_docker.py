@@ -65,7 +65,7 @@ class TestDockerConfigDefaults:
             worktree_base=tmp_path / "wt",
             state_file=tmp_path / "s.json",
         )
-        assert cfg.docker_memory_limit == "4g"
+        assert cfg.docker_memory_limit == "8g"
 
     def test_docker_pids_limit_default(self, tmp_path: Path) -> None:
         cfg = HydraFlowConfig(
@@ -564,7 +564,7 @@ class TestDockerSizeNotationValidator:
             worktree_base=tmp_path / "wt",
             state_file=tmp_path / "s.json",
         )
-        assert cfg.docker_memory_limit == "4g"
+        assert cfg.docker_memory_limit == "8g"
 
     def test_invalid_size_with_suffix_gb(self, tmp_path: Path) -> None:
         """'4gb' should fail — only single-char unit suffix is valid."""
