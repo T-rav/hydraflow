@@ -49,13 +49,13 @@ See the full product walkthrough and visuals at [hydraflow.ai](https://hydraflow
 - [GitHub CLI](https://cli.github.com/) authenticated (`gh auth login`)
 - Claude CLI and/or Codex CLI available on PATH
 - Node.js 20.19+ or 22.12+ (dashboard only)
-- [Beads](https://www.npmjs.com/package/@beads/bd) for task decomposition: `npm install -g @beads/bd`
+- [Beads](https://www.npmjs.com/package/@beads/bd) (optional — auto-installed when needed for task decomposition)
 
 ## Quick Start
 
 ```bash
 # in your project root
-git submodule add https://github.com/T-rav/hyrda.git hydraflow
+git submodule add https://github.com/T-rav/hydra.git hydraflow
 git submodule update --init --recursive
 cd hydraflow
 
@@ -106,6 +106,21 @@ PYTHONPATH=src python scripts/call_api.py POST /api/admin/clean
 > Set `HYDRAFLOW_HOME=~/.hydraflow/<repo-slug>` (or any preferred location) before
 > starting the server if you want those artifacts stored outside the working tree.
 
+### Background Loops
+
+Beyond the five pipeline stages, HydraFlow runs background loops for operational health:
+
+- **PR unsticker** — recovers stale PRs stuck in review or CI
+- **Memory sync** — compacts and syncs agent memory artifacts
+- **Metrics sync** — collects pipeline and GitHub metrics
+- **Manifest refresh** — keeps repo manifests current
+- **Epic monitor / sweeper** — tracks epic progress and generates changelogs
+- **Verify monitor** — confirms post-merge verification issues
+- **Worktree GC** — prunes stale worktrees from merged PRs
+- **Runs GC** — cleans up old run artifacts per retention policy
+- **ADR reviewer** — council-based Architecture Decision Record reviews
+- **Report issue** — processes bug reports with screenshot scanning
+
 ### Self-improving harness
 
 This repo includes a harnessed self-improvement loop (observation + session retro + memory candidate artifacts).
@@ -113,15 +128,23 @@ See [docs/self-improving-harness.md](docs/self-improving-harness.md) for importe
 
 ## Issue Flow Labels
 
-- `hydraflow-find`
-- `hydraflow-plan`
-- `hydraflow-ready`
-- `hydraflow-review`
-- `hydraflow-hitl`
-- `hydraflow-hitl-active`
-- `hydraflow-fixed`
+**Pipeline lifecycle:**
+- `hydraflow-find` — triage queue
+- `hydraflow-plan` — planning stage
+- `hydraflow-ready` — ready for implementation
+- `hydraflow-review` — PR under review
+- `hydraflow-hitl` / `hydraflow-hitl-active` / `hydraflow-hitl-autofix` — human-in-the-loop escalation
+- `hydraflow-fixed` — completed
 
-You can override label names via `.env` (created from `.env.sample` during `make setup`).
+**Auxiliary labels:**
+- `hydraflow-epic` / `hydraflow-epic-child` — epic lifecycle management
+- `hydraflow-verify` — post-merge verification tracking
+- `hydraflow-improve` / `hydraflow-memory` / `hydraflow-manifest` / `hydraflow-metrics` — internal housekeeping
+- `hydraflow-transcript` — session transcript artifacts
+- `hydraflow-visual-required` / `hydraflow-visual-skip` — visual validation controls
+- `hydraflow-dup` — duplicate detection
+
+All label names are overridable via `.env` (created from `.env.sample` during `make setup`).
 
 ## Prep Output and Local Tracking
 
