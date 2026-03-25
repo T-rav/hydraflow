@@ -170,6 +170,8 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ),
     ("screenshot_gist_public", "HYDRAFLOW_SCREENSHOT_GIST_PUBLIC", False),
     ("skip_preflight", "HYDRAFLOW_SKIP_PREFLIGHT", False),
+    ("manifest_issue_enabled", "HYDRAFLOW_MANIFEST_ISSUE_ENABLED", False),
+    ("metrics_issue_enabled", "HYDRAFLOW_METRICS_ISSUE_ENABLED", False),
 ]
 
 # Literal-typed env-var overrides.
@@ -415,9 +417,17 @@ class HydraFlowConfig(BaseModel):
         default=["hydraflow-manifest"],
         description="Labels for manifest snapshot persistence issues (OR logic)",
     )
+    manifest_issue_enabled: bool = Field(
+        default=False,
+        description="Create a GitHub issue to persist manifest snapshots",
+    )
     metrics_label: list[str] = Field(
         default=["hydraflow-metrics"],
         description="Labels for the metrics persistence issue (OR logic)",
+    )
+    metrics_issue_enabled: bool = Field(
+        default=False,
+        description="Create a GitHub issue to persist metrics snapshots",
     )
     dup_label: list[str] = Field(
         default=["hydraflow-dup"],
