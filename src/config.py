@@ -123,6 +123,7 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("adr_review_model", "HYDRAFLOW_ADR_REVIEW_MODEL", "sonnet"),
     ("changelog_file", "HYDRAFLOW_CHANGELOG_FILE", ""),
     ("release_tag_prefix", "HYDRAFLOW_RELEASE_TAG_PREFIX", "v"),
+    ("main_branch", "HYDRAFLOW_MAIN_BRANCH", "main"),
     ("repos_workspace_dir", "HYDRAFLOW_REPOS_WORKSPACE_DIR", "~/.hydra/repos"),
 ]
 
