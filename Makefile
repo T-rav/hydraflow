@@ -98,7 +98,13 @@ docker-ensure:
 		|| docker pull $(DOCKER_IMAGE) 2>/dev/null \
 		|| $(MAKE) docker-build
 
+EXECUTION_MODE ?= $(or $(HYDRAFLOW_EXECUTION_MODE),host)
+
+ifeq ($(EXECUTION_MODE),docker)
 run: check-node-ui docker-ensure
+else
+run: check-node-ui
+endif
 	@mkdir -p $(LOG_DIR)
 	@echo "$(BLUE)Starting HydraFlow — backend :$(PORT) + frontend :5556$(RESET)"
 	@echo "$(GREEN)Open http://localhost:5556 to use the dashboard$(RESET)"
