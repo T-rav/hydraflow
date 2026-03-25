@@ -490,6 +490,10 @@ class TestDotenvLoading:
 
         from dotenv import load_dotenv
 
-        load_dotenv(dotenv_path=env_file)
+        load_dotenv(dotenv_path=env_file, override=True)
 
         assert os.environ.get("HYDRAFLOW_MAIN_BRANCH") == "staging"
+
+        # Clean up: load_dotenv writes directly to os.environ, bypassing
+        # monkeypatch tracking.  Remove explicitly so it doesn't leak.
+        os.environ.pop("HYDRAFLOW_MAIN_BRANCH", None)
