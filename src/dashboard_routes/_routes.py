@@ -49,6 +49,7 @@ from dashboard_routes._common import (
     _status_sort_key,
 )
 from events import EventBus, EventType, HydraFlowEvent
+from github_cache import GitHubDataCache
 from issue_fetcher import IssueFetcher
 from metrics_manager import get_metrics_cache_dir
 from models import (
@@ -385,7 +386,40 @@ class RouteContext:
         if not default:
             return False
         normalized = default.replace("/", "-")
-        return slug in (default, normalized)
+        slug_lower = slug.lower()
+        return slug_lower in (default.lower(), normalized.lower())
+
+    def _is_default_pipeline_active(self) -> bool:
+        """Check if the default repo's pipeline is enabled.
+
+        Returns True when no orchestrator exists (headless/test mode).
+        """
+        orch = self.get_orchestrator()
+        if orch is None:
+            return True
+        if not orch.running:
+            return False
+        return orch.pipeline_enabled
+
+    def is_repo_pipeline_active(self, slug: str | None) -> bool:
+        """Return whether the resolved repo's pipeline is actively processing.
+
+        When *slug* is ``None`` (All repos view), returns True if ANY
+        repo (default or added) has an active pipeline.
+        """
+        if slug is None:
+            if self._is_default_pipeline_active():
+                return True
+            if self.registry is not None:
+                return any(getattr(rt, "running", False) for rt in self.registry.all)
+            return False
+        if self._is_default_repo(slug):
+            return self._is_default_pipeline_active()
+        if self.registry is not None:
+            rt = self.registry.get(slug)
+            if rt is not None:
+                return getattr(rt, "running", False)
+        return False
 
     def resolve_runtime(
         self,
@@ -405,9 +439,23 @@ class RouteContext:
             if self._is_default_repo(slug):
                 return self.config, self.state, self.event_bus, self.get_orchestrator
             rt: RepoRuntime | None = self.registry.get(slug)
-            if rt is None:
-                raise HTTPException(status_code=404, detail=f"Unknown repo: {slug}")
-            return rt.config, rt.state, rt.event_bus, lambda: rt.orchestrator
+            if rt is not None:
+                return rt.config, rt.state, rt.event_bus, lambda: rt.orchestrator
+            # Also try case-insensitive match before giving up
+            slug_lower = slug.lower()
+            for registered_rt in self.registry.all:
+                if registered_rt.slug.lower() == slug_lower:
+                    return (
+                        registered_rt.config,
+                        registered_rt.state,
+                        registered_rt.event_bus,
+                        lambda _rt=registered_rt: _rt.orchestrator,
+                    )
+            # Repo may be registered (in /api/repos) but not yet started
+            # (not in the runtime registry). Fall back to defaults so the
+            # WS connects and the UI renders — just with no live events.
+            logger.debug("Repo %r not in runtime registry — using defaults", slug)
+            return self.config, self.state, self.event_bus, self.get_orchestrator
         return self.config, self.state, self.event_bus, self.get_orchestrator
 
     async def execute_admin_task(
@@ -620,6 +668,15 @@ def create_router(
         Callable[[], HydraFlowOrchestrator | None],
     ]:
         return ctx.resolve_runtime(slug)
+
+    def _is_pipeline_active(slug: str | None) -> bool:
+        """Check if the selected repo's pipeline is running.
+
+        When no repo is selected (All repos view), checks the default
+        repo's pipeline state — data only shows when something is
+        actually running.
+        """
+        return ctx.is_repo_pipeline_active(slug)
 
     async def _execute_admin_task(
         task_name: str,
@@ -1208,6 +1265,30 @@ def create_router(
         }
         dashboard_public = not _is_loopback_host(config.dashboard_host)
 
+        # GitHub cache health (if available)
+        github_cache_health: dict[str, object] = {"status": "unknown"}
+        if orchestrator is not None and isinstance(
+            getattr(orchestrator, "github_cache", None), GitHubDataCache
+        ):
+            gh_cache: GitHubDataCache = orchestrator.github_cache
+            cache_ages = {
+                ds: round(gh_cache.get_cache_age(ds), 1)
+                for ds in ("open_prs", "hitl_items", "label_counts")
+            }
+            max_age = max(cache_ages.values()) if cache_ages else 0
+            github_cache_health = {
+                "status": "stale" if max_age > config.data_poll_interval * 3 else "ok",
+                "age_seconds": cache_ages,
+            }
+
+        # Queue depths
+        queue_depths: dict[str, int] = {}
+        if orchestrator is not None and hasattr(orchestrator, "_svc"):
+            issue_store = getattr(orchestrator._svc, "store", None)
+            if issue_store is not None and hasattr(issue_store, "queue_stats"):
+                qstats = issue_store.queue_stats()
+                queue_depths = dict(getattr(qstats, "queue_depth", {}).items())
+
         checks = {
             "orchestrator": {
                 "status": orchestrator_status,
@@ -1232,6 +1313,8 @@ def create_router(
                 "enabled": config.hindsight_enabled,
                 "configured": bool(config.hindsight_url),
             },
+            "github_cache": github_cache_health,
+            "queue_depths": queue_depths,
         }
         ready = checks["orchestrator"]["status"] == "running" and checks["workers"][
             "status"
@@ -1339,6 +1422,8 @@ def create_router(
         repo: RepoSlugParam = None,
     ) -> JSONResponse:
         """Return current queue depths, active counts, and throughput."""
+        if not _is_pipeline_active(repo):
+            return JSONResponse(QueueStats().model_dump())
         _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
         orch = _get_orch()
         if orch:
@@ -1394,6 +1479,8 @@ def create_router(
         repo: RepoSlugParam = None,
     ) -> JSONResponse:
         """Return current pipeline snapshot with issues per stage."""
+        if not _is_pipeline_active(repo):
+            return JSONResponse(PipelineSnapshot().model_dump())
         _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
         orch = _get_orch()
         if orch:
@@ -1416,6 +1503,8 @@ def create_router(
         repo: RepoSlugParam = None,
     ) -> JSONResponse:
         """Return lightweight pipeline stats (counts only, no issue details)."""
+        if not _is_pipeline_active(repo):
+            return JSONResponse({})
         _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
         orch = _get_orch()
         if orch:
@@ -1445,28 +1534,44 @@ def create_router(
     ) -> JSONResponse:
         """Fetch all open HydraFlow PRs from GitHub."""
         _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
-        manager = _pr_manager_for(_cfg, _bus)
-        all_labels = list(
-            {
-                *_cfg.ready_label,
-                *_cfg.review_label,
-                *_cfg.fixed_label,
-                *_cfg.hitl_label,
-                *_cfg.hitl_active_label,
-                *_cfg.planner_label,
-                *_cfg.improve_label,
-            }
-        )
-        items = await manager.list_open_prs(all_labels)
+        # Use cached data when orchestrator has a github cache
+        orch = _get_orch()
+        if orch and isinstance(getattr(orch, "github_cache", None), GitHubDataCache):
+            items = orch.github_cache.get_open_prs()
+        else:
+            manager = _pr_manager_for(_cfg, _bus)
+            all_labels = list(
+                {
+                    *_cfg.ready_label,
+                    *_cfg.review_label,
+                    *_cfg.fixed_label,
+                    *_cfg.hitl_label,
+                    *_cfg.hitl_active_label,
+                    *_cfg.planner_label,
+                    *_cfg.improve_label,
+                }
+            )
+            items = await manager.list_open_prs(all_labels)
         # Overlay merged flag from IssueStore so the frontend has
         # authoritative merged state instead of session-volatile flags.
-        orch = _get_orch()
+        if not orch:
+            orch = _get_orch()
         if orch:
             merged_numbers = orch.issue_store.get_merged_numbers()
             for item in items:
-                if item.issue in merged_numbers:
-                    item.merged = True
-        return JSONResponse([item.model_dump() for item in items])
+                issue_num = (
+                    item.get("issue")
+                    if isinstance(item, dict)
+                    else getattr(item, "issue", None)
+                )
+                if issue_num in merged_numbers:
+                    if isinstance(item, dict):
+                        item["merged"] = True
+                    else:
+                        item.merged = True
+        return JSONResponse(
+            [item if isinstance(item, dict) else item.model_dump() for item in items]
+        )
 
     @router.get("/api/epics")
     async def get_epics(
@@ -1720,18 +1825,29 @@ def create_router(
         repo: RepoSlugParam = None,
     ) -> JSONResponse:
         """Fetch issues/PRs labeled for human-in-the-loop (stuck on CI)."""
+        if not _is_pipeline_active(repo):
+            return JSONResponse([])
         _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
-        hitl_labels = list(dict.fromkeys([*_cfg.hitl_label, *_cfg.hitl_active_label]))
-        manager = _pr_manager_for(_cfg, _bus)
-        items = await manager.list_hitl_items(hitl_labels)
         orch = _get_orch()
+        # Use cached data when available
+        if orch and isinstance(getattr(orch, "github_cache", None), GitHubDataCache):
+            items = orch.github_cache.get_hitl_items()
+        else:
+            hitl_labels = list(
+                dict.fromkeys([*_cfg.hitl_label, *_cfg.hitl_active_label])
+            )
+            manager = _pr_manager_for(_cfg, _bus)
+            items = await manager.list_hitl_items(hitl_labels)
         enriched = []
         for item in items:
-            data = item.model_dump()
+            data = dict(item) if isinstance(item, dict) else item.model_dump()
+            issue_num: int = int(
+                data.get("issue", 0) if isinstance(item, dict) else item.issue
+            )
             if orch:
-                data["status"] = orch.get_hitl_status(item.issue)
-            cause = _state.get_hitl_cause(item.issue)
-            origin = _state.get_hitl_origin(item.issue)
+                data["status"] = orch.get_hitl_status(issue_num)
+            cause = _state.get_hitl_cause(issue_num)
+            origin = _state.get_hitl_origin(issue_num)
             if not cause and origin:
                 if origin in _cfg.improve_label:
                     cause = "Self-improvement proposal"
@@ -1755,10 +1871,10 @@ def create_router(
                 or "bug report detected" in cause.lower()
             ):
                 data["issueTypeReview"] = True
-            cached_summary = state.get_hitl_summary(item.issue)
+            cached_summary = state.get_hitl_summary(issue_num)
             data["llmSummary"] = cached_summary or ""
-            data["llmSummaryUpdatedAt"] = state.get_hitl_summary_updated_at(item.issue)
-            visual_ev = state.get_hitl_visual_evidence(item.issue)
+            data["llmSummaryUpdatedAt"] = state.get_hitl_summary_updated_at(issue_num)
+            visual_ev = state.get_hitl_visual_evidence(issue_num)
             if visual_ev:
                 data["visualEvidence"] = visual_ev.model_dump()
             if (
@@ -1766,10 +1882,10 @@ def create_router(
                 and config.transcript_summarization_enabled
                 and not config.dry_run
                 and bool(config.gh_token)
-                and _hitl_summary_retry_due(item.issue)
+                and _hitl_summary_retry_due(issue_num)
             ):
                 asyncio.create_task(
-                    _warm_hitl_summary(item.issue, cause=cause or "", origin=origin)
+                    _warm_hitl_summary(issue_num, cause=cause or "", origin=origin)
                 )
             enriched.append(data)
 
@@ -2045,10 +2161,19 @@ def create_router(
 
         from orchestrator import HydraFlowOrchestrator
 
+        # Remove pipeline workers from the disabled set — pipeline gating
+        # is handled solely by pipeline_enabled flag, not bg_worker_enabled.
+        existing_disabled = state.get_disabled_workers()
+        pipeline_names = set(_DEFAULT_PIPELINE_WORKERS)
+        cleaned = existing_disabled - pipeline_names
+        if cleaned != existing_disabled:
+            state.set_disabled_workers(cleaned)
+
         new_orch = HydraFlowOrchestrator(
             config,
             event_bus=event_bus,
             state=state,
+            pipeline_enabled=False,
         )
         set_orchestrator(new_orch)
         set_run_task(asyncio.create_task(new_orch.run()))
@@ -3105,6 +3230,16 @@ def create_router(
             return JSONResponse({"error": "Issue not found"}, status_code=404)
         return JSONResponse(timeline.model_dump())
 
+    @router.get("/api/timeline/completed")
+    async def get_completed_timelines() -> JSONResponse:
+        """Return persisted timelines for completed (merged) issues.
+
+        Unlike /api/timeline which derives from ephemeral events,
+        these survive event log rotation.
+        """
+        timelines = state.get_all_completed_timelines()
+        return JSONResponse([t.model_dump() for t in timelines.values()])
+
     # --- Repo runtime lifecycle endpoints ---
 
     def _is_default_repo(slug: str) -> bool:
@@ -3120,10 +3255,11 @@ def create_router(
         # Always include the default (host) repo.
         orch = get_orchestrator()
         pipeline_active = _default_repo_pipeline_running()
+        default_slug = config.repo.replace("/", "-") if config.repo else ""
         if config.repo:
             infos.append(
                 RepoRuntimeInfo(
-                    slug=config.repo,
+                    slug=default_slug,
                     repo=config.repo,
                     running=pipeline_active,
                     session_id=orch.current_session_id
@@ -3153,8 +3289,9 @@ def create_router(
         if _is_default_repo(slug):
             orch = get_orchestrator()
             pipeline_active = _default_repo_pipeline_running()
+            default_slug = config.repo.replace("/", "-") if config.repo else ""
             info = RepoRuntimeInfo(
-                slug=config.repo,
+                slug=default_slug,
                 repo=config.repo,
                 running=pipeline_active,
                 session_id=orch.current_session_id if orch and orch.running else None,
@@ -3179,11 +3316,11 @@ def create_router(
     _DEFAULT_PIPELINE_WORKERS = ("triage", "plan", "implement", "review", "hitl")
 
     def _default_repo_pipeline_running() -> bool:
-        """Return True if any pipeline worker is enabled on the default repo."""
+        """Return True if the default repo's pipeline is enabled."""
         orch = get_orchestrator()
         if not orch or not orch.running:
             return False
-        return any(orch.is_bg_worker_enabled(w) for w in _DEFAULT_PIPELINE_WORKERS)
+        return orch.pipeline_enabled
 
     @router.post("/api/runtimes/{slug}/start")
     async def start_runtime(slug: str) -> JSONResponse:
@@ -3194,8 +3331,7 @@ def create_router(
                 return JSONResponse(
                     {"error": "Orchestrator not running"}, status_code=400
                 )
-            for w in _DEFAULT_PIPELINE_WORKERS:
-                orch.set_bg_worker_enabled(w, True)
+            orch.pipeline_enabled = True
             return JSONResponse({"status": "started", "slug": slug})
 
         if registry is None:
@@ -3217,8 +3353,7 @@ def create_router(
             orch = get_orchestrator()
             if not orch or not orch.running:
                 return JSONResponse({"error": "Not running"}, status_code=400)
-            for w in _DEFAULT_PIPELINE_WORKERS:
-                orch.set_bg_worker_enabled(w, False)
+            orch.pipeline_enabled = False
             return JSONResponse({"status": "stopped", "slug": slug})
 
         if registry is None:
@@ -3272,9 +3407,10 @@ def create_router(
             payload: list[dict[str, Any]] = []
             for rec in records:
                 runtime = registry.get(rec.slug) if registry else None
+                safe_slug = rec.slug.replace("/", "-") if rec.slug else rec.slug
                 payload.append(
                     {
-                        "slug": rec.slug,
+                        "slug": safe_slug,
                         "repo": rec.repo,
                         "path": rec.path,
                         "running": bool(runtime.running) if runtime else False,

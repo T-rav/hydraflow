@@ -12,6 +12,8 @@ from config import HydraFlowConfig
 from log import setup_logging
 from runtime_config import DEFAULT_LOG_FILE, load_runtime_config
 
+logger = logging.getLogger("hydraflow.server")
+
 
 async def _run_with_dashboard(config: HydraFlowConfig) -> None:
     from dashboard import HydraFlowDashboard  # noqa: PLC0415
@@ -32,6 +34,31 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
 
     repo_store = RepoRegistryStore(config.data_root)
     registry = RepoRuntimeRegistry()
+
+    # Restore previously registered repos into the runtime registry.
+    # The repo store persists to disk, but the registry is in-memory —
+    # without this, added repos are lost on restart and their play
+    # buttons return 404.
+    for record in repo_store.list():
+        if not record.path:
+            continue
+        repo_path = Path(record.path)
+        if not repo_path.is_dir():
+            logger.warning(
+                "Skipping stored repo %s — path %s not found", record.slug, record.path
+            )
+            continue
+        try:
+            repo_cfg = load_runtime_config(
+                overrides={
+                    "repo_root": str(repo_path),
+                    **({"repo": record.slug} if record.slug else {}),
+                }
+            )
+            await registry.register(repo_cfg)
+            logger.info("Restored registered repo %r from store", record.slug)
+        except Exception:
+            logger.warning("Failed to restore repo %s", record.slug, exc_info=True)
 
     async def _register_repo(
         repo_path: Path, slug: str | None
@@ -108,11 +135,27 @@ async def _run_headless(config: HydraFlowConfig) -> None:
     await runtime.run()
 
 
+async def _run_preflight(config: HydraFlowConfig) -> bool:
+    """Run preflight checks; return True if startup should proceed."""
+    from preflight import log_preflight_results, run_preflight_checks  # noqa: PLC0415
+
+    if config.skip_preflight:
+        logger.info("Preflight checks skipped (skip_preflight=True)")
+        return True
+    results = await run_preflight_checks(config)
+    healthy = log_preflight_results(results)
+    if not healthy:
+        logger.error("Preflight checks failed — aborting startup")
+    return healthy
+
+
 async def _run(config: HydraFlowConfig) -> None:
     # NOTE: Tests patch _run_with_dashboard / _run_headless (private names)
     # because these are heavyweight server-starting functions that bind ports
     # and block forever.  Extracting them as injectable dependencies would be
     # over-engineering for a two-branch dispatch function.
+    if not await _run_preflight(config):
+        return
     if config.dashboard_enabled:
         await _run_with_dashboard(config)
     else:

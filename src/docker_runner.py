@@ -311,23 +311,48 @@ class DockerRunner:
         self._user_tool_mounts_cache: dict[str, dict[str, str]] | None = None
         self._user_tool_mounts_cache_key: tuple[str, str, str, str] | None = None
 
-    def _ensure_client(self) -> None:
-        """Verify Docker is reachable; reconnect if the daemon was restarted."""
+    def _ensure_client(self, max_retries: int = 6, delay: float = 5.0) -> None:
+        """Verify Docker is reachable; wait and retry if the daemon is restarting.
+
+        Retries up to *max_retries* times with *delay* seconds between attempts,
+        giving Docker Desktop time to restart (e.g. via launchd auto-restart).
+        """
+        import time  # noqa: PLC0415
+
         import docker  # noqa: PLC0415
 
         try:
             self._client.ping()
+            return
         except Exception:
-            logger.warning("Docker daemon unreachable — attempting reconnect")
+            logger.debug("Docker ping failed on attempt, will retry", exc_info=True)
+
+        for attempt in range(1, max_retries + 1):
+            logger.warning(
+                "Docker daemon unreachable — waiting %ds (attempt %d/%d)",
+                delay,
+                attempt,
+                max_retries,
+            )
+            time.sleep(delay)
             try:
                 self._client = docker.from_env()
                 self._client.ping()
-                logger.info("Docker daemon reconnected")
+                logger.info("Docker daemon reconnected after %d attempt(s)", attempt)
+                return
             except Exception:
-                raise RuntimeError(
-                    "Docker daemon is not available. "
-                    "Start Docker Desktop or check the Docker socket."
-                ) from None
+                logger.warning(
+                    "Docker reconnect failed (attempt %d/%d)",
+                    attempt,
+                    max_retries,
+                    exc_info=True,
+                )
+                continue
+
+        raise RuntimeError(
+            f"Docker daemon not available after {max_retries} retries "
+            f"({max_retries * delay:.0f}s). Start Docker Desktop or check the Docker socket."
+        )
 
     async def __aenter__(self) -> DockerRunner:
         return self
@@ -518,10 +543,10 @@ class DockerRunner:
             None,
             lambda: self._client.containers.create(**container_kwargs),  # type: ignore[arg-type]
         )
-        self._containers.add(container)
 
         try:
             await loop.run_in_executor(None, container.start)
+            self._containers.add(container)
             attach_params = {"stdout": 1, "stderr": 1, "stream": 1}
             if needs_stdin:
                 attach_params["stdin"] = 1
@@ -539,7 +564,9 @@ class DockerRunner:
             try:
                 await loop.run_in_executor(None, lambda: container.remove(force=True))
             except Exception:
-                logger.debug("Failed to remove container during cleanup", exc_info=True)
+                logger.warning(
+                    "Failed to remove container during cleanup", exc_info=True
+                )
             self._containers.discard(container)
             raise
 
@@ -591,10 +618,10 @@ class DockerRunner:
             None,
             lambda: self._client.containers.create(**container_kwargs),
         )
-        self._containers.add(container)
 
         try:
             await loop.run_in_executor(None, container.start)
+            self._containers.add(container)
 
             result = await asyncio.wait_for(
                 loop.run_in_executor(None, container.wait),
@@ -623,13 +650,15 @@ class DockerRunner:
             try:
                 await loop.run_in_executor(None, container.kill)
             except Exception:
-                logger.debug("Failed to kill container on timeout", exc_info=True)
+                logger.warning("Failed to kill container on timeout", exc_info=True)
             raise
         finally:
             try:
                 await loop.run_in_executor(None, lambda: container.remove(force=True))
             except Exception:
-                logger.debug("Failed to remove container during cleanup", exc_info=True)
+                logger.warning(
+                    "Failed to remove container during cleanup", exc_info=True
+                )
             self._containers.discard(container)
 
     async def cleanup(self) -> None:
@@ -641,7 +670,9 @@ class DockerRunner:
                     None, lambda c=container: c.remove(force=True)
                 )
             except Exception:
-                logger.debug("Failed to remove container during cleanup", exc_info=True)
+                logger.warning(
+                    "Failed to remove container during cleanup", exc_info=True
+                )
         self._containers.clear()
 
 

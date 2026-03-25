@@ -104,6 +104,8 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         50_000,
     ),
     ("hindsight_timeout", "HYDRAFLOW_HINDSIGHT_TIMEOUT", 30),
+    ("state_backup_interval", "HYDRAFLOW_STATE_BACKUP_INTERVAL", 300),
+    ("state_backup_count", "HYDRAFLOW_STATE_BACKUP_COUNT", 3),
 ]
 
 _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
@@ -171,6 +173,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("screenshot_gist_public", "HYDRAFLOW_SCREENSHOT_GIST_PUBLIC", False),
     ("hindsight_enabled", "HYDRAFLOW_HINDSIGHT_ENABLED", False),
     ("hindsight_exclusive", "HYDRAFLOW_HINDSIGHT_EXCLUSIVE", False),
+    ("skip_preflight", "HYDRAFLOW_SKIP_PREFLIGHT", False),
 ]
 
 # Literal-typed env-var overrides.
@@ -1041,6 +1044,20 @@ class HydraFlowConfig(BaseModel):
         description="Days of event history to retain during rotation",
     )
 
+    # State backup
+    state_backup_interval: int = Field(
+        default=300,
+        ge=60,
+        le=86400,
+        description="Seconds between automatic state.json backups",
+    )
+    state_backup_count: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Number of rotated state.json backup generations to keep",
+    )
+
     # Config file persistence
     config_file: Path | None = Field(
         default=None,
@@ -1216,6 +1233,9 @@ class HydraFlowConfig(BaseModel):
     # Execution mode
     dry_run: bool = Field(
         default=False, description="Log actions without executing them"
+    )
+    skip_preflight: bool = Field(
+        default=False, description="Skip startup preflight dependency checks"
     )
     execution_mode: Literal["host", "docker"] = Field(
         default="host",

@@ -51,6 +51,7 @@ from subprocess_util import (
 if TYPE_CHECKING:
     from base_background_loop import BaseBackgroundLoop
     from crate_manager import CrateManager
+    from github_cache import GitHubDataCache
     from issue_store import IssueStore
     from metrics_manager import MetricsManager
     from run_recorder import RunRecorder
@@ -74,6 +75,7 @@ class HydraFlowOrchestrator:
         config: HydraFlowConfig,
         event_bus: EventBus | None = None,
         state: StateTracker | None = None,
+        pipeline_enabled: bool = True,
     ) -> None:
         self._config = config
         self._bus = event_bus or EventBus()
@@ -88,6 +90,9 @@ class HydraFlowOrchestrator:
         # Stop mechanism for dashboard control
         self._stop_event = asyncio.Event()
         self._running = False
+        # Pipeline gate — when False, pipeline loops sleep until play is pressed.
+        # Defaults to True for headless mode / tests; dashboard passes False.
+        self._pipeline_enabled = pipeline_enabled
         # Auth failure flag — set when a loop crashes due to AuthenticationError
         self._auth_failed = False
         # Credit pause — set when API credits are exhausted
@@ -161,6 +166,11 @@ class HydraFlowOrchestrator:
         return self._state
 
     @property
+    def github_cache(self) -> GitHubDataCache:
+        """Expose GitHub data cache for dashboard endpoints."""
+        return self._svc.github_cache
+
+    @property
     def run_recorder(self) -> RunRecorder:
         """Expose run recorder for dashboard API."""
         return self._svc.run_recorder
@@ -174,6 +184,32 @@ class HydraFlowOrchestrator:
     def running(self) -> bool:
         """Whether the orchestrator is currently executing."""
         return self._running
+
+    @property
+    def pipeline_enabled(self) -> bool:
+        """Whether the pipeline loops should process work."""
+        return self._pipeline_enabled
+
+    @pipeline_enabled.setter
+    def pipeline_enabled(self, value: bool) -> None:
+        was_disabled = not self._pipeline_enabled
+        self._pipeline_enabled = value
+        if value and was_disabled and self._running:
+            # Pipeline just turned on — run deferred repo init in background
+            asyncio.create_task(self._deferred_pipeline_start())
+
+    async def _deferred_pipeline_start(self) -> None:
+        """Run repo initialization that was skipped when pipeline was disabled."""
+        try:
+            await self._svc.worktrees.sanitize_repo()
+            await self._svc.prs.ensure_labels_exist()
+            await self._enable_rerere()
+            self._warn_if_agents_md_missing()
+            if self._current_session is None:
+                await self._start_session()
+            logger.info("Pipeline enabled — repo initialized and session started")
+        except Exception:
+            logger.exception("Failed deferred pipeline start")
 
     @property
     def current_session_id(self) -> str | None:
@@ -356,7 +392,13 @@ class HydraFlowOrchestrator:
         return self._hitl_ctrl.hitl_corrections
 
     def _sync_active_issue_numbers(self) -> None:
-        """Persist the combined active issue set to state."""
+        """Persist the combined active issue set to state.
+
+        Safety: this method is synchronous with no ``await`` points, so the
+        asyncio event loop cannot interleave it with coroutines that modify
+        the active-issue sets.  The set union + list conversion runs
+        atomically from the event loop's perspective.
+        """
         self._state.set_active_issue_numbers(
             list(
                 self._active_impl_issues
@@ -626,23 +668,32 @@ class HydraFlowOrchestrator:
         self._restore_state()
         await self._publish_status()
         logger.info(
-            "HydraFlow starting — repo=%s label=%s workers=%d poll=%ds",
+            "HydraFlow starting — repo=%s label=%s workers=%d poll=%ds pipeline=%s",
             self._config.repo,
             ",".join(self._config.ready_label),
             self._config.max_workers,
             self._config.poll_interval,
+            "enabled" if self._pipeline_enabled else "paused",
         )
 
-        await self._svc.worktrees.sanitize_repo()
-        await self._svc.prs.ensure_labels_exist()
-        await self._enable_rerere()
-        self._warn_if_agents_md_missing()
-        await self._start_session()
+        # Only initialize the repo and create a session when the pipeline
+        # is enabled.  When pipeline_enabled=False (dashboard mode), the
+        # orchestrator only runs background workers — no issue fetching,
+        # no repo sanitization, no session.
+        session_started = False
+        if self._pipeline_enabled:
+            await self._svc.worktrees.sanitize_repo()
+            await self._svc.prs.ensure_labels_exist()
+            await self._enable_rerere()
+            self._warn_if_agents_md_missing()
+            await self._start_session()
+            session_started = True
 
         try:
             await self._supervise_loops()
         finally:
-            await self._end_session()
+            if session_started:
+                await self._end_session()
             self._svc.planners.terminate()
             self._svc.agents.terminate()
             self._svc.reviewers.terminate()
@@ -762,7 +813,12 @@ class HydraFlowOrchestrator:
         """Run all loops plus the IssueStore poller, restarting any that crash."""
 
         async def _store_loop() -> None:
-            await self._svc.store.start(self._stop_event)
+            # Only poll GitHub for issues when pipeline is enabled
+            while not self._stop_event.is_set():
+                if self._pipeline_enabled:
+                    await self._svc.store.start(self._stop_event)
+                    return
+                await self._sleep_or_stop(self._config.poll_interval)
 
         loop_factories: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]] = [
             ("store", _store_loop),
@@ -782,6 +838,7 @@ class HydraFlowOrchestrator:
             ("worktree_gc", self._svc.worktree_gc_loop.run),
             ("runs_gc", self._svc.runs_gc_loop.run),
             ("adr_reviewer", self._svc.adr_reviewer_loop.run),
+            ("github_cache", self._svc.github_cache_loop.run),
             ("pipeline_stats", self._pipeline_stats_loop),
         ]
 
@@ -842,6 +899,7 @@ class HydraFlowOrchestrator:
         interval: int,
         enabled_name: str | None = None,
         max_consecutive_failures: int = 5,
+        is_pipeline: bool = False,
     ) -> None:
         """Generic polling loop: check enabled -> try work -> except -> sleep.
 
@@ -854,6 +912,9 @@ class HydraFlowOrchestrator:
         last_exc_type: type[BaseException] | None = None
 
         while not self._stop_event.is_set():
+            if is_pipeline and not self._pipeline_enabled:
+                await self._sleep_or_stop(interval)
+                continue
             if enabled_name is not None and not self.is_bg_worker_enabled(enabled_name):
                 await self._sleep_or_stop(interval)
                 continue
@@ -951,6 +1012,7 @@ class HydraFlowOrchestrator:
             self._svc.triager.triage_issues,
             self._config.poll_interval,
             enabled_name="triage",
+            is_pipeline=True,
         )
 
     async def _plan_loop(self) -> None:
@@ -960,6 +1022,7 @@ class HydraFlowOrchestrator:
             self._svc.planner_phase.plan_issues,
             self._config.poll_interval,
             enabled_name="plan",
+            is_pipeline=True,
         )
 
     async def _implement_loop(self) -> None:
@@ -969,6 +1032,7 @@ class HydraFlowOrchestrator:
             self._do_implement_work,
             self._config.poll_interval,
             enabled_name="implement",
+            is_pipeline=True,
         )
 
     async def _review_loop(self) -> None:
@@ -978,6 +1042,7 @@ class HydraFlowOrchestrator:
             self._do_review_work,
             self._config.poll_interval,
             enabled_name="review",
+            is_pipeline=True,
         )
 
     async def _hitl_loop(self) -> None:
@@ -986,6 +1051,7 @@ class HydraFlowOrchestrator:
             "hitl",
             self._hitl_ctrl.do_work,
             self._config.poll_interval,
+            is_pipeline=True,
         )
 
     async def _memory_sync_loop(self) -> None:
