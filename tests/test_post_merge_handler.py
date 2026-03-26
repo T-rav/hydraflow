@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import logging
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -21,11 +21,39 @@ from models import (
     CriterionResult,
     CriterionVerdict,
     JudgeVerdict,
+    ReviewResult,
 )
 from post_merge_handler import PostMergeHandler
 from state import StateTracker
 from tests.conftest import PRInfoFactory, ReviewResultFactory, TaskFactory
 from tests.helpers import ConfigFactory
+
+
+@dataclass
+class _ApprovedSetup:
+    """Baseline objects for handle_approved tests."""
+
+    handler: PostMergeHandler
+    pr: object
+    issue: object
+    result: ReviewResult
+    publish_fn: AsyncMock
+    escalate_fn: AsyncMock
+    ci_gate_fn: AsyncMock
+
+    async def call(self, diff: str = "diff", attempt: int = 0, **kwargs) -> None:
+        """Invoke handle_approved with the baseline args, allowing overrides."""
+        await self.handler.handle_approved(
+            self.pr,
+            self.issue,
+            self.result,
+            diff,
+            attempt,
+            ci_gate_fn=kwargs.pop("ci_gate_fn", self.ci_gate_fn),
+            escalate_fn=kwargs.pop("escalate_fn", self.escalate_fn),
+            publish_fn=kwargs.pop("publish_fn", self.publish_fn),
+            **kwargs,
+        )
 
 
 def _make_handler(
@@ -54,6 +82,36 @@ def _make_handler(
     )
 
 
+def _setup_approved(
+    config: HydraFlowConfig,
+    *,
+    merge_return: bool = True,
+    pr_kwargs: dict | None = None,
+    issue_kwargs: dict | None = None,
+    **handler_kwargs,
+) -> _ApprovedSetup:
+    """Return a ready-to-use baseline for handle_approved tests.
+
+    Creates a handler (with merge_pr mocked), default pr/issue/result from
+    factories, and default AsyncMock callbacks.  Pass *handler_kwargs* to
+    forward extra arguments to ``_make_handler`` (e.g. ``retrospective=``).
+    """
+    handler = _make_handler(config, **handler_kwargs)
+    handler._prs.merge_pr = AsyncMock(return_value=merge_return)
+    pr = PRInfoFactory.create(**(pr_kwargs or {}))
+    issue = TaskFactory.create(**(issue_kwargs or {}))
+    result = ReviewResultFactory.create()
+    return _ApprovedSetup(
+        handler=handler,
+        pr=pr,
+        issue=issue,
+        result=result,
+        publish_fn=AsyncMock(),
+        escalate_fn=AsyncMock(),
+        ci_gate_fn=AsyncMock(return_value=True),
+    )
+
+
 class TestPostMergeHandler:
     """Tests for the PostMergeHandler class."""
 
@@ -62,80 +120,36 @@ class TestPostMergeHandler:
         self, config: HydraFlowConfig
     ) -> None:
         """On successful merge, should mark issue and swap labels."""
-        handler = _make_handler(config)
-        pr = PRInfoFactory.create()
-        issue = TaskFactory.create()
-        result = ReviewResultFactory.create()
+        s = _setup_approved(config)
+        await s.call()
 
-        handler._prs.merge_pr = AsyncMock(return_value=True)
-        publish_fn = AsyncMock()
-        escalate_fn = AsyncMock()
-        ci_gate_fn = AsyncMock(return_value=True)
-
-        await handler.handle_approved(
-            pr,
-            issue,
-            result,
-            "diff",
-            0,
-            ci_gate_fn=ci_gate_fn,
-            escalate_fn=escalate_fn,
-            publish_fn=publish_fn,
-        )
-
-        assert result.merged is True
-        handler._prs.swap_pipeline_labels.assert_awaited_once()
-        handler._prs.close_issue.assert_awaited_once_with(pr.issue_number)
+        assert s.result.merged is True
+        s.handler._prs.swap_pipeline_labels.assert_awaited_once()
+        s.handler._prs.close_issue.assert_awaited_once_with(s.pr.issue_number)
 
     @pytest.mark.asyncio
     async def test_handle_approved_closes_issue_after_merge(
         self, config: HydraFlowConfig
     ) -> None:
         """After successful merge, close_issue should be called with the correct issue number."""
-        handler = _make_handler(config)
-        pr = PRInfoFactory.create(number=99, issue_number=55)
-        issue = TaskFactory.create(id=55)
-        result = ReviewResultFactory.create()
-
-        handler._prs.merge_pr = AsyncMock(return_value=True)
-
-        await handler.handle_approved(
-            pr,
-            issue,
-            result,
-            "diff",
-            0,
-            ci_gate_fn=AsyncMock(return_value=True),
-            escalate_fn=AsyncMock(),
-            publish_fn=AsyncMock(),
+        s = _setup_approved(
+            config,
+            pr_kwargs={"number": 99, "issue_number": 55},
+            issue_kwargs={"id": 55},
         )
+        await s.call()
 
-        handler._prs.close_issue.assert_awaited_once_with(55)
+        s.handler._prs.close_issue.assert_awaited_once_with(55)
 
     @pytest.mark.asyncio
     async def test_handle_approved_does_not_close_issue_on_merge_failure(
         self, config: HydraFlowConfig
     ) -> None:
         """When merge fails, close_issue should NOT be called."""
-        handler = _make_handler(config)
-        pr = PRInfoFactory.create()
-        issue = TaskFactory.create()
-        result = ReviewResultFactory.create()
+        s = _setup_approved(config, merge_return=False)
+        await s.call()
 
-        handler._prs.merge_pr = AsyncMock(return_value=False)
-
-        await handler.handle_approved(
-            pr,
-            issue,
-            result,
-            "diff",
-            0,
-            ci_gate_fn=AsyncMock(return_value=True),
-            escalate_fn=AsyncMock(),
-            publish_fn=AsyncMock(),
-        )
-
-        handler._prs.close_issue.assert_not_awaited()
+        s.handler._prs.close_issue.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_handle_approved_calls_store_mark_merged(
@@ -143,23 +157,13 @@ class TestPostMergeHandler:
     ) -> None:
         """Successful merge must call IssueStore.mark_merged for pipeline snapshot."""
         mock_store = MagicMock()
-        handler = _make_handler(config, store=mock_store)
-        pr = PRInfoFactory.create(number=99, issue_number=55)
-        issue = TaskFactory.create(id=55)
-        result = ReviewResultFactory.create()
-
-        handler._prs.merge_pr = AsyncMock(return_value=True)
-
-        await handler.handle_approved(
-            pr,
-            issue,
-            result,
-            "diff",
-            0,
-            ci_gate_fn=AsyncMock(return_value=True),
-            escalate_fn=AsyncMock(),
-            publish_fn=AsyncMock(),
+        s = _setup_approved(
+            config,
+            store=mock_store,
+            pr_kwargs={"number": 99, "issue_number": 55},
+            issue_kwargs={"id": 55},
         )
+        await s.call()
 
         mock_store.mark_merged.assert_called_once_with(55)
 
@@ -169,23 +173,8 @@ class TestPostMergeHandler:
     ) -> None:
         """Failed merge must NOT call mark_merged on the issue store."""
         mock_store = MagicMock()
-        handler = _make_handler(config, store=mock_store)
-        pr = PRInfoFactory.create()
-        issue = TaskFactory.create()
-        result = ReviewResultFactory.create()
-
-        handler._prs.merge_pr = AsyncMock(return_value=False)
-
-        await handler.handle_approved(
-            pr,
-            issue,
-            result,
-            "diff",
-            0,
-            ci_gate_fn=AsyncMock(return_value=True),
-            escalate_fn=AsyncMock(),
-            publish_fn=AsyncMock(),
-        )
+        s = _setup_approved(config, merge_return=False, store=mock_store)
+        await s.call()
 
         mock_store.mark_merged.assert_not_called()
 
@@ -194,35 +183,21 @@ class TestPostMergeHandler:
         self, config: HydraFlowConfig
     ) -> None:
         """On successful merge, should comment inference usage on the issue."""
-        handler = _make_handler(config)
-        pr = PRInfoFactory.create(number=123, issue_number=42)
-        issue = TaskFactory.create(id=42)
-        result = ReviewResultFactory.create()
-
-        handler._prompt_telemetry.get_pr_totals = lambda _pr: {
+        s = _setup_approved(
+            config,
+            pr_kwargs={"number": 123, "issue_number": 42},
+            issue_kwargs={"id": 42},
+        )
+        s.handler._prompt_telemetry.get_pr_totals = lambda _pr: {
             "inference_calls": 5,
             "total_tokens": 1200,
             "total_est_tokens": 1300,
             "actual_usage_calls": 5,
         }
-        handler._prs.merge_pr = AsyncMock(return_value=True)
-        publish_fn = AsyncMock()
-        escalate_fn = AsyncMock()
-        ci_gate_fn = AsyncMock(return_value=True)
+        await s.call()
 
-        await handler.handle_approved(
-            pr,
-            issue,
-            result,
-            "diff",
-            0,
-            ci_gate_fn=ci_gate_fn,
-            escalate_fn=escalate_fn,
-            publish_fn=publish_fn,
-        )
-
-        handler._prs.post_comment.assert_awaited()
-        args = handler._prs.post_comment.await_args.args
+        s.handler._prs.post_comment.assert_awaited()
+        args = s.handler._prs.post_comment.await_args.args
         assert args[0] == 42
         assert "Inference Usage" in args[1]
         assert "Total tokens: 1,200" in args[1]
@@ -232,56 +207,21 @@ class TestPostMergeHandler:
         self, config: HydraFlowConfig
     ) -> None:
         """When merge fails, should escalate to HITL."""
-        handler = _make_handler(config)
-        pr = PRInfoFactory.create()
-        issue = TaskFactory.create()
-        result = ReviewResultFactory.create()
+        s = _setup_approved(config, merge_return=False)
+        await s.call()
 
-        handler._prs.merge_pr = AsyncMock(return_value=False)
-        publish_fn = AsyncMock()
-        escalate_fn = AsyncMock()
-        ci_gate_fn = AsyncMock(return_value=True)
-
-        await handler.handle_approved(
-            pr,
-            issue,
-            result,
-            "diff",
-            0,
-            ci_gate_fn=ci_gate_fn,
-            escalate_fn=escalate_fn,
-            publish_fn=publish_fn,
-        )
-
-        escalate_fn.assert_awaited_once()
+        s.escalate_fn.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_handle_approved_merge_failure_conflict_sets_conflict_cause(
         self, config: HydraFlowConfig
     ) -> None:
         """When mergeability reports conflicts, escalation cause includes merge conflict."""
-        handler = _make_handler(config)
-        pr = PRInfoFactory.create()
-        issue = TaskFactory.create()
-        result = ReviewResultFactory.create()
+        s = _setup_approved(config, merge_return=False)
+        s.handler._prs.get_pr_mergeable = AsyncMock(return_value=False)
+        await s.call()
 
-        handler._prs.merge_pr = AsyncMock(return_value=False)
-        handler._prs.get_pr_mergeable = AsyncMock(return_value=False)
-        publish_fn = AsyncMock()
-        escalate_fn = AsyncMock()
-
-        await handler.handle_approved(
-            pr,
-            issue,
-            result,
-            "diff",
-            0,
-            ci_gate_fn=AsyncMock(return_value=True),
-            escalate_fn=escalate_fn,
-            publish_fn=publish_fn,
-        )
-
-        esc = escalate_fn.await_args.args[0]
+        esc = s.escalate_fn.await_args.args[0]
         assert esc.cause == "PR merge failed on GitHub: merge conflict"
         assert "merge conflicts" in esc.comment
 
@@ -290,28 +230,11 @@ class TestPostMergeHandler:
         self, config: HydraFlowConfig
     ) -> None:
         """When mergeability is true, escalation cause marks non-conflict merge block."""
-        handler = _make_handler(config)
-        pr = PRInfoFactory.create()
-        issue = TaskFactory.create()
-        result = ReviewResultFactory.create()
+        s = _setup_approved(config, merge_return=False)
+        s.handler._prs.get_pr_mergeable = AsyncMock(return_value=True)
+        await s.call()
 
-        handler._prs.merge_pr = AsyncMock(return_value=False)
-        handler._prs.get_pr_mergeable = AsyncMock(return_value=True)
-        publish_fn = AsyncMock()
-        escalate_fn = AsyncMock()
-
-        await handler.handle_approved(
-            pr,
-            issue,
-            result,
-            "diff",
-            0,
-            ci_gate_fn=AsyncMock(return_value=True),
-            escalate_fn=escalate_fn,
-            publish_fn=publish_fn,
-        )
-
-        esc = escalate_fn.await_args.args[0]
+        esc = s.escalate_fn.await_args.args[0]
         assert esc.cause == "PR merge failed on GitHub: merge blocked (non-conflict)"
 
     @pytest.mark.asyncio
@@ -319,63 +242,29 @@ class TestPostMergeHandler:
         self, config: HydraFlowConfig
     ) -> None:
         """On merge conflict, standard review path should attempt auto-fix before HITL."""
-        handler = _make_handler(config)
-        pr = PRInfoFactory.create()
-        issue = TaskFactory.create()
-        result = ReviewResultFactory.create()
-
-        handler._prs.merge_pr = AsyncMock(side_effect=[False, True])
-        handler._prs.get_pr_mergeable = AsyncMock(return_value=False)
-        publish_fn = AsyncMock()
-        escalate_fn = AsyncMock()
+        s = _setup_approved(config)
+        s.handler._prs.merge_pr = AsyncMock(side_effect=[False, True])
+        s.handler._prs.get_pr_mergeable = AsyncMock(return_value=False)
         merge_conflict_fix_fn = AsyncMock(return_value=True)
+        await s.call(merge_conflict_fix_fn=merge_conflict_fix_fn)
 
-        await handler.handle_approved(
-            pr,
-            issue,
-            result,
-            "diff",
-            0,
-            ci_gate_fn=AsyncMock(return_value=True),
-            escalate_fn=escalate_fn,
-            publish_fn=publish_fn,
-            merge_conflict_fix_fn=merge_conflict_fix_fn,
-        )
-
-        merge_conflict_fix_fn.assert_awaited_once_with(pr, issue, 0)
-        assert handler._prs.merge_pr.await_count == 2
-        escalate_fn.assert_not_awaited()
-        assert result.merged is True
+        merge_conflict_fix_fn.assert_awaited_once_with(s.pr, s.issue, 0)
+        assert s.handler._prs.merge_pr.await_count == 2
+        s.escalate_fn.assert_not_awaited()
+        assert s.result.merged is True
 
     @pytest.mark.asyncio
     async def test_handle_approved_merge_conflict_fix_failure_escalates(
         self, config: HydraFlowConfig
     ) -> None:
         """If standard auto-fix fails, merge conflict should still escalate to HITL."""
-        handler = _make_handler(config)
-        pr = PRInfoFactory.create()
-        issue = TaskFactory.create()
-        result = ReviewResultFactory.create()
-
-        handler._prs.merge_pr = AsyncMock(return_value=False)
-        handler._prs.get_pr_mergeable = AsyncMock(return_value=False)
-        escalate_fn = AsyncMock()
+        s = _setup_approved(config, merge_return=False)
+        s.handler._prs.get_pr_mergeable = AsyncMock(return_value=False)
         merge_conflict_fix_fn = AsyncMock(return_value=False)
+        await s.call(merge_conflict_fix_fn=merge_conflict_fix_fn)
 
-        await handler.handle_approved(
-            pr,
-            issue,
-            result,
-            "diff",
-            0,
-            ci_gate_fn=AsyncMock(return_value=True),
-            escalate_fn=escalate_fn,
-            publish_fn=AsyncMock(),
-            merge_conflict_fix_fn=merge_conflict_fix_fn,
-        )
-
-        merge_conflict_fix_fn.assert_awaited_once_with(pr, issue, 0)
-        esc = escalate_fn.await_args.args[0]
+        merge_conflict_fix_fn.assert_awaited_once_with(s.pr, s.issue, 0)
+        esc = s.escalate_fn.await_args.args[0]
         assert esc.cause == "PR merge failed on GitHub: merge conflict"
 
     def test_get_judge_result_none(self, config: HydraFlowConfig) -> None:
@@ -418,26 +307,8 @@ class TestPostMergeHandler:
     ) -> None:
         """retrospective.record() should be called after successful merge."""
         mock_retro = AsyncMock()
-        handler = _make_handler(config, retrospective=mock_retro)
-        pr = PRInfoFactory.create()
-        issue = TaskFactory.create()
-        result = ReviewResultFactory.create()
-
-        handler._prs.merge_pr = AsyncMock(return_value=True)
-        publish_fn = AsyncMock()
-        escalate_fn = AsyncMock()
-        ci_gate_fn = AsyncMock(return_value=True)
-
-        await handler.handle_approved(
-            pr,
-            issue,
-            result,
-            "diff",
-            0,
-            ci_gate_fn=ci_gate_fn,
-            escalate_fn=escalate_fn,
-            publish_fn=publish_fn,
-        )
+        s = _setup_approved(config, retrospective=mock_retro)
+        await s.call()
 
         mock_retro.record.assert_awaited_once()
 
@@ -448,27 +319,14 @@ class TestPostMergeHandler:
         """Retrospective runs should publish a background worker status update."""
         mock_retro = AsyncMock()
         status_cb = MagicMock()
-        handler = _make_handler(
+        s = _setup_approved(
             config,
             retrospective=mock_retro,
             update_bg_worker_status=status_cb,
+            pr_kwargs={"number": 55, "issue_number": 66},
+            issue_kwargs={"id": 66},
         )
-        pr = PRInfoFactory.create(number=55, issue_number=66)
-        issue = TaskFactory.create(id=66)
-        result = ReviewResultFactory.create()
-
-        handler._prs.merge_pr = AsyncMock(return_value=True)
-
-        await handler.handle_approved(
-            pr,
-            issue,
-            result,
-            "diff",
-            0,
-            ci_gate_fn=AsyncMock(return_value=True),
-            escalate_fn=AsyncMock(),
-            publish_fn=AsyncMock(),
-        )
+        await s.call()
 
         status_cb.assert_called_with(
             "retrospective",
@@ -484,27 +342,14 @@ class TestPostMergeHandler:
         mock_retro = AsyncMock()
         mock_retro.record.side_effect = RuntimeError("retro boom")
         status_cb = MagicMock()
-        handler = _make_handler(
+        s = _setup_approved(
             config,
             retrospective=mock_retro,
             update_bg_worker_status=status_cb,
+            pr_kwargs={"number": 55, "issue_number": 66},
+            issue_kwargs={"id": 66},
         )
-        pr = PRInfoFactory.create(number=55, issue_number=66)
-        issue = TaskFactory.create(id=66)
-        result = ReviewResultFactory.create()
-
-        handler._prs.merge_pr = AsyncMock(return_value=True)
-
-        await handler.handle_approved(
-            pr,
-            issue,
-            result,
-            "diff",
-            0,
-            ci_gate_fn=AsyncMock(return_value=True),
-            escalate_fn=AsyncMock(),
-            publish_fn=AsyncMock(),
-        )
+        await s.call()
 
         status_cb.assert_called_with(
             "retrospective",
@@ -519,29 +364,16 @@ class TestPostMergeHandler:
         """Status callback errors must not break post-merge hooks."""
         mock_retro = AsyncMock()
         status_cb = MagicMock(side_effect=RuntimeError("status boom"))
-        handler = _make_handler(
+        s = _setup_approved(
             config,
             retrospective=mock_retro,
             update_bg_worker_status=status_cb,
+            pr_kwargs={"number": 55, "issue_number": 66},
+            issue_kwargs={"id": 66},
         )
-        pr = PRInfoFactory.create(number=55, issue_number=66)
-        issue = TaskFactory.create(id=66)
-        result = ReviewResultFactory.create()
+        await s.call()
 
-        handler._prs.merge_pr = AsyncMock(return_value=True)
-
-        await handler.handle_approved(
-            pr,
-            issue,
-            result,
-            "diff",
-            0,
-            ci_gate_fn=AsyncMock(return_value=True),
-            escalate_fn=AsyncMock(),
-            publish_fn=AsyncMock(),
-        )
-
-        assert result.merged is True
+        assert s.result.merged is True
 
     @pytest.mark.asyncio
     async def test_verification_issue_created_when_judge_returns_verdict(
@@ -562,34 +394,16 @@ class TestPostMergeHandler:
         )
         mock_judge = AsyncMock()
         mock_judge.judge = AsyncMock(return_value=verdict)
-        handler = _make_handler(config, verification_judge=mock_judge)
-        pr = PRInfoFactory.create()
-        issue = TaskFactory.create()
-        result = ReviewResultFactory.create()
+        s = _setup_approved(config, verification_judge=mock_judge)
+        s.handler._prs.create_issue = AsyncMock(return_value=42)
+        await s.call(diff="+++ b/src/ui/App.tsx\n@@\n+<button>Save</button>")
 
-        handler._prs.merge_pr = AsyncMock(return_value=True)
-        handler._prs.create_issue = AsyncMock(return_value=42)
-        publish_fn = AsyncMock()
-        escalate_fn = AsyncMock()
-        ci_gate_fn = AsyncMock(return_value=True)
-
-        await handler.handle_approved(
-            pr,
-            issue,
-            result,
-            "+++ b/src/ui/App.tsx\n@@\n+<button>Save</button>",
-            0,
-            ci_gate_fn=ci_gate_fn,
-            escalate_fn=escalate_fn,
-            publish_fn=publish_fn,
-        )
-
-        handler._prs.create_issue.assert_awaited_once()
+        s.handler._prs.create_issue.assert_awaited_once()
         # Verification issue should use verify_label, not hitl_label.
-        call_args = handler._prs.create_issue.call_args
+        call_args = s.handler._prs.create_issue.call_args
         assert config.verify_label[0] in call_args[0][2]
         # Should record VERIFY_PENDING outcome with verification_issue_number.
-        outcome = handler._state.get_outcome(issue.id)
+        outcome = s.handler._state.get_outcome(s.issue.id)
         assert outcome is not None
         assert outcome.outcome.value == "verify_pending"
         assert outcome.verification_issue_number == 42
@@ -613,34 +427,16 @@ class TestPostMergeHandler:
         )
         mock_judge = AsyncMock()
         mock_judge.judge = AsyncMock(return_value=verdict)
-        handler = _make_handler(config, verification_judge=mock_judge)
-        pr = PRInfoFactory.create()
-        issue = TaskFactory.create()
-        result = ReviewResultFactory.create()
-
-        handler._prs.merge_pr = AsyncMock(return_value=True)
-        handler._prs.create_issue = AsyncMock(return_value=99)
-        publish_fn = AsyncMock()
-        escalate_fn = AsyncMock()
-        ci_gate_fn = AsyncMock(return_value=True)
-
-        await handler.handle_approved(
-            pr,
-            issue,
-            result,
-            "+++ b/src/ui/App.tsx\n@@\n+<button>Save</button>",
-            0,
-            ci_gate_fn=ci_gate_fn,
-            escalate_fn=escalate_fn,
-            publish_fn=publish_fn,
-        )
+        s = _setup_approved(config, verification_judge=mock_judge)
+        s.handler._prs.create_issue = AsyncMock(return_value=99)
+        await s.call(diff="+++ b/src/ui/App.tsx\n@@\n+<button>Save</button>")
 
         # Label used should be verify_label, not hitl_label
-        call_args = handler._prs.create_issue.call_args
+        call_args = s.handler._prs.create_issue.call_args
         assert config.verify_label[0] in call_args[0][2]
         assert config.hitl_label[0] not in call_args[0][2]
         # Should NOT set hitl_origin (verify issues aren't HITL items)
-        assert handler._state.get_hitl_origin(99) is None
+        assert s.handler._state.get_hitl_origin(99) is None
 
     @pytest.mark.asyncio
     async def test_verification_issue_skipped_for_refactor_and_test_only_work(
@@ -661,32 +457,18 @@ class TestPostMergeHandler:
         )
         mock_judge = AsyncMock()
         mock_judge.judge = AsyncMock(return_value=verdict)
-        handler = _make_handler(config, verification_judge=mock_judge)
-        pr = PRInfoFactory.create()
-        issue = TaskFactory.create(
-            title="Refactor test helpers",
-            body="Cleanup test fixtures and typing in unit tests.",
+        s = _setup_approved(
+            config,
+            verification_judge=mock_judge,
+            issue_kwargs={
+                "title": "Refactor test helpers",
+                "body": "Cleanup test fixtures and typing in unit tests.",
+            },
         )
-        result = ReviewResultFactory.create()
+        s.handler._prs.create_issue = AsyncMock(return_value=42)
+        await s.call(diff="+++ b/tests/test_helpers.py\n@@\n+assert value == expected")
 
-        handler._prs.merge_pr = AsyncMock(return_value=True)
-        handler._prs.create_issue = AsyncMock(return_value=42)
-        publish_fn = AsyncMock()
-        escalate_fn = AsyncMock()
-        ci_gate_fn = AsyncMock(return_value=True)
-
-        await handler.handle_approved(
-            pr,
-            issue,
-            result,
-            "+++ b/tests/test_helpers.py\n@@\n+assert value == expected",
-            0,
-            ci_gate_fn=ci_gate_fn,
-            escalate_fn=escalate_fn,
-            publish_fn=publish_fn,
-        )
-
-        handler._prs.create_issue.assert_not_awaited()
+        s.handler._prs.create_issue.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_epic_runs_when_verification_issue_creation_fails(
@@ -708,31 +490,13 @@ class TestPostMergeHandler:
         mock_judge = AsyncMock()
         mock_judge.judge = AsyncMock(return_value=verdict)
         mock_epic = AsyncMock()
-        handler = _make_handler(
+        s = _setup_approved(
             config,
             verification_judge=mock_judge,
             epic_checker=mock_epic,
         )
-        pr = PRInfoFactory.create()
-        issue = TaskFactory.create()
-        result = ReviewResultFactory.create()
-
-        handler._prs.merge_pr = AsyncMock(return_value=True)
-        handler._prs.create_issue = AsyncMock(side_effect=RuntimeError("GH API down"))
-        publish_fn = AsyncMock()
-        escalate_fn = AsyncMock()
-        ci_gate_fn = AsyncMock(return_value=True)
-
-        await handler.handle_approved(
-            pr,
-            issue,
-            result,
-            "diff",
-            0,
-            ci_gate_fn=ci_gate_fn,
-            escalate_fn=escalate_fn,
-            publish_fn=publish_fn,
-        )
+        s.handler._prs.create_issue = AsyncMock(side_effect=RuntimeError("GH API down"))
+        await s.call()
 
         mock_epic.check_and_close_epics.assert_awaited_once()
 
@@ -799,32 +563,14 @@ class TestPostMergeHandler:
         mock_judge = AsyncMock()
         mock_judge.judge = AsyncMock(return_value=None)
         mock_epic = AsyncMock()
-        handler = _make_handler(
+        s = _setup_approved(
             config,
             ac_generator=mock_ac,
             retrospective=mock_retro,
             verification_judge=mock_judge,
             epic_checker=mock_epic,
         )
-        pr = PRInfoFactory.create()
-        issue = TaskFactory.create()
-        result = ReviewResultFactory.create()
-
-        handler._prs.merge_pr = AsyncMock(return_value=True)
-        publish_fn = AsyncMock()
-        escalate_fn = AsyncMock()
-        ci_gate_fn = AsyncMock(return_value=True)
-
-        await handler.handle_approved(
-            pr,
-            issue,
-            result,
-            "diff",
-            0,
-            ci_gate_fn=ci_gate_fn,
-            escalate_fn=escalate_fn,
-            publish_fn=publish_fn,
-        )
+        await s.call()
 
         mock_ac.generate.assert_awaited_once()
         mock_retro.record.assert_awaited_once()
@@ -839,30 +585,12 @@ class TestPostMergeHandler:
         mock_judge = AsyncMock()
         mock_judge.judge = AsyncMock(side_effect=RuntimeError("judge broke"))
         mock_epic = AsyncMock()
-        handler = _make_handler(
+        s = _setup_approved(
             config,
             verification_judge=mock_judge,
             epic_checker=mock_epic,
         )
-        pr = PRInfoFactory.create()
-        issue = TaskFactory.create()
-        result = ReviewResultFactory.create()
-
-        handler._prs.merge_pr = AsyncMock(return_value=True)
-        publish_fn = AsyncMock()
-        escalate_fn = AsyncMock()
-        ci_gate_fn = AsyncMock(return_value=True)
-
-        await handler.handle_approved(
-            pr,
-            issue,
-            result,
-            "diff",
-            0,
-            ci_gate_fn=ci_gate_fn,
-            escalate_fn=escalate_fn,
-            publish_fn=publish_fn,
-        )
+        await s.call()
 
         mock_epic.check_and_close_epics.assert_awaited_once()
 
@@ -874,26 +602,8 @@ class TestPostMergeHandler:
         mock_ac = AsyncMock()
         mock_ac.generate = AsyncMock(side_effect=RuntimeError("AC failed"))
         mock_retro = AsyncMock()
-        handler = _make_handler(config, ac_generator=mock_ac, retrospective=mock_retro)
-        pr = PRInfoFactory.create()
-        issue = TaskFactory.create()
-        result = ReviewResultFactory.create()
-
-        handler._prs.merge_pr = AsyncMock(return_value=True)
-        publish_fn = AsyncMock()
-        escalate_fn = AsyncMock()
-        ci_gate_fn = AsyncMock(return_value=True)
-
-        await handler.handle_approved(
-            pr,
-            issue,
-            result,
-            "diff",
-            0,
-            ci_gate_fn=ci_gate_fn,
-            escalate_fn=escalate_fn,
-            publish_fn=publish_fn,
-        )
+        s = _setup_approved(config, ac_generator=mock_ac, retrospective=mock_retro)
+        await s.call()
 
         mock_retro.record.assert_awaited_once()
 

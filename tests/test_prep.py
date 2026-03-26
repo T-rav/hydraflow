@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable, Coroutine
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -14,6 +16,66 @@ from models import AuditCheckStatus
 from prep import HYDRAFLOW_LABELS, PrepResult, _list_existing_labels, ensure_labels
 from tests.conftest import SubprocessMockBuilder
 from tests.helpers import AuditCheckFactory, AuditResultFactory, ConfigFactory
+
+# ---------------------------------------------------------------------------
+# Shared helper for label-dispatch side effects
+# ---------------------------------------------------------------------------
+
+
+def _make_label_side_effect(
+    existing_labels_json: str = "[]",
+    *,
+    list_returncode: int = 0,
+    fail_label: str | None = None,
+    capture: list[str] | None = None,
+) -> Callable[..., Coroutine[Any, Any, AsyncMock]]:
+    """Return an async side_effect that dispatches between label list and create.
+
+    Args:
+        existing_labels_json: JSON returned by ``gh label list`` on success.
+        list_returncode: Return code for the ``gh label list`` call.
+            Pass ``1`` to simulate a failed listing.
+        fail_label: When set, the ``gh label create`` call for this label name
+            returns ``returncode=1`` to simulate a creation failure.
+        capture: When provided, the name of each label passed to
+            ``gh label create`` is appended to this list.
+    """
+
+    async def side_effect(*args: Any, **_kwargs: Any) -> AsyncMock:
+        proc = AsyncMock()
+        proc.wait = AsyncMock(return_value=0)
+
+        if args[1] == "label" and args[2] == "list":
+            proc.returncode = list_returncode
+            if list_returncode == 0:
+                proc.communicate = AsyncMock(
+                    return_value=(existing_labels_json.encode(), b"")
+                )
+                proc.wait = AsyncMock(return_value=0)
+            else:
+                proc.communicate = AsyncMock(return_value=(b"", b"not found"))
+                proc.wait = AsyncMock(return_value=list_returncode)
+        else:
+            label_name: str | None = None
+            if args[1] == "label" and args[2] == "create":
+                label_name = args[3]
+                if capture is not None:
+                    capture.append(label_name)
+
+            if fail_label is not None and label_name == fail_label:
+                proc.returncode = 1
+                proc.communicate = AsyncMock(
+                    return_value=(b"", b"error creating label")
+                )
+                proc.wait = AsyncMock(return_value=1)
+            else:
+                proc.returncode = 0
+                proc.communicate = AsyncMock(return_value=(b"", b""))
+
+        return proc
+
+    return side_effect
+
 
 # ---------------------------------------------------------------------------
 # PrepResult.summary()
@@ -108,22 +170,10 @@ class TestEnsureLabels:
         config = ConfigFactory.create()
         # First call: gh label list (returns empty)
         # Subsequent calls: gh label create (returns success)
-        call_count = 0
-
-        async def side_effect(*args, **_kwargs):
-            nonlocal call_count
-            call_count += 1
-            proc = AsyncMock()
-            proc.returncode = 0
-            proc.wait = AsyncMock(return_value=0)
-            # First call is label list
-            if args[1] == "label" and args[2] == "list":
-                proc.communicate = AsyncMock(return_value=(b"[]", b""))
-            else:
-                proc.communicate = AsyncMock(return_value=(b"", b""))
-            return proc
-
-        with patch("asyncio.create_subprocess_exec", side_effect=side_effect):
+        with patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=_make_label_side_effect("[]"),
+        ):
             result = await ensure_labels(config)
 
         # All labels should be created (none existed)
@@ -144,17 +194,10 @@ class TestEnsureLabels:
         )
         existing_json = json.dumps([{"name": n} for n in existing])
 
-        async def side_effect(*args, **_kwargs):
-            proc = AsyncMock()
-            proc.returncode = 0
-            proc.wait = AsyncMock(return_value=0)
-            if args[1] == "label" and args[2] == "list":
-                proc.communicate = AsyncMock(return_value=(existing_json.encode(), b""))
-            else:
-                proc.communicate = AsyncMock(return_value=(b"", b""))
-            return proc
-
-        with patch("asyncio.create_subprocess_exec", side_effect=side_effect):
+        with patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=_make_label_side_effect(existing_json),
+        ):
             result = await ensure_labels(config)
 
         assert set(result.existed) == set(existing)
@@ -172,21 +215,10 @@ class TestEnsureLabels:
 
         created_labels: list[str] = []
 
-        async def side_effect(*args, **_kwargs):
-            proc = AsyncMock()
-            proc.returncode = 0
-            proc.wait = AsyncMock(return_value=0)
-            if args[1] == "label" and args[2] == "list":
-                proc.communicate = AsyncMock(return_value=(b"[]", b""))
-            else:
-                # Capture the label name (arg after "create")
-                arg_list = list(args)
-                create_idx = arg_list.index("create")
-                created_labels.append(arg_list[create_idx + 1])
-                proc.communicate = AsyncMock(return_value=(b"", b""))
-            return proc
-
-        with patch("asyncio.create_subprocess_exec", side_effect=side_effect):
+        with patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=_make_label_side_effect("[]", capture=created_labels),
+        ):
             result = await ensure_labels(config)
 
         assert "my-find" in created_labels
@@ -215,26 +247,10 @@ class TestEnsureLabels:
         config = ConfigFactory.create()
         fail_label = "hydraflow-find"
 
-        async def side_effect(*args, **_kwargs):
-            proc = AsyncMock()
-            proc.wait = AsyncMock(return_value=0)
-            if args[1] == "label" and args[2] == "list":
-                proc.returncode = 0
-                proc.communicate = AsyncMock(return_value=(b"[]", b""))
-            elif args[1] == "label" and args[2] == "create":
-                label_name = args[3]
-                if label_name == fail_label:
-                    proc.returncode = 1
-                    proc.communicate = AsyncMock(
-                        return_value=(b"", b"error creating label")
-                    )
-                    proc.wait = AsyncMock(return_value=1)
-                else:
-                    proc.returncode = 0
-                    proc.communicate = AsyncMock(return_value=(b"", b""))
-            return proc
-
-        with patch("asyncio.create_subprocess_exec", side_effect=side_effect):
+        with patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=_make_label_side_effect("[]", fail_label=fail_label),
+        ):
             result = await ensure_labels(config)
 
         assert fail_label in result.failed
@@ -246,19 +262,10 @@ class TestEnsureLabels:
         """If gh label list fails, all labels are treated as new."""
         config = ConfigFactory.create()
 
-        async def side_effect(*args, **_kwargs):
-            proc = AsyncMock()
-            proc.wait = AsyncMock(return_value=0)
-            if args[1] == "label" and args[2] == "list":
-                proc.returncode = 1
-                proc.communicate = AsyncMock(return_value=(b"", b"not found"))
-                proc.wait = AsyncMock(return_value=1)
-            else:
-                proc.returncode = 0
-                proc.communicate = AsyncMock(return_value=(b"", b""))
-            return proc
-
-        with patch("asyncio.create_subprocess_exec", side_effect=side_effect):
+        with patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=_make_label_side_effect(list_returncode=1),
+        ):
             result = await ensure_labels(config)
 
         # All should be "created" since list failed (empty existing set)
@@ -275,17 +282,10 @@ class TestEnsureLabels:
             all_names.extend(getattr(config, cfg_field))
         existing_json = json.dumps([{"name": n} for n in all_names])
 
-        async def side_effect(*args, **_kwargs):
-            proc = AsyncMock()
-            proc.returncode = 0
-            proc.wait = AsyncMock(return_value=0)
-            if args[1] == "label" and args[2] == "list":
-                proc.communicate = AsyncMock(return_value=(existing_json.encode(), b""))
-            else:
-                proc.communicate = AsyncMock(return_value=(b"", b""))
-            return proc
-
-        with patch("asyncio.create_subprocess_exec", side_effect=side_effect):
+        with patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=_make_label_side_effect(existing_json),
+        ):
             result = await ensure_labels(config)
 
         assert len(result.created) == 0

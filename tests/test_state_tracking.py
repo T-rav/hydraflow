@@ -143,27 +143,42 @@ class TestLoadSave:
         data = json.loads(raw)  # must not raise
         assert isinstance(data, dict)
 
-    def test_save_sets_last_updated(self, tmp_path: Path) -> None:
+    def test_save_sets_last_updated_is_present(self, tmp_path: Path) -> None:
         tracker = make_tracker(tmp_path)
         tracker.save()
-        d = tracker.to_dict()
-        assert d["last_updated"] is not None
-        # Should be a valid ISO string
-        assert "T" in d["last_updated"]
+        assert tracker.to_dict()["last_updated"] is not None
 
-    def test_round_trip_preserves_data(self, tmp_path: Path) -> None:
+    def test_save_sets_last_updated_is_iso_format(self, tmp_path: Path) -> None:
+        tracker = make_tracker(tmp_path)
+        tracker.save()
+        assert "T" in tracker.to_dict()["last_updated"]
+
+    def test_round_trip_preserves_issue_status(self, tmp_path: Path) -> None:
         state_file = tmp_path / "state.json"
         tracker = StateTracker(state_file)
         tracker.mark_issue(10, "success")
-        tracker.set_worktree(10, "/tmp/wt-10")
-        tracker.set_branch(10, "agent/issue-10")
-        tracker.mark_pr(99, "merged")
-
-        # Load a second tracker from the same file
         tracker2 = StateTracker(state_file)
         assert tracker2.to_dict()["processed_issues"].get(str(10)) == "success"
+
+    def test_round_trip_preserves_worktree(self, tmp_path: Path) -> None:
+        state_file = tmp_path / "state.json"
+        tracker = StateTracker(state_file)
+        tracker.set_worktree(10, "/tmp/wt-10")
+        tracker2 = StateTracker(state_file)
         assert tracker2.get_active_worktrees() == {10: "/tmp/wt-10"}
+
+    def test_round_trip_preserves_branch(self, tmp_path: Path) -> None:
+        state_file = tmp_path / "state.json"
+        tracker = StateTracker(state_file)
+        tracker.set_branch(10, "agent/issue-10")
+        tracker2 = StateTracker(state_file)
         assert tracker2.get_branch(10) == "agent/issue-10"
+
+    def test_round_trip_preserves_pr(self, tmp_path: Path) -> None:
+        state_file = tmp_path / "state.json"
+        tracker = StateTracker(state_file)
+        tracker.mark_pr(99, "merged")
+        tracker2 = StateTracker(state_file)
         assert tracker2.to_dict()["reviewed_prs"].get(str(99)) == "merged"
 
     def test_explicit_load_returns_none(self, tmp_path: Path) -> None:

@@ -322,9 +322,14 @@ def clean_assets(target: Path) -> None:
     manifest_path = target / ".hydraflow" / "assets.json"
     manifest = load_manifest(manifest_path)
 
-    # Remove all tracked files
+    # Remove tracked files (skip non-hf hook files — those are user hooks
+    # with an appended chain block, handled separately below).
     for rel in manifest["files"]:
         full = target / rel
+        # Don't delete user hook files (e.g., .githooks/pre-commit);
+        # only delete hf-prefixed hooks (.githooks/hf-pre-commit).
+        if rel.startswith(".githooks/") and not Path(rel).name.startswith("hf-"):
+            continue
         if full.is_dir():
             shutil.rmtree(full)
         elif full.is_file():

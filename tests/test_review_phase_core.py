@@ -41,6 +41,35 @@ from tests.conftest import (
 from tests.helpers import make_review_phase
 
 # ---------------------------------------------------------------------------
+# Shared mock setup helpers
+# ---------------------------------------------------------------------------
+
+
+def _setup_escalate_to_hitl_mocks(phase: ReviewPhase) -> None:
+    """Set up the PR manager mocks required by _escalate_to_hitl."""
+    phase._prs.post_pr_comment = AsyncMock()
+    phase._prs.remove_label = AsyncMock()
+    phase._prs.remove_pr_label = AsyncMock()
+    phase._prs.add_labels = AsyncMock()
+    phase._prs.add_pr_labels = AsyncMock()
+
+
+def _setup_conflict_scenario(phase: ReviewPhase) -> None:
+    """Set up mocks for a merge-conflict escalation scenario (merge_main returns False)."""
+    _setup_escalate_to_hitl_mocks(phase)
+    phase._worktrees.merge_main = AsyncMock(return_value=False)
+
+
+def _setup_rejected_review_mocks(phase: ReviewPhase) -> None:
+    """Set up the PR manager mocks required by _handle_rejected_review."""
+    phase._prs.remove_label = AsyncMock()
+    phase._prs.remove_pr_label = AsyncMock()
+    phase._prs.add_labels = AsyncMock()
+    phase._prs.add_pr_labels = AsyncMock()
+    phase._prs.post_comment = AsyncMock()
+
+
+# ---------------------------------------------------------------------------
 # review_prs
 # ---------------------------------------------------------------------------
 
@@ -244,12 +273,7 @@ class TestPostMergeConflictFix:
         issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
-        phase._prs.post_pr_comment = AsyncMock()
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._worktrees.merge_main = AsyncMock(return_value=False)  # Conflicts
+        _setup_conflict_scenario(phase)
         # Agent resolution also fails
         phase._worktrees.start_merge_main = AsyncMock(return_value=False)
         phase._worktrees.abort_merge = AsyncMock()
@@ -280,12 +304,7 @@ class TestPostMergeConflictFix:
         issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
-        phase._prs.post_pr_comment = AsyncMock()
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._worktrees.merge_main = AsyncMock(return_value=False)
+        _setup_conflict_scenario(phase)
         phase._worktrees.start_merge_main = AsyncMock(return_value=False)
         phase._worktrees.abort_merge = AsyncMock()
 
@@ -310,12 +329,7 @@ class TestPostMergeConflictFix:
         issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
-        phase._prs.post_pr_comment = AsyncMock()
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._worktrees.merge_main = AsyncMock(return_value=False)
+        _setup_conflict_scenario(phase)
         phase._worktrees.start_merge_main = AsyncMock(return_value=False)
         phase._worktrees.abort_merge = AsyncMock()
 
@@ -359,12 +373,7 @@ class TestPostMergeConflictFix:
         issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
-        phase._prs.post_pr_comment = AsyncMock()
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._worktrees.merge_main = AsyncMock(return_value=False)
+        _setup_conflict_scenario(phase)
 
         wt = config.worktree_path_for_issue(42)
         wt.mkdir(parents=True, exist_ok=True)
@@ -1088,10 +1097,13 @@ class TestRunAndPostReview:
         phase._prs.push_branch = AsyncMock()
         phase._prs.post_pr_comment = AsyncMock()
 
-        await phase._run_and_post_review(
+        result = await phase._run_and_post_review(
             pr, issue, config.worktree_path_for_issue(42), "diff", 0
         )
 
+        assert (
+            result.verdict == ReviewVerdict.APPROVE
+        )  # behavioral: returned the reviewer's result
         phase._prs.post_pr_comment.assert_awaited_once_with(101, "Looks good.")
 
     @pytest.mark.asyncio
@@ -1130,10 +1142,13 @@ class TestRunAndPostReview:
         phase._prs.post_pr_comment = AsyncMock()
         phase._prs.submit_review = AsyncMock()
 
-        await phase._run_and_post_review(
+        result = await phase._run_and_post_review(
             pr, issue, config.worktree_path_for_issue(42), "diff", 0
         )
 
+        assert (
+            result.verdict == ReviewVerdict.REQUEST_CHANGES
+        )  # behavioral: verdict propagated to caller
         phase._prs.submit_review.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -1194,11 +1209,7 @@ class TestHandleApprovedMerge:
         result = ReviewResultFactory.create()
 
         phase._prs.merge_pr = AsyncMock(return_value=False)
-        phase._prs.post_pr_comment = AsyncMock()
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
+        _setup_escalate_to_hitl_mocks(phase)
 
         wt = config.worktree_path_for_issue(42)
         wt.mkdir(parents=True, exist_ok=True)
@@ -1225,6 +1236,9 @@ class TestHandleApprovedMerge:
 
         await phase._handle_approved_merge(pr, issue, result, "diff", 0)
 
+        assert (
+            result.merged is True
+        )  # behavioral: merge succeeded and result reflects it
         phase._prs.swap_pipeline_labels.assert_any_call(42, "hydraflow-fixed")
 
 
@@ -1241,6 +1255,7 @@ class TestRunPostMergeHooks:
         issue = TaskFactory.create()
         result = ReviewResultFactory.create()
 
+        # Behavioral: function completes without raising (hooks are fire-and-forget)
         await phase._run_post_merge_hooks(pr, issue, result, "diff")
 
         mock_ac.generate.assert_awaited_once()
@@ -1255,6 +1270,7 @@ class TestRunPostMergeHooks:
         issue = TaskFactory.create()
         result = ReviewResultFactory.create()
 
+        # Behavioral: function completes without raising (hooks are fire-and-forget)
         await phase._run_post_merge_hooks(pr, issue, result, "diff")
 
         mock_retro.record.assert_awaited_once()
@@ -1274,7 +1290,7 @@ class TestRunPostMergeHooks:
         issue = TaskFactory.create()
         result = ReviewResultFactory.create()
 
-        # Should not raise
+        # Behavioral: AC failure does not propagate — function completes normally
         await phase._run_post_merge_hooks(pr, issue, result, "diff")
 
         # AC failed but retrospective still called
@@ -1431,13 +1447,8 @@ class TestReviewOneInner:
         issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
-        phase._worktrees.merge_main = AsyncMock(return_value=False)
+        _setup_conflict_scenario(phase)
         phase._prs.push_branch = AsyncMock()
-        phase._prs.post_pr_comment = AsyncMock()
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
 
         wt = config.worktree_path_for_issue(42)
         wt.mkdir(parents=True, exist_ok=True)
@@ -1464,11 +1475,7 @@ class TestHandleRejectedReview:
         task = TaskFactory.create(id=pr.issue_number)
         result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
 
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_comment = AsyncMock()
+        _setup_rejected_review_mocks(phase)
 
         # 0 attempts < max_review_fix_attempts (2 default)
         returned = await phase._handle_rejected_review(pr, task, result, 0)
@@ -1488,11 +1495,7 @@ class TestHandleRejectedReview:
         )
         task = TaskFactory.create(id=pr.issue_number)
 
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_comment = AsyncMock()
+        _setup_rejected_review_mocks(phase)
 
         await phase._handle_rejected_review(pr, task, result, 0)
 
@@ -1508,11 +1511,7 @@ class TestHandleRejectedReview:
         task = TaskFactory.create(id=pr.issue_number)
         result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
 
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_comment = AsyncMock()
+        _setup_rejected_review_mocks(phase)
 
         await phase._handle_rejected_review(pr, task, result, 0)
 
@@ -1528,11 +1527,7 @@ class TestHandleRejectedReview:
         task = TaskFactory.create(id=pr.issue_number)
         result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
 
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_comment = AsyncMock()
+        _setup_rejected_review_mocks(phase)
 
         await phase._handle_rejected_review(pr, task, result, 0)
 
@@ -1548,11 +1543,7 @@ class TestHandleRejectedReview:
         task = TaskFactory.create(id=pr.issue_number)
         result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
 
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_comment = AsyncMock()
+        _setup_rejected_review_mocks(phase)
 
         await phase._handle_rejected_review(pr, task, result, 0)
 
@@ -1574,11 +1565,7 @@ class TestHandleRejectedReview:
         task = TaskFactory.create(id=pr.issue_number)
         result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
 
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_comment = AsyncMock()
+        _setup_rejected_review_mocks(phase)
         phase._prs.post_pr_comment = AsyncMock()
 
         # Exhaust cap: 2 attempts already recorded
@@ -1607,11 +1594,7 @@ class TestHandleRejectedReview:
         task = TaskFactory.create(id=pr.issue_number)
         result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
 
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_comment = AsyncMock()
+        _setup_rejected_review_mocks(phase)
         phase._prs.post_pr_comment = AsyncMock()
 
         phase._state.increment_review_attempts(42)
@@ -1638,11 +1621,7 @@ class TestHandleRejectedReview:
         task = TaskFactory.create(id=pr.issue_number)
         result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
 
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_comment = AsyncMock()
+        _setup_rejected_review_mocks(phase)
         phase._prs.post_pr_comment = AsyncMock()
 
         # Exhaust cap
@@ -1665,11 +1644,7 @@ class TestHandleRejectedReview:
         task = TaskFactory.create(id=pr.issue_number)
         result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
 
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_comment = AsyncMock()
+        _setup_rejected_review_mocks(phase)
 
         await phase._handle_rejected_review(pr, task, result, 0)
 

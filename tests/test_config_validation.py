@@ -11,561 +11,137 @@ import pytest
 from config import HydraFlowConfig
 
 # ---------------------------------------------------------------------------
-# HydraFlowConfig – validation constraints
+# Helpers
+# ---------------------------------------------------------------------------
+
+# (field_name, min_val, max_val, default_val)
+_BOUNDED_INT_FIELDS = [
+    ("batch_size", 1, 50, 15),
+    ("max_workers", 1, 10, 1),
+    ("max_triagers", 1, 10, 1),
+    ("max_planners", 1, 10, 1),
+    ("max_reviewers", 1, 10, 1),
+    ("max_hitl_workers", 1, 5, 1),
+    ("dashboard_port", 1024, 65535, 5555),
+    ("ci_check_timeout", 30, 3600, 600),
+    ("ci_poll_interval", 5, 120, 30),
+    ("max_ci_fix_attempts", 0, 5, 2),
+    ("max_review_fix_attempts", 0, 5, 2),
+    ("max_pre_quality_review_attempts", 0, 5, 3),
+    ("min_review_findings", 0, 20, 3),
+    ("min_plan_words", 50, 2000, 200),
+    ("max_merge_conflict_fix_attempts", 0, 5, 3),
+    ("max_new_files_warning", 1, 20, 5),
+]
+
+_BOUNDED_INT_IDS = [f[0] for f in _BOUNDED_INT_FIELDS]
+
+
+def _make_cfg(tmp_path: Path, **overrides: object) -> HydraFlowConfig:
+    return HydraFlowConfig(
+        repo_root=tmp_path,
+        worktree_base=tmp_path / "wt",
+        state_file=tmp_path / "s.json",
+        **overrides,  # type: ignore[arg-type]
+    )
+
+
+# ---------------------------------------------------------------------------
+# HydraFlowConfig – validation constraints (parametrized)
+# ---------------------------------------------------------------------------
+
+
+class TestBoundedIntFields:
+    """Parametrized tests for Pydantic field constraints (ge/le) across all bounded int fields."""
+
+    @pytest.mark.parametrize(
+        "field,min_val,max_val,default", _BOUNDED_INT_FIELDS, ids=_BOUNDED_INT_IDS
+    )
+    def test_default_value(
+        self,
+        tmp_path: Path,
+        field: str,
+        min_val: int,
+        max_val: int,
+        default: int,
+    ) -> None:
+        cfg = _make_cfg(tmp_path)
+        assert getattr(cfg, field) == default
+
+    @pytest.mark.parametrize(
+        "field,min_val,max_val,default", _BOUNDED_INT_FIELDS, ids=_BOUNDED_INT_IDS
+    )
+    def test_minimum_boundary_accepted(
+        self,
+        tmp_path: Path,
+        field: str,
+        min_val: int,
+        max_val: int,
+        default: int,
+    ) -> None:
+        cfg = _make_cfg(tmp_path, **{field: min_val})
+        assert getattr(cfg, field) == min_val
+
+    @pytest.mark.parametrize(
+        "field,min_val,max_val,default", _BOUNDED_INT_FIELDS, ids=_BOUNDED_INT_IDS
+    )
+    def test_maximum_boundary_accepted(
+        self,
+        tmp_path: Path,
+        field: str,
+        min_val: int,
+        max_val: int,
+        default: int,
+    ) -> None:
+        cfg = _make_cfg(tmp_path, **{field: max_val})
+        assert getattr(cfg, field) == max_val
+
+    @pytest.mark.parametrize(
+        "field,min_val,max_val,default", _BOUNDED_INT_FIELDS, ids=_BOUNDED_INT_IDS
+    )
+    def test_below_minimum_raises(
+        self,
+        tmp_path: Path,
+        field: str,
+        min_val: int,
+        max_val: int,
+        default: int,
+    ) -> None:
+        with pytest.raises(ValueError):
+            _make_cfg(tmp_path, **{field: min_val - 1})
+
+    @pytest.mark.parametrize(
+        "field,min_val,max_val,default", _BOUNDED_INT_FIELDS, ids=_BOUNDED_INT_IDS
+    )
+    def test_above_maximum_raises(
+        self,
+        tmp_path: Path,
+        field: str,
+        min_val: int,
+        max_val: int,
+        default: int,
+    ) -> None:
+        with pytest.raises(ValueError):
+            _make_cfg(tmp_path, **{field: max_val + 1})
+
+
+# ---------------------------------------------------------------------------
+# HydraFlowConfig – validation constraints (non-parametrized edge cases)
 # ---------------------------------------------------------------------------
 
 
 class TestHydraFlowConfigValidationConstraints:
-    """Tests for Pydantic field constraints (ge/le/gt)."""
+    """Edge-case tests that don't fit the uniform min/max/default pattern."""
 
-    # batch_size: ge=1, le=50
+    # batch_size: ge=1, le=50 — representative boundary check kept for clarity
 
     def test_batch_size_minimum_boundary(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            batch_size=1,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
+        cfg = _make_cfg(tmp_path, batch_size=1)
         assert cfg.batch_size == 1
-
-    def test_batch_size_maximum_boundary(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            batch_size=50,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.batch_size == 50
-
-    def test_batch_size_below_minimum_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError):
-            HydraFlowConfig(
-                batch_size=0,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
 
     def test_batch_size_above_maximum_raises(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError):
-            HydraFlowConfig(
-                batch_size=51,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    # max_workers: ge=1, le=10
-
-    def test_max_workers_minimum_boundary(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            max_workers=1,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.max_workers == 1
-
-    def test_max_workers_maximum_boundary(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            max_workers=10,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.max_workers == 10
-
-    def test_max_workers_below_minimum_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError):
-            HydraFlowConfig(
-                max_workers=0,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    def test_max_workers_above_maximum_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError):
-            HydraFlowConfig(
-                max_workers=11,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    # max_triagers: ge=1, le=10
-
-    def test_max_triagers_minimum_boundary(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            max_triagers=1,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.max_triagers == 1
-
-    def test_max_triagers_maximum_boundary(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            max_triagers=10,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.max_triagers == 10
-
-    def test_max_triagers_below_minimum_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError):
-            HydraFlowConfig(
-                max_triagers=0,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    def test_max_triagers_above_maximum_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError):
-            HydraFlowConfig(
-                max_triagers=11,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    # max_planners: ge=1, le=10
-
-    def test_max_planners_minimum_boundary(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            max_planners=1,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.max_planners == 1
-
-    def test_max_planners_maximum_boundary(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            max_planners=10,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.max_planners == 10
-
-    def test_max_planners_below_minimum_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError):
-            HydraFlowConfig(
-                max_planners=0,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    def test_max_planners_above_maximum_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError):
-            HydraFlowConfig(
-                max_planners=11,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    # max_reviewers: ge=1, le=10
-
-    def test_max_reviewers_minimum_boundary(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            max_reviewers=1,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.max_reviewers == 1
-
-    def test_max_reviewers_maximum_boundary(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            max_reviewers=10,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.max_reviewers == 10
-
-    def test_max_reviewers_below_minimum_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError):
-            HydraFlowConfig(
-                max_reviewers=0,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    def test_max_reviewers_above_maximum_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError):
-            HydraFlowConfig(
-                max_reviewers=11,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    # max_hitl_workers: ge=1, le=5
-
-    def test_max_hitl_workers_minimum_boundary(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            max_hitl_workers=1,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.max_hitl_workers == 1
-
-    def test_max_hitl_workers_maximum_boundary(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            max_hitl_workers=5,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.max_hitl_workers == 5
-
-    def test_max_hitl_workers_below_minimum_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError):
-            HydraFlowConfig(
-                max_hitl_workers=0,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    def test_max_hitl_workers_above_maximum_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError):
-            HydraFlowConfig(
-                max_hitl_workers=6,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    # dashboard_port: ge=1024, le=65535
-
-    def test_dashboard_port_minimum_boundary(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            dashboard_port=1024,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.dashboard_port == 1024
-
-    def test_dashboard_port_maximum_boundary(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            dashboard_port=65535,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.dashboard_port == 65535
-
-    def test_dashboard_port_below_minimum_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError):
-            HydraFlowConfig(
-                dashboard_port=1023,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    def test_dashboard_port_above_maximum_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError):
-            HydraFlowConfig(
-                dashboard_port=65536,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    # ci_check_timeout: ge=30, le=3600
-
-    def test_ci_check_timeout_default(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.ci_check_timeout == 600
-
-    def test_ci_check_timeout_minimum_boundary(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            ci_check_timeout=30,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.ci_check_timeout == 30
-
-    def test_ci_check_timeout_below_minimum_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError):
-            HydraFlowConfig(
-                ci_check_timeout=29,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    # ci_poll_interval: ge=5, le=120
-
-    def test_ci_poll_interval_default(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.ci_poll_interval == 30
-
-    def test_ci_poll_interval_minimum_boundary(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            ci_poll_interval=5,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.ci_poll_interval == 5
-
-    def test_ci_poll_interval_below_minimum_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError):
-            HydraFlowConfig(
-                ci_poll_interval=4,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    # max_ci_fix_attempts: ge=0, le=5
-
-    def test_max_ci_fix_attempts_default(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.max_ci_fix_attempts == 2
-
-    def test_max_ci_fix_attempts_zero_disables(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            max_ci_fix_attempts=0,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.max_ci_fix_attempts == 0
-
-    def test_max_ci_fix_attempts_above_maximum_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError):
-            HydraFlowConfig(
-                max_ci_fix_attempts=6,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    # max_review_fix_attempts: ge=0, le=5
-
-    def test_max_review_fix_attempts_default(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.max_review_fix_attempts == 2
-
-    def test_max_review_fix_attempts_configurable(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            max_review_fix_attempts=4,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.max_review_fix_attempts == 4
-
-    def test_max_review_fix_attempts_above_maximum_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError):
-            HydraFlowConfig(
-                max_review_fix_attempts=6,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    # max_pre_quality_review_attempts: ge=0, le=5
-
-    def test_max_pre_quality_review_attempts_default(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.max_pre_quality_review_attempts == 3
-
-    def test_max_pre_quality_review_attempts_configurable(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            max_pre_quality_review_attempts=3,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.max_pre_quality_review_attempts == 3
-
-    def test_max_pre_quality_review_attempts_above_maximum_raises(
-        self, tmp_path: Path
-    ) -> None:
-        with pytest.raises(ValueError):
-            HydraFlowConfig(
-                max_pre_quality_review_attempts=6,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    # min_review_findings: ge=0, le=20
-
-    def test_min_review_findings_default(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.min_review_findings == 3
-
-    def test_min_review_findings_configurable(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            min_review_findings=5,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.min_review_findings == 5
-
-    def test_min_review_findings_above_maximum_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError):
-            HydraFlowConfig(
-                min_review_findings=21,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    # min_plan_words: ge=50, le=2000
-
-    def test_min_plan_words_default(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.min_plan_words == 200
-
-    def test_min_plan_words_configurable(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            min_plan_words=100,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.min_plan_words == 100
-
-    def test_min_plan_words_below_minimum_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError):
-            HydraFlowConfig(
-                min_plan_words=49,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    def test_min_plan_words_above_maximum_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError):
-            HydraFlowConfig(
-                min_plan_words=2001,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    # max_merge_conflict_fix_attempts: ge=0, le=5
-
-    def test_max_merge_conflict_fix_attempts_default(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.max_merge_conflict_fix_attempts == 3
-
-    def test_max_merge_conflict_fix_attempts_configurable(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            max_merge_conflict_fix_attempts=1,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.max_merge_conflict_fix_attempts == 1
-
-    def test_max_merge_conflict_fix_attempts_zero_allowed(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            max_merge_conflict_fix_attempts=0,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.max_merge_conflict_fix_attempts == 0
-
-    def test_max_merge_conflict_fix_attempts_above_maximum_raises(
-        self, tmp_path: Path
-    ) -> None:
-        with pytest.raises(ValueError):
-            HydraFlowConfig(
-                max_merge_conflict_fix_attempts=6,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    # max_new_files_warning: ge=1, le=20
-
-    def test_max_new_files_warning_default(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.max_new_files_warning == 5
-
-    def test_max_new_files_warning_configurable(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            max_new_files_warning=10,
-            repo_root=tmp_path,
-            worktree_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.max_new_files_warning == 10
-
-    def test_max_new_files_warning_below_minimum_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError):
-            HydraFlowConfig(
-                max_new_files_warning=0,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    def test_max_new_files_warning_above_maximum_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError):
-            HydraFlowConfig(
-                max_new_files_warning=21,
-                repo_root=tmp_path,
-                worktree_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
+            _make_cfg(tmp_path, batch_size=51)
 
 
 # ---------------------------------------------------------------------------

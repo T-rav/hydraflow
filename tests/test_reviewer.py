@@ -11,7 +11,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from base_runner import BaseRunner
 from events import EventType
 from models import CodeScanningAlert, ReviewerStatus, ReviewVerdict
 from reviewer import ReviewRunner
@@ -22,23 +21,6 @@ from tests.helpers import ConfigFactory, make_streaming_proc
 @pytest.fixture
 def pr_info():
     return PRInfoFactory.create()
-
-
-# ---------------------------------------------------------------------------
-# Inheritance
-# ---------------------------------------------------------------------------
-
-
-class TestReviewRunnerInheritance:
-    """ReviewRunner must extend BaseRunner."""
-
-    def test_inherits_from_base_runner(self, config, event_bus) -> None:
-        runner = ReviewRunner(config, event_bus)
-        assert isinstance(runner, BaseRunner)
-
-    def test_has_terminate_method(self, config, event_bus) -> None:
-        runner = ReviewRunner(config, event_bus)
-        assert callable(runner.terminate)
 
 
 # ---------------------------------------------------------------------------
@@ -311,72 +293,43 @@ def test_extract_summary_fallback_ignores_empty_lines(config, event_bus):
 # ---------------------------------------------------------------------------
 
 
-def test_sanitize_summary_accepts_clean_text(config, event_bus):
+@pytest.mark.parametrize(
+    "text",
+    [
+        "→ TaskOutput: {'task_id': 'abc123'}",
+        "← Result: done",
+        '{"task_id": "abc", "block": true}',
+        "<div>Some output</div>",
+        "```python",
+        "Co-Authored-By: Claude <noreply@anthropic.com>",
+        "Signed-off-by: Bot <bot@example.com>",
+        "ok",
+        "   short   ",
+        "tokens: 12345",
+        "cost: $0.05",
+        "duration: 30s",
+    ],
+)
+def test_sanitize_summary_rejects_invalid(config, event_bus, text):
     runner = _make_runner(config, event_bus)
-    assert runner._sanitize_summary("Implementation looks good, tests pass.") == (
-        "Implementation looks good, tests pass."
-    )
+    assert runner._sanitize_summary(text) is None
 
 
-def test_sanitize_summary_rejects_tool_arrow_output(config, event_bus):
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        (
+            "Implementation looks good, tests pass.",
+            "Implementation looks good, tests pass.",
+        ),
+        ("   Clean summary text here   ", "Clean summary text here"),
+        ("A" * 300, "A" * 200),
+    ],
+)
+def test_sanitize_summary_accepts_valid(config, event_bus, text, expected):
     runner = _make_runner(config, event_bus)
-    assert runner._sanitize_summary("→ TaskOutput: {'task_id': 'abc123'}") is None
-
-
-def test_sanitize_summary_rejects_left_arrow_output(config, event_bus):
-    runner = _make_runner(config, event_bus)
-    assert runner._sanitize_summary("← Result: done") is None
-
-
-def test_sanitize_summary_rejects_raw_json(config, event_bus):
-    runner = _make_runner(config, event_bus)
-    assert runner._sanitize_summary('{"task_id": "abc", "block": true}') is None
-
-
-def test_sanitize_summary_rejects_html_tags(config, event_bus):
-    runner = _make_runner(config, event_bus)
-    assert runner._sanitize_summary("<div>Some output</div>") is None
-
-
-def test_sanitize_summary_rejects_code_fences(config, event_bus):
-    runner = _make_runner(config, event_bus)
-    assert runner._sanitize_summary("```python") is None
-
-
-def test_sanitize_summary_rejects_git_trailers(config, event_bus):
-    runner = _make_runner(config, event_bus)
-    assert (
-        runner._sanitize_summary("Co-Authored-By: Claude <noreply@anthropic.com>")
-        is None
-    )
-    assert runner._sanitize_summary("Signed-off-by: Bot <bot@example.com>") is None
-
-
-def test_sanitize_summary_rejects_short_strings(config, event_bus):
-    runner = _make_runner(config, event_bus)
-    assert runner._sanitize_summary("ok") is None
-    assert runner._sanitize_summary("   short   ") is None
-
-
-def test_sanitize_summary_rejects_metric_lines(config, event_bus):
-    runner = _make_runner(config, event_bus)
-    assert runner._sanitize_summary("tokens: 12345") is None
-    assert runner._sanitize_summary("cost: $0.05") is None
-    assert runner._sanitize_summary("duration: 30s") is None
-
-
-def test_sanitize_summary_truncates_to_200_chars(config, event_bus):
-    runner = _make_runner(config, event_bus)
-    long_text = "A" * 300
-    result = runner._sanitize_summary(long_text)
-    assert result is not None
-    assert len(result) == 200
-
-
-def test_sanitize_summary_strips_whitespace(config, event_bus):
-    runner = _make_runner(config, event_bus)
-    result = runner._sanitize_summary("   Clean summary text here   ")
-    assert result == "Clean summary text here"
+    result = runner._sanitize_summary(text)
+    assert result == expected
 
 
 # ---------------------------------------------------------------------------

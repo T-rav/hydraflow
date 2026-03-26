@@ -52,12 +52,8 @@ class TestFetchAndMergeMain:
         success_proc = make_proc(returncode=0)
         fail_proc = make_proc(returncode=1, stderr=b"fatal: not a fast-forward")
 
-        call_count = 0
-
         async def fake_exec(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
+            if args[:3] == ("git", "fetch", "origin"):
                 return success_proc  # fetch succeeds
             return fail_proc  # ff-only merge fails
 
@@ -78,12 +74,8 @@ class TestFetchAndMergeMain:
             returncode=1, stderr=b"CONFLICT (content): Merge conflict"
         )
 
-        call_count = 0
-
         async def fake_exec(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count <= 2:
+            if args[:3] == ("git", "fetch", "origin") or "--ff-only" in args:
                 return success_proc  # fetch + ff-only succeed
             return fail_proc  # merge origin/main fails
 
@@ -153,16 +145,12 @@ class TestMergeMain:
         )
         abort_proc = make_proc(returncode=0)
 
-        call_count = 0
-
         async def fake_exec(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count <= 2:
+            if "--abort" in args:
+                return abort_proc  # git merge --abort
+            if args[:3] == ("git", "fetch", "origin") or "--ff-only" in args:
                 return success_proc  # git fetch + ff-only merge succeed
-            if call_count == 3:
-                return merge_fail_proc  # git merge origin/main fails
-            return abort_proc  # git merge --abort
+            return merge_fail_proc  # git merge origin/main fails
 
         with patch(
             "asyncio.create_subprocess_exec", side_effect=fake_exec
@@ -184,12 +172,8 @@ class TestMergeMain:
         fetch_fail_proc = make_proc(returncode=1, stderr=b"fatal: network error")
         abort_proc = make_proc(returncode=0)
 
-        call_count = 0
-
         async def fake_exec(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
+            if args[:3] == ("git", "fetch", "origin"):
                 return fetch_fail_proc
             return abort_proc
 
@@ -351,12 +335,8 @@ class TestStartMergeMain:
             returncode=1, stderr=b"CONFLICT (content): Merge conflict"
         )
 
-        call_count = 0
-
         async def fake_exec(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count <= 2:
+            if args[:3] == ("git", "fetch", "origin") or "--ff-only" in args:
                 return success_proc  # git fetch + ff-only merge succeed
             return merge_fail_proc  # git merge origin/main fails
 
@@ -510,12 +490,8 @@ class TestGetMainDiffForFiles:
             returncode=0, stdout=b"diff --git a/foo.py b/foo.py\n+added\n"
         )
 
-        call_count = 0
-
         async def fake_exec(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
+            if args[1] == "merge-base":
                 return merge_base_proc
             return diff_proc
 
@@ -546,12 +522,8 @@ class TestGetMainDiffForFiles:
         large_diff = b"x" * 50_000
         diff_proc = make_proc(returncode=0, stdout=large_diff)
 
-        call_count = 0
-
         async def fake_exec(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
+            if args[1] == "merge-base":
                 return merge_base_proc
             return diff_proc
 
@@ -583,12 +555,8 @@ class TestGetMainDiffForFiles:
         merge_base_proc = make_proc(returncode=0, stdout=b"abc123\n")
         diff_fail_proc = make_proc(returncode=1, stderr=b"fatal: bad path")
 
-        call_count = 0
-
         async def fake_exec(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
+            if args[1] == "merge-base":
                 return merge_base_proc
             return diff_fail_proc
 
@@ -604,12 +572,8 @@ class TestGetMainDiffForFiles:
         merge_base_proc = make_proc(returncode=0, stdout=b"abc123\n")
         diff_proc = make_proc(returncode=0, stdout=b"combined diff\n")
 
-        call_count = 0
-
         async def fake_exec(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
+            if args[1] == "merge-base":
                 return merge_base_proc
             return diff_proc
 
@@ -644,12 +608,8 @@ class TestGetMainCommitsSinceDiverge:
         log_output = b"abc1234 Add feature X\ndef5678 Fix bug Y\n"
         log_proc = make_proc(returncode=0, stdout=log_output)
 
-        call_count = 0
-
         async def fake_exec(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
+            if args[:3] == ("git", "fetch", "origin"):
                 return fetch_proc
             return log_proc
 
@@ -678,12 +638,8 @@ class TestGetMainCommitsSinceDiverge:
         fetch_proc = make_proc(returncode=0)
         log_fail_proc = make_proc(returncode=1, stderr=b"fatal: bad revision")
 
-        call_count = 0
-
         async def fake_exec(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
+            if args[:3] == ("git", "fetch", "origin"):
                 return fetch_proc
             return log_fail_proc
 
@@ -702,12 +658,8 @@ class TestGetMainCommitsSinceDiverge:
         fetch_proc = make_proc(returncode=0)
         log_proc = make_proc(returncode=0, stdout=b"")
 
-        call_count = 0
-
         async def fake_exec(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
+            if args[:3] == ("git", "fetch", "origin"):
                 return fetch_proc
             return log_proc
 

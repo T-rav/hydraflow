@@ -370,25 +370,17 @@ async def test_create_from_phases(manager):
         ),
     ]
 
-    call_count = 0
-
-    async def mock_run(*args, **_kwargs):
-        nonlocal call_count
-        call_count += 1
-        cmd_args = list(args)
-        if "create" in cmd_args:
-            return f"repo-id{call_count}"
-        return "ok"
-
     with patch("beads_manager.run_subprocess", new_callable=AsyncMock) as mock_run_fn:
-        mock_run_fn.side_effect = mock_run
+        mock_run_fn.side_effect = ["repo-id1", "repo-id2", "ok"]
         mapping = await manager.create_from_phases(phases, 42, Path("/repo"))
 
     assert mapping == {"P1": "repo-id1", "P2": "repo-id2"}
-    create_calls = [c for c in mock_run_fn.call_args_list if "create" in list(c.args)]
-    assert create_calls[0].args[4] == "0"  # P1 no deps → priority 0
-    assert create_calls[1].args[4] == "1"  # P2 has deps → priority 1
-    assert create_calls[0].args[5] == "--silent"
+    create_calls = [c for c in mock_run_fn.call_args_list if "create" in c.args]
+    p1_args = list(create_calls[0].args)
+    p2_args = list(create_calls[1].args)
+    assert p1_args[p1_args.index("-p") + 1] == "0"  # P1 no deps → priority 0
+    assert p2_args[p2_args.index("-p") + 1] == "1"  # P2 has deps → priority 1
+    assert "--silent" in p1_args
 
 
 @pytest.mark.asyncio()

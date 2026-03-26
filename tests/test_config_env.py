@@ -475,25 +475,23 @@ class TestEnvVarOverrideTable:
 
 
 class TestDotenvLoading:
-    """Verify python-dotenv integration."""
+    """Verify python-dotenv is called at server startup."""
 
-    def test_dotenv_loads_hydraflow_env_vars(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """python-dotenv should load HYDRAFLOW_ vars from .env."""
-        import os
+    def test_server_main_invokes_load_dotenv(self) -> None:
+        """server.main() should call load_dotenv before config resolution."""
+        from unittest.mock import MagicMock, patch
 
-        env_file = tmp_path / ".env"
-        env_file.write_text("HYDRAFLOW_MAIN_BRANCH=staging\n")
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.delenv("HYDRAFLOW_MAIN_BRANCH", raising=False)
+        mock_config = MagicMock()
+        mock_config.dashboard_enabled = False
 
-        from dotenv import load_dotenv
+        with (
+            patch("dotenv.load_dotenv") as mock_dotenv,
+            patch("server.load_runtime_config", return_value=mock_config),
+            patch("server.asyncio.run"),
+            patch("server.setup_logging"),
+            patch.dict("os.environ", {}, clear=False),
+        ):
+            from server import main
 
-        load_dotenv(dotenv_path=env_file, override=True)
-
-        assert os.environ.get("HYDRAFLOW_MAIN_BRANCH") == "staging"
-
-        # Clean up: load_dotenv writes directly to os.environ, bypassing
-        # monkeypatch tracking.  Remove explicitly so it doesn't leak.
-        os.environ.pop("HYDRAFLOW_MAIN_BRANCH", None)
+            main()
+            mock_dotenv.assert_called_once()
