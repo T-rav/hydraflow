@@ -69,6 +69,10 @@ class GlobalMemoryStore:
         - Global digest provides baseline context prepended before local.
         - The combined text is hard-capped at *max_chars*.
         """
+        separator = "\n\n---\n\n"
+        if max_chars <= len(separator):
+            return local_digest[:max_chars]
+
         global_digest = self.load_global_digest()
 
         if not global_digest:
@@ -77,7 +81,6 @@ class GlobalMemoryStore:
             return global_digest[:max_chars]
 
         # Reserve space for local by allocating the remainder after a separator.
-        separator = "\n\n---\n\n"
         local_budget = max_chars - len(separator)
 
         # When local fits, prepend as much global as the budget allows.
@@ -194,6 +197,7 @@ class GlobalMemoryStore:
             group_slugs = [slug_a]
             group_ids: dict[str, int] = {slug_a: id_a}
             group_scores = [score_a]
+            group_indices: list[int] = []  # indices in qualified that joined this group
 
             for j, (slug_b, id_b, text_b, score_b) in enumerate(qualified):
                 if j <= i or j in seen_indices:
@@ -205,6 +209,7 @@ class GlobalMemoryStore:
                     group_slugs.append(slug_b)
                     group_ids[slug_b] = id_b
                     group_scores.append(score_b)
+                    group_indices.append(j)
 
             if len(group_slugs) < _PROMOTION_MIN_PROJECTS:
                 continue
@@ -228,9 +233,10 @@ class GlobalMemoryStore:
                 }
             )
             processed_groups.append(group_kw)
-            seen_indices.update(
-                j for j, (s, _, _, _) in enumerate(qualified) if s in group_slugs
-            )
+            # Only mark the specific indices selected into this group (not all
+            # items from member slugs, which would over-suppress future groups).
+            seen_indices.add(i)  # the seed item
+            seen_indices.update(group_indices)  # the items that joined this group
 
         return candidates
 

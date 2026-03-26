@@ -432,13 +432,14 @@ class TestDecisionAuditTrail:
         assert loaded[0]["v"] == 1
 
     def test_decision_counter_increments(self, tmp_path: Path) -> None:
-        """Sequential calls to _next_decision_id produce distinct incrementing IDs."""
+        """Sequential calls to _next_decision_id produce distinct IDs."""
         id1 = _next_decision_id(tmp_path)
         id2 = _next_decision_id(tmp_path)
         assert id1 != id2
-        n1 = int(id1.split("-")[1])
-        n2 = int(id2.split("-")[1])
-        assert n2 == n1 + 1
+        assert id1.startswith("adj-")
+        assert id2.startswith("adj-")
+        assert len(id1.split("-")[1]) == 8  # 8 hex chars from UUID
+        assert len(id2.split("-")[1]) == 8
 
     def test_multiple_decisions_appended(self, tmp_path: Path) -> None:
         """Multiple writes produce multiple JSONL lines."""

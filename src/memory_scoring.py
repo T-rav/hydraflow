@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -11,6 +12,12 @@ from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+# ---------------------------------------------------------------------------
+# Module-level lock protecting read-modify-write on item_scores.json.
+# File I/O is synchronous so threading.Lock is the correct primitive here.
+# ---------------------------------------------------------------------------
+_SCORES_LOCK = threading.Lock()
 
 # ---------------------------------------------------------------------------
 # Relevance matrix: memory type -> set of relevant failure categories.
@@ -126,70 +133,72 @@ class MemoryScorer:
         item_types: dict[int, str] | None = None,
     ) -> None:
         """Update per-item scores based on a new outcome record."""
-        scores = self.load_item_scores()
+        with _SCORES_LOCK:
+            scores = self.load_item_scores()
 
-        for item_id in active_item_ids:
-            item = scores.get(item_id, _default_item_score())
+            for item_id in active_item_ids:
+                item = scores.get(item_id, _default_item_score())
 
-            # Determine whether the failure is relevant for this item
-            relevant = self._is_relevant(outcome, item_id, item_types)
+                # Determine whether the failure is relevant for this item
+                relevant = self._is_relevant(outcome, item_id, item_types)
 
-            # Always increment appearances
-            item["appearances"] = item.get("appearances", 0) + 1
+                # Always increment appearances
+                item["appearances"] = item.get("appearances", 0) + 1
 
-            if relevant:
-                old_score: float = item["score"]
-                delta = self._delta_for_outcome(outcome.outcome)
-                new_score = max(0.0, min(1.0, old_score + delta))
+                if relevant:
+                    old_score: float = item["score"]
+                    delta = self._delta_for_outcome(outcome.outcome)
+                    new_score = max(0.0, min(1.0, old_score + delta))
 
-                # Surprise detection (evaluate before updating score)
-                surprising = (
-                    old_score > _SURPRISE_HIGH and outcome.outcome == "failure"
-                ) or (old_score < _SURPRISE_LOW and outcome.outcome == "success")
+                    # Surprise detection (evaluate before updating score)
+                    surprising = (
+                        old_score > _SURPRISE_HIGH and outcome.outcome == "failure"
+                    ) or (old_score < _SURPRISE_LOW and outcome.outcome == "success")
 
-                item["score"] = new_score
+                    item["score"] = new_score
 
-                trail_entry = TrailEntry(
-                    issue=outcome.issue_id,
-                    outcome=outcome.outcome,
-                    delta=delta,
-                    summary=outcome.summary,
-                    surprising=surprising,
-                ).model_dump()
+                    trail_entry = TrailEntry(
+                        issue=outcome.issue_id,
+                        outcome=outcome.outcome,
+                        delta=delta,
+                        summary=outcome.summary,
+                        surprising=surprising,
+                    ).model_dump()
 
-                trail: list[dict[str, Any]] = item.get("trail", [])
-                trail.append(trail_entry)
+                    trail: list[dict[str, Any]] = item.get("trail", [])
+                    trail.append(trail_entry)
 
-                if len(trail) > _TRAIL_MAX:
-                    # Condense oldest entries into summary
-                    condensed = trail[: len(trail) - _TRAIL_MAX]
-                    item["condensed_summary"] = self._condense(
-                        item.get("condensed_summary", ""), condensed
+                    if len(trail) > _TRAIL_MAX:
+                        # Condense oldest entries into summary
+                        condensed = trail[: len(trail) - _TRAIL_MAX]
+                        item["condensed_summary"] = self._condense(
+                            item.get("condensed_summary", ""), condensed
+                        )
+                        trail = trail[len(trail) - _TRAIL_MAX :]
+
+                    item["trail"] = trail
+
+                    # Track per-context score in addition to the global score
+                    context = outcome.context or "feature"
+                    ctx_key = f"ctx_{context}"
+                    if ctx_key not in item:
+                        item[ctx_key] = {"score": 0.5, "appearances": 0}
+                    item[ctx_key]["appearances"] += 1
+                    item[ctx_key]["score"] = max(
+                        0.0, min(1.0, item[ctx_key]["score"] + delta)
                     )
-                    trail = trail[len(trail) - _TRAIL_MAX :]
 
-                item["trail"] = trail
+                scores[item_id] = item
 
-                # Track per-context score in addition to the global score
-                context = outcome.context or "feature"
-                ctx_key = f"ctx_{context}"
-                if ctx_key not in item:
-                    item[ctx_key] = {"score": 0.5, "appearances": 0}
-                item[ctx_key]["appearances"] += 1
-                item[ctx_key]["score"] = max(
-                    0.0, min(1.0, item[ctx_key]["score"] + delta)
-                )
-
-            scores[item_id] = item
-
-        self._save_item_scores(scores)
+            self._save_item_scores(scores)
 
     def apply_temporal_decay(self) -> None:
         """Apply exponential decay toward 0.5 for all item scores."""
-        scores = self.load_item_scores()
-        for _item_id, item in scores.items():
-            item["score"] = item["score"] * 0.95 + 0.5 * 0.05
-        self._save_item_scores(scores)
+        with _SCORES_LOCK:
+            scores = self.load_item_scores()
+            for _item_id, item in scores.items():
+                item["score"] = item["score"] * 0.95 + 0.5 * 0.05
+            self._save_item_scores(scores)
 
     def eviction_candidates(self) -> list[int]:
         """Return item IDs with score < 0.3 and appearances >= 5."""

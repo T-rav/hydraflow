@@ -293,9 +293,14 @@ class ImplementPhase:
         await self._escalate_capped_issue(issue, attempts, last_error)
         self._state.mark_issue(issue.id, "failed")
         try:
-            from memory_scoring import MemoryScorer, OutcomeRecord  # noqa: PLC0415
+            from memory_scoring import (  # noqa: PLC0415
+                MemoryScorer,
+                OutcomeRecord,
+                _classify_context,
+            )
 
             scorer = MemoryScorer(self._config.memory_dir)
+            context = _classify_context(list(issue.tags))
             scorer.record_outcome(
                 OutcomeRecord(
                     issue_id=issue.id,
@@ -304,6 +309,7 @@ class ImplementPhase:
                     digest_hash=self._state.get_digest_hash(issue.id) or "",
                     failure_category="max_attempts_exceeded",
                     summary=f"Max attempts exceeded: {issue.title[:80]}",
+                    context=context,
                 )
             )
         except Exception:

@@ -10,6 +10,9 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
+import tempfile
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -51,10 +54,6 @@ _HITL_HIGH = 0.4
 _AVG_SCORE_LOW = 0.4
 _STALE_COUNT_HIGH = 5
 
-# Decision ID counter persisted in memory
-_DECISION_COUNTER_FILE = "decision_counter.json"
-
-
 # ---------------------------------------------------------------------------
 # Trend metrics
 # ---------------------------------------------------------------------------
@@ -94,30 +93,9 @@ class TrendMetrics:
 # ---------------------------------------------------------------------------
 
 
-def _load_decision_counter(decisions_dir: Path) -> int:
-    counter_file = decisions_dir / _DECISION_COUNTER_FILE
-    if counter_file.exists():
-        try:
-            data = json.loads(counter_file.read_text(encoding="utf-8"))
-            return int(data.get("counter", 0))
-        except Exception:  # noqa: BLE001
-            pass
-    return 0
-
-
-def _save_decision_counter(decisions_dir: Path, counter: int) -> None:
-    decisions_dir.mkdir(parents=True, exist_ok=True)
-    counter_file = decisions_dir / _DECISION_COUNTER_FILE
-    counter_file.write_text(
-        json.dumps({"counter": counter}, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
-
-
-def _next_decision_id(decisions_dir: Path) -> str:
-    counter = _load_decision_counter(decisions_dir) + 1
-    _save_decision_counter(decisions_dir, counter)
-    return f"adj-{counter:04d}"
+def _next_decision_id(_decisions_dir: Path) -> str:
+    """Return a unique decision ID using UUID."""
+    return f"adj-{uuid.uuid4().hex[:8]}"
 
 
 def _write_decision(decisions_dir: Path, record: dict[str, Any]) -> None:
@@ -148,7 +126,7 @@ def _load_decisions(decisions_dir: Path) -> list[dict[str, Any]]:
 def _update_decision(
     decisions_dir: Path, decision_id: str, updates: dict[str, Any]
 ) -> None:
-    """Rewrite the decisions.jsonl updating the record matching decision_id."""
+    """Atomically rewrite decisions.jsonl updating the record matching decision_id."""
     records = _load_decisions(decisions_dir)
     updated = False
     for record in records:
@@ -160,9 +138,17 @@ def _update_decision(
         return
     decisions_dir.mkdir(parents=True, exist_ok=True)
     decisions_file = decisions_dir / "decisions.jsonl"
-    with decisions_file.open("w", encoding="utf-8") as fh:
-        for record in records:
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    # Write to a temp file first, then atomically rename to avoid data loss on crash
+    fd, tmp_path = tempfile.mkstemp(dir=str(decisions_dir), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            for record in records:
+                fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        os.replace(tmp_path, str(decisions_file))
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_path)
+        raise
 
 
 # ---------------------------------------------------------------------------
