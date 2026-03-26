@@ -537,9 +537,10 @@ class TestCleanAssets:
         assert "HydraFlow hook chain" in content
 
         clean_assets(target)
-        if (target / ".githooks" / "pre-commit").exists():
-            content = (target / ".githooks" / "pre-commit").read_text()
-            assert "HydraFlow hook chain" not in content
+        hook = target / ".githooks" / "pre-commit"
+        assert hook.exists(), "clean_assets must preserve the user's hook file"
+        content = hook.read_text()
+        assert "HydraFlow hook chain" not in content
 
     def test_clean_noop_when_no_manifest(self, tmp_path):
         """clean_assets should be safe to call when nothing was ever installed."""
