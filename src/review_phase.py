@@ -59,12 +59,14 @@ from phase_utils import (
 from post_merge_handler import PostMergeHandler
 from pr_manager import PRManager, SelfReviewError
 from review_insights import (
+    _PROPOSAL_STALE_DAYS,
     CATEGORY_DESCRIPTIONS,
     ReviewInsightStore,
     ReviewRecord,
     analyze_patterns,
     build_insight_issue_body,
     extract_categories,
+    verify_proposals,
 )
 from reviewer import ReviewRunner
 from state import StateTracker
@@ -1506,6 +1508,25 @@ class ReviewPhase:
                 labels = self._config.improve_label[:1]
                 await self._transitioner.create_task(title, body, labels)
                 self._insights.mark_category_proposed(category)
+                self._insights.record_proposal(category, pre_count=count)
+
+            # Verify existing proposals — re-file stale ones as HITL issues
+            stale = verify_proposals(self._insights, recent)
+            for category in stale:
+                desc = CATEGORY_DESCRIPTIONS.get(category, category)
+                title = f"[HITL] Stale review insight: {desc}"
+                body = (
+                    f"## Stale Improvement Proposal\n\n"
+                    f"The improvement proposal for **{category}** ({desc}) "
+                    f"was filed over {_PROPOSAL_STALE_DAYS} days ago but the "
+                    f"pattern frequency has not decreased. Human intervention is "
+                    f"required to resolve this recurring feedback loop.\n\n"
+                    f"---\n*Auto-escalated by HydraFlow review insight verification.*"
+                )
+                hitl_labels = list(self._config.improve_label[:1]) + list(
+                    self._config.hitl_label
+                )
+                await self._transitioner.create_task(title, body, hitl_labels)
         except (RuntimeError, OSError):
             status = "error"
             details["error"] = "review insight recording failed"
