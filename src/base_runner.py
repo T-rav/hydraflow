@@ -205,14 +205,41 @@ class BaseRunner:
 
         memory_section = ""
         memory_raw = ""
+        troubleshooting_raw = ""
+        retrospectives_raw = ""
 
         if self._hindsight and query_context:
             from hindsight import Bank, format_memories_as_markdown, recall_safe
 
+            max_chars = self._config.max_memory_prompt_chars
+
+            # Priority order: learnings > troubleshooting > retrospectives.
+            # Each bank gets up to max_chars; the combined section is also
+            # capped at max_chars to prevent prompt bloat.
             memories = await recall_safe(self._hindsight, Bank.LEARNINGS, query_context)
             memory_raw = format_memories_as_markdown(memories)
             if memory_raw:
-                memory_raw = memory_raw[: self._config.max_memory_prompt_chars]
+                memory_raw = memory_raw[:max_chars]
+
+            try:
+                ts_memories = await recall_safe(
+                    self._hindsight, Bank.TROUBLESHOOTING, query_context
+                )
+                troubleshooting_raw = format_memories_as_markdown(ts_memories)
+                if troubleshooting_raw:
+                    troubleshooting_raw = troubleshooting_raw[:max_chars]
+            except Exception:  # noqa: BLE001
+                pass  # Enhancement — must not interrupt pipeline
+
+            try:
+                retro_memories = await recall_safe(
+                    self._hindsight, Bank.RETROSPECTIVES, query_context
+                )
+                retrospectives_raw = format_memories_as_markdown(retro_memories)
+                if retrospectives_raw:
+                    retrospectives_raw = retrospectives_raw[:max_chars]
+            except Exception:  # noqa: BLE001
+                pass  # Enhancement — must not interrupt pipeline
 
         # Fallback to file-based digest when Hindsight is absent or returned nothing.
         # When hindsight_exclusive is set and a client is configured, skip file-based.
@@ -230,8 +257,22 @@ class BaseRunner:
             cache_misses += 0 if digest_hit else 1
             memory_raw = digest
 
+        # Assemble the memory section from all available banks.
+        # Cap the combined section at max_memory_prompt_chars.
+        combined_parts: list[str] = []
         if memory_raw:
-            memory_section = f"\n\n## Accumulated Learnings\n\n{memory_raw}"
+            combined_parts.append(f"## Accumulated Learnings\n\n{memory_raw}")
+        if troubleshooting_raw:
+            combined_parts.append(
+                f"## Known Troubleshooting Patterns\n\n{troubleshooting_raw}"
+            )
+        if retrospectives_raw:
+            combined_parts.append(f"## Past Retrospectives\n\n{retrospectives_raw}")
+
+        if combined_parts:
+            combined = "\n\n".join(combined_parts)
+            combined = combined[: self._config.max_memory_prompt_chars]
+            memory_section = f"\n\n{combined}"
 
         self._last_context_stats = {
             "cache_hits": cache_hits,

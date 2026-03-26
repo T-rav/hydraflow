@@ -443,6 +443,175 @@ class TestInjectManifestAndMemory:
         # File-based fallback should still work
         assert "file digest" in memory_sec
 
+    @pytest.mark.asyncio
+    async def test_troubleshooting_bank_recalled_when_hindsight_available(
+        self, config, event_bus: EventBus
+    ) -> None:
+        """When Hindsight is configured, TROUBLESHOOTING bank is recalled."""
+        from hindsight import Bank, HindsightMemory
+
+        mock_client = MagicMock()
+        runner = _TestRunner(config, event_bus, hindsight=mock_client)
+
+        def _recall_side_effect(client, bank, query, **_kwargs):
+            if bank == Bank.LEARNINGS:
+                return [HindsightMemory(content="Always run lint")]
+            if bank == Bank.TROUBLESHOOTING:
+                return [HindsightMemory(content="Check import paths first")]
+            return []
+
+        with (
+            patch("base_runner.load_project_manifest", return_value=""),
+            patch(
+                "hindsight.recall_safe",
+                new_callable=AsyncMock,
+                side_effect=_recall_side_effect,
+            ),
+        ):
+            _, memory_sec = await runner._inject_manifest_and_memory(
+                query_context="Fix import issue"
+            )
+
+        assert "## Known Troubleshooting Patterns" in memory_sec
+        assert "Check import paths first" in memory_sec
+
+    @pytest.mark.asyncio
+    async def test_retrospectives_bank_recalled_when_hindsight_available(
+        self, config, event_bus: EventBus
+    ) -> None:
+        """When Hindsight is configured, RETROSPECTIVES bank is recalled."""
+        from hindsight import Bank, HindsightMemory
+
+        mock_client = MagicMock()
+        runner = _TestRunner(config, event_bus, hindsight=mock_client)
+
+        def _recall_side_effect(client, bank, query, **_kwargs):
+            if bank == Bank.LEARNINGS:
+                return [HindsightMemory(content="Always run lint")]
+            if bank == Bank.RETROSPECTIVES:
+                return [
+                    HindsightMemory(content="Sprint 5: CI flakiness was root cause")
+                ]
+            return []
+
+        with (
+            patch("base_runner.load_project_manifest", return_value=""),
+            patch(
+                "hindsight.recall_safe",
+                new_callable=AsyncMock,
+                side_effect=_recall_side_effect,
+            ),
+        ):
+            _, memory_sec = await runner._inject_manifest_and_memory(
+                query_context="CI failure"
+            )
+
+        assert "## Past Retrospectives" in memory_sec
+        assert "Sprint 5" in memory_sec
+
+    @pytest.mark.asyncio
+    async def test_all_three_banks_appear_in_priority_order(
+        self, config, event_bus: EventBus
+    ) -> None:
+        """Learnings appear before troubleshooting, which appears before retrospectives."""
+        from hindsight import Bank, HindsightMemory
+
+        mock_client = MagicMock()
+        runner = _TestRunner(config, event_bus, hindsight=mock_client)
+
+        def _recall_side_effect(client, bank, query, **_kwargs):
+            if bank == Bank.LEARNINGS:
+                return [HindsightMemory(content="LEARNING_ITEM")]
+            if bank == Bank.TROUBLESHOOTING:
+                return [HindsightMemory(content="TROUBLESHOOT_ITEM")]
+            if bank == Bank.RETROSPECTIVES:
+                return [HindsightMemory(content="RETRO_ITEM")]
+            return []
+
+        with (
+            patch("base_runner.load_project_manifest", return_value=""),
+            patch(
+                "hindsight.recall_safe",
+                new_callable=AsyncMock,
+                side_effect=_recall_side_effect,
+            ),
+        ):
+            _, memory_sec = await runner._inject_manifest_and_memory(
+                query_context="issue context"
+            )
+
+        learnings_pos = memory_sec.index("LEARNING_ITEM")
+        troubleshoot_pos = memory_sec.index("TROUBLESHOOT_ITEM")
+        retro_pos = memory_sec.index("RETRO_ITEM")
+        assert learnings_pos < troubleshoot_pos < retro_pos
+
+    @pytest.mark.asyncio
+    async def test_combined_section_capped_at_max_chars(
+        self, config, event_bus: EventBus
+    ) -> None:
+        """The combined memory section must not exceed max_memory_prompt_chars."""
+        from hindsight import HindsightMemory
+
+        config.max_memory_prompt_chars = 50
+        mock_client = MagicMock()
+        runner = _TestRunner(config, event_bus, hindsight=mock_client)
+
+        big_content = "X" * 200
+
+        def _recall_side_effect(client, bank, query, **_kwargs):
+            return [HindsightMemory(content=big_content)]
+
+        with (
+            patch("base_runner.load_project_manifest", return_value=""),
+            patch(
+                "hindsight.recall_safe",
+                new_callable=AsyncMock,
+                side_effect=_recall_side_effect,
+            ),
+        ):
+            _, memory_sec = await runner._inject_manifest_and_memory(
+                query_context="big query"
+            )
+
+        # Leading "\n\n" prepended to combined, but the combined itself is capped
+        # Total memory_section must not be vastly larger than max_chars + small overhead
+        assert (
+            len(memory_sec) <= config.max_memory_prompt_chars + 4
+        )  # +4 for leading "\n\n"
+
+    @pytest.mark.asyncio
+    async def test_troubleshooting_recall_failure_does_not_raise(
+        self, config, event_bus: EventBus
+    ) -> None:
+        """An exception in TROUBLESHOOTING recall is silently swallowed."""
+        from hindsight import Bank, HindsightMemory
+
+        mock_client = MagicMock()
+        runner = _TestRunner(config, event_bus, hindsight=mock_client)
+
+        call_count = 0
+
+        async def _flaky_recall(client, bank, query, **_kwargs):
+            nonlocal call_count
+            call_count += 1
+            if bank == Bank.TROUBLESHOOTING:
+                raise RuntimeError("network error")
+            return [HindsightMemory(content="Always run lint")]
+
+        with (
+            patch("base_runner.load_project_manifest", return_value=""),
+            patch("hindsight.recall_safe", side_effect=_flaky_recall),
+        ):
+            # Should not raise
+            _, memory_sec = await runner._inject_manifest_and_memory(
+                query_context="Fix something"
+            )
+
+        # Learnings should still appear
+        assert "## Accumulated Learnings" in memory_sec
+        # Troubleshooting section should be absent
+        assert "## Known Troubleshooting Patterns" not in memory_sec
+
 
 # ---------------------------------------------------------------------------
 # _verify_quality
