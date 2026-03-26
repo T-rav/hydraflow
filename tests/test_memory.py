@@ -18,7 +18,7 @@ from memory import (
     load_memory_digest,
     parse_memory_suggestion,
 )
-from models import MEMORY_TYPE_DISPLAY_ORDER, ManifestRefreshResult, MemoryType
+from models import MEMORY_TYPE_DISPLAY_ORDER, MemoryType
 from state import StateTracker
 from tests.helpers import ConfigFactory
 
@@ -537,39 +537,58 @@ class TestMemorySyncWorkerSync:
         bus = MagicMock()
 
         worker = MemorySyncWorker(config, state, bus)
-        stats = await worker.sync([])
+        # No items.jsonl — empty sync
+        stats = await worker.sync()
 
         assert stats["item_count"] == 0
         state.update_memory_state.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_builds_digest_from_issues(self, tmp_path: Path) -> None:
+    async def test_builds_digest_from_local_items(self, tmp_path: Path) -> None:
+        """sync() reads from items.jsonl and builds a digest."""
+        import json
+
         config = ConfigFactory.create(repo_root=tmp_path)
         state = MagicMock()
         state.get_memory_state.return_value = ([], "", None)
         bus = MagicMock()
 
-        worker = MemorySyncWorker(config, state, bus)
-        issues = [
+        # Write items directly to JSONL (the new write path)
+        items_path = config.data_path("memory", "items.jsonl")
+        items_path.parent.mkdir(parents=True, exist_ok=True)
+        items = [
             {
-                "number": 10,
-                "title": "[Memory] Test learning",
-                "body": "## Memory Suggestion\n\n**Learning:** Always test first\n\n**Context:** Found in testing",
-                "createdAt": "2024-06-01T00:00:00Z",
+                "id": "mem-aaa",
+                "title": "Test learning",
+                "learning": "Always test first",
+                "context": "Found in testing",
+                "memory_type": "knowledge",
+                "source": "implementer",
+                "reference": "#10",
+                "created_at": "2024-06-01T00:00:00Z",
             },
             {
-                "number": 20,
-                "title": "[Memory] Another learning",
-                "body": "## Memory Suggestion\n\n**Learning:** Use type hints\n\n**Context:** Code review",
-                "createdAt": "2024-05-01T00:00:00Z",
+                "id": "mem-bbb",
+                "title": "Another learning",
+                "learning": "Use type hints",
+                "context": "Code review",
+                "memory_type": "knowledge",
+                "source": "reviewer",
+                "reference": "#20",
+                "created_at": "2024-05-01T00:00:00Z",
             },
         ]
-        stats = await worker.sync(issues)
+        with items_path.open("w") as f:
+            for item in items:
+                f.write(json.dumps(item) + "\n")
+
+        worker = MemorySyncWorker(config, state, bus)
+        stats = await worker.sync()
 
         assert stats["item_count"] == 2
         assert stats["action"] == "synced"
         # Digest file should exist
-        digest_path = tmp_path / ".hydraflow" / "memory" / "digest.md"
+        digest_path = config.data_path("memory", "digest.md")
         assert digest_path.exists()
         content = digest_path.read_text()
         assert "Always test first" in content
@@ -577,251 +596,161 @@ class TestMemorySyncWorkerSync:
 
     @pytest.mark.asyncio
     async def test_skips_compaction_when_no_change(self, tmp_path: Path) -> None:
+        import json
+
         config = ConfigFactory.create(repo_root=tmp_path)
         state = MagicMock()
-        state.get_memory_state.return_value = ([10, 20], "somehash", "2024-06-01")
+        state.get_memory_state.return_value = ([], "", None)
         bus = MagicMock()
 
-        # Write a digest so the read works
-        digest_dir = tmp_path / ".hydraflow" / "memory"
-        digest_dir.mkdir(parents=True)
-        (digest_dir / "digest.md").write_text("existing digest")
+        items_path = config.data_path("memory", "items.jsonl")
+        items_path.parent.mkdir(parents=True, exist_ok=True)
+        items = [
+            {
+                "id": "mem-aaa",
+                "title": "Item A",
+                "learning": "First learning",
+                "context": "",
+                "memory_type": "knowledge",
+                "source": "implementer",
+                "reference": "#10",
+                "created_at": "2024-06-01T00:00:00Z",
+            },
+            {
+                "id": "mem-bbb",
+                "title": "Item B",
+                "learning": "Second learning",
+                "context": "",
+                "memory_type": "knowledge",
+                "source": "implementer",
+                "reference": "#20",
+                "created_at": "2024-05-01T00:00:00Z",
+            },
+        ]
+        with items_path.open("w") as f:
+            for item in items:
+                f.write(json.dumps(item) + "\n")
 
         worker = MemorySyncWorker(config, state, bus)
-        issues = [
-            {"number": 10, "title": "A", "body": "B", "createdAt": ""},
-            {"number": 20, "title": "C", "body": "D", "createdAt": ""},
-        ]
-        stats = await worker.sync(issues)
+        stats = await worker.sync()
 
         assert stats["compacted"] is False
         assert stats["item_count"] == 2
 
     @pytest.mark.asyncio
     async def test_detects_new_issues_and_rebuilds(self, tmp_path: Path) -> None:
+        import json
+
         config = ConfigFactory.create(repo_root=tmp_path)
         state = MagicMock()
-        state.get_memory_state.return_value = ([10], "oldhash", "2024-05-01")
+        state.get_memory_state.return_value = ([], "", None)
         bus = MagicMock()
 
-        worker = MemorySyncWorker(config, state, bus)
-        issues = [
-            {
-                "number": 10,
-                "title": "A",
-                "body": "**Learning:** Old thing",
-                "createdAt": "2024-05-01",
-            },
-            {
-                "number": 30,
-                "title": "B",
-                "body": "**Learning:** New thing",
-                "createdAt": "2024-06-01",
-            },
-        ]
-        stats = await worker.sync(issues)
+        items_path = config.data_path("memory", "items.jsonl")
+        items_path.parent.mkdir(parents=True, exist_ok=True)
 
-        assert stats["item_count"] == 2
-        # State should be updated with new IDs
+        item_a = {
+            "id": "mem-aaa",
+            "title": "Old item",
+            "learning": "Old thing",
+            "context": "",
+            "memory_type": "knowledge",
+            "source": "implementer",
+            "reference": "#10",
+            "created_at": "2024-05-01T00:00:00Z",
+        }
+        with items_path.open("w") as f:
+            f.write(json.dumps(item_a) + "\n")
+
+        worker = MemorySyncWorker(config, state, bus)
+        stats1 = await worker.sync()
+        assert stats1["item_count"] == 1
+
+        # Add a second item and sync again
+        item_b = {
+            "id": "mem-bbb",
+            "title": "New item",
+            "learning": "New thing",
+            "context": "",
+            "memory_type": "knowledge",
+            "source": "implementer",
+            "reference": "#30",
+            "created_at": "2024-06-01T00:00:00Z",
+        }
+        with items_path.open("a") as f:
+            f.write(json.dumps(item_b) + "\n")
+
+        state.get_memory_state.return_value = ([], "oldhash", "2024-05-01")
+        stats2 = await worker.sync()
+        assert stats2["item_count"] == 2
         state.update_memory_state.assert_called()
-        call_args = state.update_memory_state.call_args
-        assert 30 in call_args[0][0]
 
     @pytest.mark.asyncio
     async def test_updates_state(self, tmp_path: Path) -> None:
+        import json
+
         config = ConfigFactory.create(repo_root=tmp_path)
         state = MagicMock()
         state.get_memory_state.return_value = ([], "", None)
         bus = MagicMock()
 
+        items_path = config.data_path("memory", "items.jsonl")
+        items_path.parent.mkdir(parents=True, exist_ok=True)
+        item = {
+            "id": "mem-abc12345",
+            "title": "T",
+            "learning": "Something",
+            "context": "",
+            "memory_type": "knowledge",
+            "source": "implementer",
+            "reference": "#5",
+            "created_at": "2024-06-01T00:00:00Z",
+        }
+        with items_path.open("w") as f:
+            f.write(json.dumps(item) + "\n")
+
         worker = MemorySyncWorker(config, state, bus)
-        issues = [
-            {
-                "number": 5,
-                "title": "T",
-                "body": "**Learning:** Something",
-                "createdAt": "",
-            },
-        ]
-        await worker.sync(issues)
+        await worker.sync()
 
         state.update_memory_state.assert_called()
         call_args = state.update_memory_state.call_args[0]
-        assert call_args[0] == [5]  # issue IDs
+        assert len(call_args[0]) == 1  # one item ID
         assert isinstance(call_args[1], str)  # digest hash
-
-    @pytest.mark.asyncio
-    async def test_sync_auto_closes_processed_memory_issues(
-        self, tmp_path: Path
-    ) -> None:
-        config = ConfigFactory.create(repo_root=tmp_path)
-        state = MagicMock()
-        state.get_memory_state.return_value = ([], "", None)
-        bus = MagicMock()
-        prs = MagicMock()
-        prs.close_issue = AsyncMock()
-        prs.create_issue = AsyncMock(return_value=0)
-
-        worker = MemorySyncWorker(config, state, bus, prs=prs)
-        issues = [
-            {
-                "number": 5,
-                "title": "[Memory] T",
-                "body": "**Learning:** Something",
-                "createdAt": "",
-                "labels": ["hydraflow-memory"],
-            },
-            {
-                "number": 6,
-                "title": "[Memory] U",
-                "body": "**Learning:** Else",
-                "createdAt": "",
-                "labels": ["hydraflow-memory"],
-            },
-        ]
-        await worker.sync(issues)
-
-        assert prs.close_issue.await_count == 2
-        prs.close_issue.assert_any_await(5)
-        prs.close_issue.assert_any_await(6)
-
-    @pytest.mark.asyncio
-    async def test_sync_close_issue_failure_does_not_fail_sync(
-        self, tmp_path: Path
-    ) -> None:
-        config = ConfigFactory.create(repo_root=tmp_path)
-        state = MagicMock()
-        state.get_memory_state.return_value = ([], "", None)
-        bus = MagicMock()
-        prs = MagicMock()
-        prs.close_issue = AsyncMock(side_effect=RuntimeError("close failed"))
-        prs.create_issue = AsyncMock(return_value=0)
-
-        worker = MemorySyncWorker(config, state, bus, prs=prs)
-        issues = [
-            {
-                "number": 5,
-                "title": "[Memory] T",
-                "body": "**Learning:** Something",
-                "createdAt": "",
-                "labels": ["hydraflow-memory"],
-            },
-        ]
-        stats = await worker.sync(issues)
-
-        assert stats["item_count"] == 1
-        prs.close_issue.assert_awaited_once_with(5)
-
-    @pytest.mark.asyncio
-    async def test_close_synced_issues_continues_after_failure(
-        self, tmp_path: Path
-    ) -> None:
-        """First issue close fails; second issue is still closed."""
-        config = ConfigFactory.create(repo_root=tmp_path)
-        state = MagicMock()
-        state.get_memory_state.return_value = ([], "", None)
-        bus = MagicMock()
-        prs = MagicMock()
-        prs.create_issue = AsyncMock(return_value=0)
-
-        async def _close_side_effect(issue_number: int) -> None:
-            if issue_number == 5:
-                raise RuntimeError("close failed")
-
-        prs.close_issue = AsyncMock(side_effect=_close_side_effect)
-
-        worker = MemorySyncWorker(config, state, bus, prs=prs)
-        issues = [
-            {
-                "number": 5,
-                "title": "[Memory] First",
-                "body": "**Learning:** A",
-                "createdAt": "",
-                "labels": ["hydraflow-memory"],
-            },
-            {
-                "number": 6,
-                "title": "[Memory] Second",
-                "body": "**Learning:** B",
-                "createdAt": "",
-                "labels": ["hydraflow-memory"],
-            },
-        ]
-        stats = await worker.sync(issues)
-
-        # Both issues were attempted despite first failing
-        assert prs.close_issue.await_count == 2
-        prs.close_issue.assert_any_await(5)  # first issue attempted (raised)
-        prs.close_issue.assert_any_await(6)  # second issue still closed
-        # Stats still reflect synced items
-        assert stats["item_count"] == 2
-
-    @pytest.mark.asyncio
-    async def test_sync_does_not_close_non_memory_style_issues(
-        self, tmp_path: Path
-    ) -> None:
-        config = ConfigFactory.create(repo_root=tmp_path)
-        state = MagicMock()
-        state.get_memory_state.return_value = ([], "", None)
-        bus = MagicMock()
-        prs = MagicMock()
-        prs.close_issue = AsyncMock()
-        prs.create_issue = AsyncMock(return_value=0)
-
-        worker = MemorySyncWorker(config, state, bus, prs=prs)
-        issues = [
-            {
-                "number": 5,
-                "title": "Feature issue that mentions memory",
-                "body": "**Learning:** Something",
-                "createdAt": "",
-                "labels": ["hydraflow-memory"],
-            },
-            {
-                "number": 6,
-                "title": "[Memory] Missing memory label",
-                "body": "**Learning:** Else",
-                "createdAt": "",
-                "labels": ["hydraflow-plan"],
-            },
-        ]
-        stats = await worker.sync(issues)
-
-        assert stats["item_count"] == 2
-        prs.close_issue.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_sync_routes_architecture_memory_to_adr_task(
         self, tmp_path: Path
     ) -> None:
+        import json
+
         config = ConfigFactory.create(repo_root=tmp_path)
         state = MagicMock()
         state.get_memory_state.return_value = ([], "", None)
         bus = MagicMock()
         prs = MagicMock()
-        prs.close_issue = AsyncMock()
         prs.create_issue = AsyncMock(return_value=101)
 
+        items_path = config.data_path("memory", "items.jsonl")
+        items_path.parent.mkdir(parents=True, exist_ok=True)
+        item = {
+            "id": "mem-arch01",
+            "title": "Shift to event-driven architecture",
+            "learning": "We shifted service boundaries and queue topology.",
+            "context": "Runtime scaling bottleneck.",
+            "memory_type": "knowledge",
+            "source": "implementer",
+            "reference": "#5",
+            "created_at": "2024-06-01T00:00:00Z",
+        }
+        with items_path.open("w") as f:
+            f.write(json.dumps(item) + "\n")
+
         worker = MemorySyncWorker(config, state, bus, prs=prs)
-        issues = [
-            {
-                "number": 5,
-                "title": "[Memory] Shift to event-driven architecture",
-                "body": (
-                    "## Memory Suggestion\n\n"
-                    "**Type:** knowledge\n\n"
-                    "**Learning:** We shifted service boundaries and queue topology.\n\n"
-                    "**Context:** Runtime scaling bottleneck.\n"
-                ),
-                "createdAt": "",
-                "labels": ["hydraflow-memory"],
-            },
-        ]
-        await worker.sync(issues)
+        await worker.sync()
 
         prs.create_issue.assert_awaited_once()
         args = prs.create_issue.call_args[0]
-        assert args[0].startswith("[ADR] Draft decision from memory #5:")
+        assert "[ADR] Draft decision from memory #" in args[0]
         assert "## Decision" in args[1]
         assert "<Chosen architecture/workflow shift>" not in args[1]
         assert args[2] == [config.find_label[0]]
@@ -830,34 +759,40 @@ class TestMemorySyncWorkerSync:
     async def test_sync_rejects_invalid_adr_candidate_and_deduplicates(
         self, tmp_path: Path
     ) -> None:
+        import json
+
         config = ConfigFactory.create(repo_root=tmp_path)
         state = MagicMock()
         state.get_memory_state.return_value = ([], "", None)
         bus = MagicMock()
         prs = MagicMock()
-        prs.close_issue = AsyncMock()
         prs.create_issue = AsyncMock(return_value=101)
+
+        items_path = config.data_path("memory", "items.jsonl")
+        items_path.parent.mkdir(parents=True, exist_ok=True)
+        item = {
+            "id": "mem-arch05",
+            "title": "Architecture update",
+            "learning": "Architecture decision changed worker topology.",
+            "context": "",
+            "memory_type": "knowledge",
+            "source": "implementer",
+            "reference": "#5",
+            "created_at": "2024-06-01T00:00:00Z",
+        }
+        with items_path.open("w") as f:
+            f.write(json.dumps(item) + "\n")
 
         worker = MemorySyncWorker(config, state, bus, prs=prs)
         worker._build_adr_task = MagicMock(  # type: ignore[method-assign]
             return_value=(
-                "[ADR] Draft decision from memory #5: bad",
+                "[ADR] Draft decision from memory #bad",
                 "## ADR Draft Task\n\n## Context\nShort.\n\n## Decision\nNope.\n",
             )
         )
-        issue = {
-            "number": 5,
-            "title": "[Memory] Architecture update",
-            "body": (
-                "## Memory Suggestion\n\n"
-                "**Learning:** Architecture decision changed worker topology.\n"
-            ),
-            "createdAt": "",
-            "labels": ["hydraflow-memory"],
-        }
 
-        await worker.sync([issue])
-        await worker.sync([issue])
+        await worker.sync()
+        await worker.sync()
 
         prs.create_issue.assert_not_called()
 
@@ -865,65 +800,79 @@ class TestMemorySyncWorkerSync:
     async def test_sync_adr_routing_deduplicates_by_source_issue(
         self, tmp_path: Path
     ) -> None:
+        import json
+
         config = ConfigFactory.create(repo_root=tmp_path)
         state = MagicMock()
         state.get_memory_state.return_value = ([], "", None)
         bus = MagicMock()
         prs = MagicMock()
-        prs.close_issue = AsyncMock()
         prs.create_issue = AsyncMock(return_value=101)
 
-        worker = MemorySyncWorker(config, state, bus, prs=prs)
-        issue = {
-            "number": 5,
-            "title": "[Memory] Architecture update",
-            "body": (
-                "## Memory Suggestion\n\n"
-                "**Learning:** Architecture decision changed worker topology.\n"
-            ),
-            "createdAt": "",
-            "labels": ["hydraflow-memory"],
+        items_path = config.data_path("memory", "items.jsonl")
+        items_path.parent.mkdir(parents=True, exist_ok=True)
+        item = {
+            "id": "mem-arch06",
+            "title": "Architecture update",
+            "learning": "Architecture decision changed worker topology.",
+            "context": "",
+            "memory_type": "knowledge",
+            "source": "implementer",
+            "reference": "#5",
+            "created_at": "2024-06-01T00:00:00Z",
         }
-        await worker.sync([issue])
-        await worker.sync([issue])
+        with items_path.open("w") as f:
+            f.write(json.dumps(item) + "\n")
+
+        worker = MemorySyncWorker(config, state, bus, prs=prs)
+        # Sync twice with the same items — ADR should only be created once
+        await worker.sync()
+        await worker.sync()
 
         assert prs.create_issue.await_count == 1
 
     @pytest.mark.asyncio
     async def test_sync_adr_deduplicates_by_topic_content(self, tmp_path: Path) -> None:
-        """Two memory issues about the same topic should only create one ADR issue."""
+        """Two memory items about the same topic should only create one ADR issue."""
+        import json
+
         config = ConfigFactory.create(repo_root=tmp_path)
         state = MagicMock()
         state.get_memory_state.return_value = ([], "", None)
         bus = MagicMock()
         prs = MagicMock()
-        prs.close_issue = AsyncMock()
         prs.create_issue = AsyncMock(return_value=101)
 
-        worker = MemorySyncWorker(config, state, bus, prs=prs)
-        issues = [
+        items_path = config.data_path("memory", "items.jsonl")
+        items_path.parent.mkdir(parents=True, exist_ok=True)
+        items = [
             {
-                "number": 10,
-                "title": "[Memory] ADR test policy — only structural tests allowed",
-                "body": (
-                    "## Memory Suggestion\n\n"
-                    "**Learning:** Architecture decision: ADR tests structural only.\n"
-                ),
-                "createdAt": "",
-                "labels": ["hydraflow-memory"],
+                "id": "mem-adr10",
+                "title": "ADR test policy — only structural tests allowed",
+                "learning": "Architecture decision: ADR tests structural only.",
+                "context": "",
+                "memory_type": "knowledge",
+                "source": "implementer",
+                "reference": "#10",
+                "created_at": "2024-06-01T00:00:00Z",
             },
             {
-                "number": 11,
-                "title": "[Memory] ADR test policy — only structural tests allowed",
-                "body": (
-                    "## Memory Suggestion\n\n"
-                    "**Learning:** Architecture decision: ADR tests structural only.\n"
-                ),
-                "createdAt": "",
-                "labels": ["hydraflow-memory"],
+                "id": "mem-adr11",
+                "title": "ADR test policy — only structural tests allowed",
+                "learning": "Architecture decision: ADR tests structural only.",
+                "context": "",
+                "memory_type": "knowledge",
+                "source": "implementer",
+                "reference": "#11",
+                "created_at": "2024-06-02T00:00:00Z",
             },
         ]
-        await worker.sync(issues)
+        with items_path.open("w") as f:
+            for it in items:
+                f.write(json.dumps(it) + "\n")
+
+        worker = MemorySyncWorker(config, state, bus, prs=prs)
+        await worker.sync()
 
         assert prs.create_issue.await_count == 1
 
@@ -932,6 +881,8 @@ class TestMemorySyncWorkerSync:
         self, tmp_path: Path
     ) -> None:
         """ADR candidate should be skipped if docs/adr/ already has that topic."""
+        import json
+
         adr_dir = tmp_path / "docs" / "adr"
         adr_dir.mkdir(parents=True)
         (adr_dir / "0001-worker-topology.md").write_text("# ADR\n")
@@ -941,23 +892,25 @@ class TestMemorySyncWorkerSync:
         state.get_memory_state.return_value = ([], "", None)
         bus = MagicMock()
         prs = MagicMock()
-        prs.close_issue = AsyncMock()
         prs.create_issue = AsyncMock(return_value=101)
 
+        items_path = config.data_path("memory", "items.jsonl")
+        items_path.parent.mkdir(parents=True, exist_ok=True)
+        item = {
+            "id": "mem-wt20",
+            "title": "Worker topology",
+            "learning": "Architecture decision about worker topology.",
+            "context": "",
+            "memory_type": "knowledge",
+            "source": "implementer",
+            "reference": "#20",
+            "created_at": "2024-06-01T00:00:00Z",
+        }
+        with items_path.open("w") as f:
+            f.write(json.dumps(item) + "\n")
+
         worker = MemorySyncWorker(config, state, bus, prs=prs)
-        issues = [
-            {
-                "number": 20,
-                "title": "[Memory] Worker topology",
-                "body": (
-                    "## Memory Suggestion\n\n"
-                    "**Learning:** Architecture decision about worker topology.\n"
-                ),
-                "createdAt": "",
-                "labels": ["hydraflow-memory"],
-            },
-        ]
-        await worker.sync(issues)
+        await worker.sync()
 
         prs.create_issue.assert_not_called()
 
@@ -990,71 +943,6 @@ class TestMemorySyncWorkerSync:
         assert len(topics) == 2  # README excluded
 
     @pytest.mark.asyncio
-    async def test_sync_auto_closes_transcript_summary_issues(
-        self, tmp_path: Path
-    ) -> None:
-        config = ConfigFactory.create(repo_root=tmp_path)
-        state = MagicMock()
-        state.get_memory_state.return_value = ([], "", None)
-        bus = MagicMock()
-        prs = MagicMock()
-        prs.close_issue = AsyncMock()
-
-        worker = MemorySyncWorker(config, state, bus, prs=prs)
-        issues = [
-            {
-                "number": 11,
-                "title": "[Transcript Summary] Issue #42 — review phase",
-                "body": "## Transcript Summary\n\n- Insight",
-                "createdAt": "",
-                "labels": ["hydraflow-transcript"],
-            },
-        ]
-        await worker.sync(issues)
-
-        prs.close_issue.assert_awaited_once_with(11)
-
-    @pytest.mark.asyncio
-    async def test_sync_refreshes_manifest_and_syncer(self, tmp_path: Path) -> None:
-        config = ConfigFactory.create(repo_root=tmp_path)
-        state = MagicMock()
-        state.get_memory_state.return_value = ([], "", None)
-        bus = MagicMock()
-        manifest_store = MagicMock()
-        manifest_manager = MagicMock()
-        manifest_manager.refresh.return_value = ManifestRefreshResult(
-            "## Base", "abc123"
-        )
-        manifest_syncer = MagicMock()
-        manifest_syncer.sync = AsyncMock()
-
-        worker = MemorySyncWorker(
-            config,
-            state,
-            bus,
-            manifest_store=manifest_store,
-            manifest_manager=manifest_manager,
-            manifest_syncer=manifest_syncer,
-        )
-        issues = [
-            {
-                "number": 1,
-                "title": "A",
-                "body": "## Memory Suggestion\n\n**Learning:** Use make prep\n\n**Type:** knowledge",
-                "createdAt": "2024-06-01T00:00:00Z",
-            }
-        ]
-
-        await worker.sync(issues)
-
-        manifest_store.update_from_learnings.assert_called_once()
-        manifest_manager.refresh.assert_called_once()
-        manifest_syncer.sync.assert_awaited_once_with(
-            "## Base", "abc123", source="memory-sync"
-        )
-        state.update_manifest_state.assert_called_with("abc123")
-
-    @pytest.mark.asyncio
     async def test_publish_sync_event(self, tmp_path: Path) -> None:
         config = ConfigFactory.create(repo_root=tmp_path)
         state = MagicMock()
@@ -1080,135 +968,52 @@ class TestMemorySyncWorkerSync:
         self, tmp_path: Path
     ) -> None:
         """Two concurrent sync() calls should both complete without corruption."""
+        import json
+
         config = ConfigFactory.create(repo_root=tmp_path)
         state = MagicMock()
         state.get_memory_state.return_value = ([], "", None)
         bus = MagicMock()
 
+        items_path = config.data_path("memory", "items.jsonl")
+        items_path.parent.mkdir(parents=True, exist_ok=True)
+        items = [
+            {
+                "id": "mem-con01",
+                "title": "First",
+                "learning": "First learning",
+                "context": "",
+                "memory_type": "knowledge",
+                "source": "implementer",
+                "reference": "#10",
+                "created_at": "2024-06-01T00:00:00Z",
+            },
+            {
+                "id": "mem-con02",
+                "title": "Second",
+                "learning": "Second learning",
+                "context": "",
+                "memory_type": "knowledge",
+                "source": "implementer",
+                "reference": "#20",
+                "created_at": "2024-06-02T00:00:00Z",
+            },
+        ]
+        with items_path.open("w") as f:
+            for item in items:
+                f.write(json.dumps(item) + "\n")
+
         worker = MemorySyncWorker(config, state, bus)
 
-        issues_a = [
-            {
-                "number": 10,
-                "title": "A",
-                "body": "**Learning:** First learning",
-                "createdAt": "2024-06-01",
-            },
-        ]
-        issues_b = [
-            {
-                "number": 20,
-                "title": "B",
-                "body": "**Learning:** Second learning",
-                "createdAt": "2024-06-02",
-            },
-        ]
-
         results = await asyncio.gather(
-            worker.sync(issues_a),
-            worker.sync(issues_b),
+            worker.sync(),
+            worker.sync(),
             return_exceptions=True,
         )
 
         # Both calls should complete without raising
         for r in results:
             assert not isinstance(r, Exception), f"sync() raised: {r}"
-
-    @pytest.mark.asyncio
-    async def test_sync_prunes_stale_item_files(self, tmp_path: Path) -> None:
-        """Stale .md files in items/ should be removed when their issue is gone."""
-        config = ConfigFactory.create(repo_root=tmp_path)
-        state = MagicMock()
-        state.get_memory_state.return_value = ([10, 20, 30], "oldhash", "")
-        bus = MagicMock()
-
-        # Pre-populate items dir with files for issues 10, 20, 30
-        items_dir = tmp_path / ".hydraflow" / "memory" / "items"
-        items_dir.mkdir(parents=True)
-        for n in [10, 20, 30]:
-            (items_dir / f"{n}.md").write_text(f"learning for {n}")
-
-        worker = MemorySyncWorker(config, state, bus)
-        # Only issue 10 is still active
-        issues = [
-            {"number": 10, "title": "A", "body": "B", "createdAt": ""},
-        ]
-        stats = await worker.sync(issues)
-
-        assert stats["pruned"] == 2
-        assert (items_dir / "10.md").exists()
-        assert not (items_dir / "20.md").exists()
-        assert not (items_dir / "30.md").exists()
-
-    @pytest.mark.asyncio
-    async def test_sync_prune_disabled_by_config(self, tmp_path: Path) -> None:
-        """When memory_prune_stale_items is False, no files should be removed."""
-        config = ConfigFactory.create(
-            repo_root=tmp_path, memory_prune_stale_items=False
-        )
-        state = MagicMock()
-        state.get_memory_state.return_value = ([10, 20], "oldhash", "")
-        bus = MagicMock()
-
-        items_dir = tmp_path / ".hydraflow" / "memory" / "items"
-        items_dir.mkdir(parents=True)
-        (items_dir / "10.md").write_text("active")
-        (items_dir / "99.md").write_text("stale")
-
-        worker = MemorySyncWorker(config, state, bus)
-        issues = [
-            {"number": 10, "title": "A", "body": "B", "createdAt": ""},
-        ]
-        stats = await worker.sync(issues)
-
-        assert stats.get("pruned", 0) == 0
-        assert (items_dir / "99.md").exists()
-
-    @pytest.mark.asyncio
-    async def test_sync_returns_issues_closed_count(self, tmp_path: Path) -> None:
-        """Sync result should include issues_closed count."""
-        config = ConfigFactory.create(repo_root=tmp_path)
-        state = MagicMock()
-        state.get_memory_state.return_value = ([], "", None)
-        bus = MagicMock()
-        prs = AsyncMock()
-        prs.close_issue = AsyncMock()
-
-        worker = MemorySyncWorker(config, state, bus, prs=prs)
-        issues = [
-            {
-                "number": 10,
-                "title": "[Memory] Test",
-                "body": "## Memory Suggestion\n\n**Learning:** Test\n\n**Context:** Test",
-                "createdAt": "",
-                "labels": ["hydraflow-memory"],
-            },
-        ]
-        stats = await worker.sync(issues)
-
-        assert stats["issues_closed"] == 1
-        prs.close_issue.assert_awaited_once_with(10)
-
-    @pytest.mark.asyncio
-    async def test_sync_empty_issues_prunes_all_stale_files(
-        self, tmp_path: Path
-    ) -> None:
-        """When no issues remain, all item files should be pruned."""
-        config = ConfigFactory.create(repo_root=tmp_path)
-        state = MagicMock()
-        state.get_memory_state.return_value = ([10], "hash", "")
-        bus = MagicMock()
-
-        items_dir = tmp_path / ".hydraflow" / "memory" / "items"
-        items_dir.mkdir(parents=True)
-        (items_dir / "10.md").write_text("stale")
-
-        worker = MemorySyncWorker(config, state, bus)
-        stats = await worker.sync([])
-
-        assert stats["pruned"] == 1
-        assert stats["issues_closed"] == 0
-        assert not (items_dir / "10.md").exists()
 
 
 # --- State tracking tests ---
@@ -1628,579 +1433,129 @@ class TestExtractMemoryType:
         assert MemorySyncWorker._extract_memory_type(body) == MemoryType.KNOWLEDGE
 
 
-class TestFileSuggestionSetsOrigin:
-    """Tests that file_memory_suggestion sets hitl_origin on created issues."""
+class TestFileMemorySuggestionLocal:
+    """Tests for the local JSONL-based memory suggestion filing."""
 
     @pytest.mark.asyncio
-    async def test_file_memory_suggestion_sets_hitl_origin(
-        self, tmp_path: Path
-    ) -> None:
-        """When a knowledge memory suggestion is filed, no HITL state should be set."""
-        config = ConfigFactory.create(
-            repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
-        )
-        state = StateTracker(config.state_file)
-        mock_prs = AsyncMock()
-        mock_prs.create_issue = AsyncMock(return_value=99)
+    async def test_writes_item_to_jsonl(self, tmp_path: Path) -> None:
+        import json
 
-        transcript = (
-            "Some output\n"
-            "MEMORY_SUGGESTION_START\n"
-            "title: Test suggestion\n"
-            "learning: Learned something useful\n"
-            "context: During testing\n"
-            "MEMORY_SUGGESTION_END\n"
-        )
-
-        await file_memory_suggestion(
-            transcript, "implementer", "issue #42", config, mock_prs, state
-        )
-
-        # Knowledge type: improve label only, no HITL label
-        mock_prs.create_issue.assert_awaited_once()
-        call_labels = mock_prs.create_issue.call_args.args[2]
-        assert config.improve_label[0] in call_labels
-        assert config.hitl_label[0] not in call_labels
-
-        # No HITL state set for knowledge type
-        assert state.get_hitl_origin(99) is None
-        assert state.get_hitl_cause(99) is None
-
-    @pytest.mark.asyncio
-    async def test_file_memory_suggestion_no_origin_on_failure(
-        self, tmp_path: Path
-    ) -> None:
-        """When create_issue returns 0, no hitl_origin should be set."""
-        config = ConfigFactory.create(
-            repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
-        )
-        state = StateTracker(config.state_file)
-        mock_prs = AsyncMock()
-        mock_prs.create_issue = AsyncMock(return_value=0)
-
-        transcript = (
-            "Some output\n"
-            "MEMORY_SUGGESTION_START\n"
-            "title: Test suggestion\n"
-            "learning: Learned something\n"
-            "context: During testing\n"
-            "MEMORY_SUGGESTION_END\n"
-        )
-
-        await file_memory_suggestion(
-            transcript, "implementer", "issue #42", config, mock_prs, state
-        )
-
-        # No hitl_origin should be set when create_issue fails
-        assert state.get_hitl_origin(0) is None
-
-
-class TestFileMemorySuggestionRouting:
-    """Tests for memory type routing in file_memory_suggestion."""
-
-    @pytest.mark.asyncio
-    async def test_file_memory_suggestion__knowledge_type_no_hitl(
-        self, tmp_path: Path
-    ) -> None:
-        """Knowledge type should NOT set HITL state and should use improve label only."""
-        config = ConfigFactory.create(
-            repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
-        )
-        state = StateTracker(config.state_file)
-        mock_prs = AsyncMock()
-        mock_prs.create_issue = AsyncMock(return_value=100)
-
+        config = ConfigFactory.create(repo_root=tmp_path)
         transcript = (
             "MEMORY_SUGGESTION_START\n"
-            "title: Knowledge insight\n"
+            "title: Test\n"
             "type: knowledge\n"
-            "learning: A passive insight\n"
-            "context: During review\n"
-            "MEMORY_SUGGESTION_END\n"
+            "learning: Always test\n"
+            "context: Testing\n"
+            "MEMORY_SUGGESTION_END"
         )
-
-        await file_memory_suggestion(
-            transcript, "reviewer", "PR #10", config, mock_prs, state
-        )
-
-        # Knowledge type: no HITL state
-        assert state.get_hitl_cause(100) is None
-        assert state.get_hitl_origin(100) is None
-        # Body should include type
-        call_body = mock_prs.create_issue.call_args.args[1]
-        assert "**Type:** knowledge" in call_body
-        # Labels should be improve only, no hitl
-        call_labels = mock_prs.create_issue.call_args.args[2]
-        assert config.improve_label[0] in call_labels
-        assert config.hitl_label[0] not in call_labels
+        await file_memory_suggestion(transcript, "implementer", "#42", config)
+        items_path = config.data_path("memory", "items.jsonl")
+        assert items_path.exists()
+        items = [
+            json.loads(line) for line in items_path.read_text().strip().splitlines()
+        ]
+        assert len(items) == 1
+        assert items[0]["learning"] == "Always test"
+        assert items[0]["memory_type"] == "knowledge"
 
     @pytest.mark.asyncio
-    async def test_file_memory_suggestion__config_type_actionable_cause(
-        self, tmp_path: Path
-    ) -> None:
-        """Config type should use actionable cause, HITL routing, and both labels."""
-        config = ConfigFactory.create(
-            repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
-        )
-        state = StateTracker(config.state_file)
-        mock_prs = AsyncMock()
-        mock_prs.create_issue = AsyncMock(return_value=101)
+    async def test_no_suggestion_no_write(self, tmp_path: Path) -> None:
+        config = ConfigFactory.create(repo_root=tmp_path)
+        await file_memory_suggestion("no suggestion here", "implementer", "#42", config)
+        items_path = config.data_path("memory", "items.jsonl")
+        assert not items_path.exists()
 
+    @pytest.mark.asyncio
+    async def test_appends_multiple_items(self, tmp_path: Path) -> None:
+        import json
+
+        config = ConfigFactory.create(repo_root=tmp_path)
+        for i in range(3):
+            transcript = (
+                f"MEMORY_SUGGESTION_START\n"
+                f"title: Item {i}\n"
+                f"type: knowledge\n"
+                f"learning: Learn {i}\n"
+                f"context: ctx\n"
+                f"MEMORY_SUGGESTION_END"
+            )
+            await file_memory_suggestion(transcript, "implementer", f"#{i}", config)
+        items_path = config.data_path("memory", "items.jsonl")
+        items = [
+            json.loads(line) for line in items_path.read_text().strip().splitlines()
+        ]
+        assert len(items) == 3
+
+    @pytest.mark.asyncio
+    async def test_item_contains_expected_fields(self, tmp_path: Path) -> None:
+        import json
+
+        config = ConfigFactory.create(repo_root=tmp_path)
         transcript = (
             "MEMORY_SUGGESTION_START\n"
-            "title: Increase CI timeout\n"
+            "title: Field check\n"
             "type: config\n"
-            "learning: CI timeout too low\n"
-            "context: During implementation\n"
-            "MEMORY_SUGGESTION_END\n"
-        )
-
-        await file_memory_suggestion(
-            transcript, "implementer", "issue #5", config, mock_prs, state
-        )
-
-        assert state.get_hitl_cause(101) == "Actionable memory suggestion (config)"
-        assert state.get_hitl_origin(101) == config.improve_label[0]
-        call_body = mock_prs.create_issue.call_args.args[1]
-        assert "**Type:** config" in call_body
-        # Actionable: both improve and hitl labels
-        call_labels = mock_prs.create_issue.call_args.args[2]
-        assert config.improve_label[0] in call_labels
-        assert config.hitl_label[0] in call_labels
-
-    @pytest.mark.asyncio
-    async def test_file_memory_suggestion__instruction_type_actionable_cause(
-        self, tmp_path: Path
-    ) -> None:
-        """Instruction type should use actionable cause and both labels."""
-        config = ConfigFactory.create(
-            repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
-        )
-        state = StateTracker(config.state_file)
-        mock_prs = AsyncMock()
-        mock_prs.create_issue = AsyncMock(return_value=102)
-
-        transcript = (
-            "MEMORY_SUGGESTION_START\n"
-            "title: Add lint step\n"
-            "type: instruction\n"
-            "learning: Always lint first\n"
-            "context: During review\n"
-            "MEMORY_SUGGESTION_END\n"
-        )
-
-        await file_memory_suggestion(
-            transcript, "reviewer", "PR #20", config, mock_prs, state
-        )
-
-        assert state.get_hitl_cause(102) == "Actionable memory suggestion (instruction)"
-        assert state.get_hitl_origin(102) == config.improve_label[0]
-        call_labels = mock_prs.create_issue.call_args.args[2]
-        assert config.improve_label[0] in call_labels
-        assert config.hitl_label[0] in call_labels
-
-    @pytest.mark.asyncio
-    async def test_file_memory_suggestion__code_type_actionable_cause(
-        self, tmp_path: Path
-    ) -> None:
-        """Code type should use actionable cause and both labels."""
-        config = ConfigFactory.create(
-            repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
-        )
-        state = StateTracker(config.state_file)
-        mock_prs = AsyncMock()
-        mock_prs.create_issue = AsyncMock(return_value=103)
-
-        transcript = (
-            "MEMORY_SUGGESTION_START\n"
-            "title: Refactor helper\n"
-            "type: code\n"
-            "learning: Should refactor shared helper\n"
-            "context: During implementation\n"
-            "MEMORY_SUGGESTION_END\n"
-        )
-
-        await file_memory_suggestion(
-            transcript, "implementer", "issue #30", config, mock_prs, state
-        )
-
-        assert state.get_hitl_cause(103) == "Actionable memory suggestion (code)"
-        assert state.get_hitl_origin(103) == config.improve_label[0]
-        call_labels = mock_prs.create_issue.call_args.args[2]
-        assert config.improve_label[0] in call_labels
-        assert config.hitl_label[0] in call_labels
-
-    @pytest.mark.asyncio
-    async def test_file_memory_suggestion__missing_type_defaults_to_knowledge(
-        self, tmp_path: Path
-    ) -> None:
-        """When type is missing, should default to knowledge (no HITL)."""
-        config = ConfigFactory.create(
-            repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
-        )
-        state = StateTracker(config.state_file)
-        mock_prs = AsyncMock()
-        mock_prs.create_issue = AsyncMock(return_value=104)
-
-        transcript = (
-            "MEMORY_SUGGESTION_START\n"
-            "title: Some insight\n"
-            "learning: Discovered something\n"
-            "context: During work\n"
-            "MEMORY_SUGGESTION_END\n"
-        )
-
-        await file_memory_suggestion(
-            transcript, "implementer", "issue #40", config, mock_prs, state
-        )
-
-        # Defaults to knowledge: no HITL state, improve label only
-        assert state.get_hitl_cause(104) is None
-        assert state.get_hitl_origin(104) is None
-        call_labels = mock_prs.create_issue.call_args.args[2]
-        assert config.improve_label[0] in call_labels
-        assert config.hitl_label[0] not in call_labels
-
-
-class TestFileMemorySuggestionLabelRouting:
-    """Tests confirming knowledge types get different labels than actionable types."""
-
-    @staticmethod
-    def _make_transcript(memory_type: str) -> str:
-        return (
-            "MEMORY_SUGGESTION_START\n"
-            f"title: Test {memory_type}\n"
-            f"type: {memory_type}\n"
-            f"learning: A {memory_type} learning\n"
+            "learning: Check all fields\n"
             "context: During testing\n"
-            "MEMORY_SUGGESTION_END\n"
+            "MEMORY_SUGGESTION_END"
         )
-
-    @pytest.mark.asyncio
-    async def test_file_memory_suggestion__knowledge_gets_improve_label_only(
-        self, tmp_path: Path
-    ) -> None:
-        """Knowledge type issues receive improve label but NOT hitl label."""
-        config = ConfigFactory.create(
-            repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
-        )
-        state = StateTracker(config.state_file)
-        mock_prs = AsyncMock()
-        mock_prs.create_issue = AsyncMock(return_value=200)
-
-        await file_memory_suggestion(
-            self._make_transcript("knowledge"),
-            "planner",
-            "issue #50",
-            config,
-            mock_prs,
-            state,
-        )
-
-        call_labels = mock_prs.create_issue.call_args.args[2]
-        assert call_labels == list(config.improve_label)
-        assert config.hitl_label[0] not in call_labels
-
-    @pytest.mark.asyncio
-    async def test_file_memory_suggestion__actionable_gets_both_labels(
-        self, tmp_path: Path
-    ) -> None:
-        """Actionable type issues receive both improve and hitl labels."""
-        config = ConfigFactory.create(
-            repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
-        )
-        state = StateTracker(config.state_file)
-        mock_prs = AsyncMock()
-        mock_prs.create_issue = AsyncMock(return_value=201)
-
-        await file_memory_suggestion(
-            self._make_transcript("config"),
-            "implementer",
-            "issue #51",
-            config,
-            mock_prs,
-            state,
-        )
-
-        call_labels = mock_prs.create_issue.call_args.args[2]
-        expected = list(config.improve_label) + list(config.hitl_label)
-        assert call_labels == expected
-
-    @pytest.mark.asyncio
-    async def test_file_memory_suggestion__knowledge_vs_actionable_labels_differ(
-        self, tmp_path: Path
-    ) -> None:
-        """Knowledge and actionable types must produce different label sets."""
-        config = ConfigFactory.create(
-            repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
-        )
-
-        # File a knowledge suggestion
-        state_k = StateTracker(tmp_path / "state_k.json")
-        mock_prs_k = AsyncMock()
-        mock_prs_k.create_issue = AsyncMock(return_value=300)
-        await file_memory_suggestion(
-            self._make_transcript("knowledge"),
-            "planner",
-            "issue #60",
-            config,
-            mock_prs_k,
-            state_k,
-        )
-        knowledge_labels = mock_prs_k.create_issue.call_args.args[2]
-
-        # File an actionable (instruction) suggestion
-        state_a = StateTracker(tmp_path / "state_a.json")
-        mock_prs_a = AsyncMock()
-        mock_prs_a.create_issue = AsyncMock(return_value=301)
-        await file_memory_suggestion(
-            self._make_transcript("instruction"),
-            "implementer",
-            "issue #61",
-            config,
-            mock_prs_a,
-            state_a,
-        )
-        actionable_labels = mock_prs_a.create_issue.call_args.args[2]
-
-        # Labels must differ
-        assert knowledge_labels != actionable_labels
-        # Knowledge: improve only; actionable: improve + hitl
-        assert len(knowledge_labels) < len(actionable_labels)
-
-    @pytest.mark.asyncio
-    async def test_file_memory_suggestion__knowledge_no_hitl_state_set(
-        self, tmp_path: Path
-    ) -> None:
-        """Knowledge type must not call set_hitl_origin or set_hitl_cause."""
-        config = ConfigFactory.create(
-            repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
-        )
-        state = StateTracker(config.state_file)
-        mock_prs = AsyncMock()
-        mock_prs.create_issue = AsyncMock(return_value=400)
-
-        await file_memory_suggestion(
-            self._make_transcript("knowledge"),
-            "reviewer",
-            "PR #70",
-            config,
-            mock_prs,
-            state,
-        )
-
-        # No HITL state should exist for this issue
-        assert state.get_hitl_origin(400) is None
-        assert state.get_hitl_cause(400) is None
-
-    @pytest.mark.asyncio
-    async def test_file_memory_suggestion__actionable_sets_hitl_state(
-        self, tmp_path: Path
-    ) -> None:
-        """Actionable type must set both hitl_origin and hitl_cause."""
-        config = ConfigFactory.create(
-            repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
-        )
-        state = StateTracker(config.state_file)
-        mock_prs = AsyncMock()
-        mock_prs.create_issue = AsyncMock(return_value=401)
-
-        await file_memory_suggestion(
-            self._make_transcript("code"),
-            "implementer",
-            "issue #71",
-            config,
-            mock_prs,
-            state,
-        )
-
-        assert state.get_hitl_origin(401) == config.improve_label[0]
-        assert state.get_hitl_cause(401) == "Actionable memory suggestion (code)"
-
-
-# --- Auto-approve tests ---
-
-
-class TestMemoryAutoApproveRouting:
-    """Tests for memory_auto_approve toggle routing in file_memory_suggestion."""
-
-    @staticmethod
-    def _make_transcript(memory_type: str) -> str:
-        return (
-            "MEMORY_SUGGESTION_START\n"
-            f"title: Auto-approve test ({memory_type})\n"
-            f"type: {memory_type}\n"
-            "learning: Something important\n"
-            "context: During testing\n"
-            "MEMORY_SUGGESTION_END\n"
-        )
-
-    @pytest.mark.asyncio
-    async def test_auto_approve_on__actionable_skips_hitl(self, tmp_path: Path) -> None:
-        """When memory_auto_approve is True, actionable types bypass HITL."""
-        config = ConfigFactory.create(
-            repo_root=tmp_path / "repo",
-            memory_auto_approve=True,
-        )
-        state = StateTracker(config.state_file)
-        mock_prs = AsyncMock()
-        mock_prs.create_issue = AsyncMock(return_value=500)
-
-        await file_memory_suggestion(
-            self._make_transcript("config"),
-            "implementer",
-            "issue #80",
-            config,
-            mock_prs,
-            state,
-        )
-
-        # With auto-approve, no HITL state should be set
-        assert state.get_hitl_cause(500) is None
-        assert state.get_hitl_origin(500) is None
-        # Labels should be improve only (no hitl label)
-        call_labels = mock_prs.create_issue.call_args.args[2]
-        assert call_labels == list(config.improve_label)
-        assert config.hitl_label[0] not in call_labels
-
-    @pytest.mark.asyncio
-    async def test_auto_approve_on__knowledge_unchanged(self, tmp_path: Path) -> None:
-        """When memory_auto_approve is True, knowledge type still uses improve label only."""
-        config = ConfigFactory.create(
-            repo_root=tmp_path / "repo",
-            memory_auto_approve=True,
-        )
-        state = StateTracker(config.state_file)
-        mock_prs = AsyncMock()
-        mock_prs.create_issue = AsyncMock(return_value=501)
-
-        await file_memory_suggestion(
-            self._make_transcript("knowledge"),
-            "planner",
-            "issue #81",
-            config,
-            mock_prs,
-            state,
-        )
-
-        assert state.get_hitl_cause(501) is None
-        assert state.get_hitl_origin(501) is None
-        call_labels = mock_prs.create_issue.call_args.args[2]
-        assert call_labels == list(config.improve_label)
-
-    @pytest.mark.asyncio
-    async def test_auto_approve_off__actionable_routes_hitl(
-        self, tmp_path: Path
-    ) -> None:
-        """When memory_auto_approve is False (default), actionable types route to HITL."""
-        config = ConfigFactory.create(
-            repo_root=tmp_path / "repo",
-            memory_auto_approve=False,
-        )
-        state = StateTracker(config.state_file)
-        mock_prs = AsyncMock()
-        mock_prs.create_issue = AsyncMock(return_value=502)
-
-        await file_memory_suggestion(
-            self._make_transcript("instruction"),
-            "reviewer",
-            "PR #82",
-            config,
-            mock_prs,
-            state,
-        )
-
-        assert state.get_hitl_cause(502) == "Actionable memory suggestion (instruction)"
-        assert state.get_hitl_origin(502) == config.improve_label[0]
-        call_labels = mock_prs.create_issue.call_args.args[2]
-        assert config.hitl_label[0] in call_labels
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("memory_type", ["config", "instruction", "code"])
-    async def test_auto_approve_on__actionable_types_skip_hitl(
-        self, tmp_path: Path, memory_type: str
-    ) -> None:
-        """All actionable types should skip HITL when auto-approve is enabled."""
-        config = ConfigFactory.create(
-            repo_root=tmp_path / "repo",
-            memory_auto_approve=True,
-        )
-        state = StateTracker(config.state_file)
-        mock_prs = AsyncMock()
-        mock_prs.create_issue = AsyncMock(return_value=777)
-
-        await file_memory_suggestion(
-            self._make_transcript(memory_type),
-            "implementer",
-            "issue #777",
-            config,
-            mock_prs,
-            state,
-        )
-
-        assert state.get_hitl_cause(777) is None, (
-            f"{memory_type} suggestions should skip HITL"
-        )
-        assert state.get_hitl_origin(777) is None, (
-            f"{memory_type} suggestions should not set hitl_origin when auto-approve is on"
-        )
-        call_labels = mock_prs.create_issue.call_args.args[2]
-        assert config.hitl_label[0] not in call_labels, (
-            f"{memory_type} suggestions should not include HITL label"
-        )
+        await file_memory_suggestion(transcript, "reviewer", "#99", config)
+        items_path = config.data_path("memory", "items.jsonl")
+        item = json.loads(items_path.read_text().strip())
+        assert item["title"] == "Field check"
+        assert item["memory_type"] == "config"
+        assert item["source"] == "reviewer"
+        assert item["reference"] == "#99"
+        assert "id" in item
+        assert "created_at" in item
 
 
 class TestSyncWithTypedIssues:
-    """Tests for MemorySyncWorker.sync with typed issue bodies."""
+    """Tests for MemorySyncWorker.sync with typed JSONL items."""
 
     @pytest.mark.asyncio
     async def test_sync__typed_issues_produce_grouped_digest(
         self, tmp_path: Path
     ) -> None:
-        """Sync with typed issues should produce a digest grouped by type."""
+        """Sync with typed JSONL items should produce a digest grouped by type."""
+        import json
+
         config = ConfigFactory.create(repo_root=tmp_path)
         state = MagicMock()
         state.get_memory_state.return_value = ([], "", None)
         bus = MagicMock()
 
-        worker = MemorySyncWorker(config, state, bus)
-        issues = [
+        items_path = config.data_path("memory", "items.jsonl")
+        items_path.parent.mkdir(parents=True, exist_ok=True)
+        items = [
             {
-                "number": 10,
-                "title": "[Memory] Config change",
-                "body": (
-                    "## Memory Suggestion\n\n"
-                    "**Type:** config\n\n"
-                    "**Learning:** Increase timeout\n\n"
-                    "**Context:** CI failures\n"
-                ),
-                "createdAt": "2024-06-01T00:00:00Z",
+                "id": "mem-cfg10",
+                "title": "Config change",
+                "learning": "Increase timeout",
+                "context": "CI failures",
+                "memory_type": "config",
+                "source": "implementer",
+                "reference": "#10",
+                "created_at": "2024-06-01T00:00:00Z",
             },
             {
-                "number": 20,
-                "title": "[Memory] Knowledge item",
-                "body": (
-                    "## Memory Suggestion\n\n"
-                    "**Type:** knowledge\n\n"
-                    "**Learning:** Use type hints\n\n"
-                    "**Context:** Code review\n"
-                ),
-                "createdAt": "2024-05-01T00:00:00Z",
+                "id": "mem-kno20",
+                "title": "Knowledge item",
+                "learning": "Use type hints",
+                "context": "Code review",
+                "memory_type": "knowledge",
+                "source": "reviewer",
+                "reference": "#20",
+                "created_at": "2024-05-01T00:00:00Z",
             },
         ]
-        stats = await worker.sync(issues)
+        with items_path.open("w") as f:
+            for item in items:
+                f.write(json.dumps(item) + "\n")
+
+        worker = MemorySyncWorker(config, state, bus)
+        stats = await worker.sync()
 
         assert stats["item_count"] == 2
         digest_path = tmp_path / ".hydraflow" / "memory" / "digest.md"
@@ -2214,26 +1569,31 @@ class TestSyncWithTypedIssues:
     async def test_sync__untyped_issues_default_to_knowledge(
         self, tmp_path: Path
     ) -> None:
-        """Issues without a Type field should be grouped under Knowledge."""
+        """Items without a memory_type field should be grouped under Knowledge."""
+        import json
+
         config = ConfigFactory.create(repo_root=tmp_path)
         state = MagicMock()
         state.get_memory_state.return_value = ([], "", None)
         bus = MagicMock()
 
+        items_path = config.data_path("memory", "items.jsonl")
+        items_path.parent.mkdir(parents=True, exist_ok=True)
+        item = {
+            "id": "mem-leg10",
+            "title": "Legacy item",
+            "learning": "Old learning without type",
+            "context": "Before types existed",
+            # no memory_type field — should default to knowledge
+            "source": "implementer",
+            "reference": "#10",
+            "created_at": "2024-01-01T00:00:00Z",
+        }
+        with items_path.open("w") as f:
+            f.write(json.dumps(item) + "\n")
+
         worker = MemorySyncWorker(config, state, bus)
-        issues = [
-            {
-                "number": 10,
-                "title": "[Memory] Legacy item",
-                "body": (
-                    "## Memory Suggestion\n\n"
-                    "**Learning:** Old learning without type\n\n"
-                    "**Context:** Before types existed\n"
-                ),
-                "createdAt": "2024-01-01T00:00:00Z",
-            },
-        ]
-        stats = await worker.sync(issues)
+        stats = await worker.sync()
 
         assert stats["item_count"] == 1
         digest_path = tmp_path / ".hydraflow" / "memory" / "digest.md"
@@ -2283,50 +1643,40 @@ class TestWriteDigestUsesAtomicWrite:
 
 
 class TestSyncPerItemIsolation:
-    """Per-item try/except in sync() prevents one bad issue from aborting the batch."""
+    """Per-item try/except in sync() prevents one bad JSONL item from aborting the batch."""
 
     @pytest.mark.asyncio
     async def test_bad_issue_skipped_good_issue_still_synced(
         self, tmp_path: Path
     ) -> None:
+        import json
+
         config = ConfigFactory.create(repo_root=tmp_path)
         state = MagicMock()
         state.get_memory_state.return_value = ([], "", None)
         bus = MagicMock()
 
+        # Write one malformed JSONL line (invalid JSON) followed by one valid item
+        items_path = config.data_path("memory", "items.jsonl")
+        items_path.parent.mkdir(parents=True, exist_ok=True)
+        good_item = {
+            "id": "mem-good01",
+            "title": "Good issue",
+            "learning": "Always test first",
+            "context": "",
+            "memory_type": "knowledge",
+            "source": "implementer",
+            "reference": "#20",
+            "created_at": "2024-05-01T00:00:00Z",
+        }
+        with items_path.open("w") as f:
+            f.write("{bad json line\n")  # malformed — should be skipped
+            f.write(json.dumps(good_item) + "\n")
+
         worker = MemorySyncWorker(config, state, bus)
+        stats = await worker.sync()
 
-        # Issue 10 has a body that will cause _extract_learning to raise
-        # Issue 20 is normal and should still be processed
-        issues = [
-            {
-                "number": 10,
-                "title": "[Memory] Bad issue",
-                "body": "**Learning:** Good learning",
-                "createdAt": "2024-06-01T00:00:00Z",
-            },
-            {
-                "number": 20,
-                "title": "[Memory] Good issue",
-                "body": "**Learning:** Always test first",
-                "createdAt": "2024-05-01T00:00:00Z",
-            },
-        ]
-
-        # Make _extract_learning blow up for issue 10
-        original_extract = MemorySyncWorker._extract_learning
-
-        def exploding_extract(body: str) -> str:
-            if "Good learning" in body:
-                raise RuntimeError("parse error")
-            return original_extract(body)
-
-        with patch.object(
-            MemorySyncWorker, "_extract_learning", staticmethod(exploding_extract)
-        ):
-            stats = await worker.sync(issues)
-
-        # Issue 10 failed — skipped; issue 20 succeeded
+        # The malformed line was skipped; the good item was synced
         assert stats["item_count"] == 1
         digest_path = tmp_path / ".hydraflow" / "memory" / "digest.md"
         assert digest_path.exists()
@@ -2403,6 +1753,8 @@ class TestMemorySyncHindsightDualWrite:
     @pytest.mark.asyncio
     async def test_dual_write_fires_for_each_learning(self, tmp_path: Path) -> None:
         """When hindsight client is set, retain_safe is called for each learning."""
+        import json
+
         config = ConfigFactory.create(repo_root=tmp_path)
         state = StateTracker(config.state_file)
         bus = MagicMock()
@@ -2410,49 +1762,68 @@ class TestMemorySyncHindsightDualWrite:
         mock_hindsight = MagicMock()
         worker = MemorySyncWorker(config, state, bus, hindsight=mock_hindsight)
 
-        issues = [
+        items_path = config.data_path("memory", "items.jsonl")
+        items_path.parent.mkdir(parents=True, exist_ok=True)
+        items = [
             {
-                "number": 1,
-                "title": "[Memory] Learn A",
-                "body": "**Type:** knowledge\n\n**Learning:** First insight",
-                "labels": list(config.memory_label),
-                "createdAt": "2024-01-01",
+                "id": "mem-hw01",
+                "title": "Learn A",
+                "learning": "First insight",
+                "context": "",
+                "memory_type": "knowledge",
+                "source": "implementer",
+                "reference": "#1",
+                "created_at": "2024-01-01T00:00:00Z",
             },
             {
-                "number": 2,
-                "title": "[Memory] Learn B",
-                "body": "**Type:** config\n\n**Learning:** Second insight",
-                "labels": list(config.memory_label),
-                "createdAt": "2024-01-02",
+                "id": "mem-hw02",
+                "title": "Learn B",
+                "learning": "Second insight",
+                "context": "",
+                "memory_type": "config",
+                "source": "implementer",
+                "reference": "#2",
+                "created_at": "2024-01-02T00:00:00Z",
             },
         ]
+        with items_path.open("w") as f:
+            for item in items:
+                f.write(json.dumps(item) + "\n")
 
         with patch("hindsight.retain_safe", new_callable=AsyncMock) as mock_retain:
-            await worker.sync(issues)
+            await worker.sync()
             assert mock_retain.await_count == 2
-            # Verify first call args
+            # Verify first call args include the hindsight client
             call_args_list = mock_retain.call_args_list
             assert call_args_list[0].args[0] is mock_hindsight
 
     @pytest.mark.asyncio
     async def test_file_write_happens_without_hindsight(self, tmp_path: Path) -> None:
         """File write still happens when hindsight is None."""
+        import json
+
         config = ConfigFactory.create(repo_root=tmp_path)
         state = StateTracker(config.state_file)
         bus = MagicMock()
         bus.publish = AsyncMock()
         worker = MemorySyncWorker(config, state, bus, hindsight=None)
 
-        issues = [
-            {
-                "number": 1,
-                "title": "[Memory] Test",
-                "body": "**Type:** knowledge\n\n**Learning:** Something",
-                "labels": list(config.memory_label),
-                "createdAt": "2024-01-01",
-            },
-        ]
-        await worker.sync(issues)
+        items_path = config.data_path("memory", "items.jsonl")
+        items_path.parent.mkdir(parents=True, exist_ok=True)
+        item = {
+            "id": "mem-fw01",
+            "title": "Test",
+            "learning": "Something",
+            "context": "",
+            "memory_type": "knowledge",
+            "source": "implementer",
+            "reference": "#1",
+            "created_at": "2024-01-01T00:00:00Z",
+        }
+        with items_path.open("w") as f:
+            f.write(json.dumps(item) + "\n")
+
+        await worker.sync()
 
         digest_path = config.data_path("memory", "digest.md")
         assert digest_path.exists()
@@ -2463,6 +1834,8 @@ class TestMemorySyncHindsightDualWrite:
         self, tmp_path: Path
     ) -> None:
         """Verify retain_safe is called with the LEARNINGS bank and correct metadata."""
+        import json
+
         from hindsight import Bank
 
         config = ConfigFactory.create(repo_root=tmp_path)
@@ -2472,30 +1845,37 @@ class TestMemorySyncHindsightDualWrite:
         mock_hindsight = MagicMock()
         worker = MemorySyncWorker(config, state, bus, hindsight=mock_hindsight)
 
-        issues = [
-            {
-                "number": 7,
-                "title": "[Memory] Config tip",
-                "body": "**Type:** config\n\n**Learning:** Use env vars",
-                "labels": list(config.memory_label),
-                "createdAt": "2024-03-15",
-            },
-        ]
+        items_path = config.data_path("memory", "items.jsonl")
+        items_path.parent.mkdir(parents=True, exist_ok=True)
+        item = {
+            "id": "mem-dw07",
+            "title": "Config tip",
+            "learning": "Use env vars",
+            "context": "",
+            "memory_type": "config",
+            "source": "implementer",
+            "reference": "#7",
+            "created_at": "2024-03-15T00:00:00Z",
+        }
+        with items_path.open("w") as f:
+            f.write(json.dumps(item) + "\n")
 
         with patch("hindsight.retain_safe", new_callable=AsyncMock) as mock_retain:
-            await worker.sync(issues)
+            await worker.sync()
             mock_retain.assert_called_once()
             call_kw = mock_retain.call_args
             assert call_kw.args[1] == Bank.LEARNINGS
             assert call_kw.args[2] == "Use env vars"
-            assert call_kw.kwargs["metadata"]["issue_number"] == 7
+            assert call_kw.kwargs["metadata"]["item_id"] is not None
             assert call_kw.kwargs["metadata"]["memory_type"] == "config"
 
     @pytest.mark.asyncio
     async def test_file_writes_skipped_when_hindsight_enabled(
         self, tmp_path: Path
     ) -> None:
-        """When hindsight client is set, digest and item file writes are skipped."""
+        """When hindsight client is set, digest file write is skipped."""
+        import json
+
         config = ConfigFactory.create(repo_root=tmp_path)
         state = StateTracker(config.state_file)
         bus = MagicMock()
@@ -2503,27 +1883,27 @@ class TestMemorySyncHindsightDualWrite:
         mock_hindsight = MagicMock()
         worker = MemorySyncWorker(config, state, bus, hindsight=mock_hindsight)
 
-        issues = [
-            {
-                "number": 1,
-                "title": "[Memory] Learn A",
-                "body": "**Type:** knowledge\n\n**Learning:** First insight",
-                "labels": list(config.memory_label),
-                "createdAt": "2024-01-01",
-            },
-        ]
+        items_path = config.data_path("memory", "items.jsonl")
+        items_path.parent.mkdir(parents=True, exist_ok=True)
+        item = {
+            "id": "mem-sk01",
+            "title": "Learn A",
+            "learning": "First insight",
+            "context": "",
+            "memory_type": "knowledge",
+            "source": "implementer",
+            "reference": "#1",
+            "created_at": "2024-01-01T00:00:00Z",
+        }
+        with items_path.open("w") as f:
+            f.write(json.dumps(item) + "\n")
 
         with patch("hindsight.retain_safe", new_callable=AsyncMock):
-            await worker.sync(issues)
+            await worker.sync()
 
-        # Digest file should NOT be written
+        # Digest file should NOT be written when hindsight is the exclusive write target
         digest_path = config.data_path("memory", "digest.md")
         assert not digest_path.exists()
-
-        # Item files should NOT be written
-        items_dir = config.data_path("memory", "items")
-        item_files = list(items_dir.glob("*.md")) if items_dir.exists() else []
-        assert item_files == []
 
 
 # ---------------------------------------------------------------------------
