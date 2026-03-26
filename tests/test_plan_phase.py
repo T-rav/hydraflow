@@ -99,8 +99,11 @@ class TestPlanPhase:
         planners.plan = AsyncMock(return_value=plan_result)
         store.get_plannable = supply_once([issue])
 
-        await phase.plan_issues()
+        results = await phase.plan_issues()
 
+        assert (
+            len(results) == 1 and results[0].success is False
+        )  # behavioral: failure result returned, not skipped
         prs.post_comment.assert_not_awaited()
         prs.remove_label.assert_not_awaited()
         prs.add_labels.assert_not_awaited()
