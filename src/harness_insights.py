@@ -18,9 +18,11 @@ from pydantic import BaseModel, Field
 from models import IsoTimestamp, PipelineStage
 
 if TYPE_CHECKING:
+    from config import HydraFlowConfig
     from dolt_backend import DoltBackend
     from hindsight import HindsightClient
     from hindsight_wal import HindsightWAL
+    from ports import PRPort
 
 logger = logging.getLogger("hydraflow.harness_insights")
 
@@ -385,3 +387,76 @@ def generate_suggestions(
     # Sort by occurrence count (highest first)
     suggestions.sort(key=lambda s: s.occurrence_count, reverse=True)
     return suggestions
+
+
+# ---------------------------------------------------------------------------
+# Auto-filing
+# ---------------------------------------------------------------------------
+
+
+async def auto_file_suggestions(
+    store: HarnessInsightStore,
+    prs: PRPort,
+    config: HydraFlowConfig,
+    *,
+    threshold: int = 3,
+) -> None:
+    """Generate suggestions from recent failures and file new ones as GitHub issues.
+
+    For each suggestion not yet in the store's dedup set, this creates a GitHub
+    issue titled ``[Harness Insight] {suggestion title}`` labelled with
+    ``config.improve_label``.  Filed keys are persisted via the store so the
+    same pattern is never filed twice.
+
+    All operations are wrapped in try/except — this is an enhancement and must
+    not interrupt the pipeline.
+    """
+    try:
+        records = store.load_recent()
+        if not records:
+            return
+
+        proposed = store.get_proposed_patterns()
+        suggestions = generate_suggestions(
+            records, threshold=threshold, proposed=proposed
+        )
+        if not suggestions:
+            return
+
+        for suggestion in suggestions:
+            key = (
+                f"subcategory:{suggestion.subcategory}"
+                if suggestion.subcategory
+                else f"category:{suggestion.category}"
+            )
+            try:
+                title = f"[Harness Insight] {suggestion.description}"
+                body = (
+                    f"## Harness Insight\n\n"
+                    f"**Pattern:** {suggestion.category}"
+                    + (f" / {suggestion.subcategory}" if suggestion.subcategory else "")
+                    + f"\n\n"
+                    f"**Occurrences:** {suggestion.occurrence_count} of {suggestion.window_size} recent failures\n\n"
+                    f"**Description:** {suggestion.description}\n\n"
+                    f"**Suggested Action:** {suggestion.suggestion}\n"
+                )
+                issue_number = await prs.create_issue(
+                    title,
+                    body,
+                    list(config.improve_label),
+                )
+                if issue_number:
+                    store.mark_pattern_proposed(key)
+                    logger.info(
+                        "Filed harness insight as issue #%d: %s",
+                        issue_number,
+                        suggestion.description,
+                    )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Failed to file harness insight suggestion for key %s",
+                    key,
+                    exc_info=True,
+                )
+    except Exception:  # noqa: BLE001
+        logger.warning("auto_file_suggestions failed", exc_info=True)
