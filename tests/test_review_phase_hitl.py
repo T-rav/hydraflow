@@ -35,6 +35,28 @@ from tests.conftest import (
 )
 from tests.helpers import ConfigFactory, make_review_phase
 
+# ---------------------------------------------------------------------------
+# Shared mock setup helpers
+# ---------------------------------------------------------------------------
+
+
+def _setup_escalate_to_hitl_mocks(phase: ReviewPhase) -> None:
+    """Set up the PR manager mocks required by _escalate_to_hitl."""
+    phase._prs.post_pr_comment = AsyncMock()
+    phase._prs.remove_label = AsyncMock()
+    phase._prs.remove_pr_label = AsyncMock()
+    phase._prs.add_labels = AsyncMock()
+    phase._prs.add_pr_labels = AsyncMock()
+
+
+def _setup_conflict_scenario(phase: ReviewPhase) -> None:
+    """Set up mocks for a merge-conflict escalation scenario (merge_main returns False)."""
+    _setup_escalate_to_hitl_mocks(phase)
+    phase._worktrees.merge_main = AsyncMock(return_value=False)
+
+
+# ---------------------------------------------------------------------------
+
 
 class TestHITLEscalationEvents:
     """Tests that HITL escalation points emit HITL_ESCALATION events."""
@@ -53,12 +75,7 @@ class TestHITLEscalationEvents:
         issue = TaskFactory.create()
         pr = PRInfoFactory.create()
 
-        phase._prs.post_pr_comment = AsyncMock()
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._worktrees.merge_main = AsyncMock(return_value=False)
+        _setup_conflict_scenario(phase)
         phase._worktrees.start_merge_main = AsyncMock(return_value=False)
         phase._worktrees.abort_merge = AsyncMock()
 
@@ -91,11 +108,7 @@ class TestHITLEscalationEvents:
         phase._prs.get_pr_diff = AsyncMock(return_value="diff text")
         phase._prs.push_branch = AsyncMock(return_value=True)
         phase._prs.merge_pr = AsyncMock(return_value=False)
-        phase._prs.post_pr_comment = AsyncMock()
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
+        _setup_escalate_to_hitl_mocks(phase)
         phase._worktrees.merge_main = AsyncMock(return_value=True)
 
         wt = config.worktree_path_for_issue(42)
@@ -140,11 +153,7 @@ class TestHITLEscalationEvents:
         phase._prs.push_branch = AsyncMock(return_value=True)
         phase._prs.merge_pr = AsyncMock(return_value=True)
         phase._prs.wait_for_ci = AsyncMock(return_value=(False, "Failed checks: ci"))
-        phase._prs.post_pr_comment = AsyncMock()
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
+        _setup_escalate_to_hitl_mocks(phase)
         phase._worktrees.merge_main = AsyncMock(return_value=True)
 
         wt = config.worktree_path_for_issue(42)
@@ -211,12 +220,8 @@ class TestHITLEscalationEvents:
         )
         phase._prs.get_pr_diff = AsyncMock(return_value="diff text")
         phase._prs.push_branch = AsyncMock(return_value=True)
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
+        _setup_escalate_to_hitl_mocks(phase)
         phase._prs.post_comment = AsyncMock()
-        phase._prs.post_pr_comment = AsyncMock()
         phase._prs.submit_review = AsyncMock()
         phase._worktrees.merge_main = AsyncMock(return_value=True)
 
@@ -363,12 +368,8 @@ class TestRequestChangesRetry:
         )
         phase._prs.get_pr_diff = AsyncMock(return_value="diff text")
         phase._prs.push_branch = AsyncMock(return_value=True)
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
+        _setup_escalate_to_hitl_mocks(phase)
         phase._prs.post_comment = AsyncMock()
-        phase._prs.post_pr_comment = AsyncMock()
         phase._prs.submit_review = AsyncMock()
 
         wt = config.worktree_path_for_issue(42)
@@ -657,11 +658,7 @@ class TestEscalateToHitl:
     async def test_sets_hitl_origin_and_cause(self, config: HydraFlowConfig) -> None:
         """Should set HITL origin label and cause in state."""
         phase = make_review_phase(config)
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_pr_comment = AsyncMock()
+        _setup_escalate_to_hitl_mocks(phase)
 
         await phase._escalate_to_hitl(
             HitlEscalation(
@@ -682,11 +679,7 @@ class TestEscalateToHitl:
     ) -> None:
         """Should increment the HITL escalation counter."""
         phase = make_review_phase(config)
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_pr_comment = AsyncMock()
+        _setup_escalate_to_hitl_mocks(phase)
 
         await phase._escalate_to_hitl(
             HitlEscalation(
@@ -705,11 +698,7 @@ class TestEscalateToHitl:
     async def test_swaps_labels_on_issue_and_pr(self, config: HydraFlowConfig) -> None:
         """Should remove review labels and add HITL labels."""
         phase = make_review_phase(config)
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_pr_comment = AsyncMock()
+        _setup_escalate_to_hitl_mocks(phase)
 
         await phase._escalate_to_hitl(
             HitlEscalation(
@@ -729,11 +718,7 @@ class TestEscalateToHitl:
     ) -> None:
         """By default, the comment is posted on the PR."""
         phase = make_review_phase(config)
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_pr_comment = AsyncMock()
+        _setup_escalate_to_hitl_mocks(phase)
         phase._prs.post_comment = AsyncMock()
 
         await phase._escalate_to_hitl(
@@ -755,11 +740,7 @@ class TestEscalateToHitl:
     ) -> None:
         """When post_on_pr=False, comment is posted on the issue."""
         phase = make_review_phase(config)
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_pr_comment = AsyncMock()
+        _setup_escalate_to_hitl_mocks(phase)
         phase._prs.post_comment = AsyncMock()
 
         await phase._escalate_to_hitl(
@@ -782,11 +763,7 @@ class TestEscalateToHitl:
     ) -> None:
         """Should publish an HITL_ESCALATION event."""
         phase = make_review_phase(config, event_bus=event_bus)
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_pr_comment = AsyncMock()
+        _setup_escalate_to_hitl_mocks(phase)
 
         await phase._escalate_to_hitl(
             HitlEscalation(
@@ -812,11 +789,7 @@ class TestEscalateToHitl:
     ) -> None:
         """Extra event data should be merged into the HITL event."""
         phase = make_review_phase(config, event_bus=event_bus)
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_pr_comment = AsyncMock()
+        _setup_escalate_to_hitl_mocks(phase)
 
         await phase._escalate_to_hitl(
             HitlEscalation(
@@ -839,11 +812,7 @@ class TestEscalateToHitl:
     ) -> None:
         """Providing task should enqueue transition immediately."""
         phase = make_review_phase(config)
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_pr_comment = AsyncMock()
+        _setup_escalate_to_hitl_mocks(phase)
         issue = TaskFactory.create(id=42)
 
         await phase._escalate_to_hitl(
@@ -865,11 +834,7 @@ class TestEscalateToHitl:
     ) -> None:
         """Omitting task (default None) should not call enqueue_transition."""
         phase = make_review_phase(config)
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_pr_comment = AsyncMock()
+        _setup_escalate_to_hitl_mocks(phase)
 
         await phase._escalate_to_hitl(
             HitlEscalation(
@@ -891,11 +856,7 @@ class TestEscalateToHitl:
 def _mock_visual_phase(config: HydraFlowConfig, event_bus) -> ReviewPhase:
     """Create a ReviewPhase with PR manager mocks for visual failure tests."""
     phase = make_review_phase(config, event_bus=event_bus)
-    phase._prs.post_pr_comment = AsyncMock()
-    phase._prs.remove_label = AsyncMock()
-    phase._prs.remove_pr_label = AsyncMock()
-    phase._prs.add_labels = AsyncMock()
-    phase._prs.add_pr_labels = AsyncMock()
+    _setup_escalate_to_hitl_mocks(phase)
     return phase
 
 
@@ -1177,11 +1138,7 @@ class TestVisualEvidenceEscalation:
         from models import VisualEvidence, VisualEvidenceItem
 
         phase = make_review_phase(config)
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_pr_comment = AsyncMock()
+        _setup_escalate_to_hitl_mocks(phase)
 
         evidence = VisualEvidence(
             items=[
@@ -1215,11 +1172,7 @@ class TestVisualEvidenceEscalation:
     ) -> None:
         """When visual_evidence is None, no evidence should be persisted."""
         phase = make_review_phase(config)
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_pr_comment = AsyncMock()
+        _setup_escalate_to_hitl_mocks(phase)
 
         await phase._escalate_to_hitl(
             HitlEscalation(
@@ -1241,11 +1194,7 @@ class TestVisualEvidenceEscalation:
         from models import VisualEvidence, VisualEvidenceItem
 
         phase = make_review_phase(config, event_bus=event_bus)
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_pr_comment = AsyncMock()
+        _setup_escalate_to_hitl_mocks(phase)
 
         evidence = VisualEvidence(
             items=[
@@ -1283,11 +1232,7 @@ class TestVisualEvidenceEscalation:
         from models import VisualEvidence, VisualEvidenceItem
 
         phase = make_review_phase(config, event_bus=event_bus)
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_pr_comment = AsyncMock()
+        _setup_escalate_to_hitl_mocks(phase)
         issue = TaskFactory.create(id=42)
 
         evidence = VisualEvidence(
@@ -1339,11 +1284,7 @@ class TestVisualEvidenceEscalation:
         from models import VisualEvidence, VisualEvidenceItem
 
         phase = make_review_phase(config)
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_pr_comment = AsyncMock()
+        _setup_escalate_to_hitl_mocks(phase)
 
         evidence = VisualEvidence(
             items=[
@@ -1367,11 +1308,7 @@ class TestVisualEvidenceEscalation:
         from models import VisualEvidence, VisualEvidenceItem
 
         phase = make_review_phase(config)
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_pr_comment = AsyncMock()
+        _setup_escalate_to_hitl_mocks(phase)
         phase._prs.post_comment = AsyncMock()
 
         evidence = VisualEvidence(
@@ -1397,11 +1334,7 @@ class TestVisualEvidenceEscalation:
         from models import VisualEvidence
 
         phase = make_review_phase(config)
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_pr_comment = AsyncMock()
+        _setup_escalate_to_hitl_mocks(phase)
 
         evidence = VisualEvidence(items=[], summary="No details available")
 
@@ -1419,11 +1352,7 @@ class TestVisualEvidenceEscalation:
         from models import VisualEvidence, VisualEvidenceItem
 
         phase = make_review_phase(config)
-        phase._prs.remove_label = AsyncMock()
-        phase._prs.remove_pr_label = AsyncMock()
-        phase._prs.add_labels = AsyncMock()
-        phase._prs.add_pr_labels = AsyncMock()
-        phase._prs.post_pr_comment = AsyncMock()
+        _setup_escalate_to_hitl_mocks(phase)
 
         evidence = VisualEvidence(
             items=[
