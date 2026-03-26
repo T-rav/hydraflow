@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
+from collections import defaultdict
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -31,6 +34,13 @@ _SURPRISE_HIGH = 0.7
 _SURPRISE_LOW = 0.3
 _AUTO_EVICT_SCORE = 0.2
 _NEEDS_CURATION_SCORE = 0.4
+
+# Minimum word-overlap ratio to consider a failure "addressed" by a memory item.
+_GAP_OVERLAP_THRESHOLD = 0.30
+# Minimum occurrences before a gap becomes a suggestion.
+_GAP_FREQUENCY_THRESHOLD = 3
+# Maximum recent failures to inspect.
+_GAP_WINDOW = 50
 
 
 # ---------------------------------------------------------------------------
@@ -254,3 +264,162 @@ class MemoryScorer:
         for e in entries:
             parts.append(f"{e['outcome']}(issue={e['issue']},Δ={e['delta']:+.2f})")
         return "; ".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Knowledge gap detection
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class KnowledgeGap:
+    """A recurring failure pattern not addressed by any existing memory item."""
+
+    failure_category: str
+    subcategory: str | None
+    frequency: int
+    sample_details: list[str] = field(default_factory=list)
+    suggested_learning: str = ""
+
+
+def _tokenize(text: str) -> set[str]:
+    """Return the set of lowercased word tokens from *text*.
+
+    Strips punctuation and ignores single-character tokens.
+    """
+    return {w for w in re.split(r"\W+", text.lower()) if len(w) > 1}
+
+
+def _word_overlap(text_a: str, text_b: str) -> float:
+    """Return the Jaccard-like overlap ratio between two text strings.
+
+    Ratio = |intersection| / |union|. Returns 0.0 when both sets are empty.
+    """
+    tokens_a = _tokenize(text_a)
+    tokens_b = _tokenize(text_b)
+    if not tokens_a or not tokens_b:
+        return 0.0
+    intersection = tokens_a & tokens_b
+    union = tokens_a | tokens_b
+    return len(intersection) / len(union)
+
+
+def _failure_is_addressed(details: str, memory_texts: list[str]) -> bool:
+    """Return True if *details* has >30% word overlap with any memory item text."""
+    for mem_text in memory_texts:
+        if _word_overlap(details, mem_text) > _GAP_OVERLAP_THRESHOLD:
+            return True
+    return False
+
+
+def _synthesize_suggestion(
+    failure_category: str,
+    subcategory: str | None,
+    sample_details: list[str],
+    frequency: int,
+) -> str:
+    """Produce a brief suggested-learning string for a knowledge gap."""
+    sub_part = f" ({subcategory})" if subcategory else ""
+    details_hint = sample_details[0][:120] if sample_details else ""
+    return (
+        f"Add a memory item addressing recurring '{failure_category}{sub_part}' failures "
+        f"({frequency} unaddressed occurrences). "
+        f"Example failure: {details_hint!r}"
+    )
+
+
+def detect_knowledge_gaps(
+    failures_path: Path,
+    memory_texts: list[str],
+    *,
+    window: int = _GAP_WINDOW,
+    frequency_threshold: int = _GAP_FREQUENCY_THRESHOLD,
+    overlap_threshold: float = _GAP_OVERLAP_THRESHOLD,
+) -> list[KnowledgeGap]:
+    """Detect recurring failure patterns not addressed by existing memory items.
+
+    Args:
+        failures_path: Path to ``harness_failures.jsonl``.
+        memory_texts: List of text strings — one per memory item — used to
+            determine whether a failure is already addressed. Callers may
+            pass the full content of each memory item file, or extract the
+            ``condensed_summary`` / ``learning`` fields from their storage.
+        window: How many recent failures to examine (tail of the file).
+        frequency_threshold: Minimum occurrence count for a gap to be returned.
+        overlap_threshold: Word-overlap ratio above which a failure is
+            considered addressed by an existing memory item.
+
+    Returns:
+        A list of :class:`KnowledgeGap` objects, one per
+        ``(failure_category, subcategory)`` pair that appears at least
+        *frequency_threshold* times without a matching memory item.
+        Sorted by frequency descending.
+    """
+    # ------------------------------------------------------------------
+    # 1. Load recent failures
+    # ------------------------------------------------------------------
+    if not failures_path.exists():
+        return []
+
+    try:
+        lines = failures_path.read_text(encoding="utf-8").strip().splitlines()
+    except OSError:
+        return []
+
+    tail_lines = lines[-window:] if len(lines) > window else lines
+
+    # Import locally to avoid circular dependency at module level; harness_insights
+    # is a sibling module that does not import memory_scoring.
+    from harness_insights import FailureRecord  # noqa: PLC0415
+
+    records: list[FailureRecord] = []
+    for line in tail_lines:
+        try:
+            records.append(FailureRecord.model_validate_json(line))
+        except Exception:  # noqa: BLE001
+            continue  # skip malformed records
+
+    if not records:
+        return []
+
+    # ------------------------------------------------------------------
+    # 2. Group unaddressed failures by (category, subcategory)
+    # ------------------------------------------------------------------
+    # key → (category, primary_subcategory | None)
+    gap_counts: dict[tuple[str, str | None], int] = defaultdict(int)
+    gap_details: dict[tuple[str, str | None], list[str]] = defaultdict(list)
+
+    for record in records:
+        if _failure_is_addressed(record.details, memory_texts):
+            continue
+
+        # Use the first subcategory (most specific), or None if absent
+        primary_sub: str | None = (
+            record.subcategories[0] if record.subcategories else None
+        )
+        key = (str(record.category), primary_sub)
+        gap_counts[key] += 1
+        if len(gap_details[key]) < 3 and record.details:
+            gap_details[key].append(record.details)
+
+    # ------------------------------------------------------------------
+    # 3. Return gaps that meet the frequency threshold
+    # ------------------------------------------------------------------
+    gaps: list[KnowledgeGap] = []
+    for (category, subcategory), count in gap_counts.items():
+        if count < frequency_threshold:
+            continue
+        samples = gap_details[(category, subcategory)]
+        suggestion = _synthesize_suggestion(category, subcategory, samples, count)
+        gaps.append(
+            KnowledgeGap(
+                failure_category=category,
+                subcategory=subcategory,
+                frequency=count,
+                sample_details=samples,
+                suggested_learning=suggestion,
+            )
+        )
+
+    gaps.sort(key=lambda g: g.frequency, reverse=True)
+    return gaps

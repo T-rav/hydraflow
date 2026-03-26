@@ -10,7 +10,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from memory_scoring import MemoryScorer, OutcomeRecord  # noqa: E402
+from memory_scoring import (  # noqa: E402
+    KnowledgeGap,
+    MemoryScorer,
+    OutcomeRecord,
+    _failure_is_addressed,
+    _word_overlap,
+    detect_knowledge_gaps,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -33,6 +40,31 @@ def _make_outcome(
         failure_category=failure_category,
         summary=summary,
     )
+
+
+def _write_failures(path: Path, records: list[dict]) -> None:
+    """Write a list of dicts as JSONL to *path*."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [json.dumps(r) for r in records]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _failure_record(
+    category: str = "quality_gate",
+    subcategories: list[str] | None = None,
+    details: str = "ruff lint error in module foo",
+    issue_number: int = 1,
+) -> dict:
+    """Return a minimal FailureRecord-compatible dict."""
+    return {
+        "issue_number": issue_number,
+        "pr_number": 0,
+        "timestamp": "2026-01-01T00:00:00+00:00",
+        "category": category,
+        "subcategories": subcategories or [],
+        "details": details,
+        "stage": "",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -498,3 +530,241 @@ class TestCompactionClassification:
         scorer = MemoryScorer(tmp_path / "mem")
         # Item not in scores — treat as new/unknown
         assert scorer.classify_for_compaction(999) == "keep"
+
+
+# ---------------------------------------------------------------------------
+# TestWordOverlap (unit tests for helper)
+# ---------------------------------------------------------------------------
+
+
+class TestWordOverlap:
+    def test_identical_strings_overlap_one(self) -> None:
+        assert _word_overlap("hello world foo", "hello world foo") == pytest.approx(1.0)
+
+    def test_disjoint_strings_overlap_zero(self) -> None:
+        assert _word_overlap("alpha beta", "gamma delta") == pytest.approx(0.0)
+
+    def test_partial_overlap(self) -> None:
+        # "hello world" vs "hello there" → shared: {hello}, union: {hello, world, there}
+        ratio = _word_overlap("hello world", "hello there")
+        assert 0.0 < ratio < 1.0
+
+    def test_empty_string_returns_zero(self) -> None:
+        assert _word_overlap("", "some text") == pytest.approx(0.0)
+        assert _word_overlap("some text", "") == pytest.approx(0.0)
+        assert _word_overlap("", "") == pytest.approx(0.0)
+
+    def test_case_insensitive(self) -> None:
+        assert _word_overlap("Hello World", "hello world") == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# TestFailureIsAddressed
+# ---------------------------------------------------------------------------
+
+
+class TestFailureIsAddressed:
+    def test_addressed_when_high_overlap(self) -> None:
+        # Construct a memory text that shares many tokens with the failure details.
+        details = "pyright type error in module bar annotation missing"
+        memory = "pyright type error in module bar annotation missing return value"
+        assert _failure_is_addressed(details, [memory]) is True
+
+    def test_not_addressed_when_low_overlap(self) -> None:
+        details = "completely unrelated failure about network timeout"
+        memory = "pyright annotation type hint missing"
+        assert _failure_is_addressed(details, [memory]) is False
+
+    def test_addressed_by_any_item(self) -> None:
+        details = "ruff lint format error in foo"
+        irrelevant = "completely different topic"
+        relevant = "ruff lint format error foo bar"
+        assert _failure_is_addressed(details, [irrelevant, relevant]) is True
+
+    def test_not_addressed_with_empty_memory(self) -> None:
+        assert _failure_is_addressed("some failure details", []) is False
+
+
+# ---------------------------------------------------------------------------
+# TestDetectKnowledgeGaps
+# ---------------------------------------------------------------------------
+
+
+class TestDetectKnowledgeGaps:
+    def test_gaps_detected_when_no_matching_memory(self, tmp_path: Path) -> None:
+        """Failures with no matching memory items should be reported as gaps."""
+        failures_path = tmp_path / "harness_failures.jsonl"
+        # Write 3 identical failures — no memory covers them
+        records = [
+            _failure_record(
+                category="quality_gate",
+                details="unique obscure failure about zztop module crash",
+                issue_number=i,
+            )
+            for i in range(1, 4)
+        ]
+        _write_failures(failures_path, records)
+
+        gaps = detect_knowledge_gaps(failures_path, memory_texts=[])
+        assert len(gaps) == 1
+        assert gaps[0].failure_category == "quality_gate"
+        assert gaps[0].frequency == 3
+
+    def test_no_gaps_when_all_failures_matched(self, tmp_path: Path) -> None:
+        """Failures whose details overlap sufficiently with memory items are not gaps."""
+        failures_path = tmp_path / "harness_failures.jsonl"
+        detail = "ruff lint format error in module foo bar baz qux"
+        records = [
+            _failure_record(category="quality_gate", details=detail, issue_number=i)
+            for i in range(1, 4)
+        ]
+        _write_failures(failures_path, records)
+
+        # Memory item that covers the same words
+        memory_texts = ["ruff lint format error module foo bar baz qux style issue"]
+        gaps = detect_knowledge_gaps(failures_path, memory_texts=memory_texts)
+        assert gaps == []
+
+    def test_frequency_threshold_excludes_rare_gaps(self, tmp_path: Path) -> None:
+        """Gaps appearing fewer than 3 times are not returned."""
+        failures_path = tmp_path / "harness_failures.jsonl"
+        records = [
+            _failure_record(
+                category="ci_failure",
+                details="some exotic timeout zztop unreachable host xyz",
+                issue_number=i,
+            )
+            for i in range(1, 3)  # only 2 occurrences
+        ]
+        _write_failures(failures_path, records)
+
+        gaps = detect_knowledge_gaps(failures_path, memory_texts=[])
+        assert gaps == []
+
+    def test_frequency_threshold_includes_gaps_at_threshold(
+        self, tmp_path: Path
+    ) -> None:
+        """Gaps at exactly the threshold (3) are returned."""
+        failures_path = tmp_path / "harness_failures.jsonl"
+        records = [
+            _failure_record(
+                category="review_rejection",
+                details="missing docstring zztop function quux frob",
+                issue_number=i,
+            )
+            for i in range(1, 4)  # exactly 3 occurrences
+        ]
+        _write_failures(failures_path, records)
+
+        gaps = detect_knowledge_gaps(failures_path, memory_texts=[])
+        assert len(gaps) == 1
+        assert gaps[0].frequency == 3
+
+    def test_gaps_grouped_by_category_and_subcategory(self, tmp_path: Path) -> None:
+        """Failures with different (category, subcategory) keys produce separate gaps."""
+        failures_path = tmp_path / "harness_failures.jsonl"
+        quality_records = [
+            _failure_record(
+                category="quality_gate",
+                subcategories=["lint_error"],
+                details="ruff zztop obscure format fail alpha beta gamma",
+                issue_number=i,
+            )
+            for i in range(1, 4)
+        ]
+        ci_records = [
+            _failure_record(
+                category="ci_failure",
+                subcategories=["timeout"],
+                details="pytest timeout frob quux unreachable zztop delta epsilon",
+                issue_number=i + 10,
+            )
+            for i in range(1, 4)
+        ]
+        _write_failures(failures_path, quality_records + ci_records)
+
+        gaps = detect_knowledge_gaps(failures_path, memory_texts=[])
+        assert len(gaps) == 2
+        categories = {g.failure_category for g in gaps}
+        assert "quality_gate" in categories
+        assert "ci_failure" in categories
+
+    def test_gap_includes_up_to_three_sample_details(self, tmp_path: Path) -> None:
+        """At most 3 sample_details strings are included per gap."""
+        failures_path = tmp_path / "harness_failures.jsonl"
+        records = [
+            _failure_record(
+                category="plan_validation",
+                details=f"unique obscure zztop failure detail number {i}",
+                issue_number=i,
+            )
+            for i in range(1, 6)  # 5 failures
+        ]
+        _write_failures(failures_path, records)
+
+        gaps = detect_knowledge_gaps(failures_path, memory_texts=[])
+        assert len(gaps) == 1
+        assert len(gaps[0].sample_details) <= 3
+
+    def test_returns_empty_list_when_no_failures_file(self, tmp_path: Path) -> None:
+        """No crash when harness_failures.jsonl does not exist."""
+        missing = tmp_path / "nonexistent" / "harness_failures.jsonl"
+        gaps = detect_knowledge_gaps(missing, memory_texts=[])
+        assert gaps == []
+
+    def test_gaps_sorted_by_frequency_descending(self, tmp_path: Path) -> None:
+        """Returned gaps are ordered from most frequent to least frequent."""
+        failures_path = tmp_path / "harness_failures.jsonl"
+        # 5 quality_gate failures, 3 ci_failure failures (distinct word sets)
+        quality_records = [
+            _failure_record(
+                category="quality_gate",
+                details="zztop alpha beta gamma delta epsilon frob",
+                issue_number=i,
+            )
+            for i in range(1, 6)
+        ]
+        ci_records = [
+            _failure_record(
+                category="ci_failure",
+                details="quux corge grault garply waldo fred plugh",
+                issue_number=i + 20,
+            )
+            for i in range(1, 4)
+        ]
+        _write_failures(failures_path, quality_records + ci_records)
+
+        gaps = detect_knowledge_gaps(failures_path, memory_texts=[])
+        assert len(gaps) >= 2
+        # Most frequent gap should be first
+        assert gaps[0].frequency >= gaps[-1].frequency
+
+    def test_suggested_learning_references_category(self, tmp_path: Path) -> None:
+        """suggested_learning text mentions the failure category."""
+        failures_path = tmp_path / "harness_failures.jsonl"
+        records = [
+            _failure_record(
+                category="hitl_escalation",
+                details="zztop unique obscure hitl escalation detail quux",
+                issue_number=i,
+            )
+            for i in range(1, 4)
+        ]
+        _write_failures(failures_path, records)
+
+        gaps = detect_knowledge_gaps(failures_path, memory_texts=[])
+        assert len(gaps) == 1
+        assert "hitl_escalation" in gaps[0].suggested_learning
+
+    def test_knowledge_gap_is_dataclass(self) -> None:
+        """KnowledgeGap can be instantiated as a plain dataclass."""
+        gap = KnowledgeGap(
+            failure_category="ci_failure",
+            subcategory="timeout",
+            frequency=5,
+            sample_details=["detail one"],
+            suggested_learning="Add memory item.",
+        )
+        assert gap.failure_category == "ci_failure"
+        assert gap.subcategory == "timeout"
+        assert gap.frequency == 5
