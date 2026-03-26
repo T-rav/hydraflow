@@ -29,10 +29,7 @@ def _make_loop(
     dry_run: bool = False,
 ) -> tuple[ReportIssueLoop, asyncio.Event, StateTracker, MagicMock]:
     """Build a ReportIssueLoop with test-friendly defaults."""
-    deps = make_bg_loop_deps(tmp_path, enabled=enabled)
-
-    if dry_run:
-        object.__setattr__(deps.config, "dry_run", True)
+    deps = make_bg_loop_deps(tmp_path, enabled=enabled, dry_run=dry_run)
 
     state = StateTracker(tmp_path / "state.json")
     pr_manager = MagicMock()
