@@ -106,6 +106,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("hindsight_timeout", "HYDRAFLOW_HINDSIGHT_TIMEOUT", 30),
     ("state_backup_interval", "HYDRAFLOW_STATE_BACKUP_INTERVAL", 300),
     ("state_backup_count", "HYDRAFLOW_STATE_BACKUP_COUNT", 3),
+    ("health_monitor_interval", "HYDRAFLOW_HEALTH_MONITOR_INTERVAL", 7200),
 ]
 
 _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
@@ -1067,6 +1068,14 @@ class HydraFlowConfig(BaseModel):
         ge=1,
         le=10,
         description="Number of rotated state.json backup generations to keep",
+    )
+
+    # Health monitor
+    health_monitor_interval: int = Field(
+        default=7200,
+        ge=60,
+        le=86400,
+        description="Health monitor cycle interval in seconds",
     )
 
     # Config file persistence

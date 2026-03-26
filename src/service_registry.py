@@ -26,6 +26,7 @@ from events import EventBus
 from execution import SubprocessRunner
 from github_cache import GitHubCacheLoop, GitHubDataCache
 from harness_insights import HarnessInsightStore
+from health_monitor_loop import HealthMonitorLoop
 from hitl_phase import HITLPhase
 from hitl_runner import HITLRunner
 from implement_phase import ImplementPhase
@@ -122,6 +123,7 @@ class ServiceRegistry:
     worktree_gc_loop: WorkspaceGCLoop
     runs_gc_loop: RunsGCLoop
     adr_reviewer_loop: ADRReviewerLoop
+    health_monitor_loop: HealthMonitorLoop
 
     # Optional integrations
     hindsight: HindsightClient | None = None
@@ -433,6 +435,11 @@ def build_services(
     adr_reviewer_loop = ADRReviewerLoop(
         config=config, adr_reviewer=adr_reviewer, deps=loop_deps
     )
+    health_monitor_loop = HealthMonitorLoop(  # noqa: F841
+        config=config,
+        deps=loop_deps,
+        prs=prs,
+    )
     gh_cache_loop = GitHubCacheLoop(config, gh_cache, deps=loop_deps)  # noqa: F841
 
     return ServiceRegistry(
@@ -473,6 +480,7 @@ def build_services(
         worktree_gc_loop=worktree_gc_loop,
         runs_gc_loop=runs_gc_loop,
         adr_reviewer_loop=adr_reviewer_loop,
+        health_monitor_loop=health_monitor_loop,
         hindsight=hindsight_client,
         hindsight_wal=hindsight_wal,
         github_cache=gh_cache,
