@@ -863,6 +863,60 @@ class TestDoWork:
 
 
 # ---------------------------------------------------------------------------
+# Sentry log pattern metrics
+# ---------------------------------------------------------------------------
+
+
+class TestSentryLogPatternMetrics:
+    """Tests for log-pattern parameters in _emit_sentry_metrics."""
+
+    def test_emits_log_pattern_measurements(self) -> None:
+        """Log pattern Sentry measurements are emitted when provided."""
+        mock_sentry = MagicMock()
+        metrics = TrendMetrics(
+            first_pass_rate=0.75,
+            avg_memory_score=0.65,
+            surprise_rate=0.1,
+            hitl_escalation_rate=0.05,
+            stale_item_count=3,
+            total_outcomes=50,
+        )
+
+        with patch.dict("sys.modules", {"sentry_sdk": mock_sentry}):
+            HealthMonitorLoop._emit_sentry_metrics(
+                metrics,
+                log_patterns_total=10,
+                log_patterns_novel=3,
+                log_patterns_escalating=1,
+            )
+
+        calls = {c[0][0]: c[0][1] for c in mock_sentry.set_measurement.call_args_list}
+        assert calls.get("memory.log_patterns_total") == pytest.approx(10)
+        assert calls.get("memory.log_patterns_novel") == pytest.approx(3)
+        assert calls.get("memory.log_patterns_escalating") == pytest.approx(1)
+
+    def test_log_pattern_params_default_to_zero(self) -> None:
+        """Log pattern params default to 0 when not provided."""
+        mock_sentry = MagicMock()
+        metrics = TrendMetrics(
+            first_pass_rate=0.5,
+            avg_memory_score=0.5,
+            surprise_rate=0.0,
+            hitl_escalation_rate=0.0,
+            stale_item_count=0,
+            total_outcomes=10,
+        )
+
+        with patch.dict("sys.modules", {"sentry_sdk": mock_sentry}):
+            HealthMonitorLoop._emit_sentry_metrics(metrics)
+
+        calls = {c[0][0]: c[0][1] for c in mock_sentry.set_measurement.call_args_list}
+        assert calls.get("memory.log_patterns_total") == pytest.approx(0)
+        assert calls.get("memory.log_patterns_novel") == pytest.approx(0)
+        assert calls.get("memory.log_patterns_escalating") == pytest.approx(0)
+
+
+# ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 

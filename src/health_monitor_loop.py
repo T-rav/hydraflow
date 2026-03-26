@@ -755,6 +755,11 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             )
             sentry_sdk.set_measurement("memory.knowledge_gaps", gap_count)
             sentry_sdk.set_measurement("memory.auto_adjustments", adjustment_count)
+            sentry_sdk.set_measurement("memory.log_patterns_total", log_patterns_total)
+            sentry_sdk.set_measurement("memory.log_patterns_novel", log_patterns_novel)
+            sentry_sdk.set_measurement(
+                "memory.log_patterns_escalating", log_patterns_escalating
+            )
         except ImportError:
             pass
         except Exception:  # noqa: BLE001

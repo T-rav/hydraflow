@@ -663,3 +663,53 @@ class TestFileLogPatterns:
         result = await file_log_patterns([pattern], known, prs, config)
 
         assert result.escalated == 1
+
+    @pytest.mark.asyncio
+    async def test_sentry_breadcrumb_called_for_novel_pattern(self) -> None:
+        """Sentry breadcrumb is added when a novel pattern is detected."""
+        from unittest.mock import MagicMock, patch
+
+        prs = AsyncMock()
+        prs.create_issue = AsyncMock(return_value=101)
+        config = _make_config()
+        known: dict[str, KnownLogPattern] = {}
+        pattern = self._make_pattern()
+
+        mock_sentry = MagicMock()
+        with patch.dict("sys.modules", {"sentry_sdk": mock_sentry}):
+            await file_log_patterns([pattern], known, prs, config)
+
+        mock_sentry.add_breadcrumb.assert_called_once()
+        call_kwargs = mock_sentry.add_breadcrumb.call_args[1]
+        assert call_kwargs["category"] == "log_ingestion.novel"
+        assert "level" in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_sentry_capture_message_called_on_escalation(self) -> None:
+        """Sentry capture_message is called when a pattern escalates."""
+        from unittest.mock import MagicMock, patch
+
+        prs = AsyncMock()
+        prs.create_issue = AsyncMock(return_value=200)
+        config = _make_config()
+        pattern = self._make_pattern(count=15)
+        key = f"{pattern.source_module}:{pattern.fingerprint}"
+        known = {
+            key: KnownLogPattern(
+                fingerprint=pattern.fingerprint,
+                source_module=pattern.source_module,
+                filed_at="2026-03-26T09:00:00+00:00",
+                issue_number=50,
+                last_count=5,
+                filed_count=5,
+            )
+        }
+
+        mock_sentry = MagicMock()
+        with patch.dict("sys.modules", {"sentry_sdk": mock_sentry}):
+            await file_log_patterns([pattern], known, prs, config)
+
+        mock_sentry.capture_message.assert_called_once()
+        args = mock_sentry.capture_message.call_args
+        assert "escalating" in args[0][0].lower()
+        assert args[1]["level"] == "warning"
