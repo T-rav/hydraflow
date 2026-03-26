@@ -1097,10 +1097,13 @@ class TestRunAndPostReview:
         phase._prs.push_branch = AsyncMock()
         phase._prs.post_pr_comment = AsyncMock()
 
-        await phase._run_and_post_review(
+        result = await phase._run_and_post_review(
             pr, issue, config.worktree_path_for_issue(42), "diff", 0
         )
 
+        assert (
+            result.verdict == ReviewVerdict.APPROVE
+        )  # behavioral: returned the reviewer's result
         phase._prs.post_pr_comment.assert_awaited_once_with(101, "Looks good.")
 
     @pytest.mark.asyncio
@@ -1139,10 +1142,13 @@ class TestRunAndPostReview:
         phase._prs.post_pr_comment = AsyncMock()
         phase._prs.submit_review = AsyncMock()
 
-        await phase._run_and_post_review(
+        result = await phase._run_and_post_review(
             pr, issue, config.worktree_path_for_issue(42), "diff", 0
         )
 
+        assert (
+            result.verdict == ReviewVerdict.REQUEST_CHANGES
+        )  # behavioral: verdict propagated to caller
         phase._prs.submit_review.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -1230,6 +1236,9 @@ class TestHandleApprovedMerge:
 
         await phase._handle_approved_merge(pr, issue, result, "diff", 0)
 
+        assert (
+            result.merged is True
+        )  # behavioral: merge succeeded and result reflects it
         phase._prs.swap_pipeline_labels.assert_any_call(42, "hydraflow-fixed")
 
 
@@ -1246,6 +1255,7 @@ class TestRunPostMergeHooks:
         issue = TaskFactory.create()
         result = ReviewResultFactory.create()
 
+        # Behavioral: function completes without raising (hooks are fire-and-forget)
         await phase._run_post_merge_hooks(pr, issue, result, "diff")
 
         mock_ac.generate.assert_awaited_once()
@@ -1260,6 +1270,7 @@ class TestRunPostMergeHooks:
         issue = TaskFactory.create()
         result = ReviewResultFactory.create()
 
+        # Behavioral: function completes without raising (hooks are fire-and-forget)
         await phase._run_post_merge_hooks(pr, issue, result, "diff")
 
         mock_retro.record.assert_awaited_once()
@@ -1279,7 +1290,7 @@ class TestRunPostMergeHooks:
         issue = TaskFactory.create()
         result = ReviewResultFactory.create()
 
-        # Should not raise
+        # Behavioral: AC failure does not propagate — function completes normally
         await phase._run_post_merge_hooks(pr, issue, result, "diff")
 
         # AC failed but retrospective still called
