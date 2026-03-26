@@ -484,48 +484,6 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         except Exception:  # noqa: BLE001
             logger.debug("Proposal verification failed", exc_info=True)
 
-        # Cross-project promotion (only in multi-repo mode)
-        try:
-            from global_memory import GlobalMemoryStore  # noqa: PLC0415
-
-            global_dir = Path(self._config.data_root).parent / "global_memory"
-            if global_dir.exists():
-                global_store = GlobalMemoryStore(global_dir)
-                # Collect project stores from registry if available
-                # For now, just check the current project
-                candidates = global_store.find_promotion_candidates(
-                    {self._config.repo_slug: self._config.memory_dir}
-                )
-                if candidates:
-                    logger.info("Found %d promotion candidates", len(candidates))
-        except ImportError:
-            pass
-        except Exception:  # noqa: BLE001
-            logger.debug("Promotion candidate check failed", exc_info=True)
-
-        # Override detection
-        try:
-            from global_memory import GlobalMemoryStore  # noqa: PLC0415
-
-            global_dir = Path(self._config.data_root).parent / "global_memory"
-            if global_dir.exists():
-                global_store = GlobalMemoryStore(global_dir)
-                overrides = global_store.detect_override_candidates(
-                    {self._config.repo_slug: self._config.memory_dir}
-                )
-                for candidate in overrides:
-                    logger.warning(
-                        "Global item %s underperforming on project %s (score %.2f vs global %.2f)",
-                        candidate["global_item_id"],
-                        candidate["project"],
-                        candidate["project_score"],
-                        candidate["global_avg"],
-                    )
-        except ImportError:
-            pass
-        except Exception:  # noqa: BLE001
-            logger.debug("Override detection failed", exc_info=True)
-
         # Cross-project log pattern detection
         try:
             from log_ingestion import (  # noqa: PLC0415
