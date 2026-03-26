@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -18,19 +17,6 @@ from models import ConflictResolutionResult, HITLItem, LoopResult
 from pr_unsticker import FailureCause, PRUnsticker, _classify_cause
 from tests.conftest import HITLResultFactory, IssueFactory, make_state
 from tests.helpers import ConfigFactory
-
-
-@dataclass
-class UnstickerHarness:
-    unsticker: object
-    state: object
-    prs: object
-    agents: object
-    wt: object
-    fetcher: object
-    bus: object
-    hitl_runner: object
-    resolver: object
 
 
 def _make_config(tmp_path: Path, **overrides) -> MagicMock:
@@ -72,7 +58,7 @@ def _make_unsticker(
     # save_conflict_transcript is sync; override the auto-generated AsyncMock
     # attribute so callers don't produce "coroutine never awaited" warnings.
     rs.save_conflict_transcript = MagicMock()
-    return UnstickerHarness(
+    return SimpleNamespace(
         unsticker=PRUnsticker(
             cfg,
             st,
@@ -124,7 +110,7 @@ class TestPRUnstickerInternals:
         monkeypatch.setitem(sys.modules, "polyglot_prep", failing_module)
 
         with caplog.at_level(logging.WARNING):
-            result = unsticker._detect_language(tmp_path)
+            result = h.unsticker._detect_language(tmp_path)
 
         assert result == "general"
         assert "Falling back to 'general' language classification" in caplog.text
@@ -180,7 +166,7 @@ class TestEmptyItems:
     async def test_empty_items_returns_zero_stats(self, tmp_path: Path) -> None:
         h = _make_unsticker(tmp_path)
 
-        stats = await unsticker.unstick([])
+        stats = await h.unsticker.unstick([])
         assert stats == {
             "processed": 0,
             "resolved": 0,
@@ -195,13 +181,11 @@ class TestAllCausesProcessing:
 
     @pytest.mark.asyncio
     async def test_all_causes_processes_everything(self, tmp_path: Path) -> None:
-        h = _make_unsticker(
-            tmp_path, unstick_all_causes=True, unstick_auto_merge=False
-        )
+        h = _make_unsticker(tmp_path, unstick_all_causes=True, unstick_auto_merge=False)
 
-        state.set_hitl_cause(1, "Merge conflict with main")
-        state.set_hitl_cause(2, "CI failure in tests")
-        state.set_hitl_cause(3, "Unknown reason")
+        h.state.set_hitl_cause(1, "Merge conflict with main")
+        h.state.set_hitl_cause(2, "CI failure in tests")
+        h.state.set_hitl_cause(3, "Unknown reason")
 
         items = [
             _make_hitl_item(issue=1),
@@ -209,9 +193,9 @@ class TestAllCausesProcessing:
             _make_hitl_item(issue=3),
         ]
 
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=None)
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=None)
 
-        stats = await unsticker.unstick(items)
+        stats = await h.unsticker.unstick(items)
 
         # All 3 should be processed when unstick_all_causes=True
         assert stats["processed"] == 3
@@ -222,9 +206,9 @@ class TestAllCausesProcessing:
             tmp_path, unstick_all_causes=False, unstick_auto_merge=False
         )
 
-        state.set_hitl_cause(1, "Merge conflict with main")
-        state.set_hitl_cause(2, "CI failure in tests")
-        state.set_hitl_cause(3, "Review rejected")
+        h.state.set_hitl_cause(1, "Merge conflict with main")
+        h.state.set_hitl_cause(2, "CI failure in tests")
+        h.state.set_hitl_cause(3, "Review rejected")
 
         items = [
             _make_hitl_item(issue=1),
@@ -232,9 +216,9 @@ class TestAllCausesProcessing:
             _make_hitl_item(issue=3),
         ]
 
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=None)
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=None)
 
-        stats = await unsticker.unstick(items)
+        stats = await h.unsticker.unstick(items)
 
         # Only issue 1 should be processed (merge conflict)
         assert stats["processed"] == 1
@@ -247,9 +231,9 @@ class TestMergeConflictFilter:
             tmp_path, unstick_all_causes=False, unstick_auto_merge=False
         )
 
-        state.set_hitl_cause(1, "Merge conflict with main")
-        state.set_hitl_cause(2, "CI failure in tests")
-        state.set_hitl_cause(3, "Review rejected")
+        h.state.set_hitl_cause(1, "Merge conflict with main")
+        h.state.set_hitl_cause(2, "CI failure in tests")
+        h.state.set_hitl_cause(3, "Review rejected")
 
         items = [
             _make_hitl_item(issue=1),
@@ -257,21 +241,21 @@ class TestMergeConflictFilter:
             _make_hitl_item(issue=3),
         ]
 
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=None)
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=None)
 
-        stats = await unsticker.unstick(items)
+        stats = await h.unsticker.unstick(items)
 
         assert stats["processed"] == 1
 
     def test_is_merge_conflict_matches_various_causes(self, tmp_path: Path) -> None:
         h = _make_unsticker(tmp_path)
 
-        assert unsticker._is_merge_conflict("Merge conflict with main")
-        assert unsticker._is_merge_conflict("merge conflict")
-        assert unsticker._is_merge_conflict("Has CONFLICT markers")
-        assert not unsticker._is_merge_conflict("CI failure")
-        assert not unsticker._is_merge_conflict("Review rejected")
-        assert not unsticker._is_merge_conflict("")
+        assert h.unsticker._is_merge_conflict("Merge conflict with main")
+        assert h.unsticker._is_merge_conflict("merge conflict")
+        assert h.unsticker._is_merge_conflict("Has CONFLICT markers")
+        assert not h.unsticker._is_merge_conflict("CI failure")
+        assert not h.unsticker._is_merge_conflict("Review rejected")
+        assert not h.unsticker._is_merge_conflict("")
 
 
 class TestCleanMerge:
@@ -280,31 +264,29 @@ class TestCleanMerge:
         issue = IssueFactory.create(
             title="Test issue", body="body", labels=["hydraflow-hitl"]
         )
-        h = _make_unsticker(
-            tmp_path, unstick_auto_merge=False
-        )
+        h = _make_unsticker(tmp_path, unstick_auto_merge=False)
 
-        state.set_hitl_cause(42, "Merge conflict")
-        state.set_hitl_origin(42, "hydraflow-review")
+        h.state.set_hitl_cause(42, "Merge conflict")
+        h.state.set_hitl_origin(42, "hydraflow-review")
 
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
-        prs.push_branch = AsyncMock(return_value=True)
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.prs.push_branch = AsyncMock(return_value=True)
 
         # Resolver reports clean merge (no rebuild)
-        resolver.resolve_merge_conflicts = AsyncMock(
+        h.resolver.resolve_merge_conflicts = AsyncMock(
             return_value=ConflictResolutionResult(success=True, used_rebuild=False)
         )
 
-        wt_dir = unsticker._config.worktree_path_for_issue(42)
+        wt_dir = h.unsticker._config.worktree_path_for_issue(42)
         wt_dir.mkdir(parents=True)
 
-        stats = await unsticker.unstick([_make_hitl_item(42)])
+        stats = await h.unsticker.unstick([_make_hitl_item(42)])
 
         assert stats["resolved"] == 1
         assert stats["failed"] == 0
-        resolver.resolve_merge_conflicts.assert_awaited_once()
-        prs.push_branch.assert_called_once()
+        h.resolver.resolve_merge_conflicts.assert_awaited_once()
+        h.prs.push_branch.assert_called_once()
 
 
 class TestSuccessfulResolution:
@@ -315,35 +297,33 @@ class TestSuccessfulResolution:
         issue = IssueFactory.create(
             title="Test issue", body="body", labels=["hydraflow-hitl"]
         )
-        h = _make_unsticker(
-            tmp_path, unstick_auto_merge=False
-        )
+        h = _make_unsticker(tmp_path, unstick_auto_merge=False)
 
-        state.set_hitl_cause(42, "Merge conflict")
-        state.set_hitl_origin(42, "hydraflow-review")
+        h.state.set_hitl_cause(42, "Merge conflict")
+        h.state.set_hitl_origin(42, "hydraflow-review")
 
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
-        prs.push_branch = AsyncMock(return_value=True)
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.prs.push_branch = AsyncMock(return_value=True)
 
         # Resolver succeeds without rebuild
-        resolver.resolve_merge_conflicts = AsyncMock(
+        h.resolver.resolve_merge_conflicts = AsyncMock(
             return_value=ConflictResolutionResult(success=True, used_rebuild=False)
         )
 
-        wt_dir = unsticker._config.worktree_path_for_issue(42)
+        wt_dir = h.unsticker._config.worktree_path_for_issue(42)
         wt_dir.mkdir(parents=True)
 
-        stats = await unsticker.unstick([_make_hitl_item(42)])
+        stats = await h.unsticker.unstick([_make_hitl_item(42)])
 
         assert stats["resolved"] == 1
         assert stats["failed"] == 0
 
-        prs.swap_pipeline_labels.assert_any_call(42, "hydraflow-hitl-active")
-        prs.swap_pipeline_labels.assert_any_call(42, "hydraflow-review")
+        h.prs.swap_pipeline_labels.assert_any_call(42, "hydraflow-hitl-active")
+        h.prs.swap_pipeline_labels.assert_any_call(42, "hydraflow-review")
 
-        assert state.get_hitl_origin(42) is None
-        assert state.get_hitl_cause(42) is None
+        assert h.state.get_hitl_origin(42) is None
+        assert h.state.get_hitl_cause(42) is None
 
 
 class TestFailedResolution:
@@ -354,33 +334,31 @@ class TestFailedResolution:
         issue = IssueFactory.create(
             title="Test issue", body="body", labels=["hydraflow-hitl"]
         )
-        h = _make_unsticker(
-            tmp_path, unstick_auto_merge=False
-        )
+        h = _make_unsticker(tmp_path, unstick_auto_merge=False)
 
-        state.set_hitl_cause(42, "Merge conflict")
+        h.state.set_hitl_cause(42, "Merge conflict")
 
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
 
         # Resolver fails
-        resolver.resolve_merge_conflicts = AsyncMock(
+        h.resolver.resolve_merge_conflicts = AsyncMock(
             return_value=ConflictResolutionResult(success=False, used_rebuild=False)
         )
 
-        wt_dir = unsticker._config.worktree_path_for_issue(42)
+        wt_dir = h.unsticker._config.worktree_path_for_issue(42)
         wt_dir.mkdir(parents=True)
 
-        stats = await unsticker.unstick([_make_hitl_item(42)])
+        stats = await h.unsticker.unstick([_make_hitl_item(42)])
 
         assert stats["failed"] == 1
         assert stats["resolved"] == 0
 
-        prs.swap_pipeline_labels.assert_any_call(42, "hydraflow-hitl")
+        h.prs.swap_pipeline_labels.assert_any_call(42, "hydraflow-hitl")
 
         comment_calls = [
             call
-            for call in prs.post_comment.call_args_list
+            for call in h.prs.post_comment.call_args_list
             if "could not resolve" in call.args[1].lower()
         ]
         assert len(comment_calls) == 1
@@ -389,18 +367,16 @@ class TestFailedResolution:
 class TestBatchSizeLimit:
     @pytest.mark.asyncio
     async def test_batch_size_limits_processing(self, tmp_path: Path) -> None:
-        h = _make_unsticker(
-            tmp_path, pr_unstick_batch_size=2, unstick_auto_merge=False
-        )
+        h = _make_unsticker(tmp_path, pr_unstick_batch_size=2, unstick_auto_merge=False)
 
         for i in range(5):
-            state.set_hitl_cause(i + 1, "Merge conflict")
+            h.state.set_hitl_cause(i + 1, "Merge conflict")
 
         items = [_make_hitl_item(issue=i + 1) for i in range(5)]
 
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=None)
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=None)
 
-        stats = await unsticker.unstick(items)
+        stats = await h.unsticker.unstick(items)
 
         assert stats["processed"] == 2
 
@@ -415,16 +391,14 @@ class TestCIFailureResolution:
         issue = IssueFactory.create(
             title="Fix widget", body="body", labels=["hydraflow-hitl"]
         )
-        h = _make_unsticker(
-            tmp_path, unstick_all_causes=True, unstick_auto_merge=False
-        )
+        h = _make_unsticker(tmp_path, unstick_all_causes=True, unstick_auto_merge=False)
 
-        state.set_hitl_cause(42, "CI failed after 2 fix attempts")
-        state.set_hitl_origin(42, "hydraflow-review")
+        h.state.set_hitl_cause(42, "CI failed after 2 fix attempts")
+        h.state.set_hitl_origin(42, "hydraflow-review")
 
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.start_merge_main = AsyncMock(return_value=True)  # Clean rebase
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.start_merge_main = AsyncMock(return_value=True)  # Clean rebase
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
 
         captured_prompt = None
         original_execute = AsyncMock(return_value="fixed transcript")
@@ -434,19 +408,19 @@ class TestCIFailureResolution:
             captured_prompt = prompt
             return await original_execute(cmd, prompt, wt_arg, issue_number, **kwargs)
 
-        agents._build_command = MagicMock(return_value=["claude", "-p"])
-        agents._execute = capture_execute
-        agents._verify_result = AsyncMock(
+        h.agents._build_command = MagicMock(return_value=["claude", "-p"])
+        h.agents._execute = capture_execute
+        h.agents._verify_result = AsyncMock(
             return_value=LoopResult(passed=True, summary="OK")
         )
 
-        prs.push_branch = AsyncMock(return_value=True)
+        h.prs.push_branch = AsyncMock(return_value=True)
 
-        wt_dir = unsticker._config.worktree_path_for_issue(42)
+        wt_dir = h.unsticker._config.worktree_path_for_issue(42)
         wt_dir.mkdir(parents=True)
         (tmp_path / "repo" / ".hydraflow" / "logs").mkdir(parents=True)
 
-        stats = await unsticker.unstick(
+        stats = await h.unsticker.unstick(
             [_make_hitl_item(42, prUrl="https://github.com/test-org/test-repo/pull/42")]
         )
 
@@ -474,17 +448,17 @@ class TestGenericResolution:
             hitl_runner=hitl_runner,
         )
 
-        state.set_hitl_cause(42, "Manual escalation by user")
-        state.set_hitl_origin(42, "hydraflow-review")
+        h.state.set_hitl_cause(42, "Manual escalation by user")
+        h.state.set_hitl_origin(42, "hydraflow-review")
 
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
-        prs.push_branch = AsyncMock(return_value=True)
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.prs.push_branch = AsyncMock(return_value=True)
 
-        wt_dir = unsticker._config.worktree_path_for_issue(42)
+        wt_dir = h.unsticker._config.worktree_path_for_issue(42)
         wt_dir.mkdir(parents=True)
 
-        stats = await unsticker.unstick([_make_hitl_item(42)])
+        stats = await h.unsticker.unstick([_make_hitl_item(42)])
 
         assert stats["resolved"] == 1
         hitl_runner.run.assert_awaited_once()
@@ -501,18 +475,18 @@ class TestGenericResolution:
             hitl_runner=None,
         )
         # Override to None explicitly
-        unsticker._hitl_runner = None
+        h.unsticker._hitl_runner = None
 
-        state.set_hitl_cause(42, "Manual escalation by user")
-        state.set_hitl_origin(42, "hydraflow-review")
+        h.state.set_hitl_cause(42, "Manual escalation by user")
+        h.state.set_hitl_origin(42, "hydraflow-review")
 
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
 
-        wt_dir = unsticker._config.worktree_path_for_issue(42)
+        wt_dir = h.unsticker._config.worktree_path_for_issue(42)
         wt_dir.mkdir(parents=True)
 
-        stats = await unsticker.unstick([_make_hitl_item(42)])
+        stats = await h.unsticker.unstick([_make_hitl_item(42)])
 
         assert stats["failed"] == 1
 
@@ -525,37 +499,35 @@ class TestAutoMerge:
         issue = IssueFactory.create(
             title="Test issue", body="body", labels=["hydraflow-hitl"]
         )
-        h = _make_unsticker(
-            tmp_path, unstick_auto_merge=True
-        )
+        h = _make_unsticker(tmp_path, unstick_auto_merge=True)
 
-        state.set_hitl_cause(42, "Merge conflict")
-        state.set_hitl_origin(42, "hydraflow-review")
+        h.state.set_hitl_cause(42, "Merge conflict")
+        h.state.set_hitl_origin(42, "hydraflow-review")
 
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
-        prs.push_branch = AsyncMock(return_value=True)
-        prs.wait_for_ci = AsyncMock(return_value=(True, "All checks passed"))
-        prs.merge_pr = AsyncMock(return_value=True)
-        prs.pull_main = AsyncMock(return_value=True)
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.prs.push_branch = AsyncMock(return_value=True)
+        h.prs.wait_for_ci = AsyncMock(return_value=(True, "All checks passed"))
+        h.prs.merge_pr = AsyncMock(return_value=True)
+        h.prs.pull_main = AsyncMock(return_value=True)
 
         # Resolver reports clean merge
-        resolver.resolve_merge_conflicts = AsyncMock(
+        h.resolver.resolve_merge_conflicts = AsyncMock(
             return_value=ConflictResolutionResult(success=True, used_rebuild=False)
         )
 
-        wt_dir = unsticker._config.worktree_path_for_issue(42)
+        wt_dir = h.unsticker._config.worktree_path_for_issue(42)
         wt_dir.mkdir(parents=True)
 
-        stats = await unsticker.unstick([_make_hitl_item(42, pr=100)])
+        stats = await h.unsticker.unstick([_make_hitl_item(42, pr=100)])
 
         assert stats["resolved"] == 1
         assert stats["merged"] == 1
-        prs.merge_pr.assert_awaited_once_with(100)
+        h.prs.merge_pr.assert_awaited_once_with(100)
 
         # State should be cleaned up
-        assert state.get_hitl_origin(42) is None
-        assert state.get_hitl_cause(42) is None
+        assert h.state.get_hitl_origin(42) is None
+        assert h.state.get_hitl_cause(42) is None
 
     @pytest.mark.asyncio
     async def test_auto_merge_calls_store_mark_merged(self, tmp_path: Path) -> None:
@@ -564,28 +536,26 @@ class TestAutoMerge:
             title="Test issue", body="body", labels=["hydraflow-hitl"]
         )
         mock_store = MagicMock()
-        h = _make_unsticker(
-            tmp_path, unstick_auto_merge=True, store=mock_store
-        )
+        h = _make_unsticker(tmp_path, unstick_auto_merge=True, store=mock_store)
 
-        state.set_hitl_cause(42, "Merge conflict")
-        state.set_hitl_origin(42, "hydraflow-review")
+        h.state.set_hitl_cause(42, "Merge conflict")
+        h.state.set_hitl_origin(42, "hydraflow-review")
 
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
-        prs.push_branch = AsyncMock(return_value=True)
-        prs.wait_for_ci = AsyncMock(return_value=(True, "All checks passed"))
-        prs.merge_pr = AsyncMock(return_value=True)
-        prs.pull_main = AsyncMock(return_value=True)
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.prs.push_branch = AsyncMock(return_value=True)
+        h.prs.wait_for_ci = AsyncMock(return_value=(True, "All checks passed"))
+        h.prs.merge_pr = AsyncMock(return_value=True)
+        h.prs.pull_main = AsyncMock(return_value=True)
 
-        resolver.resolve_merge_conflicts = AsyncMock(
+        h.resolver.resolve_merge_conflicts = AsyncMock(
             return_value=ConflictResolutionResult(success=True, used_rebuild=False)
         )
 
-        wt_dir = unsticker._config.worktree_path_for_issue(42)
+        wt_dir = h.unsticker._config.worktree_path_for_issue(42)
         wt_dir.mkdir(parents=True)
 
-        await unsticker.unstick([_make_hitl_item(42, pr=100)])
+        await h.unsticker.unstick([_make_hitl_item(42, pr=100)])
 
         mock_store.mark_merged.assert_called_once_with(42)
 
@@ -598,27 +568,25 @@ class TestAutoMerge:
             title="Test issue", body="body", labels=["hydraflow-hitl"]
         )
         mock_store = MagicMock()
-        h = _make_unsticker(
-            tmp_path, unstick_auto_merge=True, store=mock_store
-        )
+        h = _make_unsticker(tmp_path, unstick_auto_merge=True, store=mock_store)
 
-        state.set_hitl_cause(42, "Merge conflict")
-        state.set_hitl_origin(42, "hydraflow-review")
+        h.state.set_hitl_cause(42, "Merge conflict")
+        h.state.set_hitl_origin(42, "hydraflow-review")
 
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
-        prs.push_branch = AsyncMock(return_value=True)
-        prs.wait_for_ci = AsyncMock(return_value=(True, "All checks passed"))
-        prs.merge_pr = AsyncMock(return_value=False)
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.prs.push_branch = AsyncMock(return_value=True)
+        h.prs.wait_for_ci = AsyncMock(return_value=(True, "All checks passed"))
+        h.prs.merge_pr = AsyncMock(return_value=False)
 
-        resolver.resolve_merge_conflicts = AsyncMock(
+        h.resolver.resolve_merge_conflicts = AsyncMock(
             return_value=ConflictResolutionResult(success=True, used_rebuild=False)
         )
 
-        wt_dir = unsticker._config.worktree_path_for_issue(42)
+        wt_dir = h.unsticker._config.worktree_path_for_issue(42)
         wt_dir.mkdir(parents=True)
 
-        await unsticker.unstick([_make_hitl_item(42, pr=100)])
+        await h.unsticker.unstick([_make_hitl_item(42, pr=100)])
 
         mock_store.mark_merged.assert_not_called()
 
@@ -631,34 +599,34 @@ class TestAutoMergeDisabled:
         issue = IssueFactory.create(
             title="Test issue", body="body", labels=["hydraflow-hitl"]
         )
-        h = _make_unsticker(
-            tmp_path, unstick_auto_merge=False
-        )
+        h = _make_unsticker(tmp_path, unstick_auto_merge=False)
 
-        state.set_hitl_cause(42, "Merge conflict")
-        state.set_hitl_origin(42, "hydraflow-review")
+        h.state.set_hitl_cause(42, "Merge conflict")
+        h.state.set_hitl_origin(42, "hydraflow-review")
 
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
-        prs.push_branch = AsyncMock(return_value=True)
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.prs.push_branch = AsyncMock(return_value=True)
 
         # Resolver reports clean merge
-        resolver.resolve_merge_conflicts = AsyncMock(
+        h.resolver.resolve_merge_conflicts = AsyncMock(
             return_value=ConflictResolutionResult(success=True, used_rebuild=False)
         )
 
-        wt_dir = unsticker._config.worktree_path_for_issue(42)
+        wt_dir = h.unsticker._config.worktree_path_for_issue(42)
         wt_dir.mkdir(parents=True)
 
-        stats = await unsticker.unstick([_make_hitl_item(42, pr=100)])
+        stats = await h.unsticker.unstick([_make_hitl_item(42, pr=100)])
 
         assert stats["resolved"] == 1
         assert stats["merged"] == 0
 
         # Should swap back to origin label
-        prs.swap_pipeline_labels.assert_any_call(42, "hydraflow-review", pr_number=100)
+        h.prs.swap_pipeline_labels.assert_any_call(
+            42, "hydraflow-review", pr_number=100
+        )
         # merge_pr should NOT have been called
-        prs.merge_pr.assert_not_called()
+        h.prs.merge_pr.assert_not_called()
 
 
 class TestCascadingRebase:
@@ -666,23 +634,21 @@ class TestCascadingRebase:
 
     @pytest.mark.asyncio
     async def test_re_rebase_calls_start_merge_main(self, tmp_path: Path) -> None:
-        h = _make_unsticker(
-            tmp_path
-        )
+        h = _make_unsticker(tmp_path)
 
         # Create worktree dirs (repo-scoped path)
         for i in [1, 2]:
-            unsticker._config.worktree_path_for_issue(i).mkdir(
+            h.unsticker._config.worktree_path_for_issue(i).mkdir(
                 parents=True, exist_ok=True
             )
 
         remaining = [_make_hitl_item(issue=1), _make_hitl_item(issue=2)]
 
-        wt.start_merge_main = AsyncMock(return_value=True)
+        h.wt.start_merge_main = AsyncMock(return_value=True)
 
-        await unsticker._re_rebase_remaining(remaining)
+        await h.unsticker._re_rebase_remaining(remaining)
 
-        assert wt.start_merge_main.await_count == 2
+        assert h.wt.start_merge_main.await_count == 2
 
 
 class TestPriorityOrdering:
@@ -690,13 +656,11 @@ class TestPriorityOrdering:
 
     @pytest.mark.asyncio
     async def test_merge_conflicts_sorted_first(self, tmp_path: Path) -> None:
-        h = _make_unsticker(
-            tmp_path, unstick_all_causes=True, unstick_auto_merge=False
-        )
+        h = _make_unsticker(tmp_path, unstick_all_causes=True, unstick_auto_merge=False)
 
-        state.set_hitl_cause(1, "CI failure in tests")
-        state.set_hitl_cause(2, "Merge conflict with main")
-        state.set_hitl_cause(3, "Unknown reason")
+        h.state.set_hitl_cause(1, "CI failure in tests")
+        h.state.set_hitl_cause(2, "Merge conflict with main")
+        h.state.set_hitl_cause(3, "Unknown reason")
 
         items = [
             _make_hitl_item(issue=1),
@@ -706,16 +670,16 @@ class TestPriorityOrdering:
 
         # Track processing order
         processed_order = []
-        original_process = unsticker._process_item
+        original_process = h.unsticker._process_item
 
         async def track_process(item):
             processed_order.append(item.issue)
             return await original_process(item)
 
-        unsticker._process_item = track_process
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=None)
+        h.unsticker._process_item = track_process
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=None)
 
-        await unsticker.unstick(items)
+        await h.unsticker.unstick(items)
 
         # Issue 2 (merge conflict) should be first
         assert processed_order[0] == 2
@@ -736,7 +700,7 @@ class TestParallelWorkers:
 
         # Set up 4 items
         for i in range(1, 5):
-            state.set_hitl_cause(i, "Merge conflict")
+            h.state.set_hitl_cause(i, "Merge conflict")
 
         items = [_make_hitl_item(issue=i) for i in range(1, 5)]
 
@@ -745,7 +709,7 @@ class TestParallelWorkers:
         max_concurrent = 0
         lock = asyncio.Lock()
 
-        original_process = unsticker._process_item
+        original_process = h.unsticker._process_item
 
         async def track_concurrency(item):
             nonlocal concurrent, max_concurrent
@@ -758,10 +722,10 @@ class TestParallelWorkers:
                 async with lock:
                     concurrent -= 1
 
-        unsticker._process_item = track_concurrency
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=None)
+        h.unsticker._process_item = track_concurrency
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=None)
 
-        await unsticker.unstick(items)
+        await h.unsticker.unstick(items)
 
         assert max_concurrent <= max_workers
 
@@ -774,16 +738,16 @@ class TestPromptTelemetry:
         h = _make_unsticker(tmp_path)
 
         issue = IssueFactory.create(title="Fix CI", body="body", labels=[])
-        state.set_hitl_cause(42, "x" * 6000)
+        h.state.set_hitl_cause(42, "x" * 6000)
 
-        wt.start_merge_main = AsyncMock(return_value=True)
-        agents._build_command = MagicMock(return_value=["cmd"])
-        agents._execute = AsyncMock(return_value="done")
-        agents._verify_result = AsyncMock(
+        h.wt.start_merge_main = AsyncMock(return_value=True)
+        h.agents._build_command = MagicMock(return_value=["cmd"])
+        h.agents._execute = AsyncMock(return_value="done")
+        h.agents._verify_result = AsyncMock(
             return_value=LoopResult(passed=True, summary="")
         )
 
-        ok = await unsticker._resolve_ci_or_quality(
+        ok = await h.unsticker._resolve_ci_or_quality(
             42,
             issue,
             tmp_path / "worktrees" / "issue-42",
@@ -791,7 +755,7 @@ class TestPromptTelemetry:
             "https://example.com/pull/1",
         )
         assert ok is True
-        telemetry = agents._execute.await_args.kwargs["telemetry_stats"]
+        telemetry = h.agents._execute.await_args.kwargs["telemetry_stats"]
         assert telemetry["pruned_chars_total"] > 0
 
 
@@ -803,34 +767,32 @@ class TestGoalDrivenLoop:
         issue_a = IssueFactory.create(number=1, title="Issue A", body="a", labels=[])
         issue_b = IssueFactory.create(number=2, title="Issue B", body="b", labels=[])
 
-        h = _make_unsticker(
-            tmp_path, unstick_auto_merge=True
-        )
+        h = _make_unsticker(tmp_path, unstick_auto_merge=True)
 
-        state.set_hitl_cause(1, "Merge conflict")
-        state.set_hitl_cause(2, "Merge conflict")
-        state.set_hitl_origin(1, "hydraflow-review")
-        state.set_hitl_origin(2, "hydraflow-review")
+        h.state.set_hitl_cause(1, "Merge conflict")
+        h.state.set_hitl_cause(2, "Merge conflict")
+        h.state.set_hitl_origin(1, "hydraflow-review")
+        h.state.set_hitl_origin(2, "hydraflow-review")
 
-        fetcher.fetch_issue_by_number = AsyncMock(
+        h.fetcher.fetch_issue_by_number = AsyncMock(
             side_effect=lambda num: issue_a if num == 1 else issue_b
         )
-        wt.start_merge_main = AsyncMock(return_value=True)
-        wt.create = AsyncMock(
+        h.wt.start_merge_main = AsyncMock(return_value=True)
+        h.wt.create = AsyncMock(
             side_effect=lambda num, _branch: tmp_path / "worktrees" / f"issue-{num}"
         )
-        prs.push_branch = AsyncMock(return_value=True)
-        prs.wait_for_ci = AsyncMock(return_value=(True, "All checks passed"))
-        prs.merge_pr = AsyncMock(return_value=True)
-        prs.pull_main = AsyncMock(return_value=True)
+        h.prs.push_branch = AsyncMock(return_value=True)
+        h.prs.wait_for_ci = AsyncMock(return_value=(True, "All checks passed"))
+        h.prs.merge_pr = AsyncMock(return_value=True)
+        h.prs.pull_main = AsyncMock(return_value=True)
 
         # Resolver reports clean merge for both
-        resolver.resolve_merge_conflicts = AsyncMock(
+        h.resolver.resolve_merge_conflicts = AsyncMock(
             return_value=ConflictResolutionResult(success=True, used_rebuild=False)
         )
 
         for i in [1, 2]:
-            unsticker._config.worktree_path_for_issue(i).mkdir(
+            h.unsticker._config.worktree_path_for_issue(i).mkdir(
                 parents=True, exist_ok=True
             )
 
@@ -839,13 +801,13 @@ class TestGoalDrivenLoop:
             _make_hitl_item(issue=2, pr=102),
         ]
 
-        stats = await unsticker.unstick(items)
+        stats = await h.unsticker.unstick(items)
 
         assert stats["resolved"] == 2
         assert stats["merged"] == 2
-        assert prs.merge_pr.await_count == 2
+        assert h.prs.merge_pr.await_count == 2
         # pull_main called between merges
-        assert prs.pull_main.await_count >= 1
+        assert h.prs.pull_main.await_count >= 1
 
 
 class TestMergeConflictDelegation:
@@ -860,29 +822,27 @@ class TestMergeConflictDelegation:
             body="Widget description",
             labels=[],
         )
-        h = _make_unsticker(
-            tmp_path, unstick_auto_merge=False
-        )
+        h = _make_unsticker(tmp_path, unstick_auto_merge=False)
 
-        state.set_hitl_cause(42, "Merge conflict")
-        state.set_hitl_origin(42, "hydraflow-review")
+        h.state.set_hitl_cause(42, "Merge conflict")
+        h.state.set_hitl_origin(42, "hydraflow-review")
 
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
-        prs.push_branch = AsyncMock(return_value=True)
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.prs.push_branch = AsyncMock(return_value=True)
 
-        resolver.resolve_merge_conflicts = AsyncMock(
+        h.resolver.resolve_merge_conflicts = AsyncMock(
             return_value=ConflictResolutionResult(success=True, used_rebuild=False)
         )
 
-        wt_dir = unsticker._config.worktree_path_for_issue(42)
+        wt_dir = h.unsticker._config.worktree_path_for_issue(42)
         wt_dir.mkdir(parents=True)
 
         pr_url = "https://github.com/test-org/test-repo/pull/100"
-        await unsticker.unstick([_make_hitl_item(42, pr=100, prUrl=pr_url)])
+        await h.unsticker.unstick([_make_hitl_item(42, pr=100, prUrl=pr_url)])
 
-        resolver.resolve_merge_conflicts.assert_awaited_once()
-        call_args = resolver.resolve_merge_conflicts.call_args
+        h.resolver.resolve_merge_conflicts.assert_awaited_once()
+        call_args = h.resolver.resolve_merge_conflicts.call_args
 
         pr_info = call_args.args[0]
         assert pr_info.number == 100
@@ -897,26 +857,26 @@ class TestMergeConflictDelegation:
         issue = IssueFactory.create(
             title="Test issue", body="body", labels=["hydraflow-hitl"]
         )
-        h = _make_unsticker(
-            tmp_path, unstick_auto_merge=False
-        )
+        h = _make_unsticker(tmp_path, unstick_auto_merge=False)
 
-        state.set_hitl_cause(42, "Merge conflict")
-        state.set_hitl_origin(42, "hydraflow-review")
+        h.state.set_hitl_cause(42, "Merge conflict")
+        h.state.set_hitl_origin(42, "hydraflow-review")
 
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
-        prs.push_branch = AsyncMock(return_value=True)
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.prs.push_branch = AsyncMock(return_value=True)
 
-        resolver.resolve_merge_conflicts = AsyncMock(
+        h.resolver.resolve_merge_conflicts = AsyncMock(
             return_value=ConflictResolutionResult(success=True, used_rebuild=False)
         )
 
-        unsticker._config.worktree_path_for_issue(42).mkdir(parents=True, exist_ok=True)
+        h.unsticker._config.worktree_path_for_issue(42).mkdir(
+            parents=True, exist_ok=True
+        )
 
-        await unsticker.unstick([_make_hitl_item(42)])
+        await h.unsticker.unstick([_make_hitl_item(42)])
 
-        call_kwargs = resolver.resolve_merge_conflicts.call_args.kwargs
+        call_kwargs = h.resolver.resolve_merge_conflicts.call_args.kwargs
         assert call_kwargs["source"] == "pr_unsticker"
         assert call_kwargs["worker_id"] is None
 
@@ -932,32 +892,30 @@ class TestFreshBranchRebuild:
         issue = IssueFactory.create(
             title="Test issue", body="body", labels=["hydraflow-hitl"]
         )
-        h = _make_unsticker(
-            tmp_path, unstick_auto_merge=False
-        )
+        h = _make_unsticker(tmp_path, unstick_auto_merge=False)
 
-        state.set_hitl_cause(42, "Merge conflict")
-        state.set_hitl_origin(42, "hydraflow-review")
+        h.state.set_hitl_cause(42, "Merge conflict")
+        h.state.set_hitl_origin(42, "hydraflow-review")
 
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
 
         # Resolver used fresh rebuild
-        resolver.resolve_merge_conflicts = AsyncMock(
+        h.resolver.resolve_merge_conflicts = AsyncMock(
             return_value=ConflictResolutionResult(success=True, used_rebuild=True)
         )
-        prs.push_branch = AsyncMock(return_value=True)
+        h.prs.push_branch = AsyncMock(return_value=True)
 
-        wt_dir = unsticker._config.worktree_path_for_issue(42)
+        wt_dir = h.unsticker._config.worktree_path_for_issue(42)
         wt_dir.mkdir(parents=True)
 
         pr_url = "https://github.com/test-org/test-repo/pull/100"
-        stats = await unsticker.unstick([_make_hitl_item(42, pr=100, prUrl=pr_url)])
+        stats = await h.unsticker.unstick([_make_hitl_item(42, pr=100, prUrl=pr_url)])
 
         assert stats["resolved"] == 1
         # Should force-push since rebuild was used
-        prs.push_branch.assert_awaited_once()
-        _, kwargs = prs.push_branch.await_args
+        h.prs.push_branch.assert_awaited_once()
+        _, kwargs = h.prs.push_branch.await_args
         assert kwargs["force"] is True
 
     @pytest.mark.asyncio
@@ -966,26 +924,26 @@ class TestFreshBranchRebuild:
         issue = IssueFactory.create(
             title="Test issue", body="body", labels=["hydraflow-hitl"]
         )
-        h = _make_unsticker(
-            tmp_path, unstick_auto_merge=False
-        )
+        h = _make_unsticker(tmp_path, unstick_auto_merge=False)
 
-        state.set_hitl_cause(42, "Merge conflict")
+        h.state.set_hitl_cause(42, "Merge conflict")
 
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
 
-        resolver.resolve_merge_conflicts = AsyncMock(
+        h.resolver.resolve_merge_conflicts = AsyncMock(
             return_value=ConflictResolutionResult(success=False, used_rebuild=False)
         )
 
-        unsticker._config.worktree_path_for_issue(42).mkdir(parents=True, exist_ok=True)
+        h.unsticker._config.worktree_path_for_issue(42).mkdir(
+            parents=True, exist_ok=True
+        )
 
-        stats = await unsticker.unstick([_make_hitl_item(42)])
+        stats = await h.unsticker.unstick([_make_hitl_item(42)])
 
         assert stats["failed"] == 1
         assert stats["resolved"] == 0
-        prs.swap_pipeline_labels.assert_any_call(42, "hydraflow-hitl")
+        h.prs.swap_pipeline_labels.assert_any_call(42, "hydraflow-hitl")
 
 
 class TestResolverNoneEdgeCases:
@@ -995,7 +953,7 @@ class TestResolverNoneEdgeCases:
     async def test_merge_conflict_without_resolver_fails_and_releases_to_hitl(
         self, tmp_path: Path
     ) -> None:
-        """When resolver is None and cause is MERGE_CONFLICT, return failure and release to HITL."""
+        """When h.resolver is None and cause is MERGE_CONFLICT, return failure and release to HITL."""
         issue = IssueFactory.create(
             title="Test issue", body="body", labels=["hydraflow-hitl"]
         )
@@ -1003,25 +961,27 @@ class TestResolverNoneEdgeCases:
             tmp_path, unstick_all_causes=False, unstick_auto_merge=False
         )
         # Explicitly remove the h.resolver to test the None path
-        unsticker._resolver = None
+        h.unsticker._resolver = None
 
-        state.set_hitl_cause(42, "Merge conflict with main")
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.state.set_hitl_cause(42, "Merge conflict with main")
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
 
-        unsticker._config.worktree_path_for_issue(42).mkdir(parents=True, exist_ok=True)
+        h.unsticker._config.worktree_path_for_issue(42).mkdir(
+            parents=True, exist_ok=True
+        )
 
-        stats = await unsticker.unstick([_make_hitl_item(42)])
+        stats = await h.unsticker.unstick([_make_hitl_item(42)])
 
         assert stats["failed"] == 1
         assert stats["resolved"] == 0
         # Should release back to HITL
-        prs.swap_pipeline_labels.assert_any_call(42, "hydraflow-hitl")
+        h.prs.swap_pipeline_labels.assert_any_call(42, "hydraflow-hitl")
 
 
 def _setup_ci_fix_memory_test(
     tmp_path: Path, *, transcript: str = "transcript"
-) -> UnstickerHarness:
+) -> SimpleNamespace:
     """Set up shared fixtures for memory suggestion tests on the CI fix path."""
     issue = IssueFactory.create(
         title="Test issue", body="body", labels=["hydraflow-hitl"]
@@ -1052,15 +1012,13 @@ def _setup_ci_fix_memory_test(
 class TestMemorySuggestionExtraction:
     @pytest.mark.asyncio
     async def test_ci_fix_uses_suggest_memory(self, tmp_path: Path) -> None:
-        h = _setup_ci_fix_memory_test(
-            tmp_path, transcript="transcript with suggestion"
-        )
+        h = _setup_ci_fix_memory_test(tmp_path, transcript="transcript with suggestion")
 
-        unsticker._suggest_memory = AsyncMock()
-        stats = await unsticker.unstick([_make_hitl_item(42)])
+        h.unsticker._suggest_memory = AsyncMock()
+        stats = await h.unsticker.unstick([_make_hitl_item(42)])
 
         assert stats["resolved"] == 1
-        unsticker._suggest_memory.assert_awaited_once_with(
+        h.unsticker._suggest_memory.assert_awaited_once_with(
             "transcript with suggestion",
             "pr_unsticker",
             "issue #42",
@@ -1078,20 +1036,20 @@ class TestCITimeoutResolution:
             body="body",
             labels=["hydraflow-hitl"],
         )
-        h = _make_unsticker(
-            tmp_path, unstick_all_causes=True, unstick_auto_merge=False
+        h = _make_unsticker(tmp_path, unstick_all_causes=True, unstick_auto_merge=False)
+
+        h.state.set_hitl_cause(
+            42, "CI failed after 2 fix attempt(s): Timeout after 600s"
         )
+        h.state.set_hitl_origin(42, "hydraflow-review")
 
-        state.set_hitl_cause(42, "CI failed after 2 fix attempt(s): Timeout after 600s")
-        state.set_hitl_origin(42, "hydraflow-review")
-
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.start_merge_main = AsyncMock(return_value=True)
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.start_merge_main = AsyncMock(return_value=True)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
 
         # Mock run_simple for test isolation — simulate timeout
-        agents._runner = MagicMock()
-        agents._runner.run_simple = AsyncMock(side_effect=TimeoutError("timed out"))
+        h.agents._runner = MagicMock()
+        h.agents._runner.run_simple = AsyncMock(side_effect=TimeoutError("timed out"))
 
         captured_prompt = None
         original_execute = AsyncMock(return_value="fixed transcript")
@@ -1101,19 +1059,19 @@ class TestCITimeoutResolution:
             captured_prompt = prompt
             return await original_execute(cmd, prompt, wt_arg, issue_meta, **kwargs)
 
-        agents._build_command = MagicMock(return_value=["claude", "-p"])
-        agents._execute = capture_execute
-        agents._verify_result = AsyncMock(
+        h.agents._build_command = MagicMock(return_value=["claude", "-p"])
+        h.agents._execute = capture_execute
+        h.agents._verify_result = AsyncMock(
             return_value=LoopResult(passed=True, summary="OK")
         )
 
-        prs.push_branch = AsyncMock(return_value=True)
+        h.prs.push_branch = AsyncMock(return_value=True)
 
-        wt_dir = unsticker._config.worktree_path_for_issue(42)
+        wt_dir = h.unsticker._config.worktree_path_for_issue(42)
         wt_dir.mkdir(parents=True)
         (tmp_path / "repo" / ".hydraflow" / "logs").mkdir(parents=True)
 
-        stats = await unsticker.unstick(
+        stats = await h.unsticker.unstick(
             [_make_hitl_item(42, prUrl="https://github.com/test-org/test-repo/pull/42")]
         )
 
@@ -1132,10 +1090,10 @@ class TestCITimeoutResolution:
         issue = IssueFactory.create(title="Fix CI", body="body", labels=[])
         h = _make_unsticker(tmp_path)
 
-        state.set_hitl_cause(42, "CI failed: Timeout after 600s")
+        h.state.set_hitl_cause(42, "CI failed: Timeout after 600s")
 
         isolation_output = "pytest timed out after 120s — a test is hanging."
-        prompt, stats = unsticker._build_ci_timeout_fix_prompt(
+        prompt, stats = h.unsticker._build_ci_timeout_fix_prompt(
             issue,
             "https://github.com/test-org/test-repo/pull/42",
             "CI failed: Timeout after 600s",
@@ -1160,20 +1118,20 @@ class TestCITimeoutResolution:
         issue = IssueFactory.create(
             title="Fix CI", body="body", labels=["hydraflow-hitl"]
         )
-        h = _make_unsticker(
-            tmp_path, unstick_all_causes=True, unstick_auto_merge=False
+        h = _make_unsticker(tmp_path, unstick_all_causes=True, unstick_auto_merge=False)
+
+        h.state.set_hitl_cause(
+            42, "CI failed after 1 fix attempt(s): Timeout after 600s"
         )
+        h.state.set_hitl_origin(42, "hydraflow-review")
 
-        state.set_hitl_cause(42, "CI failed after 1 fix attempt(s): Timeout after 600s")
-        state.set_hitl_origin(42, "hydraflow-review")
-
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.start_merge_main = AsyncMock(return_value=True)
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.start_merge_main = AsyncMock(return_value=True)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
 
         # Mock run_simple to raise a generic error (not TimeoutError)
-        agents._runner = MagicMock()
-        agents._runner.run_simple = AsyncMock(
+        h.agents._runner = MagicMock()
+        h.agents._runner.run_simple = AsyncMock(
             side_effect=FileNotFoundError("pytest not found")
         )
 
@@ -1184,18 +1142,18 @@ class TestCITimeoutResolution:
             captured_prompt = prompt
             return "transcript"
 
-        agents._build_command = MagicMock(return_value=["claude", "-p"])
-        agents._execute = capture_execute
-        agents._verify_result = AsyncMock(
+        h.agents._build_command = MagicMock(return_value=["claude", "-p"])
+        h.agents._execute = capture_execute
+        h.agents._verify_result = AsyncMock(
             return_value=LoopResult(passed=True, summary="OK")
         )
-        prs.push_branch = AsyncMock(return_value=True)
+        h.prs.push_branch = AsyncMock(return_value=True)
 
-        wt_dir = unsticker._config.worktree_path_for_issue(42)
+        wt_dir = h.unsticker._config.worktree_path_for_issue(42)
         wt_dir.mkdir(parents=True)
         (tmp_path / "repo" / ".hydraflow" / "logs").mkdir(parents=True)
 
-        stats = await unsticker.unstick(
+        stats = await h.unsticker.unstick(
             [_make_hitl_item(42, prUrl="https://github.com/test-org/test-repo/pull/42")]
         )
 
@@ -1217,37 +1175,39 @@ class TestCITimeoutResolution:
             max_ci_timeout_fix_attempts=2,
         )
 
-        state.set_hitl_cause(42, "CI failed after 2 fix attempt(s): Timeout after 600s")
-        state.set_hitl_origin(42, "hydraflow-review")
+        h.state.set_hitl_cause(
+            42, "CI failed after 2 fix attempt(s): Timeout after 600s"
+        )
+        h.state.set_hitl_origin(42, "hydraflow-review")
 
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.start_merge_main = AsyncMock(return_value=True)
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.start_merge_main = AsyncMock(return_value=True)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
 
         # Mock isolation
-        agents._runner = MagicMock()
-        agents._runner.run_simple = AsyncMock(side_effect=TimeoutError("timed out"))
+        h.agents._runner = MagicMock()
+        h.agents._runner.run_simple = AsyncMock(side_effect=TimeoutError("timed out"))
 
-        agents._build_command = MagicMock(return_value=["claude", "-p"])
-        agents._execute = AsyncMock(return_value="transcript")
+        h.agents._build_command = MagicMock(return_value=["claude", "-p"])
+        h.agents._execute = AsyncMock(return_value="transcript")
         # Verification always fails
-        agents._verify_result = AsyncMock(
+        h.agents._verify_result = AsyncMock(
             return_value=LoopResult(passed=False, summary="tests still hang")
         )
-        prs.push_branch = AsyncMock(return_value=True)
+        h.prs.push_branch = AsyncMock(return_value=True)
 
-        wt_dir = unsticker._config.worktree_path_for_issue(42)
+        wt_dir = h.unsticker._config.worktree_path_for_issue(42)
         wt_dir.mkdir(parents=True)
         (tmp_path / "repo" / ".hydraflow" / "logs").mkdir(parents=True)
 
-        stats = await unsticker.unstick(
+        stats = await h.unsticker.unstick(
             [_make_hitl_item(42, prUrl="https://github.com/test-org/test-repo/pull/42")]
         )
 
         assert stats["failed"] == 1
         assert stats["resolved"] == 0
         # Agent should have been called max_ci_timeout_fix_attempts times
-        assert agents._execute.await_count == 2
+        assert h.agents._execute.await_count == 2
 
     def test_ci_timeout_priority_ordering(self) -> None:
         """CI_TIMEOUT should sort before CI_FAILURE in priority."""
@@ -1293,15 +1253,15 @@ class TestCITimeoutResolution:
             troubleshooting_store=store,
         )
 
-        state.set_hitl_cause(42, "Timeout after 600s")
-        state.set_hitl_origin(42, "hydraflow-review")
+        h.state.set_hitl_cause(42, "Timeout after 600s")
+        h.state.set_hitl_origin(42, "hydraflow-review")
 
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.start_merge_main = AsyncMock(return_value=True)
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.start_merge_main = AsyncMock(return_value=True)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
 
-        agents._runner = MagicMock()
-        agents._runner.run_simple = AsyncMock(side_effect=TimeoutError("timed out"))
+        h.agents._runner = MagicMock()
+        h.agents._runner.run_simple = AsyncMock(side_effect=TimeoutError("timed out"))
 
         captured_prompt = None
 
@@ -1310,19 +1270,19 @@ class TestCITimeoutResolution:
             captured_prompt = prompt
             return "transcript"
 
-        agents._build_command = MagicMock(return_value=["claude", "-p"])
-        agents._execute = capture_execute
-        agents._verify_result = AsyncMock(
+        h.agents._build_command = MagicMock(return_value=["claude", "-p"])
+        h.agents._execute = capture_execute
+        h.agents._verify_result = AsyncMock(
             return_value=LoopResult(passed=True, summary="OK")
         )
-        prs.push_branch = AsyncMock(return_value=True)
+        h.prs.push_branch = AsyncMock(return_value=True)
 
-        wt_dir = unsticker._config.worktree_path_for_issue(42)
+        wt_dir = h.unsticker._config.worktree_path_for_issue(42)
         wt_dir.mkdir(parents=True)
         (tmp_path / "repo" / ".hydraflow" / "logs").mkdir(parents=True)
 
-        with patch.object(unsticker, "_detect_language", return_value="python"):
-            await unsticker.unstick(
+        with patch.object(h.unsticker, "_detect_language", return_value="python"):
+            await h.unsticker.unstick(
                 [
                     _make_hitl_item(
                         42, prUrl="https://github.com/test-org/test-repo/pull/42"
@@ -1364,29 +1324,29 @@ Done."""
             troubleshooting_store=store,
         )
 
-        state.set_hitl_cause(42, "Timeout after 600s")
-        state.set_hitl_origin(42, "hydraflow-review")
+        h.state.set_hitl_cause(42, "Timeout after 600s")
+        h.state.set_hitl_origin(42, "hydraflow-review")
 
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.start_merge_main = AsyncMock(return_value=True)
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.start_merge_main = AsyncMock(return_value=True)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
 
-        agents._runner = MagicMock()
-        agents._runner.run_simple = AsyncMock(side_effect=TimeoutError("timed out"))
+        h.agents._runner = MagicMock()
+        h.agents._runner.run_simple = AsyncMock(side_effect=TimeoutError("timed out"))
 
-        agents._build_command = MagicMock(return_value=["claude", "-p"])
-        agents._execute = AsyncMock(return_value=transcript_with_pattern)
-        agents._verify_result = AsyncMock(
+        h.agents._build_command = MagicMock(return_value=["claude", "-p"])
+        h.agents._execute = AsyncMock(return_value=transcript_with_pattern)
+        h.agents._verify_result = AsyncMock(
             return_value=LoopResult(passed=True, summary="OK")
         )
-        prs.push_branch = AsyncMock(return_value=True)
+        h.prs.push_branch = AsyncMock(return_value=True)
 
-        wt_dir = unsticker._config.worktree_path_for_issue(42)
+        wt_dir = h.unsticker._config.worktree_path_for_issue(42)
         wt_dir.mkdir(parents=True)
         (tmp_path / "repo" / ".hydraflow" / "logs").mkdir(parents=True)
 
-        with patch.object(unsticker, "_detect_language", return_value="python"):
-            stats = await unsticker.unstick(
+        with patch.object(h.unsticker, "_detect_language", return_value="python"):
+            stats = await h.unsticker.unstick(
                 [
                     _make_hitl_item(
                         42, prUrl="https://github.com/test-org/test-repo/pull/42"
@@ -1416,27 +1376,27 @@ Done."""
             unstick_auto_merge=False,
         )
 
-        state.set_hitl_cause(42, "Timeout after 600s")
-        state.set_hitl_origin(42, "hydraflow-review")
+        h.state.set_hitl_cause(42, "Timeout after 600s")
+        h.state.set_hitl_origin(42, "hydraflow-review")
 
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.start_merge_main = AsyncMock(return_value=True)
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.start_merge_main = AsyncMock(return_value=True)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
 
-        agents._runner = MagicMock()
-        agents._runner.run_simple = AsyncMock(side_effect=TimeoutError("timed out"))
-        agents._build_command = MagicMock(return_value=["claude", "-p"])
-        agents._execute = AsyncMock(return_value="transcript")
-        agents._verify_result = AsyncMock(
+        h.agents._runner = MagicMock()
+        h.agents._runner.run_simple = AsyncMock(side_effect=TimeoutError("timed out"))
+        h.agents._build_command = MagicMock(return_value=["claude", "-p"])
+        h.agents._execute = AsyncMock(return_value="transcript")
+        h.agents._verify_result = AsyncMock(
             return_value=LoopResult(passed=True, summary="OK")
         )
-        prs.push_branch = AsyncMock(return_value=True)
+        h.prs.push_branch = AsyncMock(return_value=True)
 
-        wt_dir = unsticker._config.worktree_path_for_issue(42)
+        wt_dir = h.unsticker._config.worktree_path_for_issue(42)
         wt_dir.mkdir(parents=True)
         (tmp_path / "repo" / ".hydraflow" / "logs").mkdir(parents=True)
 
-        stats = await unsticker.unstick(
+        stats = await h.unsticker.unstick(
             [_make_hitl_item(42, prUrl="https://github.com/test-org/test-repo/pull/42")]
         )
         assert stats["resolved"] == 1
@@ -1448,7 +1408,7 @@ Done."""
         issue = IssueFactory.create(title="Fix CI", body="body", labels=[])
         h = _make_unsticker(tmp_path)
 
-        prompt, _ = unsticker._build_ci_timeout_fix_prompt(
+        prompt, _ = h.unsticker._build_ci_timeout_fix_prompt(
             issue,
             "https://github.com/test-org/test-repo/pull/42",
             "Timeout after 600s",
@@ -1485,23 +1445,23 @@ Done."""
             troubleshooting_store=store,
         )
 
-        state.set_hitl_cause(42, "Timeout after 600s")
-        state.set_hitl_origin(42, "hydraflow-review")
+        h.state.set_hitl_cause(42, "Timeout after 600s")
+        h.state.set_hitl_origin(42, "hydraflow-review")
 
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.start_merge_main = AsyncMock(return_value=True)
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.start_merge_main = AsyncMock(return_value=True)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
 
-        agents._runner = MagicMock()
-        agents._runner.run_simple = AsyncMock(side_effect=TimeoutError("timed out"))
-        agents._build_command = MagicMock(return_value=["claude", "-p"])
-        agents._execute = AsyncMock(return_value=transcript_no_block)
-        agents._verify_result = AsyncMock(
+        h.agents._runner = MagicMock()
+        h.agents._runner.run_simple = AsyncMock(side_effect=TimeoutError("timed out"))
+        h.agents._build_command = MagicMock(return_value=["claude", "-p"])
+        h.agents._execute = AsyncMock(return_value=transcript_no_block)
+        h.agents._verify_result = AsyncMock(
             return_value=LoopResult(passed=True, summary="OK")
         )
-        prs.push_branch = AsyncMock(return_value=True)
+        h.prs.push_branch = AsyncMock(return_value=True)
 
-        wt_dir = unsticker._config.worktree_path_for_issue(42)
+        wt_dir = h.unsticker._config.worktree_path_for_issue(42)
         wt_dir.mkdir(parents=True)
         (tmp_path / "repo" / ".hydraflow" / "logs").mkdir(parents=True)
 
@@ -1521,12 +1481,12 @@ TROUBLESHOOTING_PATTERN_END
 
         # The first run_simple call is for isolation (TimeoutError),
         # the second is for reflection (returns the pattern)
-        agents._runner.run_simple = AsyncMock(
+        h.agents._runner.run_simple = AsyncMock(
             side_effect=[TimeoutError("timed out"), reflection_result]
         )
 
-        with patch.object(unsticker, "_detect_language", return_value="python"):
-            stats = await unsticker.unstick(
+        with patch.object(h.unsticker, "_detect_language", return_value="python"):
+            stats = await h.unsticker.unstick(
                 [
                     _make_hitl_item(
                         42, prUrl="https://github.com/test-org/test-repo/pull/42"
@@ -1560,37 +1520,37 @@ TROUBLESHOOTING_PATTERN_END
             troubleshooting_store=store,
         )
 
-        state.set_hitl_cause(42, "Timeout after 600s")
-        state.set_hitl_origin(42, "hydraflow-review")
+        h.state.set_hitl_cause(42, "Timeout after 600s")
+        h.state.set_hitl_origin(42, "hydraflow-review")
 
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.start_merge_main = AsyncMock(return_value=True)
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.start_merge_main = AsyncMock(return_value=True)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
 
-        agents._runner = MagicMock()
-        agents._build_command = MagicMock(return_value=["claude", "-p"])
-        agents._execute = AsyncMock(return_value="Fixed by setting return_value.")
-        agents._verify_result = AsyncMock(
+        h.agents._runner = MagicMock()
+        h.agents._build_command = MagicMock(return_value=["claude", "-p"])
+        h.agents._execute = AsyncMock(return_value="Fixed by setting return_value.")
+        h.agents._verify_result = AsyncMock(
             return_value=LoopResult(passed=True, summary="OK")
         )
-        prs.push_branch = AsyncMock(return_value=True)
+        h.prs.push_branch = AsyncMock(return_value=True)
 
-        wt_dir = unsticker._config.worktree_path_for_issue(42)
+        wt_dir = h.unsticker._config.worktree_path_for_issue(42)
         wt_dir.mkdir(parents=True)
         (tmp_path / "repo" / ".hydraflow" / "logs").mkdir(parents=True)
 
         from execution import SimpleResult
 
         # Reflection says nothing novel
-        agents._runner.run_simple = AsyncMock(
+        h.agents._runner.run_simple = AsyncMock(
             side_effect=[
                 TimeoutError("timed out"),
                 SimpleResult(stdout="NO_NEW_PATTERN", stderr="", returncode=0),
             ]
         )
 
-        with patch.object(unsticker, "_detect_language", return_value="python"):
-            await unsticker.unstick(
+        with patch.object(h.unsticker, "_detect_language", return_value="python"):
+            await h.unsticker.unstick(
                 [
                     _make_hitl_item(
                         42, prUrl="https://github.com/test-org/test-repo/pull/42"
@@ -1622,35 +1582,35 @@ TROUBLESHOOTING_PATTERN_END
             troubleshooting_store=store,
         )
 
-        state.set_hitl_cause(42, "Timeout after 600s")
-        state.set_hitl_origin(42, "hydraflow-review")
+        h.state.set_hitl_cause(42, "Timeout after 600s")
+        h.state.set_hitl_origin(42, "hydraflow-review")
 
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.start_merge_main = AsyncMock(return_value=True)
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.start_merge_main = AsyncMock(return_value=True)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
 
-        agents._runner = MagicMock()
-        agents._build_command = MagicMock(return_value=["claude", "-p"])
-        agents._execute = AsyncMock(return_value="Fixed it.")
-        agents._verify_result = AsyncMock(
+        h.agents._runner = MagicMock()
+        h.agents._build_command = MagicMock(return_value=["claude", "-p"])
+        h.agents._execute = AsyncMock(return_value="Fixed it.")
+        h.agents._verify_result = AsyncMock(
             return_value=LoopResult(passed=True, summary="OK")
         )
-        prs.push_branch = AsyncMock(return_value=True)
+        h.prs.push_branch = AsyncMock(return_value=True)
 
-        wt_dir = unsticker._config.worktree_path_for_issue(42)
+        wt_dir = h.unsticker._config.worktree_path_for_issue(42)
         wt_dir.mkdir(parents=True)
         (tmp_path / "repo" / ".hydraflow" / "logs").mkdir(parents=True)
 
         # Reflection model times out
-        agents._runner.run_simple = AsyncMock(
+        h.agents._runner.run_simple = AsyncMock(
             side_effect=[
                 TimeoutError("timed out"),
                 TimeoutError("reflection timed out"),
             ]
         )
 
-        with patch.object(unsticker, "_detect_language", return_value="python"):
-            stats = await unsticker.unstick(
+        with patch.object(h.unsticker, "_detect_language", return_value="python"):
+            stats = await h.unsticker.unstick(
                 [
                     _make_hitl_item(
                         42, prUrl="https://github.com/test-org/test-repo/pull/42"
@@ -1674,24 +1634,22 @@ class TestNarrowedExceptionHandling:
     async def test_process_item_reraises_likely_bug(self, tmp_path: Path) -> None:
         """TypeError/KeyError from _resolve_by_cause must propagate."""
         issue = IssueFactory.create(title="Fix bug", body="body", labels=[])
-        h = _make_unsticker(
-            tmp_path
-        )
+        h = _make_unsticker(tmp_path)
 
-        state.set_hitl_cause(42, "ci_failure")
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.state.set_hitl_cause(42, "ci_failure")
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
 
         # Make _resolve_by_cause raise a code bug
         with (
             patch.object(
-                unsticker,
+                h.unsticker,
                 "_resolve_by_cause",
                 AsyncMock(side_effect=TypeError("bad type")),
             ),
             pytest.raises(TypeError, match="bad type"),
         ):
-            await unsticker._process_item(
+            await h.unsticker._process_item(
                 _make_hitl_item(
                     42, pr=10, prUrl="https://github.com/test-org/test-repo/pull/10"
                 )
@@ -1701,20 +1659,18 @@ class TestNarrowedExceptionHandling:
     async def test_process_item_catches_runtime_error(self, tmp_path: Path) -> None:
         """RuntimeError (subprocess) in _process_item should be caught gracefully."""
         issue = IssueFactory.create(title="Fix bug", body="body", labels=[])
-        h = _make_unsticker(
-            tmp_path
-        )
+        h = _make_unsticker(tmp_path)
 
-        state.set_hitl_cause(42, "ci_failure")
-        fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
-        wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
+        h.state.set_hitl_cause(42, "ci_failure")
+        h.fetcher.fetch_issue_by_number = AsyncMock(return_value=issue)
+        h.wt.create = AsyncMock(return_value=tmp_path / "worktrees" / "issue-42")
 
         with patch.object(
-            unsticker,
+            h.unsticker,
             "_resolve_by_cause",
             AsyncMock(side_effect=RuntimeError("subprocess failed")),
         ):
-            result = await unsticker._process_item(
+            result = await h.unsticker._process_item(
                 _make_hitl_item(
                     42, pr=10, prUrl="https://github.com/test-org/test-repo/pull/10"
                 )
@@ -1730,15 +1686,15 @@ class TestNarrowedExceptionHandling:
         h = _make_unsticker(tmp_path)
 
         issue = IssueFactory.create(title="Fix CI", body="body", labels=[])
-        state.set_hitl_cause(42, "ci_failure")
+        h.state.set_hitl_cause(42, "ci_failure")
 
-        wt.start_merge_main = AsyncMock(return_value=True)
-        agents._build_command = MagicMock(return_value=["cmd"])
-        agents._execute = AsyncMock(side_effect=AttributeError("bad attr"))
+        h.wt.start_merge_main = AsyncMock(return_value=True)
+        h.agents._build_command = MagicMock(return_value=["cmd"])
+        h.agents._execute = AsyncMock(side_effect=AttributeError("bad attr"))
 
         with pytest.raises(AttributeError, match="bad attr"):
-            await unsticker._resolve_ci_or_quality(
-                42, issue, tmp_path / "wt", "branch", "url"
+            await h.unsticker._resolve_ci_or_quality(
+                42, issue, tmp_path / "h.wt", "branch", "url"
             )
 
     @pytest.mark.asyncio
@@ -1749,14 +1705,14 @@ class TestNarrowedExceptionHandling:
         h = _make_unsticker(tmp_path)
 
         issue = IssueFactory.create(title="Fix CI", body="body", labels=[])
-        state.set_hitl_cause(42, "ci_failure")
+        h.state.set_hitl_cause(42, "ci_failure")
 
-        wt.start_merge_main = AsyncMock(return_value=True)
-        agents._build_command = MagicMock(return_value=["cmd"])
-        agents._execute = AsyncMock(side_effect=RuntimeError("agent crashed"))
+        h.wt.start_merge_main = AsyncMock(return_value=True)
+        h.agents._build_command = MagicMock(return_value=["cmd"])
+        h.agents._execute = AsyncMock(side_effect=RuntimeError("agent crashed"))
 
-        result = await unsticker._resolve_ci_or_quality(
-            42, issue, tmp_path / "wt", "branch", "url"
+        result = await h.unsticker._resolve_ci_or_quality(
+            42, issue, tmp_path / "h.wt", "branch", "url"
         )
         assert result is False
 
@@ -1765,10 +1721,10 @@ class TestNarrowedExceptionHandling:
         """RuntimeError during re-rebase should be caught gracefully."""
         h = _make_unsticker(tmp_path)
 
-        wt_dir = unsticker._config.worktree_path_for_issue(42)
+        wt_dir = h.unsticker._config.worktree_path_for_issue(42)
         wt_dir.mkdir(parents=True)
 
-        wt.start_merge_main = AsyncMock(side_effect=RuntimeError("git failed"))
+        h.wt.start_merge_main = AsyncMock(side_effect=RuntimeError("git failed"))
         # Assertion added after function call below
 
         items = [
@@ -1777,18 +1733,18 @@ class TestNarrowedExceptionHandling:
             )
         ]
         # Should not raise
-        await unsticker._re_rebase_remaining(items)
-        wt.start_merge_main.assert_awaited_once()
+        await h.unsticker._re_rebase_remaining(items)
+        h.wt.start_merge_main.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_re_rebase_propagates_type_error(self, tmp_path: Path) -> None:
         """TypeError during re-rebase must propagate."""
         h = _make_unsticker(tmp_path)
 
-        wt_dir = unsticker._config.worktree_path_for_issue(42)
+        wt_dir = h.unsticker._config.worktree_path_for_issue(42)
         wt_dir.mkdir(parents=True)
 
-        wt.start_merge_main = AsyncMock(side_effect=TypeError("bad type"))
+        h.wt.start_merge_main = AsyncMock(side_effect=TypeError("bad type"))
 
         items = [
             _make_hitl_item(
@@ -1796,7 +1752,7 @@ class TestNarrowedExceptionHandling:
             )
         ]
         with pytest.raises(TypeError, match="bad type"):
-            await unsticker._re_rebase_remaining(items)
+            await h.unsticker._re_rebase_remaining(items)
 
     def test_detect_language_falls_back_on_module_not_found(
         self,
@@ -1821,7 +1777,7 @@ class TestNarrowedExceptionHandling:
         monkeypatch.setattr(builtins, "__import__", fake_import)
 
         with caplog.at_level(logging.WARNING):
-            result = unsticker._detect_language(tmp_path)
+            result = h.unsticker._detect_language(tmp_path)
 
         assert result == "general"
         assert "Falling back to 'general' language classification" in caplog.text
@@ -1840,7 +1796,7 @@ class TestNarrowedExceptionHandling:
         monkeypatch.setitem(sys.modules, "polyglot_prep", failing_module)
 
         with pytest.raises(TypeError, match="bad"):
-            unsticker._detect_language(tmp_path)
+            h.unsticker._detect_language(tmp_path)
 
     @pytest.mark.asyncio
     async def test_isolate_hanging_tests_catches_runtime_error(
@@ -1849,12 +1805,12 @@ class TestNarrowedExceptionHandling:
         """RuntimeError in test isolation should produce a message, not raise."""
         h = _make_unsticker(tmp_path)
 
-        unsticker._agents = MagicMock()
-        unsticker._agents._runner.run_simple = AsyncMock(
+        h.unsticker._agents = MagicMock()
+        h.unsticker._agents._runner.run_simple = AsyncMock(
             side_effect=RuntimeError("command failed")
         )
 
-        result = await unsticker._isolate_hanging_tests(tmp_path)
+        result = await h.unsticker._isolate_hanging_tests(tmp_path)
         assert "Test isolation failed" in result
         assert "command failed" in result
 
@@ -1864,13 +1820,13 @@ class TestNarrowedExceptionHandling:
         h = _make_unsticker(tmp_path)
 
         issue = IssueFactory.create(title="Fix timeout", body="body", labels=[])
-        state.set_hitl_cause(42, "ci_timeout")
+        h.state.set_hitl_cause(42, "ci_timeout")
 
-        wt.start_merge_main = AsyncMock(return_value=True)
-        agents._build_command = MagicMock(return_value=["cmd"])
-        agents._execute = AsyncMock(side_effect=AttributeError("bad attr"))
+        h.wt.start_merge_main = AsyncMock(return_value=True)
+        h.agents._build_command = MagicMock(return_value=["cmd"])
+        h.agents._execute = AsyncMock(side_effect=AttributeError("bad attr"))
 
         with pytest.raises(AttributeError, match="bad attr"):
-            await unsticker._resolve_ci_timeout(
-                42, issue, tmp_path / "wt", "branch", "url"
+            await h.unsticker._resolve_ci_timeout(
+                42, issue, tmp_path / "h.wt", "branch", "url"
             )
