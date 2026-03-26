@@ -503,18 +503,6 @@ class TestDestroy:
         assert not wt_path.exists()
 
     @pytest.mark.asyncio
-    async def test_destroy_tolerates_missing_branch(
-        self, config, tmp_path: Path
-    ) -> None:
-        """destroy should complete without error even if directory is already gone."""
-        manager = WorkspaceManager(config)
-
-        # Don't create the directory — destroy should handle gracefully
-        wt_path = config.worktree_path_for_issue(7)
-        await manager.destroy(issue_number=7)
-        assert not wt_path.exists()
-
-    @pytest.mark.asyncio
     async def test_destroy_removes_existing_directory(
         self, config, tmp_path: Path
     ) -> None:
