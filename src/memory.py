@@ -191,6 +191,7 @@ async def file_memory_suggestion(
         from hindsight import Bank, schedule_retain  # noqa: PLC0415
 
         schedule_retain(
+            None,  # client — resolved by schedule_retain from global state
             Bank.LEARNINGS,
             item["learning"],
             metadata={

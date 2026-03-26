@@ -22,7 +22,6 @@ if TYPE_CHECKING:
     from dolt_backend import DoltBackend
     from hindsight import HindsightClient
     from hindsight_wal import HindsightWAL
-    from ports import PRPort
 
 logger = logging.getLogger("hydraflow.harness_insights")
 
@@ -396,17 +395,15 @@ def generate_suggestions(
 
 async def auto_file_suggestions(
     store: HarnessInsightStore,
-    prs: PRPort,
     config: HydraFlowConfig,
     *,
     threshold: int = 3,
 ) -> None:
-    """Generate suggestions from recent failures and file new ones as GitHub issues.
+    """Generate suggestions from recent failures and write to JSONL.
 
-    For each suggestion not yet in the store's dedup set, this creates a GitHub
-    issue titled ``[Harness Insight] {suggestion title}`` labelled with
-    ``config.improve_label``.  Filed keys are persisted via the store so the
-    same pattern is never filed twice.
+    For each suggestion not yet in the store's dedup set, this appends
+    to ``harness_suggestions.jsonl``.  Filed keys are persisted via the
+    store so the same pattern is never filed twice.
 
     All operations are wrapped in try/except — this is an enhancement and must
     not interrupt the pipeline.
@@ -423,6 +420,11 @@ async def auto_file_suggestions(
         if not suggestions:
             return
 
+        import json as _json  # noqa: PLC0415
+
+        suggestions_path = config.data_path("memory", "harness_suggestions.jsonl")
+        suggestions_path.parent.mkdir(parents=True, exist_ok=True)
+
         for suggestion in suggestions:
             key = (
                 f"subcategory:{suggestion.subcategory}"
@@ -430,28 +432,23 @@ async def auto_file_suggestions(
                 else f"category:{suggestion.category}"
             )
             try:
-                title = f"[Harness Insight] {suggestion.description}"
-                body = (
-                    f"## Harness Insight\n\n"
-                    f"**Pattern:** {suggestion.category}"
-                    + (f" / {suggestion.subcategory}" if suggestion.subcategory else "")
-                    + f"\n\n"
-                    f"**Occurrences:** {suggestion.occurrence_count} of {suggestion.window_size} recent failures\n\n"
-                    f"**Description:** {suggestion.description}\n\n"
-                    f"**Suggested Action:** {suggestion.suggestion}\n"
+                rec = {
+                    "title": suggestion.description,
+                    "category": suggestion.category,
+                    "subcategory": suggestion.subcategory,
+                    "occurrences": suggestion.occurrence_count,
+                    "window_size": suggestion.window_size,
+                    "suggestion": suggestion.suggestion,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+                with suggestions_path.open("a") as f:
+                    f.write(_json.dumps(rec) + "\n")
+                store.mark_pattern_proposed(key)
+                logger.warning(
+                    "Harness insight: %s (%d occurrences)",
+                    suggestion.description,
+                    suggestion.occurrence_count,
                 )
-                issue_number = await prs.create_issue(
-                    title,
-                    body,
-                    list(config.improve_label),
-                )
-                if issue_number:
-                    store.mark_pattern_proposed(key)
-                    logger.info(
-                        "Filed harness insight as issue #%d: %s",
-                        issue_number,
-                        suggestion.description,
-                    )
             except Exception:  # noqa: BLE001
                 logger.warning(
                     "Failed to file harness insight suggestion for key %s",

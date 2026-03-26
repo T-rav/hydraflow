@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -476,7 +476,7 @@ class TestFileLogPatterns:
 
         mock_file_mem = _AsyncMock()
         with patch("memory.file_memory_suggestion", mock_file_mem):
-            result = await file_log_patterns([pattern], known, None, config)
+            result = await file_log_patterns([pattern], known, config)
 
         mock_file_mem.assert_called_once()
         _source = mock_file_mem.call_args[0][1]
@@ -489,8 +489,6 @@ class TestFileLogPatterns:
 
     @pytest.mark.asyncio
     async def test_skips_known_pattern_below_escalation(self) -> None:
-        prs = AsyncMock()
-        prs.create_issue = AsyncMock(return_value=200)
         config = _make_config()
         pattern = self._make_pattern(count=6)
         key = f"{pattern.source_module}:{pattern.fingerprint}"
@@ -505,9 +503,8 @@ class TestFileLogPatterns:
             )
         }
 
-        result = await file_log_patterns([pattern], known, prs, config)
+        result = await file_log_patterns([pattern], known, config)
 
-        prs.create_issue.assert_not_called()
         assert result.filed == 0
         assert result.escalated == 0
         # last_count should be updated
@@ -515,8 +512,7 @@ class TestFileLogPatterns:
 
     @pytest.mark.asyncio
     async def test_escalates_3x_increase(self) -> None:
-        prs = AsyncMock()
-        prs.create_issue = AsyncMock(return_value=300)
+        """Escalating patterns write to hitl_recommendations.jsonl."""
         config = _make_config()
         pattern = self._make_pattern(count=15)
         key = f"{pattern.source_module}:{pattern.fingerprint}"
@@ -531,11 +527,8 @@ class TestFileLogPatterns:
             )
         }
 
-        result = await file_log_patterns([pattern], known, prs, config)
+        result = await file_log_patterns([pattern], known, config)
 
-        prs.create_issue.assert_called_once()
-        title = prs.create_issue.call_args[0][0]
-        assert "[Health Monitor]" in title
         assert result.escalated == 1
         assert result.filed == 0
         # last_count still updated
@@ -543,8 +536,6 @@ class TestFileLogPatterns:
 
     @pytest.mark.asyncio
     async def test_updates_last_count_on_known(self) -> None:
-        prs = AsyncMock()
-        prs.create_issue = AsyncMock(return_value=400)
         config = _make_config()
         pattern = self._make_pattern(count=8)
         key = f"{pattern.source_module}:{pattern.fingerprint}"
@@ -558,7 +549,7 @@ class TestFileLogPatterns:
                 filed_count=5,
             )
         }
-        await file_log_patterns([pattern], known, prs, config)
+        await file_log_patterns([pattern], known, config)
         assert known[key].last_count == 8
 
     @pytest.mark.asyncio
@@ -574,14 +565,14 @@ class TestFileLogPatterns:
             "memory.file_memory_suggestion",
             side_effect=RuntimeError("disk full"),
         ):
-            result = await file_log_patterns([pattern], known, None, config)
+            result = await file_log_patterns([pattern], known, config)
 
         assert result.filed == 0
         assert known == {}
 
     @pytest.mark.asyncio
     async def test_novel_pattern_filed_without_prs(self) -> None:
-        """Novel patterns are filed to JSONL regardless of whether prs is available."""
+        """Novel patterns are filed to JSONL — no prs needed."""
         from unittest.mock import AsyncMock as _AsyncMock
         from unittest.mock import patch
 
@@ -591,7 +582,7 @@ class TestFileLogPatterns:
 
         mock_file_mem = _AsyncMock()
         with patch("memory.file_memory_suggestion", mock_file_mem):
-            result = await file_log_patterns([pattern], known, None, config)
+            result = await file_log_patterns([pattern], known, config)
 
         mock_file_mem.assert_called_once()
         assert result.filed == 1
@@ -608,7 +599,7 @@ class TestFileLogPatterns:
 
         mock_file_mem = _AsyncMock()
         with patch("memory.file_memory_suggestion", mock_file_mem):
-            result = await file_log_patterns(patterns, known, None, config)
+            result = await file_log_patterns(patterns, known, config)
 
         assert result.total_patterns == 5
 
@@ -621,7 +612,7 @@ class TestFileLogPatterns:
 
     @pytest.mark.asyncio
     async def test_prs_none_does_not_raise(self) -> None:
-        """When prs is None, novel patterns are still filed to JSONL."""
+        """Novel patterns are filed to JSONL without any prs dependency."""
         from unittest.mock import AsyncMock as _AsyncMock
         from unittest.mock import patch
 
@@ -631,7 +622,7 @@ class TestFileLogPatterns:
 
         mock_file_mem = _AsyncMock()
         with patch("memory.file_memory_suggestion", mock_file_mem):
-            result = await file_log_patterns([pattern], known, None, config)
+            result = await file_log_patterns([pattern], known, config)
 
         assert result.filed == 1
         assert result.escalated == 0
@@ -640,7 +631,7 @@ class TestFileLogPatterns:
 
     @pytest.mark.asyncio
     async def test_prs_none_known_pattern_no_escalation(self) -> None:
-        """With prs=None, even escalating patterns are counted but not escalated."""
+        """Escalating patterns write to JSONL regardless of filing count."""
         config = _make_config()
         pattern = self._make_pattern(count=15)
         key = f"{pattern.source_module}:{pattern.fingerprint}"
@@ -651,13 +642,13 @@ class TestFileLogPatterns:
                 filed_at="2026-03-26T09:00:00+00:00",
                 issue_number=50,
                 last_count=5,
-                filed_count=5,  # 15 >= 5*3 → would escalate if prs available
+                filed_count=5,  # 15 >= 5*3 → escalates to JSONL
             )
         }
 
-        result = await file_log_patterns([pattern], known, None, config)
+        result = await file_log_patterns([pattern], known, config)
 
-        assert result.escalated == 0
+        assert result.escalated == 1
         assert result.filed == 0
         # last_count still updated
         assert known[key].last_count == 15
@@ -665,8 +656,6 @@ class TestFileLogPatterns:
     @pytest.mark.asyncio
     async def test_escalation_uses_filed_count_baseline(self) -> None:
         """Escalation checks pattern.count >= known.filed_count * 3 (not last_count)."""
-        prs = AsyncMock()
-        prs.create_issue = AsyncMock(return_value=99)
         config = _make_config()
         pattern = self._make_pattern(count=15)
         key = f"{pattern.source_module}:{pattern.fingerprint}"
@@ -683,7 +672,7 @@ class TestFileLogPatterns:
             )
         }
 
-        result = await file_log_patterns([pattern], known, prs, config)
+        result = await file_log_patterns([pattern], known, config)
 
         assert result.escalated == 1
 
@@ -703,7 +692,7 @@ class TestFileLogPatterns:
             patch.dict("sys.modules", {"sentry_sdk": mock_sentry}),
             patch("memory.file_memory_suggestion", mock_file_mem),
         ):
-            await file_log_patterns([pattern], known, None, config)
+            await file_log_patterns([pattern], known, config)
 
         mock_sentry.add_breadcrumb.assert_called_once()
         call_kwargs = mock_sentry.add_breadcrumb.call_args[1]
@@ -715,8 +704,6 @@ class TestFileLogPatterns:
         """Sentry capture_message is called when a pattern escalates."""
         from unittest.mock import MagicMock, patch
 
-        prs = AsyncMock()
-        prs.create_issue = AsyncMock(return_value=200)
         config = _make_config()
         pattern = self._make_pattern(count=15)
         key = f"{pattern.source_module}:{pattern.fingerprint}"
@@ -733,7 +720,7 @@ class TestFileLogPatterns:
 
         mock_sentry = MagicMock()
         with patch.dict("sys.modules", {"sentry_sdk": mock_sentry}):
-            await file_log_patterns([pattern], known, prs, config)
+            await file_log_patterns([pattern], known, config)
 
         mock_sentry.capture_message.assert_called_once()
         args = mock_sentry.capture_message.call_args

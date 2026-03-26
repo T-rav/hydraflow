@@ -385,9 +385,7 @@ class HealthMonitorLoop(BaseBackgroundLoop):
                 except Exception:  # noqa: BLE001
                     pass  # enrichment is best-effort
 
-                log_result = await file_log_patterns(
-                    patterns, known, self._prs, self._config
-                )
+                log_result = await file_log_patterns(patterns, known, self._config)
                 save_known_patterns(self._config.memory_dir, known)
                 self._last_log_scan = datetime.now(UTC)
 
