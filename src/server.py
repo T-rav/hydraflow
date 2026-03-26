@@ -15,6 +15,49 @@ from runtime_config import DEFAULT_LOG_FILE, load_runtime_config
 logger = logging.getLogger("hydraflow.server")
 
 
+def _init_sentry() -> None:
+    """Initialize Sentry SDK if SENTRY_DSN is configured."""
+    dsn = os.environ.get("SENTRY_DSN", "")
+    if not dsn:
+        return
+
+    import re  # noqa: PLC0415
+
+    import sentry_sdk  # noqa: PLC0415
+    from sentry_sdk.integrations.fastapi import FastApiIntegration  # noqa: PLC0415
+    from sentry_sdk.integrations.logging import LoggingIntegration  # noqa: PLC0415
+
+    _SENSITIVE_RE = re.compile(
+        r"(ghp_[a-zA-Z0-9]{36}|gho_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9_]{82}|"
+        r"sk-[a-zA-Z0-9]{48}|Bearer\s+[a-zA-Z0-9._-]+)",
+        re.IGNORECASE,
+    )
+
+    def _scrub(obj):
+        if isinstance(obj, str):
+            return _SENSITIVE_RE.sub("[REDACTED]", obj)
+        if isinstance(obj, dict):
+            return {k: _scrub(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_scrub(v) for v in obj]
+        return obj
+
+    sentry_sdk.init(
+        dsn=dsn,
+        environment=os.environ.get("HYDRAFLOW_ENV", "development"),
+        traces_sample_rate=float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+        profiles_sample_rate=float(
+            os.environ.get("SENTRY_PROFILES_SAMPLE_RATE", "0.0")
+        ),
+        integrations=[
+            FastApiIntegration(transaction_style="endpoint"),
+            LoggingIntegration(level=logging.WARNING, event_level=logging.ERROR),
+        ],
+        before_send=lambda event, hint: _scrub(event),
+        before_send_transaction=lambda event, hint: _scrub(event),
+    )
+
+
 def _detect_submodule_parent(hydraflow_root: Path) -> Path | None:
     """Return the parent repo path if HydraFlow is a git submodule, else None."""
     git_path = hydraflow_root / ".git"
@@ -218,6 +261,9 @@ def main() -> None:
     from dotenv import load_dotenv  # noqa: PLC0415
 
     load_dotenv()
+
+    # Initialize Sentry (no-op if SENTRY_DSN is empty/unset)
+    _init_sentry()
 
     verbose = os.environ.get("HYDRAFLOW_VERBOSE_LOGS", "").strip() not in {
         "",

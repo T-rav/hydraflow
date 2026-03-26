@@ -342,6 +342,24 @@ def is_likely_bug(exc: BaseException) -> bool:
     return isinstance(exc, LIKELY_BUG_EXCEPTIONS)
 
 
+def capture_if_bug(exc: Exception, **context: object) -> None:
+    """Send to Sentry only if the exception looks like a real bug."""
+    try:
+        import sentry_sdk  # noqa: PLC0415
+
+        if is_likely_bug(exc):
+            sentry_sdk.capture_exception(exc)
+        else:
+            sentry_sdk.add_breadcrumb(
+                category="transient_error",
+                message=str(exc)[:500],
+                level="warning",
+                data=context,
+            )
+    except Exception:
+        pass  # Sentry not installed
+
+
 def reraise_on_credit_or_bug(exc: BaseException) -> None:
     """Re-raise *exc* if it is a fatal infrastructure error or a likely bug.
 

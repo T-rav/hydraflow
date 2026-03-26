@@ -673,6 +673,13 @@ class HydraFlowOrchestrator:
         # is enabled.  When pipeline_enabled=False (dashboard mode), the
         # orchestrator only runs background workers — no issue fetching,
         # no repo sanitization, no session.
+        try:
+            import sentry_sdk as _sentry  # noqa: PLC0415
+
+            _sentry.set_tag("hydraflow.repo", self._config.repo or "")
+        except Exception:
+            pass
+
         session_started = False
         if self._pipeline_enabled:
             await self._svc.worktrees.sanitize_repo()
