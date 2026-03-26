@@ -9,20 +9,17 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from agent_cli import build_lightweight_command
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from execution import SubprocessRunner, get_default_runner
 from file_util import atomic_write
 from manifest_curator import CuratedLearning, CuratedManifestStore
 from models import (
-    MEMORY_TYPE_DISPLAY_ORDER,
     MemoryIssueData,
     MemorySyncResult,
     MemoryType,
 )
 from state import StateTracker
-from subprocess_util import make_clean_env
 
 if TYPE_CHECKING:
     from dolt_backend import DoltBackend
@@ -117,27 +114,6 @@ def build_memory_issue_body(
     )
 
 
-def load_memory_digest(config: HydraFlowConfig) -> str:
-    """Read the memory digest from disk if it exists.
-
-    Returns an empty string if the file is missing or empty.
-    Content is capped at ``config.max_memory_prompt_chars``.
-    """
-    digest_path = config.data_path("memory", "digest.md")
-    if not digest_path.is_file():
-        return ""
-    try:
-        content = digest_path.read_text()
-    except OSError:
-        return ""
-    if not content.strip():
-        return ""
-    max_chars = config.max_memory_prompt_chars
-    if len(content) > max_chars:
-        content = content[:max_chars] + "\n\n…(truncated)"
-    return content
-
-
 def _next_item_id() -> str:
     """Generate a unique memory item ID."""
     import uuid as _uuid  # noqa: PLC0415
@@ -214,7 +190,7 @@ async def file_memory_suggestion(
 
 
 class MemorySyncWorker:
-    """Reads local JSONL memory items and compiles them into a local digest."""
+    """Reads local JSONL memory items, scores/evicts them, and writes to Hindsight."""
 
     def __init__(
         self,
@@ -285,7 +261,7 @@ class MemorySyncWorker:
     async def sync(
         self, issues: list[MemoryIssueData] | None = None
     ) -> MemorySyncResult:
-        """Build digest from local memory items.
+        """Process local memory items: score, evict low-quality items, write to Hindsight.
 
         The *issues* parameter is DEPRECATED and ignored.  Items are read
         from ``items.jsonl`` instead of GitHub.
@@ -338,19 +314,17 @@ class MemorySyncWorker:
         # Sort newest first
         learnings.sort(key=lambda rec: rec.created_at, reverse=True)
 
-        # Build digest
+        # Score/evict: compact items.jsonl by removing low-scoring duplicates
         compacted = False
-        digest = self._build_digest(learnings)
         max_chars = self._config.max_memory_chars
-        if len(digest) > max_chars:
-            digest = await self._compact_digest(learnings, max_chars)
+        total_chars = sum(len(str(r.learning)) for r in learnings)
+        if total_chars > max_chars:
+            learnings = await self._compact_items(learnings, max_chars)
+            # Rewrite items.jsonl with only surviving items
+            self._rewrite_items_jsonl(learnings, local_items)
             compacted = True
 
-        # Write digest to disk (skip when Hindsight is the exclusive write target)
-        if not self._hindsight:
-            self._write_digest(digest)
-
-        # Dual-write learnings to Hindsight
+        # Write surviving learnings to Hindsight
         if self._hindsight:
             from hindsight import Bank, retain_safe  # noqa: PLC0415
 
@@ -373,8 +347,10 @@ class MemorySyncWorker:
         item_ids = sorted(
             abs(hash(str(item.get("id", "")))) % (10**9) for item in local_items
         )
-        digest_hash = hashlib.sha256(digest.encode()).hexdigest()[:16]
-        self._state.update_memory_state(item_ids, digest_hash)
+        items_hash = hashlib.sha256(
+            "".join(str(r.learning) for r in learnings).encode()
+        ).hexdigest()[:16]
+        self._state.update_memory_state(item_ids, items_hash)
         self._manifest_store.update_from_learnings(learnings)
 
         # Route ADR candidates from local items (convert to issue-like dicts)
@@ -385,7 +361,7 @@ class MemorySyncWorker:
             "action": "synced",
             "item_count": len(learnings),
             "compacted": compacted,
-            "digest_chars": len(digest),
+            "digest_chars": 0,
         }
 
     @staticmethod
@@ -646,49 +622,17 @@ class MemorySyncWorker:
 
         return MemoryType.KNOWLEDGE
 
-    @staticmethod
-    def _build_digest(learnings: Sequence[_LearningRecord]) -> str:
-        """Build the digest markdown grouped by memory type.
-
-        Learnings are organised into sections by type (actionable types
-        first, then knowledge) for easy scanning by agents.
-        """
-        now = datetime.now(UTC).isoformat()
-        header = (
-            f"## Accumulated Learnings\n"
-            f"*{len(learnings)} learnings — last synced {now}*\n"
-        )
-
-        # Group learnings by type
-        by_type: dict[MemoryType, list[tuple[int, str]]] = {}
-        for record in learnings:
-            num, learning, _, memory_type = MemorySyncWorker._coerce_learning_tuple(
-                record
-            )
-            by_type.setdefault(memory_type, []).append((num, learning))
-
-        sections: list[str] = []
-        for mtype in MEMORY_TYPE_DISPLAY_ORDER:
-            items = by_type.get(mtype, [])
-            if not items:
-                continue
-            type_header = f"### {mtype.value.title()}"
-            type_items = [f"- **#{num}:** {learning}" for num, learning in items]
-            sections.append(type_header + "\n" + "\n".join(type_items))
-
-        return header + "\n" + "\n---\n".join(sections) + "\n"
-
-    async def _compact_digest(
+    async def _compact_items(
         self, learnings: Sequence[_LearningRecord], max_chars: int
-    ) -> str:
-        """Deduplicate and optionally summarise learnings to fit within *max_chars*.
+    ) -> list[_LearningRecord]:
+        """Deduplicate and evict low-scoring items from the in-memory list.
 
         Pipeline:
         1. Keyword-overlap deduplication (>70% overlap → drop duplicate).
         2. Score-based curation: apply temporal decay, evict low-score items.
-        3. Rebuild digest from surviving items (grouped by type).
-        4. If still over *max_chars*: call a cheap model to summarise.
-        5. Final truncation safety-net in case the model returns too much.
+
+        Returns the surviving list of learning records (does NOT write to disk;
+        caller is responsible for rewriting items.jsonl).
         """
         # --- Step 1: Deduplicate by keyword overlap ---
         seen_keywords: list[set[str]] = []
@@ -754,97 +698,43 @@ class MemorySyncWorker:
         except Exception:
             logger.debug("Score-based curation failed", exc_info=True)
 
-        # --- Step 3: Build digest from unique items (grouped by type) ---
-        now = datetime.now(UTC).isoformat()
-        header = (
-            f"## Accumulated Learnings\n"
-            f"*{len(unique)} learnings (compacted) — last synced {now}*\n"
-        )
+        return unique
 
-        by_type: dict[MemoryType, list[tuple[int, str]]] = {}
-        for record in unique:
-            num, learning, _, memory_type = self._coerce_learning_tuple(record)
-            by_type.setdefault(memory_type, []).append((num, learning))
+    def _rewrite_items_jsonl(
+        self,
+        surviving: list[_LearningRecord],
+        original_items: list[dict[str, object]],
+    ) -> None:
+        """Rewrite items.jsonl keeping only items whose numeric ID is in *surviving*.
 
-        sections: list[str] = []
-        for mtype in MEMORY_TYPE_DISPLAY_ORDER:
-            items = by_type.get(mtype, [])
-            if not items:
-                continue
-            type_header = f"### {mtype.value.title()}"
-            type_items = [f"- **#{num}:** {learning}" for num, learning in items]
-            sections.append(type_header + "\n" + "\n".join(type_items))
-
-        digest = header + "\n" + "\n---\n".join(sections) + "\n"
-
-        # --- Step 4: Model-based summarisation if still over limit ---
-        if len(digest) > max_chars:
-            summarised = await self._summarise_with_model(digest, max_chars)
-            if summarised:
-                digest = summarised
-
-        # --- Step 5: Final truncation safety-net ---
-        if len(digest) > max_chars:
-            digest = digest[:max_chars] + "\n\n…(truncated)"
-
-        return digest
-
-    async def _summarise_with_model(self, content: str, max_chars: int) -> str | None:
-        """Use a cheap model to condense the digest.
-
-        Returns the summarised text or ``None`` on failure (caller
-        falls back to truncation).
+        This evicts low-scoring and duplicate items directly from the write-ahead queue.
         """
-        tool = self._config.memory_compaction_tool
-        model = self._config.memory_compaction_model
-        prompt = (
-            f"Condense the following agent learnings into at most {max_chars} characters. "
-            "Preserve every distinct insight but merge overlapping ones. "
-            "Output ONLY the condensed markdown list — no preamble.\n\n"
-            f"{content}"
-        )
-        cmd, cmd_input = build_lightweight_command(
-            tool=tool, model=model, prompt=prompt
-        )
-        env = make_clean_env(self._config.gh_token)
+        import json as _json  # noqa: PLC0415
+
+        surviving_ids = {self._coerce_learning_tuple(r)[0] for r in surviving}
+
+        kept: list[dict[str, object]] = []
+        for item in original_items:
+            item_id_str = str(item.get("id", ""))
+            num = abs(hash(item_id_str)) % (10**9) if item_id_str else 0
+            if num in surviving_ids:
+                kept.append(item)
 
         try:
-            result = await self._runner.run_simple(
-                cmd,
-                env=env,
-                input=cmd_input,
-                timeout=self._config.memory_compaction_timeout,
-            )
-            if result.returncode != 0:
-                stderr_excerpt = result.stderr[:200]
-                stdout_excerpt = result.stdout[:200]
-                logger.warning(
-                    "Memory compaction model failed (rc=%d, model=%s): stderr=%r stdout=%r",
-                    result.returncode,
-                    model,
-                    stderr_excerpt,
-                    stdout_excerpt,
+            path = self._config.data_path("memory", "items.jsonl")
+            lines = [_json.dumps(item) + "\n" for item in kept]
+            atomic_write(path, "".join(lines))
+            evicted_count = len(original_items) - len(kept)
+            if evicted_count:
+                logger.info(
+                    "items.jsonl compacted: evicted %d items, kept %d",
+                    evicted_count,
+                    len(kept),
                 )
-                return None
-            if not result.stdout:
-                return None
-            now = datetime.now(UTC).isoformat()
-            return (
-                f"## Accumulated Learnings\n"
-                f"*Summarised — last synced {now}*\n\n"
-                f"{result.stdout}\n"
+        except OSError:
+            logger.warning(
+                "Failed to rewrite items.jsonl after compaction", exc_info=True
             )
-        except TimeoutError:
-            logger.warning("Memory compaction model timed out")
-            return None
-        except (OSError, FileNotFoundError, NotImplementedError, RuntimeError) as exc:
-            logger.warning("Memory compaction model unavailable: %s", exc)
-            return None
-
-    def _write_digest(self, content: str) -> None:
-        """Write digest to disk atomically."""
-        digest_path = self._config.data_path("memory", "digest.md")
-        atomic_write(digest_path, content)
 
     async def publish_sync_event(self, stats: MemorySyncResult) -> None:
         """Publish a MEMORY_SYNC event with *stats*."""

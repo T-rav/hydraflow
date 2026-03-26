@@ -13,7 +13,7 @@ logger = logging.getLogger("hydraflow.memory_sync_loop")
 
 
 class MemorySyncLoop(BaseBackgroundLoop):
-    """Reads local JSONL memory items and rebuilds the digest."""
+    """Scores and evicts JSONL memory items, then writes survivors to Hindsight."""
 
     def __init__(
         self,

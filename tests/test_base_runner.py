@@ -251,64 +251,32 @@ class TestInjectManifestAndMemory:
     """Tests for BaseRunner._inject_manifest_and_memory."""
 
     @pytest.mark.asyncio
-    async def test_inject_returns_manifest_and_memory_when_both_present(
+    async def test_inject_manifest_always_empty(
         self, config, event_bus: EventBus
     ) -> None:
+        """manifest_section is always empty — manifest loading is done by individual runners."""
         runner = _TestRunner(config, event_bus)
-
-        with (
-            patch("base_runner.load_project_manifest", return_value="manifest text"),
-            patch("base_runner.load_memory_digest", return_value="digest text"),
-        ):
-            manifest_sec, memory_sec = await runner._inject_manifest_and_memory()
-
-        assert "## Project Context" in manifest_sec
-        assert "manifest text" in manifest_sec
-        assert "## Accumulated Learnings" in memory_sec
-        assert "digest text" in memory_sec
+        manifest_sec, memory_sec = await runner._inject_manifest_and_memory()
+        assert manifest_sec == ""
 
     @pytest.mark.asyncio
-    async def test_inject_returns_manifest_section_when_only_manifest_exists(
+    async def test_inject_memory_empty_without_hindsight(
         self, config, event_bus: EventBus
     ) -> None:
-        runner = _TestRunner(config, event_bus)
-
-        with (
-            patch("base_runner.load_project_manifest", return_value="manifest text"),
-            patch("base_runner.load_memory_digest", return_value=""),
-        ):
-            manifest_sec, memory_sec = await runner._inject_manifest_and_memory()
-
-        assert "## Project Context" in manifest_sec
+        """Without a Hindsight client, memory section is always empty."""
+        runner = _TestRunner(config, event_bus)  # no hindsight
+        manifest_sec, memory_sec = await runner._inject_manifest_and_memory(
+            query_context="Fix the widget"
+        )
+        assert manifest_sec == ""
         assert memory_sec == ""
 
     @pytest.mark.asyncio
-    async def test_inject_returns_memory_section_when_only_digest_exists(
+    async def test_inject_returns_empty_strings_when_no_hindsight(
         self, config, event_bus: EventBus
     ) -> None:
         runner = _TestRunner(config, event_bus)
-
-        with (
-            patch("base_runner.load_project_manifest", return_value=""),
-            patch("base_runner.load_memory_digest", return_value="digest text"),
-        ):
-            manifest_sec, memory_sec = await runner._inject_manifest_and_memory()
-
-        assert manifest_sec == ""
-        assert "## Accumulated Learnings" in memory_sec
-
-    @pytest.mark.asyncio
-    async def test_inject_returns_empty_strings_when_no_manifest_or_digest(
-        self, config, event_bus: EventBus
-    ) -> None:
-        runner = _TestRunner(config, event_bus)
-
-        with (
-            patch("base_runner.load_project_manifest", return_value=""),
-            patch("base_runner.load_memory_digest", return_value=""),
-        ):
-            manifest_sec, memory_sec = await runner._inject_manifest_and_memory()
-
+        manifest_sec, memory_sec = await runner._inject_manifest_and_memory()
         assert manifest_sec == ""
         assert memory_sec == ""
 
@@ -322,13 +290,10 @@ class TestInjectManifestAndMemory:
         runner = _TestRunner(config, event_bus, hindsight=mock_client)
 
         memories = [HindsightMemory(content="Always run lint before committing")]
-        with (
-            patch("base_runner.load_project_manifest", return_value="manifest text"),
-            patch(
-                "hindsight.recall_safe",
-                new_callable=AsyncMock,
-                return_value=memories,
-            ),
+        with patch(
+            "hindsight.recall_safe",
+            new_callable=AsyncMock,
+            return_value=memories,
         ):
             manifest_sec, memory_sec = await runner._inject_manifest_and_memory(
                 query_context="Fix the widget"
@@ -338,87 +303,34 @@ class TestInjectManifestAndMemory:
         assert "Always run lint before committing" in memory_sec
 
     @pytest.mark.asyncio
-    async def test_hindsight_fallback_to_file_when_recall_empty(
+    async def test_hindsight_empty_recall_returns_empty_memory(
         self, config, event_bus: EventBus
     ) -> None:
+        """When Hindsight recall returns nothing, memory section is empty."""
         mock_client = MagicMock()
         runner = _TestRunner(config, event_bus, hindsight=mock_client)
 
-        with (
-            patch("base_runner.load_project_manifest", return_value=""),
-            patch("base_runner.load_memory_digest", return_value="file digest"),
-            patch(
-                "hindsight.recall_safe",
-                new_callable=AsyncMock,
-                return_value=[],
-            ),
+        with patch(
+            "hindsight.recall_safe",
+            new_callable=AsyncMock,
+            return_value=[],
         ):
             _, memory_sec = await runner._inject_manifest_and_memory(
                 query_context="Fix the widget"
             )
 
-        assert "file digest" in memory_sec
+        assert memory_sec == ""
 
     @pytest.mark.asyncio
     async def test_hindsight_not_used_when_client_is_none(
         self, config, event_bus: EventBus
     ) -> None:
+        """Without a Hindsight client, memory is always empty regardless of query."""
         runner = _TestRunner(config, event_bus)
-
-        with (
-            patch("base_runner.load_project_manifest", return_value=""),
-            patch("base_runner.load_memory_digest", return_value="file digest"),
-        ):
-            _, memory_sec = await runner._inject_manifest_and_memory(
-                query_context="Fix the widget"
-            )
-
-        assert "file digest" in memory_sec
-
-    @pytest.mark.asyncio
-    async def test_hindsight_exclusive_skips_file_fallback(
-        self, config, event_bus: EventBus
-    ) -> None:
-        config.hindsight_exclusive = True
-        mock_client = MagicMock()
-        runner = _TestRunner(config, event_bus, hindsight=mock_client)
-
-        with (
-            patch("base_runner.load_project_manifest", return_value=""),
-            patch(
-                "base_runner.load_memory_digest", return_value="file digest"
-            ) as mock_digest,
-            patch(
-                "hindsight.recall_safe",
-                new_callable=AsyncMock,
-                return_value=[],
-            ),
-        ):
-            _, memory_sec = await runner._inject_manifest_and_memory(
-                query_context="Fix the widget"
-            )
-
-        # With exclusive mode and a client configured, file fallback is skipped
-        mock_digest.assert_not_called()
+        _, memory_sec = await runner._inject_manifest_and_memory(
+            query_context="Fix the widget"
+        )
         assert memory_sec == ""
-
-    @pytest.mark.asyncio
-    async def test_hindsight_exclusive_without_client_still_uses_file(
-        self, config, event_bus: EventBus
-    ) -> None:
-        config.hindsight_exclusive = True
-        runner = _TestRunner(config, event_bus)  # no hindsight client
-
-        with (
-            patch("base_runner.load_project_manifest", return_value=""),
-            patch("base_runner.load_memory_digest", return_value="file digest"),
-        ):
-            _, memory_sec = await runner._inject_manifest_and_memory(
-                query_context="Fix the widget"
-            )
-
-        # Without a client, exclusive mode is ignored — file fallback works
-        assert "file digest" in memory_sec
 
     @pytest.mark.asyncio
     async def test_empty_query_context_skips_hindsight(
@@ -428,20 +340,15 @@ class TestInjectManifestAndMemory:
         mock_client = MagicMock()
         runner = _TestRunner(config, event_bus, hindsight=mock_client)
 
-        with (
-            patch("base_runner.load_project_manifest", return_value=""),
-            patch("base_runner.load_memory_digest", return_value="file digest"),
-            patch(
-                "hindsight.recall_safe",
-                new_callable=AsyncMock,
-            ) as mock_recall,
-        ):
+        with patch(
+            "hindsight.recall_safe",
+            new_callable=AsyncMock,
+        ) as mock_recall:
             _, memory_sec = await runner._inject_manifest_and_memory(query_context="")
 
         # Hindsight should not be called with an empty query
         mock_recall.assert_not_called()
-        # File-based fallback should still work
-        assert "file digest" in memory_sec
+        assert memory_sec == ""
 
     @pytest.mark.asyncio
     async def test_troubleshooting_bank_recalled_when_hindsight_available(
@@ -460,13 +367,10 @@ class TestInjectManifestAndMemory:
                 return [HindsightMemory(content="Check import paths first")]
             return []
 
-        with (
-            patch("base_runner.load_project_manifest", return_value=""),
-            patch(
-                "hindsight.recall_safe",
-                new_callable=AsyncMock,
-                side_effect=_recall_side_effect,
-            ),
+        with patch(
+            "hindsight.recall_safe",
+            new_callable=AsyncMock,
+            side_effect=_recall_side_effect,
         ):
             _, memory_sec = await runner._inject_manifest_and_memory(
                 query_context="Fix import issue"
@@ -494,13 +398,10 @@ class TestInjectManifestAndMemory:
                 ]
             return []
 
-        with (
-            patch("base_runner.load_project_manifest", return_value=""),
-            patch(
-                "hindsight.recall_safe",
-                new_callable=AsyncMock,
-                side_effect=_recall_side_effect,
-            ),
+        with patch(
+            "hindsight.recall_safe",
+            new_callable=AsyncMock,
+            side_effect=_recall_side_effect,
         ):
             _, memory_sec = await runner._inject_manifest_and_memory(
                 query_context="CI failure"
@@ -528,13 +429,10 @@ class TestInjectManifestAndMemory:
                 return [HindsightMemory(content="RETRO_ITEM")]
             return []
 
-        with (
-            patch("base_runner.load_project_manifest", return_value=""),
-            patch(
-                "hindsight.recall_safe",
-                new_callable=AsyncMock,
-                side_effect=_recall_side_effect,
-            ),
+        with patch(
+            "hindsight.recall_safe",
+            new_callable=AsyncMock,
+            side_effect=_recall_side_effect,
         ):
             _, memory_sec = await runner._inject_manifest_and_memory(
                 query_context="issue context"
@@ -561,13 +459,10 @@ class TestInjectManifestAndMemory:
         def _recall_side_effect(client, bank, query, **_kwargs):
             return [HindsightMemory(content=big_content)]
 
-        with (
-            patch("base_runner.load_project_manifest", return_value=""),
-            patch(
-                "hindsight.recall_safe",
-                new_callable=AsyncMock,
-                side_effect=_recall_side_effect,
-            ),
+        with patch(
+            "hindsight.recall_safe",
+            new_callable=AsyncMock,
+            side_effect=_recall_side_effect,
         ):
             _, memory_sec = await runner._inject_manifest_and_memory(
                 query_context="big query"
@@ -598,10 +493,7 @@ class TestInjectManifestAndMemory:
                 raise RuntimeError("network error")
             return [HindsightMemory(content="Always run lint")]
 
-        with (
-            patch("base_runner.load_project_manifest", return_value=""),
-            patch("hindsight.recall_safe", side_effect=_flaky_recall),
-        ):
+        with patch("hindsight.recall_safe", side_effect=_flaky_recall):
             # Should not raise
             _, memory_sec = await runner._inject_manifest_and_memory(
                 query_context="Fix something"

@@ -3152,10 +3152,12 @@ def create_router(
     @router.get("/api/memories")
     async def get_memories() -> JSONResponse:
         """Return memory items and curated manifest data."""
+        import json as _json  # noqa: PLC0415
+
         from manifest_curator import CuratedManifestStore
 
         items_dir = config.data_path("memory", "items")
-        digest_path = config.data_path("memory", "digest.md")
+        items_jsonl = config.data_path("memory", "items.jsonl")
 
         items: list[dict[str, object]] = []
         if items_dir.is_dir():
@@ -3171,10 +3173,16 @@ def create_router(
                 except (ValueError, OSError):
                     pass
 
-        digest_chars = 0
-        if digest_path.exists():
+        # Count items from items.jsonl (the write-ahead queue)
+        jsonl_item_count = 0
+        if items_jsonl.exists():
             with contextlib.suppress(OSError):
-                digest_chars = digest_path.stat().st_size
+                for line in items_jsonl.read_text().splitlines():
+                    try:
+                        _json.loads(line)
+                        jsonl_item_count += 1
+                    except _json.JSONDecodeError:
+                        pass
 
         curated_store = CuratedManifestStore(config)
         curated = curated_store.load()
@@ -3182,7 +3190,7 @@ def create_router(
         return JSONResponse(
             {
                 "total_items": len(items),
-                "digest_chars": digest_chars,
+                "jsonl_item_count": jsonl_item_count,
                 "curated": curated,
                 "items": items[-50:],
             }

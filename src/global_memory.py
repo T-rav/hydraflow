@@ -3,12 +3,12 @@
 Layout under the global directory (default ``~/.hydraflow/global_memory/``):
 
     global_memory/
-      ├── digest.md           # global knowledge digest
       ├── items/              # individual global memory items
       ├── item_scores.json    # global item scores (same format as project-local)
       └── outcomes.jsonl      # aggregated cross-project outcomes
 
 Project-local overrides live in ``.hydraflow/memory/global_overrides.json``.
+Memory recall happens exclusively through Hindsight (shared across projects).
 """
 
 from __future__ import annotations
@@ -41,74 +41,6 @@ class GlobalMemoryStore:
 
     def __init__(self, global_dir: Path) -> None:
         self._dir = Path(global_dir)
-
-    # ------------------------------------------------------------------
-    # Digest helpers
-    # ------------------------------------------------------------------
-
-    def load_global_digest(self) -> str:
-        """Load the global digest markdown.
-
-        Returns an empty string when the file is missing or unreadable.
-        """
-        digest_path = self._dir / "digest.md"
-        if not digest_path.is_file():
-            return ""
-        try:
-            content = digest_path.read_text(encoding="utf-8")
-        except OSError:
-            logger.debug("Could not read global digest at %s", digest_path)
-            return ""
-        return content.strip()
-
-    def get_combined_digest(self, local_digest: str, max_chars: int) -> str:
-        """Combine global and local digests within *max_chars*.
-
-        Strategy:
-        - Local digest takes priority when truncation is required.
-        - Global digest provides baseline context prepended before local.
-        - The combined text is hard-capped at *max_chars*.
-        """
-        separator = "\n\n---\n\n"
-        if max_chars <= len(separator):
-            return local_digest[:max_chars]
-
-        global_digest = self.load_global_digest()
-
-        if not global_digest:
-            return local_digest[:max_chars]
-        if not local_digest:
-            return global_digest[:max_chars]
-
-        # Reserve space for local by allocating the remainder after a separator.
-        local_budget = max_chars - len(separator)
-
-        # When local fits, prepend as much global as the budget allows.
-        if local_budget > 0 and len(local_digest) <= local_budget:
-            remaining = local_budget - len(local_digest)
-            global_portion = global_digest[:remaining] if remaining > 0 else ""
-            combined = (
-                (global_portion + separator + local_digest)
-                if global_portion
-                else local_digest
-            )
-            result = combined[:max_chars]
-            logger.info(
-                "Combined digest: global=%d chars + local=%d chars (max=%d)",
-                len(global_digest),
-                len(local_digest),
-                max_chars,
-            )
-            return result
-
-        # local is larger than budget (or separator leaves no room) — local alone wins.
-        logger.info(
-            "Combined digest: global=%d chars + local=%d chars (max=%d)",
-            len(global_digest),
-            len(local_digest),
-            max_chars,
-        )
-        return local_digest[:max_chars]
 
     # ------------------------------------------------------------------
     # Override management

@@ -410,14 +410,14 @@ class ImplementPhase:
             issue, branch, reset_for_retry=reset_for_retry
         )
 
-        # Capture memory digest hash before agent runs
+        # Capture items.jsonl hash before agent runs (for outcome tracking)
         import hashlib  # noqa: PLC0415
 
-        digest_path = self._config.memory_dir / "digest.md"
+        items_path = self._config.memory_dir / "items.jsonl"
         digest_hash = ""
-        if digest_path.exists():
+        if items_path.exists():
             with contextlib.suppress(OSError):
-                digest_hash = hashlib.sha256(digest_path.read_bytes()).hexdigest()[:16]
+                digest_hash = hashlib.sha256(items_path.read_bytes()).hexdigest()[:16]
         self._state.set_digest_hash(issue.id, digest_hash)
 
         # Enrich the task with comments so the agent can find the plan

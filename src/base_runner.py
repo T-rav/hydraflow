@@ -11,10 +11,8 @@ from typing import TYPE_CHECKING, ClassVar
 
 from agent_cli import build_agent_command
 from config import HydraFlowConfig
-from context_cache import ContextSectionCache
 from events import EventBus
 from execution import get_default_runner
-from memory import load_memory_digest
 from models import LoopResult, TranscriptEventData
 from prompt_telemetry import PromptTelemetry, parse_command_tool_model
 from runner_utils import (
@@ -51,7 +49,6 @@ class BaseRunner:
         self._bus = event_bus
         self._active_procs: set[asyncio.subprocess.Process] = set()
         self._runner = runner or get_default_runner()
-        self._context_cache = ContextSectionCache(config)
         self._prompt_telemetry = PromptTelemetry(config)
         self._last_context_stats: dict[str, int] = {"cache_hits": 0, "cache_misses": 0}
         self._hindsight = hindsight
@@ -183,13 +180,10 @@ class BaseRunner:
         Returns ``(manifest_section, memory_section)`` where each is an
         empty string when the corresponding file is missing.
 
-        When a :class:`HindsightClient` is configured, the memory section is
-        populated via semantic recall instead of the file-based digest.  If
-        recall returns nothing, the file-based digest is used as fallback.
+        Memory is populated exclusively via Hindsight semantic recall.  If
+        Hindsight is not configured, the memory section is empty and agents
+        operate without injected context.
         """
-        cache_hits = 0
-        cache_misses = 0
-
         manifest_section = ""
 
         memory_section = ""
@@ -230,40 +224,6 @@ class BaseRunner:
             except Exception:  # noqa: BLE001
                 pass  # Enhancement — must not interrupt pipeline
 
-        # Fallback to file-based digest when Hindsight is absent or returned nothing.
-        # When hindsight_exclusive is set and a client is configured, skip file-based.
-        skip_file = self._hindsight and getattr(
-            self._config, "hindsight_exclusive", False
-        )
-        if not memory_raw and not skip_file:
-            digest_path = self._config.data_path("memory", "digest.md")
-            digest, digest_hit = self._context_cache.get_or_load(
-                key="memory_digest",
-                source_path=digest_path,
-                loader=load_memory_digest,
-            )
-            cache_hits += 1 if digest_hit else 0
-            cache_misses += 0 if digest_hit else 1
-            memory_raw = digest
-
-        # Load global factory memory and combine with local digest.
-        try:
-            from global_memory import GlobalMemoryStore  # noqa: PLC0415
-
-            global_store = GlobalMemoryStore(
-                Path(self._config.data_root).parent / "global_memory"
-            )
-            global_digest = global_store.load_global_digest()
-            if global_digest:
-                memory_raw = global_store.get_combined_digest(
-                    local_digest=memory_raw,
-                    max_chars=self._config.max_memory_prompt_chars,
-                )
-        except ImportError:
-            pass
-        except Exception:
-            self._log.debug("Global memory recall failed", exc_info=True)
-
         # Assemble the memory section from all available banks.
         # Cap the combined section at max_memory_prompt_chars.
         combined_parts: list[str] = []
@@ -282,8 +242,8 @@ class BaseRunner:
             memory_section = f"\n\n{combined}"
 
         self._last_context_stats = {
-            "cache_hits": cache_hits,
-            "cache_misses": cache_misses,
+            "cache_hits": 0,
+            "cache_misses": 0,
             "context_chars_before": len(memory_raw),
             "context_chars_after": len(manifest_section) + len(memory_section),
         }
