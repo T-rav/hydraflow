@@ -46,3 +46,26 @@ async def test_review_insights_recalled(base_runner):
 
     assert "Common Review Patterns" in memory_section
     assert "missing tests flagged 5 times" in memory_section
+
+
+@pytest.mark.asyncio
+async def test_harness_insights_recalled(base_runner):
+    """HARNESS_INSIGHTS bank should be recalled and injected into prompt."""
+    memories = {
+        Bank.LEARNINGS: [],
+        Bank.TROUBLESHOOTING: [],
+        Bank.RETROSPECTIVES: [],
+        Bank.REVIEW_INSIGHTS: [],
+        Bank.HARNESS_INSIGHTS: [_make_memory("CI timeout in pytest-xdist on macOS")],
+    }
+
+    async def mock_recall(client, bank, query, *, limit=10):
+        return memories.get(bank, [])
+
+    with patch("hindsight.recall_safe", side_effect=mock_recall):
+        _, memory_section = await base_runner._inject_manifest_and_memory(
+            query_context="fix CI pipeline"
+        )
+
+    assert "Known Pipeline Patterns" in memory_section
+    assert "CI timeout" in memory_section
