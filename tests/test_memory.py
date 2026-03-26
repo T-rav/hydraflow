@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -727,8 +728,6 @@ class TestMemorySyncWorkerSync:
         state = MagicMock()
         state.get_memory_state.return_value = ([], "", None)
         bus = MagicMock()
-        prs = MagicMock()
-        prs.create_issue = AsyncMock(return_value=101)
 
         items_path = config.data_path("memory", "items.jsonl")
         items_path.parent.mkdir(parents=True, exist_ok=True)
@@ -745,15 +744,19 @@ class TestMemorySyncWorkerSync:
         with items_path.open("w") as f:
             f.write(json.dumps(item) + "\n")
 
-        worker = MemorySyncWorker(config, state, bus, prs=prs)
+        worker = MemorySyncWorker(config, state, bus)
         await worker.sync()
 
-        prs.create_issue.assert_awaited_once()
-        args = prs.create_issue.call_args[0]
-        assert "[ADR] Draft decision from memory #" in args[0]
-        assert "## Decision" in args[1]
-        assert "<Chosen architecture/workflow shift>" not in args[1]
-        assert args[2] == [config.find_label[0]]
+        adr_decisions_path = config.data_path("memory", "adr_decisions.jsonl")
+        assert adr_decisions_path.exists()
+        entries = []
+        for line in adr_decisions_path.read_text().splitlines():
+            with contextlib.suppress(json.JSONDecodeError):
+                entries.append(json.loads(line))
+        assert len(entries) == 1
+        assert "[ADR] Draft decision from memory #" in entries[0]["title"]
+        assert "## Decision" in entries[0]["body"]
+        assert "<Chosen architecture/workflow shift>" not in entries[0]["body"]
 
     @pytest.mark.asyncio
     async def test_sync_rejects_invalid_adr_candidate_and_deduplicates(
@@ -765,8 +768,6 @@ class TestMemorySyncWorkerSync:
         state = MagicMock()
         state.get_memory_state.return_value = ([], "", None)
         bus = MagicMock()
-        prs = MagicMock()
-        prs.create_issue = AsyncMock(return_value=101)
 
         items_path = config.data_path("memory", "items.jsonl")
         items_path.parent.mkdir(parents=True, exist_ok=True)
@@ -783,7 +784,7 @@ class TestMemorySyncWorkerSync:
         with items_path.open("w") as f:
             f.write(json.dumps(item) + "\n")
 
-        worker = MemorySyncWorker(config, state, bus, prs=prs)
+        worker = MemorySyncWorker(config, state, bus)
         worker._build_adr_task = MagicMock(  # type: ignore[method-assign]
             return_value=(
                 "[ADR] Draft decision from memory #bad",
@@ -794,7 +795,14 @@ class TestMemorySyncWorkerSync:
         await worker.sync()
         await worker.sync()
 
-        prs.create_issue.assert_not_called()
+        # Invalid candidate should not produce any JSONL entries
+        adr_decisions_path = config.data_path("memory", "adr_decisions.jsonl")
+        entries = []
+        if adr_decisions_path.exists():
+            for line in adr_decisions_path.read_text().splitlines():
+                with contextlib.suppress(json.JSONDecodeError):
+                    entries.append(json.loads(line))
+        assert len(entries) == 0
 
     @pytest.mark.asyncio
     async def test_sync_adr_routing_deduplicates_by_source_issue(
@@ -806,8 +814,6 @@ class TestMemorySyncWorkerSync:
         state = MagicMock()
         state.get_memory_state.return_value = ([], "", None)
         bus = MagicMock()
-        prs = MagicMock()
-        prs.create_issue = AsyncMock(return_value=101)
 
         items_path = config.data_path("memory", "items.jsonl")
         items_path.parent.mkdir(parents=True, exist_ok=True)
@@ -824,24 +830,28 @@ class TestMemorySyncWorkerSync:
         with items_path.open("w") as f:
             f.write(json.dumps(item) + "\n")
 
-        worker = MemorySyncWorker(config, state, bus, prs=prs)
-        # Sync twice with the same items — ADR should only be created once
+        worker = MemorySyncWorker(config, state, bus)
+        # Sync twice with the same items — ADR should only be written once
         await worker.sync()
         await worker.sync()
 
-        assert prs.create_issue.await_count == 1
+        adr_decisions_path = config.data_path("memory", "adr_decisions.jsonl")
+        entries = []
+        if adr_decisions_path.exists():
+            for line in adr_decisions_path.read_text().splitlines():
+                with contextlib.suppress(json.JSONDecodeError):
+                    entries.append(json.loads(line))
+        assert len(entries) == 1
 
     @pytest.mark.asyncio
     async def test_sync_adr_deduplicates_by_topic_content(self, tmp_path: Path) -> None:
-        """Two memory items about the same topic should only create one ADR issue."""
+        """Two memory items about the same topic should only write one JSONL entry."""
         import json
 
         config = ConfigFactory.create(repo_root=tmp_path)
         state = MagicMock()
         state.get_memory_state.return_value = ([], "", None)
         bus = MagicMock()
-        prs = MagicMock()
-        prs.create_issue = AsyncMock(return_value=101)
 
         items_path = config.data_path("memory", "items.jsonl")
         items_path.parent.mkdir(parents=True, exist_ok=True)
@@ -871,10 +881,16 @@ class TestMemorySyncWorkerSync:
             for it in items:
                 f.write(json.dumps(it) + "\n")
 
-        worker = MemorySyncWorker(config, state, bus, prs=prs)
+        worker = MemorySyncWorker(config, state, bus)
         await worker.sync()
 
-        assert prs.create_issue.await_count == 1
+        adr_decisions_path = config.data_path("memory", "adr_decisions.jsonl")
+        entries = []
+        if adr_decisions_path.exists():
+            for line in adr_decisions_path.read_text().splitlines():
+                with contextlib.suppress(json.JSONDecodeError):
+                    entries.append(json.loads(line))
+        assert len(entries) == 1
 
     @pytest.mark.asyncio
     async def test_sync_adr_skips_topic_covered_by_existing_adr_file(
@@ -891,8 +907,6 @@ class TestMemorySyncWorkerSync:
         state = MagicMock()
         state.get_memory_state.return_value = ([], "", None)
         bus = MagicMock()
-        prs = MagicMock()
-        prs.create_issue = AsyncMock(return_value=101)
 
         items_path = config.data_path("memory", "items.jsonl")
         items_path.parent.mkdir(parents=True, exist_ok=True)
@@ -909,10 +923,14 @@ class TestMemorySyncWorkerSync:
         with items_path.open("w") as f:
             f.write(json.dumps(item) + "\n")
 
-        worker = MemorySyncWorker(config, state, bus, prs=prs)
+        worker = MemorySyncWorker(config, state, bus)
         await worker.sync()
 
-        prs.create_issue.assert_not_called()
+        adr_decisions_path = config.data_path("memory", "adr_decisions.jsonl")
+        assert (
+            not adr_decisions_path.exists()
+            or adr_decisions_path.read_text().strip() == ""
+        )
 
     def test_normalize_adr_topic_strips_prefixes(self) -> None:
         from phase_utils import normalize_adr_topic
@@ -1688,27 +1706,29 @@ class TestRouteAdrCandidatesPerItemIsolation:
     """Per-item try/except in _route_adr_candidates prevents one failure from aborting routing."""
 
     @pytest.mark.asyncio
-    async def test_create_issue_error_skips_candidate_continues_to_next(
+    async def test_exception_in_item_processing_skips_and_continues_to_next(
         self, tmp_path: Path
     ) -> None:
+        """An exception during per-item processing should not abort the loop."""
+
         config = ConfigFactory.create(repo_root=tmp_path)
         state = MagicMock()
         state.get_memory_state.return_value = ([], "", None)
         bus = MagicMock()
-        prs = AsyncMock()
+
+        worker = MemorySyncWorker(config, state, bus)
 
         call_count = 0
+        original_validate = worker._validate_adr_task
 
-        async def fail_then_succeed(*args: object, **kwargs: object) -> int:
+        def fail_then_succeed(body: str) -> list[str]:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                raise RuntimeError("GitHub API failure")
-            return 999
+                raise RuntimeError("Unexpected processing error")
+            return original_validate(body)
 
-        prs.create_issue = AsyncMock(side_effect=fail_then_succeed)
-
-        worker = MemorySyncWorker(config, state, bus, prs=prs)
+        worker._validate_adr_task = fail_then_succeed  # type: ignore[method-assign]
 
         # Both issues are architecture candidates (contain "architecture" keyword)
         issues = [
@@ -1738,7 +1758,7 @@ class TestRouteAdrCandidatesPerItemIsolation:
         ):
             await worker._route_adr_candidates(issues)
 
-        # First call failed, second succeeded — both were attempted
+        # First call raised, second was processed — validate was called twice
         assert call_count == 2
 
 

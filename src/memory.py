@@ -420,11 +420,14 @@ class MemorySyncWorker:
         return result
 
     async def _route_adr_candidates(self, issues: list[MemoryIssueData]) -> None:
-        """Create ADR draft tasks from architecture-shift memory issues."""
-        from phase_utils import load_existing_adr_topics, normalize_adr_topic
+        """Write ADR draft decisions from architecture-shift memory issues to JSONL."""
+        import json as _json  # noqa: PLC0415
+        from datetime import UTC, datetime  # noqa: PLC0415
 
-        if self._prs is None:
-            return
+        from phase_utils import (  # noqa: PLC0415
+            load_existing_adr_topics,
+            normalize_adr_topic,
+        )
 
         seen = self._load_adr_source_ids()
         existing_topics = load_existing_adr_topics(self._config.repo_root)
@@ -476,15 +479,23 @@ class MemorySyncWorker:
                     )
                     continue
 
-                issue_number = await self._prs.create_issue(
-                    adr_title,
-                    adr_body,
-                    list(self._config.find_label[:1]),
-                )
-                if issue_number:
+                try:
+                    path = self._config.data_path("memory", "adr_decisions.jsonl")
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    rec = {
+                        "title": adr_title,
+                        "body": adr_body,
+                        "type": "follow_up",
+                        "timestamp": datetime.now(UTC).isoformat(),
+                    }
+                    with path.open("a") as f:
+                        f.write(_json.dumps(rec) + "\n")
+                    logger.info("ADR decision recorded: %s", adr_title)
                     seen.add(source_id)
                     batch_topics.add(topic_key)
                     created += 1
+                except OSError:
+                    logger.debug("Failed to write ADR decision", exc_info=True)
             except Exception:
                 logger.exception(
                     "Error routing ADR candidate from memory issue #%s — skipping",
