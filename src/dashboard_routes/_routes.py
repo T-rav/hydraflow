@@ -2431,11 +2431,6 @@ def create_router(
             "Captures post-merge outcomes and identifies recurring delivery patterns.",
         ),
         (
-            "metrics",
-            "Metrics",
-            "Refreshes operational metrics and dashboards from state and GitHub data.",
-        ),
-        (
             "review_insights",
             "Review Insights",
             "Aggregates recurring review feedback into improvement opportunities.",
@@ -2465,7 +2460,6 @@ def create_router(
     # Workers that have independent configurable intervals
     _INTERVAL_WORKERS = {
         "memory_sync",
-        "metrics",
         "pr_unsticker",
         "pipeline_poller",
         "report_issue",
@@ -2550,8 +2544,6 @@ def create_router(
             elif name in _INTERVAL_WORKERS:
                 if name == "memory_sync":
                     interval = _cfg.memory_sync_interval
-                elif name == "metrics":
-                    interval = _cfg.metrics_sync_interval
                 elif name == "pr_unsticker":
                     interval = _cfg.pr_unstick_interval
                 elif name == "pipeline_poller":

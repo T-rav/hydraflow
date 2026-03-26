@@ -1556,7 +1556,6 @@ class ControlStatusConfig(BaseModel):
     improve_label: list[str] = Field(default_factory=list)
     memory_label: list[str] = Field(default_factory=list)
     transcript_label: list[str] = Field(default_factory=list)
-    manifest_label: list[str] = Field(default_factory=list)
     max_triagers: int = 0
     max_workers: int = 0
     max_planners: int = 0
@@ -1930,13 +1929,6 @@ class WorkerResultMeta(TypedDict, total=False):
     duration_seconds: float
     error: str | None
     commits: int
-
-
-class ManifestRefreshSummary(TypedDict):
-    """Return shape of ``ManifestRefreshLoop._do_work``."""
-
-    hash: str
-    length: int
 
 
 class TimelineStageMetadata(TypedDict, total=False):

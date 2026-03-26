@@ -130,13 +130,10 @@ class HydraFlowOrchestrator:
         # Extracted component managers
         bg_loop_registry: dict[str, BaseBackgroundLoop] = {
             "memory_sync": svc.memory_sync_bg,
-            "metrics": svc.metrics_sync_bg,
             "pr_unsticker": svc.pr_unsticker_loop,
-            "manifest_refresh": svc.manifest_refresh_loop,
             "report_issue": svc.report_issue_loop,
             "epic_monitor": svc.epic_monitor_loop,
             "epic_sweeper": svc.epic_sweeper_loop,
-            "verify_monitor": svc.verify_monitor_loop,
             "worktree_gc": svc.worktree_gc_loop,
             "runs_gc": svc.runs_gc_loop,
             "adr_reviewer": svc.adr_reviewer_loop,
@@ -836,13 +833,10 @@ class HydraFlowOrchestrator:
             ("review", self._review_loop),
             ("hitl", self._hitl_loop),
             ("memory_sync", self._memory_sync_loop),
-            ("metrics", self._metrics_sync_loop),
             ("pr_unsticker", self._svc.pr_unsticker_loop.run),
-            ("manifest_refresh", self._manifest_refresh_bg_loop),
             ("report_issue", self._svc.report_issue_loop.run),
             ("epic_monitor", self._svc.epic_monitor_loop.run),
             ("epic_sweeper", self._svc.epic_sweeper_loop.run),
-            ("verify_monitor", self._svc.verify_monitor_loop.run),
             ("worktree_gc", self._svc.worktree_gc_loop.run),
             ("runs_gc", self._svc.runs_gc_loop.run),
             ("adr_reviewer", self._svc.adr_reviewer_loop.run),
@@ -1066,14 +1060,6 @@ class HydraFlowOrchestrator:
     async def _memory_sync_loop(self) -> None:
         """Continuously poll ``hydraflow-memory`` issues and rebuild the digest."""
         await self._svc.memory_sync_bg.run()
-
-    async def _metrics_sync_loop(self) -> None:
-        """Continuously aggregate and persist metrics snapshots."""
-        await self._svc.metrics_sync_bg.run()
-
-    async def _manifest_refresh_bg_loop(self) -> None:
-        """Continuously rescan the repo and update the project manifest."""
-        await self._svc.manifest_refresh_loop.run()
 
     async def _post_run_hooks(
         self,

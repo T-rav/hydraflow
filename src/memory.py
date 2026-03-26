@@ -14,9 +14,7 @@ from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from execution import SubprocessRunner, get_default_runner
 from file_util import atomic_write
-from manifest import ProjectManifestManager
 from manifest_curator import CuratedLearning, CuratedManifestStore
-from manifest_issue_syncer import ManifestIssueSyncer
 from models import (
     MEMORY_TYPE_DISPLAY_ORDER,
     MemoryIssueData,
@@ -204,8 +202,6 @@ class MemorySyncWorker:
         prs: PRPort | None = None,
         *,
         manifest_store: CuratedManifestStore | None = None,
-        manifest_manager: ProjectManifestManager | None = None,
-        manifest_syncer: ManifestIssueSyncer | None = None,
         hindsight: HindsightClient | None = None,
         dolt: DoltBackend | None = None,
         wal: HindsightWAL | None = None,
@@ -216,10 +212,6 @@ class MemorySyncWorker:
         self._runner = runner or get_default_runner()
         self._prs = prs
         self._manifest_store = manifest_store or CuratedManifestStore(config)
-        self._manifest_manager = manifest_manager or ProjectManifestManager(
-            config, curator=self._manifest_store
-        )
-        self._manifest_syncer = manifest_syncer
         self._hindsight = hindsight
         self._dolt = dolt
         self._wal = wal
@@ -266,7 +258,6 @@ class MemorySyncWorker:
                 pruned = self._prune_stale_items([])
             self._state.update_memory_state([], prev_hash)
             self._manifest_store.update_from_learnings([])
-            await self._refresh_manifest("memory-sync-empty")
             return {
                 "action": "synced",
                 "item_count": 0,
@@ -353,7 +344,6 @@ class MemorySyncWorker:
         digest_hash = hashlib.sha256(digest.encode()).hexdigest()[:16]
         self._state.update_memory_state(current_ids, digest_hash)
         self._manifest_store.update_from_learnings(learnings)
-        await self._refresh_manifest("memory-sync")
         await self._route_adr_candidates(issues)
         closed, _close_failed = await self._close_synced_issues(issues)
 
@@ -612,25 +602,6 @@ class MemorySyncWorker:
 
     def _save_adr_source_ids(self, issue_ids: set[int]) -> None:
         self._adr_sources.set_all({str(i) for i in issue_ids})
-
-    async def _refresh_manifest(self, source: str) -> None:
-        """Regenerate the manifest and optionally sync it upstream."""
-        if self._manifest_manager is None:
-            return
-        result = self._manifest_manager.refresh()
-        self._state.update_manifest_state(result.digest_hash)
-        logger.info(
-            "Manifest refreshed via %s (hash=%s, chars=%d)",
-            source,
-            result.digest_hash,
-            len(result.content),
-        )
-        if self._manifest_syncer is not None:
-            await self._manifest_syncer.sync(
-                result.content,
-                result.digest_hash,
-                source=source,
-            )
 
     @staticmethod
     def _extract_learning(body: str) -> str:

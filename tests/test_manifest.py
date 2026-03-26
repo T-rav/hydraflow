@@ -583,17 +583,9 @@ class TestManifestStateTracking:
 class TestManifestConfig:
     """Tests for manifest-related config fields."""
 
-    def test_config__manifest_refresh_interval_default(self) -> None:
-        config = ConfigFactory.create()
-        assert config.manifest_refresh_interval == 3600
-
     def test_config__max_manifest_prompt_chars_default(self) -> None:
         config = ConfigFactory.create()
         assert config.max_manifest_prompt_chars == 2000
-
-    def test_config__manifest_refresh_interval_custom(self) -> None:
-        config = ConfigFactory.create(manifest_refresh_interval=600)
-        assert config.manifest_refresh_interval == 600
 
     def test_config__max_manifest_prompt_chars_custom(self) -> None:
         config = ConfigFactory.create(max_manifest_prompt_chars=5000)

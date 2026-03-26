@@ -14,7 +14,6 @@ from config import HydraFlowConfig
 from context_cache import ContextSectionCache
 from events import EventBus
 from execution import get_default_runner
-from manifest import load_project_manifest
 from memory import load_memory_digest
 from models import LoopResult, TranscriptEventData
 from prompt_telemetry import PromptTelemetry, parse_command_tool_model
@@ -192,16 +191,6 @@ class BaseRunner:
         cache_misses = 0
 
         manifest_section = ""
-        manifest_path = self._config.data_path("manifest", "manifest.md")
-        manifest, manifest_hit = self._context_cache.get_or_load(
-            key="manifest",
-            source_path=manifest_path,
-            loader=load_project_manifest,
-        )
-        cache_hits += 1 if manifest_hit else 0
-        cache_misses += 0 if manifest_hit else 1
-        if manifest:
-            manifest_section = f"\n\n## Project Context\n\n{manifest}"
 
         memory_section = ""
         memory_raw = ""
@@ -295,7 +284,7 @@ class BaseRunner:
         self._last_context_stats = {
             "cache_hits": cache_hits,
             "cache_misses": cache_misses,
-            "context_chars_before": len(manifest) + len(memory_raw),
+            "context_chars_before": len(memory_raw),
             "context_chars_after": len(manifest_section) + len(memory_section),
         }
 

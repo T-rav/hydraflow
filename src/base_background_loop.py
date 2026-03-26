@@ -2,8 +2,7 @@
 
 Extracts the shared run-loop, error handling, success reporting,
 interval management, and enabled-check logic that was previously
-duplicated across memory_sync_loop, metrics_sync_loop,
-pr_unsticker_loop, and manifest_refresh_loop.
+duplicated across memory_sync_loop and pr_unsticker_loop.
 """
 
 from __future__ import annotations
