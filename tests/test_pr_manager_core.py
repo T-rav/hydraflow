@@ -111,10 +111,7 @@ async def test_post_comment_calls_gh_issue_comment(config, event_bus):
     mock_create.assert_awaited_once()
     call_args = mock_create.call_args
     cmd = call_args.args if call_args.args else call_args[0]
-    assert "gh" in cmd
-    assert "issue" in cmd
-    assert "comment" in cmd
-    assert "42" in cmd
+    assert cmd[:4] == ("gh", "issue", "comment", "42")
     assert "--body-file" in cmd
     # Body should NOT be passed inline
     assert "This is a plan comment" not in cmd
@@ -168,10 +165,7 @@ async def test_post_pr_comment_calls_gh_pr_comment(config, event_bus):
     mock_create.assert_awaited_once()
     call_args = mock_create.call_args
     cmd = call_args.args if call_args.args else call_args[0]
-    assert "gh" in cmd
-    assert "pr" in cmd
-    assert "comment" in cmd
-    assert "101" in cmd
+    assert cmd[:4] == ("gh", "pr", "comment", "101")
     assert "--body-file" in cmd
     assert "Review summary here" not in cmd
 
@@ -227,10 +221,7 @@ async def test_submit_review_approve_calls_correct_flag(config, event_bus):
         if mock_create.call_args.args
         else mock_create.call_args[0]
     )
-    assert "gh" in cmd
-    assert "pr" in cmd
-    assert "review" in cmd
-    assert "101" in cmd
+    assert cmd[:4] == ("gh", "pr", "review", "101")
     assert "--approve" in cmd
     assert "--body-file" in cmd
     assert "Looks good" not in cmd
@@ -413,9 +404,7 @@ async def test_create_issue_passes_correct_gh_args(config, event_bus, tmp_path):
         await mgr.create_issue("Bug found", "Details here", ["bug"])
 
     args = mock_create.call_args[0]
-    assert "gh" in args
-    assert "issue" in args
-    assert "create" in args
+    assert args[:3] == ("gh", "issue", "create")
     assert "--title" in args
     assert "Bug found" in args
     assert "--label" in args
@@ -807,9 +796,7 @@ async def test_create_pr_calls_gh_pr_create(config, event_bus, issue):
         await manager.create_pr(issue, "agent/issue-42")
 
     args = mock_create.call_args[0]
-    assert args[0] == "gh"
-    assert "pr" in args
-    assert "create" in args
+    assert args[:3] == ("gh", "pr", "create")
 
 
 @pytest.mark.asyncio
@@ -1033,10 +1020,7 @@ async def test_merge_pr_calls_gh_pr_merge(config, event_bus):
     assert result is True
     # Second call is the merge command
     args = mock.call_args_list[1][0]
-    assert args[0] == "gh"
-    assert "pr" in args
-    assert "merge" in args
-    assert "101" in args
+    assert args[:4] == ("gh", "pr", "merge", "101")
 
 
 @pytest.mark.asyncio
@@ -1176,10 +1160,7 @@ async def test_get_pr_diff_returns_diff_content(config, event_bus):
     assert diff == expected_diff
 
     args = mock_create.call_args[0]
-    assert args[0] == "gh"
-    assert "pr" in args
-    assert "diff" in args
-    assert "101" in args
+    assert args[:4] == ("gh", "pr", "diff", "101")
 
 
 @pytest.mark.asyncio
@@ -1927,9 +1908,7 @@ async def test_update_issue_body_delegates_to_run_with_body_file(config, event_b
     mock_rwbf.assert_called_once()
     call_kwargs = mock_rwbf.call_args
     assert call_kwargs.kwargs["body"] == "New body"
-    assert "42" in call_kwargs.args
-    assert "issue" in call_kwargs.args
-    assert "edit" in call_kwargs.args
+    assert call_kwargs.args[:4] == ("gh", "issue", "edit", "42")
 
 
 # ---------------------------------------------------------------------------
@@ -2408,8 +2387,7 @@ class TestUpdateIssueBody:
 
         mock_create.assert_called_once()
         cmd = mock_create.call_args[0]
-        assert "issue" in cmd
-        assert "edit" in cmd
+        assert cmd[:4] == ("gh", "issue", "edit", "42")
         assert "--body-file" in cmd
 
     @pytest.mark.asyncio
@@ -2578,10 +2556,7 @@ class TestUpdatePrTitle:
             if mock_create.call_args.args
             else mock_create.call_args[0]
         )
-        assert "gh" in cmd
-        assert "pr" in cmd
-        assert "edit" in cmd
-        assert "123" in cmd
+        assert cmd[:4] == ("gh", "pr", "edit", "123")
         assert "--title" in cmd
         assert "Fixes #42: Fix bug" in cmd
 
