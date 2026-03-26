@@ -257,6 +257,24 @@ class BaseRunner:
             cache_misses += 0 if digest_hit else 1
             memory_raw = digest
 
+        # Load global factory memory and combine with local digest.
+        try:
+            from global_memory import GlobalMemoryStore  # noqa: PLC0415
+
+            global_store = GlobalMemoryStore(
+                Path(self._config.data_root).parent / "global_memory"
+            )
+            global_digest = global_store.load_global_digest()
+            if global_digest:
+                memory_raw = global_store.get_combined_digest(
+                    local_digest=memory_raw,
+                    max_chars=self._config.max_memory_prompt_chars,
+                )
+        except ImportError:
+            pass
+        except Exception:
+            self._log.debug("Global memory recall failed", exc_info=True)
+
         # Assemble the memory section from all available banks.
         # Cap the combined section at max_memory_prompt_chars.
         combined_parts: list[str] = []
