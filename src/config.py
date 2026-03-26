@@ -1370,7 +1370,13 @@ class HydraFlowConfig(BaseModel):
 
     @property
     def memory_sync_labels(self) -> list[str]:
-        """Return labels fetched by memory sync (memory + improve + transcript)."""
+        """Return labels fetched by memory sync (memory + improve + transcript).
+
+        .. deprecated::
+            Memory sync now reads from local JSONL instead of GitHub issues.
+            This property is retained for backward compatibility but is no
+            longer used by the memory sync loop.
+        """
         result: list[str] = []
         for label in [*self.memory_label, *self.improve_label, *self.transcript_label]:
             if label not in result:

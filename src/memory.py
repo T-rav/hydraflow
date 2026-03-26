@@ -138,60 +138,82 @@ def load_memory_digest(config: HydraFlowConfig) -> str:
     return content
 
 
+def _next_item_id() -> str:
+    """Generate a unique memory item ID."""
+    import uuid as _uuid  # noqa: PLC0415
+
+    return f"mem-{_uuid.uuid4().hex[:8]}"
+
+
 async def file_memory_suggestion(
     transcript: str,
     source: str,
     reference: str,
     config: HydraFlowConfig,
-    prs: PRPort,
-    state: StateTracker,
+    prs: PRPort | None = None,  # no longer needed — kept for signature compat
+    state: StateTracker | None = None,  # no longer needed — kept for signature compat
 ) -> None:
-    """Parse and file a memory suggestion from an agent transcript.
+    """Parse and store a memory suggestion from an agent transcript.
 
-    Actionable types (``config``, ``instruction``, ``code``) are routed
-    through HITL for human approval.  Knowledge-type suggestions follow
-    the normal improve-label flow.
+    Writes directly to local JSONL storage and Hindsight vector store.
+    No GitHub issues are created.
     """
+    import json as _json  # noqa: PLC0415
+
     suggestion = parse_memory_suggestion(transcript)
     if not suggestion:
         return
 
     memory_type = MemoryType(suggestion.get("type", "knowledge"))
-    body = build_memory_issue_body(
-        learning=suggestion["learning"],
-        context=suggestion["context"],
-        source=source,
-        reference=reference,
-        memory_type=memory_type.value,
-    )
-    title = f"[Memory] {suggestion['title']}"
+    item = {
+        "id": _next_item_id(),
+        "title": suggestion["title"],
+        "learning": suggestion["learning"],
+        "context": suggestion.get("context", ""),
+        "memory_type": memory_type.value,
+        "source": source,
+        "reference": reference,
+        "created_at": datetime.now(UTC).isoformat(),
+    }
 
-    # Routing: when auto-approve is on, actionable types skip HITL and go directly to improve pipeline
-    if config.memory_auto_approve:
-        labels = list(config.improve_label)
-        hitl_cause = None
-    elif MemoryType.is_actionable(memory_type):
-        labels = list(config.improve_label) + list(config.hitl_label)
-        hitl_cause = f"Actionable memory suggestion ({memory_type.value})"
-    else:
-        labels = list(config.improve_label)
-        hitl_cause = None
+    # Write to JSONL
+    try:
+        items_path = config.data_path("memory", "items.jsonl")
+        items_path.parent.mkdir(parents=True, exist_ok=True)
+        with items_path.open("a") as f:
+            f.write(_json.dumps(item) + "\n")
+    except OSError:
+        logger.exception("Failed to write memory item to JSONL")
+        return
 
-    issue_number = await prs.create_issue(title, body, labels)
-    if issue_number:
-        if hitl_cause is not None:
-            state.set_hitl_origin(issue_number, config.improve_label[0])
-            state.set_hitl_cause(issue_number, hitl_cause)
-        logger.info(
-            "Filed %s memory suggestion as issue #%d: %s",
-            memory_type.value,
-            issue_number,
-            suggestion["title"],
+    # Write to Hindsight if available
+    try:
+        from hindsight import Bank, schedule_retain  # noqa: PLC0415
+
+        schedule_retain(
+            Bank.LEARNINGS,
+            item["learning"],
+            metadata={
+                "source": source,
+                "type": memory_type.value,
+                "title": item["title"],
+            },
         )
+    except ImportError:
+        pass
+    except Exception:  # noqa: BLE001
+        logger.debug("Hindsight retain failed for memory item %s", item["id"])
+
+    logger.info(
+        "Stored memory item %s: %s (%s)",
+        item["id"],
+        item["title"],
+        memory_type.value,
+    )
 
 
 class MemorySyncWorker:
-    """Polls ``hydraflow-memory`` issues and compiles them into a local digest."""
+    """Reads local JSONL memory items and compiles them into a local digest."""
 
     def __init__(
         self,
@@ -241,21 +263,38 @@ class MemorySyncWorker:
             record.memory_type,
         )
 
-    async def sync(self, issues: list[MemoryIssueData]) -> MemorySyncResult:
-        """Main sync entry point.
+    def _load_local_items(self) -> list[dict[str, object]]:
+        """Load memory items from items.jsonl."""
+        import json as _json  # noqa: PLC0415
 
-        *issues* is a list of dicts with ``number``, ``title``, ``body``,
-        and ``createdAt`` keys (from ``gh issue list --json``).
+        path = self._config.data_path("memory", "items.jsonl")
+        if not path.exists():
+            return []
+        items: list[dict[str, object]] = []
+        try:
+            for line in path.read_text().strip().splitlines():
+                try:
+                    items.append(_json.loads(line))
+                except _json.JSONDecodeError:
+                    continue
+        except OSError:
+            logger.warning("Failed to read memory items from %s", path)
+        return items
+
+    async def sync(
+        self, issues: list[MemoryIssueData] | None = None
+    ) -> MemorySyncResult:
+        """Build digest from local memory items.
+
+        The *issues* parameter is DEPRECATED and ignored.  Items are read
+        from ``items.jsonl`` instead of GitHub.
 
         Returns stats dict for event publishing.
         """
-        current_ids = sorted(i["number"] for i in issues)
+        local_items = self._load_local_items()
         prev_ids, prev_hash, _ = self._state.get_memory_state()
 
-        if not issues:
-            pruned = 0
-            if self._config.memory_prune_stale_items:
-                pruned = self._prune_stale_items([])
+        if not local_items:
             self._state.update_memory_state([], prev_hash)
             self._manifest_store.update_from_learnings([])
             return {
@@ -263,37 +302,40 @@ class MemorySyncWorker:
                 "item_count": 0,
                 "compacted": False,
                 "digest_chars": 0,
-                "pruned": pruned,
-                "issues_closed": 0,
             }
 
-        # Extract learnings (now typed) and build digest
+        # Build CuratedLearning records from local items
         learnings: list[CuratedLearning] = []
-        for issue in issues:
+        for item in local_items:
             try:
-                body = issue.get("body", "")
-                learning = self._extract_learning(body)
-                created = issue.get("createdAt", "")
-                memory_type = self._extract_memory_type(body)
-                if learning:
-                    learnings.append(
-                        CuratedLearning(
-                            number=issue["number"],
-                            title=issue.get("title", ""),
-                            learning=learning,
-                            created_at=created,
-                            memory_type=memory_type,
-                            body=body,
-                        )
+                learning_text = str(item.get("learning", ""))
+                if not learning_text:
+                    continue
+                # Use hash of item id as a stable numeric identifier
+                item_id = str(item.get("id", ""))
+                # Generate a stable int from the item id for compatibility
+                num = abs(hash(item_id)) % (10**9) if item_id else 0
+                memory_type = _parse_memory_type(
+                    str(item.get("memory_type", "knowledge"))
+                )
+                learnings.append(
+                    CuratedLearning(
+                        number=num,
+                        title=str(item.get("title", "")),
+                        learning=learning_text,
+                        created_at=str(item.get("created_at", "")),
+                        memory_type=memory_type,
+                        body=learning_text,
                     )
+                )
             except Exception:
                 logger.exception(
-                    "Error extracting learning from memory issue #%s — skipping",
-                    issue.get("number", "?"),
+                    "Error processing local memory item %s — skipping",
+                    item.get("id", "?"),
                 )
 
         # Sort newest first
-        learnings.sort(key=lambda item: item.created_at, reverse=True)
+        learnings.sort(key=lambda rec: rec.created_at, reverse=True)
 
         # Build digest
         compacted = False
@@ -303,27 +345,13 @@ class MemorySyncWorker:
             digest = await self._compact_digest(learnings, max_chars)
             compacted = True
 
-        # Write individual items and digest to disk (skip when Hindsight is
-        # the exclusive write target).
+        # Write digest to disk (skip when Hindsight is the exclusive write target)
         if not self._hindsight:
-            items_dir = self._config.data_path("memory", "items")
-            items_dir.mkdir(parents=True, exist_ok=True)
-            for record in learnings:
-                num, learning, _, _ = self._coerce_learning_tuple(record)
-                item_path = items_dir / f"{num}.md"
-                item_path.write_text(learning)
-
-            # Atomic write of digest
             self._write_digest(digest)
-
-        # Prune stale item files (always — cleans up legacy files)
-        pruned = 0
-        if self._config.memory_prune_stale_items:
-            pruned = self._prune_stale_items(current_ids)
 
         # Dual-write learnings to Hindsight
         if self._hindsight:
-            from hindsight import Bank, retain_safe
+            from hindsight import Bank, retain_safe  # noqa: PLC0415
 
             for record in learnings:
                 num, learning, created, mtype = self._coerce_learning_tuple(record)
@@ -331,9 +359,9 @@ class MemorySyncWorker:
                     self._hindsight,
                     Bank.LEARNINGS,
                     learning,
-                    context=f"Issue #{num} ({mtype.value})",
+                    context=f"Item #{num} ({mtype.value})",
                     metadata={
-                        "issue_number": num,
+                        "item_id": num,
                         "memory_type": mtype.value,
                         "created_at": created,
                     },
@@ -341,92 +369,54 @@ class MemorySyncWorker:
                 )
 
         # Update state
+        item_ids = sorted(
+            abs(hash(str(item.get("id", "")))) % (10**9) for item in local_items
+        )
         digest_hash = hashlib.sha256(digest.encode()).hexdigest()[:16]
-        self._state.update_memory_state(current_ids, digest_hash)
+        self._state.update_memory_state(item_ids, digest_hash)
         self._manifest_store.update_from_learnings(learnings)
-        await self._route_adr_candidates(issues)
-        closed, _close_failed = await self._close_synced_issues(issues)
+
+        # Route ADR candidates from local items (convert to issue-like dicts)
+        adr_issues = self._local_items_to_issue_dicts(local_items)
+        await self._route_adr_candidates(adr_issues)
 
         return {
             "action": "synced",
             "item_count": len(learnings),
             "compacted": compacted,
             "digest_chars": len(digest),
-            "pruned": pruned,
-            "issues_closed": closed,
         }
 
-    def _should_auto_close_issue(self, issue: MemoryIssueData) -> bool:
-        """Return True only for canonical memory/transcript sync issues."""
-        title = str(issue.get("title", "")).strip()
-        labels = issue.get("labels", [])
-        if not isinstance(labels, list):
-            return False
-        has_memory_label = any(lbl in self._config.memory_label for lbl in labels)
-        has_transcript_label = any(
-            lbl in self._config.transcript_label for lbl in labels
-        )
-        is_memory = title.startswith("[Memory]") and has_memory_label
-        is_transcript = (
-            title.startswith("[Transcript Summary]") and has_transcript_label
-        )
-        return is_memory or is_transcript
-
-    def _prune_stale_items(self, current_ids: list[int]) -> int:
-        """Remove item files whose source issue is no longer active.
-
-        Returns the number of pruned files.
-        """
-        items_dir = self._config.data_path("memory", "items")
-        if not items_dir.is_dir():
-            return 0
-        active = set(current_ids)
-        pruned = 0
-        for path in items_dir.glob("*.md"):
-            try:
-                file_id = int(path.stem)
-            except ValueError:
-                continue
-            if file_id not in active:
-                path.unlink()
-                pruned += 1
-        if pruned:
-            logger.info("Pruned %d stale memory item files", pruned)
-        return pruned
-
-    async def _close_synced_issues(
-        self, issues: list[MemoryIssueData]
-    ) -> tuple[int, int]:
-        """Close synced memory issues when a PR port is available.
-
-        Returns ``(closed, failed)`` counts.
-        """
-        if self._prs is None:
-            return 0, 0
-        closed = 0
-        failed = 0
-        for issue in issues:
-            if not self._should_auto_close_issue(issue):
-                continue
-            issue_number = int(issue.get("number", 0))
-            if issue_number <= 0:
-                continue
-            try:
-                await self._prs.close_issue(issue_number)
-                closed += 1
-            except Exception as exc:  # noqa: BLE001
-                failed += 1
-                logger.warning(
-                    "Could not close synced memory issue #%d: %s",
-                    issue_number,
-                    exc,
+    @staticmethod
+    def _local_items_to_issue_dicts(
+        items: list[dict[str, object]],
+    ) -> list[MemoryIssueData]:
+        """Convert local JSONL items to MemoryIssueData dicts for ADR routing."""
+        result: list[MemoryIssueData] = []
+        for item in items:
+            item_id = str(item.get("id", ""))
+            num = abs(hash(item_id)) % (10**9) if item_id else 0
+            learning = str(item.get("learning", ""))
+            context = str(item.get("context", ""))
+            memory_type = str(item.get("memory_type", "knowledge"))
+            source = str(item.get("source", ""))
+            body = (
+                f"## Memory Suggestion\n\n"
+                f"**Type:** {memory_type}\n\n"
+                f"**Learning:** {learning}\n\n"
+                f"**Context:** {context}\n\n"
+                f"**Source:** {source}\n"
+            )
+            result.append(
+                MemoryIssueData(
+                    number=num,
+                    title=f"[Memory] {item.get('title', '')}",
+                    body=body,
+                    createdAt=str(item.get("created_at", "")),
+                    labels=["hydraflow-memory"],
                 )
-        logger.info(
-            "Memory sync auto-close summary: closed=%d failed=%d",
-            closed,
-            failed,
-        )
-        return closed, failed
+            )
+        return result
 
     async def _route_adr_candidates(self, issues: list[MemoryIssueData]) -> None:
         """Create ADR draft tasks from architecture-shift memory issues."""

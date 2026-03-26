@@ -378,7 +378,7 @@ def build_services(
         sleep_fn=callbacks.sleep_or_stop,
         interval_cb=callbacks.get_bg_worker_interval,
     )
-    memory_sync_bg = MemorySyncLoop(config, fetcher, memory_sync, deps=loop_deps)
+    memory_sync_bg = MemorySyncLoop(config, memory_sync, deps=loop_deps)
     pr_unsticker_loop = PRUnstickerLoop(config, pr_unsticker, prs, deps=loop_deps)
     report_issue_loop = ReportIssueLoop(
         config=config,
