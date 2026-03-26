@@ -371,6 +371,20 @@ class HealthMonitorLoop(BaseBackgroundLoop):
                 patterns = detect_log_patterns(entries)
                 known = load_known_patterns(self._config.memory_dir)
 
+                # Enrich with EventBus context
+                try:
+                    from log_ingestion import (
+                        enrich_patterns_with_events,  # noqa: PLC0415
+                    )
+
+                    history = self._bus.get_history() if hasattr(self, "_bus") else []
+                    event_dicts = [
+                        {"type": e.type.value, "data": e.data} for e in history
+                    ]
+                    enrich_patterns_with_events(patterns, event_dicts)
+                except Exception:  # noqa: BLE001
+                    pass  # enrichment is best-effort
+
                 log_result = await file_log_patterns(
                     patterns, known, self._prs, self._config
                 )

@@ -6,9 +6,10 @@ import json
 import logging
 import re
 from collections import defaultdict
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
@@ -142,6 +143,7 @@ class LogPattern(BaseModel):
     sample_issues: list[int]
     first_seen: str
     last_seen: str
+    phase_context: list[str] = Field(default_factory=list)
 
 
 def detect_log_patterns(
@@ -186,6 +188,42 @@ def detect_log_patterns(
         )
 
     return sorted(patterns, key=lambda p: p.count, reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Part 6: EventBus Cross-Reference (bead: ysf)
+# ---------------------------------------------------------------------------
+
+
+def enrich_patterns_with_events(
+    patterns: list[LogPattern],
+    event_history: list[dict[str, Any]],
+) -> None:
+    """Enrich log patterns with phase context from EventBus history.
+
+    Mutates patterns in-place, adding phase_context field.
+    """
+    for pattern in patterns:
+        if not pattern.sample_issues:
+            continue
+        phase_context: list[str] = []
+        for issue_id in pattern.sample_issues[:3]:
+            # Find phase events for this issue
+            issue_events = [
+                e
+                for e in event_history
+                if e.get("data", {}).get("issue") == issue_id
+                and e.get("type") in {"phase_change", "worker_update"}
+            ]
+            for evt in issue_events[-2:]:  # last 2 events per issue
+                phase = evt.get("data", {}).get("phase", "unknown")
+                status = evt.get("data", {}).get("status", "")
+                ctx = f"issue #{issue_id}: {phase}"
+                if status:
+                    ctx += f" ({status})"
+                if ctx not in phase_context:
+                    phase_context.append(ctx)
+        pattern.phase_context = phase_context[:5]  # cap at 5
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +296,7 @@ def _build_log_memory_body(pattern: LogPattern) -> str:
     """Format a [Memory] issue body for a novel log pattern."""
     samples = "\n".join(f"- `{m}`" for m in pattern.sample_messages)
     affected = pattern.sample_issues if pattern.sample_issues else "N/A"
-    return (
+    body = (
         f"**Type:** instruction\n"
         f"**Learning:** Recurring {pattern.level} in `{pattern.source_module}`: "
         f"{pattern.fingerprint}\n\n"
@@ -267,8 +305,15 @@ def _build_log_memory_body(pattern: LogPattern) -> str:
         f"**Sample messages:**\n"
         f"{samples}\n\n"
         f"**Affected issues:** {affected}\n\n"
-        f"**Action needed:** Investigate root cause and add handling or prevention.\n"
     )
+    if pattern.phase_context:
+        body += "**Phase context:**\n"
+        body += "\n".join(f"- {ctx}" for ctx in pattern.phase_context)
+        body += "\n\n"
+    body += (
+        "**Action needed:** Investigate root cause and add handling or prevention.\n"
+    )
+    return body
 
 
 def _build_escalation_body(
@@ -391,3 +436,49 @@ async def file_log_patterns(
     return LogIngestionResult(
         filed=filed, escalated=escalated, total_patterns=len(patterns)
     )
+
+
+# ---------------------------------------------------------------------------
+# Part 8: Cross-Project Log Aggregation (bead: lkx)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CrossProjectPattern:
+    """A log pattern that appears across multiple factory projects."""
+
+    fingerprint: str
+    source_module: str
+    projects: list[str] = field(default_factory=list)
+    total_count: int = 0
+
+
+def detect_cross_project_log_patterns(
+    project_patterns: dict[str, dict[str, KnownLogPattern]],
+    *,
+    min_projects: int = 2,
+) -> list[CrossProjectPattern]:
+    """Find log patterns appearing in multiple factory projects."""
+    all_keys: dict[str, list[str]] = defaultdict(list)
+    for slug, patterns in project_patterns.items():
+        for key in patterns:
+            all_keys[key].append(slug)
+
+    cross = []
+    for key, slugs in all_keys.items():
+        if len(slugs) >= min_projects:
+            # Parse key back into module:fingerprint
+            parts = key.split(":", 1)
+            module = parts[0] if len(parts) > 1 else "unknown"
+            fp = parts[1] if len(parts) > 1 else key
+            total = sum(project_patterns[s][key].last_count for s in slugs)
+            cross.append(
+                CrossProjectPattern(
+                    fingerprint=fp,
+                    source_module=module,
+                    projects=slugs,
+                    total_count=total,
+                )
+            )
+
+    return sorted(cross, key=lambda p: len(p.projects), reverse=True)

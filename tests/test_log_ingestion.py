@@ -10,11 +10,14 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from log_ingestion import (
+    CrossProjectPattern,
     KnownLogPattern,
     LogEntry,
     LogIngestionResult,
     LogPattern,
+    detect_cross_project_log_patterns,
     detect_log_patterns,
+    enrich_patterns_with_events,
     file_log_patterns,
     fingerprint_message,
     load_known_patterns,
@@ -713,3 +716,210 @@ class TestFileLogPatterns:
         args = mock_sentry.capture_message.call_args
         assert "escalating" in args[0][0].lower()
         assert args[1]["level"] == "warning"
+
+
+# ---------------------------------------------------------------------------
+# TestEnrichPatternsWithEvents
+# ---------------------------------------------------------------------------
+
+
+class TestEnrichPatternsWithEvents:
+    def _make_pattern(self, issues: list[int] | None = None) -> LogPattern:
+        return LogPattern(
+            fingerprint="fp <N>",
+            level="WARNING",
+            source_module="hydraflow.test",
+            count=5,
+            sample_messages=["msg 1"],
+            sample_issues=issues or [],
+            first_seen="2026-03-26T10:00:00+00:00",
+            last_seen="2026-03-26T11:00:00+00:00",
+        )
+
+    def test_adds_phase_context_from_matching_events(self) -> None:
+        pattern = self._make_pattern(issues=[42])
+        events = [
+            {
+                "type": "phase_change",
+                "data": {"issue": 42, "phase": "implement", "status": "running"},
+            }
+        ]
+        enrich_patterns_with_events([pattern], events)
+        assert pattern.phase_context == ["issue #42: implement (running)"]
+
+    def test_no_enrichment_when_no_matching_issues(self) -> None:
+        pattern = self._make_pattern(issues=[99])
+        events = [
+            {
+                "type": "phase_change",
+                "data": {"issue": 1, "phase": "plan"},
+            }
+        ]
+        enrich_patterns_with_events([pattern], events)
+        assert pattern.phase_context == []
+
+    def test_no_enrichment_when_pattern_has_no_sample_issues(self) -> None:
+        pattern = self._make_pattern(issues=[])
+        events = [
+            {
+                "type": "phase_change",
+                "data": {"issue": 10, "phase": "plan"},
+            }
+        ]
+        enrich_patterns_with_events([pattern], events)
+        assert pattern.phase_context == []
+
+    def test_caps_phase_context_at_five(self) -> None:
+        # 3 issues × 2 events each = 6 potential entries → capped at 5
+        pattern = self._make_pattern(issues=[1, 2, 3])
+        events = []
+        for issue_id in [1, 2, 3]:
+            for i in range(2):
+                events.append(
+                    {
+                        "type": "phase_change",
+                        "data": {
+                            "issue": issue_id,
+                            "phase": f"phase_{i}",
+                            "status": "done",
+                        },
+                    }
+                )
+        enrich_patterns_with_events([pattern], events)
+        assert len(pattern.phase_context) <= 5
+
+    def test_handles_empty_event_history_gracefully(self) -> None:
+        pattern = self._make_pattern(issues=[10])
+        enrich_patterns_with_events([pattern], [])
+        assert pattern.phase_context == []
+
+    def test_ignores_non_phase_event_types(self) -> None:
+        pattern = self._make_pattern(issues=[42])
+        events = [{"type": "some_other_event", "data": {"issue": 42, "phase": "plan"}}]
+        enrich_patterns_with_events([pattern], events)
+        assert pattern.phase_context == []
+
+    def test_worker_update_events_included(self) -> None:
+        pattern = self._make_pattern(issues=[7])
+        events = [{"type": "worker_update", "data": {"issue": 7, "phase": "review"}}]
+        enrich_patterns_with_events([pattern], events)
+        assert len(pattern.phase_context) == 1
+        assert "issue #7: review" in pattern.phase_context[0]
+
+    def test_status_omitted_when_empty(self) -> None:
+        pattern = self._make_pattern(issues=[5])
+        events = [{"type": "phase_change", "data": {"issue": 5, "phase": "triage"}}]
+        enrich_patterns_with_events([pattern], events)
+        assert pattern.phase_context == ["issue #5: triage"]
+        assert "(" not in pattern.phase_context[0]
+
+    def test_deduplicates_identical_context_strings(self) -> None:
+        pattern = self._make_pattern(issues=[3])
+        # Same event twice — should not produce duplicate entries
+        event = {"type": "phase_change", "data": {"issue": 3, "phase": "plan"}}
+        enrich_patterns_with_events([pattern], [event, event])
+        assert pattern.phase_context.count("issue #3: plan") == 1
+
+
+# ---------------------------------------------------------------------------
+# TestCrossProjectLogPatterns
+# ---------------------------------------------------------------------------
+
+
+def _make_known_pattern(
+    fingerprint: str,
+    module: str = "hydraflow.test",
+    last_count: int = 5,
+) -> KnownLogPattern:
+    return KnownLogPattern(
+        fingerprint=fingerprint,
+        source_module=module,
+        filed_at="2026-03-26T10:00:00+00:00",
+        issue_number=1,
+        last_count=last_count,
+        filed_count=last_count,
+    )
+
+
+class TestCrossProjectLogPatterns:
+    def test_detects_pattern_in_two_projects(self) -> None:
+        key = "hydraflow.test:fp <N>"
+        project_patterns = {
+            "project-a": {key: _make_known_pattern("fp <N>")},
+            "project-b": {key: _make_known_pattern("fp <N>")},
+        }
+        results = detect_cross_project_log_patterns(project_patterns)
+        assert len(results) == 1
+        assert set(results[0].projects) == {"project-a", "project-b"}
+
+    def test_ignores_pattern_in_only_one_project(self) -> None:
+        key = "hydraflow.test:fp <N>"
+        project_patterns = {
+            "project-a": {key: _make_known_pattern("fp <N>")},
+        }
+        results = detect_cross_project_log_patterns(project_patterns)
+        assert results == []
+
+    def test_respects_min_projects_parameter(self) -> None:
+        key = "hydraflow.test:fp <N>"
+        project_patterns = {
+            "a": {key: _make_known_pattern("fp <N>")},
+            "b": {key: _make_known_pattern("fp <N>")},
+        }
+        # Require 3 projects — should return nothing
+        results = detect_cross_project_log_patterns(project_patterns, min_projects=3)
+        assert results == []
+
+    def test_total_count_sums_across_projects(self) -> None:
+        key = "hydraflow.test:fp <N>"
+        project_patterns = {
+            "a": {key: _make_known_pattern("fp <N>", last_count=10)},
+            "b": {key: _make_known_pattern("fp <N>", last_count=7)},
+        }
+        results = detect_cross_project_log_patterns(project_patterns)
+        assert results[0].total_count == 17
+
+    def test_sorted_by_project_count_descending(self) -> None:
+        key1 = "mod:fp1 <N>"
+        key2 = "mod:fp2 <N>"
+        project_patterns = {
+            "a": {
+                key1: _make_known_pattern("fp1 <N>", "mod"),
+                key2: _make_known_pattern("fp2 <N>", "mod"),
+            },
+            "b": {
+                key1: _make_known_pattern("fp1 <N>", "mod"),
+                key2: _make_known_pattern("fp2 <N>", "mod"),
+            },
+            "c": {
+                key1: _make_known_pattern("fp1 <N>", "mod"),
+            },
+        }
+        # key1 appears in 3 projects; key2 appears in 2 projects
+        results = detect_cross_project_log_patterns(project_patterns)
+        assert len(results) == 2
+        assert len(results[0].projects) >= len(results[1].projects)
+        assert results[0].fingerprint == "fp1 <N>"
+
+    def test_handles_empty_input(self) -> None:
+        results = detect_cross_project_log_patterns({})
+        assert results == []
+
+    def test_parses_module_and_fingerprint_from_key(self) -> None:
+        key = "hydraflow.worker:conn refused <N>"
+        project_patterns = {
+            "x": {key: _make_known_pattern("conn refused <N>", "hydraflow.worker")},
+            "y": {key: _make_known_pattern("conn refused <N>", "hydraflow.worker")},
+        }
+        results = detect_cross_project_log_patterns(project_patterns)
+        assert results[0].source_module == "hydraflow.worker"
+        assert results[0].fingerprint == "conn refused <N>"
+
+    def test_returns_cross_project_pattern_dataclass(self) -> None:
+        key = "mod:fp <N>"
+        project_patterns = {
+            "a": {key: _make_known_pattern("fp <N>", "mod")},
+            "b": {key: _make_known_pattern("fp <N>", "mod")},
+        }
+        results = detect_cross_project_log_patterns(project_patterns)
+        assert isinstance(results[0], CrossProjectPattern)
