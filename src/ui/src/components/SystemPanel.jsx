@@ -359,6 +359,143 @@ function MemoryAutoApproveToggle() {
   )
 }
 
+const KNOWN_BOTS = [
+  { username: 'dependabot[bot]', label: 'Dependabot' },
+  { username: 'renovate[bot]', label: 'Renovate' },
+  { username: 'snyk-bot', label: 'Snyk' },
+]
+
+const FAILURE_STRATEGIES = [
+  { value: 'skip', label: 'Skip' },
+  { value: 'escalate', label: 'Escalate to HITL' },
+  { value: 'close', label: 'Close PR' },
+]
+
+const REVIEW_MODES = [
+  { value: 'ci_only', label: 'CI Only' },
+  { value: 'llm_review', label: 'LLM Review' },
+]
+
+function BotPRSettingsPanel() {
+  const [settings, setSettings] = useState(null)
+  const [customBot, setCustomBot] = useState('')
+
+  const fetchSettings = useCallback(async () => {
+    try {
+      const resp = await fetch('/api/bot-pr/settings')
+      if (resp.ok) {
+        const data = await resp.json()
+        setSettings(data)
+      }
+    } catch { /* ignore */ }
+  }, [])
+
+  React.useEffect(() => { fetchSettings() }, [fetchSettings])
+
+  const saveSettings = useCallback(async (updated) => {
+    setSettings(updated)
+    try {
+      await fetch('/api/bot-pr/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated),
+      })
+    } catch { /* ignore */ }
+  }, [])
+
+  const toggleBot = useCallback((username) => {
+    if (!settings) return
+    const bots = settings.allowed_bots || []
+    const next = bots.includes(username)
+      ? bots.filter(b => b !== username)
+      : [...bots, username]
+    saveSettings({ ...settings, allowed_bots: next })
+  }, [settings, saveSettings])
+
+  const addCustomBot = useCallback(() => {
+    const trimmed = customBot.trim()
+    if (!trimmed || !settings) return
+    const bots = settings.allowed_bots || []
+    if (!bots.includes(trimmed)) {
+      saveSettings({ ...settings, allowed_bots: [...bots, trimmed] })
+    }
+    setCustomBot('')
+  }, [customBot, settings, saveSettings])
+
+  if (!settings) return null
+
+  const allowedBots = settings.allowed_bots || []
+
+  return (
+    <div style={styles.botPrPanel} data-testid="bot-pr-settings">
+      <div style={styles.botPrSection}>
+        <div style={styles.botPrSectionLabel}>Allowed Bots</div>
+        {KNOWN_BOTS.map(bot => (
+          <label key={bot.username} style={styles.botPrCheckbox}>
+            <input
+              type="checkbox"
+              checked={allowedBots.includes(bot.username)}
+              onChange={() => toggleBot(bot.username)}
+              data-testid={`bot-checkbox-${bot.username}`}
+            />
+            <span style={styles.botPrCheckboxLabel}>{bot.label}</span>
+          </label>
+        ))}
+        <div style={styles.botPrAddRow}>
+          <input
+            type="text"
+            value={customBot}
+            onChange={e => setCustomBot(e.target.value)}
+            placeholder="Custom bot username"
+            style={styles.botPrInput}
+            data-testid="bot-pr-custom-input"
+            onKeyDown={e => { if (e.key === 'Enter') addCustomBot() }}
+          />
+          <button
+            onClick={addCustomBot}
+            style={styles.botPrAddBtn}
+            data-testid="bot-pr-add-btn"
+          >
+            Add
+          </button>
+        </div>
+      </div>
+      <div style={styles.botPrSection}>
+        <div style={styles.botPrSectionLabel}>Failure Strategy</div>
+        {FAILURE_STRATEGIES.map(opt => (
+          <label key={opt.value} style={styles.botPrRadio}>
+            <input
+              type="radio"
+              name="bot-pr-failure-strategy"
+              value={opt.value}
+              checked={settings.failure_strategy === opt.value}
+              onChange={() => saveSettings({ ...settings, failure_strategy: opt.value })}
+              data-testid={`failure-strategy-${opt.value}`}
+            />
+            <span style={styles.botPrRadioLabel}>{opt.label}</span>
+          </label>
+        ))}
+      </div>
+      <div style={styles.botPrSection}>
+        <div style={styles.botPrSectionLabel}>Review Mode</div>
+        {REVIEW_MODES.map(opt => (
+          <label key={opt.value} style={styles.botPrRadio}>
+            <input
+              type="radio"
+              name="bot-pr-review-mode"
+              value={opt.value}
+              checked={settings.review_mode === opt.value}
+              onChange={() => saveSettings({ ...settings, review_mode: opt.value })}
+              data-testid={`review-mode-${opt.value}`}
+            />
+            <span style={styles.botPrRadioLabel}>{opt.label}</span>
+          </label>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onTriggerBgWorker, onUpdateInterval }) {
   const { pipelinePollerLastRun, orchestratorStatus, events, pipelineIssues } = useHydraFlow()
   const [activeSubTab, setActiveSubTab] = useState('workers')
@@ -397,6 +534,10 @@ export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onTriggerBgWo
                     onTriggerBgWorker={onTriggerBgWorker}
                     onUpdateInterval={onUpdateInterval}
                     events={events}
+                    extraContent={
+                      def.key === 'bot_pr' ? <BotPRSettingsPanel /> :
+                      undefined
+                    }
                   />
                 )
               })}
@@ -738,6 +879,73 @@ const styles = {
     color: theme.text,
     cursor: 'pointer',
     outline: 'none',
+  },
+  botPrPanel: {
+    borderTop: `1px solid ${theme.border}`,
+    paddingTop: 8,
+    marginTop: 8,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+  },
+  botPrSection: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+  },
+  botPrSectionLabel: {
+    fontSize: 11,
+    fontWeight: 600,
+    color: theme.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: '0.3px',
+    marginBottom: 2,
+  },
+  botPrCheckbox: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    cursor: 'pointer',
+  },
+  botPrCheckboxLabel: {
+    fontSize: 12,
+    color: theme.text,
+  },
+  botPrRadio: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    cursor: 'pointer',
+  },
+  botPrRadioLabel: {
+    fontSize: 12,
+    color: theme.text,
+  },
+  botPrAddRow: {
+    display: 'flex',
+    gap: 4,
+    marginTop: 4,
+  },
+  botPrInput: {
+    flex: 1,
+    padding: '4px 8px',
+    fontSize: 12,
+    border: `1px solid ${theme.border}`,
+    borderRadius: 4,
+    background: theme.surface,
+    color: theme.text,
+    outline: 'none',
+  },
+  botPrAddBtn: {
+    padding: '4px 12px',
+    fontSize: 11,
+    fontWeight: 600,
+    border: `1px solid ${theme.accent}`,
+    borderRadius: 4,
+    background: theme.surface,
+    color: theme.accent,
+    cursor: 'pointer',
+    transition: 'all 0.15s',
   },
 }
 

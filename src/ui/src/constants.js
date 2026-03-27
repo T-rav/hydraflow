@@ -148,18 +148,31 @@ export const REPORT_ISSUE_PRESETS = [
 ]
 
 /**
+ * Preset interval options for the bot_pr worker.
+ * Longer cadence — bot PR merges are checked on a relaxed schedule.
+ */
+export const BOT_PR_PRESETS = [
+  { label: '1h', seconds: 3600 },
+  { label: '2h', seconds: 7200 },
+  { label: '6h', seconds: 21600 },
+  { label: '12h', seconds: 43200 },
+  { label: '24h', seconds: 86400 },
+]
+
+/**
  * Per-worker preset overrides. Workers not listed here use INTERVAL_PRESETS.
  */
 export const WORKER_PRESETS = {
   pipeline_poller: PIPELINE_POLLER_PRESETS,
   adr_reviewer: ADR_REVIEWER_PRESETS,
   report_issue: REPORT_ISSUE_PRESETS,
+  bot_pr: BOT_PR_PRESETS,
 }
 
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'pr_unsticker', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_sweeper'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'pr_unsticker', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_sweeper', 'bot_pr'])
 
 /**
  * Default intervals (in seconds) for system workers.
@@ -174,6 +187,7 @@ export const SYSTEM_WORKER_INTERVALS = {
   worktree_gc: 1800,
   adr_reviewer: 86400,
   epic_sweeper: 3600,
+  bot_pr: 3600,
 }
 
 /**
@@ -203,5 +217,6 @@ export const BACKGROUND_WORKERS = [
   { key: 'worktree_gc',    label: 'Worktree GC',    description: 'Garbage-collects stale worktrees and orphaned branches.', color: theme.textMuted, system: true },
   { key: 'adr_reviewer',   label: 'ADR Reviewer',   description: 'Reviews proposed ADRs via a 3-judge council and routes to accept, reject, or escalate.', color: theme.accent },
   { key: 'epic_sweeper',    label: 'Epic Sweeper',    description: 'Periodically sweeps open epics and auto-closes those with all sub-issues resolved.', color: theme.purple, system: true },
+  { key: 'bot_pr', label: 'Bot PR Manager', description: 'Auto-merges dependency update PRs from configured bots after CI passes.', color: theme.green },
   { key: 'health_monitor', label: 'Health Monitor', description: 'Analyzes pipeline trends, auto-tunes parameters, detects knowledge gaps, and ingests log patterns.', color: theme.green, system: true },
 ]
