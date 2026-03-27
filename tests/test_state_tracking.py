@@ -47,6 +47,8 @@ class TestInitialization:
             "active_worktrees",
             "baseline_audit",
             "bg_worker_states",
+            "bot_pr_processed",
+            "bot_pr_settings",
             "disabled_workers",
             "epic_states",
             "hitl_causes",
