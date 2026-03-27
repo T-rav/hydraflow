@@ -1199,6 +1199,14 @@ class Release(BaseModel):
     tag: str = ""
 
 
+class BotPRSettings(BaseModel):
+    """Configuration for the bot PR auto-merge worker."""
+
+    authors: list[str] = Field(default_factory=lambda: ["dependabot[bot]"])
+    failure_strategy: Literal["skip", "hitl", "close"] = "skip"
+    review_mode: Literal["ci_only", "llm_review"] = "ci_only"
+
+
 class StateData(BaseModel):
     """Typed schema for the JSON-backed crash-recovery state."""
 
@@ -1249,6 +1257,8 @@ class StateData(BaseModel):
     bead_mappings: dict[str, dict[str, str]] = Field(default_factory=dict)
     completed_timelines: dict[str, CompletedTimeline] = Field(default_factory=dict)
     digest_hashes: dict[str, str] = Field(default_factory=dict)
+    bot_pr_settings: BotPRSettings = Field(default_factory=BotPRSettings)
+    bot_pr_processed: list[int] = Field(default_factory=list)
     last_updated: str | None = None
 
 
