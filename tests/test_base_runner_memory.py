@@ -9,10 +9,11 @@ import pytest
 from base_runner import BaseRunner
 from config import HydraFlowConfig
 from events import EventBus
-from hindsight import Bank, HindsightMemory
 
 
-def _make_memory(text: str, score: float = 0.8) -> HindsightMemory:
+def _make_memory(text: str, score: float = 0.8):
+    from hindsight import HindsightMemory
+
     return HindsightMemory(content=text, text=text, relevance_score=score)
 
 
@@ -28,6 +29,8 @@ def base_runner():
 @pytest.mark.asyncio
 async def test_review_insights_recalled(base_runner):
     """REVIEW_INSIGHTS bank should be recalled and injected into prompt."""
+    from hindsight import Bank
+
     memories = {
         Bank.LEARNINGS: [_make_memory("learning-1")],
         Bank.TROUBLESHOOTING: [],
@@ -51,6 +54,8 @@ async def test_review_insights_recalled(base_runner):
 @pytest.mark.asyncio
 async def test_harness_insights_recalled(base_runner):
     """HARNESS_INSIGHTS bank should be recalled and injected into prompt."""
+    from hindsight import Bank
+
     memories = {
         Bank.LEARNINGS: [],
         Bank.TROUBLESHOOTING: [],
@@ -92,6 +97,8 @@ async def test_fallback_to_manifest_when_no_hindsight():
 @pytest.mark.asyncio
 async def test_fallback_does_not_fire_when_hindsight_configured(base_runner):
     """When hindsight IS configured, fallback must NOT activate."""
+    from hindsight import Bank
+
     memories = {
         Bank.LEARNINGS: [_make_memory("learning-1")],
         Bank.TROUBLESHOOTING: [],

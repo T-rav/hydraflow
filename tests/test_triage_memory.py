@@ -8,12 +8,13 @@ import pytest
 
 from config import HydraFlowConfig
 from events import EventBus
-from hindsight import Bank, HindsightMemory
 from models import Task
 from triage import TriageRunner
 
 
-def _make_memory(text: str, score: float = 0.8) -> HindsightMemory:
+def _make_memory(text: str, score: float = 0.8):
+    from hindsight import HindsightMemory
+
     return HindsightMemory(content=text, text=text, relevance_score=score)
 
 
@@ -46,6 +47,8 @@ class TestEvaluateWithLlmMemoryInjection:
     @pytest.mark.asyncio
     async def test_memory_injected_into_prompt(self, _config, _bus):
         """When hindsight returns memories, they appear in the prompt."""
+        from hindsight import Bank
+
         hindsight = AsyncMock()
         runner = TriageRunner(_config, _bus, hindsight=hindsight)
 
