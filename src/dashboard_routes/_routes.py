@@ -2651,6 +2651,38 @@ def create_router(
             {"status": "ok", "name": name, "interval_seconds": interval}
         )
 
+    @router.get("/api/bot-pr/settings")
+    async def get_bot_pr_settings() -> JSONResponse:
+        """Return current bot PR auto-merge settings."""
+        orch = get_orchestrator()
+        if not orch:
+            return JSONResponse({"error": "no orchestrator"}, status_code=400)
+        settings = orch.state.get_bot_pr_settings()
+        return JSONResponse(settings.model_dump())
+
+    @router.post("/api/bot-pr/settings")
+    async def set_bot_pr_settings(body: dict[str, Any]) -> JSONResponse:
+        """Update bot PR auto-merge settings."""
+        orch = get_orchestrator()
+        if not orch:
+            return JSONResponse({"error": "no orchestrator"}, status_code=400)
+
+        current = orch.state.get_bot_pr_settings()
+        update = current.model_dump()
+        for key in ("authors", "failure_strategy", "review_mode"):
+            if key in body:
+                update[key] = body[key]
+
+        try:
+            from models import BotPRSettings  # noqa: PLC0415
+
+            new_settings = BotPRSettings(**update)
+        except (ValueError, ValidationError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+        orch.state.set_bot_pr_settings(new_settings)
+        return JSONResponse({"status": "ok", **new_settings.model_dump()})
+
     @router.get("/api/issues/outcomes")
     async def get_issue_outcomes() -> JSONResponse:
         """Return all recorded issue outcomes."""
