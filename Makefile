@@ -465,13 +465,9 @@ screenshot-update: check-node-ui
 	@echo "$(GREEN)Screenshot baselines updated → src/ui/e2e/screenshots/$(RESET)"
 
 hindsight:
-	@if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then \
-		echo "$(BLUE)Starting Hindsight semantic memory server...$(RESET)"; \
-		docker compose up -d hindsight && \
-		echo "$(GREEN)Hindsight running — API: http://localhost:8888  UI: http://localhost:9999$(RESET)"; \
-	else \
-		echo "$(YELLOW)Docker Compose not available — skipping Hindsight$(RESET)"; \
-	fi
+	@echo "$(BLUE)Starting Hindsight semantic memory server...$(RESET)"
+	docker compose up -d hindsight
+	@echo "$(GREEN)Hindsight running — API: http://localhost:8888  UI: http://localhost:9999$(RESET)"
 
 hindsight-stop:
 	@echo "$(BLUE)Stopping Hindsight...$(RESET)"
