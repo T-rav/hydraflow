@@ -85,6 +85,20 @@ class RetrospectiveCollector:
         try:
             entry = await self._collect(issue_number, pr_number, review_result)
             self._append_entry(entry)
+            try:
+                import sentry_sdk as _sentry
+
+                _sentry.add_breadcrumb(
+                    category="retrospective.stored",
+                    message=f"Retrospective stored for issue #{issue_number}",
+                    level="info",
+                    data={
+                        "issue_number": issue_number,
+                        "accuracy": entry.plan_accuracy_pct,
+                    },
+                )
+            except ImportError:
+                pass
             recent = self._load_recent(self._config.retrospective_window)
             await self._detect_patterns(recent)
         except Exception:

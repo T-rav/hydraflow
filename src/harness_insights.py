@@ -189,6 +189,18 @@ class HarnessInsightStore:
                 wal=self._wal,
             )
 
+        try:
+            import sentry_sdk as _sentry
+
+            _sentry.add_breadcrumb(
+                category="harness_insights.failure_recorded",
+                message=f"Harness failure recorded: {record.category}",
+                level="info",
+                data={"category": str(record.category), "stage": str(record.stage)},
+            )
+        except ImportError:
+            pass
+
     def load_recent(self, n: int = 20) -> list[FailureRecord]:
         """Load the last *n* failure records from disk."""
         if not self._failures_path.exists():

@@ -992,3 +992,49 @@ class TestVerifyProposals:
         store = _make_store(tmp_path)
         stale = verify_proposals(store, [])
         assert stale == []
+
+
+# ---------------------------------------------------------------------------
+# Sentry breadcrumb tests
+# ---------------------------------------------------------------------------
+
+
+class TestReviewInsightsSentryBreadcrumbs:
+    """Sentry breadcrumbs for review insight recording and pattern detection."""
+
+    def test_append_review_adds_breadcrumb(self, tmp_path: Path) -> None:
+        from unittest.mock import MagicMock, patch
+
+        store = _make_store(tmp_path)
+        record = _make_record(pr_number=42, verdict=ReviewVerdict.APPROVE)
+
+        sentry_mock = MagicMock()
+        with patch.dict("sys.modules", {"sentry_sdk": sentry_mock}):
+            store.append_review(record)
+            assert sentry_mock.add_breadcrumb.called
+            kw = sentry_mock.add_breadcrumb.call_args[1]
+            assert kw["category"] == "review_insights.recorded"
+            assert kw["data"]["pr_number"] == 42
+
+    def test_analyze_patterns_adds_breadcrumb_when_threshold_met(
+        self, tmp_path: Path
+    ) -> None:
+        from unittest.mock import MagicMock, patch
+
+        records = [
+            _make_record(
+                verdict=ReviewVerdict.REQUEST_CHANGES, categories=["missing_tests"]
+            )
+            for _ in range(4)
+        ]
+        sentry_mock = MagicMock()
+        with patch.dict("sys.modules", {"sentry_sdk": sentry_mock}):
+            results = analyze_patterns(records, threshold=3)
+            assert len(results) > 0
+            calls = sentry_mock.add_breadcrumb.call_args_list
+            pattern_calls = [
+                c
+                for c in calls
+                if c[1].get("category") == "review_insights.pattern_detected"
+            ]
+            assert len(pattern_calls) >= 1

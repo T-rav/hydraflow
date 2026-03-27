@@ -1015,3 +1015,27 @@ class TestRetrospectiveCollectorDolt:
         # File SHOULD be written
         filed_path = config.data_path("memory", "filed_patterns.json")
         assert filed_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# Sentry breadcrumb tests
+# ---------------------------------------------------------------------------
+
+
+class TestRetrospectiveSentryBreadcrumbs:
+    """Sentry breadcrumb emitted when a retrospective is stored."""
+
+    @pytest.mark.asyncio()
+    async def test_record_adds_sentry_breadcrumb(self, config: HydraFlowConfig) -> None:
+        from unittest.mock import MagicMock
+
+        collector, mock_prs, state = _make_collector(config, diff_names=["src/foo.py"])
+        review = ReviewResultFactory.create()
+
+        sentry_mock = MagicMock()
+        with patch.dict("sys.modules", {"sentry_sdk": sentry_mock}):
+            await collector.record(42, 101, review)
+            assert sentry_mock.add_breadcrumb.called
+            kw = sentry_mock.add_breadcrumb.call_args[1]
+            assert kw["category"] == "retrospective.stored"
+            assert kw["data"]["issue_number"] == 42

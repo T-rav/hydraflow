@@ -30,4 +30,18 @@ class MemorySyncLoop(BaseBackgroundLoop):
     async def _do_work(self) -> dict[str, Any] | None:
         result = await self._memory_sync.sync()
         await self._memory_sync.publish_sync_event(result)
+        try:
+            import sentry_sdk as _sentry
+
+            _sentry.add_breadcrumb(
+                category="memory.sync_completed",
+                message="Memory sync completed",
+                level="info",
+                data={
+                    "item_count": result.get("processed", 0),
+                    "compacted": result.get("compacted", False),
+                },
+            )
+        except ImportError:
+            pass
         return dict(result)

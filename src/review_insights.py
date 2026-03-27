@@ -257,6 +257,18 @@ class ReviewInsightStore:
                 wal=self._wal,
             )
 
+        try:
+            import sentry_sdk as _sentry
+
+            _sentry.add_breadcrumb(
+                category="review_insights.recorded",
+                message=f"Review insight recorded for PR #{record.pr_number}",
+                level="info",
+                data={"pr_number": record.pr_number, "verdict": str(record.verdict)},
+            )
+        except ImportError:
+            pass
+
     def load_recent(self, n: int = 10) -> list[ReviewRecord]:
         """Load the last *n* review records from disk."""
         if not self._reviews_path.exists():
@@ -370,11 +382,26 @@ def analyze_patterns(
             cat_counts[cat] += 1
             cat_records.setdefault(cat, []).append(record)
 
-    return [
+    results = [
         (cat, count, cat_records[cat])
         for cat, count in cat_counts.most_common()
         if count >= threshold
     ]
+
+    for cat, count, _recs in results:
+        try:
+            import sentry_sdk as _sentry
+
+            _sentry.add_breadcrumb(
+                category="review_insights.pattern_detected",
+                message=f"Review pattern detected: {cat} ({count} occurrences)",
+                level="warning",
+                data={"category": cat, "count": count},
+            )
+        except ImportError:
+            pass
+
+    return results
 
 
 # ---------------------------------------------------------------------------
