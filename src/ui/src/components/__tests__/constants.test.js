@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { ACTIVE_STATUSES, PIPELINE_STAGES, PIPELINE_LOOPS, INTERVAL_PRESETS, EDITABLE_INTERVAL_WORKERS, REPORT_ISSUE_PRESETS, WORKER_PRESETS, PIPELINE_POLLER_PRESETS, ADR_REVIEWER_PRESETS } from '../../constants'
+import { ACTIVE_STATUSES, PIPELINE_STAGES, PIPELINE_LOOPS, INTERVAL_PRESETS, EDITABLE_INTERVAL_WORKERS, REPORT_ISSUE_PRESETS, WORKER_PRESETS, PIPELINE_POLLER_PRESETS, ADR_REVIEWER_PRESETS, BOT_PR_PRESETS, BACKGROUND_WORKERS } from '../../constants'
 import { theme } from '../../theme'
 
 describe('ACTIVE_STATUSES', () => {
@@ -199,9 +199,31 @@ describe('REPORT_ISSUE_PRESETS', () => {
   })
 })
 
+describe('BOT_PR_PRESETS', () => {
+  it('has 5 presets from 1h to 24h', () => {
+    expect(BOT_PR_PRESETS).toHaveLength(5)
+    expect(BOT_PR_PRESETS[0].seconds).toBe(3600)
+    expect(BOT_PR_PRESETS[4].seconds).toBe(86400)
+  })
+})
+
+describe('BACKGROUND_WORKERS bot_pr entry', () => {
+  it('includes bot_pr worker', () => {
+    const botPr = BACKGROUND_WORKERS.find(w => w.key === 'bot_pr')
+    expect(botPr).toBeDefined()
+    expect(botPr.label).toBe('Bot PR Manager')
+  })
+})
+
+describe('EDITABLE_INTERVAL_WORKERS includes bot_pr', () => {
+  it('bot_pr is editable', () => {
+    expect(EDITABLE_INTERVAL_WORKERS.has('bot_pr')).toBe(true)
+  })
+})
+
 describe('WORKER_PRESETS', () => {
   it('has exactly the expected worker keys', () => {
-    expect(Object.keys(WORKER_PRESETS).sort()).toEqual(['adr_reviewer', 'pipeline_poller', 'report_issue'])
+    expect(Object.keys(WORKER_PRESETS).sort()).toEqual(['adr_reviewer', 'bot_pr', 'pipeline_poller', 'report_issue'])
   })
 
   it('maps pipeline_poller to PIPELINE_POLLER_PRESETS', () => {

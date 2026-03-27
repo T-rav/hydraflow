@@ -41,6 +41,7 @@ const mockBgWorkers = [
   { name: 'retrospective', status: 'error', enabled: true, last_run: '2026-02-20T10:28:00Z', details: { last_issue: 42 } },
   { name: 'health_monitor', status: 'ok', enabled: true, last_run: '2026-02-20T10:25:00Z', details: {} },
   { name: 'review_insights', status: 'disabled', enabled: false, last_run: null, details: {} },
+  { name: 'bot_pr', status: 'ok', enabled: false, last_run: null, details: {} },
 ]
 
 describe('SystemPanel', () => {
@@ -90,6 +91,11 @@ describe('SystemPanel', () => {
       for (const def of BACKGROUND_WORKERS) {
         expect(screen.getByText(def.label)).toBeInTheDocument()
       }
+    })
+
+    it('renders Bot PR Manager worker card', () => {
+      render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
+      expect(screen.getByText('Bot PR Manager')).toBeInTheDocument()
     })
 
     it('shows correct status dot color for ok workers when orchestrator running', () => {

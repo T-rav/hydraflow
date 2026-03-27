@@ -678,7 +678,16 @@ class TestPRsRoute:
 
         body = response.json()
         assert len(body) == 1
-        expected_keys = {"pr", "issue", "branch", "url", "draft", "title", "merged"}
+        expected_keys = {
+            "pr",
+            "issue",
+            "branch",
+            "url",
+            "draft",
+            "title",
+            "merged",
+            "author",
+        }
         assert set(body[0].keys()) == expected_keys
 
     def test_prs_deduplicates_across_labels(

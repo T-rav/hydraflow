@@ -989,6 +989,7 @@ class TestPRListItem:
             "draft": False,
             "title": "Add tests",
             "merged": False,
+            "author": "",
         }
 
     def test_merged_field_defaults_false(self) -> None:

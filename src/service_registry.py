@@ -16,6 +16,7 @@ from agent import AgentRunner
 from base_background_loop import LoopDeps
 from baseline_policy import BaselinePolicy
 from beads_manager import BeadsManager
+from bot_pr_loop import BotPRLoop
 from config import HydraFlowConfig
 from crate_manager import CrateManager
 from docker_runner import get_docker_runner
@@ -116,6 +117,7 @@ class ServiceRegistry:
     runs_gc_loop: RunsGCLoop
     adr_reviewer_loop: ADRReviewerLoop
     health_monitor_loop: HealthMonitorLoop
+    bot_pr_loop: BotPRLoop
 
     # Optional integrations
     hindsight: HindsightClient | None = None
@@ -417,6 +419,13 @@ def build_services(
         deps=loop_deps,
         prs=prs,
     )
+    bot_pr_loop = BotPRLoop(
+        config=config,
+        cache=gh_cache,
+        prs=prs,
+        state=state,
+        deps=loop_deps,
+    )
     gh_cache_loop = GitHubCacheLoop(config, gh_cache, deps=loop_deps)  # noqa: F841
 
     return ServiceRegistry(
@@ -455,6 +464,7 @@ def build_services(
         runs_gc_loop=runs_gc_loop,
         adr_reviewer_loop=adr_reviewer_loop,
         health_monitor_loop=health_monitor_loop,
+        bot_pr_loop=bot_pr_loop,
         hindsight=hindsight_client,
         hindsight_wal=hindsight_wal,
         github_cache=gh_cache,
