@@ -569,7 +569,8 @@ class TestRefreshReportStatuses:
     async def test_filed_report_transitions_to_fixed_when_issue_closed(
         self, config, event_bus, state, tmp_path
     ) -> None:
-        from unittest.mock import AsyncMock, patch
+        """Report transitions to fixed when pipeline records a MERGED outcome."""
+        from models import IssueOutcomeType
 
         state.add_tracked_report(
             TrackedReport(
@@ -580,14 +581,18 @@ class TestRefreshReportStatuses:
                 linked_issue_url="https://github.com/acme/repo/issues/42",
             )
         )
+        state.record_outcome(
+            42,
+            IssueOutcomeType.MERGED,
+            reason="PR merged",
+            pr_number=100,
+            phase="review",
+        )
         router, pr_mgr = self._make_router(config, event_bus, state, tmp_path)
         endpoint = self._find_endpoint(router, "/api/reports/refresh")
         assert endpoint is not None
 
-        with patch.object(
-            pr_mgr, "get_issue_state", new_callable=AsyncMock, return_value="COMPLETED"
-        ):
-            response = await endpoint(reporter_id="u1")
+        response = await endpoint(reporter_id="u1")
 
         data = json.loads(response.body)
         assert len(data["refreshed"]) == 1
