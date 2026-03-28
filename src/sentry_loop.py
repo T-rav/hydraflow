@@ -197,8 +197,8 @@ class SentryLoop(BaseBackgroundLoop):
             for exc_val in entry.get("data", {}).get("values", []):
                 exc_type = exc_val.get("type", "")
                 exc_value = exc_val.get("value", "")
-                stacktrace = exc_val.get("stacktrace", {})
-                for frame in stacktrace.get("frames", [])[-10:]:
+                stacktrace = exc_val.get("stacktrace") or {}
+                for frame in (stacktrace.get("frames") or [])[-10:]:
                     filename = frame.get("filename", "?")
                     lineno = frame.get("lineNo", "?")
                     func = frame.get("function", "?")
