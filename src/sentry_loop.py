@@ -17,6 +17,7 @@ from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
 
 if TYPE_CHECKING:
+    from issue_store import IssueStore  # noqa: TCH004 — used in __init__ signature
     from pr_manager import PRManager
 
 logger = logging.getLogger("hydraflow.sentry_loop")
@@ -32,6 +33,7 @@ class SentryLoop(BaseBackgroundLoop):
         config: HydraFlowConfig,
         prs: PRManager,
         deps: LoopDeps,
+        store: IssueStore | None = None,
     ) -> None:
         super().__init__(
             worker_name="sentry_ingest",
@@ -40,6 +42,7 @@ class SentryLoop(BaseBackgroundLoop):
             run_on_startup=True,
         )
         self._prs = prs
+        self._store = store
         self._filed: set[str] = set()  # Sentry issue IDs already filed
 
     def _get_default_interval(self) -> int:
@@ -47,6 +50,13 @@ class SentryLoop(BaseBackgroundLoop):
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._config.sentry_auth_token}"}
+
+    def _exists_in_local_cache(self, sentry_id: str) -> bool:
+        """Check the local issue store for an existing issue with this Sentry ID."""
+        if not self._store:
+            return False
+        marker = f"sentry:{sentry_id}"
+        return any(marker in task.body for task in self._store._issue_cache.values())
 
     async def _do_work(self) -> dict[str, Any] | None:
         if not self._config.sentry_auth_token or not self._config.sentry_org:
@@ -61,6 +71,11 @@ class SentryLoop(BaseBackgroundLoop):
             for issue in issues:
                 sentry_id = str(issue["id"])
                 if sentry_id in self._filed:
+                    total_skipped += 1
+                    continue
+
+                if self._exists_in_local_cache(sentry_id):
+                    self._filed.add(sentry_id)
                     total_skipped += 1
                     continue
 

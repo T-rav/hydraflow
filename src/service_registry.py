@@ -429,7 +429,7 @@ def build_services(
         deps=loop_deps,
     )
     gh_cache_loop = GitHubCacheLoop(config, gh_cache, deps=loop_deps)  # noqa: F841
-    sentry_loop = SentryLoop(config=config, prs=prs, deps=loop_deps)
+    sentry_loop = SentryLoop(config=config, prs=prs, deps=loop_deps, store=store)
 
     return ServiceRegistry(
         worktrees=worktrees,
