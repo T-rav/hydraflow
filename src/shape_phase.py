@@ -12,7 +12,6 @@ from issue_store import IssueStore
 from models import ProductDirection, ShapeResult, Task
 from phase_utils import (
     _sentry_transaction,
-    release_batch_in_flight,
     run_refilling_pool,
     store_lifecycle,
 )
@@ -59,15 +58,19 @@ class ShapePhase:
 
     async def shape_issues(self) -> bool:
         """Process shape-labeled issues. Returns True if work was done."""
-        return await run_refilling_pool(
-            store=self._store,
-            fetch_fn=self._store.get_shapeable,
-            work_fn=self._shape_single,
-            max_slots=self._config.max_triage_workers,
+
+        async def _shape_one(_idx: int, issue: Task) -> int:
+            if self._stop_event.is_set():
+                return 0
+            return await self._shape_single(issue)
+
+        results = await run_refilling_pool(
+            supply_fn=lambda: self._store.get_shapeable(1),
+            worker_fn=_shape_one,
+            max_concurrent=self._config.max_triagers,
             stop_event=self._stop_event,
-            stage_name="shape",
-            release_fn=release_batch_in_flight,
         )
+        return bool(sum(results))
 
     async def _shape_single(self, issue: Task) -> int:
         """Shape a single issue — generate options or check for selection."""

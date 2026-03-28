@@ -11,7 +11,6 @@ from issue_store import IssueStore
 from models import DiscoverResult, Task
 from phase_utils import (
     _sentry_transaction,
-    release_batch_in_flight,
     run_refilling_pool,
     store_lifecycle,
 )
@@ -49,15 +48,19 @@ class DiscoverPhase:
 
     async def discover_issues(self) -> bool:
         """Process discover-labeled issues. Returns True if work was done."""
-        return await run_refilling_pool(
-            store=self._store,
-            fetch_fn=self._store.get_discoverable,
-            work_fn=self._discover_single,
-            max_slots=self._config.max_triage_workers,
+
+        async def _discover_one(_idx: int, issue: Task) -> int:
+            if self._stop_event.is_set():
+                return 0
+            return await self._discover_single(issue)
+
+        results = await run_refilling_pool(
+            supply_fn=lambda: self._store.get_discoverable(1),
+            worker_fn=_discover_one,
+            max_concurrent=self._config.max_triagers,
             stop_event=self._stop_event,
-            stage_name="discover",
-            release_fn=release_batch_in_flight,
         )
+        return bool(sum(results))
 
     async def _discover_single(self, issue: Task) -> int:
         """Run product discovery for a single issue."""
