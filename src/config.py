@@ -105,6 +105,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("state_backup_count", "HYDRAFLOW_STATE_BACKUP_COUNT", 3),
     ("health_monitor_interval", "HYDRAFLOW_HEALTH_MONITOR_INTERVAL", 7200),
     ("sentry_poll_interval", "SENTRY_POLL_INTERVAL", 600),
+    ("sentry_min_events", "SENTRY_MIN_EVENTS", 2),
 ]
 
 _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
@@ -711,6 +712,12 @@ class HydraFlowConfig(BaseModel):
         ge=60,
         le=86400,
         description="Seconds between Sentry issue polls",
+    )
+    sentry_min_events: int = Field(
+        default=2,
+        ge=1,
+        le=1000,
+        description="Minimum Sentry event count before filing a GitHub issue",
     )
 
     # Hindsight semantic memory

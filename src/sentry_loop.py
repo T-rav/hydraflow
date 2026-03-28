@@ -29,6 +29,18 @@ logger = logging.getLogger("hydraflow.sentry_loop")
 _SENTRY_API = "https://sentry.io/api/0"
 _ISSUE_URL_RE = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/issues/(\d+)")
 
+# Sentry issue titles matching these patterns are transient infra errors, not code bugs
+_TRANSIENT_TITLE_RE = re.compile(
+    r"(?i)"
+    r"ConnectionError|TimeoutError|ReadTimeout|WriteTimeout"
+    r"|rate.?limit|Docker.?(unavailable|daemon|not available)"
+    r"|auth(entication)?.?fail|oauth.?token"
+    r"|SIGTERM|SIGKILL|Process exited"
+    r"|RemoteDisconnected|BrokenPipeError|ConnectionResetError"
+    r"|APIError\(HTTPError"
+    r"|Server Error for http\+docker"
+)
+
 
 class SentryLoop(BaseBackgroundLoop):
     """Polls Sentry for unresolved issues and files them via Claude agent."""
@@ -74,11 +86,29 @@ class SentryLoop(BaseBackgroundLoop):
         total_created = 0
         total_skipped = 0
 
+        min_events = self._config.sentry_min_events
+
         for project in projects:
             issues = await self._fetch_unresolved(project["slug"])
             for issue in issues:
                 sentry_id = str(issue["id"])
                 if sentry_id in self._filed:
+                    total_skipped += 1
+                    continue
+
+                # Skip low-event-count noise (single-occurrence transients)
+                event_count = int(issue.get("count", "0") or "0")
+                if event_count < min_events:
+                    total_skipped += 1
+                    continue
+
+                # Skip issues with transient/infra error titles
+                title = issue.get("title", "")
+                if _TRANSIENT_TITLE_RE.search(title):
+                    logger.debug(
+                        "Skipping transient Sentry issue %s: %s", sentry_id, title[:60]
+                    )
+                    self._filed.add(sentry_id)
                     total_skipped += 1
                     continue
 
@@ -128,7 +158,7 @@ class SentryLoop(BaseBackgroundLoop):
         """Fetch unresolved issues for a project, newest first."""
         org = quote(self._config.sentry_org)
         url = f"{_SENTRY_API}/projects/{org}/{quote(project_slug)}/issues/"
-        params = {"query": "is:unresolved", "sort": "date", "limit": "25"}
+        params = {"query": "is:unresolved level:error", "sort": "date", "limit": "25"}
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(url, headers=self._headers(), params=params)
             resp.raise_for_status()
