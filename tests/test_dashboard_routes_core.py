@@ -655,5 +655,129 @@ class TestHumanInputEndpoints:
 
 
 # ---------------------------------------------------------------------------
+# POST /api/reports/refresh
+# ---------------------------------------------------------------------------
+
+
+class TestRefreshReportStatuses:
+    """Tests for the /api/reports/refresh endpoint (outcome-aware transitions)."""
+
+    @pytest.mark.asyncio
+    async def test_outcome_merged_transitions_to_fixed(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """A filed report with a MERGED outcome transitions to fixed on refresh."""
+        from models import IssueOutcomeType, TrackedReport
+
+        router, pr_mgr = make_dashboard_router(config, event_bus, state, tmp_path)
+        endpoint = find_endpoint(router, "/api/reports/refresh", "POST")
+        assert endpoint is not None
+
+        state.add_tracked_report(
+            TrackedReport(
+                id="r1",
+                reporter_id="u1",
+                description="Bug",
+                status="filed",
+                linked_issue_url=f"https://github.com/{config.repo}/issues/99",
+            )
+        )
+        state.record_outcome(
+            99,
+            IssueOutcomeType.MERGED,
+            reason="PR merged",
+            pr_number=200,
+            phase="review",
+        )
+
+        response = await endpoint(reporter_id="")
+        data = response.body.decode()
+        assert "fixed" in data
+        assert state.get_tracked_report("r1").status == "fixed"
+
+    @pytest.mark.asyncio
+    async def test_github_completed_without_outcome_stays_filed(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """GitHub COMPLETED without pipeline outcome does NOT transition to fixed."""
+        from models import TrackedReport
+
+        router, pr_mgr = make_dashboard_router(config, event_bus, state, tmp_path)
+        endpoint = find_endpoint(router, "/api/reports/refresh", "POST")
+        assert endpoint is not None
+
+        state.add_tracked_report(
+            TrackedReport(
+                id="r1",
+                reporter_id="u1",
+                description="Bug",
+                status="filed",
+                linked_issue_url=f"https://github.com/{config.repo}/issues/99",
+            )
+        )
+        pr_mgr.get_issue_state = AsyncMock(return_value="COMPLETED")
+
+        await endpoint(reporter_id="")
+        report = state.get_tracked_report("r1")
+        assert report.status == "filed"
+        assert "awaiting pipeline confirmation" in report.progress_summary
+
+    @pytest.mark.asyncio
+    async def test_not_planned_transitions_to_closed_without_outcome(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """NOT_PLANNED GitHub state transitions to closed even without outcome."""
+        from models import TrackedReport
+
+        router, pr_mgr = make_dashboard_router(config, event_bus, state, tmp_path)
+        endpoint = find_endpoint(router, "/api/reports/refresh", "POST")
+        assert endpoint is not None
+
+        state.add_tracked_report(
+            TrackedReport(
+                id="r1",
+                reporter_id="u1",
+                description="Bug",
+                status="filed",
+                linked_issue_url=f"https://github.com/{config.repo}/issues/99",
+            )
+        )
+        pr_mgr.get_issue_state = AsyncMock(return_value="NOT_PLANNED")
+
+        await endpoint(reporter_id="")
+        assert state.get_tracked_report("r1").status == "closed"
+
+    @pytest.mark.asyncio
+    async def test_outcome_failed_transitions_to_closed(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """A FAILED outcome transitions to closed on refresh."""
+        from models import IssueOutcomeType, TrackedReport
+
+        router, pr_mgr = make_dashboard_router(config, event_bus, state, tmp_path)
+        endpoint = find_endpoint(router, "/api/reports/refresh", "POST")
+        assert endpoint is not None
+
+        state.add_tracked_report(
+            TrackedReport(
+                id="r1",
+                reporter_id="u1",
+                description="Bug",
+                status="filed",
+                linked_issue_url=f"https://github.com/{config.repo}/issues/55",
+            )
+        )
+        state.record_outcome(
+            55,
+            IssueOutcomeType.FAILED,
+            reason="Build failed",
+            phase="implement",
+        )
+
+        await endpoint(reporter_id="")
+        assert state.get_tracked_report("r1").status == "closed"
+
+
+# ---------------------------------------------------------------------------
 # POST /api/control/stop
 # ---------------------------------------------------------------------------

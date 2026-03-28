@@ -16,7 +16,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from models import PendingReport, TrackedReport
+from models import IssueOutcomeType, PendingReport, TrackedReport
 from report_issue_loop import ReportIssueLoop
 from state import StateTracker
 from tests.helpers import make_bg_loop_deps
@@ -1277,10 +1277,99 @@ class TestSyncFiledReports:
     """Tests for _sync_filed_reports auto-transitioning filed reports."""
 
     @pytest.mark.asyncio
-    async def test_filed_report_transitions_to_fixed_on_completed(
+    async def test_outcome_merged_transitions_to_fixed(self, tmp_path: Path) -> None:
+        """A filed report with a MERGED pipeline outcome transitions to fixed."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
+        state.add_tracked_report(
+            TrackedReport(
+                id="r1",
+                reporter_id="u1",
+                description="Bug",
+                status="filed",
+                linked_issue_url=f"https://github.com/{loop._config.repo}/issues/99",
+            )
+        )
+        state.record_outcome(
+            99,
+            IssueOutcomeType.MERGED,
+            reason="PR merged",
+            pr_number=200,
+            phase="review",
+        )
+
+        count = await loop._sync_filed_reports()
+
+        assert count == 1
+        report = state.get_tracked_report("r1")
+        assert report is not None
+        assert report.status == "fixed"
+        assert any(h.action == "fixed" for h in report.history)
+        # GitHub API should not be called when outcome exists
+        pr_mgr.get_issue_state.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_outcome_already_satisfied_transitions_to_fixed(
         self, tmp_path: Path
     ) -> None:
-        """A filed report whose linked issue is COMPLETED transitions to fixed."""
+        """A filed report with an ALREADY_SATISFIED outcome transitions to fixed."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
+        state.add_tracked_report(
+            TrackedReport(
+                id="r1",
+                reporter_id="u1",
+                description="Bug",
+                status="filed",
+                linked_issue_url=f"https://github.com/{loop._config.repo}/issues/99",
+            )
+        )
+        state.record_outcome(
+            99,
+            IssueOutcomeType.ALREADY_SATISFIED,
+            reason="Already fixed",
+            phase="plan",
+        )
+
+        count = await loop._sync_filed_reports()
+
+        assert count == 1
+        assert state.get_tracked_report("r1").status == "fixed"
+
+    @pytest.mark.asyncio
+    async def test_outcome_failed_transitions_to_closed(self, tmp_path: Path) -> None:
+        """A filed report with a FAILED pipeline outcome transitions to closed."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
+        state.add_tracked_report(
+            TrackedReport(
+                id="r1",
+                reporter_id="u1",
+                description="Bug",
+                status="filed",
+                linked_issue_url=f"https://github.com/{loop._config.repo}/issues/50",
+            )
+        )
+        state.record_outcome(
+            50,
+            IssueOutcomeType.FAILED,
+            reason="Implementation failed",
+            phase="implement",
+        )
+
+        count = await loop._sync_filed_reports()
+
+        assert count == 1
+        report = state.get_tracked_report("r1")
+        assert report is not None
+        assert report.status == "closed"
+
+    @pytest.mark.asyncio
+    async def test_github_completed_without_outcome_stays_filed(
+        self, tmp_path: Path
+    ) -> None:
+        """A report stays filed when GitHub says COMPLETED but no pipeline outcome.
+
+        This is the core fix for issue #3142: the UI should not show reports
+        as 'fixed' when the pipeline hasn't confirmed the resolution.
+        """
         loop, _stop, state, pr_mgr = _make_loop(tmp_path)
         state.add_tracked_report(
             TrackedReport(
@@ -1295,11 +1384,42 @@ class TestSyncFiledReports:
 
         count = await loop._sync_filed_reports()
 
-        assert count == 1
+        assert count == 0
         report = state.get_tracked_report("r1")
         assert report is not None
-        assert report.status == "fixed"
-        assert any(h.action == "fixed" for h in report.history)
+        assert report.status == "filed"
+        assert "awaiting pipeline confirmation" in report.progress_summary
+
+    @pytest.mark.asyncio
+    async def test_github_completed_with_outcome_transitions_to_fixed(
+        self, tmp_path: Path
+    ) -> None:
+        """When both GitHub says COMPLETED and outcome exists, report is fixed."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
+        state.add_tracked_report(
+            TrackedReport(
+                id="r1",
+                reporter_id="u1",
+                description="Bug",
+                status="filed",
+                linked_issue_url=f"https://github.com/{loop._config.repo}/issues/99",
+            )
+        )
+        state.record_outcome(
+            99,
+            IssueOutcomeType.MERGED,
+            reason="PR merged",
+            pr_number=200,
+            phase="review",
+        )
+        pr_mgr.get_issue_state = AsyncMock(return_value="COMPLETED")
+
+        count = await loop._sync_filed_reports()
+
+        assert count == 1
+        assert state.get_tracked_report("r1").status == "fixed"
+        # Outcome was used, so GitHub API was not needed
+        pr_mgr.get_issue_state.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_filed_report_transitions_to_closed_on_not_planned(
@@ -1391,8 +1511,14 @@ class TestSyncFiledReports:
                 linked_issue_url=f"https://github.com/{loop._config.repo}/issues/20",
             )
         )
-        pr_mgr.get_issue_state = AsyncMock(
-            side_effect=[RuntimeError("API down"), "COMPLETED"]
+        # r1 gets an API error, r2 has an outcome recorded
+        pr_mgr.get_issue_state = AsyncMock(side_effect=RuntimeError("API down"))
+        state.record_outcome(
+            20,
+            IssueOutcomeType.MERGED,
+            reason="PR merged",
+            pr_number=300,
+            phase="review",
         )
 
         count = await loop._sync_filed_reports()
@@ -1416,7 +1542,14 @@ class TestSyncFiledReports:
                 linked_issue_url=f"https://github.com/{loop._config.repo}/issues/77",
             )
         )
-        pr_mgr.get_issue_state = AsyncMock(return_value="COMPLETED")
+        # Record an outcome so the sync can transition the report
+        state.record_outcome(
+            77,
+            IssueOutcomeType.MERGED,
+            reason="PR merged",
+            pr_number=400,
+            phase="review",
+        )
 
         result = await loop._do_work()
 
@@ -1425,6 +1558,83 @@ class TestSyncFiledReports:
         report = state.get_tracked_report("r1")
         assert report is not None
         assert report.status == "fixed"
+
+    @pytest.mark.asyncio
+    async def test_outcome_verify_resolved_transitions_to_fixed(
+        self, tmp_path: Path
+    ) -> None:
+        """VERIFY_RESOLVED outcome transitions report to fixed."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
+        state.add_tracked_report(
+            TrackedReport(
+                id="r1",
+                reporter_id="u1",
+                description="Bug",
+                status="filed",
+                linked_issue_url=f"https://github.com/{loop._config.repo}/issues/42",
+            )
+        )
+        state.record_outcome(
+            42,
+            IssueOutcomeType.VERIFY_RESOLVED,
+            reason="Verified fixed",
+            phase="review",
+        )
+
+        count = await loop._sync_filed_reports()
+
+        assert count == 1
+        assert state.get_tracked_report("r1").status == "fixed"
+
+    @pytest.mark.asyncio
+    async def test_outcome_manual_close_transitions_to_closed(
+        self, tmp_path: Path
+    ) -> None:
+        """MANUAL_CLOSE outcome transitions report to closed."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
+        state.add_tracked_report(
+            TrackedReport(
+                id="r1",
+                reporter_id="u1",
+                description="Bug",
+                status="filed",
+                linked_issue_url=f"https://github.com/{loop._config.repo}/issues/42",
+            )
+        )
+        state.record_outcome(
+            42,
+            IssueOutcomeType.MANUAL_CLOSE,
+            reason="Manually closed",
+            phase="review",
+        )
+
+        count = await loop._sync_filed_reports()
+
+        assert count == 1
+        assert state.get_tracked_report("r1").status == "closed"
+
+    @pytest.mark.asyncio
+    async def test_progress_summary_not_overwritten_if_already_set(
+        self, tmp_path: Path
+    ) -> None:
+        """Existing progress_summary is preserved when COMPLETED with no outcome."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
+        state.add_tracked_report(
+            TrackedReport(
+                id="r1",
+                reporter_id="u1",
+                description="Bug",
+                status="filed",
+                linked_issue_url=f"https://github.com/{loop._config.repo}/issues/99",
+                progress_summary="Pipeline stage: implement",
+            )
+        )
+        pr_mgr.get_issue_state = AsyncMock(return_value="COMPLETED")
+
+        await loop._sync_filed_reports()
+
+        report = state.get_tracked_report("r1")
+        assert report.progress_summary == "Pipeline stage: implement"
 
 
 class TestExtractIssueNumberFromUrl:

@@ -3974,30 +3974,69 @@ def create_router(
     async def refresh_report_statuses(reporter_id: str = "") -> JSONResponse:
         """Refresh statuses for filed and stale-queued reports.
 
-        * **Filed** reports: checks the linked GitHub issue state; if
-          the issue is closed the report transitions to ``"fixed"``.
+        Uses the HydraFlow pipeline outcome as the primary source of truth,
+        falling back to GitHub issue state only for definitive closures.
+        This prevents reports from being prematurely shown as "fixed"
+        while the pipeline is still processing the linked issue.
+
+        * **Filed** reports with a pipeline outcome: transitions based on
+          outcome type (resolved → ``"fixed"``, closed → ``"closed"``).
+        * **Filed** reports without outcome: only transitions for
+          ``NOT_PLANNED`` GitHub state; ``COMPLETED`` without an outcome
+          updates progress info instead.
         * **Stale queued** reports (>30 min): re-enqueues them into the
           pending queue so the background worker retries processing.
         """
         refreshed: list[dict[str, str]] = []
 
-        # --- filed → fixed when linked issue is closed as completed ---
+        _resolved = frozenset(
+            {
+                IssueOutcomeType.MERGED,
+                IssueOutcomeType.ALREADY_SATISFIED,
+                IssueOutcomeType.HITL_APPROVED,
+                IssueOutcomeType.VERIFY_RESOLVED,
+            }
+        )
+        _closed = frozenset(
+            {
+                IssueOutcomeType.FAILED,
+                IssueOutcomeType.HITL_CLOSED,
+                IssueOutcomeType.HITL_SKIPPED,
+                IssueOutcomeType.MANUAL_CLOSE,
+            }
+        )
+
         for report in state.get_filed_reports():
             if reporter_id and report.reporter_id != reporter_id:
                 continue
             issue_number = _extract_issue_number(report.linked_issue_url)
             if issue_number <= 0:
                 continue
+
+            # Primary: use pipeline outcome as source of truth
+            outcome = state.get_outcome(issue_number)
+            if outcome is not None:
+                if outcome.outcome in _resolved:
+                    state.update_tracked_report(
+                        report.id,
+                        status="fixed",
+                        action_label="fixed",
+                        detail=f"Issue #{issue_number} resolved ({outcome.outcome})",
+                    )
+                    refreshed.append({"id": report.id, "new_status": "fixed"})
+                elif outcome.outcome in _closed:
+                    state.update_tracked_report(
+                        report.id,
+                        status="closed",
+                        action_label="closed",
+                        detail=f"Issue #{issue_number} closed ({outcome.outcome})",
+                    )
+                    refreshed.append({"id": report.id, "new_status": "closed"})
+                continue
+
+            # Fallback: check GitHub issue state for definitive closures
             issue_state = await pr_manager.get_issue_state(issue_number)
-            if issue_state == "COMPLETED":
-                state.update_tracked_report(
-                    report.id,
-                    status="fixed",
-                    action_label="fixed",
-                    detail=f"Issue #{issue_number} resolved",
-                )
-                refreshed.append({"id": report.id, "new_status": "fixed"})
-            elif issue_state == "NOT_PLANNED":
+            if issue_state == "NOT_PLANNED":
                 state.update_tracked_report(
                     report.id,
                     status="closed",
@@ -4005,6 +4044,40 @@ def create_router(
                     detail=f"Issue #{issue_number} closed as won't fix",
                 )
                 refreshed.append({"id": report.id, "new_status": "closed"})
+            elif issue_state == "COMPLETED":
+                # GitHub says closed but pipeline hasn't recorded an outcome.
+                # Update progress info instead of prematurely marking fixed.
+                tracked = state.get_tracked_report(report.id)
+                if tracked and not tracked.progress_summary:
+                    tracked.progress_summary = (
+                        f"Issue #{issue_number} closed on GitHub "
+                        "— awaiting pipeline confirmation"
+                    )
+                    state.save()
+
+        # --- enrich progress_summary from pipeline snapshot ---
+        orch = get_orchestrator()
+        if orch:
+            snapshot = orch.issue_store.get_pipeline_snapshot()
+            # Build a map of issue_number → pipeline stage name
+            issue_stage_map: dict[int, str] = {}
+            for backend_stage, entries in snapshot.items():
+                frontend = _STAGE_NAME_MAP.get(backend_stage, backend_stage)
+                for entry in entries:
+                    issue_stage_map[entry["issue_number"]] = frontend
+
+            for report in state.get_filed_reports():
+                if reporter_id and report.reporter_id != reporter_id:
+                    continue
+                inum = _extract_issue_number(report.linked_issue_url)
+                if inum <= 0:
+                    continue
+                stage = issue_stage_map.get(inum)
+                if stage:
+                    new_summary = f"Pipeline stage: {stage}"
+                    if report.progress_summary != new_summary:
+                        report.progress_summary = new_summary
+                        state.save()
 
         # --- stale queued → re-enqueue pending ---
         pending_ids = {p.id for p in state.get_pending_reports()}

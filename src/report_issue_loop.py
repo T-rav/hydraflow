@@ -24,7 +24,7 @@ from agent_cli import build_agent_command
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
 from execution import SubprocessRunner
-from models import PendingReport, TranscriptEventData
+from models import IssueOutcomeType, PendingReport, TranscriptEventData
 from pr_manager import PRManager
 from runner_utils import AuthenticationRetryError, stream_claude_process
 from screenshot_scanner import scan_base64_for_secrets
@@ -33,6 +33,26 @@ from state import StateTracker
 logger = logging.getLogger("hydraflow.report_issue_loop")
 
 _MAX_REPORT_ATTEMPTS = 5
+
+# Outcome types that indicate the linked issue was resolved successfully.
+_RESOLVED_OUTCOMES: frozenset[IssueOutcomeType] = frozenset(
+    {
+        IssueOutcomeType.MERGED,
+        IssueOutcomeType.ALREADY_SATISFIED,
+        IssueOutcomeType.HITL_APPROVED,
+        IssueOutcomeType.VERIFY_RESOLVED,
+    }
+)
+
+# Outcome types that indicate the linked issue was closed without a fix.
+_CLOSED_OUTCOMES: frozenset[IssueOutcomeType] = frozenset(
+    {
+        IssueOutcomeType.FAILED,
+        IssueOutcomeType.HITL_CLOSED,
+        IssueOutcomeType.HITL_SKIPPED,
+        IssueOutcomeType.MANUAL_CLOSE,
+    }
+)
 
 
 class ReportIssueLoop(BaseBackgroundLoop):
@@ -126,6 +146,12 @@ class ReportIssueLoop(BaseBackgroundLoop):
     async def _sync_filed_reports(self) -> int:
         """Check linked GitHub issues for filed reports and auto-transition.
 
+        Uses the HydraFlow pipeline outcome as the primary source of truth
+        for status transitions, falling back to GitHub issue state only for
+        definitive closures (NOT_PLANNED).  This prevents reports from being
+        prematurely marked as "fixed" while the pipeline is still processing
+        the linked issue.
+
         Returns the number of reports transitioned.
         """
         transitioned = 0
@@ -133,6 +159,41 @@ class ReportIssueLoop(BaseBackgroundLoop):
             issue_number = self._extract_issue_number_from_url(report.linked_issue_url)
             if issue_number <= 0:
                 continue
+
+            # --- Primary: use pipeline outcome as source of truth ---
+            outcome = self._state.get_outcome(issue_number)
+            if outcome is not None:
+                if outcome.outcome in _RESOLVED_OUTCOMES:
+                    self._state.update_tracked_report(
+                        report.id,
+                        status="fixed",
+                        action_label="fixed",
+                        detail=f"Issue #{issue_number} resolved ({outcome.outcome})",
+                    )
+                    transitioned += 1
+                    logger.info(
+                        "Report %s auto-transitioned to fixed (issue #%d outcome: %s)",
+                        report.id,
+                        issue_number,
+                        outcome.outcome,
+                    )
+                elif outcome.outcome in _CLOSED_OUTCOMES:
+                    self._state.update_tracked_report(
+                        report.id,
+                        status="closed",
+                        action_label="closed",
+                        detail=f"Issue #{issue_number} closed ({outcome.outcome})",
+                    )
+                    transitioned += 1
+                    logger.info(
+                        "Report %s auto-transitioned to closed (issue #%d outcome: %s)",
+                        report.id,
+                        issue_number,
+                        outcome.outcome,
+                    )
+                continue
+
+            # --- Fallback: check GitHub issue state for definitive closures ---
             try:
                 issue_state = await self._pr_manager.get_issue_state(issue_number)
             except Exception:
@@ -143,20 +204,8 @@ class ReportIssueLoop(BaseBackgroundLoop):
                     exc_info=True,
                 )
                 continue
-            if issue_state == "COMPLETED":
-                self._state.update_tracked_report(
-                    report.id,
-                    status="fixed",
-                    action_label="fixed",
-                    detail=f"Issue #{issue_number} resolved",
-                )
-                transitioned += 1
-                logger.info(
-                    "Report %s auto-transitioned to fixed (issue #%d resolved)",
-                    report.id,
-                    issue_number,
-                )
-            elif issue_state == "NOT_PLANNED":
+
+            if issue_state == "NOT_PLANNED":
                 self._state.update_tracked_report(
                     report.id,
                     status="closed",
@@ -169,6 +218,18 @@ class ReportIssueLoop(BaseBackgroundLoop):
                     report.id,
                     issue_number,
                 )
+            elif issue_state == "COMPLETED":
+                # GitHub says closed-as-completed but the pipeline has not
+                # recorded an outcome yet — the issue is likely still being
+                # processed.  Update progress_summary so the UI reflects
+                # the current state instead of prematurely showing "fixed".
+                tracked = self._state.get_tracked_report(report.id)
+                if tracked and not tracked.progress_summary:
+                    tracked.progress_summary = (
+                        f"Issue #{issue_number} closed on GitHub — "
+                        "awaiting pipeline confirmation"
+                    )
+                    self._state.save()
         return transitioned
 
     @classmethod
