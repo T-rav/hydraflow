@@ -6,6 +6,7 @@ import asyncio
 import logging
 
 from config import HydraFlowConfig
+from discover_runner import DiscoverRunner
 from events import EventBus, EventType, HydraFlowEvent
 from issue_store import IssueStore
 from models import DiscoverResult, Task
@@ -37,6 +38,7 @@ class DiscoverPhase:
         prs: PRManager,
         event_bus: EventBus,
         stop_event: asyncio.Event,
+        discover_runner: DiscoverRunner | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -45,6 +47,7 @@ class DiscoverPhase:
         self._transitioner: TaskTransitioner = prs
         self._bus = event_bus
         self._stop_event = stop_event
+        self._runner = discover_runner
 
     async def discover_issues(self) -> bool:
         """Process discover-labeled issues. Returns True if work was done."""
@@ -73,16 +76,17 @@ class DiscoverPhase:
                     )
                 )
 
-                result = DiscoverResult(
-                    issue_number=issue.id,
-                    research_brief=(
-                        "Product discovery research is pending agent integration. "
-                        "This issue has been routed to the product track for "
-                        "competitive analysis, user need identification, and "
-                        "opportunity mapping."
-                    ),
-                    opportunities=["Pending research agent integration"],
-                )
+                if self._runner:
+                    result = await self._runner.discover(issue)
+                else:
+                    result = DiscoverResult(
+                        issue_number=issue.id,
+                        research_brief=(
+                            "Product discovery research requires a DiscoverRunner. "
+                            "Configure the discover runner to enable real product research."
+                        ),
+                        opportunities=["Discovery runner not configured"],
+                    )
 
                 # Post research brief as structured comment
                 comment = self._format_research_brief(issue, result)

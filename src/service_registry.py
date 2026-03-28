@@ -22,6 +22,7 @@ from code_grooming_loop import CodeGroomingLoop  # noqa: TCH001
 from config import HydraFlowConfig
 from crate_manager import CrateManager
 from discover_phase import DiscoverPhase  # noqa: TCH001
+from discover_runner import DiscoverRunner
 from docker_runner import get_docker_runner
 from epic import EpicCompletionChecker, EpicManager
 from epic_monitor_loop import EpicMonitorLoop
@@ -56,6 +57,7 @@ from runs_gc_loop import RunsGCLoop
 from security_patch_loop import SecurityPatchLoop  # noqa: TCH001
 from sentry_loop import SentryLoop  # noqa: TCH001 — used in dataclass field
 from shape_phase import ShapePhase  # noqa: TCH001
+from shape_runner import ShapeRunner
 from stale_issue_gc_loop import StaleIssueGCLoop  # noqa: TCH001
 from state import StateTracker
 from transcript_summarizer import TranscriptSummarizer
@@ -262,6 +264,7 @@ def build_services(
         stop_event,
         epic_manager=epic_manager,
     )
+    discover_runner = DiscoverRunner(config, event_bus)
     discover_phase = DiscoverPhase(  # noqa: F841
         config,
         state,
@@ -269,7 +272,9 @@ def build_services(
         prs,
         event_bus,
         stop_event,
+        discover_runner=discover_runner,
     )
+    shape_runner = ShapeRunner(config, event_bus)
     shape_phase = ShapePhase(  # noqa: F841
         config,
         state,
@@ -277,6 +282,7 @@ def build_services(
         prs,
         event_bus,
         stop_event,
+        shape_runner=shape_runner,
     )
     planner_phase = PlanPhase(
         config,

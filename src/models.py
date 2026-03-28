@@ -401,7 +401,7 @@ class DiscoverResult(BaseModel):
     """Outcome of product discovery research for a vague issue."""
 
     issue_number: int = Field(description="GitHub issue number")
-    research_brief: str = Field(description="Synthesized research findings")
+    research_brief: str = Field(default="", description="Synthesized research findings")
     opportunities: list[str] = Field(
         default_factory=list, description="Identified opportunity areas"
     )
