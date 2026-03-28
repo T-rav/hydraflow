@@ -159,6 +159,13 @@ export const BOT_PR_PRESETS = [
   { label: '24h', seconds: 86400 },
 ]
 
+const CODE_GROOMING_PRESETS = [
+  { label: '12h', seconds: 43200 },
+  { label: '24h', seconds: 86400 },
+  { label: '3d', seconds: 259200 },
+  { label: '7d', seconds: 604800 },
+]
+
 const SENTRY_INGEST_PRESETS = [
   { label: '30m', seconds: 1800 },
   { label: '1h', seconds: 3600 },
@@ -176,12 +183,13 @@ export const WORKER_PRESETS = {
   report_issue: REPORT_ISSUE_PRESETS,
   bot_pr: BOT_PR_PRESETS,
   sentry_ingest: SENTRY_INGEST_PRESETS,
+  code_grooming: CODE_GROOMING_PRESETS,
 }
 
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'pr_unsticker', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_sweeper', 'bot_pr', 'sentry_ingest'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'pr_unsticker', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_sweeper', 'bot_pr', 'sentry_ingest', 'code_grooming'])
 
 /**
  * Default intervals (in seconds) for system workers.
@@ -197,6 +205,7 @@ export const SYSTEM_WORKER_INTERVALS = {
   adr_reviewer: 86400,
   epic_sweeper: 3600,
   bot_pr: 3600,
+  code_grooming: 86400,
 }
 
 /**
@@ -229,4 +238,5 @@ export const BACKGROUND_WORKERS = [
   { key: 'bot_pr', label: 'Bot PR Manager', description: 'Auto-merges dependency update PRs from configured bots after CI passes.', color: theme.green },
   { key: 'health_monitor', label: 'Health Monitor', description: 'Analyzes pipeline trends, auto-tunes parameters, detects knowledge gaps, and ingests log patterns.', color: theme.green, system: true },
   { key: 'sentry_ingest', label: 'Sentry Ingest', description: 'Polls Sentry for unresolved errors and files them as GitHub issues for the pipeline.', color: theme.red },
+  { key: 'code_grooming', label: 'Code Grooming', description: 'Periodically audits code quality, test coverage, and workflow health, then files prioritized issues.', color: theme.purple },
 ]

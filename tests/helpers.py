@@ -364,6 +364,7 @@ class ConfigFactory:
         adr_review_approval_threshold: int = 2,
         adr_review_max_rounds: int = 3,
         health_monitor_interval: int = 7200,
+        code_grooming_interval: int = 86400,
         adr_review_model: str = "sonnet",
         adr_pre_review: bool = True,
         # Prompt budget configuration
@@ -585,6 +586,7 @@ class ConfigFactory:
                 adr_review_model=adr_review_model,
                 adr_pre_review=adr_pre_review,
                 health_monitor_interval=health_monitor_interval,
+                code_grooming_interval=code_grooming_interval,
                 max_discussion_comment_chars=max_discussion_comment_chars,
                 max_common_feedback_chars=max_common_feedback_chars,
                 max_impl_plan_chars=max_impl_plan_chars,

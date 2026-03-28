@@ -1199,6 +1199,56 @@ class Release(BaseModel):
     tag: str = ""
 
 
+class GroomingPriority(StrEnum):
+    """Priority levels for code grooming findings."""
+
+    P0 = "P0"
+    P1 = "P1"
+    P2 = "P2"
+    P3 = "P3"
+
+
+class AuditFinding(BaseModel):
+    """A single finding from a code grooming audit."""
+
+    category: str
+    severity: str = "medium"
+    summary: str
+    detail: str = ""
+    affected_files: list[str] = Field(default_factory=list)
+    suggested_fix: str = ""
+    priority: GroomingPriority = GroomingPriority.P2
+    audit_source: str = ""
+    dedup_key: str = ""
+
+
+class CodeGroomingSettings(BaseModel):
+    """Persistent settings for the code grooming worker."""
+
+    max_issues_per_cycle: int = Field(default=5, ge=1)
+    min_priority: GroomingPriority = GroomingPriority.P1
+    enabled_audits: list[str] = Field(
+        default_factory=lambda: [
+            "code_quality",
+            "test_quality",
+            "test_adequacy",
+            "hooks",
+            "integration_tests",
+        ]
+    )
+    dry_run: bool = False
+
+
+class GroomingFiledFinding(BaseModel):
+    """Record of a finding that was filed as a GitHub issue."""
+
+    dedup_key: str
+    issue_number: int
+    title: str
+    priority: GroomingPriority
+    filed_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+
+
 class BotPRSettings(BaseModel):
     """Configuration for the bot PR auto-merge worker."""
 
@@ -1256,6 +1306,10 @@ class StateData(BaseModel):
     digest_hashes: dict[str, str] = Field(default_factory=dict)
     bot_pr_settings: BotPRSettings = Field(default_factory=BotPRSettings)
     bot_pr_processed: list[int] = Field(default_factory=list)
+    code_grooming_settings: CodeGroomingSettings = Field(
+        default_factory=CodeGroomingSettings
+    )
+    code_grooming_filed: list[GroomingFiledFinding] = Field(default_factory=list)
     last_updated: str | None = None
 
 

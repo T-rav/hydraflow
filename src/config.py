@@ -105,6 +105,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("state_backup_count", "HYDRAFLOW_STATE_BACKUP_COUNT", 3),
     ("health_monitor_interval", "HYDRAFLOW_HEALTH_MONITOR_INTERVAL", 7200),
     ("sentry_poll_interval", "SENTRY_POLL_INTERVAL", 600),
+    ("code_grooming_interval", "HYDRAFLOW_CODE_GROOMING_INTERVAL", 86400),
 ]
 
 _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
@@ -1032,6 +1033,14 @@ class HydraFlowConfig(BaseModel):
         ge=60,
         le=86400,
         description="Health monitor cycle interval in seconds",
+    )
+
+    # Code grooming
+    code_grooming_interval: int = Field(
+        default=86400,
+        ge=3600,
+        le=604800,
+        description="Code grooming cycle interval in seconds (1h–7d)",
     )
 
     # Config file persistence

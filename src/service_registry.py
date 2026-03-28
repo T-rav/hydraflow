@@ -17,6 +17,7 @@ from base_background_loop import LoopDeps
 from baseline_policy import BaselinePolicy
 from beads_manager import BeadsManager
 from bot_pr_loop import BotPRLoop
+from code_grooming_loop import CodeGroomingLoop
 from config import HydraFlowConfig
 from crate_manager import CrateManager
 from docker_runner import get_docker_runner
@@ -120,6 +121,7 @@ class ServiceRegistry:
     health_monitor_loop: HealthMonitorLoop
     bot_pr_loop: BotPRLoop
     sentry_loop: SentryLoop
+    code_grooming_loop: CodeGroomingLoop
 
     # Optional integrations
     hindsight: HindsightClient | None = None
@@ -436,6 +438,12 @@ def build_services(
         store=store,
         runner=subprocess_runner,
     )
+    code_grooming_loop = CodeGroomingLoop(
+        config=config,
+        prs=prs,
+        state=state,
+        deps=loop_deps,
+    )
 
     return ServiceRegistry(
         worktrees=worktrees,
@@ -479,4 +487,5 @@ def build_services(
         github_cache=gh_cache,
         github_cache_loop=gh_cache_loop,
         sentry_loop=sentry_loop,
+        code_grooming_loop=code_grooming_loop,
     )

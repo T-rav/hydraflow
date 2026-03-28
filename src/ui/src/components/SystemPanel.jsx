@@ -452,6 +452,125 @@ function BotPRSettingsPanel() {
   )
 }
 
+const GROOMING_PRIORITIES = [
+  { value: 'P0', label: 'P0 only' },
+  { value: 'P1', label: 'P1+' },
+  { value: 'P2', label: 'P2+' },
+  { value: 'P3', label: 'P3+ (all)' },
+]
+
+const GROOMING_MAX_ISSUES = [1, 3, 5, 10]
+
+const GROOMING_AUDITS = [
+  { value: 'code_quality', label: 'Code Quality' },
+  { value: 'test_quality', label: 'Test Quality' },
+  { value: 'test_adequacy', label: 'Test Adequacy' },
+  { value: 'hooks', label: 'Hooks & Workflow' },
+  { value: 'integration_tests', label: 'Integration Tests' },
+]
+
+function CodeGroomingSettingsPanel() {
+  const [settings, setSettings] = useState(null)
+
+  const fetchSettings = useCallback(async () => {
+    try {
+      const resp = await fetch('/api/code-grooming/settings')
+      if (resp.ok) {
+        const data = await resp.json()
+        setSettings(data)
+      }
+    } catch { /* ignore */ }
+  }, [])
+
+  React.useEffect(() => { fetchSettings() }, [fetchSettings])
+
+  const saveSettings = useCallback(async (updated) => {
+    setSettings(updated)
+    try {
+      await fetch('/api/code-grooming/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated),
+      })
+    } catch { /* ignore */ }
+  }, [])
+
+  const toggleAudit = useCallback((audit) => {
+    if (!settings) return
+    const audits = settings.enabled_audits || []
+    const next = audits.includes(audit)
+      ? audits.filter(a => a !== audit)
+      : [...audits, audit]
+    saveSettings({ ...settings, enabled_audits: next })
+  }, [settings, saveSettings])
+
+  if (!settings) return null
+
+  return (
+    <div style={styles.botPrPanel} data-testid="code-grooming-settings">
+      <div style={styles.botPrSection}>
+        <div style={styles.botPrSectionLabel}>Max Issues Per Cycle</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {GROOMING_MAX_ISSUES.map(n => (
+            <label key={n} style={styles.botPrRadio}>
+              <input
+                type="radio"
+                name="grooming-max-issues"
+                value={n}
+                checked={settings.max_issues_per_cycle === n}
+                onChange={() => saveSettings({ ...settings, max_issues_per_cycle: n })}
+                data-testid={`grooming-max-${n}`}
+              />
+              <span style={styles.botPrRadioLabel}>{n}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+      <div style={styles.botPrSection}>
+        <div style={styles.botPrSectionLabel}>Minimum Priority</div>
+        {GROOMING_PRIORITIES.map(opt => (
+          <label key={opt.value} style={styles.botPrRadio}>
+            <input
+              type="radio"
+              name="grooming-min-priority"
+              value={opt.value}
+              checked={settings.min_priority === opt.value}
+              onChange={() => saveSettings({ ...settings, min_priority: opt.value })}
+              data-testid={`grooming-priority-${opt.value}`}
+            />
+            <span style={styles.botPrRadioLabel}>{opt.label}</span>
+          </label>
+        ))}
+      </div>
+      <div style={styles.botPrSection}>
+        <div style={styles.botPrSectionLabel}>Enabled Audits</div>
+        {GROOMING_AUDITS.map(audit => (
+          <label key={audit.value} style={styles.botPrCheckbox}>
+            <input
+              type="checkbox"
+              checked={(settings.enabled_audits || []).includes(audit.value)}
+              onChange={() => toggleAudit(audit.value)}
+              data-testid={`grooming-audit-${audit.value}`}
+            />
+            <span style={styles.botPrCheckboxLabel}>{audit.label}</span>
+          </label>
+        ))}
+      </div>
+      <div style={styles.botPrSection}>
+        <label style={styles.botPrCheckbox}>
+          <input
+            type="checkbox"
+            checked={settings.dry_run || false}
+            onChange={() => saveSettings({ ...settings, dry_run: !settings.dry_run })}
+            data-testid="grooming-dry-run"
+          />
+          <span style={styles.botPrCheckboxLabel}>Dry Run (log findings only)</span>
+        </label>
+      </div>
+    </div>
+  )
+}
+
 export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onTriggerBgWorker, onUpdateInterval }) {
   const { pipelinePollerLastRun, orchestratorStatus, events, pipelineIssues } = useHydraFlow()
   const [activeSubTab, setActiveSubTab] = useState('workers')
@@ -492,6 +611,7 @@ export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onTriggerBgWo
                     events={events}
                     extraContent={
                       def.key === 'bot_pr' ? <BotPRSettingsPanel /> :
+                      def.key === 'code_grooming' ? <CodeGroomingSettingsPanel /> :
                       undefined
                     }
                   />

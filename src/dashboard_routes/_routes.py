@@ -2414,6 +2414,11 @@ def create_router(
             "ADR Reviewer",
             "Reviews proposed ADRs via a 3-judge council and routes to accept, reject, or escalate.",
         ),
+        (
+            "code_grooming",
+            "Code Grooming",
+            "Periodically audits code quality, test coverage, and workflow health, then files prioritized issues.",
+        ),
     ]
 
     # Workers that have independent configurable intervals
@@ -2422,6 +2427,7 @@ def create_router(
         "pr_unsticker",
         "pipeline_poller",
         "report_issue",
+        "code_grooming",
     }
     # Pipeline loops share poll_interval (read-only display)
     _PIPELINE_WORKERS = {"triage", "plan", "implement", "review"}
@@ -2507,6 +2513,8 @@ def create_router(
                     interval = _cfg.pr_unstick_interval
                 elif name == "pipeline_poller":
                     interval = 5
+                elif name == "code_grooming":
+                    interval = _cfg.code_grooming_interval
             elif name in _PIPELINE_WORKERS:
                 interval = _cfg.poll_interval
 
@@ -2640,6 +2648,43 @@ def create_router(
             return JSONResponse({"error": str(exc)}, status_code=400)
 
         orch.state.set_bot_pr_settings(new_settings)
+        return JSONResponse({"status": "ok", **new_settings.model_dump()})
+
+    @router.get("/api/code-grooming/settings")
+    async def get_code_grooming_settings() -> JSONResponse:
+        """Return current code grooming settings."""
+        orch = get_orchestrator()
+        if not orch:
+            return JSONResponse({"error": "no orchestrator"}, status_code=400)
+        settings = orch.state.get_code_grooming_settings()
+        return JSONResponse(settings.model_dump())
+
+    @router.post("/api/code-grooming/settings")
+    async def set_code_grooming_settings(body: dict[str, Any]) -> JSONResponse:
+        """Update code grooming settings."""
+        orch = get_orchestrator()
+        if not orch:
+            return JSONResponse({"error": "no orchestrator"}, status_code=400)
+
+        current = orch.state.get_code_grooming_settings()
+        update = current.model_dump()
+        for key in (
+            "max_issues_per_cycle",
+            "min_priority",
+            "enabled_audits",
+            "dry_run",
+        ):
+            if key in body:
+                update[key] = body[key]
+
+        try:
+            from models import CodeGroomingSettings  # noqa: PLC0415
+
+            new_settings = CodeGroomingSettings(**update)
+        except (ValueError, ValidationError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+        orch.state.set_code_grooming_settings(new_settings)
         return JSONResponse({"status": "ok", **new_settings.model_dump()})
 
     @router.get("/api/issues/outcomes")
