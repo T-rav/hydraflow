@@ -132,6 +132,42 @@ class SentryLoop(BaseBackgroundLoop):
             logger.debug("GitHub search failed for sentry:%s", sentry_id, exc_info=True)
             return False
 
+    async def _fetch_latest_event(self, issue_id: str) -> dict[str, Any] | None:
+        """Fetch the latest event for a Sentry issue to get the full stack trace."""
+        url = f"{_SENTRY_API}/issues/{issue_id}/events/latest/"
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.get(url, headers=self._headers())
+                resp.raise_for_status()
+                result: dict[str, Any] = resp.json()
+                return result
+        except Exception:  # noqa: BLE001
+            logger.debug("Failed to fetch latest event for %s", issue_id, exc_info=True)
+            return None
+
+    def _extract_stacktrace(self, event: dict[str, Any]) -> str:
+        """Extract a formatted stack trace from a Sentry event."""
+        frames: list[str] = []
+        for entry in event.get("entries", []):
+            if entry.get("type") != "exception":
+                continue
+            for exc_val in entry.get("data", {}).get("values", []):
+                exc_type = exc_val.get("type", "")
+                exc_value = exc_val.get("value", "")
+                stacktrace = exc_val.get("stacktrace", {})
+                for frame in stacktrace.get("frames", [])[-10:]:
+                    filename = frame.get("filename", "?")
+                    lineno = frame.get("lineNo", "?")
+                    func = frame.get("function", "?")
+                    context_line = frame.get("context_line", "").strip()
+                    line = f"  {filename}:{lineno} in {func}"
+                    if context_line:
+                        line += f"\n    {context_line}"
+                    frames.append(line)
+                if exc_type:
+                    frames.append(f"\n{exc_type}: {exc_value}")
+        return "\n".join(frames) if frames else ""
+
     async def _create_github_issue(
         self, sentry_issue: dict[str, Any], project_slug: str
     ) -> bool:
@@ -146,6 +182,10 @@ class SentryLoop(BaseBackgroundLoop):
         permalink = sentry_issue.get("permalink", "")
         short_id = sentry_issue.get("shortId", sentry_id)
 
+        # Fetch latest event for full stack trace
+        event = await self._fetch_latest_event(sentry_id)
+        stacktrace = self._extract_stacktrace(event) if event else ""
+
         body = f"""## Sentry Error: {title}
 
 | Field | Value |
@@ -158,12 +198,21 @@ class SentryLoop(BaseBackgroundLoop):
 | **Last seen** | {last_seen} |
 | **Culprit** | `{culprit}` |
 | **Link** | {permalink} |
+"""
 
-### Stack trace location
-`{culprit}`
+        if stacktrace:
+            body += f"""
+### Stack trace
+```
+{stacktrace}
+```
+"""
 
-### Notes
-Auto-filed from Sentry. Investigate the root cause, fix the error, and add a regression test.
+        body += f"""
+### Instructions
+Investigate the root cause of this error. The culprit points to `{culprit}`.
+Search the codebase for the failing function, understand the error context,
+fix the bug, and add a regression test that reproduces the failure.
 
 <!-- [sentry:{sentry_id}] -->
 """
