@@ -74,11 +74,31 @@ class SentryLoop(BaseBackgroundLoop):
         total_created = 0
         total_skipped = 0
 
+        min_events = self._config.sentry_min_events
+
         for project in projects:
             issues = await self._fetch_unresolved(project["slug"])
             for issue in issues:
                 sentry_id = str(issue["id"])
                 if sentry_id in self._filed:
+                    total_skipped += 1
+                    continue
+
+                # Skip low-event-count noise (single-occurrence transients)
+                event_count = int(issue.get("count", "0") or "0")
+                if event_count < min_events:
+                    total_skipped += 1
+                    continue
+
+                # Skip handled exceptions — only unhandled errors are real bugs.
+                # Works for any language (Python, JS, Go, etc.)
+                if not issue.get("isUnhandled", True):
+                    logger.debug(
+                        "Skipping handled Sentry issue %s: %s",
+                        sentry_id,
+                        issue.get("title", "")[:60],
+                    )
+                    self._filed.add(sentry_id)
                     total_skipped += 1
                     continue
 
@@ -128,7 +148,7 @@ class SentryLoop(BaseBackgroundLoop):
         """Fetch unresolved issues for a project, newest first."""
         org = quote(self._config.sentry_org)
         url = f"{_SENTRY_API}/projects/{org}/{quote(project_slug)}/issues/"
-        params = {"query": "is:unresolved", "sort": "date", "limit": "25"}
+        params = {"query": "is:unresolved level:error", "sort": "date", "limit": "25"}
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(url, headers=self._headers(), params=params)
             resp.raise_for_status()

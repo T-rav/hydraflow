@@ -31,6 +31,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hydraflow.triage_phase")
 
+_SENTRY_MARKER = "<!-- [sentry:"
+
+
+def _is_sentry_issue(issue: Task) -> bool:
+    """Return True if the issue was filed by the Sentry ingest loop."""
+    return _SENTRY_MARKER in (issue.body or "")
+
 
 class TriagePhase:
     """Evaluates ``find_label`` issues and routes them to plan or HITL."""
@@ -167,6 +174,21 @@ class TriagePhase:
                     issue.id,
                     self._config.planner_label[0],
                 )
+        elif _is_sentry_issue(issue):
+            # Sentry-originated issues that fail triage are noise — auto-close
+            await self._prs.post_comment(
+                issue.id,
+                "## Auto-closed\n\nThis Sentry-originated issue did not pass triage "
+                "evaluation. Likely a transient infrastructure error, not a code bug.\n\n"
+                f"Reasons: {'; '.join(result.reasons)}",
+            )
+            await self._transitioner.close_task(issue.id)
+            self._state.mark_issue(issue.id, "completed")
+            logger.info(
+                "Issue #%d Sentry noise auto-closed by triage: %s",
+                issue.id,
+                "; ".join(result.reasons),
+            )
         else:
             await self._escalate_triage_issue(issue.id, result.reasons)
             self._store.enqueue_transition(issue, "hitl")
