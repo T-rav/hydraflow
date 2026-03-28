@@ -159,6 +159,14 @@ export const BOT_PR_PRESETS = [
   { label: '24h', seconds: 86400 },
 ]
 
+const SENTRY_INGEST_PRESETS = [
+  { label: '30m', seconds: 1800 },
+  { label: '1h', seconds: 3600 },
+  { label: '2h', seconds: 7200 },
+  { label: '4h', seconds: 14400 },
+  { label: '8h', seconds: 28800 },
+]
+
 /**
  * Per-worker preset overrides. Workers not listed here use INTERVAL_PRESETS.
  */
@@ -167,12 +175,13 @@ export const WORKER_PRESETS = {
   adr_reviewer: ADR_REVIEWER_PRESETS,
   report_issue: REPORT_ISSUE_PRESETS,
   bot_pr: BOT_PR_PRESETS,
+  sentry_ingest: SENTRY_INGEST_PRESETS,
 }
 
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'pr_unsticker', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_sweeper', 'bot_pr'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'pr_unsticker', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_sweeper', 'bot_pr', 'sentry_ingest'])
 
 /**
  * Default intervals (in seconds) for system workers.
