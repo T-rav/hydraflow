@@ -8,14 +8,16 @@ import { OutcomesPanel } from './components/IssueHistoryPanel'
 import { StreamView } from './components/StreamView'
 import { SessionSidebar } from './components/SessionSidebar'
 import { BugReportPanel } from './components/BugReportPanel'
+import { CaretakerPanel } from './components/CaretakerPanel'
 import { theme } from './theme'
 
-const TABS = ['issues', 'hitl', 'outcomes', 'reports', 'system']
+const TABS = ['issues', 'hitl', 'outcomes', 'reports', 'caretaker', 'system']
 
 const TAB_LABELS = {
   issues: 'Work Stream',
   outcomes: 'Outcomes',
   reports: 'Reports',
+  caretaker: 'Caretaker',
   hitl: 'HITL',
   system: 'System',
 }
@@ -264,6 +266,7 @@ function AppContent() {
               reporterId={reporterId}
             />
           )}
+          {activeTab === 'caretaker' && <CaretakerPanel />}
           {activeTab === 'system' && (
             <SystemPanel
               backgroundWorkers={backgroundWorkers}
