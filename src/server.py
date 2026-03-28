@@ -89,7 +89,7 @@ def _init_sentry() -> None:
             FastApiIntegration(transaction_style="endpoint"),
             LoggingIntegration(level=logging.WARNING, event_level=logging.ERROR),
         ],
-        before_send=_before_send,
+        before_send=_before_send,  # type: ignore[arg-type]
         before_send_transaction=lambda event, hint: _scrub(event),  # type: ignore[arg-type]
     )
 
