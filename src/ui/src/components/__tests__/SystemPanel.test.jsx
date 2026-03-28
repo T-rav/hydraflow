@@ -319,8 +319,8 @@ describe('SystemPanel', () => {
       mockUseHydraFlow.mockReturnValue(defaultMockContext({ backgroundWorkers: disabledWorkers }))
       render(<SystemPanel backgroundWorkers={disabledWorkers} onToggleBgWorker={onToggle} />)
       const offButtons = screen.getAllByText('Off')
-      // 2 explicitly disabled workers + 1 memory auto-approve toggle (defaults to Off)
-      expect(offButtons.length).toBe(3)
+      // 2 explicitly disabled workers
+      expect(offButtons.length).toBe(2)
     })
   })
 
