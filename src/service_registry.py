@@ -307,6 +307,8 @@ def build_services(
     from metrics_manager import MetricsManager
 
     metrics_manager = MetricsManager(config, state, prs, event_bus)
+    from phase_utils import MemorySuggester
+
     conflict_resolver = MergeConflictResolver(
         config=config,
         worktrees=worktrees,
@@ -315,6 +317,7 @@ def build_services(
         event_bus=event_bus,
         state=state,
         summarizer=summarizer,
+        suggest_memory=MemorySuggester(config, prs, state),
     )
     pr_unsticker = PRUnsticker(
         config,

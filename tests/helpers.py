@@ -1274,7 +1274,7 @@ def make_triage_phase(config):
     return phase, state, triage, prs, store, stop_event
 
 
-def make_conflict_resolver(config, *, agents=None):
+def make_conflict_resolver(config, *, agents=None, suggest_memory=None):
     """Build a MergeConflictResolver with standard mock dependencies.
 
     Promoted from test_merge_conflict_resolver._make_resolver() for reuse
@@ -1293,6 +1293,7 @@ def make_conflict_resolver(config, *, agents=None):
         event_bus=EventBus(),
         state=state,
         summarizer=None,
+        suggest_memory=suggest_memory,
     )
 
 

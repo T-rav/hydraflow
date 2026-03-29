@@ -6,25 +6,32 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from agent import AgentRunner
 from config import HydraFlowConfig
-from events import EventBus
+from events import EventBus, EventType, HydraFlowEvent
+from exception_classify import is_likely_bug
 from models import (
     ConflictResolutionResult,
     EscalateFn,
     HitlEscalation,
     PRInfo,
     PublishFn,
+    ReviewUpdatePayload,
     Task,
     WorkerStatus,
 )
-from phase_utils import MemorySuggester, is_likely_bug, publish_review_status
 from prompt_stats import build_prompt_stats
 from state import StateTracker
 from transcript_summarizer import TranscriptSummarizer
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
+    from typing import Any
+
+    from agent import AgentRunner  # noqa: F401
     from ports import PRPort, WorkspacePort
+
+    #: Async callable that suggests memory entries from transcripts.
+    MemorySuggesterFn = Callable[[str, str, str], Coroutine[Any, Any, None]]
 
 logger = logging.getLogger("hydraflow.merge_conflict_resolver")
 
@@ -41,6 +48,7 @@ class MergeConflictResolver:
         event_bus: EventBus,
         state: StateTracker,
         summarizer: TranscriptSummarizer | None,
+        suggest_memory: MemorySuggesterFn | None = None,
     ) -> None:
         self._config = config
         self._worktrees = worktrees
@@ -49,7 +57,7 @@ class MergeConflictResolver:
         self._bus = event_bus
         self._state = state
         self._summarizer = summarizer
-        self._suggest_memory = MemorySuggester(config, prs, state)
+        self._suggest_memory = suggest_memory
 
     async def merge_with_main(
         self,
@@ -194,7 +202,8 @@ class MergeConflictResolver:
                     pr.number, issue.id, attempt, transcript, source=source
                 )
 
-                await self._suggest_memory(transcript, source, f"PR #{pr.number}")
+                if self._suggest_memory is not None:
+                    await self._suggest_memory(transcript, source, f"PR #{pr.number}")
 
                 verify = await self._agents._verify_result(wt_path, pr.branch)
                 if verify.passed:
@@ -322,14 +331,13 @@ class MergeConflictResolver:
                 pr.number, issue.id, 0, transcript, source=source
             )
 
-            await self._suggest_memory(transcript, source, f"PR #{pr.number}")
+            if self._suggest_memory is not None:
+                await self._suggest_memory(transcript, source, f"PR #{pr.number}")
 
             verify = await self._agents._verify_result(new_wt, pr.branch)
             if verify.passed:
                 await self._maybe_summarize_conflict(transcript, issue.id, pr.number)
-                from pr_manager import PRManager as _PRManager  # noqa: PLC0415
-
-                expected_title = _PRManager.expected_pr_title(issue.id, issue.title)
+                expected_title = self._prs.expected_pr_title(issue.id, issue.title)
                 await self._prs.update_pr_title(pr.number, expected_title)
                 logger.info("Fresh branch rebuild succeeded for PR #%d", pr.number)
                 return True
@@ -407,4 +415,15 @@ class MergeConflictResolver:
         """
         if worker_id is None:
             return
-        await publish_review_status(self._bus, pr, worker_id, status)
+        await self._bus.publish(
+            HydraFlowEvent(
+                type=EventType.REVIEW_UPDATE,
+                data=ReviewUpdatePayload(
+                    pr=pr.number,
+                    issue=pr.issue_number,
+                    worker=worker_id,
+                    status=status,
+                    role="reviewer",
+                ),
+            )
+        )
