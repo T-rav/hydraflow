@@ -18,6 +18,12 @@ if TYPE_CHECKING:
     from hindsight_wal import HindsightWAL
     from visual_validator import VisualValidator
 
+from adr_utils import (
+    adr_validation_reasons,
+    is_adr_issue_title,
+    load_existing_adr_topics,
+    normalize_adr_topic,
+)
 from baseline_policy import BaselinePolicy
 from comment_formatter import SelfReviewError
 from config import HydraFlowConfig
@@ -46,10 +52,6 @@ from models import (
 from phase_utils import (
     MemorySuggester,
     _sentry_transaction,
-    adr_validation_reasons,
-    is_adr_issue_title,
-    load_existing_adr_topics,
-    normalize_adr_topic,
     publish_review_status,
     record_harness_failure,
     release_batch_in_flight,

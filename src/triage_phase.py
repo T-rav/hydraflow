@@ -6,17 +6,19 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
+from adr_utils import (
+    adr_validation_reasons,
+    is_adr_issue_title,
+    load_existing_adr_topics,
+    normalize_adr_topic,
+)
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from issue_store import IssueStore
 from models import HITLUpdatePayload, Task, TriageResult
 from phase_utils import (
     _sentry_transaction,
-    adr_validation_reasons,
     escalate_to_hitl,
-    is_adr_issue_title,
-    load_existing_adr_topics,
-    normalize_adr_topic,
     release_batch_in_flight,
     run_refilling_pool,
     store_lifecycle,

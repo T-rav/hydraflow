@@ -9,6 +9,7 @@ from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from adr_utils import is_adr_issue_title
 from bg_worker_manager import BGWorkerManager
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
@@ -33,7 +34,6 @@ from models import (
 )
 from phase_utils import (
     MemorySuggester,
-    is_adr_issue_title,
     is_likely_bug,
     log_exception_with_bug_classification,
     release_batch_in_flight,
