@@ -8,6 +8,7 @@ import logging
 import re
 from pathlib import Path
 
+from adr_utils import is_adr_issue_title, next_adr_number
 from agent import AgentRunner
 from beads_manager import BeadsManager
 from config import HydraFlowConfig
@@ -25,8 +26,6 @@ from phase_utils import (
     MemorySuggester,
     PipelineEscalator,
     _sentry_transaction,
-    is_adr_issue_title,
-    next_adr_number,
     record_harness_failure,
     release_batch_in_flight,
     run_refilling_pool,
