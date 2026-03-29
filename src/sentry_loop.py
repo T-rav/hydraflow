@@ -245,10 +245,10 @@ class SentryLoop(BaseBackgroundLoop):
         permalink = sentry_issue.get("permalink", "")
         short_id = sentry_issue.get("shortId", sentry_id)
 
-        ready_label = (
-            self._config.ready_label[0]
-            if self._config.ready_label
-            else "hydraflow-ready"
+        _plan_lbl = (  # noqa: F841
+            self._config.planner_label[0]
+            if self._config.planner_label
+            else "hydraflow-plan"
         )
 
         parts = [
@@ -263,7 +263,7 @@ class SentryLoop(BaseBackgroundLoop):
             parts.append(f"\nStack trace:\n```\n{stacktrace}\n```")
 
         parts.append(
-            f"\nIMPORTANT: Use the label `{ready_label}` instead of "
+            f"\nIMPORTANT: Use the label `{_plan_lbl}` instead of "
             f"`hydraflow-find` for this issue."
         )
         parts.append(
