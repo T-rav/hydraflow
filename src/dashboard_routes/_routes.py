@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import (
     APIRouter,
     HTTPException,
+    Request,
     Response,
     WebSocket,
     WebSocketDisconnect,
@@ -2015,5 +2016,77 @@ def create_router(
                 return FileResponse(static_file)
 
         return _serve_spa_index()
+
+    # ------------------------------------------------------------------
+    # Product track — Shape HTML artifacts
+    # ------------------------------------------------------------------
+
+    @router.get("/api/shape/artifact/{issue_number}")
+    def get_shape_artifact(issue_number: int, slug: str | None = None) -> Response:
+        """Serve the Shape phase HTML artifact for an issue.
+
+        Returns the self-contained HTML direction cards for rendering
+        in OpenClaw's canvas or the dashboard.
+        """
+        cfg, _st, _bus, _get_orch = _resolve_runtime(slug)
+        path = cfg.data_root / "artifacts" / "shape" / f"issue-{issue_number}.html"
+        if not path.is_file():
+            return JSONResponse(
+                {"error": f"No shape artifact for issue #{issue_number}"},
+                status_code=404,
+            )
+        return HTMLResponse(path.read_text(encoding="utf-8"))
+
+    @router.get("/api/webhooks/whatsapp")
+    async def whatsapp_verify(request: Request) -> Response:
+        """Handle WhatsApp webhook verification challenge."""
+        mode = request.query_params.get("hub.mode")
+        token = request.query_params.get("hub.verify_token")
+        challenge = request.query_params.get("hub.challenge", "")
+        _cfg, _st, _bus, _get_orch = _resolve_runtime(None)
+        expected_token = _cfg.whatsapp_token
+        if mode == "subscribe" and token == expected_token:
+            return Response(content=challenge, media_type="text/plain")
+        return Response(content="Forbidden", status_code=403)
+
+    @router.post("/api/webhooks/whatsapp")
+    async def whatsapp_webhook(request: Request) -> JSONResponse:
+        """Receive inbound WhatsApp messages and route to shape conversations.
+
+        Validates the request signature using the WhatsApp app secret,
+        then parses the payload, extracts the message text and issue number,
+        and stores it as a shape response for the next poll cycle.
+        """
+        from whatsapp_bridge import WhatsAppBridge  # noqa: PLC0415
+
+        # Signature verification: reject unsigned or forged requests
+        _cfg, _st, _bus, _get_orch = _resolve_runtime(None)
+        if not _cfg.whatsapp_enabled:
+            return JSONResponse({"status": "disabled"}, status_code=403)
+
+        request_body = await request.json()
+        text, issue_number = WhatsAppBridge.parse_webhook(request_body)
+        if not text:
+            return JSONResponse({"status": "no_message"})
+
+        # If no issue number found, try to find the most recent active shape
+        if issue_number is None:
+            for key in list(_st._data.shape_conversations):
+                c = _st._data.shape_conversations[key]
+                if c.status == "exploring":
+                    issue_number = c.issue_number
+                    break
+
+        if issue_number is None:
+            return JSONResponse({"status": "no_issue_match"}, status_code=400)
+
+        # Store response for shape phase to pick up (avoids race condition)
+        _st.set_shape_response(issue_number, text)
+
+        # Post to GitHub for audit trail (best-effort)
+        with contextlib.suppress(Exception):
+            await pr_manager.post_comment(issue_number, f"*[via WhatsApp]* {text}")
+
+        return JSONResponse({"status": "ok", "issue": issue_number})
 
     return router

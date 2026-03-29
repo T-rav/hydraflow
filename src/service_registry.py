@@ -21,6 +21,8 @@ from ci_monitor_loop import CIMonitorLoop  # noqa: TCH001
 from code_grooming_loop import CodeGroomingLoop  # noqa: TCH001
 from config import HydraFlowConfig
 from crate_manager import CrateManager
+from discover_phase import DiscoverPhase  # noqa: TCH001
+from discover_runner import DiscoverRunner
 from docker_runner import get_docker_runner
 from epic import EpicCompletionChecker, EpicManager
 from epic_monitor_loop import EpicMonitorLoop
@@ -54,6 +56,8 @@ from run_recorder import RunRecorder
 from runs_gc_loop import RunsGCLoop
 from security_patch_loop import SecurityPatchLoop  # noqa: TCH001
 from sentry_loop import SentryLoop  # noqa: TCH001 — used in dataclass field
+from shape_phase import ShapePhase  # noqa: TCH001
+from shape_runner import ShapeRunner
 from stale_issue_gc_loop import StaleIssueGCLoop  # noqa: TCH001
 from state import StateTracker
 from transcript_summarizer import TranscriptSummarizer
@@ -92,6 +96,8 @@ class ServiceRegistry:
 
     # Phase coordinators
     triager: TriagePhase
+    discover_phase: DiscoverPhase
+    shape_phase: ShapePhase
     planner_phase: PlanPhase
     hitl_phase: HITLPhase
     implementer: ImplementPhase
@@ -257,6 +263,36 @@ def build_services(
         event_bus,
         stop_event,
         epic_manager=epic_manager,
+    )
+    discover_runner = DiscoverRunner(config, event_bus)
+    discover_phase = DiscoverPhase(  # noqa: F841
+        config,
+        state,
+        store,
+        prs,
+        event_bus,
+        stop_event,
+        discover_runner=discover_runner,
+    )
+    shape_runner = ShapeRunner(config, event_bus)
+    wa_bridge = None
+    if config.whatsapp_enabled:
+        from whatsapp_bridge import WhatsAppBridge  # noqa: PLC0415
+
+        wa_bridge = WhatsAppBridge(
+            phone_id=config.whatsapp_phone_id,
+            token=config.whatsapp_token,
+            recipient=config.whatsapp_recipient,
+        )
+    shape_phase = ShapePhase(  # noqa: F841
+        config,
+        state,
+        store,
+        prs,
+        event_bus,
+        stop_event,
+        shape_runner=shape_runner,
+        whatsapp_bridge=wa_bridge,
     )
     planner_phase = PlanPhase(
         config,
@@ -479,6 +515,8 @@ def build_services(
         store=store,
         crate_manager=crate_manager,
         triager=triager,
+        discover_phase=discover_phase,
+        shape_phase=shape_phase,
         planner_phase=planner_phase,
         hitl_phase=hitl_phase,
         implementer=implementer,

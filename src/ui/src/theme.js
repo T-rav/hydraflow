@@ -20,6 +20,7 @@ export const theme = {
   orange: 'var(--orange)',
   purple: 'var(--purple)',
   triageGreen: 'var(--triage-green)',
+  cyan: 'var(--cyan)',
 
   btnGreen: 'var(--btn-green)',
   btnRed: 'var(--btn-red)',
@@ -35,6 +36,7 @@ export const theme = {
   orangeSubtle: 'var(--orange-subtle)',
   greenSubtle: 'var(--green-subtle)',
   redSubtle: 'var(--red-subtle)',
+  cyanSubtle: 'var(--cyan-subtle)',
   overlay: 'var(--overlay)',
   intentBg: 'var(--intent-bg)',
 }

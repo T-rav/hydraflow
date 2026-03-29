@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react'
 import { theme } from '../theme'
 import { useHydraFlow } from '../context/HydraFlowContext'
-import { PIPELINE_STAGES, SENSITIVE_SELECTORS } from '../constants'
+import { PIPELINE_STAGES, PRODUCT_TRACK_KEYS, SENSITIVE_SELECTORS } from '../constants'
 import { BugReportPanel } from './BugReportPanel'
 import { ReportIssueModal } from './ReportIssueModal'
 import html2canvasLib from 'html2canvas'
@@ -242,9 +242,12 @@ export function Header({ connected, orchestratorStatus }) {
       <div style={styles.center}>
         <div style={styles.sessionBox} data-testid="session-box" aria-label="Session pipeline statistics">
           <div style={styles.pipelineRow} data-testid="session-pipeline">
-            {sessionStages.map((stage, index) => (
-              <React.Fragment key={stage.key}>
+            {(() => {
+              const mainTrack = sessionStages.filter(s => !PRODUCT_TRACK_KEYS.has(s.key))
+              const productTrack = sessionStages.filter(s => PRODUCT_TRACK_KEYS.has(s.key))
+              const renderPill = (stage) => (
                 <div
+                  key={stage.key}
                   style={pipelineStageStylesMap[stage.key]}
                   data-testid={`session-stage-${stage.key}`}
                 >
@@ -253,11 +256,41 @@ export function Header({ connected, orchestratorStatus }) {
                   </span>
                   <span style={styles.pipelineValue}>{stage.count}</span>
                 </div>
-                {index < sessionStages.length - 1 && (
-                  <span style={styles.pipelineArrow}>→</span>
-                )}
-              </React.Fragment>
-            ))}
+              )
+              const arrow = <span style={styles.pipelineArrow}>→</span>
+              const triageStage = mainTrack.find(s => s.key === 'triage')
+              const postTriage = mainTrack.filter(s => s.key !== 'triage')
+              return (
+                <>
+                  {triageStage && renderPill(triageStage)}
+                  {productTrack.length > 0 && (
+                    <>
+                      <span style={styles.pipelineFork}>
+                        <span style={styles.forkTop}>
+                          {productTrack.map((s, i) => (
+                            <React.Fragment key={s.key}>
+                              {i === 0 && <span style={styles.forkArrow}>↗</span>}
+                              {i > 0 && arrow}
+                              {renderPill(s)}
+                            </React.Fragment>
+                          ))}
+                          <span style={styles.forkArrow}>↘</span>
+                        </span>
+                        <span style={styles.forkBottom}>
+                          <span style={styles.forkDirect}>direct</span>
+                        </span>
+                      </span>
+                    </>
+                  )}
+                  {postTriage.map((stage, index) => (
+                    <React.Fragment key={stage.key}>
+                      {arrow}
+                      {renderPill(stage)}
+                    </React.Fragment>
+                  ))}
+                </>
+              )
+            })()}
           </div>
         </div>
       </div>
@@ -395,6 +428,33 @@ const styles = {
     color: theme.textMuted,
     fontSize: 12,
     fontWeight: 600,
+  },
+  pipelineFork: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 2,
+    margin: '0 4px',
+  },
+  forkTop: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 4,
+  },
+  forkBottom: {
+    display: 'flex',
+    alignItems: 'center',
+  },
+  forkArrow: {
+    color: theme.cyan,
+    fontSize: 10,
+    fontWeight: 600,
+  },
+  forkDirect: {
+    fontSize: 9,
+    color: theme.textInactive,
+    fontStyle: 'italic',
+    letterSpacing: '0.3px',
   },
   controls: { display: 'flex', alignItems: 'center', gap: 10, marginLeft: 10, flexShrink: 0 },
   controlStartBtn: {

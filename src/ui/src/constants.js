@@ -27,12 +27,19 @@ export const MAX_EVENTS = 5000
  * Components derive their own views (uppercase labels, filtered subsets, etc.) from this array.
  */
 export const PIPELINE_STAGES = [
-  { key: 'triage',    label: 'Triage',    color: theme.yellow,      subtleColor: theme.yellowSubtle,  role: 'triage',      configKey: 'max_triagers' },
-  { key: 'plan',      label: 'Plan',      color: theme.purple,      subtleColor: theme.purpleSubtle, role: 'planner',     configKey: 'max_planners' },
-  { key: 'implement', label: 'Implement', color: theme.accent,      subtleColor: theme.accentSubtle, role: 'implementer', configKey: 'max_workers' },
-  { key: 'review',    label: 'Review',    color: theme.orange,      subtleColor: theme.orangeSubtle, role: 'reviewer',    configKey: 'max_reviewers' },
-  { key: 'merged',    label: 'Merged',    color: theme.green,       subtleColor: theme.greenSubtle,  role: null,           configKey: null },
+  { key: 'triage',    label: 'Triage',    color: theme.yellow,      subtleColor: theme.yellowSubtle,  role: 'triage',      configKey: 'max_triagers', track: 'junction' },
+  { key: 'discover',  label: 'Discover',  color: theme.cyan,        subtleColor: theme.cyanSubtle,    role: 'discover',    configKey: 'max_triagers', track: 'product' },
+  { key: 'shape',     label: 'Shape',     color: theme.cyan,        subtleColor: theme.cyanSubtle,    role: 'shape',       configKey: 'max_triagers', track: 'product' },
+  { key: 'plan',      label: 'Plan',      color: theme.purple,      subtleColor: theme.purpleSubtle,  role: 'planner',     configKey: 'max_planners', track: 'junction' },
+  { key: 'implement', label: 'Implement', color: theme.accent,      subtleColor: theme.accentSubtle,  role: 'implementer', configKey: 'max_workers',  track: 'engineering' },
+  { key: 'review',    label: 'Review',    color: theme.orange,      subtleColor: theme.orangeSubtle,  role: 'reviewer',    configKey: 'max_reviewers', track: 'engineering' },
+  { key: 'merged',    label: 'Merged',    color: theme.green,       subtleColor: theme.greenSubtle,   role: null,           configKey: null,           track: 'engineering' },
 ]
+
+/** Stages that form the product discovery track (branching path from triage). */
+export const PRODUCT_TRACK_KEYS = new Set(
+  PIPELINE_STAGES.filter(s => s.track === 'product').map(s => s.key)
+)
 
 /**
  * Pencil cursor for the annotation canvas in the Report Issue modal.
@@ -47,6 +54,8 @@ export const ANNOTATION_PENCIL_CURSOR = "url('data:image/svg+xml,%3Csvg xmlns=%2
  */
 export const ANNOTATION_COLORS = [
   { key: 'triage',    label: 'Triage',    color: theme.yellow },
+  { key: 'discover',  label: 'Discover',  color: theme.cyan },
+  { key: 'shape',     label: 'Shape',     color: theme.cyan },
   { key: 'plan',      label: 'Plan',      color: theme.purple },
   { key: 'implement', label: 'Implement', color: theme.accent },
   { key: 'review',    label: 'Review',    color: theme.orange },
