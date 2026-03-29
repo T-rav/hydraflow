@@ -279,15 +279,16 @@ class ReportIssueLoop(BaseBackgroundLoop):
                     "broken image."
                 )
 
-        # Use hydraflow-ready so bug reports skip triage/planning and go
-        # straight to implementation.
-        ready_label = (
-            self._config.ready_label[0]
-            if self._config.ready_label
-            else "hydraflow-ready"
+        # Use hydraflow-plan so bug reports go through the planning phase
+        # (lite plan auto-detected) before implementation. This ensures every
+        # issue has a plan comment that the implement agent can reference.
+        plan_label = (
+            self._config.planner_label[0]
+            if self._config.planner_label
+            else "hydraflow-plan"
         )
         description += (
-            f"\n\nIMPORTANT: Use the label `{ready_label}` instead of "
+            f"\n\nIMPORTANT: Use the label `{plan_label}` instead of "
             f"`hydraflow-find` for this issue."
         )
 
@@ -331,7 +332,7 @@ class ReportIssueLoop(BaseBackgroundLoop):
 
         if issue_number > 0:
             # Verify the agent applied the correct label and screenshot
-            await self._verify_issue(issue_number, ready_label, screenshot_url)
+            await self._verify_issue(issue_number, plan_label, screenshot_url)
 
             issue_url = f"https://github.com/{self._config.repo}/issues/{issue_number}"
 
