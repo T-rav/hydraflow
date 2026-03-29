@@ -582,3 +582,156 @@ class TestFreshRebuildTitleUpdate:
 
         assert result is False
         resolver._prs.update_pr_title.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Architecture layering tests (#5919)
+# ---------------------------------------------------------------------------
+
+
+class TestArchitectureLayering:
+    """Verify merge_conflict_resolver does not import from Application/Runner layers."""
+
+    def test_no_agent_import(self) -> None:
+        """merge_conflict_resolver must not import AgentRunner directly."""
+        import merge_conflict_resolver as mod
+
+        source = Path(mod.__file__).read_text()
+        assert "from agent import" not in source
+        assert "import agent" not in source.split("\n")[0]
+
+    def test_no_phase_utils_import(self) -> None:
+        """merge_conflict_resolver must not import from phase_utils."""
+        import merge_conflict_resolver as mod
+
+        source = Path(mod.__file__).read_text()
+        assert "from phase_utils import" not in source
+
+    def test_constructor_accepts_base_runner(self) -> None:
+        """Constructor should accept BaseRunner (not AgentRunner) for agents param."""
+        import inspect
+
+        from merge_conflict_resolver import MergeConflictResolver
+
+        sig = inspect.signature(MergeConflictResolver.__init__)
+        agents_param = sig.parameters["agents"]
+        annotation_str = str(agents_param.annotation)
+        assert "BaseRunner" in annotation_str
+        assert "AgentRunner" not in annotation_str
+
+    @pytest.mark.asyncio
+    async def test_suggest_memory_callback_invoked(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Injected suggest_memory callback should be called on success."""
+        mock_agents = AsyncMock()
+        mock_agents._execute = AsyncMock(return_value="transcript")
+        mock_agents._verify_result = AsyncMock(
+            return_value=LoopResult(passed=True, summary="")
+        )
+        suggest_fn = AsyncMock()
+        resolver = make_conflict_resolver(
+            config, agents=mock_agents, suggest_memory=suggest_fn
+        )
+        pr = PRInfoFactory.create()
+        issue = TaskFactory.create()
+        resolver._worktrees.start_merge_main = AsyncMock(return_value=False)
+
+        await resolver.resolve_merge_conflicts(
+            pr, issue, config.worktree_path_for_issue(42), worker_id=0
+        )
+
+        suggest_fn.assert_awaited_once()
+        assert suggest_fn.call_args.args[0] == "transcript"
+
+    @pytest.mark.asyncio
+    async def test_suggest_memory_none_does_not_raise(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """When suggest_memory is None, resolve should still succeed."""
+        mock_agents = AsyncMock()
+        mock_agents._execute = AsyncMock(return_value="transcript")
+        mock_agents._verify_result = AsyncMock(
+            return_value=LoopResult(passed=True, summary="")
+        )
+        resolver = make_conflict_resolver(
+            config, agents=mock_agents, suggest_memory=None
+        )
+        pr = PRInfoFactory.create()
+        issue = TaskFactory.create()
+        resolver._worktrees.start_merge_main = AsyncMock(return_value=False)
+
+        result = await resolver.resolve_merge_conflicts(
+            pr, issue, config.worktree_path_for_issue(42), worker_id=0
+        )
+
+        assert result == ConflictResolutionResult(success=True, used_rebuild=False)
+
+    @pytest.mark.asyncio
+    async def test_publish_review_status_uses_event_bus_directly(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """_publish_review_status should emit events via EventBus without phase_utils."""
+        mock_agents = AsyncMock()
+        mock_agents._execute = AsyncMock(return_value="transcript")
+        mock_agents._verify_result = AsyncMock(
+            return_value=LoopResult(passed=True, summary="")
+        )
+        resolver = make_conflict_resolver(config, agents=mock_agents)
+        pr = PRInfoFactory.create()
+        issue = TaskFactory.create()
+        resolver._worktrees.start_merge_main = AsyncMock(return_value=False)
+
+        # Track events
+        from events import EventType
+
+        published = []
+        original = resolver._bus.publish
+
+        async def track(event):
+            published.append(event)
+            return await original(event)
+
+        resolver._bus.publish = track
+
+        await resolver.resolve_merge_conflicts(
+            pr, issue, config.worktree_path_for_issue(42), worker_id=1
+        )
+
+        review_events = [e for e in published if e.type == EventType.REVIEW_UPDATE]
+        assert len(review_events) >= 1
+        assert review_events[0].data.role == "reviewer"
+
+    @pytest.mark.asyncio
+    async def test_fresh_rebuild_uses_prs_expected_pr_title(
+        self, tmp_path: Path
+    ) -> None:
+        """fresh_branch_rebuild should call self._prs.expected_pr_title, not PRManager."""
+        cfg = ConfigFactory.create(
+            enable_fresh_branch_rebuild=True,
+            repo_root=tmp_path / "repo",
+            worktree_base=tmp_path / "worktrees",
+            state_file=tmp_path / "state.json",
+        )
+        mock_agents = AsyncMock()
+        mock_agents._execute = AsyncMock(return_value="rebuilt transcript")
+        mock_agents._verify_result = AsyncMock(
+            return_value=LoopResult(passed=True, summary="")
+        )
+        resolver = make_conflict_resolver(cfg, agents=mock_agents)
+        pr = PRInfoFactory.create(number=200, issue_number=77)
+        issue = TaskFactory.create(id=77, title="Fix the gizmo")
+
+        new_wt = cfg.worktree_path_for_issue(pr.issue_number)
+        resolver._worktrees.destroy = AsyncMock()
+        resolver._worktrees.create = AsyncMock(return_value=new_wt)
+        resolver._prs.get_pr_diff = AsyncMock(return_value="diff content")
+        resolver._prs.update_pr_title = AsyncMock(return_value=True)
+        resolver._prs.expected_pr_title = lambda n, t: f"Fixes #{n}: {t}"
+
+        result = await resolver.fresh_branch_rebuild(pr, issue, worker_id=0)
+
+        assert result is True
+        resolver._prs.update_pr_title.assert_awaited_once_with(
+            200, "Fixes #77: Fix the gizmo"
+        )
