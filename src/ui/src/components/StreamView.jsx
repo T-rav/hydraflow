@@ -2,7 +2,7 @@ import React, { useMemo, useCallback, useState } from 'react'
 import { theme } from '../theme'
 import { useHydraFlow } from '../context/HydraFlowContext'
 import { StreamCard } from './StreamCard'
-import { PIPELINE_STAGES, PULSE_ANIMATION } from '../constants'
+import { PIPELINE_STAGES, PRODUCT_TRACK_KEYS, PULSE_ANIMATION } from '../constants'
 import { STAGE_KEYS } from '../hooks/useTimeline'
 import {
   sectionHeaderStyles,
@@ -33,40 +33,69 @@ function PipelineFlow({ stageGroups }) {
     return { mergedCount: merged, failedCount: failed }
   }, [stageGroups])
 
+  const renderFlowStage = (group) => (
+    <div style={styles.flowStage} key={group.stage.key}>
+      <span style={flowLabelStyles[group.stage.key]}>{group.stage.label}</span>
+      {group.issues.length > 0 && (
+        <div style={styles.flowDots}>
+          {group.issues.map(issue => {
+            const isEpic = issue.isEpicChild || issue.epicNumber > 0
+            const dotStyles = isEpic ? epicFlowDotStyleMap : regularFlowDotStyleMap
+            const dotStyle =
+              issue.overallStatus === 'active' ? dotStyles.active[group.stage.key]
+              : issue.overallStatus === 'failed' ? dotStyles.failed[group.stage.key]
+              : issue.overallStatus === 'hitl' ? dotStyles.hitl[group.stage.key]
+              : issue.overallStatus === 'queued' ? dotStyles.queued[group.stage.key]
+              : dotStyles.base[group.stage.key]
+            return (
+              <span
+                key={issue.issueNumber}
+                style={dotStyle}
+                title={`#${issue.issueNumber}${isEpic ? ` (Epic #${issue.epicNumber})` : ''}`}
+                data-testid={`flow-dot-${issue.issueNumber}`}
+              >
+                {isEpic ? 'e' : null}
+              </span>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+
+  const mainGroups = stageGroups.filter(g => !PRODUCT_TRACK_KEYS.has(g.stage.key))
+  const productGroups = stageGroups.filter(g => PRODUCT_TRACK_KEYS.has(g.stage.key))
+  const triageGroup = mainGroups.find(g => g.stage.key === 'triage')
+  const postTriageGroups = mainGroups.filter(g => g.stage.key !== 'triage')
+
   return (
     <div style={styles.flowContainer} data-testid="pipeline-flow">
       <span style={styles.flowTitle}>Pipeline Flow</span>
       <div style={styles.flowConnector} />
-      {stageGroups.map((group, idx) => (
-        <React.Fragment key={group.stage.key}>
-          <div style={styles.flowStage}>
-            <span style={flowLabelStyles[group.stage.key]}>{group.stage.label}</span>
-            {group.issues.length > 0 && (
-              <div style={styles.flowDots}>
-                {group.issues.map(issue => {
-                  const isEpic = issue.isEpicChild || issue.epicNumber > 0
-                  const dotStyles = isEpic ? epicFlowDotStyleMap : regularFlowDotStyleMap
-                  const dotStyle =
-                    issue.overallStatus === 'active' ? dotStyles.active[group.stage.key]
-                    : issue.overallStatus === 'failed' ? dotStyles.failed[group.stage.key]
-                    : issue.overallStatus === 'hitl' ? dotStyles.hitl[group.stage.key]
-                    : issue.overallStatus === 'queued' ? dotStyles.queued[group.stage.key]
-                    : dotStyles.base[group.stage.key]
-                  return (
-                    <span
-                      key={issue.issueNumber}
-                      style={dotStyle}
-                      title={`#${issue.issueNumber}${isEpic ? ` (Epic #${issue.epicNumber})` : ''}`}
-                      data-testid={`flow-dot-${issue.issueNumber}`}
-                    >
-                      {isEpic ? 'e' : null}
-                    </span>
-                  )
-                })}
-              </div>
-            )}
+      {triageGroup && renderFlowStage(triageGroup)}
+      {productGroups.length > 0 && (
+        <>
+          <div style={styles.flowFork}>
+            <div style={styles.flowForkTop}>
+              {productGroups.map((group, idx) => (
+                <React.Fragment key={group.stage.key}>
+                  {idx === 0 && <span style={styles.flowForkArrow}>↗</span>}
+                  {idx > 0 && <div style={styles.flowConnectorShort} />}
+                  {renderFlowStage(group)}
+                </React.Fragment>
+              ))}
+              <span style={styles.flowForkArrow}>↘</span>
+            </div>
+            <div style={styles.flowForkBottom}>
+              <span style={styles.flowForkDirect}>direct →</span>
+            </div>
           </div>
-          {idx < stageGroups.length - 1 && <div style={styles.flowConnector} />}
+        </>
+      )}
+      {postTriageGroups.map((group, idx) => (
+        <React.Fragment key={group.stage.key}>
+          <div style={styles.flowConnector} />
+          {renderFlowStage(group)}
         </React.Fragment>
       ))}
       {(mergedCount > 0 || failedCount > 0) && (
@@ -624,6 +653,38 @@ const styles = {
     height: 1,
     background: theme.border,
     flexShrink: 0,
+  },
+  flowConnectorShort: {
+    width: 8,
+    height: 1,
+    background: theme.border,
+    flexShrink: 0,
+  },
+  flowFork: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 1,
+    margin: '0 4px',
+  },
+  flowForkTop: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 4,
+  },
+  flowForkBottom: {
+    display: 'flex',
+    alignItems: 'center',
+  },
+  flowForkArrow: {
+    color: theme.cyan,
+    fontSize: 10,
+    fontWeight: 600,
+  },
+  flowForkDirect: {
+    fontSize: 9,
+    color: theme.textInactive,
+    fontStyle: 'italic',
   },
   flowTitle: {
     fontSize: 9,
