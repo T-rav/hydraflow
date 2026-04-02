@@ -29,7 +29,7 @@ export const MAX_EVENTS = 5000
 export const PIPELINE_STAGES = [
   { key: 'triage',    label: 'Triage',    color: theme.yellow,      subtleColor: theme.yellowSubtle,  role: 'triage',      configKey: 'max_triagers', track: 'junction' },
   { key: 'discover',  label: 'Discover',  color: theme.cyan,        subtleColor: theme.cyanSubtle,    role: 'discover',    configKey: 'max_triagers', track: 'product' },
-  { key: 'shape',     label: 'Shape',     color: theme.purple,      subtleColor: theme.purpleSubtle,  role: 'shape',       configKey: 'max_triagers', track: 'product' },
+  { key: 'shape',     label: 'Shape',     color: theme.pink,        subtleColor: theme.pinkSubtle,    role: 'shape',       configKey: 'max_triagers', track: 'product' },
   { key: 'plan',      label: 'Plan',      color: theme.purple,      subtleColor: theme.purpleSubtle,  role: 'planner',     configKey: 'max_planners', track: 'junction' },
   { key: 'implement', label: 'Implement', color: theme.accent,      subtleColor: theme.accentSubtle,  role: 'implementer', configKey: 'max_workers',  track: 'engineering' },
   { key: 'review',    label: 'Review',    color: theme.orange,      subtleColor: theme.orangeSubtle,  role: 'reviewer',    configKey: 'max_reviewers', track: 'engineering' },
@@ -110,7 +110,7 @@ export const WORKER_COUNT_MAX = 10
 export const PIPELINE_LOOPS = [
   { key: 'triage',    label: 'Triage',    color: theme.yellow,      dimColor: theme.yellowSubtle,  configKey: 'max_triagers' },
   { key: 'discover',  label: 'Discover',  color: theme.cyan,        dimColor: theme.cyanSubtle,    configKey: 'max_triagers' },
-  { key: 'shape',     label: 'Shape',     color: theme.purple,      dimColor: theme.purpleSubtle,  configKey: 'max_triagers' },
+  { key: 'shape',     label: 'Shape',     color: theme.pink,        dimColor: theme.pinkSubtle,    configKey: 'max_triagers' },
   { key: 'plan',      label: 'Plan',      color: theme.purple,      dimColor: theme.purpleSubtle,  configKey: 'max_planners' },
   { key: 'implement', label: 'Implement', color: theme.accent,      dimColor: theme.accentSubtle,  configKey: 'max_workers' },
   { key: 'review',    label: 'Review',    color: theme.orange,      dimColor: theme.orangeSubtle,  configKey: 'max_reviewers' },

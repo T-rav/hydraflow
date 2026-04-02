@@ -52,7 +52,7 @@ describe('PIPELINE_STAGES', () => {
     expect(colorMap).toEqual({
       triage: theme.yellow,
       discover: theme.cyan,
-      shape: theme.purple,
+      shape: theme.pink,
       plan: theme.purple,
       implement: theme.accent,
       review: theme.orange,
@@ -91,7 +91,7 @@ describe('PIPELINE_STAGES', () => {
     expect(subtleMap).toEqual({
       triage: theme.yellowSubtle,
       discover: theme.cyanSubtle,
-      shape: theme.purpleSubtle,
+      shape: theme.pinkSubtle,
       plan: theme.purpleSubtle,
       implement: theme.accentSubtle,
       review: theme.orangeSubtle,
