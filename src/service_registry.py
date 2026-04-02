@@ -17,6 +17,7 @@ from base_background_loop import LoopDeps
 from baseline_policy import BaselinePolicy
 from beads_manager import BeadsManager
 from bot_pr_loop import BotPRLoop
+from ci_monitor_loop import CIMonitorLoop
 from config import HydraFlowConfig
 from crate_manager import CrateManager
 from docker_runner import get_docker_runner
@@ -50,6 +51,8 @@ from review_phase import ReviewPhase
 from reviewer import ReviewRunner
 from run_recorder import RunRecorder
 from runs_gc_loop import RunsGCLoop
+from security_patch_loop import SecurityPatchLoop
+from stale_issue_loop import StaleIssueLoop
 from state import StateTracker
 from transcript_summarizer import TranscriptSummarizer
 from triage import TriageRunner
@@ -118,6 +121,9 @@ class ServiceRegistry:
     adr_reviewer_loop: ADRReviewerLoop
     health_monitor_loop: HealthMonitorLoop
     bot_pr_loop: BotPRLoop
+    stale_issue_loop: StaleIssueLoop
+    security_patch_loop: SecurityPatchLoop
+    ci_monitor_loop: CIMonitorLoop
 
     # Optional integrations
     hindsight: HindsightClient | None = None
@@ -426,6 +432,24 @@ def build_services(
         state=state,
         deps=loop_deps,
     )
+    stale_issue_loop = StaleIssueLoop(
+        config=config,
+        prs=prs,
+        state=state,
+        deps=loop_deps,
+    )
+    security_patch_loop = SecurityPatchLoop(
+        config=config,
+        prs=prs,
+        state=state,
+        deps=loop_deps,
+    )
+    ci_monitor_loop = CIMonitorLoop(
+        config=config,
+        prs=prs,
+        state=state,
+        deps=loop_deps,
+    )
     gh_cache_loop = GitHubCacheLoop(config, gh_cache, deps=loop_deps)  # noqa: F841
 
     return ServiceRegistry(
@@ -465,6 +489,9 @@ def build_services(
         adr_reviewer_loop=adr_reviewer_loop,
         health_monitor_loop=health_monitor_loop,
         bot_pr_loop=bot_pr_loop,
+        stale_issue_loop=stale_issue_loop,
+        security_patch_loop=security_patch_loop,
+        ci_monitor_loop=ci_monitor_loop,
         hindsight=hindsight_client,
         hindsight_wal=hindsight_wal,
         github_cache=gh_cache,

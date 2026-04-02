@@ -139,6 +139,9 @@ class HydraFlowOrchestrator:
             "adr_reviewer": svc.adr_reviewer_loop,
             "health_monitor": svc.health_monitor_loop,
             "bot_pr": svc.bot_pr_loop,
+            "stale_issue": svc.stale_issue_loop,
+            "security_patch": svc.security_patch_loop,
+            "ci_monitor": svc.ci_monitor_loop,
         }
         self._bg_workers = BGWorkerManager(config, self._state, bg_loop_registry)
         self._hitl_ctrl = HITLController(svc.hitl_phase, svc.fetcher, config.hitl_label)
@@ -843,6 +846,9 @@ class HydraFlowOrchestrator:
             ("adr_reviewer", self._svc.adr_reviewer_loop.run),
             ("health_monitor", self._svc.health_monitor_loop.run),
             ("bot_pr", self._svc.bot_pr_loop.run),
+            ("stale_issue", self._svc.stale_issue_loop.run),
+            ("security_patch", self._svc.security_patch_loop.run),
+            ("ci_monitor", self._svc.ci_monitor_loop.run),
             ("github_cache", self._svc.github_cache_loop.run),
             ("pipeline_stats", self._pipeline_stats_loop),
         ]
