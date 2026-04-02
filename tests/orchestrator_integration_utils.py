@@ -453,6 +453,7 @@ def build_scripted_services(
     services.stale_issue_loop = FakeBackgroundLoop()
     services.security_patch_loop = FakeBackgroundLoop()
     services.ci_monitor_loop = FakeBackgroundLoop()
+    services.code_grooming_loop = FakeBackgroundLoop()
     services.crate_manager = SimpleNamespace(
         active_crate_number=None,
         check_and_advance=AsyncMock(),

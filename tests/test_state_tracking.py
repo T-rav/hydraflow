@@ -51,6 +51,8 @@ class TestInitialization:
             "bot_pr_settings",
             "ci_monitor_settings",
             "ci_monitor_tracked_failures",
+            "code_grooming_filed",
+            "code_grooming_settings",
             "disabled_workers",
             "epic_states",
             "hitl_causes",

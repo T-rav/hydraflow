@@ -2683,6 +2683,224 @@ def create_router(
         orch.state.set_bot_pr_settings(new_settings)
         return JSONResponse({"status": "ok", **new_settings.model_dump()})
 
+    # --- Stale Issue settings ---
+
+    @router.get("/api/stale-issue/settings")
+    async def get_stale_issue_settings() -> JSONResponse:
+        """Return current stale issue cleanup settings."""
+        orch = get_orchestrator()
+        if not orch:
+            return JSONResponse({"error": "no orchestrator"}, status_code=400)
+        settings = orch.state.get_stale_issue_settings()
+        return JSONResponse(settings.model_dump())
+
+    @router.post("/api/stale-issue/settings")
+    async def set_stale_issue_settings(body: dict[str, Any]) -> JSONResponse:
+        """Update stale issue cleanup settings."""
+        orch = get_orchestrator()
+        if not orch:
+            return JSONResponse({"error": "no orchestrator"}, status_code=400)
+
+        current = orch.state.get_stale_issue_settings()
+        update = current.model_dump()
+        for key in ("staleness_days", "excluded_labels", "dry_run"):
+            if key in body:
+                update[key] = body[key]
+
+        try:
+            from models import StaleIssueSettings  # noqa: PLC0415
+
+            new_settings = StaleIssueSettings(**update)
+        except (ValueError, ValidationError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+        orch.state.set_stale_issue_settings(new_settings)
+        return JSONResponse({"status": "ok", **new_settings.model_dump()})
+
+    # --- Security Patch settings ---
+
+    @router.get("/api/security-patch/settings")
+    async def get_security_patch_settings() -> JSONResponse:
+        """Return current security patch settings."""
+        orch = get_orchestrator()
+        if not orch:
+            return JSONResponse({"error": "no orchestrator"}, status_code=400)
+        settings = orch.state.get_security_patch_settings()
+        return JSONResponse(settings.model_dump())
+
+    @router.post("/api/security-patch/settings")
+    async def set_security_patch_settings(body: dict[str, Any]) -> JSONResponse:
+        """Update security patch settings."""
+        orch = get_orchestrator()
+        if not orch:
+            return JSONResponse({"error": "no orchestrator"}, status_code=400)
+
+        current = orch.state.get_security_patch_settings()
+        update = current.model_dump()
+        for key in ("severity_levels",):
+            if key in body:
+                update[key] = body[key]
+
+        try:
+            from models import SecurityPatchSettings  # noqa: PLC0415
+
+            new_settings = SecurityPatchSettings(**update)
+        except (ValueError, ValidationError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+        orch.state.set_security_patch_settings(new_settings)
+        return JSONResponse({"status": "ok", **new_settings.model_dump()})
+
+    # --- CI Monitor settings ---
+
+    @router.get("/api/ci-monitor/settings")
+    async def get_ci_monitor_settings() -> JSONResponse:
+        """Return current CI monitor settings."""
+        orch = get_orchestrator()
+        if not orch:
+            return JSONResponse({"error": "no orchestrator"}, status_code=400)
+        settings = orch.state.get_ci_monitor_settings()
+        return JSONResponse(settings.model_dump())
+
+    @router.post("/api/ci-monitor/settings")
+    async def set_ci_monitor_settings(body: dict[str, Any]) -> JSONResponse:
+        """Update CI monitor settings."""
+        orch = get_orchestrator()
+        if not orch:
+            return JSONResponse({"error": "no orchestrator"}, status_code=400)
+
+        current = orch.state.get_ci_monitor_settings()
+        update = current.model_dump()
+        for key in ("branch", "workflows", "create_issue"):
+            if key in body:
+                update[key] = body[key]
+
+        try:
+            from models import CIMonitorSettings  # noqa: PLC0415
+
+            new_settings = CIMonitorSettings(**update)
+        except (ValueError, ValidationError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+        orch.state.set_ci_monitor_settings(new_settings)
+        return JSONResponse({"status": "ok", **new_settings.model_dump()})
+
+    # --- Code Grooming settings ---
+
+    @router.get("/api/code-grooming/settings")
+    async def get_code_grooming_settings() -> JSONResponse:
+        """Return current code grooming settings."""
+        orch = get_orchestrator()
+        if not orch:
+            return JSONResponse({"error": "no orchestrator"}, status_code=400)
+        settings = orch.state.get_code_grooming_settings()
+        return JSONResponse(settings.model_dump())
+
+    @router.post("/api/code-grooming/settings")
+    async def set_code_grooming_settings(body: dict[str, Any]) -> JSONResponse:
+        """Update code grooming settings."""
+        orch = get_orchestrator()
+        if not orch:
+            return JSONResponse({"error": "no orchestrator"}, status_code=400)
+
+        current = orch.state.get_code_grooming_settings()
+        update = current.model_dump()
+        for key in (
+            "max_issues_per_cycle",
+            "min_priority",
+            "enabled_audits",
+            "dry_run",
+        ):
+            if key in body:
+                update[key] = body[key]
+
+        try:
+            from models import CodeGroomingSettings  # noqa: PLC0415
+
+            new_settings = CodeGroomingSettings(**update)
+        except (ValueError, ValidationError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+        orch.state.set_code_grooming_settings(new_settings)
+        return JSONResponse({"status": "ok", **new_settings.model_dump()})
+
+    # --- Health Score ---
+
+    @router.get("/api/health-score")
+    async def get_health_score() -> JSONResponse:
+        """Compute and return a weighted health score (0-100)."""
+        orch = get_orchestrator()
+
+        score = 100
+        details: dict[str, Any] = {}
+
+        # Factor 1: open bot PRs (fewer is better) — weight 30
+        try:
+            if hasattr(config, "repo_data_root"):
+                # Access cache via service registry if available
+                if (
+                    orch
+                    and hasattr(orch, "_svc")
+                    and hasattr(orch._svc, "github_cache")
+                ):
+                    open_prs = orch._svc.github_cache.get_open_prs()
+                    bot_pr_count = len(open_prs)
+                else:
+                    bot_pr_count = 0
+            else:
+                bot_pr_count = 0
+            details["bot_pr_count"] = bot_pr_count
+            # Penalty: 5 points per bot PR, max 30
+            score -= min(30, bot_pr_count * 5)
+        except Exception:  # noqa: BLE001
+            details["bot_pr_count"] = 0
+
+        # Factor 2: CI status (weight 40)
+        try:
+            if orch:
+                ci_failures = orch.state.get_ci_monitor_tracked_failures()
+                failure_count = len(ci_failures)
+            else:
+                failure_count = 0
+            details["ci_failure_count"] = failure_count
+            # Penalty: 10 points per failure, max 40
+            score -= min(40, failure_count * 10)
+        except Exception:  # noqa: BLE001
+            details["ci_failure_count"] = 0
+
+        # Factor 3: stale issues closed recently (weight 30)
+        try:
+            if orch:
+                stale_closed = orch.state.get_stale_issue_closed()
+                stale_count = len(stale_closed)
+            else:
+                stale_count = 0
+            details["stale_issues_closed"] = stale_count
+            # Penalty: 3 points per stale issue, max 30
+            score -= min(30, stale_count * 3)
+        except Exception:  # noqa: BLE001
+            details["stale_issues_closed"] = 0
+
+        score = max(0, min(100, score))
+        details["score"] = score
+
+        # Persist snapshot
+        try:
+            import json as _json  # noqa: PLC0415
+
+            scores_path = config.data_path("metrics", "health_scores.jsonl")
+            scores_path.parent.mkdir(parents=True, exist_ok=True)
+            snapshot = {
+                "timestamp": datetime.now(UTC).isoformat(),
+                **details,
+            }
+            with scores_path.open("a", encoding="utf-8") as fh:
+                fh.write(_json.dumps(snapshot) + "\n")
+        except Exception:  # noqa: BLE001
+            pass
+
+        return JSONResponse(details)
+
     @router.get("/api/issues/outcomes")
     async def get_issue_outcomes() -> JSONResponse:
         """Return all recorded issue outcomes."""

@@ -108,6 +108,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("stale_issue_interval", "HYDRAFLOW_STALE_ISSUE_INTERVAL", 86400),
     ("security_patch_interval", "HYDRAFLOW_SECURITY_PATCH_INTERVAL", 21600),
     ("ci_monitor_interval", "HYDRAFLOW_CI_MONITOR_INTERVAL", 1800),
+    ("code_grooming_interval", "HYDRAFLOW_CODE_GROOMING_INTERVAL", 86400),
 ]
 
 _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
@@ -1128,6 +1129,12 @@ class HydraFlowConfig(BaseModel):
         ge=60,
         le=86400,
         description="CI monitor check interval (seconds)",
+    )
+    code_grooming_interval: int = Field(
+        default=86400,
+        ge=60,
+        le=604800,
+        description="Code grooming audit interval (seconds)",
     )
     pr_unstick_batch_size: int = Field(
         default=10,

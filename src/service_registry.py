@@ -18,6 +18,7 @@ from baseline_policy import BaselinePolicy
 from beads_manager import BeadsManager
 from bot_pr_loop import BotPRLoop
 from ci_monitor_loop import CIMonitorLoop
+from code_grooming_loop import CodeGroomingLoop
 from config import HydraFlowConfig
 from crate_manager import CrateManager
 from docker_runner import get_docker_runner
@@ -124,6 +125,7 @@ class ServiceRegistry:
     stale_issue_loop: StaleIssueLoop
     security_patch_loop: SecurityPatchLoop
     ci_monitor_loop: CIMonitorLoop
+    code_grooming_loop: CodeGroomingLoop
 
     # Optional integrations
     hindsight: HindsightClient | None = None
@@ -450,6 +452,12 @@ def build_services(
         state=state,
         deps=loop_deps,
     )
+    code_grooming_loop = CodeGroomingLoop(
+        config=config,
+        prs=prs,
+        state=state,
+        deps=loop_deps,
+    )
     gh_cache_loop = GitHubCacheLoop(config, gh_cache, deps=loop_deps)  # noqa: F841
 
     return ServiceRegistry(
@@ -492,6 +500,7 @@ def build_services(
         stale_issue_loop=stale_issue_loop,
         security_patch_loop=security_patch_loop,
         ci_monitor_loop=ci_monitor_loop,
+        code_grooming_loop=code_grooming_loop,
         hindsight=hindsight_client,
         hindsight_wal=hindsight_wal,
         github_cache=gh_cache,

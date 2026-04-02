@@ -1231,6 +1231,27 @@ class CIMonitorSettings(BaseModel):
     create_issue: bool = True
 
 
+class AuditFinding(BaseModel):
+    """A single finding from a code audit."""
+
+    category: str
+    priority: Literal["P0", "P1", "P2", "P3"]
+    summary: str
+    file_path: str = ""
+    details: str = ""
+
+
+class CodeGroomingSettings(BaseModel):
+    """Configuration for the code grooming worker."""
+
+    max_issues_per_cycle: int = Field(default=5, ge=1, le=50)
+    min_priority: Literal["P0", "P1", "P2", "P3"] = "P1"
+    enabled_audits: list[str] = Field(
+        default_factory=lambda: ["lint", "complexity", "dead_code"]
+    )
+    dry_run: bool = False
+
+
 class StateData(BaseModel):
     """Typed schema for the JSON-backed crash-recovery state."""
 
@@ -1291,6 +1312,10 @@ class StateData(BaseModel):
     security_patch_processed: list[str] = Field(default_factory=list)
     ci_monitor_settings: CIMonitorSettings = Field(default_factory=CIMonitorSettings)
     ci_monitor_tracked_failures: dict[str, str] = Field(default_factory=dict)
+    code_grooming_settings: CodeGroomingSettings = Field(
+        default_factory=CodeGroomingSettings
+    )
+    code_grooming_filed: list[str] = Field(default_factory=list)
     last_updated: str | None = None
 
 
