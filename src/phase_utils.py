@@ -21,6 +21,14 @@ from adr_utils import (  # noqa: F401
 )
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
+
+# Exception classification — canonical definitions live in
+# ``exception_classify`` (cross-cutting); re-exported here for backward
+# compatibility so existing consumers don't break.
+from exception_classify import (  # noqa: F401
+    LIKELY_BUG_EXCEPTIONS,
+    is_likely_bug,
+)
 from harness_insights import FailureCategory, FailureRecord, HarnessInsightStore
 from memory import file_memory_suggestion
 from models import PipelineStage, PRInfo, ReviewUpdatePayload, Task
@@ -288,26 +296,9 @@ async def publish_review_status(
 
 
 # ---------------------------------------------------------------------------
-# Exception classification
+# Exception classification helpers (use ``is_likely_bug`` and
+# ``LIKELY_BUG_EXCEPTIONS`` imported from ``exception_classify`` above).
 # ---------------------------------------------------------------------------
-
-#: Exception types that almost certainly indicate a code bug rather than a
-#: transient/environmental failure.  When one of these is caught in a
-#: catch-all handler, it should be logged at a higher severity so operators
-#: can distinguish "needs a code fix" from "will probably succeed on retry".
-LIKELY_BUG_EXCEPTIONS: tuple[type[BaseException], ...] = (
-    TypeError,
-    KeyError,
-    AttributeError,
-    ValueError,
-    IndexError,
-    NotImplementedError,
-)
-
-
-def is_likely_bug(exc: BaseException) -> bool:
-    """Return True if *exc* is likely a code bug rather than a transient failure."""
-    return isinstance(exc, LIKELY_BUG_EXCEPTIONS)
 
 
 def capture_if_bug(exc: Exception, **context: object) -> None:
