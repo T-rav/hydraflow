@@ -27,11 +27,11 @@ export function deriveStageStatus(pipelineIssues, workers, backgroundWorkers, pi
 
   const stageStatus = {}
 
-  const workerCaps = {
-    triage: stages.triage?.worker_cap ?? null,
-    plan: stages.plan?.worker_cap ?? null,
-    implement: stages.implement?.worker_cap ?? null,
-    review: stages.review?.worker_cap ?? null,
+  const workerCaps = {}
+  for (const stage of PIPELINE_STAGES) {
+    if (stage.configKey) {
+      workerCaps[stage.key] = stages[stage.key]?.worker_cap ?? null
+    }
   }
 
   for (const stage of PIPELINE_STAGES) {
