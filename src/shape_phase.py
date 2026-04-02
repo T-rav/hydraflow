@@ -93,86 +93,127 @@ class ShapePhase:
         return bool(sum(results))
 
     async def _shape_single(self, issue: Task) -> int:
-        """Run one iteration of the shape conversation for a single issue."""
+        """Run one iteration of the shape conversation for a single issue.
+
+        Two modes of operation:
+
+        1. **Comment-based selection** (always active): checks issue comments
+           for an existing options marker.  If found, looks for a direction
+           selection; if not found, generates options and posts them.
+
+        2. **Agent-driven conversation** (when ``shape_runner`` is configured):
+           uses a multi-turn agent loop with research briefs and memory recall.
+
+        The comment-based path runs first so that selection detection works
+        even when the runner is available.
+        """
         with _sentry_transaction("pipeline.shape", f"shape:#{issue.id}"):
             async with store_lifecycle(self._store, issue.id, "shape"):
-                conv = self._state.get_shape_conversation(issue.id)
-                if not conv:
-                    conv = ShapeConversation(
-                        issue_number=issue.id,
-                        started_at=datetime.now(UTC).isoformat(),
-                    )
+                # --- Comment-based selection flow ---
+                enriched = await self._store.enrich_with_comments(issue)
+                comments = enriched.comments or []
 
-                # Handle waiting states (timed-out or awaiting response)
-                proceed, cancelled = await self._handle_waiting_state(issue, conv)
-                if cancelled:
-                    return 1
-                if not proceed:
+                has_options = any(_SHAPE_OPTIONS_MARKER in c for c in comments)
+
+                if has_options:
+                    # Options already posted — check for selection
+                    selection = self._find_selection(comments)
+                    if selection:
+                        self._store.enqueue_transition(issue, "plan")
+                        await self._prs.transition(issue.id, "plan")
+                        self._state.increment_session_counter("shaped")
+                        return 1
+                    # No selection yet — re-enqueue and wait
+                    self._store.enqueue_transition(issue, "shape")
                     return 0
 
-                # Check max turns
-                if len(conv.turns) >= self._config.max_shape_turns:
-                    conv.status = "finalizing"
+                # --- No options marker: generate options ---
 
-                # Run agent turn
-                if not self._runner:
-                    await self._transitioner.post_comment(
-                        issue.id,
-                        "Shape runner not configured. Manual product design required.",
-                    )
-                    return 1
+                # If we have a runner, use the full conversation loop
+                if self._runner:
+                    return await self._shape_with_runner(issue)
 
-                research_brief = self._extract_research_brief(issue)
-                # Query learned preferences for cross-issue context (first turn only)
-                learned = ""
-                if (
-                    not conv.turns
-                    and self._runner
-                    and getattr(self._runner, "_hindsight", None)
-                ):
-                    learned = await self._recall_preferences(issue)
-                result = await self._runner.run_turn(
-                    issue,
-                    conv,
-                    research_brief=research_brief,
-                    learned_preferences=learned,
+                # No runner — post stub options via comment
+                comment = (
+                    f"{_SHAPE_OPTIONS_MARKER} for #{issue.id}\n\n"
+                    "### Direction A: Quick & Focused\n"
+                    "Minimal implementation targeting the core need.\n\n"
+                    "### Direction B: Comprehensive\n"
+                    "Full-featured approach addressing all aspects.\n\n"
+                    "---\n"
+                    '*Reply with your selection (e.g., "Direction A").*'
                 )
-
-                conv.turns.append(
-                    ConversationTurn(
-                        role="agent",
-                        content=result.content,
-                        timestamp=datetime.now(UTC).isoformat(),
-                    )
-                )
-                conv.last_activity_at = datetime.now(UTC).isoformat()
-                # Truncate old turn content to keep state.json bounded
-                self._truncate_old_turns(conv)
-                self._state.set_shape_conversation(issue.id, conv)
-
-                if result.is_final or conv.status == "finalizing":
-                    await self._process_finalization(issue, conv, result.content)
-                    conv.status = "done"
-                    self._state.set_shape_conversation(issue.id, conv)
-                    return 1
-
-                # Post agent turn and wait for response
-                await self._post_conversation_turn(
-                    issue, result.content, len(conv.turns), conv
-                )
+                await self._prs.post_comment(issue.id, comment)
                 self._store.enqueue_transition(issue, "shape")
-
-                await self._bus.publish(
-                    HydraFlowEvent(
-                        type=EventType.SHAPE_UPDATE,
-                        data={
-                            "issue": issue.id,
-                            "action": "turn_posted",
-                            "turn": len(conv.turns),
-                        },
-                    )
-                )
                 return 1
+
+    async def _shape_with_runner(self, issue: Task) -> int:
+        """Run one agent-driven conversation turn using the shape runner."""
+        conv = self._state.get_shape_conversation(issue.id)
+        if not conv:
+            conv = ShapeConversation(
+                issue_number=issue.id,
+                started_at=datetime.now(UTC).isoformat(),
+            )
+
+        # Handle waiting states (timed-out or awaiting response)
+        proceed, cancelled = await self._handle_waiting_state(issue, conv)
+        if cancelled:
+            return 1
+        if not proceed:
+            return 0
+
+        # Check max turns
+        if len(conv.turns) >= self._config.max_shape_turns:
+            conv.status = "finalizing"
+
+        research_brief = self._extract_research_brief(issue)
+        learned = ""
+        if (
+            not conv.turns
+            and self._runner
+            and getattr(self._runner, "_hindsight", None)
+        ):
+            learned = await self._recall_preferences(issue)
+        result = await self._runner.run_turn(
+            issue,
+            conv,
+            research_brief=research_brief,
+            learned_preferences=learned,
+        )
+
+        conv.turns.append(
+            ConversationTurn(
+                role="agent",
+                content=result.content,
+                timestamp=datetime.now(UTC).isoformat(),
+            )
+        )
+        conv.last_activity_at = datetime.now(UTC).isoformat()
+        self._truncate_old_turns(conv)
+        self._state.set_shape_conversation(issue.id, conv)
+
+        if result.is_final or conv.status == "finalizing":
+            await self._process_finalization(issue, conv, result.content)
+            conv.status = "done"
+            self._state.set_shape_conversation(issue.id, conv)
+            return 1
+
+        # Post agent turn and wait for response
+        await self._post_conversation_turn(issue, result.content, len(conv.turns), conv)
+        self._store.enqueue_transition(issue, "shape")
+
+        await self._bus.publish(
+            HydraFlowEvent(
+                type=EventType.SHAPE_UPDATE,
+                data={
+                    "issue": issue.id,
+                    "action": "turn_posted",
+                    "turn": len(conv.turns),
+                },
+            )
+        )
+        return 1
 
     async def _handle_waiting_state(
         self, issue: Task, conv: ShapeConversation
@@ -407,6 +448,48 @@ class ShapePhase:
             "MEMORY_SUGGESTION_END"
         )
         await self._suggest_memory(transcript, "shape", f"issue #{issue.id}")
+
+    def _find_selection(self, comments: list[str]) -> str | None:
+        """Find a direction selection in comments after the options marker.
+
+        Looks for comments containing "Direction X" or "Option X" (case-insensitive)
+        that appear AFTER the ``_SHAPE_OPTIONS_MARKER``. Returns the letter (A-E)
+        or None if no selection found.
+        """
+        marker_seen = False
+        for comment in comments:
+            if _SHAPE_OPTIONS_MARKER in comment:
+                marker_seen = True
+                continue
+            if not marker_seen:
+                continue
+            match = re.search(
+                r"\b(?:direction|option)\s+([a-e])\b", comment, re.IGNORECASE
+            )
+            if match:
+                return match.group(1).upper()
+        return None
+
+    def _format_options(self, issue: Task, result: ShapeResult) -> str:
+        """Format a ShapeResult as a markdown comment with direction options."""
+
+        lines = [f"{_SHAPE_OPTIONS_MARKER} for #{issue.id}\n"]
+        for i, d in enumerate(result.directions):
+            letter = chr(65 + i)  # A, B, C, ...
+            lines.append(f"### Direction {letter}: {d.name}\n")
+            lines.append(f"**Approach:** {d.approach}")
+            lines.append(f"**Tradeoffs:** {d.tradeoffs}")
+            lines.append(f"**Effort:** {d.effort}")
+            lines.append(f"**Risk:** {d.risk}")
+            if d.differentiator:
+                lines.append(f"**Differentiator:** {d.differentiator}")
+            lines.append("")
+
+        if result.recommendation:
+            lines.append(f"### Recommendation\n\n{result.recommendation}\n")
+
+        lines.append('---\n*Reply with your selection (e.g., "Direction A").*')
+        return "\n".join(lines)
 
     @staticmethod
     def _truncate_old_turns(

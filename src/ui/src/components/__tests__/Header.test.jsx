@@ -261,6 +261,8 @@ describe('Header component', () => {
 
     const expectedCounts = {
       triage: 7,
+      discover: 0,
+      shape: 0,
       plan: 5,
       implement: 4,
       review: 3,

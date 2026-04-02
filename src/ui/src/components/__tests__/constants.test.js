@@ -32,25 +32,27 @@ describe('ACTIVE_STATUSES', () => {
 })
 
 describe('PIPELINE_STAGES', () => {
-  it('is an array with 5 stages', () => {
+  it('is an array with 7 stages', () => {
     expect(Array.isArray(PIPELINE_STAGES)).toBe(true)
-    expect(PIPELINE_STAGES).toHaveLength(5)
+    expect(PIPELINE_STAGES).toHaveLength(7)
   })
 
   it('contains all pipeline stage keys in order', () => {
     const keys = PIPELINE_STAGES.map(s => s.key)
-    expect(keys).toEqual(['triage', 'plan', 'implement', 'review', 'merged'])
+    expect(keys).toEqual(['triage', 'discover', 'shape', 'plan', 'implement', 'review', 'merged'])
   })
 
   it('has title-case labels for each stage', () => {
     const labels = PIPELINE_STAGES.map(s => s.label)
-    expect(labels).toEqual(['Triage', 'Plan', 'Implement', 'Review', 'Merged'])
+    expect(labels).toEqual(['Triage', 'Discover', 'Shape', 'Plan', 'Implement', 'Review', 'Merged'])
   })
 
   it('maps each stage to the correct theme color', () => {
     const colorMap = Object.fromEntries(PIPELINE_STAGES.map(s => [s.key, s.color]))
     expect(colorMap).toEqual({
       triage: theme.yellow,
+      discover: theme.cyan,
+      shape: theme.purple,
       plan: theme.purple,
       implement: theme.accent,
       review: theme.orange,
@@ -62,6 +64,8 @@ describe('PIPELINE_STAGES', () => {
     const roleMap = Object.fromEntries(PIPELINE_STAGES.map(s => [s.key, s.role]))
     expect(roleMap).toEqual({
       triage: 'triage',
+      discover: 'discover',
+      shape: 'shape',
       plan: 'planner',
       implement: 'implementer',
       review: 'reviewer',
@@ -69,10 +73,12 @@ describe('PIPELINE_STAGES', () => {
     })
   })
 
-  it('assigns configKeys to plan, implement, review and null to triage/merged', () => {
+  it('assigns configKeys to active stages and null to merged', () => {
     const configMap = Object.fromEntries(PIPELINE_STAGES.map(s => [s.key, s.configKey]))
     expect(configMap).toEqual({
       triage: 'max_triagers',
+      discover: 'max_triagers',
+      shape: 'max_triagers',
       plan: 'max_planners',
       implement: 'max_workers',
       review: 'max_reviewers',
@@ -84,6 +90,8 @@ describe('PIPELINE_STAGES', () => {
     const subtleMap = Object.fromEntries(PIPELINE_STAGES.map(s => [s.key, s.subtleColor]))
     expect(subtleMap).toEqual({
       triage: theme.yellowSubtle,
+      discover: theme.cyanSubtle,
+      shape: theme.purpleSubtle,
       plan: theme.purpleSubtle,
       implement: theme.accentSubtle,
       review: theme.orangeSubtle,
@@ -128,6 +136,8 @@ describe('PIPELINE_LOOPS', () => {
     const configMap = Object.fromEntries(PIPELINE_LOOPS.map(l => [l.key, l.configKey]))
     expect(configMap).toEqual({
       triage: 'max_triagers',
+      discover: 'max_triagers',
+      shape: 'max_triagers',
       plan: 'max_planners',
       implement: 'max_workers',
       review: 'max_reviewers',
