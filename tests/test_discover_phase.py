@@ -116,7 +116,7 @@ class TestDiscoverPhase:
         result = DiscoverResult(
             issue_number=42,
             research_brief="Test research findings",
-            competitors=["Calendly", "Cal.com"],
+            competitors=["Calendly", "Acuity Scheduling"],
             user_needs=["Group scheduling", "Privacy"],
             opportunities=["Open source alternative"],
         )
@@ -125,6 +125,6 @@ class TestDiscoverPhase:
         assert "## Product Discovery Brief" in brief
         assert "Test research findings" in brief
         assert "Calendly" in brief
-        assert "Cal.com" in brief
+        assert "Acuity Scheduling" in brief
         assert "Group scheduling" in brief
         assert "Open source alternative" in brief
