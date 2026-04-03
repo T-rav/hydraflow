@@ -100,7 +100,7 @@ def _build_summary(
                 _extract_subagent(span, subagent_counts)
 
         elif span_type == "workflow":
-            duration_seconds = _compute_duration(span)
+            duration_seconds += _compute_duration(span)
 
     total_prompt_and_cache = prompt_tokens + cache_read_tokens
     cache_hit_rate = (

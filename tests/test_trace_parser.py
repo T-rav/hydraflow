@@ -254,6 +254,8 @@ class TestParseTraces:
         assert set(summary.trace_ids) == {"0x111", "0x222"}
         assert summary.tools.tool_counts == {"Read": 1, "Edit": 1}
         assert summary.tools.total_invocations == 2
+        # Duration accumulates across trace files (each workflow span is 5 min)
+        assert summary.spans.duration_seconds == 600.0
 
     def test_no_raw_dir_returns_empty_summary(self, tmp_path: Path) -> None:
         summary = parse_traces(tmp_path, issue_number=1, phase="plan")
