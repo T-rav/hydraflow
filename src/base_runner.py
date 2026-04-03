@@ -58,6 +58,11 @@ class BaseRunner:
         """Number of currently running subprocesses."""
         return len(self._active_procs)
 
+    @property
+    def hindsight(self) -> HindsightClient | None:
+        """Read-only access to the Hindsight client for shared prefix building."""
+        return self._hindsight
+
     def terminate(self) -> None:
         """Kill all active subprocesses."""
         terminate_processes(self._active_procs)
@@ -178,7 +183,7 @@ class BaseRunner:
             )
 
     async def _inject_manifest_and_memory(
-        self, *, query_context: str = ""
+        self, *, query_context: str = "", shared_prefix: str | None = None
     ) -> tuple[str, str]:
         """Load the project manifest and memory digest.
 
@@ -188,7 +193,39 @@ class BaseRunner:
         Memory is populated exclusively via Hindsight semantic recall.  If
         Hindsight is not configured, the memory section is empty and agents
         operate without injected context.
+
+        When ``shared_prefix`` is provided the full manifest + 5-bank recall
+        is skipped.  Only a lightweight LEARNINGS top-up is performed and the
+        caller-supplied prefix is returned as the first element of the tuple.
         """
+        # --- Shared prefix mode: skip full recall, do issue-specific top-up ---
+        if shared_prefix is not None:
+            topup_section = ""
+            if self._hindsight is not None and query_context:
+                try:
+                    from hindsight import Bank, format_memories_as_markdown, recall_safe
+
+                    topup_cap = self._config.max_memory_prompt_chars // 4
+                    memories = await recall_safe(
+                        self._hindsight, Bank.LEARNINGS, query_context
+                    )
+                    raw = format_memories_as_markdown(memories)
+                    if raw:
+                        topup_section = (
+                            f"\n\n## Issue-Specific Context\n\n{raw[:topup_cap]}"
+                        )
+                except Exception:  # noqa: BLE001
+                    pass  # Must not interrupt pipeline
+            self._last_context_stats = {
+                "cache_hits": 1,
+                "cache_misses": 0,
+                "context_chars_before": len(shared_prefix) + len(topup_section),
+                "context_chars_after": len(shared_prefix) + len(topup_section),
+                "dedup_items_removed": 0,
+                "dedup_chars_saved": 0,
+            }
+            return shared_prefix, topup_section
+
         manifest_section = ""
 
         memory_section = ""
