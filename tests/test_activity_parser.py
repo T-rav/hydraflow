@@ -2,7 +2,7 @@
 
 import json
 
-from activity_parser import ClaudeActivityParser
+from activity_parser import ClaudeActivityParser, CodexActivityParser
 
 
 class TestClaudeActivityParserToolCall:
@@ -204,3 +204,80 @@ class TestClaudeActivityParserIgnored:
     def test_invalid_json_ignored(self):
         parser = ClaudeActivityParser()
         assert parser.parse("not json") is None
+
+
+class TestCodexActivityParserToolCall:
+    """CodexActivityParser extracts activity from Codex item.completed events."""
+
+    def test_function_call_item(self):
+        parser = CodexActivityParser()
+        line = json.dumps(
+            {
+                "type": "item.completed",
+                "item": {
+                    "id": "item_1",
+                    "type": "function_call",
+                    "name": "Read",
+                    "arguments": json.dumps({"file_path": "src/main.py"}),
+                },
+            }
+        )
+        result = parser.parse(line)
+        assert result is not None
+        assert result["activity_type"] == "tool_call"
+        assert result["tool_name"] == "Read"
+        assert "src/main.py" in result["summary"]
+
+    def test_agent_message_item(self):
+        parser = CodexActivityParser()
+        line = json.dumps(
+            {
+                "type": "item.completed",
+                "item": {
+                    "id": "item_2",
+                    "type": "agent_message",
+                    "text": "I will now implement the feature by modifying the config file.",
+                },
+            }
+        )
+        result = parser.parse(line)
+        assert result is not None
+        assert result["activity_type"] == "text"
+        assert "implement" in result["summary"]
+
+    def test_duplicate_item_id_ignored(self):
+        parser = CodexActivityParser()
+        line = json.dumps(
+            {
+                "type": "item.completed",
+                "item": {
+                    "id": "item_1",
+                    "type": "function_call",
+                    "name": "Read",
+                    "arguments": json.dumps({"file_path": "a.py"}),
+                },
+            }
+        )
+        result1 = parser.parse(line)
+        result2 = parser.parse(line)
+        assert result1 is not None
+        assert result2 is None
+
+    def test_short_message_ignored(self):
+        parser = CodexActivityParser()
+        line = json.dumps(
+            {
+                "type": "item.completed",
+                "item": {"id": "item_3", "type": "agent_message", "text": "OK"},
+            }
+        )
+        assert parser.parse(line) is None
+
+    def test_turn_completed_ignored(self):
+        parser = CodexActivityParser()
+        line = json.dumps({"type": "turn.completed"})
+        assert parser.parse(line) is None
+
+    def test_invalid_json_ignored(self):
+        parser = CodexActivityParser()
+        assert parser.parse("not valid json") is None

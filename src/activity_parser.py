@@ -147,3 +147,54 @@ class ClaudeActivityParser:
                     "detail": _truncate(str(result_content), _MAX_DETAIL_LEN),
                 }
         return None
+
+
+class CodexActivityParser:
+    """Parses Codex ``--json`` stream lines into activity events."""
+
+    def __init__(self) -> None:
+        self._seen_item_ids: set[str] = set()
+
+    def parse(self, raw_line: str) -> AgentActivityPayload | None:
+        try:
+            event = json.loads(raw_line)
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+        event_type = event.get("type", "")
+        if event_type != "item.completed":
+            return None
+
+        item = event.get("item", {})
+        item_id = item.get("id", "")
+        if item_id and item_id in self._seen_item_ids:
+            return None
+        if item_id:
+            self._seen_item_ids.add(item_id)
+
+        item_type = item.get("type", "")
+
+        if item_type == "function_call":
+            name = item.get("name", "?")
+            try:
+                args = json.loads(item.get("arguments", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                args = {}
+            return {
+                "activity_type": "tool_call",
+                "tool_name": name,
+                "summary": _summarize_tool(name, args),
+                "detail": _truncate(str(args), _MAX_DETAIL_LEN),
+            }
+
+        if item_type == "agent_message":
+            text = str(item.get("text", "")).strip()
+            if len(text) >= _MIN_TEXT_LEN:
+                return {
+                    "activity_type": "text",
+                    "tool_name": None,
+                    "summary": _truncate(text, 80),
+                    "detail": _truncate(text, _MAX_DETAIL_LEN),
+                }
+
+        return None
