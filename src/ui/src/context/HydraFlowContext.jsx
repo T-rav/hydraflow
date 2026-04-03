@@ -224,6 +224,7 @@ export function reducer(state, action) {
               activityType: action.data.activity_type,
               toolName: action.data.tool_name,
               summary: action.data.summary,
+              detail: action.data.detail || null,
               timestamp: action.timestamp,
             },
           },

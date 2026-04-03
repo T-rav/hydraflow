@@ -164,7 +164,7 @@ export function StreamCard({ issue, intent, defaultExpanded, onRequestChanges, t
             <span
               style={{
                 ...styles.activityIndicator,
-                color: ACTIVITY_TYPE_COLORS[issue.lastActivity.activityType] || theme.textSecondary,
+                color: ACTIVITY_TYPE_COLORS[issue.lastActivity.activityType] || theme.textMuted,
               }}
               title={issue.lastActivity.detail || issue.lastActivity.summary}
               data-testid={`activity-indicator-${issue.issueNumber}`}

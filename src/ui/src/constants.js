@@ -94,7 +94,7 @@ export const ACTIVITY_TYPE_COLORS = {
   tool_call: theme.accent,
   tool_result: theme.green,
   thinking: theme.yellow,
-  text: theme.textSecondary,
+  text: theme.textMuted,
   error: theme.red,
 }
 
