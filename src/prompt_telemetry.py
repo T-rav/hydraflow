@@ -91,6 +91,13 @@ class PromptTelemetry:
         explicit_pruned = max(0, _as_int(st.get("pruned_chars_total", 0)))
         has_explicit_pruned = "pruned_chars_total" in st
 
+        shared_prefix_chars = max(0, _as_int(st.get("shared_prefix_chars", 0)))
+        unique_suffix_chars = max(0, _as_int(st.get("unique_suffix_chars", 0)))
+        prefix_total = shared_prefix_chars + unique_suffix_chars
+        prefix_cache_reuse_ratio = (
+            round(shared_prefix_chars / prefix_total, 3) if prefix_total > 0 else 0.0
+        )
+
         prompt_tokens, chars_per_token, estimate_confidence = _estimate_tokens(
             prompt_chars, model
         )
@@ -159,6 +166,9 @@ class PromptTelemetry:
                 if has_explicit_pruned
                 else max(0, history_saved + context_saved)
             ),
+            "shared_prefix_chars": shared_prefix_chars,
+            "unique_suffix_chars": unique_suffix_chars,
+            "prefix_cache_reuse_ratio": prefix_cache_reuse_ratio,
         }
         # Estimate cost from pricing table
         cost = self._pricing.estimate_cost(

@@ -1053,6 +1053,7 @@ def make_implement_phase(
             review_feedback: str = "",
             prior_failure: str = "",
             bead_mapping: dict[str, str] | None = None,
+            shared_prefix: str | None = None,
         ) -> WorkerResult:
             return WorkerResultFactory.create(
                 issue_number=issue.id,
@@ -1063,7 +1064,22 @@ def make_implement_phase(
         agent_run = _default_agent_run
 
     mock_agents = AsyncMock()
-    mock_agents.run = agent_run
+    # Wrap agent_run to absorb extra kwargs (e.g. shared_prefix) that
+    # the production code may pass but test mocks don't declare.
+    _original_run = agent_run
+
+    async def _kwargs_absorbing_run(*args: object, **kwargs: object) -> WorkerResult:
+        import inspect  # noqa: PLC0415
+
+        sig = inspect.signature(_original_run)
+        bound = sig.bind(
+            *args, **{k: v for k, v in kwargs.items() if k in sig.parameters}
+        )
+        bound.apply_defaults()
+        return await _original_run(*bound.args, **bound.kwargs)
+
+    mock_agents.run = _kwargs_absorbing_run
+    mock_agents.hindsight = None  # SharedPromptPrefix accesses this
 
     # Mock IssueStore — get_implementable returns the supplied issues once
     mock_store = AsyncMock(spec=IssueStore)

@@ -23,6 +23,7 @@ from phase_utils import (
 )
 from planner import PlannerRunner
 from research_runner import ResearchRunner
+from shared_prompt_prefix import SharedPromptPrefix
 from state import StateTracker
 from task_source import TaskTransitioner
 from transcript_summarizer import TranscriptSummarizer

@@ -33,6 +33,7 @@ from phase_utils import (
     store_lifecycle,
 )
 from run_recorder import RunRecorder
+from shared_prompt_prefix import SharedPromptPrefix
 from state import StateTracker
 from task_source import TaskTransitioner
 
@@ -126,6 +127,25 @@ class ImplementPhase:
                 issues.extend(batch)
                 return batch
 
+        # Build shared prefix once for batch when running multiple agents
+        shared_prefix: str | None = None
+        if self._config.max_workers > 1:
+            try:
+                builder = SharedPromptPrefix(self._config)
+                shared_prefix = await builder.build(
+                    hindsight=self._agents.hindsight,
+                )
+                logger.info(
+                    "Built shared prompt prefix (%d chars) for %d concurrent workers",
+                    builder.prefix_chars,
+                    self._config.max_workers,
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Failed to build shared prefix, falling back", exc_info=True
+                )
+                shared_prefix = None
+
         async def _worker(idx: int, issue: Task) -> WorkerResult:
             if self._stop_event.is_set():
                 return WorkerResult(
@@ -174,25 +194,6 @@ class ImplementPhase:
                                 list(self._active_issues)
                             )
                         release_batch_in_flight(self._store, {issue.id})
-
-        # Build shared prefix once for batch when running multiple agents
-        shared_prefix: str | None = None
-        if self._config.max_workers > 1:
-            try:
-                builder = SharedPromptPrefix(self._config)
-                shared_prefix = await builder.build(
-                    hindsight=self._agents.hindsight,
-                )
-                logger.info(
-                    "Built shared prompt prefix (%d chars) for %d concurrent workers",
-                    builder.prefix_chars,
-                    self._config.max_workers,
-                )
-            except Exception:  # noqa: BLE001
-                logger.warning(
-                    "Failed to build shared prefix, falling back", exc_info=True
-                )
-                shared_prefix = None
 
         all_results = await run_refilling_pool(
             supply_fn=_supply_fixed,
