@@ -53,7 +53,7 @@ describe('deriveStageStatus', () => {
     expect(result.workload.total).toBe(0)
     expect(result.workload.done).toBe(0)
     expect(result.workerCaps).toEqual({
-      triage: null, plan: null, implement: null, review: null,
+      triage: null, discover: null, shape: null, plan: null, implement: null, review: null,
     })
   })
 
@@ -104,6 +104,8 @@ describe('deriveStageStatus', () => {
 
     expect(result.workerCaps).toEqual({
       triage: 2,
+      discover: null,
+      shape: null,
       plan: 3,
       implement: 5,
       review: 4,
@@ -292,7 +294,7 @@ describe('deriveStageStatus', () => {
       total: 8, active: 3, done: 3, failed: 0,
     })
     expect(result.workerCaps).toEqual({
-      triage: 2, plan: 3, implement: 5, review: 2,
+      triage: 2, discover: null, shape: null, plan: 3, implement: 5, review: 2,
     })
   })
 })

@@ -234,6 +234,8 @@ _DEPRECATED_ENV_REVERSE: dict[str, str] = {
 # Label env var overrides — maps env key → (field_name, default_value)
 _ENV_LABEL_MAP: dict[str, tuple[str, list[str]]] = {
     "HYDRAFLOW_LABEL_FIND": ("find_label", ["hydraflow-find"]),
+    "HYDRAFLOW_LABEL_DISCOVER": ("discover_label", ["hydraflow-discover"]),
+    "HYDRAFLOW_LABEL_SHAPE": ("shape_label", ["hydraflow-shape"]),
     "HYDRAFLOW_LABEL_PLAN": ("planner_label", ["hydraflow-plan"]),
     "HYDRAFLOW_LABEL_READY": ("ready_label", ["hydraflow-ready"]),
     "HYDRAFLOW_LABEL_REVIEW": ("review_label", ["hydraflow-review"]),
@@ -542,6 +544,52 @@ class HydraFlowConfig(BaseModel):
     find_label: list[str] = Field(
         default=["hydraflow-find"],
         description="Labels for new issues to discover and triage into planning (OR logic)",
+    )
+    discover_label: list[str] = Field(
+        default=["hydraflow-discover"],
+        description="Labels for issues needing product discovery research (OR logic)",
+    )
+    shape_label: list[str] = Field(
+        default=["hydraflow-shape"],
+        description="Labels for issues needing product direction shaping (OR logic)",
+    )
+    clarity_threshold: int = Field(
+        default=7,
+        ge=1,
+        le=10,
+        description="Clarity score threshold: issues scoring below this route to discovery",
+    )
+    max_shape_turns: int = Field(
+        default=10,
+        ge=2,
+        le=20,
+        description="Maximum conversation turns in a shape session",
+    )
+    shape_timeout_minutes: int = Field(
+        default=60,
+        ge=5,
+        le=1440,
+        description="Minutes to wait for human response before timing out shape conversation",
+    )
+    whatsapp_enabled: bool = Field(
+        default=False,
+        description="Enable WhatsApp notifications for shape conversations",
+    )
+    whatsapp_phone_id: str = Field(
+        default="",
+        description="WhatsApp Business API phone number ID",
+    )
+    whatsapp_token: str = Field(
+        default="",
+        description="WhatsApp Business API access token",
+    )
+    whatsapp_recipient: str = Field(
+        default="",
+        description="WhatsApp recipient phone number (with country code)",
+    )
+    dashboard_url: str = Field(
+        default="http://localhost:8000",
+        description="Public URL of the dashboard for artifact links",
     )
     planner_label: list[str] = Field(
         default=["hydraflow-plan"],
@@ -1378,6 +1426,8 @@ class HydraFlowConfig(BaseModel):
         "epic_label",
         "epic_child_label",
         "find_label",
+        "discover_label",
+        "shape_label",
         "planner_label",
         "verify_label",
     )
@@ -1418,6 +1468,8 @@ class HydraFlowConfig(BaseModel):
         result: list[str] = []
         for labels in (
             self.find_label,
+            self.discover_label,
+            self.shape_label,
             self.planner_label,
             self.ready_label,
             self.review_label,

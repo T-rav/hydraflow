@@ -84,6 +84,8 @@ class TestInitialization:
             "digest_hashes",
             "reviewed_prs",
             "schema_version",
+            "shape_conversations",
+            "shape_responses",
             "security_patch_processed",
             "security_patch_settings",
             "stale_issue_closed",

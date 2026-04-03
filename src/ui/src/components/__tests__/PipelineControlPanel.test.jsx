@@ -18,13 +18,15 @@ const { PipelineControlPanel } = await import('../PipelineControlPanel')
 function buildPipelineStats(caps = {}) {
   const stages = {}
   if (caps.triage != null) stages.triage = { worker_cap: caps.triage }
+  if (caps.discover != null) stages.discover = { worker_cap: caps.discover }
+  if (caps.shape != null) stages.shape = { worker_cap: caps.shape }
   if (caps.plan != null) stages.plan = { worker_cap: caps.plan }
   if (caps.implement != null) stages.implement = { worker_cap: caps.implement }
   if (caps.review != null) stages.review = { worker_cap: caps.review }
   return { stages }
 }
 
-const DEFAULT_CAPS = { triage: 1, plan: 2, implement: 3, review: 2 }
+const DEFAULT_CAPS = { triage: 1, discover: 1, shape: 1, plan: 2, implement: 3, review: 2 }
 
 function defaultMockContext(overrides = {}) {
   const pipelineIssues = overrides.pipelineIssues || {}
@@ -148,7 +150,7 @@ describe('PipelineControlPanel', () => {
       render(<PipelineControlPanel onToggleBgWorker={() => {}} />)
       expect(screen.getByText('Off')).toBeInTheDocument()
       const onButtons = screen.getAllByText('On')
-      expect(onButtons.length).toBe(3) // 3 enabled loops
+      expect(onButtons.length).toBe(PIPELINE_LOOPS.length - 1) // all loops minus triage (disabled)
     })
 
     it('shows dimmed dot color when loop is disabled', () => {
@@ -226,7 +228,7 @@ describe('PipelineControlPanel', () => {
 
     it('disables decrement button when count is at minimum (1)', () => {
       mockUseHydraFlow.mockReturnValue(defaultMockContext({
-        pipelineStats: buildPipelineStats({ triage: 1, plan: 1, implement: 1, review: 1 }),
+        pipelineStats: buildPipelineStats({ triage: 1, discover: 1, shape: 1, plan: 1, implement: 1, review: 1 }),
       }))
       render(<PipelineControlPanel />)
       for (const loop of PIPELINE_LOOPS) {
@@ -236,7 +238,7 @@ describe('PipelineControlPanel', () => {
 
     it('disables increment button when count is at maximum (10)', () => {
       mockUseHydraFlow.mockReturnValue(defaultMockContext({
-        pipelineStats: buildPipelineStats({ triage: 10, plan: 10, implement: 10, review: 10 }),
+        pipelineStats: buildPipelineStats({ triage: 10, discover: 10, shape: 10, plan: 10, implement: 10, review: 10 }),
       }))
       render(<PipelineControlPanel />)
       for (const loop of PIPELINE_LOOPS) {
@@ -246,7 +248,7 @@ describe('PipelineControlPanel', () => {
 
     it('enables both buttons when count is between min and max', () => {
       mockUseHydraFlow.mockReturnValue(defaultMockContext({
-        pipelineStats: buildPipelineStats({ triage: 5, plan: 5, implement: 5, review: 5 }),
+        pipelineStats: buildPipelineStats({ triage: 5, discover: 5, shape: 5, plan: 5, implement: 5, review: 5 }),
       }))
       render(<PipelineControlPanel />)
       for (const loop of PIPELINE_LOOPS) {

@@ -347,6 +347,16 @@ class TriageResult(BaseModel):
     enrichment: str = Field(
         default="", description="Additional context gathered during triage"
     )
+    clarity_score: int = Field(
+        default=10,
+        ge=0,
+        le=10,
+        description="Clarity/specificity score 0-10; low values route to discovery",
+    )
+    needs_discovery: bool = Field(
+        default=False,
+        description="Whether the issue needs product discovery before planning",
+    )
 
     @field_validator("issue_type", mode="before")
     @classmethod
@@ -370,6 +380,90 @@ class EpicDecompResult(BaseModel):
     epic_body: str = ""
     children: list[NewIssueSpec] = Field(default_factory=list)
     reasoning: str = ""
+
+
+# --- Product Discovery & Shaping ---
+
+
+class ProductDirection(BaseModel):
+    """A single product direction option proposed during shaping."""
+
+    name: str = Field(description="Short name for this direction")
+    approach: str = Field(description="What this direction entails")
+    tradeoffs: str = Field(description="Key tradeoffs and considerations")
+    effort: str = Field(description="Estimated effort level (low/medium/high)")
+    risk: str = Field(description="Risk level (low/medium/high)")
+    differentiator: str = Field(
+        default="", description="Market differentiation strength"
+    )
+
+
+class DiscoverResult(BaseModel):
+    """Outcome of product discovery research for a vague issue."""
+
+    issue_number: int = Field(description="GitHub issue number")
+    research_brief: str = Field(default="", description="Synthesized research findings")
+    opportunities: list[str] = Field(
+        default_factory=list, description="Identified opportunity areas"
+    )
+    competitors: list[str] = Field(
+        default_factory=list, description="Key competitors analyzed"
+    )
+    user_needs: list[str] = Field(
+        default_factory=list, description="Identified user needs/pain points"
+    )
+
+
+class ShapeResult(BaseModel):
+    """Outcome of product shaping — proposed directions for human selection."""
+
+    issue_number: int = Field(description="GitHub issue number")
+    directions: list[ProductDirection] = Field(
+        default_factory=list, description="Proposed product directions"
+    )
+    recommendation: str = Field(
+        default="", description="Agent's recommended direction with reasoning"
+    )
+
+
+# --- Shape Conversation ---
+
+
+class ConversationTurn(BaseModel):
+    """A single turn in a shape design conversation."""
+
+    role: str = Field(description="Who spoke: 'agent' or 'human'")
+    content: str = Field(description="The message content")
+    timestamp: str = Field(default="", description="ISO 8601 timestamp")
+    signal: str = Field(
+        default="",
+        description="Classified learning signal (e.g. scope_narrow, positive)",
+    )
+    source: str = Field(
+        default="", description="Response source: github, dashboard, whatsapp"
+    )
+
+
+class ShapeConversation(BaseModel):
+    """Persisted state for an active shape design conversation."""
+
+    issue_number: int = Field(description="GitHub issue number")
+    turns: list[ConversationTurn] = Field(default_factory=list)
+    status: str = Field(
+        default="exploring", description="exploring, finalizing, done, timed_out"
+    )
+    started_at: str = Field(default="", description="ISO 8601")
+    last_activity_at: str = Field(default="", description="ISO 8601")
+
+
+class ShapeTurnResult(BaseModel):
+    """Result of a single shape agent turn."""
+
+    content: str = Field(default="", description="Agent's response content")
+    is_final: bool = Field(
+        default=False, description="Whether this is a finalization turn"
+    )
+    transcript: str = Field(default="", description="Full agent transcript")
 
 
 # --- Planner ---
@@ -1339,6 +1433,8 @@ class StateData(BaseModel):
     digest_hashes: dict[str, str] = Field(default_factory=dict)
     bot_pr_settings: BotPRSettings = Field(default_factory=BotPRSettings)
     bot_pr_processed: list[int] = Field(default_factory=list)
+    shape_conversations: dict[str, ShapeConversation] = Field(default_factory=dict)
+    shape_responses: dict[str, str] = Field(default_factory=dict)
     stale_issue_settings: StaleIssueSettings = Field(default_factory=StaleIssueSettings)
     stale_issue_closed: list[int] = Field(default_factory=list)
     security_patch_settings: SecurityPatchSettings = Field(
@@ -1526,6 +1622,7 @@ class PipelineIssue(BaseModel):
     status: PipelineIssueStatus = PipelineIssueStatus.QUEUED
     epic_number: int = 0
     is_epic_child: bool = False
+    track: str = ""
 
 
 class PipelineSnapshot(BaseModel):
@@ -2358,6 +2455,8 @@ class PipelineStage(StrEnum):
     """Display pipeline stages for issue lifecycle."""
 
     TRIAGE = "triage"
+    DISCOVER = "discover"
+    SHAPE = "shape"
     PLAN = "plan"
     IMPLEMENT = "implement"
     REVIEW = "review"

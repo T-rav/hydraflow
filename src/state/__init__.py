@@ -36,6 +36,7 @@ from ._report import ReportStateMixin
 from ._review import ReviewStateMixin
 from ._security_patch import SecurityPatchStateMixin
 from ._session import SessionStateMixin
+from ._shape import ShapeStateMixin
 from ._stale_issue import StaleIssueStateMixin
 from ._worker import WorkerStateMixin
 from ._workspace import WorkspaceStateMixin
@@ -57,6 +58,7 @@ class StateTracker(
     SessionStateMixin,
     WorkerStateMixin,
     ReportStateMixin,
+    ShapeStateMixin,
     BotPRStateMixin,
     StaleIssueStateMixin,
     SecurityPatchStateMixin,

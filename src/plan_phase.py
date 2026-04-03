@@ -156,8 +156,49 @@ class PlanPhase:
                 )
         return True
 
+    async def _is_product_track_issue(self, issue: Task) -> bool:
+        """Detect if an issue came through the product discovery/shape track."""
+        enriched = await self._store.enrich_with_comments(issue)
+        for comment in enriched.comments or []:
+            if "DECOMPOSITION REQUIRED" in comment:
+                return True
+        return False
+
     async def _handle_plan_success(self, issue: Task, result: PlanResult) -> None:
         """Post plan comment, run analysis, transition to ready, file sub-issues."""
+        # Product-track decomposition check: if issue came from Shape and
+        # the planner didn't produce enough sub-issues, retry with feedback
+        if (
+            await self._is_product_track_issue(issue)
+            and len(result.new_issues) < 3
+            and not getattr(result, "_decompose_retried", False)
+        ):
+            logger.info(
+                "Issue #%d is product-track but planner only produced %d sub-issues "
+                "(need ≥3) — retrying with decomposition feedback",
+                issue.id,
+                len(result.new_issues),
+            )
+            retry_result = await self._planners.plan(
+                issue,
+                research_context=(
+                    f"IMPORTANT: This issue came through the product track and "
+                    f"MUST be decomposed into 3-8 concrete sub-issues using "
+                    f"NEW_ISSUES_START/NEW_ISSUES_END markers. Your previous "
+                    f"plan only produced {len(result.new_issues)} sub-issues. "
+                    f"Break the work into independently implementable pieces."
+                ),
+            )
+            if retry_result.success and len(retry_result.new_issues) >= 3:
+                result = retry_result
+            else:
+                logger.warning(
+                    "Decomposition retry for #%d still insufficient (%d issues)",
+                    issue.id,
+                    len(retry_result.new_issues) if retry_result.success else 0,
+                )
+                # Proceed with whatever we have
+
         branch = self._config.branch_for_issue(issue.id)
         score_line = ""
         if result.actionability_rank != "unknown":
