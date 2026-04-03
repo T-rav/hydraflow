@@ -331,7 +331,9 @@ class WorkspacePort(Protocol):
         """Hard-reset worktree to ``origin/main`` and clean untracked files."""
         ...
 
-    async def post_work_cleanup(self, issue_number: int) -> None:
+    async def post_work_cleanup(
+        self, issue_number: int, *, phase: str = "implement"
+    ) -> None:
         """Clean up after an issue is done (salvage uncommitted changes, destroy workspace)."""
         ...
 

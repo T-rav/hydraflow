@@ -305,14 +305,29 @@ class WorkspaceManager:
                 exc,
             )
 
-    async def post_work_cleanup(self, issue_number: int) -> None:
+    async def post_work_cleanup(
+        self, issue_number: int, *, phase: str = "implement"
+    ) -> None:
         """Clean up after an issue is done (PR created/merged/failed).
 
-        Salvages any uncommitted changes, then removes the workspace.
+        Salvages any uncommitted changes, harvests trace files, then
+        removes the workspace.
         """
         # Salvage any uncommitted work before destroying
         with contextlib.suppress(Exception):
             await self._salvage_uncommitted(issue_number)
+
+        # Harvest Monocle trace files before workspace is destroyed
+        with contextlib.suppress(Exception):
+            from trace_harvester import harvest_traces
+
+            wt_path = self._config.workspace_path_for_issue(issue_number)
+            harvest_traces(
+                wt_path,
+                issue_number=issue_number,
+                phase=phase,
+                data_path=self._config.data_root,
+            )
 
         # Destroy workspace
         with contextlib.suppress(RuntimeError):

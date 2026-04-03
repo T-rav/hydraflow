@@ -796,7 +796,9 @@ class ReviewPhase:
 
         if not skip:
             try:
-                await self._workspaces.post_work_cleanup(pr.issue_number)
+                await self._workspaces.post_work_cleanup(
+                    pr.issue_number, phase="review"
+                )
                 self._state.remove_workspace(pr.issue_number)
             except RuntimeError as exc:
                 logger.warning(

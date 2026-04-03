@@ -2223,7 +2223,9 @@ class TestCleanupWorktree:
 
         await phase._cleanup_worktree(pr, result, skip=False)
 
-        phase._workspaces.post_work_cleanup.assert_awaited_once_with(pr.issue_number)
+        phase._workspaces.post_work_cleanup.assert_awaited_once_with(
+            pr.issue_number, phase="review"
+        )
 
     @pytest.mark.asyncio
     async def test_preserves_when_skipped(self, config: HydraFlowConfig) -> None:
@@ -2264,7 +2266,9 @@ class TestCleanupWorktree:
 
         await phase._cleanup_worktree(pr, result, skip=False)
 
-        phase._workspaces.post_work_cleanup.assert_awaited_once_with(pr.issue_number)
+        phase._workspaces.post_work_cleanup.assert_awaited_once_with(
+            pr.issue_number, phase="review"
+        )
 
 
 class TestRequiredDIParameters:
