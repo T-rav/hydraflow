@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from hindsight import Bank
 from models import (
     LifetimeStats,
     TraceSkillProfile,
@@ -178,3 +179,11 @@ class TestLifetimeStatsTraceFields:
         assert restored.tool_invocation_counts == {"Read": 100, "Bash": 50}
         assert restored.skill_invocation_counts == {"tdd": 10}
         assert restored.subagent_invocation_counts == {"Explore": 20}
+
+
+class TestTracingInsightsBank:
+    def test_tracing_insights_bank_exists(self) -> None:
+        assert Bank.TRACING_INSIGHTS == "hydraflow-tracing-insights"
+
+    def test_tracing_insights_is_valid_bank(self) -> None:
+        assert Bank.TRACING_INSIGHTS in list(Bank)
