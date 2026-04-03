@@ -1072,6 +1072,12 @@ def make_implement_phase(
         import inspect  # noqa: PLC0415
 
         sig = inspect.signature(_original_run)
+        # If the function accepts **kwargs, pass everything through
+        has_var_keyword = any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+        )
+        if has_var_keyword:
+            return await _original_run(*args, **kwargs)
         bound = sig.bind(
             *args, **{k: v for k, v in kwargs.items() if k in sig.parameters}
         )
