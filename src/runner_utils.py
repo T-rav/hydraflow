@@ -179,16 +179,19 @@ async def stream_claude_process(
                     break
 
                 # Emit structured activity event (additive — does not replace TRANSCRIPT_LINE)
-                activity = activity_parser.parse(line)
-                if activity is not None:
-                    activity["issue"] = event_data.get("issue", 0)
-                    activity["source"] = event_data.get("source", "unknown")
-                    await event_bus.publish(
-                        HydraFlowEvent(
-                            type=EventType.AGENT_ACTIVITY,
-                            data=activity,
+                try:
+                    activity = activity_parser.parse(line)
+                    if activity is not None:
+                        activity["issue"] = event_data.get("issue", 0)
+                        activity["source"] = event_data.get("source", "unknown")
+                        await event_bus.publish(
+                            HydraFlowEvent(
+                                type=EventType.AGENT_ACTIVITY,
+                                data=activity,
+                            )
                         )
-                    )
+                except Exception:
+                    logger.warning("Activity parsing failed", exc_info=True)
 
             stderr_bytes = await stderr_task
             await proc.wait()
