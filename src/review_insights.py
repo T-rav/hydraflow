@@ -207,6 +207,9 @@ def extract_categories(summary: str) -> list[str]:
 class ReviewInsightStore:
     """File-backed store for review records and proposed-category tracking."""
 
+    PROPOSAL_STALE_DAYS: int = 30
+    """Number of days after which an unimproved proposal is considered stale."""
+
     def __init__(
         self,
         memory_dir: Path,
@@ -352,6 +355,89 @@ class ReviewInsightStore:
         if category in meta:
             meta[category].verified = verified
             self.save_proposal_metadata(meta)
+
+    # --- Convenience wrappers (encapsulate free-function logic) ---
+
+    @staticmethod
+    def extract_categories(summary: str) -> list[str]:
+        """Extract feedback categories from a review summary.
+
+        Delegates to the module-level :func:`extract_categories`.
+        """
+        return extract_categories(summary)
+
+    def get_feedback_section(self, window: int = 10, top_n: int = 3) -> str:
+        """Build a ``## Common Review Feedback`` markdown section.
+
+        Loads the last *window* reviews and delegates to
+        :func:`get_common_feedback_section`.
+        """
+        recent = self.load_recent(window)
+        return get_common_feedback_section(recent, top_n=top_n)
+
+    def get_escalation(
+        self,
+        window: int = 10,
+        top_n: int = 3,
+        threshold: int = 3,
+    ) -> list[dict[str, str | int | list[str]]]:
+        """Return structured escalation data for recurring feedback categories.
+
+        Loads the last *window* reviews and delegates to
+        :func:`get_escalation_data`.
+        """
+        recent = self.load_recent(window)
+        return get_escalation_data(recent, top_n=top_n, threshold=threshold)
+
+    def analyze_and_file(
+        self,
+        recent: list[ReviewRecord],
+        threshold: int = 3,
+    ) -> tuple[list[tuple[str, int, str, str]], list[tuple[str, str, str]]]:
+        """Analyze patterns and prepare proposals/stale escalations.
+
+        Returns ``(new_proposals, stale_escalations)`` where:
+
+        * ``new_proposals`` is a list of
+          ``(category, count, title, body)`` tuples for categories that
+          have crossed the *threshold* but have not yet been proposed.
+        * ``stale_escalations`` is a list of ``(category, title, body)``
+          tuples for proposals that are older than
+          :attr:`PROPOSAL_STALE_DAYS` and have not improved.
+
+        The caller is responsible for filing the issues (e.g. via
+        ``create_task``). After filing, call
+        :meth:`mark_category_proposed` and :meth:`record_proposal`
+        for each new proposal.
+        """
+        patterns = analyze_patterns(recent, threshold)
+        proposed = self.get_proposed_categories()
+
+        new_proposals: list[tuple[str, int, str, str]] = []
+        for category, count, evidence in patterns:
+            if category in proposed:
+                continue
+            body = build_insight_issue_body(category, count, len(recent), evidence)
+            desc = CATEGORY_DESCRIPTIONS.get(category, category)
+            title = f"[Review Insight] Recurring feedback: {desc}"
+            new_proposals.append((category, count, title, body))
+
+        stale = verify_proposals(self, recent)
+        stale_escalations: list[tuple[str, str, str]] = []
+        for category in stale:
+            desc = CATEGORY_DESCRIPTIONS.get(category, category)
+            title = f"[HITL] Stale review insight: {desc}"
+            body = (
+                f"## Stale Improvement Proposal\n\n"
+                f"The improvement proposal for **{category}** ({desc}) "
+                f"was filed over {self.PROPOSAL_STALE_DAYS} days ago but the "
+                f"pattern frequency has not decreased. Human intervention is "
+                f"required to resolve this recurring feedback loop.\n\n"
+                f"---\n*Auto-escalated by HydraFlow review insight verification.*"
+            )
+            stale_escalations.append((category, title, body))
+
+        return new_proposals, stale_escalations
 
 
 # ---------------------------------------------------------------------------

@@ -1281,11 +1281,10 @@ class TestRecordReviewInsight:
 
         mock_insights = MagicMock()
         mock_insights.load_recent.return_value = []
-        mock_insights.get_proposed_categories.return_value = set()
+        mock_insights.analyze_and_file.return_value = ([], [])
         phase._insights = mock_insights
 
-        with patch("review_phase.analyze_patterns", return_value=[]):
-            await phase._record_review_insight(result)
+        await phase._record_review_insight(result)
 
         mock_insights.append_review.assert_called_once()
 
@@ -1300,36 +1299,20 @@ class TestRecordReviewInsight:
 
         mock_insights = MagicMock()
         mock_insights.load_recent.return_value = [MagicMock()] * 5
-        mock_insights.get_proposed_categories.return_value = set()
+        mock_insights.analyze_and_file.return_value = (
+            [
+                (
+                    "test_coverage",
+                    4,
+                    "[Review Insight] Recurring feedback: test_coverage",
+                    "body",
+                )
+            ],
+            [],
+        )
         phase._insights = mock_insights
 
-        from review_insights import ReviewRecord
-
-        mock_evidence = [
-            ReviewRecord(
-                pr_number=101,
-                issue_number=42,
-                timestamp="2026-01-01T00:00:00",
-                verdict="request-changes",
-                summary="Missing tests",
-                fixes_made=False,
-                categories=["test_coverage"],
-            ),
-            ReviewRecord(
-                pr_number=102,
-                issue_number=43,
-                timestamp="2026-01-02T00:00:00",
-                verdict="request-changes",
-                summary="Missing tests again",
-                fixes_made=False,
-                categories=["test_coverage"],
-            ),
-        ]
-        with patch(
-            "review_phase.analyze_patterns",
-            return_value=[("test_coverage", 4, mock_evidence)],
-        ):
-            await phase._record_review_insight(result)
+        await phase._record_review_insight(result)
 
         phase._prs.create_task.assert_awaited_once()
         call_title, _call_body, call_labels = phase._prs.create_task.call_args[0]
@@ -1350,18 +1333,11 @@ class TestRecordReviewInsight:
 
         mock_insights = MagicMock()
         mock_insights.load_recent.return_value = [MagicMock()] * 5
-        mock_insights.get_proposed_categories.return_value = {"test_coverage"}
+        # analyze_and_file returns empty proposals because test_coverage is already proposed
+        mock_insights.analyze_and_file.return_value = ([], [])
         phase._insights = mock_insights
 
-        mock_evidence = [
-            MagicMock(pr_number=1, issue_number=10, summary="needs tests"),
-            MagicMock(pr_number=2, issue_number=20, summary="missing coverage"),
-        ]
-        with patch(
-            "review_phase.analyze_patterns",
-            return_value=[("test_coverage", 4, mock_evidence)],
-        ):
-            await phase._record_review_insight(result)
+        await phase._record_review_insight(result)
 
         phase._prs.create_task.assert_not_awaited()
 
@@ -1389,11 +1365,10 @@ class TestRecordReviewInsight:
 
         mock_insights = MagicMock()
         mock_insights.load_recent.return_value = []
-        mock_insights.get_proposed_categories.return_value = set()
+        mock_insights.analyze_and_file.return_value = ([], [])
         phase._insights = mock_insights
 
-        with patch("review_phase.analyze_patterns", return_value=[]):
-            await phase._record_review_insight(result)
+        await phase._record_review_insight(result)
 
         status_cb.assert_called_with(
             "review_insights",
@@ -1437,11 +1412,10 @@ class TestRecordReviewInsight:
 
         mock_insights = MagicMock()
         mock_insights.load_recent.return_value = []
-        mock_insights.get_proposed_categories.return_value = set()
+        mock_insights.analyze_and_file.return_value = ([], [])
         phase._insights = mock_insights
 
-        with patch("review_phase.analyze_patterns", return_value=[]):
-            await phase._record_review_insight(result)
+        await phase._record_review_insight(result)
 
         mock_insights.append_review.assert_called_once()
 

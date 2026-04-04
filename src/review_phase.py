@@ -61,16 +61,7 @@ from phase_utils import (
     store_lifecycle,
 )
 from post_merge_handler import PostMergeHandler
-from review_insights import (
-    _PROPOSAL_STALE_DAYS,
-    CATEGORY_DESCRIPTIONS,
-    ReviewInsightStore,
-    ReviewRecord,
-    analyze_patterns,
-    build_insight_issue_body,
-    extract_categories,
-    verify_proposals,
-)
+from review_insights import ReviewInsightStore, ReviewRecord
 from reviewer import ReviewRunner
 from state import StateTracker
 from task_source import TaskTransitioner
@@ -1536,7 +1527,7 @@ class ReviewPhase:
                 verdict=result.verdict,
                 summary=result.summary,
                 fixes_made=result.fixes_made,
-                categories=extract_categories(result.summary),
+                categories=ReviewInsightStore.extract_categories(result.summary),
                 raw_feedback=result.transcript,
             )
             self._insights.append_review(record)
@@ -1563,33 +1554,18 @@ class ReviewPhase:
                 )
 
             recent = self._insights.load_recent(self._config.review_insight_window)
-            patterns = analyze_patterns(recent, self._config.review_pattern_threshold)
-            proposed = self._insights.get_proposed_categories()
+            new_proposals, stale_escalations = self._insights.analyze_and_file(
+                recent, threshold=self._config.review_pattern_threshold
+            )
 
-            for category, count, evidence in patterns:
-                if category in proposed:
-                    continue
-                body = build_insight_issue_body(category, count, len(recent), evidence)
-                desc = CATEGORY_DESCRIPTIONS.get(category, category)
-                title = f"[Review Insight] Recurring feedback: {desc}"
+            for category, count, title, body in new_proposals:
                 labels = self._config.find_label[:1]
                 await self._transitioner.create_task(title, body, labels)
                 self._insights.mark_category_proposed(category)
                 self._insights.record_proposal(category, pre_count=count)
 
-            # Verify existing proposals — re-file stale ones as HITL issues
-            stale = verify_proposals(self._insights, recent)
-            for category in stale:
-                desc = CATEGORY_DESCRIPTIONS.get(category, category)
-                title = f"[HITL] Stale review insight: {desc}"
-                body = (
-                    f"## Stale Improvement Proposal\n\n"
-                    f"The improvement proposal for **{category}** ({desc}) "
-                    f"was filed over {_PROPOSAL_STALE_DAYS} days ago but the "
-                    f"pattern frequency has not decreased. Human intervention is "
-                    f"required to resolve this recurring feedback loop.\n\n"
-                    f"---\n*Auto-escalated by HydraFlow review insight verification.*"
-                )
+            # Re-file stale proposals as HITL issues
+            for _category, title, body in stale_escalations:
                 hitl_labels = list(self._config.hitl_label)
                 await self._transitioner.create_task(title, body, hitl_labels)
         except (RuntimeError, OSError):
