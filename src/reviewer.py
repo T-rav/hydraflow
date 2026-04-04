@@ -10,6 +10,7 @@ from pathlib import Path
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from events import EventType, HydraFlowEvent
+from exception_classify import reraise_on_credit_or_bug
 from models import (
     CICheckPayload,
     CodeScanningAlert,
@@ -20,7 +21,6 @@ from models import (
     ReviewVerdict,
     Task,
 )
-from phase_utils import reraise_on_credit_or_bug
 from precheck import run_precheck_context
 from prompt_builder import PromptBuilder
 from runner_constants import MEMORY_SUGGESTION_PROMPT

@@ -10,8 +10,8 @@ from typing import Literal
 
 from base_runner import BaseRunner
 from events import EventType, HydraFlowEvent
+from exception_classify import reraise_on_credit_or_bug
 from models import GitHubIssue, HITLResult, HITLUpdatePayload
-from phase_utils import reraise_on_credit_or_bug
 from prompt_builder import PromptBuilder
 from runner_constants import MEMORY_SUGGESTION_PROMPT
 

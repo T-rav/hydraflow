@@ -10,8 +10,8 @@ from pathlib import Path
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from events import EventType, HydraFlowEvent
+from exception_classify import reraise_on_credit_or_bug
 from models import NewIssueSpec, PlannerStatus, PlannerUpdatePayload, PlanResult, Task
-from phase_utils import reraise_on_credit_or_bug
 from plan_constants import (
     LITE_BODY_THRESHOLD,
     LITE_REQUIRED_SECTIONS,
