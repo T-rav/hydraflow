@@ -250,7 +250,7 @@ or for truly insufficient issues:
         )
 
         # Inject memory context if available
-        _, memory_section = await self._inject_manifest_and_memory(
+        memory_section = await self._inject_memory(
             query_context=f"{issue.title} {(issue.body or '')[:200]}"
         )
         if memory_section:

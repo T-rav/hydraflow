@@ -191,7 +191,7 @@ class HITLRunner(BaseRunner):
             "Human guidance", correction or "", self._config.max_hitl_correction_chars
         )
 
-        manifest_section, memory_section = await self._inject_manifest_and_memory(
+        memory_section = await self._inject_memory(
             query_context=f"{issue.title}\n{(issue.body or '')[:200]}",
         )
 
@@ -199,7 +199,7 @@ class HITLRunner(BaseRunner):
 
 ## Issue: {issue.title}
 
-{issue_body}{manifest_section}{memory_section}
+{issue_body}{memory_section}
 
 ## Escalation Reason
 
