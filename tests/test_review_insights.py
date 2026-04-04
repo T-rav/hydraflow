@@ -1038,3 +1038,134 @@ class TestReviewInsightsSentryBreadcrumbs:
                 if c[1].get("category") == "review_insights.pattern_detected"
             ]
             assert len(pattern_calls) >= 1
+
+
+# ---------------------------------------------------------------------------
+# ReviewInsightStore convenience methods (issue #5948)
+# ---------------------------------------------------------------------------
+
+
+class TestReviewInsightStoreProposalStaleDays:
+    """Tests for the PROPOSAL_STALE_DAYS class attribute."""
+
+    def test_proposal_stale_days_equals_30(self) -> None:
+        assert ReviewInsightStore.PROPOSAL_STALE_DAYS == 30
+
+    def test_proposal_stale_days_on_instance(self, tmp_path: Path) -> None:
+        store = ReviewInsightStore(tmp_path)
+        assert store.PROPOSAL_STALE_DAYS == 30
+
+
+class TestStoreExtractCategories:
+    """Tests for ReviewInsightStore.extract_categories() static method."""
+
+    def test_delegates_to_module_function(self) -> None:
+        result = ReviewInsightStore.extract_categories("missing test")
+        assert "missing_tests" in result
+
+    def test_returns_empty_for_no_match(self) -> None:
+        assert ReviewInsightStore.extract_categories("all good") == []
+
+
+class TestStoreGetFeedbackSection:
+    """Tests for ReviewInsightStore.get_feedback_section()."""
+
+    def test_returns_markdown_with_reviews(self, tmp_path: Path) -> None:
+        store = ReviewInsightStore(tmp_path)
+        for i in range(5):
+            store.append_review(_make_record(pr_number=i, categories=["missing_tests"]))
+        section = store.get_feedback_section(window=10)
+        assert "## Common Review Feedback" in section
+        assert "Missing or insufficient test coverage" in section
+
+    def test_returns_empty_when_no_reviews(self, tmp_path: Path) -> None:
+        store = ReviewInsightStore(tmp_path)
+        assert store.get_feedback_section() == ""
+
+
+class TestStoreGetEscalation:
+    """Tests for ReviewInsightStore.get_escalation()."""
+
+    def test_returns_escalation_dicts(self, tmp_path: Path) -> None:
+        store = ReviewInsightStore(tmp_path)
+        for i in range(5):
+            store.append_review(_make_record(pr_number=i, categories=["missing_tests"]))
+        result = store.get_escalation(window=10)
+        assert len(result) >= 1
+        assert result[0]["category"] == "missing_tests"
+        assert "mandatory_block" in result[0]
+
+    def test_returns_empty_when_no_reviews(self, tmp_path: Path) -> None:
+        store = ReviewInsightStore(tmp_path)
+        assert store.get_escalation() == []
+
+
+class TestStoreAnalyzeAndFile:
+    """Tests for ReviewInsightStore.analyze_and_file()."""
+
+    def test_returns_new_proposals_for_unproposed_categories(
+        self, tmp_path: Path
+    ) -> None:
+        store = ReviewInsightStore(tmp_path)
+        records = [
+            _make_record(pr_number=i, categories=["missing_tests"]) for i in range(5)
+        ]
+        new_proposals, stale = store.analyze_and_file(records, threshold=3)
+        assert len(new_proposals) == 1
+        cat, count, title, body = new_proposals[0]
+        assert cat == "missing_tests"
+        assert count == 5
+        assert "[Review Insight]" in title
+        assert "missing_tests" in body
+        assert stale == []
+
+    def test_skips_already_proposed_categories(self, tmp_path: Path) -> None:
+        store = ReviewInsightStore(tmp_path)
+        store.mark_category_proposed("missing_tests")
+        records = [
+            _make_record(pr_number=i, categories=["missing_tests"]) for i in range(5)
+        ]
+        new_proposals, _stale = store.analyze_and_file(records, threshold=3)
+        assert new_proposals == []
+
+    def test_returns_stale_escalations(self, tmp_path: Path) -> None:
+        store = ReviewInsightStore(tmp_path)
+        store.record_proposal("error_handling", pre_count=5)
+        meta = store.load_proposal_metadata()
+        meta["error_handling"].proposed_at = _old_timestamp(35)
+        store.save_proposal_metadata(meta)
+
+        records = [
+            _make_record(
+                pr_number=i,
+                verdict=ReviewVerdict.REQUEST_CHANGES,
+                categories=["error_handling"],
+            )
+            for i in range(5)
+        ]
+        _new, stale = store.analyze_and_file(records, threshold=3)
+        assert len(stale) == 1
+        cat, title, body = stale[0]
+        assert cat == "error_handling"
+        assert "[HITL]" in title
+        assert str(ReviewInsightStore.PROPOSAL_STALE_DAYS) in body
+
+    def test_returns_empty_for_no_patterns(self, tmp_path: Path) -> None:
+        store = ReviewInsightStore(tmp_path)
+        new_proposals, stale = store.analyze_and_file([], threshold=3)
+        assert new_proposals == []
+        assert stale == []
+
+    def test_returns_empty_for_all_approve_reviews(self, tmp_path: Path) -> None:
+        store = ReviewInsightStore(tmp_path)
+        records = [
+            _make_record(
+                pr_number=i,
+                verdict=ReviewVerdict.APPROVE,
+                categories=["missing_tests"],
+            )
+            for i in range(5)
+        ]
+        new_proposals, stale = store.analyze_and_file(records, threshold=3)
+        assert new_proposals == []
+        assert stale == []
