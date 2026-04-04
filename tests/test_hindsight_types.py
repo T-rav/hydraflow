@@ -80,12 +80,23 @@ class TestNoCircularImport:
         assert hasattr(hindsight_wal, "WALEntry")
 
     def test_import_wal_then_hindsight(self) -> None:
-        """Importing hindsight_wal followed by hindsight must succeed."""
-        import hindsight  # noqa: PLC0415
-        import hindsight_wal  # noqa: PLC0415
+        """Importing hindsight_wal followed by hindsight must succeed.
 
-        assert hasattr(hindsight_wal, "WALEntry")
-        assert hasattr(hindsight, "Bank")
+        Uses importlib to control import order; bare ``import`` statements
+        are sorted alphabetically by the linter so order cannot be enforced.
+        """
+        import importlib  # noqa: PLC0415
+        import sys  # noqa: PLC0415
+
+        # Evict cached modules so this test exercises fresh import order.
+        for mod in ("hindsight", "hindsight_wal", "hindsight_types"):
+            sys.modules.pop(mod, None)
+
+        wal_mod = importlib.import_module("hindsight_wal")
+        hs_mod = importlib.import_module("hindsight")
+
+        assert hasattr(wal_mod, "WALEntry")
+        assert hasattr(hs_mod, "Bank")
 
     def test_reexports_from_hindsight(self) -> None:
         """Bank, HindsightMemory, WALEntry are re-exported from hindsight."""
