@@ -58,6 +58,9 @@ def _setup_conflict_scenario(phase: ReviewPhase) -> None:
     """Set up mocks for a merge-conflict escalation scenario (merge_main returns False)."""
     _setup_escalate_to_hitl_mocks(phase)
     phase._workspaces.merge_main = AsyncMock(return_value=False)
+    # The conflict resolver's fresh_branch_rebuild calls get_pr_diff and uses
+    # the return value synchronously (.strip()), so it must be a real string.
+    phase._prs.get_pr_diff = AsyncMock(return_value="diff text")
 
 
 def _setup_rejected_review_mocks(phase: ReviewPhase) -> None:
@@ -265,6 +268,7 @@ class TestPostMergeConflictFix:
     ) -> None:
         """When merge fails and agent can't resolve, should escalate to HITL."""
         mock_agents = AsyncMock()
+        mock_agents._build_command = MagicMock(return_value=["claude"])
         mock_agents._verify_result = AsyncMock(
             return_value=LoopResult(passed=False, summary="")
         )
@@ -296,6 +300,7 @@ class TestPostMergeConflictFix:
     ) -> None:
         """Merge conflict escalation should record review_label as HITL origin."""
         mock_agents = AsyncMock()
+        mock_agents._build_command = MagicMock(return_value=["claude"])
         mock_agents._execute = AsyncMock(return_value="transcript")
         mock_agents._verify_result = AsyncMock(
             return_value=LoopResult(passed=False, summary="")
@@ -321,6 +326,7 @@ class TestPostMergeConflictFix:
     ) -> None:
         """Merge conflict escalation should record cause in state."""
         mock_agents = AsyncMock()
+        mock_agents._build_command = MagicMock(return_value=["claude"])
         mock_agents._execute = AsyncMock(return_value="transcript")
         mock_agents._verify_result = AsyncMock(
             return_value=LoopResult(passed=False, summary="")
@@ -346,6 +352,7 @@ class TestPostMergeConflictFix:
     ) -> None:
         """When merge fails but agent resolves conflicts, review should proceed."""
         mock_agents = AsyncMock()
+        mock_agents._build_command = MagicMock(return_value=["claude"])
         mock_agents._execute = AsyncMock(return_value="transcript")
         mock_agents._verify_result = AsyncMock(
             return_value=LoopResult(passed=True, summary="")
@@ -2223,7 +2230,9 @@ class TestCleanupWorktree:
 
         await phase._cleanup_worktree(pr, result, skip=False)
 
-        phase._workspaces.post_work_cleanup.assert_awaited_once_with(pr.issue_number)
+        phase._workspaces.post_work_cleanup.assert_awaited_once_with(
+            pr.issue_number, phase="review"
+        )
 
     @pytest.mark.asyncio
     async def test_preserves_when_skipped(self, config: HydraFlowConfig) -> None:
@@ -2264,7 +2273,9 @@ class TestCleanupWorktree:
 
         await phase._cleanup_worktree(pr, result, skip=False)
 
-        phase._workspaces.post_work_cleanup.assert_awaited_once_with(pr.issue_number)
+        phase._workspaces.post_work_cleanup.assert_awaited_once_with(
+            pr.issue_number, phase="review"
+        )
 
 
 class TestRequiredDIParameters:

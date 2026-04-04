@@ -1476,6 +1476,9 @@ def make_review_phase(
 
     mock_reviewers = AsyncMock()
     mock_prs = AsyncMock()
+    # expected_pr_title is a sync staticmethod on PRManager — use MagicMock
+    # so callers don't get an unawaited coroutine when invoking it without await.
+    mock_prs.expected_pr_title = MagicMock(return_value="Fixes #0: test")
 
     mock_store = MagicMock(spec=IssueStore)
     mock_store.mark_active = lambda _num, _stage: None
