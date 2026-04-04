@@ -708,7 +708,7 @@ Then a brief summary on the next line starting with "SUMMARY: ".
 
         min_findings = self._config.min_review_findings
 
-        manifest_section, memory_section = await self._inject_manifest_and_memory(
+        memory_section = await self._inject_memory(
             query_context=f"{issue.title}\n{(issue.body or '')[:200]}",
         )
 
@@ -769,7 +769,7 @@ Then a brief summary on the next line starting with "SUMMARY: ".
 
 ## Issue: {issue.title}
 
-{issue_body}{manifest_section}{memory_section}{log_section}{scanning_section}{bead_section}{spec_section}
+{issue_body}{memory_section}{log_section}{scanning_section}{bead_section}{spec_section}
 
 ## Precheck Context
 

@@ -152,7 +152,6 @@ Run through this checklist before your final commit:
         review_feedback: str = "",
         prior_failure: str = "",
         bead_mapping: dict[str, str] | None = None,
-        shared_prefix: str | None = None,
     ) -> WorkerResult:
         """Run the implementation agent for *task*.
 
@@ -185,7 +184,6 @@ Run through this checklist before your final commit:
                 review_feedback=review_feedback,
                 prior_failure=prior_failure,
                 bead_mapping=bead_mapping,
-                shared_prefix=shared_prefix,
             )
             transcript = await self._execute(
                 cmd,
@@ -552,7 +550,6 @@ Run through this checklist before your final commit:
         review_feedback: str = "",
         prior_failure: str = "",
         bead_mapping: dict[str, str] | None = None,
-        shared_prefix: str | None = None,
     ) -> tuple[str, dict[str, object]]:
         """Build the implementation prompt and pruning stats."""
         builder = PromptBuilder()
@@ -660,9 +657,8 @@ Run through this checklist before your final commit:
                 "Escalations", escalation_section, escalation_section
             )
 
-        manifest_section, memory_section = await self._inject_manifest_and_memory(
+        memory_section = await self._inject_memory(
             query_context=f"{issue.title}\n{(issue.body or '')[:200]}",
-            shared_prefix=shared_prefix,
         )
 
         # Runtime log injection
@@ -691,7 +687,7 @@ Run through this checklist before your final commit:
 
 ## Issue: {issue.title}
 
-{body}{plan_section}{review_feedback_section}{prior_failure_section}{comments_section}{manifest_section}{memory_section}{log_section}
+{body}{plan_section}{review_feedback_section}{prior_failure_section}{comments_section}{memory_section}{log_section}
 
 ## Instructions
 
