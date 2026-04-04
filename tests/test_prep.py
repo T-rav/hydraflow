@@ -15,7 +15,12 @@ from admin_tasks import _seed_context_assets
 from models import AuditCheckStatus
 from prep import HYDRAFLOW_LABELS, PrepResult, _list_existing_labels, ensure_labels
 from tests.conftest import SubprocessMockBuilder
-from tests.helpers import AuditCheckFactory, AuditResultFactory, ConfigFactory
+from tests.helpers import (
+    AuditCheckFactory,
+    AuditResultFactory,
+    ConfigFactory,
+    CredentialsFactory,
+)
 
 # ---------------------------------------------------------------------------
 # Shared helper for label-dispatch side effects
@@ -1143,10 +1148,11 @@ class TestCheckGhCli:
     @pytest.mark.asyncio
     async def test_gh_token_passed_to_subprocess(self, tmp_path: Path) -> None:
         """Should pass gh_token to every run_subprocess call."""
-        config = ConfigFactory.create(repo_root=tmp_path, gh_token="ghp_test123")
+        config = ConfigFactory.create(repo_root=tmp_path)
+        creds = CredentialsFactory.create(gh_token="ghp_test123")
         from prep import RepoAuditor
 
-        auditor = RepoAuditor(config)
+        auditor = RepoAuditor(config, credentials=creds)
 
         with patch("prep.run_subprocess", new_callable=AsyncMock) as mock_run:
             mock_run.side_effect = [
@@ -1231,10 +1237,11 @@ class TestCheckLabels:
     @pytest.mark.asyncio
     async def test_gh_token_passed_to_subprocess(self, tmp_path: Path) -> None:
         """Should pass gh_token to run_subprocess when listing labels."""
-        config = ConfigFactory.create(repo_root=tmp_path, gh_token="ghp_label_tok")
+        config = ConfigFactory.create(repo_root=tmp_path)
+        creds = CredentialsFactory.create(gh_token="ghp_label_tok")
         from prep import RepoAuditor
 
-        auditor = RepoAuditor(config)
+        auditor = RepoAuditor(config, credentials=creds)
         all_labels = auditor._get_hydra_labels()
 
         with patch("prep.run_subprocess", new_callable=AsyncMock) as mock_run:

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 from agent_cli import build_agent_command
-from config import HydraFlowConfig
+from config import Credentials, HydraFlowConfig
 from events import EventBus
 from execution import get_default_runner
 from models import LoopResult, TranscriptEventData
@@ -44,6 +44,7 @@ class BaseRunner:
         runner: SubprocessRunner | None = None,
         *,
         hindsight: HindsightClient | None = None,
+        credentials: Credentials | None = None,
     ) -> None:
         self._config = config
         self._bus = event_bus
@@ -52,6 +53,7 @@ class BaseRunner:
         self._prompt_telemetry = PromptTelemetry(config)
         self._last_context_stats: dict[str, int] = {"cache_hits": 0, "cache_misses": 0}
         self._hindsight = hindsight
+        self._credentials = credentials or Credentials()
 
     @property
     def active_count(self) -> int:
@@ -119,7 +121,7 @@ class BaseRunner:
                         timeout=self._config.agent_timeout,
                         runner=self._runner,
                         usage_stats=usage_stats,
-                        gh_token=self._config.gh_token,
+                        gh_token=self._credentials.gh_token,
                     )
                     succeeded = True
                     return transcript
