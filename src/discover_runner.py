@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING
 
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
+from exception_classify import reraise_on_credit_or_bug
 from models import DiscoverResult
-from phase_utils import reraise_on_credit_or_bug
 from runner_constants import MEMORY_SUGGESTION_PROMPT
 
 if TYPE_CHECKING:

@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from events import EventBus, EventType, HydraFlowEvent
+from exception_classify import is_likely_bug, reraise_on_credit_or_bug
 from models import LoopResult, Task, WorkerResult, WorkerStatus, WorkerUpdatePayload
-from phase_utils import is_likely_bug, reraise_on_credit_or_bug
 from prompt_builder import PromptBuilder
 from review_insights import (
     ReviewInsightStore,

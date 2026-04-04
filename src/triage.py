@@ -10,6 +10,7 @@ from pathlib import Path
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from events import EventType, HydraFlowEvent
+from exception_classify import reraise_on_credit_or_bug
 from models import (
     EpicDecompResult,
     IssueType,
@@ -20,7 +21,6 @@ from models import (
     TriageStatus,
     TriageUpdatePayload,
 )
-from phase_utils import reraise_on_credit_or_bug
 from prompt_builder import PromptBuilder
 
 logger = logging.getLogger("hydraflow.triage")
