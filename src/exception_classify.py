@@ -45,7 +45,7 @@ def capture_if_bug(exc: Exception, **context: object) -> None:
                 data=context,
             )
     except Exception:
-        pass  # Sentry not installed
+        pass  # Never let Sentry errors crash the application
 
 
 def reraise_on_credit_or_bug(exc: BaseException) -> None:
