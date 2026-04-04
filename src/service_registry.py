@@ -19,7 +19,7 @@ from beads_manager import BeadsManager
 from bot_pr_loop import BotPRLoop
 from ci_monitor_loop import CIMonitorLoop  # noqa: TCH001
 from code_grooming_loop import CodeGroomingLoop  # noqa: TCH001
-from config import HydraFlowConfig
+from config import Credentials, HydraFlowConfig
 from crate_manager import CrateManager
 from discover_phase import DiscoverPhase  # noqa: TCH001
 from discover_runner import DiscoverRunner
@@ -162,11 +162,18 @@ def build_services(
     state: StateTracker,
     stop_event: asyncio.Event,
     callbacks: OrchestratorCallbacks,
+    credentials: Credentials | None = None,
 ) -> ServiceRegistry:
     """Create all services wired together.
 
     This replaces the 170-line orchestrator constructor body.
     """
+    # Build credentials from env if not supplied by caller.
+    if credentials is None:
+        from config import build_credentials
+
+        credentials = build_credentials(config)
+
     # Configure global GitHub API concurrency limiter (startup config
     # belongs in the composition root, not the orchestrator).
     from subprocess_util import configure_gh_concurrency
@@ -176,13 +183,13 @@ def build_services(
     # Hindsight semantic memory (optional)
     hindsight_client = None
     hindsight_wal: HindsightWAL | None = None
-    if config.hindsight_url:
+    if credentials.hindsight_url:
         from hindsight import HindsightClient
         from hindsight_wal import HindsightWAL
 
         hindsight_client = HindsightClient(
-            config.hindsight_url,
-            api_key=config.hindsight_api_key,
+            credentials.hindsight_url,
+            api_key=credentials.hindsight_api_key,
             timeout=config.hindsight_timeout,
         )
         hindsight_wal = HindsightWAL(config.data_path("memory", "hindsight_wal.jsonl"))
@@ -205,8 +212,8 @@ def build_services(
         )
 
     # Core runners
-    workspaces = WorkspaceManager(config)  # noqa: F841
-    subprocess_runner = get_docker_runner(config)
+    workspaces = WorkspaceManager(config, credentials=credentials)  # noqa: F841
+    subprocess_runner = get_docker_runner(config, credentials=credentials)
     agents = AgentRunner(
         config,
         event_bus,
@@ -214,29 +221,50 @@ def build_services(
         hindsight=hindsight_client,
         dolt=dolt_backend,
         wal=hindsight_wal,
+        credentials=credentials,
     )
     planners = PlannerRunner(
-        config, event_bus, runner=subprocess_runner, hindsight=hindsight_client
+        config,
+        event_bus,
+        runner=subprocess_runner,
+        hindsight=hindsight_client,
+        credentials=credentials,
     )
     researcher = ResearchRunner(
-        config, event_bus, runner=subprocess_runner, hindsight=hindsight_client
+        config,
+        event_bus,
+        runner=subprocess_runner,
+        hindsight=hindsight_client,
+        credentials=credentials,
     )
-    prs = PRManager(config, event_bus)
+    prs = PRManager(config, event_bus, credentials=credentials)
     reviewers = ReviewRunner(
-        config, event_bus, runner=subprocess_runner, hindsight=hindsight_client
+        config,
+        event_bus,
+        runner=subprocess_runner,
+        hindsight=hindsight_client,
+        credentials=credentials,
     )
     hitl_runner = HITLRunner(
-        config, event_bus, runner=subprocess_runner, hindsight=hindsight_client
+        config,
+        event_bus,
+        runner=subprocess_runner,
+        hindsight=hindsight_client,
+        credentials=credentials,
     )
     triage = TriageRunner(
-        config, event_bus, runner=subprocess_runner, hindsight=hindsight_client
+        config,
+        event_bus,
+        runner=subprocess_runner,
+        hindsight=hindsight_client,
+        credentials=credentials,
     )
     summarizer = TranscriptSummarizer(
-        config, prs, event_bus, state, runner=subprocess_runner
+        config, prs, event_bus, state, runner=subprocess_runner, credentials=credentials
     )
 
     # Data layer
-    fetcher = IssueFetcher(config)
+    fetcher = IssueFetcher(config, credentials=credentials)
     gh_cache = GitHubDataCache(config, prs, fetcher)  # noqa: F841
     store = IssueStore(config, GitHubTaskFetcher(fetcher), event_bus)
 
@@ -291,9 +319,9 @@ def build_services(
         from whatsapp_bridge import WhatsAppBridge  # noqa: PLC0415
 
         wa_bridge = WhatsAppBridge(
-            phone_id=config.whatsapp_phone_id,
-            token=config.whatsapp_token,
-            recipient=config.whatsapp_recipient,
+            phone_id=credentials.whatsapp_phone_id,
+            token=credentials.whatsapp_token,
+            recipient=credentials.whatsapp_recipient,
         )
     shape_phase = ShapePhase(  # noqa: F841
         config,
@@ -374,6 +402,7 @@ def build_services(
         resolver=conflict_resolver,
         troubleshooting_store=troubleshooting_store,
         store=store,
+        credentials=credentials,
     )
     memory_sync = MemorySyncWorker(
         config,
@@ -394,9 +423,11 @@ def build_services(
         wal=hindsight_wal,
     )
     ac_generator = AcceptanceCriteriaGenerator(
-        config, prs, event_bus, runner=subprocess_runner
+        config, prs, event_bus, runner=subprocess_runner, credentials=credentials
     )
-    verification_judge = VerificationJudge(config, event_bus, runner=subprocess_runner)
+    verification_judge = VerificationJudge(
+        config, event_bus, runner=subprocess_runner, credentials=credentials
+    )
     baseline_policy = BaselinePolicy(
         config=config,
         state=state,
@@ -463,6 +494,7 @@ def build_services(
         pr_manager=prs,
         deps=loop_deps,
         runner=subprocess_runner,
+        credentials=credentials,
     )
     epic_monitor_loop = EpicMonitorLoop(
         config=config, epic_manager=epic_manager, deps=loop_deps
@@ -481,9 +513,12 @@ def build_services(
         state=state,
         deps=loop_deps,
         is_in_pipeline_cb=store.is_in_pipeline,
+        credentials=credentials,
     )
     runs_gc_loop = RunsGCLoop(config=config, run_recorder=run_recorder, deps=loop_deps)
-    adr_reviewer = ADRCouncilReviewer(config, event_bus, prs, subprocess_runner)
+    adr_reviewer = ADRCouncilReviewer(
+        config, event_bus, prs, subprocess_runner, credentials=credentials
+    )
     adr_reviewer_loop = ADRReviewerLoop(
         config=config, adr_reviewer=adr_reviewer, deps=loop_deps
     )
@@ -512,6 +547,7 @@ def build_services(
         deps=loop_deps,
         store=store,
         runner=subprocess_runner,
+        credentials=credentials,
     )
     stale_issue_gc_loop = StaleIssueGCLoop(  # noqa: F841
         config=config,
@@ -532,6 +568,7 @@ def build_services(
         config=config,
         pr_manager=prs,
         deps=loop_deps,
+        credentials=credentials,
     )
     trace_mining_loop = TraceMiningLoop(
         config=config,

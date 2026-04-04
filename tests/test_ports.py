@@ -58,7 +58,6 @@ class TestPRPortConformance:
         # Build minimal PRManager without hitting GitHub
         config = MagicMock()
         config.repo = "org/repo"
-        config.gh_token = None
         config.dry_run = False
         event_bus = MagicMock()
 
@@ -387,7 +386,6 @@ class TestIssueFetcherPortConformance:
 
         config = MagicMock()
         config.repo = "org/repo"
-        config.gh_token = None
         config.dry_run = False
         config.data_poll_interval = 30
         config.collaborator_cache_ttl = 600

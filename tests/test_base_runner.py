@@ -184,7 +184,7 @@ class TestExecute:
             "cwd": tmp_path,
             "event_data": {"issue": 42},
             "on_output": None,
-            "gh_token": config.gh_token,
+            "gh_token": runner._credentials.gh_token,
         }
         assert {k: call_kwargs[k] for k in expected_kwargs} == expected_kwargs
 

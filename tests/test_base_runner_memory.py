@@ -19,7 +19,7 @@ def _make_memory(text: str, score: float = 0.8):
 
 @pytest.fixture
 def base_runner():
-    config = HydraFlowConfig(repo_root="/tmp/test", gh_token="fake")
+    config = HydraFlowConfig(repo_root="/tmp/test")
     bus = EventBus()
     hindsight = AsyncMock()
     runner = BaseRunner(config, bus, hindsight=hindsight)

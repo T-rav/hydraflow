@@ -31,7 +31,7 @@ from skill_registry import (  # noqa: F401
 from task_graph import extract_phases, has_task_graph, topological_sort
 
 if TYPE_CHECKING:
-    from config import HydraFlowConfig
+    from config import Credentials, HydraFlowConfig
     from dolt_backend import DoltBackend
     from execution import SubprocessRunner
     from hindsight import HindsightClient
@@ -134,8 +134,11 @@ Run through this checklist before your final commit:
         hindsight: HindsightClient | None = None,
         dolt: DoltBackend | None = None,
         wal: HindsightWAL | None = None,
+        credentials: Credentials | None = None,
     ) -> None:
-        super().__init__(config, event_bus, runner, hindsight=hindsight)
+        super().__init__(
+            config, event_bus, runner, hindsight=hindsight, credentials=credentials
+        )
         self._insights = ReviewInsightStore(
             config.memory_dir, hindsight=hindsight, dolt=dolt, wal=wal
         )

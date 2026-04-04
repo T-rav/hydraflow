@@ -110,7 +110,10 @@ class TestBuildServices:
             mock_factory.return_value = get_default_runner()
             build_services(config, bus, state, stop_event, callbacks)
 
-        mock_factory.assert_called_once_with(config)
+        mock_factory.assert_called_once()
+        call_args = mock_factory.call_args
+        assert call_args[0][0] is config  # positional: config
+        assert "credentials" in call_args[1]  # keyword: credentials
 
 
 class TestServiceRegistryWiring:
