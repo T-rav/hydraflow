@@ -466,23 +466,48 @@ class TestRegistryForwarding:
 
 
 # ---------------------------------------------------------------------------
-# serve() module-level entry point
+# Circular import guard (issue #5958)
 # ---------------------------------------------------------------------------
 
 
-class TestServeEntryPoint:
-    """Tests for the module-level serve() function."""
+class TestNoCircularImport:
+    """Verify server.py and dashboard.py have no circular import dependency."""
 
-    def test_serve_delegates_to_server_main(self) -> None:
-        """serve() should call server.main() with no arguments."""
-        with patch("server.main") as mock_main:
-            from dashboard import serve
+    def test_serve_not_importable_from_dashboard(self) -> None:
+        """serve() was removed to break the circular import cycle."""
+        import importlib
 
-            serve()
-            mock_main.assert_called_once_with()
+        mod = importlib.import_module("dashboard")
+        assert not hasattr(mod, "serve")
 
-    def test_serve_is_importable(self) -> None:
-        """serve() should be importable from the dashboard module."""
-        from dashboard import serve
+    def test_dashboard_does_not_import_server_at_module_level(self) -> None:
+        """dashboard module must not import server at module scope."""
+        import importlib
+        import sys
 
-        assert callable(serve)
+        # Clear cached modules so we can observe fresh imports
+        for name in list(sys.modules):
+            if name in ("dashboard", "server"):
+                del sys.modules[name]
+
+        # Track what gets imported
+        original_import = (
+            __builtins__.__import__
+            if hasattr(__builtins__, "__import__")
+            else __import__
+        )
+        imported_names: list[str] = []
+
+        def _tracking_import(name, *args, **kwargs):
+            imported_names.append(name)
+            return original_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=_tracking_import):
+            importlib.import_module("dashboard")
+
+        # "server" should not appear as a top-level import
+        # (it was only imported inside serve() which is now removed)
+        top_level_server_imports = [n for n in imported_names if n == "server"]
+        assert len(top_level_server_imports) == 0, (
+            "dashboard.py imports 'server' at module level, creating a circular dependency"
+        )
