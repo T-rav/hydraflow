@@ -27,7 +27,6 @@ from phase_utils import (
     MemorySuggester,
     PipelineEscalator,
     _sentry_transaction,
-    log_exception_with_bug_classification,
     record_harness_failure,
     release_batch_in_flight,
     run_refilling_pool,
@@ -110,11 +109,10 @@ class ImplementPhase:
                     duration_seconds=result.duration_seconds,
                     log_file=self._impl_log_reference(result.issue_number),
                 )
-            except Exception as exc:
-                log_exception_with_bug_classification(
-                    logger,
-                    exc,
-                    f"Failed to post transcript summary for issue #{result.issue_number}",
+            except (RuntimeError, OSError):
+                logger.exception(
+                    "Failed to post transcript summary for issue #%d",
+                    result.issue_number,
                 )
 
     def _impl_log_reference(self, issue_number: int) -> str:
