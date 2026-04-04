@@ -485,29 +485,27 @@ class TestNoCircularImport:
         import importlib
         import sys
 
-        # Clear cached modules so we can observe fresh imports
-        for name in list(sys.modules):
-            if name in ("dashboard", "server"):
-                del sys.modules[name]
+        # Remove cached modules so the import runs fresh
+        sys.modules.pop("dashboard", None)
+        sys.modules.pop("server", None)
 
-        # Track what gets imported
-        original_import = (
-            __builtins__.__import__
-            if hasattr(__builtins__, "__import__")
-            else __import__
-        )
-        imported_names: list[str] = []
+        importlib.import_module("dashboard")
 
-        def _tracking_import(name, *args, **kwargs):
-            imported_names.append(name)
-            return original_import(name, *args, **kwargs)
-
-        with patch("builtins.__import__", side_effect=_tracking_import):
-            importlib.import_module("dashboard")
-
-        # "server" should not appear as a top-level import
-        # (it was only imported inside serve() which is now removed)
-        top_level_server_imports = [n for n in imported_names if n == "server"]
-        assert len(top_level_server_imports) == 0, (
+        assert "server" not in sys.modules, (
             "dashboard.py imports 'server' at module level, creating a circular dependency"
+        )
+
+    def test_server_does_not_import_dashboard_at_module_level(self) -> None:
+        """server module must not import dashboard at module scope."""
+        import importlib
+        import sys
+
+        # Remove cached modules so the import runs fresh
+        sys.modules.pop("dashboard", None)
+        sys.modules.pop("server", None)
+
+        importlib.import_module("server")
+
+        assert "dashboard" not in sys.modules, (
+            "server.py imports 'dashboard' at module level, creating a circular dependency"
         )
