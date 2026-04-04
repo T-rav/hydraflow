@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
+from expert_council import ExpertCouncil  # noqa: TCH001
 from issue_store import IssueStore
 from models import (
     ConversationTurn,
@@ -75,6 +76,7 @@ class ShapePhase:
         self._stop_event = stop_event
         self._runner = shape_runner
         self._whatsapp = whatsapp_bridge
+        self._council: ExpertCouncil | None = None
         self._suggest_memory = MemorySuggester(config, prs, state)
 
     async def shape_issues(self) -> bool:
@@ -201,7 +203,13 @@ class ShapePhase:
             self._state.set_shape_conversation(issue.id, conv)
             return 1
 
-        # Post agent turn and wait for response
+        # After first agent turn with directions, run expert council vote
+        if len(conv.turns) == 1 and self._council:
+            council_result = await self._run_council_vote(issue, conv, result.content)
+            if council_result:
+                return council_result
+
+        # No consensus or no council — post turn and wait for human
         await self._post_conversation_turn(issue, result.content, len(conv.turns), conv)
         self._store.enqueue_transition(issue, "shape")
 
@@ -216,6 +224,94 @@ class ShapePhase:
             )
         )
         return 1
+
+    async def _run_council_vote(
+        self, issue: Task, conv: ShapeConversation, directions_content: str
+    ) -> int | None:
+        """Run expert council vote on generated directions.
+
+        Returns 1 if consensus reached and issue transitioned to plan.
+        Returns None if no consensus (caller should fall through to human).
+        """
+        assert self._council is not None  # guaranteed by caller
+        council_result = await self._council.vote(issue, directions_content)
+
+        # Post council vote summary as comment
+        await self._transitioner.post_comment(issue.id, council_result.format_summary())
+
+        # Track the decision
+        decision_record = {
+            "type": "council_auto" if council_result.has_consensus else "council_split",
+            "issue": issue.id,
+            "votes": council_result.to_dict(),
+        }
+        await self._bus.publish(
+            HydraFlowEvent(
+                type=EventType.SHAPE_UPDATE,
+                data={
+                    "issue": issue.id,
+                    "action": "council_vote",
+                    "decision": decision_record,
+                },
+            )
+        )
+
+        if council_result.has_consensus:
+            winner = council_result.winning_direction
+            logger.info(
+                "Issue #%d shape — council consensus on Direction %s "
+                "(confidence %.1f) — auto-selecting",
+                issue.id,
+                winner,
+                council_result.avg_confidence,
+            )
+
+            # Write learning signal
+            learning = (
+                "MEMORY_SUGGESTION_START\n"
+                f"title: Council auto-selected direction for #{issue.id}\n"
+                f"learning: Expert council reached consensus on Direction {winner} "
+                f"for '{issue.title}' with avg confidence {council_result.avg_confidence:.1f}/10. "
+                f"Decision was automated (no human needed).\n"
+                f"context: Expert council vote for issue #{issue.id}\n"
+                "type: knowledge\n"
+                "MEMORY_SUGGESTION_END"
+            )
+            await self._suggest_memory(learning, "shape-council", f"issue #{issue.id}")
+
+            # Finalize with the winning direction
+            conv.turns.append(
+                ConversationTurn(
+                    role="agent",
+                    content=f"Council consensus: Direction {winner}\n\n{council_result.format_summary()}",
+                    timestamp=datetime.now(UTC).isoformat(),
+                    signal="council_consensus",
+                )
+            )
+            conv.status = "done"
+            self._state.set_shape_conversation(issue.id, conv)
+
+            await self._process_finalization(
+                issue,
+                conv,
+                f"Direction {winner} selected by expert council consensus.\n\n"
+                f"{directions_content}",
+            )
+            return 1
+
+        # No consensus — log it and fall through to human conversation
+        logger.info("Issue #%d shape — council split, escalating to human", issue.id)
+        learning = (
+            "MEMORY_SUGGESTION_START\n"
+            f"title: Council split for #{issue.id} — human needed\n"
+            f"learning: Expert council could not reach consensus for '{issue.title}'. "
+            f"Split vote required human tiebreaker.\n"
+            f"context: Expert council vote for issue #{issue.id}\n"
+            "type: knowledge\n"
+            "MEMORY_SUGGESTION_END"
+        )
+        await self._suggest_memory(learning, "shape-council", f"issue #{issue.id}")
+        return None
 
     async def _handle_waiting_state(
         self, issue: Task, conv: ShapeConversation
