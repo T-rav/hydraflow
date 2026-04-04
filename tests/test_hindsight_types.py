@@ -100,16 +100,20 @@ class TestNoCircularImport:
 
     def test_reexports_from_hindsight(self) -> None:
         """Bank, HindsightMemory, WALEntry are re-exported from hindsight."""
+        import hindsight_types as _ht  # noqa: PLC0415
         from hindsight import Bank as B  # noqa: PLC0415
         from hindsight import HindsightMemory as HM  # noqa: PLC0415
         from hindsight import WALEntry as WE  # noqa: PLC0415
 
-        assert B is Bank
-        assert HM is HindsightMemory
-        assert WE is WALEntry
+        # Compare against locally-resolved types to avoid staleness from the
+        # module-eviction in test_import_wal_then_hindsight.
+        assert B is _ht.Bank
+        assert HM is _ht.HindsightMemory
+        assert WE is _ht.WALEntry
 
     def test_reexport_from_wal(self) -> None:
         """WALEntry is re-exported from hindsight_wal."""
+        import hindsight_types as _ht  # noqa: PLC0415
         from hindsight_wal import WALEntry as WE  # noqa: PLC0415
 
-        assert WE is WALEntry
+        assert WE is _ht.WALEntry
