@@ -325,9 +325,12 @@ class HydraFlowOrchestrator:
     async def _build_interrupted_issues(self) -> dict[int, str]:
         """Build a mapping of issue_number → phase for all in-flight issues.
 
-        Acquires ``_active_issues_lock`` to ensure a consistent snapshot of the
-        in-memory tracking sets, preventing races with concurrent workers that
-        add/remove issues across ``await`` points.
+        Called during shutdown after ``stop_event`` is set.  Phase workers
+        check ``stop_event`` before modifying their ``_active_issues`` sets,
+        so no new additions occur once shutdown begins — iteration is safe
+        without holding the per-phase locks.  ``_active_issues_lock`` (the
+        orchestrator-level lock) guards against concurrent calls to this
+        method itself, not against phase-worker modifications.
         """
         async with self._active_issues_lock:
             interrupted: dict[int, str] = {}

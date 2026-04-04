@@ -339,3 +339,16 @@ class TestOrchestratorSoleWriter:
 
         persisted = set(orch._state.get_active_issue_numbers())
         assert 42 in persisted
+
+    @pytest.mark.asyncio
+    async def test_build_interrupted_issues_reads_from_phase_properties(self, tmp_path):
+        """_build_interrupted_issues snapshots from phase active_issues properties."""
+        orch = self._make_orchestrator(tmp_path)
+
+        orch._svc.implementer.active_issues.add(10)
+        orch._svc.reviewer.active_issues.add(20)
+
+        interrupted = await orch._build_interrupted_issues()
+
+        assert interrupted.get(10) == "implement"
+        assert interrupted.get(20) == "review"
