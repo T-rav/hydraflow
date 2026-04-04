@@ -61,10 +61,10 @@ class ADRCouncilReviewer:
         runner: SubprocessRunner,
         credentials: Credentials | None = None,
     ) -> None:
-        from config import Credentials as _Credentials
+        from config import Credentials
 
         self._config = config
-        self._credentials = credentials or _Credentials()
+        self._credentials = credentials or Credentials()
         self._bus = event_bus
         self._runner = runner
         self._pre_validator = ADRPreValidator()
