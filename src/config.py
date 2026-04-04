@@ -599,7 +599,7 @@ class HydraFlowConfig(BaseModel):
         description="WhatsApp recipient phone number (with country code)",
     )
     dashboard_url: str = Field(
-        default="http://localhost:8000",
+        default="http://localhost:5555",
         description="Public URL of the dashboard for artifact links",
     )
     planner_label: list[str] = Field(
