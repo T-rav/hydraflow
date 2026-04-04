@@ -35,7 +35,6 @@ from phase_utils import (
     store_lifecycle,
 )
 from run_recorder import RunRecorder
-from shared_prompt_prefix import SharedPromptPrefix
 from state import StateTracker
 from task_source import TaskTransitioner
 from transcript_summarizer import TranscriptSummarizer
@@ -167,25 +166,6 @@ class ImplementPhase:
                 issues.extend(batch)
                 return batch
 
-        # Build shared prefix once for batch when running multiple agents
-        shared_prefix: str | None = None
-        if self._config.max_workers > 1:
-            try:
-                builder = SharedPromptPrefix(self._config)
-                shared_prefix = await builder.build(
-                    hindsight=self._agents.hindsight,
-                )
-                logger.info(
-                    "Built shared prompt prefix (%d chars) for %d concurrent workers",
-                    builder.prefix_chars,
-                    self._config.max_workers,
-                )
-            except Exception:  # noqa: BLE001
-                logger.warning(
-                    "Failed to build shared prefix, falling back", exc_info=True
-                )
-                shared_prefix = None
-
         async def _worker(idx: int, issue: Task) -> WorkerResult:
             if self._stop_event.is_set():
                 return WorkerResult(
@@ -221,9 +201,7 @@ class ImplementPhase:
 
                     try:
                         return await run_with_fatal_guard(
-                            self._worker_inner(
-                                idx, issue, branch, shared_prefix=shared_prefix
-                            ),
+                            self._worker_inner(idx, issue, branch),
                             on_failure=_on_worker_failure,
                             context=f"Worker failed for issue #{issue.id}",
                             log=logger,
@@ -243,9 +221,7 @@ class ImplementPhase:
         )
         return all_results, issues
 
-    async def _worker_inner(
-        self, idx: int, issue: Task, branch: str, shared_prefix: str | None = None
-    ) -> WorkerResult:
+    async def _worker_inner(self, idx: int, issue: Task, branch: str) -> WorkerResult:
         """Core implementation logic — called inside the semaphore."""
         self._prepare_adr_plan(issue)
 
@@ -306,9 +282,7 @@ class ImplementPhase:
                 f"\n\n## Prior Reflections\n\n{prior_reflections}"
             )
 
-        result = await self._run_implementation(
-            issue, branch, idx, review_feedback, shared_prefix=shared_prefix
-        )
+        result = await self._run_implementation(issue, branch, idx, review_feedback)
 
         # Record a reflection for future cycles
         if result.error:
@@ -483,7 +457,6 @@ class ImplementPhase:
         branch: str,
         worker_id: int,
         review_feedback: str,
-        shared_prefix: str | None = None,
     ) -> WorkerResult:
         """Set up worktree, push branch, run agent, record metrics."""
         # Retrieve prior failure context for retry feedback
@@ -532,8 +505,6 @@ class ImplementPhase:
         }
         if bead_mapping:
             run_kwargs["bead_mapping"] = bead_mapping
-        if shared_prefix is not None:
-            run_kwargs["shared_prefix"] = shared_prefix
 
         result = await self._agents.run(
             issue,

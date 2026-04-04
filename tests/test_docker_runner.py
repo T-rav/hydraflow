@@ -12,7 +12,7 @@ import pytest
 
 docker = pytest.importorskip("docker", reason="docker package not installed")
 
-from config import HydraFlowConfig
+from config import Credentials, HydraFlowConfig
 from docker_runner import (
     DockerProcess,
     DockerRunner,
@@ -1085,9 +1085,12 @@ class TestGetDockerRunner:
             docker_image="hydra:latest",
         ).resolve_defaults()
 
+        creds = Credentials(gh_token="ghp_bot_token")
         mock_client = _make_mock_docker_client()
         with patch("docker.from_env", return_value=mock_client):
-            runner = get_docker_runner(cfg, docker_checker=lambda: True)
+            runner = get_docker_runner(
+                cfg, docker_checker=lambda: True, credentials=creds
+            )
             assert isinstance(runner, DockerRunner)
             await runner.create_streaming_process(["claude", "-p"], cwd=str(repo_root))
 

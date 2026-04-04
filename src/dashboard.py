@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from app_version import get_app_version
-from config import HydraFlowConfig
+from config import Credentials, HydraFlowConfig
 from events import EventBus
 from pr_manager import PRManager
 from state import StateTracker
@@ -60,8 +60,10 @@ class HydraFlowDashboard:
         ui_dist_dir: Path | None = None,
         template_dir: Path | None = None,
         static_dir: Path | None = None,
+        credentials: Credentials | None = None,
     ) -> None:
         self._config = config
+        self._credentials = credentials
         self._bus = event_bus
         self._state = state
         self._orchestrator = orchestrator
@@ -113,7 +115,7 @@ class HydraFlowDashboard:
                 name="static",
             )
 
-        pr_mgr = PRManager(self._config, self._bus)
+        pr_mgr = PRManager(self._config, self._bus, credentials=self._credentials)
         router = create_router(
             config=self._config,
             event_bus=self._bus,
@@ -124,6 +126,7 @@ class HydraFlowDashboard:
             set_run_task=self._set_run_task,
             ui_dist_dir=ui_dist_dir,
             template_dir=self._template_dir,
+            credentials=self._credentials,
             registry=self._registry,
             repo_store=self._repo_store,
             register_repo_cb=self._register_repo_cb,
