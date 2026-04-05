@@ -383,9 +383,6 @@ class ScriptedHITLPhase:
     def skip_issue(self, issue_number: int) -> None:
         self._corrections.pop(issue_number, None)
 
-    async def attempt_auto_fixes(self, hitl_issues: list) -> None:
-        pass
-
     async def process_corrections(self) -> None:
         pending = dict(self._corrections)
         self._corrections.clear()
