@@ -36,8 +36,13 @@ from phase_utils import (
     log_exception_with_bug_classification,
     release_batch_in_flight,
 )
-from service_registry import ServiceRegistry, WorkerRegistryCallbacks, build_services
-from state import StateTracker, build_state_tracker
+from service_registry import (
+    ServiceRegistry,
+    WorkerRegistryCallbacks,
+    build_services,
+    build_state_tracker,
+)
+from state import StateTracker
 from state_restorer import StateRestorer
 from subprocess_util import (
     AuthenticationError,
@@ -47,7 +52,7 @@ from subprocess_util import (
 if TYPE_CHECKING:
     from base_background_loop import BaseBackgroundLoop
     from crate_manager import CrateManager
-    from github_cache import GitHubDataCache
+    from github_cache_loop import GitHubDataCache
     from issue_store import IssueStore
     from metrics_manager import MetricsManager
     from run_recorder import RunRecorder
