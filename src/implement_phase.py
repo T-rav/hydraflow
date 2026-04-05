@@ -27,6 +27,7 @@ from phase_utils import (
     MemorySuggester,
     PipelineEscalator,
     _sentry_transaction,
+    log_exception_with_bug_classification,
     record_harness_failure,
     release_batch_in_flight,
     run_refilling_pool,
@@ -36,6 +37,7 @@ from phase_utils import (
 from run_recorder import RunRecorder
 from state import StateTracker
 from task_source import TaskTransitioner
+from transcript_summarizer import TranscriptSummarizer
 
 if TYPE_CHECKING:
     from ports import IssueStorePort, PRPort, WorkspacePort
@@ -59,6 +61,7 @@ class ImplementPhase:
         harness_insights: HarnessInsightStore | None = None,
         beads_manager: BeadsManager | None = None,
         active_issues_cb: Callable[[], None] | None = None,
+        transcript_summarizer: TranscriptSummarizer | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -72,9 +75,11 @@ class ImplementPhase:
         self._harness_insights = harness_insights
         self._beads_manager = beads_manager
         self._active_issues_cb = active_issues_cb
+        self._summarizer = transcript_summarizer
         self._active_issues: set[int] = set()
         self._active_issues_lock = asyncio.Lock()
         self._suggest_memory = MemorySuggester(config, prs, state)
+        self._zero_diff_memory_filed: set[int] = set()
         self._escalator = PipelineEscalator(
             state,
             prs,
@@ -89,6 +94,68 @@ class ImplementPhase:
     def active_issues(self) -> set[int]:
         """Return the set of currently active implementation issues."""
         return self._active_issues
+
+    async def _post_impl_transcript(self, result: WorkerResult, *, status: str) -> None:
+        """File memory suggestion and post transcript summary for a single result."""
+        if result.transcript:
+            await self._suggest_memory(
+                result.transcript, "implementer", f"issue #{result.issue_number}"
+            )
+        if self._summarizer and result.transcript and result.issue_number > 0:
+            try:
+                await self._summarizer.summarize_and_comment(
+                    transcript=result.transcript,
+                    issue_number=result.issue_number,
+                    phase="implement",
+                    status=status,
+                    duration_seconds=result.duration_seconds,
+                    log_file=self._impl_log_reference(result.issue_number),
+                )
+            except Exception as exc:
+                log_exception_with_bug_classification(
+                    logger,
+                    exc,
+                    f"Failed to post transcript summary for issue #{result.issue_number}",
+                )
+
+    async def post_impl_transcript_hooks(self, results: list[WorkerResult]) -> None:
+        """File memory suggestions and post transcript summaries for completed runs.
+
+        Called by the orchestrator after :meth:`run_batch` returns.  Skips
+        memory filing for issues where the zero-diff escalation handler has
+        already filed a suggestion with a more specific source tag.
+        """
+        for result in results:
+            already_filed = result.issue_number in self._zero_diff_memory_filed
+            self._zero_diff_memory_filed.discard(result.issue_number)
+            if already_filed:
+                # Zero-diff handler filed memory with a specific source; skip
+                # memory filing here but still post the transcript summary.
+                if self._summarizer and result.transcript and result.issue_number > 0:
+                    try:
+                        await self._summarizer.summarize_and_comment(
+                            transcript=result.transcript,
+                            issue_number=result.issue_number,
+                            phase="implement",
+                            status="success" if result.success else "failed",
+                            duration_seconds=result.duration_seconds,
+                            log_file=self._impl_log_reference(result.issue_number),
+                        )
+                    except Exception as exc:
+                        log_exception_with_bug_classification(
+                            logger,
+                            exc,
+                            f"Failed to post transcript summary for issue #{result.issue_number}",
+                        )
+            else:
+                await self._post_impl_transcript(
+                    result, status="success" if result.success else "failed"
+                )
+
+    def _impl_log_reference(self, issue_number: int) -> str:
+        """Return a display-friendly log path for implementer transcripts."""
+        log_path = self._config.log_dir / f"issue-{issue_number}.txt"
+        return self._config.format_path_for_display(log_path)
 
     def _hitl_cause(self, issue: Task, reason: str) -> str:
         """Build a HITL cause string, prefixing with epic context if applicable."""
@@ -280,7 +347,8 @@ class ImplementPhase:
                 logger.debug("Run recording finalize failed", exc_info=True)
 
         is_retry = bool(review_feedback)
-        return await self._handle_implementation_result(issue, result, is_retry)
+        final_result = await self._handle_implementation_result(issue, result, is_retry)
+        return final_result
 
     def _read_plan_for_recording(self, issue_number: int) -> str:
         """Read the plan file for *issue_number*, returning empty string on failure."""
@@ -649,6 +717,7 @@ class ImplementPhase:
                 "implement_zero_diff",
                 f"issue #{issue.id}",
             )
+            self._zero_diff_memory_filed.add(issue.id)
         return result
 
     async def _handle_no_pr_fallback(
