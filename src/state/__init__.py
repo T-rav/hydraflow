@@ -119,7 +119,7 @@ class StateTracker(
         the most recent ``.bak`` file before falling back to an empty
         :class:`StateData`.
         """
-        if self._dolt:
+        if self._dolt is not None:
             try:
                 loaded = self._dolt.load_state()
                 if loaded and isinstance(loaded, dict):
@@ -196,14 +196,14 @@ class StateTracker(
             self.backup()
         self._data.last_updated = datetime.now(UTC).isoformat()
         data = self._data.model_dump_json(indent=2)
-        if self._dolt:
+        if self._dolt is not None:
             self._dolt.save_state(data)
         else:
             atomic_write(self._path, data)
 
     def commit_state(self, message: str = "state update") -> None:
         """Create a Dolt version commit (no-op when using file backend)."""
-        if self._dolt:
+        if self._dolt is not None:
             self._dolt.commit(message)
 
     # --- reset ---

@@ -227,14 +227,9 @@ def build_services(
         dolt_dir = Path(str(config.state_file)).parent / "dolt"
         dolt_backend = DoltBackend(dolt_dir)
     except FileNotFoundError:
-        logging.getLogger("hydraflow.service_registry").info(
-            "dolt CLI not found — stores will use file-based fallback",
-        )
+        logger.info("dolt CLI not found — stores will use file-based fallback")
     except Exception:
-        logging.getLogger("hydraflow.service_registry").warning(
-            "Dolt init failed",
-            exc_info=True,
-        )
+        logger.warning("Dolt init failed", exc_info=True)
 
     # Core runners
     workspaces = WorkspaceManager(config, credentials=credentials)  # noqa: F841
