@@ -140,7 +140,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
                 not cached_summary
                 and ctx.config.transcript_summarization_enabled
                 and not ctx.config.dry_run
-                and bool(ctx.config.gh_token)
+                and bool(ctx.credentials.gh_token)
                 and ctx.hitl_summary_retry_due(issue_num)
             ):
                 asyncio.create_task(

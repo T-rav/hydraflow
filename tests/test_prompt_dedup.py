@@ -182,21 +182,24 @@ def test_split_paragraphs_empty():
 
 
 def test_base_runner_inject_calls_dedup(monkeypatch):
-    """BaseRunner._inject_manifest_and_memory uses PromptDeduplicator.
+    """BaseRunner._inject_memory uses PromptDeduplicator.
 
     The base runner deduplicates memory items across Hindsight banks.
     """
+    # Read the source to confirm PromptDeduplicator is used in
+    # _inject_memory — a structural assertion that the
+    # dedup integration point exists and hasn't drifted.
     import inspect
 
     import base_runner as br_mod
 
-    source = inspect.getsource(br_mod.BaseRunner._inject_manifest_and_memory)
+    source = inspect.getsource(br_mod.BaseRunner._inject_memory)
     assert "PromptDeduplicator" in source
     assert "dedup_memories" in source
 
 
 def test_agent_prompt_uses_section_dedup(monkeypatch):
-    """AgentRunner._build_prompt_with_stats uses cross-section dedup.
+    """AgentRunner._build_prompt_with_stats uses _inject_memory and cross-section dedup.
 
     The agent deduplicates overlapping paragraphs across prompt sections
     (issue body, plan, review feedback, comments, memory) before assembly.
@@ -206,12 +209,12 @@ def test_agent_prompt_uses_section_dedup(monkeypatch):
     import agent as agent_mod
 
     source = inspect.getsource(agent_mod.AgentRunner._build_prompt_with_stats)
-    assert "_inject_manifest_and_memory" in source
+    assert "_inject_memory" in source
     assert "dedup_sections" in source
 
 
 def test_planner_prompt_uses_section_dedup(monkeypatch):
-    """PlannerRunner._build_prompt_with_stats uses cross-section dedup.
+    """PlannerRunner._build_prompt_with_stats uses _inject_memory and cross-section dedup.
 
     The planner deduplicates overlapping paragraphs across prompt sections
     (issue body, comments, research, memory) before assembly.
@@ -221,5 +224,5 @@ def test_planner_prompt_uses_section_dedup(monkeypatch):
     import planner as planner_mod
 
     source = inspect.getsource(planner_mod.PlannerRunner._build_prompt_with_stats)
-    assert "_inject_manifest_and_memory" in source
+    assert "_inject_memory" in source
     assert "dedup_sections" in source

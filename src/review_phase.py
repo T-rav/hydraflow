@@ -53,6 +53,7 @@ from models import (
 from phase_utils import (
     MemorySuggester,
     _sentry_transaction,
+    log_exception_with_bug_classification,
     publish_review_status,
     record_harness_failure,
     release_batch_in_flight,
@@ -74,6 +75,7 @@ from review_insights import (
 from reviewer import ReviewRunner
 from state import StateTracker
 from task_source import TaskTransitioner
+from transcript_summarizer import TranscriptSummarizer
 
 logger = logging.getLogger("hydraflow.review_phase")
 
@@ -117,6 +119,8 @@ class ReviewPhase:
         hindsight: HindsightClient | None = None,
         dolt: DoltBackend | None = None,
         wal: HindsightWAL | None = None,
+        active_issues_cb: Callable[[], None] | None = None,
+        transcript_summarizer: TranscriptSummarizer | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -128,12 +132,14 @@ class ReviewPhase:
         self._store = store
         self._bus = event_bus or EventBus()
         self._suggest_memory = MemorySuggester(config, prs, state)
+        self._summarizer = transcript_summarizer
         self._update_bg_worker_status = update_bg_worker_status
         self._harness_insights = harness_insights
         self._insights = review_insights or ReviewInsightStore(
             config.memory_dir, dolt=dolt, wal=wal
         )
         self._wal = wal
+        self._active_issues_cb = active_issues_cb
         self._active_issues: set[int] = set()
         self._active_issues_lock = asyncio.Lock()
         self._conflict_resolver = conflict_resolver
@@ -145,6 +151,56 @@ class ReviewPhase:
             from visual_validator import VisualValidator  # noqa: PLC0415
 
             self._visual_validator = VisualValidator(config)
+
+    @property
+    def active_issues(self) -> set[int]:
+        """Return the set of currently active review issues."""
+        return self._active_issues
+
+    async def post_review_transcript_hooks(
+        self, review_results: list[ReviewResult]
+    ) -> None:
+        """File memory suggestions and post transcript summaries for review results."""
+        for result in review_results:
+            if not result.transcript:
+                continue
+            if result.merged:
+                review_status = "success"
+            elif result.ci_passed is False:
+                review_status = "failed"
+            else:
+                review_status = "completed"
+            await self._post_review_transcript(result, status=review_status)
+
+    async def _post_review_transcript(
+        self, result: ReviewResult, *, status: str
+    ) -> None:
+        """File memory suggestion and post transcript summary for a single review."""
+        if result.transcript:
+            await self._suggest_memory(
+                result.transcript, "reviewer", f"PR #{result.pr_number}"
+            )
+        if self._summarizer and result.transcript and result.issue_number > 0:
+            try:
+                await self._summarizer.summarize_and_comment(
+                    transcript=result.transcript,
+                    issue_number=result.issue_number,
+                    phase="review",
+                    status=status,
+                    duration_seconds=result.duration_seconds,
+                    log_file=self._review_log_reference(result.pr_number),
+                )
+            except Exception as exc:
+                log_exception_with_bug_classification(
+                    logger,
+                    exc,
+                    f"Failed to post transcript summary for issue #{result.issue_number}",
+                )
+
+    def _review_log_reference(self, pr_number: int) -> str:
+        """Return a display-friendly log path for reviewer transcripts."""
+        log_path = self._config.log_dir / f"review-pr-{pr_number}.txt"
+        return self._config.format_path_for_display(log_path)
 
     async def review_prs(
         self,
@@ -175,7 +231,8 @@ class ReviewPhase:
                     )
                 async with self._active_issues_lock:
                     self._active_issues.add(pr.issue_number)
-                    self._state.set_active_issue_numbers(list(self._active_issues))
+                    if self._active_issues_cb:
+                        self._active_issues_cb()
                 with _sentry_transaction("pipeline.review", f"review:PR#{pr.number}"):
                     async with store_lifecycle(self._store, pr.issue_number, "review"):
                         try:
@@ -193,9 +250,8 @@ class ReviewPhase:
                             await self._publish_review_status(pr, idx, "done")
                             async with self._active_issues_lock:
                                 self._active_issues.discard(pr.issue_number)
-                                self._state.set_active_issue_numbers(
-                                    list(self._active_issues)
-                                )
+                                if self._active_issues_cb:
+                                    self._active_issues_cb()
 
         try:
             return await run_concurrent_batch(prs, _review_one, self._stop_event)

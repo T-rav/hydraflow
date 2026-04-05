@@ -90,6 +90,7 @@ def _build_ctx(**overrides):
     """Build a minimal RouteContext for testing."""
     from unittest.mock import MagicMock
 
+    from config import Credentials
     from dashboard_routes._routes import RouteContext
 
     defaults = {
@@ -97,6 +98,7 @@ def _build_ctx(**overrides):
         "event_bus": MagicMock(),
         "state": MagicMock(),
         "pr_manager": MagicMock(),
+        "credentials": Credentials(),
         "get_orchestrator": lambda: None,
         "set_orchestrator": lambda o: None,
         "set_run_task": lambda t: None,

@@ -30,7 +30,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from admin_tasks import TaskResult
 from app_version import get_app_version
-from config import HydraFlowConfig
+from config import Credentials, HydraFlowConfig
 from dashboard_routes._common import (
     _EPIC_INTERNAL_LABELS,
     _FRONTEND_STAGE_TO_LABEL_FIELD,
@@ -304,6 +304,7 @@ class RouteContext:
 
     # Core services
     config: HydraFlowConfig
+    credentials: Credentials
     event_bus: EventBus
     state: StateTracker
     pr_manager: PRManager
@@ -342,12 +343,13 @@ class RouteContext:
     hitl_summary_slots: asyncio.Semaphore = field(init=False)
 
     def __post_init__(self) -> None:
-        self.issue_fetcher = IssueFetcher(self.config)
+        self.issue_fetcher = IssueFetcher(self.config, credentials=self.credentials)
         self.hitl_summarizer = TranscriptSummarizer(
             self.config,
             self.pr_manager,
             self.event_bus,
             self.state,
+            credentials=self.credentials,
         )
         self.hitl_summary_inflight = set()
         self.hitl_summary_slots = asyncio.Semaphore(3)
@@ -509,7 +511,7 @@ class RouteContext:
         if (
             not self.config.transcript_summarization_enabled
             or self.config.dry_run
-            or not self.config.gh_token
+            or not self.credentials.gh_token
         ):
             return None
         issue = await self.issue_fetcher.fetch_issue_by_number(issue_number)
@@ -591,6 +593,7 @@ def create_router(
     ui_dist_dir: Path,
     template_dir: Path,
     *,
+    credentials: Credentials | None = None,
     registry: RepoRuntimeRegistry | None = None,
     repo_store: RepoStore | None = None,
     register_repo_cb: Callable[
@@ -612,8 +615,10 @@ def create_router(
     backward compatibility.
     """
     # Build the shared RouteContext that bundles all dependencies.
+    _creds = credentials or Credentials()
     ctx = RouteContext(
         config=config,
+        credentials=_creds,
         event_bus=event_bus,
         state=state,
         pr_manager=pr_manager,
@@ -1090,7 +1095,7 @@ def create_router(
         if not entries:
             return
 
-        fetcher = IssueFetcher(config)
+        fetcher = IssueFetcher(config, credentials=_creds)
         issue_numbers = sorted(entries.keys(), reverse=True)[:limit]
         sem = asyncio.Semaphore(6)
 
@@ -1251,8 +1256,8 @@ def create_router(
                 "public": dashboard_public,
             },
             "hindsight": {
-                "status": "ok" if config.hindsight_url else "disabled",
-                "configured": bool(config.hindsight_url),
+                "status": "ok" if _creds.hindsight_url else "disabled",
+                "configured": bool(_creds.hindsight_url),
             },
             "github_cache": github_cache_health,
             "queue_depths": queue_depths,
@@ -1292,7 +1297,7 @@ def create_router(
             {
                 "status": "ok" if reachable else "unreachable",
                 "reachable": reachable,
-                "url": config.hindsight_url or "",
+                "url": _creds.hindsight_url,
             },
         )
 
@@ -1310,7 +1315,7 @@ def create_router(
     @router.get("/api/hindsight/banks")
     async def hindsight_banks() -> JSONResponse:
         """List Hindsight memory banks with stats."""
-        if not config.hindsight_url:
+        if not _creds.hindsight_url:
             return JSONResponse({"status": "disabled", "banks": []})
         from hindsight import Bank  # noqa: PLC0415
 
@@ -2034,7 +2039,9 @@ def create_router(
         token = request.query_params.get("hub.verify_token")
         challenge = request.query_params.get("hub.challenge", "")
         _cfg, _st, _bus, _get_orch = _resolve_runtime(None)
-        expected_token = _cfg.whatsapp_verify_token or _cfg.whatsapp_token
+        expected_token = (
+            ctx.credentials.whatsapp_verify_token or ctx.credentials.whatsapp_token
+        )
         if mode == "subscribe" and token == expected_token:
             return Response(content=challenge, media_type="text/plain")
         return Response(content="Forbidden", status_code=403)
