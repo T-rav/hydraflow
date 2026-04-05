@@ -309,6 +309,81 @@ class TestRoundTrip:
         assert entries[0].source_issue == 99
 
 
+class TestActiveLint:
+    """Tests for the self-healing active lint pass."""
+
+    def test_marks_entries_stale_for_closed_issues(self, store: RepoWikiStore) -> None:
+        store.ingest(
+            REPO,
+            [
+                WikiEntry(
+                    title="Insight from closed issue",
+                    content="Something learned.",
+                    source_type="plan",
+                    source_issue=99,
+                ),
+            ],
+        )
+        result = store.active_lint(REPO, closed_issues={99})
+        assert result.entries_marked_stale == 1
+        assert result.stale_entries == 1
+
+    def test_prunes_old_stale_entries(self, store: RepoWikiStore) -> None:
+        store.ingest(
+            REPO,
+            [
+                WikiEntry(
+                    title="Ancient stale entry",
+                    content="Very old.",
+                    source_type="plan",
+                    stale=True,
+                    created_at="2020-01-01T00:00:00+00:00",
+                ),
+            ],
+        )
+        result = store.active_lint(REPO)
+        assert result.orphans_pruned == 1
+
+    def test_preserves_fresh_stale_entries(self, store: RepoWikiStore) -> None:
+        store.ingest(
+            REPO,
+            [
+                WikiEntry(
+                    title="Recently stale",
+                    content="Just flagged.",
+                    source_type="plan",
+                    stale=True,
+                    # created_at defaults to now, so it's fresh
+                ),
+            ],
+        )
+        result = store.active_lint(REPO)
+        assert result.orphans_pruned == 0
+        assert result.stale_entries == 1
+
+    def test_rebuilds_index_after_changes(self, store: RepoWikiStore) -> None:
+        store.ingest(
+            REPO,
+            [
+                WikiEntry(
+                    title="Will be marked stale",
+                    content="From closed issue.",
+                    source_type="plan",
+                    source_issue=50,
+                ),
+            ],
+        )
+        result = store.active_lint(REPO, closed_issues={50})
+        assert result.index_rebuilt is True
+
+    def test_updates_last_lint_timestamp(self, store: RepoWikiStore) -> None:
+        store._ensure_repo_dir(REPO)
+        store.active_lint(REPO)
+        index = store._load_index(REPO)
+        assert index is not None
+        assert index.last_lint is not None
+
+
 class TestWikiIndexModel:
     def test_serialization(self) -> None:
         index = WikiIndex(

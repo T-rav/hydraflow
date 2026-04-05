@@ -354,6 +354,11 @@ class BaseRunner:
             combined = combined[: self._config.max_memory_prompt_chars]
             memory_section = f"\n\n{combined}"
 
+        # Append repo wiki context (Karpathy-style compiled knowledge)
+        wiki_section = self._inject_repo_wiki(query_context=query_context)
+        if wiki_section:
+            memory_section += wiki_section
+
         self._last_context_stats = {
             "cache_hits": 0,
             "cache_misses": 0,

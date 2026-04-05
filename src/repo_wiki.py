@@ -83,6 +83,9 @@ class LintResult(BaseModel):
     orphan_entries: int = 0
     empty_topics: list[str] = Field(default_factory=list)
     total_entries: int = 0
+    entries_marked_stale: int = 0
+    orphans_pruned: int = 0
+    index_rebuilt: bool = False
 
 
 class IngestResult(BaseModel):
@@ -275,6 +278,95 @@ class RepoWikiStore:
                     result.orphan_entries += 1
 
         self._append_log(repo_slug, "lint", result.model_dump())
+        return result
+
+    def active_lint(
+        self,
+        repo_slug: str,
+        closed_issues: set[int] | None = None,
+    ) -> LintResult:
+        """Run an active lint pass that fixes problems.
+
+        Unlike ``lint()``, this method modifies the wiki:
+        - Marks entries as stale if their source issue is in *closed_issues*
+        - Prunes entries older than 90 days that are already marked stale
+        - Removes orphan entries (not in index) by rebuilding from source
+        - Rebuilds the index after any modifications
+
+        Returns the same ``LintResult`` with counts of actions taken.
+        """
+        repo_dir = self._repo_dir(repo_slug)
+        result = LintResult()
+
+        if not repo_dir.exists():
+            return result
+
+        closed = closed_issues or set()
+        modified = False
+        now = datetime.now(UTC)
+        _STALE_PRUNE_DAYS = 90
+
+        for topic_name in DEFAULT_TOPICS:
+            topic_path = repo_dir / f"{topic_name}.md"
+            entries = self._load_topic_entries(topic_path)
+            if not entries:
+                result.empty_topics.append(topic_name)
+                continue
+
+            original_count = len(entries)
+            new_entries: list[WikiEntry] = []
+
+            for entry in entries:
+                result.total_entries += 1
+
+                # Mark stale if source issue is closed
+                should_mark_stale = (
+                    not entry.stale
+                    and entry.source_issue is not None
+                    and entry.source_issue in closed
+                )
+                if should_mark_stale:
+                    current = entry.model_copy(
+                        update={"stale": True, "updated_at": now.isoformat()}
+                    )
+                    result.entries_marked_stale += 1
+                    modified = True
+                else:
+                    current = entry
+
+                if current.stale:
+                    result.stale_entries += 1
+                    # Prune stale entries older than threshold
+                    try:
+                        created = datetime.fromisoformat(current.created_at)
+                        age_days = (now - created).days
+                    except (ValueError, TypeError):
+                        age_days = 0
+                    if age_days > _STALE_PRUNE_DAYS:
+                        result.orphans_pruned += 1
+                        modified = True
+                        continue  # skip — don't keep this entry
+
+                new_entries.append(current)
+
+            if len(new_entries) != original_count:
+                modified = True
+
+            if modified:
+                self._write_topic_page(topic_path, topic_name, new_entries)
+
+        if modified:
+            self._rebuild_index(repo_slug)
+            result.index_rebuilt = True
+
+        # Update last_lint timestamp in index
+        index = self._load_index(repo_slug)
+        if index is not None:
+            index.last_lint = now.isoformat()
+            index_path = repo_dir / "index.json"
+            index_path.write_text(index.model_dump_json(indent=2))
+
+        self._append_log(repo_slug, "active_lint", result.model_dump())
         return result
 
     def list_repos(self) -> list[str]:

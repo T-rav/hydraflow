@@ -125,6 +125,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("quality_timeout", "HYDRAFLOW_QUALITY_TIMEOUT", 3600),
     ("git_command_timeout", "HYDRAFLOW_GIT_COMMAND_TIMEOUT", 30),
     ("summarizer_timeout", "HYDRAFLOW_SUMMARIZER_TIMEOUT", 120),
+    ("wiki_compilation_timeout", "HYDRAFLOW_WIKI_COMPILATION_TIMEOUT", 120),
     ("error_output_max_chars", "HYDRAFLOW_ERROR_OUTPUT_MAX_CHARS", 3000),
     (
         "max_troubleshooting_prompt_chars",
@@ -182,6 +183,7 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("background_model", "HYDRAFLOW_BACKGROUND_MODEL", ""),
     ("memory_compaction_model", "HYDRAFLOW_MEMORY_COMPACTION_MODEL", "haiku"),
     ("transcript_summary_model", "HYDRAFLOW_TRANSCRIPT_SUMMARY_MODEL", "haiku"),
+    ("wiki_compilation_model", "HYDRAFLOW_WIKI_COMPILATION_MODEL", "haiku"),
     ("triage_model", "HYDRAFLOW_TRIAGE_MODEL", "haiku"),
     ("subskill_model", "HYDRAFLOW_SUBSKILL_MODEL", "haiku"),
     ("debug_model", "HYDRAFLOW_DEBUG_MODEL", "opus"),
@@ -255,6 +257,7 @@ _ENV_LITERAL_OVERRIDES: list[tuple[str, str]] = [
     ("planner_tool", "HYDRAFLOW_PLANNER_TOOL"),
     ("triage_tool", "HYDRAFLOW_TRIAGE_TOOL"),
     ("transcript_summary_tool", "HYDRAFLOW_TRANSCRIPT_SUMMARY_TOOL"),
+    ("wiki_compilation_tool", "HYDRAFLOW_WIKI_COMPILATION_TOOL"),
     ("memory_compaction_tool", "HYDRAFLOW_MEMORY_COMPACTION_TOOL"),
     ("ac_tool", "HYDRAFLOW_AC_TOOL"),
     ("verification_judge_tool", "HYDRAFLOW_VERIFICATION_JUDGE_TOOL"),
@@ -894,6 +897,20 @@ class HydraFlowConfig(BaseModel):
         ge=1_000,
         le=100_000,
         description="Max characters for repo wiki context injected into agent prompts",
+    )
+    wiki_compilation_model: str = Field(
+        default="haiku",
+        description="Model for wiki compilation and synthesis",
+    )
+    wiki_compilation_tool: Literal["claude", "codex", "pi"] = Field(
+        default="claude",
+        description="CLI backend for wiki compilation",
+    )
+    wiki_compilation_timeout: int = Field(
+        default=120,
+        ge=30,
+        le=600,
+        description="Timeout in seconds for wiki compilation LLM calls",
     )
 
     # Hindsight semantic memory

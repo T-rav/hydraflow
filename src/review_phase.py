@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from hindsight import HindsightClient
     from hindsight_wal import HindsightWAL
     from ports import IssueStorePort, PRPort, WorkspacePort
+    from repo_wiki import RepoWikiStore  # noqa: TCH004 — used in __init__ signature
     from visual_validator import VisualValidator
 
 from adr_utils import (
@@ -121,6 +122,7 @@ class ReviewPhase:
         wal: HindsightWAL | None = None,
         active_issues_cb: Callable[[], None] | None = None,
         transcript_summarizer: TranscriptSummarizer | None = None,
+        wiki_store: RepoWikiStore | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -133,6 +135,7 @@ class ReviewPhase:
         self._bus = event_bus or EventBus()
         self._suggest_memory = MemorySuggester(config, prs, state)
         self._summarizer = transcript_summarizer
+        self._wiki_store = wiki_store
         self._update_bg_worker_status = update_bg_worker_status
         self._harness_insights = harness_insights
         self._insights = review_insights or ReviewInsightStore(
@@ -151,6 +154,21 @@ class ReviewPhase:
             from visual_validator import VisualValidator  # noqa: PLC0415
 
             self._visual_validator = VisualValidator(config)
+
+    def _wiki_ingest_review(self, issue_number: int, feedback: str) -> None:
+        """Ingest review feedback into the per-repo wiki.  Never raises."""
+        if self._wiki_store is None or not self._config.repo:
+            return
+        try:
+            from repo_wiki_ingest import ingest_from_review  # noqa: PLC0415
+
+            ingest_from_review(
+                self._wiki_store, self._config.repo, issue_number, feedback
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Wiki ingest failed for review #%d", issue_number, exc_info=True
+            )
 
     @property
     def active_issues(self) -> set[int]:
@@ -939,6 +957,8 @@ class ReviewPhase:
 
         if result.summary and pr.number > 0:
             await self._prs.post_pr_comment(pr.number, result.summary)
+            # Ingest review feedback into the per-repo wiki
+            self._wiki_ingest_review(pr.issue_number, result.summary)
 
         if pr.number > 0 and result.verdict != ReviewVerdict.APPROVE:
             try:
