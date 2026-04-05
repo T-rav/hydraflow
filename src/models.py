@@ -1559,6 +1559,11 @@ class StateData(BaseModel):
         default_factory=CodeGroomingSettings
     )
     code_grooming_filed: list[str] = Field(default_factory=list)
+    escalation_contexts: dict[str, dict[str, object]] = Field(default_factory=dict)
+    diagnostic_attempts: dict[str, list[dict[str, object]]] = Field(
+        default_factory=dict
+    )
+    diagnosis_severities: dict[str, str] = Field(default_factory=dict)
     last_updated: str | None = None
 
 
