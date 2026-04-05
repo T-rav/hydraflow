@@ -76,6 +76,8 @@ if TYPE_CHECKING:
     from hindsight_wal import HindsightWAL
     from metrics_manager import MetricsManager
 
+logger = logging.getLogger("hydraflow.service_registry")
+
 
 @dataclass
 class ServiceRegistry:
@@ -156,6 +158,26 @@ class WorkerRegistryCallbacks:
     update_status: StatusCallback
     is_enabled: Callable[[str], bool]
     get_interval: Callable[[str], int]
+
+
+def build_state_tracker(config: HydraFlowConfig) -> StateTracker:
+    """Construct a ``StateTracker`` with the best available backend.
+
+    Uses embedded Dolt when the ``dolt`` CLI is installed, otherwise
+    falls back to JSON-file persistence.
+    """
+    from dolt_backend import DoltBackend
+
+    dolt_backend: DoltBackend | None = None
+    try:
+        dolt_dir = Path(str(config.state_file)).parent / "dolt"
+        dolt_backend = DoltBackend(dolt_dir)
+        logger.info("Dolt state backend enabled at %s", dolt_dir)
+    except FileNotFoundError:
+        logger.info("dolt CLI not found — using file-based state")
+    except Exception:
+        logger.warning("Dolt init failed — using file-based state", exc_info=True)
+    return StateTracker(config.state_file, dolt=dolt_backend)
 
 
 def build_services(
