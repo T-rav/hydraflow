@@ -203,6 +203,14 @@ class TestSentryLoopDoWork:
         assert result["issues_created"] == 0
         assert result["issues_skipped"] == 1
 
+    @pytest.mark.asyncio
+    async def test_config_has_sentry_max_creation_attempts(
+        self, tmp_path: Path
+    ) -> None:
+        config = ConfigFactory.create(repo_root=tmp_path)
+        assert hasattr(config, "sentry_max_creation_attempts")
+        assert config.sentry_max_creation_attempts == 3
+
 
 class TestSentryLoopFiltering:
     """Tests for noise filtering (handled errors, low event count)."""
@@ -365,3 +373,15 @@ class TestSentryLoopProjectFilter:
 
         assert result is not None
         assert result["projects_polled"] == 2  # proj-a and proj-c, not proj-b
+
+
+class TestSentryLoopWiring:
+    """Tests for sentry loop wiring completeness."""
+
+    def test_interval_bounds_includes_sentry_ingest(self) -> None:
+        from dashboard_routes._common import _INTERVAL_BOUNDS
+
+        assert "sentry_ingest" in _INTERVAL_BOUNDS
+        lo, hi = _INTERVAL_BOUNDS["sentry_ingest"]
+        assert lo == 60
+        assert hi == 86400
