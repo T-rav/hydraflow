@@ -18,6 +18,7 @@ import httpx
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import Credentials, HydraFlowConfig
+from exception_classify import reraise_on_credit_or_bug
 
 if TYPE_CHECKING:
     from execution import SubprocessRunner
@@ -173,7 +174,8 @@ class SentryLoop(BaseBackgroundLoop):
                 )
                 resp.raise_for_status()
                 logger.debug("Resolved Sentry issue %s", issue_id)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            reraise_on_credit_or_bug(exc)
             logger.warning("Failed to resolve Sentry issue %s", issue_id, exc_info=True)
 
     async def _already_filed_on_github(self, sentry_id: str) -> bool:
@@ -193,7 +195,8 @@ class SentryLoop(BaseBackgroundLoop):
                 ".total_count",
             )
             return int(raw.strip() or "0") > 0
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            reraise_on_credit_or_bug(exc)
             logger.debug("GitHub search failed for sentry:%s", sentry_id, exc_info=True)
             return False
 
@@ -206,7 +209,8 @@ class SentryLoop(BaseBackgroundLoop):
                 resp.raise_for_status()
                 result: dict[str, Any] = resp.json()
                 return result
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            reraise_on_credit_or_bug(exc)
             logger.debug("Failed to fetch latest event for %s", issue_id, exc_info=True)
             return None
 
@@ -331,6 +335,7 @@ class SentryLoop(BaseBackgroundLoop):
                 short_id,
             )
             return False
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            reraise_on_credit_or_bug(exc)
             logger.exception("Agent failed for Sentry %s", sentry_id)
             return False

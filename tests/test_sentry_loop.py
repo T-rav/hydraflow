@@ -211,6 +211,60 @@ class TestSentryLoopDoWork:
         assert hasattr(config, "sentry_max_creation_attempts")
         assert config.sentry_max_creation_attempts == 3
 
+    @pytest.mark.asyncio
+    async def test_dedup_persists_across_instances(self, tmp_path: Path) -> None:
+        """Filed sentry IDs survive instance recreation (via DedupStore)."""
+        from config import Credentials
+        from dedup_store import DedupStore
+        from sentry_loop import SentryLoop
+
+        config = ConfigFactory.create(repo_root=tmp_path)
+        object.__setattr__(config, "sentry_org", "test-org")
+        deps = _make_deps()
+        prs = MagicMock()
+        prs._run_gh = AsyncMock(return_value="0")
+        creds = Credentials(sentry_auth_token="sntryu_test")
+        dedup = DedupStore("sentry_filed", tmp_path / "dedup" / "sentry_filed.json")
+
+        loop1 = SentryLoop(
+            config=config,
+            prs=prs,
+            deps=deps,
+            credentials=creds,
+            dedup=dedup,
+        )
+
+        issue = _make_sentry_issue()
+        with (
+            patch.object(loop1, "_list_projects", return_value=[{"slug": "p"}]),
+            patch.object(loop1, "_fetch_unresolved", return_value=[issue]),
+            patch.object(loop1, "_create_github_issue", return_value=True),
+            patch.object(loop1, "_resolve_sentry_issue", new_callable=AsyncMock),
+        ):
+            await loop1._do_work()
+
+        # New instance with same DedupStore — should skip the already-filed issue
+        loop2 = SentryLoop(
+            config=config,
+            prs=prs,
+            deps=deps,
+            credentials=creds,
+            dedup=dedup,
+        )
+
+        with (
+            patch.object(loop2, "_list_projects", return_value=[{"slug": "p"}]),
+            patch.object(loop2, "_fetch_unresolved", return_value=[issue]),
+            patch.object(
+                loop2, "_create_github_issue", return_value=True
+            ) as mock_create,
+        ):
+            result = await loop2._do_work()
+
+        assert result is not None
+        assert result["issues_skipped"] == 1
+        mock_create.assert_not_called()
+
 
 class TestSentryLoopFiltering:
     """Tests for noise filtering (handled errors, low event count)."""
@@ -419,3 +473,56 @@ class TestSentryLoopWiring:
         lo, hi = _INTERVAL_BOUNDS["sentry_ingest"]
         assert lo == 60
         assert hi == 86400
+
+
+class TestSentryLoopErrorClassification:
+    """Tests for proper error classification in catch-all handlers."""
+
+    @pytest.mark.asyncio
+    async def test_reraises_type_error(self, tmp_path: Path) -> None:
+        """TypeError (likely bug) should propagate, not be swallowed."""
+        config = ConfigFactory.create(repo_root=tmp_path)
+        deps = _make_deps()
+        prs = MagicMock()
+
+        loop = _make_loop(config, prs, deps)
+
+        sentry_issue = _make_sentry_issue()
+        with (
+            patch(
+                "runner_utils.stream_claude_process",
+                new_callable=AsyncMock,
+                side_effect=TypeError("bad code"),
+            ),
+            patch("agent_cli.build_agent_command", return_value=["claude"]),
+            patch.object(
+                loop, "_fetch_latest_event", new_callable=AsyncMock, return_value=None
+            ),
+            pytest.raises(TypeError, match="bad code"),
+        ):
+            await loop._create_github_issue(sentry_issue, "myproject")
+
+    @pytest.mark.asyncio
+    async def test_swallows_runtime_error(self, tmp_path: Path) -> None:
+        """RuntimeError (transient) should be caught and return False."""
+        config = ConfigFactory.create(repo_root=tmp_path)
+        deps = _make_deps()
+        prs = MagicMock()
+
+        loop = _make_loop(config, prs, deps)
+
+        sentry_issue = _make_sentry_issue()
+        with (
+            patch(
+                "runner_utils.stream_claude_process",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("agent crash"),
+            ),
+            patch("agent_cli.build_agent_command", return_value=["claude"]),
+            patch.object(
+                loop, "_fetch_latest_event", new_callable=AsyncMock, return_value=None
+            ),
+        ):
+            result = await loop._create_github_issue(sentry_issue, "myproject")
+
+        assert result is False
