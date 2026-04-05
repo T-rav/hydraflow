@@ -384,6 +384,31 @@ class TestActiveLint:
         assert index.last_lint is not None
 
 
+class TestDedupTracking:
+    """Tests for ingest deduplication."""
+
+    def test_not_ingested_initially(self, store: RepoWikiStore) -> None:
+        store._ensure_repo_dir(REPO)
+        assert store.is_ingested(REPO, 42, "review") is False
+
+    def test_mark_and_check(self, store: RepoWikiStore) -> None:
+        store._ensure_repo_dir(REPO)
+        store.mark_ingested(REPO, 42, "review")
+        assert store.is_ingested(REPO, 42, "review") is True
+        # Different source_type is not deduped
+        assert store.is_ingested(REPO, 42, "plan") is False
+        # Different issue is not deduped
+        assert store.is_ingested(REPO, 99, "review") is False
+
+    def test_survives_reinstantiation(self, wiki_root: Path) -> None:
+        store1 = RepoWikiStore(wiki_root)
+        store1._ensure_repo_dir(REPO)
+        store1.mark_ingested(REPO, 10, "plan")
+
+        store2 = RepoWikiStore(wiki_root)
+        assert store2.is_ingested(REPO, 10, "plan") is True
+
+
 class TestWikiIndexModel:
     def test_serialization(self) -> None:
         index = WikiIndex(

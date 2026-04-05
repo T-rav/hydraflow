@@ -21,9 +21,12 @@ import logging
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from dedup_store import DedupStore
 
 logger = logging.getLogger("hydraflow.repo_wiki")
 
@@ -120,6 +123,7 @@ class RepoWikiStore:
 
     def __init__(self, wiki_root: Path) -> None:
         self._wiki_root = wiki_root
+        self._dedup_stores: dict[str, object] = {}
 
     # -- public API --------------------------------------------------------
 
@@ -383,6 +387,32 @@ class RepoWikiStore:
                 if repo_dir.is_dir() and (repo_dir / "index.json").exists():
                     repos.append(f"{owner_dir.name}/{repo_dir.name}")
         return repos
+
+    # -- dedup tracking ----------------------------------------------------
+
+    def _get_dedup(self, repo_slug: str) -> DedupStore:
+        """Return the ingest dedup store for a repo, creating lazily."""
+        from dedup_store import DedupStore  # noqa: PLC0415
+
+        if repo_slug not in self._dedup_stores:
+            repo_dir = self._repo_dir(repo_slug)
+            self._dedup_stores[repo_slug] = DedupStore(
+                f"wiki_ingest:{repo_slug}",
+                repo_dir / "ingest_dedup.json",
+            )
+        return self._dedup_stores[repo_slug]  # type: ignore[return-value]
+
+    def is_ingested(self, repo_slug: str, issue_number: int, source_type: str) -> bool:
+        """Check if this (issue, source_type) has already been ingested."""
+        key = f"{issue_number}:{source_type}"
+        return key in self._get_dedup(repo_slug).get()
+
+    def mark_ingested(
+        self, repo_slug: str, issue_number: int, source_type: str
+    ) -> None:
+        """Record that this (issue, source_type) has been ingested."""
+        key = f"{issue_number}:{source_type}"
+        self._get_dedup(repo_slug).add(key)
 
     # -- internal ----------------------------------------------------------
 

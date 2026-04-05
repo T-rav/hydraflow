@@ -261,29 +261,39 @@ class PlanPhase:
         self._state.increment_session_counter("planned")
         logger.info("Plan posted and labels swapped for issue #%d", issue.id)
 
+    _WIKI_INGEST_MAX_CHARS = 40_000
+
     async def _wiki_ingest_plan(self, issue_number: int, plan_text: str) -> None:
         """Ingest plan knowledge into the per-repo wiki.
 
         Uses the LLM compiler for synthesis when available, falling back
-        to mechanical section extraction.  Never raises.
+        to mechanical section extraction.  Skips if already ingested.
+        Never raises.
         """
         if self._wiki_store is None or not self._config.repo:
             return
+        repo = self._config.repo
+        if self._wiki_store.is_ingested(repo, issue_number, "plan"):
+            return
         try:
-            repo = self._config.repo
             # Prefer LLM synthesis when compiler is available
             if self._wiki_compiler is not None:
                 entries = await self._wiki_compiler.synthesize_ingest(
-                    repo, issue_number, "plan", plan_text
+                    repo,
+                    issue_number,
+                    "plan",
+                    plan_text[: self._WIKI_INGEST_MAX_CHARS],
                 )
                 if entries:
                     self._wiki_store.ingest(repo, entries)
+                    self._wiki_store.mark_ingested(repo, issue_number, "plan")
                     return
 
             # Fallback: mechanical section extraction
             from repo_wiki_ingest import ingest_from_plan  # noqa: PLC0415
 
             ingest_from_plan(self._wiki_store, repo, issue_number, plan_text)
+            self._wiki_store.mark_ingested(repo, issue_number, "plan")
         except Exception:  # noqa: BLE001
             logger.warning(
                 "Wiki ingest failed for plan #%d", issue_number, exc_info=True

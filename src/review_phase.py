@@ -158,29 +158,42 @@ class ReviewPhase:
 
             self._visual_validator = VisualValidator(config)
 
-    async def _wiki_ingest_review(self, issue_number: int, feedback: str) -> None:
-        """Ingest review feedback into the per-repo wiki.
+    _WIKI_INGEST_MAX_CHARS = 40_000
 
-        Uses the LLM compiler for synthesis when available, falling back
-        to mechanical extraction.  Never raises.
+    async def _wiki_ingest_review(
+        self, issue_number: int, *, transcript: str, summary: str
+    ) -> None:
+        """Ingest review knowledge into the per-repo wiki.
+
+        When the LLM compiler is available, passes the full *transcript*
+        for richer synthesis.  Falls back to *summary* for mechanical
+        extraction.  Skips if this issue+review was already ingested.
+        Never raises.
         """
         if self._wiki_store is None or not self._config.repo:
             return
+        repo = self._config.repo
+        if self._wiki_store.is_ingested(repo, issue_number, "review"):
+            return
         try:
-            repo = self._config.repo
-            # Prefer LLM synthesis when compiler is available
-            if self._wiki_compiler is not None:
+            # Prefer LLM synthesis from transcript when compiler is available
+            if self._wiki_compiler is not None and transcript:
                 entries = await self._wiki_compiler.synthesize_ingest(
-                    repo, issue_number, "review", feedback
+                    repo,
+                    issue_number,
+                    "review",
+                    transcript[: self._WIKI_INGEST_MAX_CHARS],
                 )
                 if entries:
                     self._wiki_store.ingest(repo, entries)
+                    self._wiki_store.mark_ingested(repo, issue_number, "review")
                     return
 
-            # Fallback: mechanical extraction
+            # Fallback: mechanical extraction from structured summary
             from repo_wiki_ingest import ingest_from_review  # noqa: PLC0415
 
-            ingest_from_review(self._wiki_store, repo, issue_number, feedback)
+            ingest_from_review(self._wiki_store, repo, issue_number, summary)
+            self._wiki_store.mark_ingested(repo, issue_number, "review")
         except Exception:  # noqa: BLE001
             logger.warning(
                 "Wiki ingest failed for review #%d", issue_number, exc_info=True
@@ -974,7 +987,11 @@ class ReviewPhase:
         if result.summary and pr.number > 0:
             await self._prs.post_pr_comment(pr.number, result.summary)
             # Ingest review feedback into the per-repo wiki
-            await self._wiki_ingest_review(pr.issue_number, result.summary)
+            await self._wiki_ingest_review(
+                pr.issue_number,
+                transcript=result.transcript,
+                summary=result.summary,
+            )
 
         if pr.number > 0 and result.verdict != ReviewVerdict.APPROVE:
             try:
