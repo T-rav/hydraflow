@@ -375,6 +375,40 @@ class TestSentryLoopProjectFilter:
         assert result["projects_polled"] == 2  # proj-a and proj-c, not proj-b
 
 
+class TestSentryStateMixin:
+    """Tests for sentry state persistence."""
+
+    def _make_tracker(self, tmp_path: Path):  # type: ignore[return]
+        from state import StateTracker
+
+        return StateTracker(tmp_path / "state.json")
+
+    def test_fail_sentry_creation_increments(self, tmp_path: Path) -> None:
+        tracker = self._make_tracker(tmp_path)
+        assert tracker.fail_sentry_creation("12345") == 1
+        assert tracker.fail_sentry_creation("12345") == 2
+        assert tracker.fail_sentry_creation("99999") == 1
+
+    def test_get_sentry_creation_attempts_default(self, tmp_path: Path) -> None:
+        tracker = self._make_tracker(tmp_path)
+        assert tracker.get_sentry_creation_attempts("12345") == 0
+
+    def test_clear_sentry_creation_attempts(self, tmp_path: Path) -> None:
+        tracker = self._make_tracker(tmp_path)
+        tracker.fail_sentry_creation("12345")
+        tracker.fail_sentry_creation("12345")
+        tracker.clear_sentry_creation_attempts("12345")
+        assert tracker.get_sentry_creation_attempts("12345") == 0
+
+    def test_state_persists_across_reload(self, tmp_path: Path) -> None:
+        tracker = self._make_tracker(tmp_path)
+        tracker.fail_sentry_creation("12345")
+        tracker.fail_sentry_creation("12345")
+
+        tracker2 = self._make_tracker(tmp_path)
+        assert tracker2.get_sentry_creation_attempts("12345") == 2
+
+
 class TestSentryLoopWiring:
     """Tests for sentry loop wiring completeness."""
 
