@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from execution import SubprocessRunner
     from issue_store import IssueStore  # noqa: TCH004 — used in __init__ signature
     from pr_manager import PRManager
+    from state import StateTracker  # noqa: TCH004 — used in __init__ signature
 
 logger = logging.getLogger("hydraflow.sentry_loop")
 
@@ -44,6 +45,7 @@ class SentryLoop(BaseBackgroundLoop):
         runner: SubprocessRunner | None = None,
         credentials: Credentials | None = None,
         dedup: DedupStore | None = None,
+        state: StateTracker | None = None,
     ) -> None:
         super().__init__(
             worker_name="sentry_ingest",
@@ -59,6 +61,7 @@ class SentryLoop(BaseBackgroundLoop):
         self._dedup = dedup
         # In-memory hot cache seeded from persistent DedupStore
         self._filed: set[str] = dedup.get() if dedup else set()
+        self._state = state
 
     def _get_default_interval(self) -> int:
         return self._config.sentry_poll_interval
@@ -125,12 +128,29 @@ class SentryLoop(BaseBackgroundLoop):
                     total_skipped += 1
                     continue
 
+                # Check attempt budget — park after too many failures
+                if self._state:
+                    attempts = self._state.get_sentry_creation_attempts(sentry_id)
+                    if attempts >= self._config.sentry_max_creation_attempts:
+                        logger.warning(
+                            "Parking Sentry %s after %d failed creation attempts",
+                            sentry_id,
+                            attempts,
+                        )
+                        self._mark_filed(sentry_id)
+                        total_skipped += 1
+                        continue
+
                 created = await self._create_github_issue(issue, project["slug"])
                 if created:
                     await self._resolve_sentry_issue(sentry_id)
                     self._mark_filed(sentry_id)
+                    if self._state:
+                        self._state.clear_sentry_creation_attempts(sentry_id)
                     total_created += 1
                 else:
+                    if self._state:
+                        self._state.fail_sentry_creation(sentry_id)
                     total_skipped += 1
 
         return {

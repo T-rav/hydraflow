@@ -608,6 +608,7 @@ def build_services(
         runner=subprocess_runner,
         credentials=credentials,
         dedup=sentry_dedup,
+        state=state,
     )
     stale_issue_gc_loop = StaleIssueGCLoop(  # noqa: F841
         config=config,

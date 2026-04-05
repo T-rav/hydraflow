@@ -212,6 +212,63 @@ class TestSentryLoopDoWork:
         assert config.sentry_max_creation_attempts == 3
 
     @pytest.mark.asyncio
+    async def test_parks_after_max_creation_attempts(self, tmp_path: Path) -> None:
+        """After N failed attempts, issue is parked and not retried."""
+        from state import StateTracker
+
+        config = ConfigFactory.create(repo_root=tmp_path)
+        deps = _make_deps()
+        prs = MagicMock()
+        prs._run_gh = AsyncMock(return_value="0")
+        state = StateTracker(tmp_path / "state.json")
+
+        loop = _make_loop(config, prs, deps)
+        loop._state = state
+        object.__setattr__(config, "sentry_max_creation_attempts", 2)
+
+        # Pre-load 2 failed attempts
+        state.fail_sentry_creation("12345")
+        state.fail_sentry_creation("12345")
+
+        issue = _make_sentry_issue(issue_id="12345")
+        with (
+            patch.object(loop, "_list_projects", return_value=[{"slug": "p"}]),
+            patch.object(loop, "_fetch_unresolved", return_value=[issue]),
+            patch.object(
+                loop, "_create_github_issue", return_value=True
+            ) as mock_create,
+        ):
+            result = await loop._do_work()
+
+        assert result is not None
+        assert result["issues_skipped"] == 1
+        mock_create.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_tracks_failed_attempt(self, tmp_path: Path) -> None:
+        """Failed creation increments the attempt counter in state."""
+        from state import StateTracker
+
+        config = ConfigFactory.create(repo_root=tmp_path)
+        deps = _make_deps()
+        prs = MagicMock()
+        prs._run_gh = AsyncMock(return_value="0")
+        state = StateTracker(tmp_path / "state.json")
+
+        loop = _make_loop(config, prs, deps)
+        loop._state = state
+
+        issue = _make_sentry_issue(issue_id="55555")
+        with (
+            patch.object(loop, "_list_projects", return_value=[{"slug": "p"}]),
+            patch.object(loop, "_fetch_unresolved", return_value=[issue]),
+            patch.object(loop, "_create_github_issue", return_value=False),
+        ):
+            await loop._do_work()
+
+        assert state.get_sentry_creation_attempts("55555") == 1
+
+    @pytest.mark.asyncio
     async def test_dedup_persists_across_instances(self, tmp_path: Path) -> None:
         """Filed sentry IDs survive instance recreation (via DedupStore)."""
         from config import Credentials
