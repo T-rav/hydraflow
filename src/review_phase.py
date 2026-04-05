@@ -17,7 +17,9 @@ if TYPE_CHECKING:
     from hindsight import HindsightClient
     from hindsight_wal import HindsightWAL
     from ports import IssueStorePort, PRPort, WorkspacePort
+    from repo_wiki import RepoWikiStore  # noqa: TCH004 — used in __init__ signature
     from visual_validator import VisualValidator
+    from wiki_compiler import WikiCompiler  # noqa: TCH004 — used in __init__ signature
 
 from adr_utils import (
     adr_validation_reasons,
@@ -121,6 +123,8 @@ class ReviewPhase:
         wal: HindsightWAL | None = None,
         active_issues_cb: Callable[[], None] | None = None,
         transcript_summarizer: TranscriptSummarizer | None = None,
+        wiki_store: RepoWikiStore | None = None,
+        wiki_compiler: WikiCompiler | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -133,6 +137,8 @@ class ReviewPhase:
         self._bus = event_bus or EventBus()
         self._suggest_memory = MemorySuggester(config, prs, state)
         self._summarizer = transcript_summarizer
+        self._wiki_store = wiki_store
+        self._wiki_compiler = wiki_compiler
         self._update_bg_worker_status = update_bg_worker_status
         self._harness_insights = harness_insights
         self._insights = review_insights or ReviewInsightStore(
@@ -151,6 +157,47 @@ class ReviewPhase:
             from visual_validator import VisualValidator  # noqa: PLC0415
 
             self._visual_validator = VisualValidator(config)
+
+    _WIKI_INGEST_MAX_CHARS = 40_000
+
+    async def _wiki_ingest_review(
+        self, issue_number: int, *, transcript: str, summary: str
+    ) -> None:
+        """Ingest review knowledge into the per-repo wiki.
+
+        When the LLM compiler is available, passes the full *transcript*
+        for richer synthesis.  Falls back to *summary* for mechanical
+        extraction.  Skips if this issue+review was already ingested.
+        Never raises.
+        """
+        if self._wiki_store is None or not self._config.repo:
+            return
+        repo = self._config.repo
+        if self._wiki_store.is_ingested(repo, issue_number, "review"):
+            return
+        try:
+            # Prefer LLM synthesis from transcript when compiler is available
+            if self._wiki_compiler is not None and transcript:
+                entries = await self._wiki_compiler.synthesize_ingest(
+                    repo,
+                    issue_number,
+                    "review",
+                    transcript[: self._WIKI_INGEST_MAX_CHARS],
+                )
+                if entries:
+                    self._wiki_store.ingest(repo, entries)
+                    self._wiki_store.mark_ingested(repo, issue_number, "review")
+                    return
+
+            # Fallback: mechanical extraction from structured summary
+            from repo_wiki_ingest import ingest_from_review  # noqa: PLC0415
+
+            ingest_from_review(self._wiki_store, repo, issue_number, summary)
+            self._wiki_store.mark_ingested(repo, issue_number, "review")
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Wiki ingest failed for review #%d", issue_number, exc_info=True
+            )
 
     @property
     def active_issues(self) -> set[int]:
@@ -939,6 +986,12 @@ class ReviewPhase:
 
         if result.summary and pr.number > 0:
             await self._prs.post_pr_comment(pr.number, result.summary)
+            # Ingest review feedback into the per-repo wiki
+            await self._wiki_ingest_review(
+                pr.issue_number,
+                transcript=result.transcript,
+                summary=result.summary,
+            )
 
         if pr.number > 0 and result.verdict != ReviewVerdict.APPROVE:
             try:

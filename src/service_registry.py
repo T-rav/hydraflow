@@ -244,6 +244,13 @@ def build_services(
     repo_wiki_store = RepoWikiStore(
         wiki_root=config.data_path("repo_wiki"),
     )
+    from wiki_compiler import WikiCompiler  # noqa: PLC0415
+
+    wiki_compiler = WikiCompiler(
+        config=config,
+        runner=subprocess_runner,
+        credentials=credentials,
+    )
     agents = AgentRunner(
         config,
         event_bus,
@@ -268,6 +275,7 @@ def build_services(
         runner=subprocess_runner,
         hindsight=hindsight_client,
         credentials=credentials,
+        wiki_store=repo_wiki_store,
     )
     prs = PRManager(config, event_bus, credentials=credentials)
     reviewers = ReviewRunner(
@@ -292,6 +300,7 @@ def build_services(
         runner=subprocess_runner,
         hindsight=hindsight_client,
         credentials=credentials,
+        wiki_store=repo_wiki_store,
     )
     summarizer = TranscriptSummarizer(
         config, prs, event_bus, state, runner=subprocess_runner, credentials=credentials
@@ -384,6 +393,8 @@ def build_services(
         epic_manager=epic_manager,
         research_runner=researcher,
         beads_manager=beads_mgr,
+        wiki_store=repo_wiki_store,
+        wiki_compiler=wiki_compiler,
     )
     hitl_phase = HITLPhase(
         config,
@@ -515,6 +526,8 @@ def build_services(
         wal=hindsight_wal,
         active_issues_cb=active_issues_cb,
         transcript_summarizer=summarizer,
+        wiki_store=repo_wiki_store,
+        wiki_compiler=wiki_compiler,
     )
 
     # Background loops — shared deps bundled into a single LoopDeps object
@@ -619,6 +632,8 @@ def build_services(
         config=config,
         wiki_store=repo_wiki_store,
         deps=loop_deps,
+        wiki_compiler=wiki_compiler,
+        state=state,
     )
     diagnostic_runner = DiagnosticRunner(config=config, event_bus=event_bus)
     diagnostic_loop = DiagnosticLoop(

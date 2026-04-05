@@ -309,6 +309,147 @@ class TestRoundTrip:
         assert entries[0].source_issue == 99
 
 
+class TestActiveLint:
+    """Tests for the self-healing active lint pass."""
+
+    def test_marks_entries_stale_for_closed_issues(self, store: RepoWikiStore) -> None:
+        store.ingest(
+            REPO,
+            [
+                WikiEntry(
+                    title="Insight from closed issue",
+                    content="Something learned.",
+                    source_type="plan",
+                    source_issue=99,
+                ),
+            ],
+        )
+        result = store.active_lint(REPO, closed_issues={99})
+        assert result.entries_marked_stale == 1
+        assert result.stale_entries == 1
+
+    def test_prunes_old_stale_entries(self, store: RepoWikiStore) -> None:
+        store.ingest(
+            REPO,
+            [
+                WikiEntry(
+                    title="Ancient stale entry",
+                    content="Very old.",
+                    source_type="plan",
+                    stale=True,
+                    created_at="2020-01-01T00:00:00+00:00",
+                ),
+            ],
+        )
+        result = store.active_lint(REPO)
+        assert result.orphans_pruned == 1
+
+    def test_preserves_fresh_stale_entries(self, store: RepoWikiStore) -> None:
+        store.ingest(
+            REPO,
+            [
+                WikiEntry(
+                    title="Recently stale",
+                    content="Just flagged.",
+                    source_type="plan",
+                    stale=True,
+                    # created_at defaults to now, so it's fresh
+                ),
+            ],
+        )
+        result = store.active_lint(REPO)
+        assert result.orphans_pruned == 0
+        assert result.stale_entries == 1
+
+    def test_rebuilds_index_after_changes(self, store: RepoWikiStore) -> None:
+        store.ingest(
+            REPO,
+            [
+                WikiEntry(
+                    title="Will be marked stale",
+                    content="From closed issue.",
+                    source_type="plan",
+                    source_issue=50,
+                ),
+            ],
+        )
+        result = store.active_lint(REPO, closed_issues={50})
+        assert result.index_rebuilt is True
+
+    def test_updates_last_lint_timestamp(self, store: RepoWikiStore) -> None:
+        store._ensure_repo_dir(REPO)
+        store.active_lint(REPO)
+        index = store._load_index(REPO)
+        assert index is not None
+        assert index.last_lint is not None
+
+    def test_no_rebuild_when_unchanged(self, store: RepoWikiStore) -> None:
+        store.ingest(
+            REPO,
+            [WikiEntry(title="Stable", content="Not stale.", source_type="plan")],
+        )
+        result = store.active_lint(REPO)
+        assert result.index_rebuilt is False
+
+    def test_handles_unparseable_created_at(self, store: RepoWikiStore) -> None:
+        store.ingest(
+            REPO,
+            [
+                WikiEntry(
+                    title="Bad timestamp",
+                    content="Stale with bad date.",
+                    source_type="plan",
+                    stale=True,
+                    created_at="not-a-date",
+                ),
+            ],
+        )
+        # Should not raise — age_days falls back to 0, entry preserved
+        result = store.active_lint(REPO)
+        assert result.stale_entries == 1
+        assert result.orphans_pruned == 0
+
+    def test_closed_issues_none_default(self, store: RepoWikiStore) -> None:
+        store.ingest(
+            REPO,
+            [
+                WikiEntry(
+                    title="From issue",
+                    content="Something.",
+                    source_type="plan",
+                    source_issue=42,
+                ),
+            ],
+        )
+        result = store.active_lint(REPO, closed_issues=None)
+        assert result.entries_marked_stale == 0
+
+
+class TestDedupTracking:
+    """Tests for ingest deduplication."""
+
+    def test_not_ingested_initially(self, store: RepoWikiStore) -> None:
+        store._ensure_repo_dir(REPO)
+        assert store.is_ingested(REPO, 42, "review") is False
+
+    def test_mark_and_check(self, store: RepoWikiStore) -> None:
+        store._ensure_repo_dir(REPO)
+        store.mark_ingested(REPO, 42, "review")
+        assert store.is_ingested(REPO, 42, "review") is True
+        # Different source_type is not deduped
+        assert store.is_ingested(REPO, 42, "plan") is False
+        # Different issue is not deduped
+        assert store.is_ingested(REPO, 99, "review") is False
+
+    def test_survives_reinstantiation(self, wiki_root: Path) -> None:
+        store1 = RepoWikiStore(wiki_root)
+        store1._ensure_repo_dir(REPO)
+        store1.mark_ingested(REPO, 10, "plan")
+
+        store2 = RepoWikiStore(wiki_root)
+        assert store2.is_ingested(REPO, 10, "plan") is True
+
+
 class TestWikiIndexModel:
     def test_serialization(self) -> None:
         index = WikiIndex(
