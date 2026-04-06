@@ -999,6 +999,127 @@ class TestDiffSanityLoop:
         assert result.attempts == 2
 
 
+class TestScopeCheckLoop:
+    """Tests for the scope-check skill integration (blocking)."""
+
+    @pytest.mark.asyncio
+    async def test_skipped_when_disabled(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        config.max_scope_check_attempts = 0
+        runner = AgentRunner(config, event_bus)
+        result = await runner._run_skill(
+            BUILTIN_SKILLS[1], agent_task, tmp_path, "branch", worker_id=0
+        )
+        assert result.passed is True
+        assert "disabled" in result.summary
+
+    @pytest.mark.asyncio
+    async def test_passes_on_ok_result(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        config.max_scope_check_attempts = 1
+        runner = AgentRunner(config, event_bus)
+        with (
+            patch.object(
+                runner, "_count_commits", new_callable=AsyncMock, return_value=1
+            ),
+            patch.object(
+                runner,
+                "_get_branch_diff",
+                new_callable=AsyncMock,
+                return_value="+import os\n",
+            ),
+            patch.object(
+                runner,
+                "_execute",
+                new_callable=AsyncMock,
+                return_value="SCOPE_CHECK_RESULT: OK\nSUMMARY: All files planned",
+            ),
+        ):
+            result = await runner._run_skill(
+                BUILTIN_SKILLS[1],
+                agent_task,
+                tmp_path,
+                "branch",
+                worker_id=0,
+                plan_text="## File Delta\nMODIFIED: src/agent.py",
+            )
+        assert result.passed is True
+
+    @pytest.mark.asyncio
+    async def test_blocks_pipeline_on_retry(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """scope-check is blocking — RETRY result must halt the pipeline."""
+        config.max_scope_check_attempts = 1
+        runner = AgentRunner(config, event_bus)
+        with (
+            patch.object(
+                runner, "_count_commits", new_callable=AsyncMock, return_value=1
+            ),
+            patch.object(
+                runner,
+                "_get_branch_diff",
+                new_callable=AsyncMock,
+                return_value="+import os\n",
+            ),
+            patch.object(
+                runner,
+                "_execute",
+                new_callable=AsyncMock,
+                return_value=(
+                    "SCOPE_CHECK_RESULT: RETRY\nSUMMARY: unrelated file changed\n"
+                    "UNPLANNED_FILES:\n- [FAIL] src/auth.py — unrelated module"
+                ),
+            ),
+        ):
+            result = await runner._run_skill(
+                BUILTIN_SKILLS[1],
+                agent_task,
+                tmp_path,
+                "branch",
+                worker_id=0,
+                plan_text="## File Delta\nMODIFIED: src/agent.py",
+            )
+        assert result.passed is False
+        assert "unrelated file changed" in result.summary
+
+    @pytest.mark.asyncio
+    async def test_auto_passes_when_plan_text_empty(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """Empty plan_text produces an auto-pass prompt; agent echoes OK back."""
+        config.max_scope_check_attempts = 1
+        runner = AgentRunner(config, event_bus)
+        with (
+            patch.object(
+                runner, "_count_commits", new_callable=AsyncMock, return_value=1
+            ),
+            patch.object(
+                runner,
+                "_get_branch_diff",
+                new_callable=AsyncMock,
+                return_value="+import os\n",
+            ),
+            patch.object(
+                runner,
+                "_execute",
+                new_callable=AsyncMock,
+                return_value="SCOPE_CHECK_RESULT: OK\nSUMMARY: No plan available for comparison",
+            ),
+        ):
+            result = await runner._run_skill(
+                BUILTIN_SKILLS[1],
+                agent_task,
+                tmp_path,
+                "branch",
+                worker_id=0,
+                plan_text="",
+            )
+        assert result.passed is True
+
+
 class TestPlanComplianceLoop:
     """Tests for the plan compliance skill integration."""
 
@@ -1009,7 +1130,7 @@ class TestPlanComplianceLoop:
         config.max_plan_compliance_attempts = 0
         runner = AgentRunner(config, event_bus)
         result = await runner._run_skill(
-            BUILTIN_SKILLS[1], agent_task, tmp_path, "branch", worker_id=0
+            BUILTIN_SKILLS[2], agent_task, tmp_path, "branch", worker_id=0
         )
         assert result.passed is True
         assert "disabled" in result.summary
@@ -1034,7 +1155,7 @@ class TestPlanComplianceLoop:
             patch.object(runner, "_execute", new_callable=AsyncMock) as mock_execute,
         ):
             result = await runner._run_skill(
-                BUILTIN_SKILLS[1],
+                BUILTIN_SKILLS[2],
                 agent_task,
                 tmp_path,
                 "branch",
@@ -1069,7 +1190,7 @@ class TestPlanComplianceLoop:
             ),
         ):
             result = await runner._run_skill(
-                BUILTIN_SKILLS[1],
+                BUILTIN_SKILLS[2],
                 agent_task,
                 tmp_path,
                 "branch",
@@ -1102,7 +1223,7 @@ class TestPlanComplianceLoop:
             ),
         ):
             result = await runner._run_skill(
-                BUILTIN_SKILLS[1],
+                BUILTIN_SKILLS[2],
                 agent_task,
                 tmp_path,
                 "branch",
@@ -1123,7 +1244,7 @@ class TestTestAdequacyLoop:
         config.max_test_adequacy_attempts = 0
         runner = AgentRunner(config, event_bus)
         result = await runner._run_skill(
-            BUILTIN_SKILLS[2], agent_task, tmp_path, "branch", worker_id=0
+            BUILTIN_SKILLS[3], agent_task, tmp_path, "branch", worker_id=0
         )
         assert result.passed is True
         assert "disabled" in result.summary
@@ -1138,7 +1259,7 @@ class TestTestAdequacyLoop:
             runner, "_count_commits", new_callable=AsyncMock, return_value=0
         ):
             result = await runner._run_skill(
-                BUILTIN_SKILLS[2], agent_task, tmp_path, "branch", worker_id=0
+                BUILTIN_SKILLS[3], agent_task, tmp_path, "branch", worker_id=0
             )
         assert result.passed is True
         assert "No commits" in result.summary
@@ -1167,7 +1288,7 @@ class TestTestAdequacyLoop:
             ),
         ):
             result = await runner._run_skill(
-                BUILTIN_SKILLS[2], agent_task, tmp_path, "branch", worker_id=0
+                BUILTIN_SKILLS[3], agent_task, tmp_path, "branch", worker_id=0
             )
         assert result.passed is True
 
@@ -1195,7 +1316,7 @@ class TestTestAdequacyLoop:
             ),
         ):
             result = await runner._run_skill(
-                BUILTIN_SKILLS[2], agent_task, tmp_path, "branch", worker_id=0
+                BUILTIN_SKILLS[3], agent_task, tmp_path, "branch", worker_id=0
             )
         assert result.passed is False
         assert "missing tests" in result.summary
@@ -1229,7 +1350,7 @@ class TestTestAdequacyLoop:
             ),
         ):
             result = await runner._run_skill(
-                BUILTIN_SKILLS[2], agent_task, tmp_path, "branch", worker_id=0
+                BUILTIN_SKILLS[3], agent_task, tmp_path, "branch", worker_id=0
             )
         assert result.passed is True
         assert result.attempts == 2
