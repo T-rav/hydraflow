@@ -566,11 +566,10 @@ class TestMemoryQuality:
         ):
             memory_sec = await runner._inject_memory(query_context="big memory test")
 
-        # +4 for leading "\n\n" prefix
-        assert len(memory_sec) <= harness.config.max_memory_prompt_chars + 4
+        # +2 for leading "\n\n" prefix prepended by _inject_memory
+        assert len(memory_sec) <= harness.config.max_memory_prompt_chars + 2
 
-    @pytest.mark.asyncio
-    async def test_format_memories_with_context(self) -> None:
+    def test_format_memories_with_context(self) -> None:
         """format_memories_as_markdown includes context when present."""
         from hindsight import format_memories_as_markdown
         from hindsight_types import HindsightMemory
@@ -589,8 +588,7 @@ class TestMemoryQuality:
         assert "_Context: Discovered during issue #42 debugging_" in result
         assert "- Use async patterns" in result
 
-    @pytest.mark.asyncio
-    async def test_format_memories_empty_list(self) -> None:
+    def test_format_memories_empty_list(self) -> None:
         """format_memories_as_markdown returns empty string for empty list."""
         from hindsight import format_memories_as_markdown
 
