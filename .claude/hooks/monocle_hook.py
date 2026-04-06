@@ -27,14 +27,15 @@ Environment Variables:
     MONOCLE_SERVICE_NAME        Service name for spans (default: claude-cli)
 """
 
+import contextlib
 import hashlib
 import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 # --- Configuration ---
 STATE_DIR = Path.home() / ".claude" / "state"
@@ -44,6 +45,7 @@ LOCK_FILE = STATE_DIR / "monocle_state.lock"
 
 DEBUG = os.environ.get("MONOCLE_CLAUDE_DEBUG", "").lower() == "true"
 SERVICE_NAME = os.environ.get("MONOCLE_SERVICE_NAME", "claude-cli")
+
 
 # --- Logging (fail-open, never block) ---
 def _log(level: str, message: str) -> None:
@@ -55,15 +57,19 @@ def _log(level: str, message: str) -> None:
     except Exception:
         pass
 
+
 def debug(msg: str) -> None:
     if DEBUG:
         _log("DEBUG", msg)
 
+
 def info(msg: str) -> None:
     _log("INFO", msg)
 
+
 def error(msg: str) -> None:
     _log("ERROR", msg)
+
 
 # --- State Management ---
 class FileLock:
@@ -77,6 +83,7 @@ class FileLock:
         self._fh = open(self.path, "a+", encoding="utf-8")
         try:
             import fcntl
+
             deadline = time.time() + self.timeout_s
             while True:
                 try:
@@ -90,18 +97,20 @@ class FileLock:
             pass
         return self
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, exc_type, exc, tb):  # noqa: ARG002
+        if self._fh is None:
+            return
         try:
             import fcntl
+
             fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
         except Exception:
             pass
-        try:
+        with contextlib.suppress(Exception):
             self._fh.close()
-        except Exception:
-            pass
 
-def load_state() -> Dict[str, Any]:
+
+def load_state() -> dict[str, Any]:
     try:
         if not STATE_FILE.exists():
             return {}
@@ -109,7 +118,8 @@ def load_state() -> Dict[str, Any]:
     except Exception:
         return {}
 
-def save_state(state: Dict[str, Any]) -> None:
+
+def save_state(state: dict[str, Any]) -> None:
     try:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
         tmp = STATE_FILE.with_suffix(".tmp")
@@ -118,12 +128,14 @@ def save_state(state: Dict[str, Any]) -> None:
     except Exception as e:
         debug(f"save_state failed: {e}")
 
+
 def state_key(session_id: str, transcript_path: str) -> str:
     raw = f"{session_id}::{transcript_path}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
+
 # --- Hook Payload ---
-def read_hook_payload() -> Dict[str, Any]:
+def read_hook_payload() -> dict[str, Any]:
     try:
         data = sys.stdin.read()
         if not data.strip():
@@ -132,7 +144,10 @@ def read_hook_payload() -> Dict[str, Any]:
     except Exception:
         return {}
 
-def extract_session_and_transcript(payload: Dict[str, Any]) -> Tuple[Optional[str], Optional[Path]]:
+
+def extract_session_and_transcript(
+    payload: dict[str, Any],
+) -> tuple[str | None, Path | None]:
     session_id = (
         payload.get("sessionId")
         or payload.get("session_id")
@@ -150,8 +165,9 @@ def extract_session_and_transcript(payload: Dict[str, Any]) -> Tuple[Optional[st
             pass
     return session_id, None
 
+
 # --- Main ---
-def main() -> int:
+def main() -> int:  # noqa: PLR0911 — early-return validation gates
     start = time.time()
     debug("Monocle hook started")
 
@@ -175,23 +191,27 @@ def main() -> int:
 
     try:
         # Import Monocle components
-        from opentelemetry import trace
-        from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-        from opentelemetry.sdk.resources import Resource, SERVICE_NAME as SVC_NAME
         from monocle_apptrace.exporters.monocle_exporters import get_monocle_exporter
         from monocle_apptrace.instrumentation.metamodel.claude_code._helper import (
-            SessionState, build_turns, read_new_jsonl,
+            SessionState,
+            build_turns,
+            read_new_jsonl,
         )
         from monocle_apptrace.instrumentation.metamodel.claude_code.transcript_processor import (
             process_transcript,
         )
+        from opentelemetry import trace
+        from opentelemetry.sdk.resources import SERVICE_NAME as SVC_NAME
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
     except ImportError as e:
         error(f"Missing dependency: {e}")
         return 0
 
     try:
         import importlib.metadata
+
         sdk_version = importlib.metadata.version("monocle_apptrace")
     except Exception:
         sdk_version = "0.7.6"
@@ -214,10 +234,11 @@ def main() -> int:
             msgs, ss = read_new_jsonl(transcript_path, ss)
             if not msgs:
                 state[key] = {
-                    "offset": ss.offset, "buffer": ss.buffer,
+                    "offset": ss.offset,
+                    "buffer": ss.buffer,
                     "turn_count": ss.turn_count,
                     "subagents_processed": ss.subagents_processed,
-                    "updated": datetime.now(timezone.utc).isoformat(),
+                    "updated": datetime.now(UTC).isoformat(),
                 }
                 save_state(state)
                 debug("No new messages")
@@ -226,10 +247,11 @@ def main() -> int:
             turns = build_turns(msgs)
             if not turns:
                 state[key] = {
-                    "offset": ss.offset, "buffer": ss.buffer,
+                    "offset": ss.offset,
+                    "buffer": ss.buffer,
                     "turn_count": ss.turn_count,
                     "subagents_processed": ss.subagents_processed,
-                    "updated": datetime.now(timezone.utc).isoformat(),
+                    "updated": datetime.now(UTC).isoformat(),
                 }
                 save_state(state)
                 debug("No complete turns")
@@ -259,10 +281,11 @@ def main() -> int:
 
             # Save state
             state[key] = {
-                "offset": ss.offset, "buffer": ss.buffer,
+                "offset": ss.offset,
+                "buffer": ss.buffer,
                 "turn_count": ss.turn_count,
                 "subagents_processed": ss.subagents_processed,
-                "updated": datetime.now(timezone.utc).isoformat(),
+                "updated": datetime.now(UTC).isoformat(),
             }
             save_state(state)
 
@@ -280,8 +303,10 @@ def main() -> int:
     except Exception as e:
         error(f"Unexpected failure: {e}")
         import traceback
+
         debug(traceback.format_exc())
         return 0  # Always exit 0 to not block Claude Code
+
 
 if __name__ == "__main__":
     sys.exit(main())
