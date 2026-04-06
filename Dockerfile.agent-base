@@ -46,8 +46,8 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
 # ---------------------------------------------------------------------------
 FROM base AS tools
 
-# Install agent CLIs globally via npm (Claude, Codex, Pi)
-RUN npm install -g @anthropic-ai/claude-code @openai/codex @mariozechner/pi-coding-agent --no-fund --no-audit
+# Install agent CLIs globally via npm (Claude, Codex, Pi, Beads)
+RUN npm install -g @anthropic-ai/claude-code @openai/codex @mariozechner/pi-coding-agent @beads/bd --no-fund --no-audit
 
 # Pre-install Python quality tools into a venv
 COPY pyproject.toml uv.lock ./
@@ -63,7 +63,8 @@ FROM base AS runtime
 COPY --from=tools /usr/lib/node_modules /usr/lib/node_modules
 COPY --from=tools /usr/bin/claude /usr/bin/claude
 RUN ln -s ../lib/node_modules/@openai/codex/bin/codex.js /usr/bin/codex \
-    && ln -s ../lib/node_modules/@mariozechner/pi-coding-agent/dist/cli.js /usr/bin/pi
+    && ln -s ../lib/node_modules/@mariozechner/pi-coding-agent/dist/cli.js /usr/bin/pi \
+    && ln -s ../lib/node_modules/@beads/bd/bin/bd.js /usr/bin/bd
 
 # Copy Python venv with quality tools
 COPY --from=tools /opt/hydraflow-venv /opt/hydraflow-venv
