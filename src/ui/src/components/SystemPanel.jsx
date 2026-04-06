@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react'
 import { theme } from '../theme'
-import { BACKGROUND_WORKERS, INTERVAL_PRESETS, WORKER_PRESETS, EDITABLE_INTERVAL_WORKERS, SYSTEM_WORKER_INTERVALS, UNSTICK_BATCH_OPTIONS } from '../constants'
+import { BACKGROUND_WORKERS, WORKER_GROUPS, INTERVAL_PRESETS, WORKER_PRESETS, EDITABLE_INTERVAL_WORKERS, SYSTEM_WORKER_INTERVALS, UNSTICK_BATCH_OPTIONS } from '../constants'
 import { useHydraFlow } from '../context/HydraFlowContext'
 import { Livestream } from './Livestream'
 import { PipelineControlPanel } from './PipelineControlPanel'
@@ -161,17 +161,12 @@ function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssue
           data-testid={`dot-${def.key}`}
         />
         <span style={styles.label}>{def.label}</span>
-        {isSystem ? (
-          <span
-            style={statusText === 'ok'
-              ? styles.statusPillOk
-              : styles.statusPillError}
-            data-testid={`status-pill-${def.key}`}
-          >
-            {statusText}
-          </span>
-        ) : (
-          <span style={styles.status}>{statusText}</span>
+        <span style={styles.status}>{statusText}</span>
+        {def.tags && def.tags.map(tag => (
+          <span key={tag} style={styles.tagPill}>{tag}</span>
+        ))}
+        {def.system && (
+          <span style={styles.systemBadge}>system</span>
         )}
         {showToggle && (
           <button
@@ -263,8 +258,11 @@ function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssue
   )
 }
 
-const NON_SYSTEM_WORKERS = BACKGROUND_WORKERS.filter(w => !w.system)
-const SYSTEM_WORKERS = BACKGROUND_WORKERS.filter(w => w.system)
+/** Workers organized by group key for the grouped layout. */
+const WORKERS_BY_GROUP = WORKER_GROUPS.map(group => ({
+  ...group,
+  workers: BACKGROUND_WORKERS.filter(w => w.group === group.key),
+}))
 
 function UnstickWorkersDropdown() {
   const { config, selectedRepoSlug } = useHydraFlow()
@@ -453,6 +451,58 @@ function DependabotMergeSettingsPanel() {
 }
 
 
+function WorkerGroupSection({ group, backgroundWorkers, pipelinePollerLastRun, pipelineIssues, orchestratorStatus, onToggleBgWorker, onTriggerBgWorker, onUpdateInterval, events }) {
+  const [collapsed, setCollapsed] = useState(false)
+  const workerCount = group.workers.length
+  const activeCount = group.workers.filter(w => {
+    const state = backgroundWorkers.find(s => s.name === w.key)
+    return state && state.enabled !== false && state.status === 'ok'
+  }).length
+
+  return (
+    <div style={styles.groupContainer}>
+      <div
+        style={styles.groupHeader}
+        onClick={() => setCollapsed(!collapsed)}
+        role="button"
+        tabIndex={0}
+        data-testid={`group-header-${group.key}`}
+      >
+        <span style={{ ...styles.groupDot, background: group.color }} />
+        <span style={styles.groupLabel}>{group.label}</span>
+        <span style={styles.groupCount}>{activeCount}/{workerCount}</span>
+        <span style={styles.groupChevron}>{collapsed ? '\u25B6' : '\u25BC'}</span>
+      </div>
+      {!collapsed && (
+        <div style={styles.grid}>
+          {group.workers.map((def) => {
+            const state = backgroundWorkers.find(w => w.name === def.key)
+            return (
+              <BackgroundWorkerCard
+                key={def.key}
+                def={def}
+                state={state}
+                pipelinePollerLastRun={pipelinePollerLastRun}
+                pipelineIssues={pipelineIssues}
+                orchestratorStatus={orchestratorStatus}
+                onToggleBgWorker={onToggleBgWorker}
+                onTriggerBgWorker={onTriggerBgWorker}
+                onUpdateInterval={onUpdateInterval}
+                events={events}
+                extraContent={
+                  def.key === 'dependabot_merge' ? <DependabotMergeSettingsPanel /> :
+                  def.key === 'pr_unsticker' ? <UnstickWorkersDropdown /> :
+                  undefined
+                }
+              />
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onTriggerBgWorker, onUpdateInterval }) {
   const { pipelinePollerLastRun, orchestratorStatus, events, pipelineIssues } = useHydraFlow()
   const [activeSubTab, setActiveSubTab] = useState('workers')
@@ -476,53 +526,20 @@ export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onTriggerBgWo
       <div style={styles.subTabContent} data-testid="system-subtab-content">
         {activeSubTab === 'workers' && (
           <div style={styles.workersContent}>
-            <h3 style={styles.heading}>Background Workers</h3>
-            <div style={styles.grid}>
-              {NON_SYSTEM_WORKERS.map((def) => {
-                const state = backgroundWorkers.find(w => w.name === def.key)
-                return (
-                  <BackgroundWorkerCard
-                    key={def.key}
-                    def={def}
-                    state={state}
-                    pipelinePollerLastRun={pipelinePollerLastRun}
-                    orchestratorStatus={orchestratorStatus}
-                    onToggleBgWorker={onToggleBgWorker}
-                    onTriggerBgWorker={onTriggerBgWorker}
-                    onUpdateInterval={onUpdateInterval}
-                    events={events}
-                    extraContent={
-                      def.key === 'dependabot_merge' ? <DependabotMergeSettingsPanel /> :
-                      undefined
-                    }
-                  />
-                )
-              })}
-            </div>
-            <h3 style={styles.sectionHeading}>System</h3>
-            <div style={styles.grid}>
-              {SYSTEM_WORKERS.map((def) => {
-                const state = backgroundWorkers.find(w => w.name === def.key)
-                return (
-                  <BackgroundWorkerCard
-                    key={def.key}
-                    def={def}
-                    state={state}
-                    pipelinePollerLastRun={pipelinePollerLastRun}
-                    pipelineIssues={pipelineIssues}
-                    orchestratorStatus={orchestratorStatus}
-                    onToggleBgWorker={onToggleBgWorker}
-                    onTriggerBgWorker={onTriggerBgWorker}
-                    onUpdateInterval={onUpdateInterval}
-                    events={events}
-                    extraContent={
-                      def.key === 'pr_unsticker' ? <UnstickWorkersDropdown /> :
-                      undefined
-                    }
-                  />
-                )
-              })}
-            </div>
+            {WORKERS_BY_GROUP.map((group) => (
+              <WorkerGroupSection
+                key={group.key}
+                group={group}
+                backgroundWorkers={backgroundWorkers}
+                pipelinePollerLastRun={pipelinePollerLastRun}
+                pipelineIssues={pipelineIssues}
+                orchestratorStatus={orchestratorStatus}
+                onToggleBgWorker={onToggleBgWorker}
+                onTriggerBgWorker={onTriggerBgWorker}
+                onUpdateInterval={onUpdateInterval}
+                events={events}
+              />
+            ))}
           </div>
         )}
         {activeSubTab === 'pipeline' && (
@@ -902,6 +919,64 @@ const styles = {
     color: theme.accent,
     cursor: 'pointer',
     transition: 'all 0.15s',
+  },
+  groupContainer: {
+    marginBottom: 24,
+  },
+  groupHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '8px 0',
+    cursor: 'pointer',
+    userSelect: 'none',
+    borderBottom: `1px solid ${theme.border}`,
+    marginBottom: 12,
+  },
+  groupDot: {
+    width: 10,
+    height: 10,
+    borderRadius: '50%',
+    flexShrink: 0,
+  },
+  groupLabel: {
+    fontSize: 14,
+    fontWeight: 600,
+    color: theme.textBright,
+    flex: 1,
+  },
+  groupCount: {
+    fontSize: 11,
+    color: theme.textMuted,
+    fontWeight: 600,
+  },
+  groupChevron: {
+    fontSize: 10,
+    color: theme.textMuted,
+    width: 16,
+    textAlign: 'center',
+  },
+  tagPill: {
+    fontSize: 9,
+    fontWeight: 600,
+    color: theme.textMuted,
+    background: theme.surfaceInset,
+    border: `1px solid ${theme.border}`,
+    borderRadius: 8,
+    padding: '1px 6px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.3px',
+  },
+  systemBadge: {
+    fontSize: 9,
+    fontWeight: 600,
+    color: theme.accent,
+    background: theme.accentSubtle,
+    border: `1px solid ${theme.accent}`,
+    borderRadius: 8,
+    padding: '1px 6px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.3px',
   },
 }
 
