@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from dashboard_routes._routes import RouteContext
-from hindsight_types import Bank
+from hindsight_types import Bank, HindsightMemory
 from models import MemoryBankInfo, MemoryContextItem, MemoryContextResponse
 
 logger = logging.getLogger("hydraflow.dashboard.memory")
@@ -22,7 +21,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
 
     def _memory_from_hindsight(
         bank: Bank,
-        mem: Any,
+        mem: HindsightMemory,
     ) -> MemoryContextItem:
         """Convert a HindsightMemory to a MemoryContextItem."""
         return MemoryContextItem(
@@ -120,6 +119,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
                 items.append(_memory_from_hindsight(b, mem))
 
         items.sort(key=lambda x: x.relevance_score, reverse=True)
+        items = items[:5]
 
         resp = MemoryContextResponse(items=items, query=query)
         return JSONResponse(resp.model_dump())
@@ -164,6 +164,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
                 items.append(_memory_from_hindsight(b, mem))
 
         items.sort(key=lambda x: x.relevance_score, reverse=True)
+        items = items[:5]
 
         resp = MemoryContextResponse(items=items, query=query)
         return JSONResponse(resp.model_dump())

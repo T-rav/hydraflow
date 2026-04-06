@@ -11,6 +11,7 @@ Covers:
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -122,7 +123,6 @@ class TestMemoryBanksEndpoint:
 
         resp = await handler()
         data = resp.body  # JSONResponse stores bytes
-        import json
 
         payload = json.loads(data)
         assert "banks" in payload
@@ -138,7 +138,6 @@ class TestMemoryBanksEndpoint:
         assert handler is not None
 
         resp = await handler()
-        import json
 
         payload = json.loads(resp.body)
         assert len(payload["banks"]) == len(Bank)
@@ -158,7 +157,6 @@ class TestMemorySearchEndpoint:
         handler = find_endpoint(router, "/api/memory/search", "GET")
 
         resp = await handler(q="", bank=None, limit=10)
-        import json
 
         payload = json.loads(resp.body)
         assert payload["items"] == []
@@ -188,7 +186,6 @@ class TestMemorySearchEndpoint:
 
         handler = find_endpoint(router, "/api/memory/search", "GET")
         resp = await handler(q="CI timeout", bank=None, limit=10)
-        import json
 
         payload = json.loads(resp.body)
         assert len(payload["items"]) == 2
@@ -212,7 +209,6 @@ class TestMemorySearchEndpoint:
 
         handler = find_endpoint(router, "/api/memory/search", "GET")
         resp = await handler(q="test", bank=str(Bank.LEARNINGS), limit=10)
-        import json
 
         payload = json.loads(resp.body)
         assert payload["bank_filter"] == str(Bank.LEARNINGS)
@@ -228,7 +224,6 @@ class TestMemorySearchEndpoint:
 
         handler = find_endpoint(router, "/api/memory/search", "GET")
         resp = await handler(q="test", bank="nonexistent-bank", limit=10)
-        import json
 
         payload = json.loads(resp.body)
         assert payload["items"] == []
@@ -240,7 +235,6 @@ class TestMemorySearchEndpoint:
         """Search gracefully returns empty when Hindsight is unavailable."""
         handler = find_endpoint(router_no_hindsight, "/api/memory/search", "GET")
         resp = await handler(q="test query", bank=None, limit=10)
-        import json
 
         payload = json.loads(resp.body)
         assert payload["items"] == []
@@ -254,7 +248,6 @@ class TestMemorySearchEndpoint:
 
         handler = find_endpoint(router, "/api/memory/search", "GET")
         resp = await handler(q="test", bank=None, limit=10)
-        import json
 
         payload = json.loads(resp.body)
         assert payload["items"] == []
@@ -269,7 +262,6 @@ class TestMemorySearchEndpoint:
 
         handler = find_endpoint(router, "/api/memory/search", "GET")
         resp = await handler(q="test", bank="TROUBLESHOOTING", limit=10)
-        import json
 
         json.loads(resp.body)
         # Should resolve the bank name and call recall_banks
@@ -299,7 +291,6 @@ class TestMemoryForIssueEndpoint:
 
         handler = find_endpoint(router, "/api/memory/issue/{issue_number}", "GET")
         resp = await handler(42)
-        import json
 
         payload = json.loads(resp.body)
         assert payload["query"] == "issue #42"
@@ -314,7 +305,6 @@ class TestMemoryForIssueEndpoint:
             "GET",
         )
         resp = await handler(42)
-        import json
 
         payload = json.loads(resp.body)
         assert payload["items"] == []
@@ -327,7 +317,6 @@ class TestMemoryForIssueEndpoint:
 
         handler = find_endpoint(router, "/api/memory/issue/{issue_number}", "GET")
         resp = await handler(99)
-        import json
 
         payload = json.loads(resp.body)
         assert payload["items"] == []
@@ -357,7 +346,6 @@ class TestMemoryForHITLEndpoint:
 
         handler = find_endpoint(router, "/api/memory/hitl/{issue_number}", "GET")
         resp = await handler(123)
-        import json
 
         payload = json.loads(resp.body)
         assert "CI timeout after 300s" in payload["query"]
@@ -371,7 +359,6 @@ class TestMemoryForHITLEndpoint:
 
         handler = find_endpoint(router, "/api/memory/hitl/{issue_number}", "GET")
         resp = await handler(456)
-        import json
 
         payload = json.loads(resp.body)
         assert payload["query"] == "issue #456"
@@ -400,7 +387,6 @@ class TestMemoryForHITLEndpoint:
             "GET",
         )
         resp = await handler(42)
-        import json
 
         payload = json.loads(resp.body)
         assert payload["items"] == []
@@ -412,7 +398,6 @@ class TestMemoryForHITLEndpoint:
 
         handler = find_endpoint(router, "/api/memory/hitl/{issue_number}", "GET")
         resp = await handler(42)
-        import json
 
         payload = json.loads(resp.body)
         assert payload["items"] == []
