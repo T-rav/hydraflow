@@ -292,7 +292,7 @@ class TestPostMergeConflictFix:
         # Review should NOT have been called
         phase._reviewers.review.assert_not_awaited()
         # Should escalate to HITL via transition
-        phase._prs.transition.assert_awaited_once_with(42, "hitl", pr_number=101)
+        phase._prs.transition.assert_awaited_once_with(42, "diagnose", pr_number=101)
 
     @pytest.mark.asyncio
     async def test_review_conflict_escalation_records_hitl_origin(
@@ -389,7 +389,7 @@ class TestPostMergeConflictFix:
 
         assert results[0].merged is False
         assert "conflicts" in results[0].summary.lower()
-        phase._prs.transition.assert_awaited_once_with(42, "hitl", pr_number=101)
+        phase._prs.transition.assert_awaited_once_with(42, "diagnose", pr_number=101)
 
     @pytest.mark.asyncio
     async def test_review_merge_failure_escalates_to_hitl(
@@ -414,7 +414,7 @@ class TestPostMergeConflictFix:
             if "Merge failed" in str(c)
         ]
         assert len(hitl_calls) == 1
-        phase._prs.transition.assert_any_await(42, "hitl", pr_number=101)
+        phase._prs.transition.assert_any_await(42, "diagnose", pr_number=101)
 
     @pytest.mark.asyncio
     async def test_review_merge_failure_records_hitl_origin(
@@ -1607,7 +1607,7 @@ class TestHandleRejectedReview:
         await phase._handle_rejected_review(pr, task, result, 0)
 
         assert phase._state.get_hitl_origin(42) == "hydraflow-review"
-        phase._prs.transition.assert_any_await(42, "hitl", pr_number=101)
+        phase._prs.transition.assert_any_await(42, "diagnose", pr_number=101)
 
     @pytest.mark.asyncio
     async def test_cap_exceeded_posts_comment_on_issue(self, tmp_path: Path) -> None:
@@ -2328,9 +2328,10 @@ class TestADRReviewPath:
         phase._prs.close_task.assert_awaited_once_with(710)
 
     @pytest.mark.asyncio
-    async def test_review_adrs_escalates_invalid_adr_to_hitl(
+    async def test_review_adrs_requeues_invalid_adr_to_plan(
         self, config: HydraFlowConfig
     ) -> None:
+        """Invalid ADR should re-queue to plan, not escalate to HITL."""
         phase = make_review_phase(config)
         issue = TaskFactory.create(
             id=711,
@@ -2342,7 +2343,7 @@ class TestADRReviewPath:
 
         assert len(results) == 1
         assert results[0].verdict == ReviewVerdict.REQUEST_CHANGES
-        phase._prs.transition.assert_awaited_once_with(711, "hitl", pr_number=None)
+        phase._prs.transition.assert_awaited_once_with(711, "plan")
 
     @pytest.mark.asyncio
     async def test_review_adrs_approved_calls_store_mark_merged(

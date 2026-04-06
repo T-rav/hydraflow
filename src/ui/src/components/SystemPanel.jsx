@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react'
 import { theme } from '../theme'
-import { BACKGROUND_WORKERS, INTERVAL_PRESETS, WORKER_PRESETS, EDITABLE_INTERVAL_WORKERS, SYSTEM_WORKER_INTERVALS, UNSTICK_BATCH_OPTIONS } from '../constants'
+import { BACKGROUND_WORKERS, WORKER_GROUPS, INTERVAL_PRESETS, WORKER_PRESETS, EDITABLE_INTERVAL_WORKERS, SYSTEM_WORKER_INTERVALS, UNSTICK_BATCH_OPTIONS } from '../constants'
 import { useHydraFlow } from '../context/HydraFlowContext'
 import { Livestream } from './Livestream'
 import { PipelineControlPanel } from './PipelineControlPanel'
@@ -161,17 +161,12 @@ function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssue
           data-testid={`dot-${def.key}`}
         />
         <span style={styles.label}>{def.label}</span>
-        {isSystem ? (
-          <span
-            style={statusText === 'ok'
-              ? styles.statusPillOk
-              : styles.statusPillError}
-            data-testid={`status-pill-${def.key}`}
-          >
-            {statusText}
-          </span>
-        ) : (
-          <span style={styles.status}>{statusText}</span>
+        <span style={styles.status}>{statusText}</span>
+        {def.tags && def.tags.map(tag => (
+          <span key={tag} style={styles.tagPill}>{tag}</span>
+        ))}
+        {def.system && (
+          <span style={styles.systemBadge}>system</span>
         )}
         {showToggle && (
           <button
@@ -263,8 +258,11 @@ function BackgroundWorkerCard({ def, state, pipelinePollerLastRun, pipelineIssue
   )
 }
 
-const NON_SYSTEM_WORKERS = BACKGROUND_WORKERS.filter(w => !w.system)
-const SYSTEM_WORKERS = BACKGROUND_WORKERS.filter(w => w.system)
+/** Workers organized by group key for the grouped layout. */
+const WORKERS_BY_GROUP = WORKER_GROUPS.map(group => ({
+  ...group,
+  workers: BACKGROUND_WORKERS.filter(w => w.group === group.key),
+}))
 
 function UnstickWorkersDropdown() {
   const { config, selectedRepoSlug } = useHydraFlow()
@@ -323,7 +321,7 @@ const KNOWN_BOTS = [
 
 const FAILURE_STRATEGIES = [
   { value: 'skip', label: 'Skip' },
-  { value: 'escalate', label: 'Escalate to HITL' },
+  { value: 'hitl', label: 'Escalate to HITL' },
   { value: 'close', label: 'Close PR' },
 ]
 
@@ -332,13 +330,13 @@ const REVIEW_MODES = [
   { value: 'llm_review', label: 'LLM Review' },
 ]
 
-function BotPRSettingsPanel() {
+function DependabotMergeSettingsPanel() {
   const [settings, setSettings] = useState(null)
   const [customBot, setCustomBot] = useState('')
 
   const fetchSettings = useCallback(async () => {
     try {
-      const resp = await fetch('/api/bot-pr/settings')
+      const resp = await fetch('/api/dependabot-merge/settings')
       if (resp.ok) {
         const data = await resp.json()
         setSettings(data)
@@ -351,7 +349,7 @@ function BotPRSettingsPanel() {
   const saveSettings = useCallback(async (updated) => {
     setSettings(updated)
     try {
-      await fetch('/api/bot-pr/settings', {
+      await fetch('/api/dependabot-merge/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updated),
@@ -361,90 +359,90 @@ function BotPRSettingsPanel() {
 
   const toggleBot = useCallback((username) => {
     if (!settings) return
-    const bots = settings.allowed_bots || []
+    const bots = settings.authors || []
     const next = bots.includes(username)
       ? bots.filter(b => b !== username)
       : [...bots, username]
-    saveSettings({ ...settings, allowed_bots: next })
+    saveSettings({ ...settings, authors: next })
   }, [settings, saveSettings])
 
   const addCustomBot = useCallback(() => {
     const trimmed = customBot.trim()
     if (!trimmed || !settings) return
-    const bots = settings.allowed_bots || []
+    const bots = settings.authors || []
     if (!bots.includes(trimmed)) {
-      saveSettings({ ...settings, allowed_bots: [...bots, trimmed] })
+      saveSettings({ ...settings, authors: [...bots, trimmed] })
     }
     setCustomBot('')
   }, [customBot, settings, saveSettings])
 
   if (!settings) return null
 
-  const allowedBots = settings.allowed_bots || []
+  const allowedBots = settings.authors || []
 
   return (
-    <div style={styles.botPrPanel} data-testid="bot-pr-settings">
-      <div style={styles.botPrSection}>
-        <div style={styles.botPrSectionLabel}>Allowed Bots</div>
+    <div style={styles.depMergePanel} data-testid="dependabot-merge-settings">
+      <div style={styles.depMergeSection}>
+        <div style={styles.depMergeSectionLabel}>Allowed Bots</div>
         {KNOWN_BOTS.map(bot => (
-          <label key={bot.username} style={styles.botPrCheckbox}>
+          <label key={bot.username} style={styles.depMergeCheckbox}>
             <input
               type="checkbox"
               checked={allowedBots.includes(bot.username)}
               onChange={() => toggleBot(bot.username)}
               data-testid={`bot-checkbox-${bot.username}`}
             />
-            <span style={styles.botPrCheckboxLabel}>{bot.label}</span>
+            <span style={styles.depMergeCheckboxLabel}>{bot.label}</span>
           </label>
         ))}
-        <div style={styles.botPrAddRow}>
+        <div style={styles.depMergeAddRow}>
           <input
             type="text"
             value={customBot}
             onChange={e => setCustomBot(e.target.value)}
             placeholder="Custom bot username"
-            style={styles.botPrInput}
-            data-testid="bot-pr-custom-input"
+            style={styles.depMergeInput}
+            data-testid="dependabot-merge-custom-input"
             onKeyDown={e => { if (e.key === 'Enter') addCustomBot() }}
           />
           <button
             onClick={addCustomBot}
-            style={styles.botPrAddBtn}
-            data-testid="bot-pr-add-btn"
+            style={styles.depMergeAddBtn}
+            data-testid="dependabot-merge-add-btn"
           >
             Add
           </button>
         </div>
       </div>
-      <div style={styles.botPrSection}>
-        <div style={styles.botPrSectionLabel}>Failure Strategy</div>
+      <div style={styles.depMergeSection}>
+        <div style={styles.depMergeSectionLabel}>Failure Strategy</div>
         {FAILURE_STRATEGIES.map(opt => (
-          <label key={opt.value} style={styles.botPrRadio}>
+          <label key={opt.value} style={styles.depMergeRadio}>
             <input
               type="radio"
-              name="bot-pr-failure-strategy"
+              name="dependabot-merge-failure-strategy"
               value={opt.value}
               checked={settings.failure_strategy === opt.value}
               onChange={() => saveSettings({ ...settings, failure_strategy: opt.value })}
               data-testid={`failure-strategy-${opt.value}`}
             />
-            <span style={styles.botPrRadioLabel}>{opt.label}</span>
+            <span style={styles.depMergeRadioLabel}>{opt.label}</span>
           </label>
         ))}
       </div>
-      <div style={styles.botPrSection}>
-        <div style={styles.botPrSectionLabel}>Review Mode</div>
+      <div style={styles.depMergeSection}>
+        <div style={styles.depMergeSectionLabel}>Review Mode</div>
         {REVIEW_MODES.map(opt => (
-          <label key={opt.value} style={styles.botPrRadio}>
+          <label key={opt.value} style={styles.depMergeRadio}>
             <input
               type="radio"
-              name="bot-pr-review-mode"
+              name="dependabot-merge-review-mode"
               value={opt.value}
               checked={settings.review_mode === opt.value}
               onChange={() => saveSettings({ ...settings, review_mode: opt.value })}
               data-testid={`review-mode-${opt.value}`}
             />
-            <span style={styles.botPrRadioLabel}>{opt.label}</span>
+            <span style={styles.depMergeRadioLabel}>{opt.label}</span>
           </label>
         ))}
       </div>
@@ -452,6 +450,58 @@ function BotPRSettingsPanel() {
   )
 }
 
+
+function WorkerGroupSection({ group, backgroundWorkers, pipelinePollerLastRun, pipelineIssues, orchestratorStatus, onToggleBgWorker, onTriggerBgWorker, onUpdateInterval, events }) {
+  const [collapsed, setCollapsed] = useState(false)
+  const workerCount = group.workers.length
+  const activeCount = group.workers.filter(w => {
+    const state = backgroundWorkers.find(s => s.name === w.key)
+    return state && state.enabled !== false && state.status === 'ok'
+  }).length
+
+  return (
+    <div style={styles.groupContainer}>
+      <div
+        style={styles.groupHeader}
+        onClick={() => setCollapsed(!collapsed)}
+        role="button"
+        tabIndex={0}
+        data-testid={`group-header-${group.key}`}
+      >
+        <span style={{ ...styles.groupDot, background: group.color }} />
+        <span style={styles.groupLabel}>{group.label}</span>
+        <span style={styles.groupCount}>{activeCount}/{workerCount}</span>
+        <span style={styles.groupChevron}>{collapsed ? '\u25B6' : '\u25BC'}</span>
+      </div>
+      {!collapsed && (
+        <div style={styles.grid}>
+          {group.workers.map((def) => {
+            const state = backgroundWorkers.find(w => w.name === def.key)
+            return (
+              <BackgroundWorkerCard
+                key={def.key}
+                def={def}
+                state={state}
+                pipelinePollerLastRun={pipelinePollerLastRun}
+                pipelineIssues={pipelineIssues}
+                orchestratorStatus={orchestratorStatus}
+                onToggleBgWorker={onToggleBgWorker}
+                onTriggerBgWorker={onTriggerBgWorker}
+                onUpdateInterval={onUpdateInterval}
+                events={events}
+                extraContent={
+                  def.key === 'dependabot_merge' ? <DependabotMergeSettingsPanel /> :
+                  def.key === 'pr_unsticker' ? <UnstickWorkersDropdown /> :
+                  undefined
+                }
+              />
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onTriggerBgWorker, onUpdateInterval }) {
   const { pipelinePollerLastRun, orchestratorStatus, events, pipelineIssues } = useHydraFlow()
@@ -476,53 +526,20 @@ export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onTriggerBgWo
       <div style={styles.subTabContent} data-testid="system-subtab-content">
         {activeSubTab === 'workers' && (
           <div style={styles.workersContent}>
-            <h3 style={styles.heading}>Background Workers</h3>
-            <div style={styles.grid}>
-              {NON_SYSTEM_WORKERS.map((def) => {
-                const state = backgroundWorkers.find(w => w.name === def.key)
-                return (
-                  <BackgroundWorkerCard
-                    key={def.key}
-                    def={def}
-                    state={state}
-                    pipelinePollerLastRun={pipelinePollerLastRun}
-                    orchestratorStatus={orchestratorStatus}
-                    onToggleBgWorker={onToggleBgWorker}
-                    onTriggerBgWorker={onTriggerBgWorker}
-                    onUpdateInterval={onUpdateInterval}
-                    events={events}
-                    extraContent={
-                      def.key === 'bot_pr' ? <BotPRSettingsPanel /> :
-                      undefined
-                    }
-                  />
-                )
-              })}
-            </div>
-            <h3 style={styles.sectionHeading}>System</h3>
-            <div style={styles.grid}>
-              {SYSTEM_WORKERS.map((def) => {
-                const state = backgroundWorkers.find(w => w.name === def.key)
-                return (
-                  <BackgroundWorkerCard
-                    key={def.key}
-                    def={def}
-                    state={state}
-                    pipelinePollerLastRun={pipelinePollerLastRun}
-                    pipelineIssues={pipelineIssues}
-                    orchestratorStatus={orchestratorStatus}
-                    onToggleBgWorker={onToggleBgWorker}
-                    onTriggerBgWorker={onTriggerBgWorker}
-                    onUpdateInterval={onUpdateInterval}
-                    events={events}
-                    extraContent={
-                      def.key === 'pr_unsticker' ? <UnstickWorkersDropdown /> :
-                      undefined
-                    }
-                  />
-                )
-              })}
-            </div>
+            {WORKERS_BY_GROUP.map((group) => (
+              <WorkerGroupSection
+                key={group.key}
+                group={group}
+                backgroundWorkers={backgroundWorkers}
+                pipelinePollerLastRun={pipelinePollerLastRun}
+                pipelineIssues={pipelineIssues}
+                orchestratorStatus={orchestratorStatus}
+                onToggleBgWorker={onToggleBgWorker}
+                onTriggerBgWorker={onTriggerBgWorker}
+                onUpdateInterval={onUpdateInterval}
+                events={events}
+              />
+            ))}
           </div>
         )}
         {activeSubTab === 'pipeline' && (
@@ -836,7 +853,7 @@ const styles = {
     cursor: 'pointer',
     outline: 'none',
   },
-  botPrPanel: {
+  depMergePanel: {
     borderTop: `1px solid ${theme.border}`,
     paddingTop: 8,
     marginTop: 8,
@@ -844,12 +861,12 @@ const styles = {
     flexDirection: 'column',
     gap: 8,
   },
-  botPrSection: {
+  depMergeSection: {
     display: 'flex',
     flexDirection: 'column',
     gap: 4,
   },
-  botPrSectionLabel: {
+  depMergeSectionLabel: {
     fontSize: 11,
     fontWeight: 600,
     color: theme.textMuted,
@@ -857,32 +874,32 @@ const styles = {
     letterSpacing: '0.3px',
     marginBottom: 2,
   },
-  botPrCheckbox: {
+  depMergeCheckbox: {
     display: 'flex',
     alignItems: 'center',
     gap: 8,
     cursor: 'pointer',
   },
-  botPrCheckboxLabel: {
+  depMergeCheckboxLabel: {
     fontSize: 12,
     color: theme.text,
   },
-  botPrRadio: {
+  depMergeRadio: {
     display: 'flex',
     alignItems: 'center',
     gap: 8,
     cursor: 'pointer',
   },
-  botPrRadioLabel: {
+  depMergeRadioLabel: {
     fontSize: 12,
     color: theme.text,
   },
-  botPrAddRow: {
+  depMergeAddRow: {
     display: 'flex',
     gap: 4,
     marginTop: 4,
   },
-  botPrInput: {
+  depMergeInput: {
     flex: 1,
     padding: '4px 8px',
     fontSize: 12,
@@ -892,7 +909,7 @@ const styles = {
     color: theme.text,
     outline: 'none',
   },
-  botPrAddBtn: {
+  depMergeAddBtn: {
     padding: '4px 12px',
     fontSize: 11,
     fontWeight: 600,
@@ -902,6 +919,64 @@ const styles = {
     color: theme.accent,
     cursor: 'pointer',
     transition: 'all 0.15s',
+  },
+  groupContainer: {
+    marginBottom: 24,
+  },
+  groupHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '8px 0',
+    cursor: 'pointer',
+    userSelect: 'none',
+    borderBottom: `1px solid ${theme.border}`,
+    marginBottom: 12,
+  },
+  groupDot: {
+    width: 10,
+    height: 10,
+    borderRadius: '50%',
+    flexShrink: 0,
+  },
+  groupLabel: {
+    fontSize: 14,
+    fontWeight: 600,
+    color: theme.textBright,
+    flex: 1,
+  },
+  groupCount: {
+    fontSize: 11,
+    color: theme.textMuted,
+    fontWeight: 600,
+  },
+  groupChevron: {
+    fontSize: 10,
+    color: theme.textMuted,
+    width: 16,
+    textAlign: 'center',
+  },
+  tagPill: {
+    fontSize: 9,
+    fontWeight: 600,
+    color: theme.textMuted,
+    background: theme.surfaceInset,
+    border: `1px solid ${theme.border}`,
+    borderRadius: 8,
+    padding: '1px 6px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.3px',
+  },
+  systemBadge: {
+    fontSize: 9,
+    fontWeight: 600,
+    color: theme.accent,
+    background: theme.accentSubtle,
+    border: `1px solid ${theme.accent}`,
+    borderRadius: 8,
+    padding: '1px 6px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.3px',
   },
 }
 

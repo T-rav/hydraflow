@@ -290,7 +290,7 @@ class ConfigFactory:
         transcript_summary_tool: Literal["claude", "codex", "pi"] = "claude",
         max_transcript_summary_chars: int = 50_000,
         pr_unstick_interval: int = 3600,
-        bot_pr_interval: int = 3600,
+        dependabot_merge_interval: int = 3600,
         stale_issue_interval: int = 86400,
         pr_unstick_batch_size: int = 10,
         max_sessions_per_repo: int = 10,
@@ -494,7 +494,7 @@ class ConfigFactory:
                 transcript_summary_tool=transcript_summary_tool,
                 max_transcript_summary_chars=max_transcript_summary_chars,
                 pr_unstick_interval=pr_unstick_interval,
-                bot_pr_interval=bot_pr_interval,
+                dependabot_merge_interval=dependabot_merge_interval,
                 stale_issue_interval=stale_issue_interval,
                 pr_unstick_batch_size=pr_unstick_batch_size,
                 max_sessions_per_repo=max_sessions_per_repo,
@@ -672,15 +672,25 @@ class PipelineHarness:
 
         self.triage_runner = AsyncMock()
         self.triage_runner.evaluate = AsyncMock()
+        self.triage_runner.set_tracing_context = MagicMock()
+        self.triage_runner.clear_tracing_context = MagicMock()
         self.planners = AsyncMock()
         self.planners.plan = AsyncMock()
+        self.planners.set_tracing_context = MagicMock()
+        self.planners.clear_tracing_context = MagicMock()
         self.agents = AsyncMock()
         self.agents.run = AsyncMock()
+        self.agents.set_tracing_context = MagicMock()
+        self.agents.clear_tracing_context = MagicMock()
         self.reviewers = AsyncMock()
         self.reviewers.review = AsyncMock()
         self.reviewers.fix_ci = AsyncMock()
+        self.reviewers.set_tracing_context = MagicMock()
+        self.reviewers.clear_tracing_context = MagicMock()
         self.hitl_runner = AsyncMock()
         self.hitl_runner.run = AsyncMock()
+        self.hitl_runner.set_tracing_context = MagicMock()
+        self.hitl_runner.clear_tracing_context = MagicMock()
         self._hitl_fetcher = AsyncMock()
         self._hitl_fetcher.fetch_issue_by_number = AsyncMock()
 
@@ -799,6 +809,7 @@ class PipelineHarness:
         self.prs.create_task = AsyncMock(return_value=12345)
         self.prs.close_task = AsyncMock()
         self.prs.close_issue = AsyncMock()
+        self.prs.find_existing_issue = AsyncMock(return_value=0)
         self.prs.push_branch = AsyncMock(return_value=True)
         self.prs.create_pr = AsyncMock(side_effect=_make_pr)
         self.prs.find_open_pr_for_branch = AsyncMock(side_effect=_find_pr)
@@ -1021,6 +1032,8 @@ def make_plan_phase(
     fetcher = AsyncMock()
     store = IssueStore(config, fetcher, bus)
     planners = AsyncMock()
+    planners.set_tracing_context = MagicMock()
+    planners.clear_tracing_context = MagicMock()
     prs = AsyncMock()
     prs.post_comment = AsyncMock()
     prs.remove_label = AsyncMock()
@@ -1092,7 +1105,7 @@ def make_implement_phase(
     # the production code may pass but test mocks don't declare.
     _original_run = agent_run
 
-    async def _kwargs_absorbing_run(*args: object, **kwargs: object) -> WorkerResult:
+    async def _kwargs_absorbing_run(*args: Any, **kwargs: Any) -> WorkerResult:
         import inspect  # noqa: PLC0415
 
         sig = inspect.signature(_original_run)
@@ -1110,6 +1123,13 @@ def make_implement_phase(
 
     mock_agents.run = _kwargs_absorbing_run
     mock_agents.hindsight = None
+    # set_tracing_context / clear_tracing_context are synchronous on the real
+    # runner; override the auto-generated async mocks with plain MagicMocks so
+    # callers don't get "coroutine was never awaited" warnings.
+    from unittest.mock import MagicMock  # noqa: PLC0415
+
+    mock_agents.set_tracing_context = MagicMock()
+    mock_agents.clear_tracing_context = MagicMock()
 
     # Mock IssueStore — get_implementable returns the supplied issues once
     mock_store = AsyncMock(spec=IssueStore)
@@ -1274,6 +1294,8 @@ def make_hitl_phase(config):
     workspaces.create = AsyncMock(return_value=config.workspace_base / "issue-42")
     workspaces.destroy = AsyncMock()
     hitl_runner = AsyncMock()
+    hitl_runner.set_tracing_context = MagicMock()
+    hitl_runner.clear_tracing_context = MagicMock()
     prs = AsyncMock()
     prs.remove_label = AsyncMock()
     prs.add_labels = AsyncMock()
@@ -1312,11 +1334,14 @@ def make_triage_phase(config):
     fetcher = AsyncMock()
     store = IssueStore(config, fetcher, bus)
     triage = AsyncMock()
+    triage.set_tracing_context = MagicMock()
+    triage.clear_tracing_context = MagicMock()
     prs = AsyncMock()
     prs.remove_label = AsyncMock()
     prs.add_labels = AsyncMock()
     prs.swap_pipeline_labels = AsyncMock()
     prs.post_comment = AsyncMock()
+    prs.find_existing_issue = AsyncMock(return_value=0)
     stop_event = asyncio.Event()
     phase = TriagePhase(config, state, store, triage, prs, bus, stop_event)
     return phase, state, triage, prs, store, stop_event
@@ -1452,6 +1477,7 @@ def make_pr_manager_mock(**overrides: Any) -> AsyncMock:
     prs.submit_review = AsyncMock(return_value=True)
     prs.create_task = AsyncMock(return_value=99)
     prs.close_task = AsyncMock()
+    prs.find_existing_issue = AsyncMock(return_value=0)
     prs.add_pr_labels = AsyncMock()
     prs.remove_pr_label = AsyncMock()
     for k, v in overrides.items():
@@ -1503,6 +1529,8 @@ def make_review_phase(
     mock_wt.destroy = AsyncMock()
 
     mock_reviewers = AsyncMock()
+    mock_reviewers.set_tracing_context = MagicMock()
+    mock_reviewers.clear_tracing_context = MagicMock()
     mock_prs = AsyncMock()
     # expected_pr_title is a sync staticmethod on PRManager — use MagicMock
     # so callers don't get an unawaited coroutine when invoking it without await.
@@ -1651,3 +1679,59 @@ def make_pr_manager(config: Any, event_bus: Any) -> Any:
     from pr_manager import PRManager
 
     return PRManager(config=config, event_bus=event_bus)
+
+
+class MemoryHarness:
+    """Pre-wired Hindsight mocks for memory lifecycle integration tests.
+
+    Composes with ``ConfigFactory`` and ``EventBus`` to provide:
+    - A mock ``HindsightClient`` with configurable per-bank recall responses
+    - A concrete ``BaseRunner`` subclass wired with the mock client
+    """
+
+    def __init__(
+        self,
+        tmp_path: Path,
+        *,
+        bank_responses: dict[str, list[Any]] | None = None,
+    ) -> None:
+        import logging
+
+        from base_runner import BaseRunner
+        from events import EventBus
+
+        self.config = ConfigFactory.create(
+            repo_root=tmp_path / "repo",
+            max_memory_prompt_chars=4000,
+        )
+
+        self.bus = EventBus()
+        self.mock_client = MagicMock()
+        self._bank_responses: dict[str, list[Any]] = bank_responses or {}
+
+        class _MemoryTestRunner(BaseRunner):
+            _log = logging.getLogger("hydraflow.memory_test_runner")
+
+        self._runner_cls = _MemoryTestRunner
+
+    def set_bank_responses(self, responses: dict[str, list[Any]]) -> None:
+        """Configure per-bank recall responses for the mock client."""
+        self._bank_responses = responses
+
+    def make_runner(self) -> Any:
+        """Create a BaseRunner wired with the mock Hindsight client."""
+        return self._runner_cls(
+            self.config,
+            self.bus,
+            hindsight=self.mock_client,
+        )
+
+    def make_runner_without_hindsight(self) -> Any:
+        """Create a BaseRunner with no Hindsight client (degradation mode)."""
+        return self._runner_cls(self.config, self.bus)
+
+    def recall_side_effect(
+        self, _client: Any, bank: Any, _query: str, **_kw: Any
+    ) -> list[Any]:
+        """Side-effect function for patching ``hindsight.recall_safe``."""
+        return self._bank_responses.get(str(bank), [])

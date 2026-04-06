@@ -31,6 +31,8 @@ if TYPE_CHECKING:
     from beads_manager import BeadsManager
     from epic import EpicManager
     from ports import IssueStorePort, PRPort
+    from repo_wiki import RepoWikiStore  # noqa: TCH004
+    from wiki_compiler import WikiCompiler  # noqa: TCH004
 
 logger = logging.getLogger("hydraflow.plan_phase")
 
@@ -55,6 +57,8 @@ class PlanPhase:
         epic_manager: EpicManager | None = None,
         research_runner: ResearchRunner | None = None,
         beads_manager: BeadsManager | None = None,
+        wiki_store: RepoWikiStore | None = None,
+        wiki_compiler: WikiCompiler | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -69,6 +73,8 @@ class PlanPhase:
         self._epic_manager = epic_manager
         self._research_runner = research_runner
         self._beads_manager = beads_manager
+        self._wiki_store = wiki_store
+        self._wiki_compiler = wiki_compiler
         self._suggest_memory = MemorySuggester(config, prs, state)
         self._escalator = PipelineEscalator(
             state,
@@ -77,6 +83,7 @@ class PlanPhase:
             harness_insights,
             origin_label=config.planner_label[0],
             hitl_label=config.hitl_label[0],
+            diagnose_label=config.diagnose_label[0],
             stage=PipelineStage.PLAN,
         )
 
@@ -206,9 +213,16 @@ class PlanPhase:
                 f"**Actionability score:** {result.actionability_score}/100 "
                 f"({result.actionability_rank})\n"
             )
+        # Collect any architecture diagrams the planner wrote to /tmp
+        diagram_attachments = PlannerRunner.collect_diagram_attachments(issue.id)
+        diagram_section = ""
+        if diagram_attachments:
+            diagram_section = f"\n\n## Architecture Diagrams\n\n{diagram_attachments}\n"
+
         comment_body = (
             f"## Implementation Plan\n\n"
             f"{result.plan}\n\n"
+            f"{diagram_section}"
             f"**Branch:** `{branch}`\n\n"
             f"---\n"
             f"{score_line}"
@@ -219,6 +233,10 @@ class PlanPhase:
         analyzer = PlanAnalyzer(repo_root=self._config.repo_root)
         analysis = analyzer.analyze(result.plan, issue.id)
         await self._transitioner.post_comment(issue.id, analysis.format_comment())
+
+        # Ingest plan knowledge into the per-repo wiki
+        await self._wiki_ingest_plan(issue.id, result.plan)
+
         # Activate eager-transition protection BEFORE the GitHub label swap
         # so that concurrent polling cannot re-queue the issue during the
         # non-atomic label add/remove window.
@@ -249,6 +267,44 @@ class PlanPhase:
             self._state.record_plan_duration(result.duration_seconds)
         self._state.increment_session_counter("planned")
         logger.info("Plan posted and labels swapped for issue #%d", issue.id)
+
+    _WIKI_INGEST_MAX_CHARS = 40_000
+
+    async def _wiki_ingest_plan(self, issue_number: int, plan_text: str) -> None:
+        """Ingest plan knowledge into the per-repo wiki.
+
+        Uses the LLM compiler for synthesis when available, falling back
+        to mechanical section extraction.  Skips if already ingested.
+        Never raises.
+        """
+        if self._wiki_store is None or not self._config.repo:
+            return
+        repo = self._config.repo
+        if self._wiki_store.is_ingested(repo, issue_number, "plan"):
+            return
+        try:
+            # Prefer LLM synthesis when compiler is available
+            if self._wiki_compiler is not None:
+                entries = await self._wiki_compiler.synthesize_ingest(
+                    repo,
+                    issue_number,
+                    "plan",
+                    plan_text[: self._WIKI_INGEST_MAX_CHARS],
+                )
+                if entries:
+                    self._wiki_store.ingest(repo, entries)
+                    self._wiki_store.mark_ingested(repo, issue_number, "plan")
+                    return
+
+            # Fallback: mechanical section extraction
+            from repo_wiki_ingest import ingest_from_plan  # noqa: PLC0415
+
+            ingest_from_plan(self._wiki_store, repo, issue_number, plan_text)
+            self._wiki_store.mark_ingested(repo, issue_number, "plan")
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Wiki ingest failed for plan #%d", issue_number, exc_info=True
+            )
 
     async def _create_beads_from_plan(self, issue: Task, plan: str) -> None:
         """Create bead tasks from a Task Graph plan and post mapping comment."""
@@ -483,11 +539,44 @@ class PlanPhase:
                                 research_result.error,
                             )
 
-                    result = await self._planners.plan(
-                        issue,
-                        worker_id=idx,
-                        research_context=research_context,
+                    from trace_rollup import write_phase_rollup  # noqa: PLC0415
+                    from tracing_context import (  # noqa: PLC0415
+                        TracingContext,
+                        source_to_phase,
                     )
+
+                    trace_phase = source_to_phase("planner")
+                    run_id = self._state.begin_trace_run(issue.id, trace_phase)
+                    self._planners.set_tracing_context(
+                        TracingContext(
+                            issue_number=issue.id,
+                            phase=trace_phase,
+                            source="planner",
+                            run_id=run_id,
+                        )
+                    )
+                    try:
+                        result = await self._planners.plan(
+                            issue,
+                            worker_id=idx,
+                            research_context=research_context,
+                        )
+                    finally:
+                        self._planners.clear_tracing_context()
+                        try:
+                            write_phase_rollup(
+                                config=self._config,
+                                issue_number=issue.id,
+                                phase=trace_phase,
+                                run_id=run_id,
+                            )
+                        except Exception:
+                            logger.warning(
+                                "Phase rollup failed for issue #%d",
+                                issue.id,
+                                exc_info=True,
+                            )
+                        self._state.end_trace_run(issue.id, trace_phase)
 
                     already_handled = False
                     ts_status = "failed"

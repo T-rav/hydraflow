@@ -20,10 +20,12 @@ from runner_utils import (
     stream_claude_process,
     terminate_processes,
 )
+from tracing_context import TracingContext
 
 if TYPE_CHECKING:
     from execution import SubprocessRunner
     from hindsight import HindsightClient
+    from repo_wiki import RepoWikiStore  # noqa: TCH004
 
 
 class BaseRunner:
@@ -45,6 +47,7 @@ class BaseRunner:
         *,
         hindsight: HindsightClient | None = None,
         credentials: Credentials | None = None,
+        wiki_store: RepoWikiStore | None = None,
     ) -> None:
         self._config = config
         self._bus = event_bus
@@ -53,7 +56,18 @@ class BaseRunner:
         self._prompt_telemetry = PromptTelemetry(config)
         self._last_context_stats: dict[str, int] = {"cache_hits": 0, "cache_misses": 0}
         self._hindsight = hindsight
+        # Per-phase-run tracing state, set by phase coordinators before
+        # invoking runner.run() and cleared after. None when tracing is
+        # not active (e.g. dry-run, background loops).
+        self._tracing_ctx: TracingContext | None = None
+        # Monotonic counter that allocates a unique ``subprocess_idx`` for
+        # every ``_execute`` call within a phase run. Reset whenever the
+        # tracing context is set or cleared. Without this, skills,
+        # pre-quality review loops, and quality fix loops would overwrite
+        # each other's ``subprocess-N.json`` files.
+        self._trace_subprocess_counter: int = 0
         self._credentials = credentials or Credentials()
+        self._wiki_store = wiki_store
 
     @property
     def active_count(self) -> int:
@@ -64,6 +78,27 @@ class BaseRunner:
     def hindsight(self) -> HindsightClient | None:
         """Read-only access to the Hindsight client for shared prefix building."""
         return self._hindsight
+
+    @property
+    def tracing_context(self) -> TracingContext | None:
+        """Read-only access to the active tracing context."""
+        return self._tracing_ctx
+
+    def set_tracing_context(self, ctx: TracingContext) -> None:
+        """Set the per-phase-run tracing context. Called by phase coordinators."""
+        self._tracing_ctx = ctx
+        self._trace_subprocess_counter = 0
+
+    def clear_tracing_context(self) -> None:
+        """Clear the tracing context. Called after the phase run completes."""
+        self._tracing_ctx = None
+        self._trace_subprocess_counter = 0
+
+    def _allocate_trace_subprocess_idx(self) -> int:
+        """Allocate the next unique subprocess index for this phase run."""
+        idx = self._trace_subprocess_counter
+        self._trace_subprocess_counter += 1
+        return idx
 
     def terminate(self) -> None:
         """Kill all active subprocesses."""
@@ -91,6 +126,25 @@ class BaseRunner:
         transcript = ""
         succeeded = False
         usage_stats: dict[str, object] = {}
+
+        # Build trace collector from active context, if any.
+        # Created ONCE for the entire _execute call (including all auth retries)
+        # and finalized exactly once on either success or exception.
+        trace_collector: TraceCollector | None = None
+        ctx = self._tracing_ctx
+        if ctx is not None:
+            from trace_collector import TraceCollector  # noqa: PLC0415
+
+            trace_collector = TraceCollector(
+                issue_number=ctx.issue_number,
+                phase=ctx.phase,
+                source=ctx.source,
+                subprocess_idx=self._allocate_trace_subprocess_idx(),
+                run_id=ctx.run_id,
+                config=self._config,
+                event_bus=self._bus,
+            )
+
         try:
             try:
                 import sentry_sdk as _sentry  # noqa: PLC0415
@@ -122,8 +176,11 @@ class BaseRunner:
                         runner=self._runner,
                         usage_stats=usage_stats,
                         gh_token=self._credentials.gh_token,
+                        trace_collector=trace_collector,
                     )
                     succeeded = True
+                    if trace_collector is not None:
+                        trace_collector.finalize(success=True)
                     return transcript
                 except AuthenticationRetryError as exc:
                     last_auth_error = exc
@@ -144,6 +201,10 @@ class BaseRunner:
                             exc,
                         )
             raise last_auth_error  # type: ignore[misc]
+        except Exception:
+            if trace_collector is not None:
+                trace_collector.finalize(success=False)
+            raise
         finally:
             duration = time.monotonic() - start
             source = str(event_data.get("source", "unknown"))
@@ -351,6 +412,11 @@ class BaseRunner:
             combined = combined[: self._config.max_memory_prompt_chars]
             memory_section = f"\n\n{combined}"
 
+        # Append repo wiki context (Karpathy-style compiled knowledge)
+        wiki_section = self._inject_repo_wiki(query_context=query_context)
+        if wiki_section:
+            memory_section += wiki_section
+
         self._last_context_stats = {
             "cache_hits": 0,
             "cache_misses": 0,
@@ -367,6 +433,33 @@ class BaseRunner:
         }
 
         return memory_section
+
+    def _inject_repo_wiki(self, *, query_context: str = "") -> str:
+        """Load compiled repo wiki context for the current target repo.
+
+        Returns a markdown string with relevant wiki pages, or empty
+        string if no wiki exists for this repo.
+        """
+        if self._wiki_store is None:
+            return ""
+
+        repo = self._config.repo
+        if not repo:
+            return ""
+
+        keywords = (
+            [w for w in query_context.split() if len(w) > 3][:10]
+            if query_context
+            else None
+        )
+        wiki_section = self._wiki_store.query(
+            repo,
+            keywords=keywords,
+            max_chars=self._config.max_repo_wiki_chars,
+        )
+        if wiki_section:
+            return f"\n\n{wiki_section}"
+        return ""
 
     def _consume_context_stats(self) -> dict[str, int]:
         stats = dict(self._last_context_stats)

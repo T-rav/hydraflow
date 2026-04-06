@@ -131,7 +131,7 @@ class HydraFlowOrchestrator:
             "runs_gc": svc.runs_gc_loop,
             "adr_reviewer": svc.adr_reviewer_loop,
             "health_monitor": svc.health_monitor_loop,
-            "bot_pr": svc.bot_pr_loop,
+            "dependabot_merge": svc.dependabot_merge_loop,
             "stale_issue": svc.stale_issue_loop,
             "sentry_ingest": svc.sentry_loop,
             "stale_issue_gc": svc.stale_issue_gc_loop,
@@ -139,6 +139,8 @@ class HydraFlowOrchestrator:
             "security_patch": svc.security_patch_loop,
             "code_grooming": svc.code_grooming_loop,
             "trace_mining": svc.trace_mining_loop,
+            "repo_wiki": svc.repo_wiki_loop,
+            "diagnostic": svc.diagnostic_loop,
         }
         self._bg_workers = BGWorkerManager(config, self._state, bg_loop_registry)
         self._hitl_ctrl = HITLController(svc.hitl_phase, svc.fetcher, config.hitl_label)
@@ -851,7 +853,7 @@ class HydraFlowOrchestrator:
             ("runs_gc", self._svc.runs_gc_loop.run),
             ("adr_reviewer", self._svc.adr_reviewer_loop.run),
             ("health_monitor", self._svc.health_monitor_loop.run),
-            ("bot_pr", self._svc.bot_pr_loop.run),
+            ("dependabot_merge", self._svc.dependabot_merge_loop.run),
             ("stale_issue", self._svc.stale_issue_loop.run),
             ("sentry_ingest", self._svc.sentry_loop.run),
             ("github_cache", self._svc.github_cache_loop.run),

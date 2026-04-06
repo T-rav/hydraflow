@@ -17,7 +17,9 @@ if TYPE_CHECKING:
     from hindsight import HindsightClient
     from hindsight_wal import HindsightWAL
     from ports import IssueStorePort, PRPort, WorkspacePort
+    from repo_wiki import RepoWikiStore  # noqa: TCH004 — used in __init__ signature
     from visual_validator import VisualValidator
+    from wiki_compiler import WikiCompiler  # noqa: TCH004 — used in __init__ signature
 
 from adr_utils import (
     adr_validation_reasons,
@@ -121,6 +123,8 @@ class ReviewPhase:
         wal: HindsightWAL | None = None,
         active_issues_cb: Callable[[], None] | None = None,
         transcript_summarizer: TranscriptSummarizer | None = None,
+        wiki_store: RepoWikiStore | None = None,
+        wiki_compiler: WikiCompiler | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -133,6 +137,8 @@ class ReviewPhase:
         self._bus = event_bus or EventBus()
         self._suggest_memory = MemorySuggester(config, prs, state)
         self._summarizer = transcript_summarizer
+        self._wiki_store = wiki_store
+        self._wiki_compiler = wiki_compiler
         self._update_bg_worker_status = update_bg_worker_status
         self._harness_insights = harness_insights
         self._insights = review_insights or ReviewInsightStore(
@@ -151,6 +157,47 @@ class ReviewPhase:
             from visual_validator import VisualValidator  # noqa: PLC0415
 
             self._visual_validator = VisualValidator(config)
+
+    _WIKI_INGEST_MAX_CHARS = 40_000
+
+    async def _wiki_ingest_review(
+        self, issue_number: int, *, transcript: str, summary: str
+    ) -> None:
+        """Ingest review knowledge into the per-repo wiki.
+
+        When the LLM compiler is available, passes the full *transcript*
+        for richer synthesis.  Falls back to *summary* for mechanical
+        extraction.  Skips if this issue+review was already ingested.
+        Never raises.
+        """
+        if self._wiki_store is None or not self._config.repo:
+            return
+        repo = self._config.repo
+        if self._wiki_store.is_ingested(repo, issue_number, "review"):
+            return
+        try:
+            # Prefer LLM synthesis from transcript when compiler is available
+            if self._wiki_compiler is not None and transcript:
+                entries = await self._wiki_compiler.synthesize_ingest(
+                    repo,
+                    issue_number,
+                    "review",
+                    transcript[: self._WIKI_INGEST_MAX_CHARS],
+                )
+                if entries:
+                    self._wiki_store.ingest(repo, entries)
+                    self._wiki_store.mark_ingested(repo, issue_number, "review")
+                    return
+
+            # Fallback: mechanical extraction from structured summary
+            from repo_wiki_ingest import ingest_from_review  # noqa: PLC0415
+
+            ingest_from_review(self._wiki_store, repo, issue_number, summary)
+            self._wiki_store.mark_ingested(repo, issue_number, "review")
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Wiki ingest failed for review #%d", issue_number, exc_info=True
+            )
 
     @property
     def active_issues(self) -> set[int]:
@@ -307,28 +354,33 @@ class ReviewPhase:
             )
 
         if reasons:
-            await self._escalate_to_hitl(
-                HitlEscalation(
-                    issue_number=issue.id,
-                    pr_number=None,
-                    cause="ADR review failed validation",
-                    origin_label=self._config.review_label[0],
-                    comment=(
-                        "## ADR Review Failed\n\n"
-                        "The ADR draft is not ready for finalization.\n\n"
-                        "**Required fixes:**\n"
-                        + "\n".join(f"- {reason}" for reason in reasons)
-                    ),
-                    post_on_pr=False,
-                    event_cause="adr_review_failed",
-                    task=issue,
+            # Re-queue for planning instead of HITL — ADR needs author fixes
+            await self._prs.post_comment(
+                issue.id,
+                "## ADR Review — Changes Needed\n\n"
+                "The ADR draft needs fixes before finalization.\n\n"
+                "**Required fixes:**\n"
+                + "\n".join(f"- {reason}" for reason in reasons)
+                + "\n\nUpdate the ADR and re-label to re-enter the pipeline.",
+            )
+            if issue is not None:
+                self._store.enqueue_transition(issue, "plan")
+            await self._transitioner.transition(issue.id, "plan")
+            await self._bus.publish(
+                HydraFlowEvent(
+                    type=EventType.SYSTEM_REROUTE,
+                    data={
+                        "issue": issue.id,
+                        "action": "requeued_to_plan",
+                        "reasons": reasons,
+                    },
                 )
             )
             return ReviewResult(
                 pr_number=0,
                 issue_number=issue.id,
                 verdict=ReviewVerdict.REQUEST_CHANGES,
-                summary="ADR review failed validation",
+                summary=f"ADR re-queued for fixes: {'; '.join(reasons)}",
             )
 
         await self._transitioner.post_comment(
@@ -427,33 +479,67 @@ class ReviewPhase:
         issue_map: dict[int, Task],
     ) -> ReviewResult:
         """Core review logic for a single PR — called inside the semaphore."""
-        await self._publish_review_status(pr, idx, "start")
-
-        guards = await self._run_initial_guards(idx, pr, issue_map)
-        if isinstance(guards, ReviewResult):
-            return guards
-
-        pre_review = await self._run_pre_review_checks(pr, guards.task)
-        if isinstance(pre_review, ReviewResult):
-            return pre_review
-
-        result = await self._run_and_post_review(
-            pr,
-            guards.task,
-            guards.workspace_path,
-            pre_review.diff,
-            idx,
-            code_scanning_alerts=pre_review.code_scanning_alerts,
+        from trace_rollup import write_phase_rollup  # noqa: PLC0415
+        from tracing_context import (  # noqa: PLC0415
+            TracingContext,
+            source_to_phase,
         )
 
-        return await self._run_post_review_actions(
-            pr,
-            guards.task,
-            guards.workspace_path,
-            result,
-            pre_review,
-            idx,
+        trace_phase = source_to_phase("reviewer")
+        run_id = self._state.begin_trace_run(pr.issue_number, trace_phase)
+        self._reviewers.set_tracing_context(
+            TracingContext(
+                issue_number=pr.issue_number,
+                phase=trace_phase,
+                source="reviewer",
+                run_id=run_id,
+            )
         )
+
+        try:
+            await self._publish_review_status(pr, idx, "start")
+
+            guards = await self._run_initial_guards(idx, pr, issue_map)
+            if isinstance(guards, ReviewResult):
+                return guards
+
+            pre_review = await self._run_pre_review_checks(pr, guards.task)
+            if isinstance(pre_review, ReviewResult):
+                return pre_review
+
+            result = await self._run_and_post_review(
+                pr,
+                guards.task,
+                guards.workspace_path,
+                pre_review.diff,
+                idx,
+                code_scanning_alerts=pre_review.code_scanning_alerts,
+            )
+
+            return await self._run_post_review_actions(
+                pr,
+                guards.task,
+                guards.workspace_path,
+                result,
+                pre_review,
+                idx,
+            )
+        finally:
+            self._reviewers.clear_tracing_context()
+            try:
+                write_phase_rollup(
+                    config=self._config,
+                    issue_number=pr.issue_number,
+                    phase=trace_phase,
+                    run_id=run_id,
+                )
+            except Exception:
+                logger.warning(
+                    "Phase rollup failed for PR #%d",
+                    pr.number,
+                    exc_info=True,
+                )
+            self._state.end_trace_run(pr.issue_number, trace_phase)
 
     async def _run_initial_guards(
         self,
@@ -934,6 +1020,12 @@ class ReviewPhase:
 
         if result.summary and pr.number > 0:
             await self._prs.post_pr_comment(pr.number, result.summary)
+            # Ingest review feedback into the per-repo wiki
+            await self._wiki_ingest_review(
+                pr.issue_number,
+                transcript=result.transcript,
+                summary=result.summary,
+            )
 
         if pr.number > 0 and result.verdict != ReviewVerdict.APPROVE:
             try:
@@ -1472,6 +1564,16 @@ class ReviewPhase:
             stage=PipelineStage.REVIEW,
         )
         cause = f"CI failed after {ci_fix_attempts} fix attempt(s): {logs[:200]}"
+        # Pre-store richer context with full CI logs before routing to diagnostic loop
+        from models import EscalationContext  # noqa: PLC0415
+
+        context = EscalationContext(
+            cause=cause,
+            origin_phase="review",
+            ci_logs=logs,
+            pr_number=pr.number,
+        )
+        self._state.set_escalation_context(issue.id, context)
         await self._escalate_to_hitl(
             HitlEscalation(
                 issue_number=issue.id,
@@ -1664,33 +1766,31 @@ class ReviewPhase:
         await publish_review_status(self._bus, pr, worker_id, status)
 
     async def _escalate_to_hitl(self, esc: HitlEscalation) -> None:
-        """Record HITL escalation state, swap labels, post comment, publish event."""
+        """Route escalation through diagnostic loop instead of direct HITL."""
+        from models import EscalationContext  # noqa: PLC0415
+
+        # Build escalation context if not already stored by the call site
+        existing = self._state.get_escalation_context(esc.issue_number)
+        if existing is None:
+            context = EscalationContext(
+                cause=esc.cause,
+                origin_phase="review",
+                pr_number=esc.pr_number,
+            )
+            self._state.set_escalation_context(esc.issue_number, context)
+
         self._state.set_hitl_origin(esc.issue_number, esc.origin_label)
         self._state.set_hitl_cause(esc.issue_number, esc.cause)
         self._state.record_hitl_escalation()
         try:
-            from memory_scoring import (  # noqa: PLC0415
-                MemoryScorer,
-                OutcomeRecord,
-                _classify_context,
-            )
+            from memory_scoring import MemoryScorer  # noqa: PLC0415
 
             scorer = MemoryScorer(self._config.memory_dir)
-            context = (
-                _classify_context(list(esc.task.tags))
-                if esc.task is not None
-                else "feature"
-            )
-            scorer.record_outcome(
-                OutcomeRecord(
-                    issue_id=esc.issue_number,
-                    outcome="failure",
-                    score=-1.0,
-                    digest_hash=self._state.get_digest_hash(esc.issue_number) or "",
-                    failure_category=esc.cause or "hitl_escalation",
-                    summary=f"HITL escalation: {esc.cause}",
-                    context=context,
-                )
+            scorer.record_hitl_outcome(
+                issue_id=esc.issue_number,
+                digest_hash=self._state.get_digest_hash(esc.issue_number) or "",
+                cause=esc.cause,
+                tags=list(esc.task.tags) if esc.task is not None else [],
             )
         except Exception:
             logger.debug("Failed to record HITL outcome", exc_info=True)
@@ -1698,9 +1798,9 @@ class ReviewPhase:
             self._state.set_hitl_visual_evidence(esc.issue_number, esc.visual_evidence)
 
         if esc.task is not None:
-            self._store.enqueue_transition(esc.task, "hitl")
+            self._store.enqueue_transition(esc.task, "diagnose")
         await self._transitioner.transition(
-            esc.issue_number, "hitl", pr_number=esc.pr_number
+            esc.issue_number, "diagnose", pr_number=esc.pr_number
         )
 
         if esc.post_on_pr and esc.pr_number and esc.pr_number > 0:
@@ -1710,7 +1810,7 @@ class ReviewPhase:
 
         event_data: dict[str, object] = {
             "issue": esc.issue_number,
-            "status": "escalated",
+            "status": "diagnostic",
             "role": "reviewer",
             "cause": esc.event_cause or esc.cause,
         }
@@ -1929,11 +2029,22 @@ class ReviewPhase:
                 pr_number=pr.number,
             )
             await self._publish_review_status(pr, worker_id, "escalating")
+            # Pre-store richer context with agent transcript before routing to diagnostic loop
+            from models import EscalationContext  # noqa: PLC0415
+
+            cap_cause = f"Review fix cap exceeded after {max_attempts} attempt(s)"
+            cap_context = EscalationContext(
+                cause=cap_cause,
+                origin_phase="review",
+                pr_number=pr.number,
+                agent_transcript=result.transcript if result.transcript else None,
+            )
+            self._state.set_escalation_context(pr.issue_number, cap_context)
             await self._escalate_to_hitl(
                 HitlEscalation(
                     issue_number=pr.issue_number,
                     pr_number=pr.number,
-                    cause=f"Review fix cap exceeded after {max_attempts} attempt(s)",
+                    cause=cap_cause,
                     origin_label=self._config.review_label[0],
                     comment=(
                         f"**Review fix cap exceeded** — {max_attempts} review fix "

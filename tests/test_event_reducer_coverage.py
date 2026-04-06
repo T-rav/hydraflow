@@ -50,6 +50,10 @@ SKIP_LIST: set[str] = {
     # Product track events are consumed server-side (shape phase polling, memory writes)
     "discover_update",
     "shape_update",
+    # System reroute events are internal routing decisions (park, requeue), not dashboard state
+    "system_reroute",
+    # Diagnostic events are internal loop state, not dashboard-dispatched
+    "diagnostic_update",
 }
 
 

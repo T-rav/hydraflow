@@ -772,6 +772,53 @@ class HitlEscalation:
     visual_evidence: VisualEvidence | None = None
 
 
+# --- Diagnostic Self-Healing ---
+
+
+class Severity(StrEnum):
+    """Priority classification for diagnostic escalations."""
+
+    P0_SECURITY = "P0"
+    P1_BLOCKING = "P1"
+    P2_FUNCTIONAL = "P2"
+    P3_WIRING = "P3"
+    P4_HOUSEKEEPING = "P4"
+
+
+class AttemptRecord(BaseModel):
+    """Record of a single diagnostic fix attempt."""
+
+    attempt_number: int
+    changes_made: bool
+    error_summary: str
+    timestamp: str
+
+
+class EscalationContext(BaseModel):
+    """Full context captured at escalation time for the diagnostic agent."""
+
+    cause: str
+    origin_phase: str
+    ci_logs: str | None = None
+    review_comments: list[str] = Field(default_factory=list)
+    pr_diff: str | None = None
+    pr_number: int | None = None
+    code_scanning_alerts: list[str] = Field(default_factory=list)
+    previous_attempts: list[AttemptRecord] = Field(default_factory=list)
+    agent_transcript: str | None = None
+
+
+class DiagnosisResult(BaseModel):
+    """Structured output from diagnostic agent Stage 1."""
+
+    root_cause: str
+    severity: Severity
+    fixable: bool
+    fix_plan: str
+    human_guidance: str
+    affected_files: list[str] = Field(default_factory=list)
+
+
 # --- Reviews ---
 
 
@@ -1304,7 +1351,7 @@ class TraceSkillProfile(BaseModel):
 
 
 class TraceSummary(BaseModel):
-    """Parsed summary of Monocle trace files for one issue/phase."""
+    """Aggregated trace data for one phase run of one issue."""
 
     issue_number: int
     phase: str
@@ -1314,6 +1361,60 @@ class TraceSummary(BaseModel):
     tokens: TraceTokenStats
     tools: TraceToolProfile
     skills: TraceSkillProfile
+    # New fields for in-process tracing (default for backward compatibility):
+    run_id: int = 0
+    subprocess_count: int = 0
+    crashed: bool = False
+    phase_run_started_at: str = ""
+    phase_run_ended_at: str = ""
+
+
+class ToolCallSpan(BaseModel):
+    """One tool invocation observed during a subprocess."""
+
+    tool_name: str
+    started_at: str  # ISO 8601
+    duration_ms: int
+    input_summary: str  # human-readable preview from _summarize_tool
+    succeeded: bool
+    error: str | None = None
+    # Stream-level tool invocation id (Claude tool_use_id, codex function_call
+    # id, pi invocationId). Used to match tool_result events back to the
+    # right span when multiple tools are in flight concurrently.
+    tool_use_id: str | None = None
+
+
+class SkillResultRecord(BaseModel):
+    """Outcome of a single skill loop run."""
+
+    skill_name: str
+    passed: bool
+    attempts: int
+    duration_seconds: float
+    blocking: bool
+
+
+class SubprocessTrace(BaseModel):
+    """One subprocess trace file (`run-N/subprocess-<idx>.json`)."""
+
+    issue_number: int
+    phase: str
+    source: str
+    run_id: int
+    subprocess_idx: int
+    backend: str  # "claude" / "codex" / "pi"
+    started_at: str  # ISO 8601
+    ended_at: str | None = None
+    success: bool
+    crashed: bool = False
+    error: str | None = None
+
+    tokens: TraceTokenStats
+    tools: TraceToolProfile
+    tool_calls: list[ToolCallSpan] = Field(default_factory=list)
+    skill_results: list[SkillResultRecord] = Field(default_factory=list)
+    turn_count: int = 0
+    inference_count: int = 0
 
 
 class HITLSummaryCacheEntry(BaseModel):
@@ -1395,8 +1496,8 @@ class Release(BaseModel):
     tag: str = ""
 
 
-class BotPRSettings(BaseModel):
-    """Configuration for the bot PR auto-merge worker."""
+class DependabotMergeSettings(BaseModel):
+    """Configuration for the Dependabot merge auto-merge worker."""
 
     authors: list[str] = Field(default_factory=lambda: ["dependabot[bot]"])
     failure_strategy: Literal["skip", "hitl", "close"] = "skip"
@@ -1496,8 +1597,10 @@ class StateData(BaseModel):
     bead_mappings: dict[str, dict[str, str]] = Field(default_factory=dict)
     completed_timelines: dict[str, CompletedTimeline] = Field(default_factory=dict)
     digest_hashes: dict[str, str] = Field(default_factory=dict)
-    bot_pr_settings: BotPRSettings = Field(default_factory=BotPRSettings)
-    bot_pr_processed: list[int] = Field(default_factory=list)
+    dependabot_merge_settings: DependabotMergeSettings = Field(
+        default_factory=DependabotMergeSettings
+    )
+    dependabot_merge_processed: list[int] = Field(default_factory=list)
     shape_conversations: dict[str, ShapeConversation] = Field(default_factory=dict)
     shape_responses: dict[str, str] = Field(default_factory=dict)
     stale_issue_settings: StaleIssueSettings = Field(default_factory=StaleIssueSettings)
@@ -1512,6 +1615,15 @@ class StateData(BaseModel):
         default_factory=CodeGroomingSettings
     )
     code_grooming_filed: list[str] = Field(default_factory=list)
+    escalation_contexts: dict[str, dict[str, object]] = Field(default_factory=dict)
+    diagnostic_attempts: dict[str, list[dict[str, object]]] = Field(
+        default_factory=dict
+    )
+    diagnosis_severities: dict[str, str] = Field(default_factory=dict)
+    sentry_creation_attempts: dict[str, int] = Field(default_factory=dict)
+    trace_runs: dict[str, dict[str, object]] = Field(
+        default_factory=lambda: {"active": {}, "next_run_id": {}}
+    )
     last_updated: str | None = None
 
 

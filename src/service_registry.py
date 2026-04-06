@@ -16,11 +16,13 @@ from agent import AgentRunner
 from base_background_loop import LoopDeps
 from baseline_policy import BaselinePolicy
 from beads_manager import BeadsManager
-from bot_pr_loop import BotPRLoop
 from ci_monitor_loop import CIMonitorLoop  # noqa: TCH001
 from code_grooming_loop import CodeGroomingLoop  # noqa: TCH001
 from config import Credentials, HydraFlowConfig
 from crate_manager import CrateManager
+from dependabot_merge_loop import DependabotMergeLoop
+from diagnostic_loop import DiagnosticLoop  # noqa: TCH001
+from diagnostic_runner import DiagnosticRunner
 from discover_phase import DiscoverPhase  # noqa: TCH001
 from discover_runner import DiscoverRunner
 from docker_runner import get_docker_runner
@@ -47,6 +49,8 @@ from post_merge_handler import PostMergeHandler
 from pr_manager import PRManager
 from pr_unsticker import PRUnsticker
 from pr_unsticker_loop import PRUnstickerLoop
+from repo_wiki import RepoWikiStore
+from repo_wiki_loop import RepoWikiLoop  # noqa: TCH001
 from report_issue_loop import ReportIssueLoop
 from research_runner import ResearchRunner
 from retrospective import RetrospectiveCollector
@@ -133,7 +137,7 @@ class ServiceRegistry:
     runs_gc_loop: RunsGCLoop
     adr_reviewer_loop: ADRReviewerLoop
     health_monitor_loop: HealthMonitorLoop
-    bot_pr_loop: BotPRLoop
+    dependabot_merge_loop: DependabotMergeLoop
     stale_issue_loop: StaleIssueLoop
     sentry_loop: SentryLoop
     stale_issue_gc_loop: StaleIssueGCLoop
@@ -141,6 +145,9 @@ class ServiceRegistry:
     security_patch_loop: SecurityPatchLoop
     code_grooming_loop: CodeGroomingLoop
     trace_mining_loop: TraceMiningLoop
+    repo_wiki_store: RepoWikiStore
+    repo_wiki_loop: RepoWikiLoop
+    diagnostic_loop: DiagnosticLoop
 
     # Optional integrations
     hindsight: HindsightClient | None = None
@@ -234,6 +241,16 @@ def build_services(
     # Core runners
     workspaces = WorkspaceManager(config, credentials=credentials)  # noqa: F841
     subprocess_runner = get_docker_runner(config, credentials=credentials)
+    repo_wiki_store = RepoWikiStore(
+        wiki_root=config.data_path("repo_wiki"),
+    )
+    from wiki_compiler import WikiCompiler  # noqa: PLC0415
+
+    wiki_compiler = WikiCompiler(
+        config=config,
+        runner=subprocess_runner,
+        credentials=credentials,
+    )
     agents = AgentRunner(
         config,
         event_bus,
@@ -242,6 +259,7 @@ def build_services(
         dolt=dolt_backend,
         wal=hindsight_wal,
         credentials=credentials,
+        wiki_store=repo_wiki_store,
     )
     planners = PlannerRunner(
         config,
@@ -249,6 +267,7 @@ def build_services(
         runner=subprocess_runner,
         hindsight=hindsight_client,
         credentials=credentials,
+        wiki_store=repo_wiki_store,
     )
     researcher = ResearchRunner(
         config,
@@ -256,6 +275,7 @@ def build_services(
         runner=subprocess_runner,
         hindsight=hindsight_client,
         credentials=credentials,
+        wiki_store=repo_wiki_store,
     )
     prs = PRManager(config, event_bus, credentials=credentials)
     reviewers = ReviewRunner(
@@ -264,6 +284,7 @@ def build_services(
         runner=subprocess_runner,
         hindsight=hindsight_client,
         credentials=credentials,
+        wiki_store=repo_wiki_store,
     )
     hitl_runner = HITLRunner(
         config,
@@ -271,6 +292,7 @@ def build_services(
         runner=subprocess_runner,
         hindsight=hindsight_client,
         credentials=credentials,
+        wiki_store=repo_wiki_store,
     )
     triage = TriageRunner(
         config,
@@ -278,6 +300,7 @@ def build_services(
         runner=subprocess_runner,
         hindsight=hindsight_client,
         credentials=credentials,
+        wiki_store=repo_wiki_store,
     )
     summarizer = TranscriptSummarizer(
         config, prs, event_bus, state, runner=subprocess_runner, credentials=credentials
@@ -370,6 +393,8 @@ def build_services(
         epic_manager=epic_manager,
         research_runner=researcher,
         beads_manager=beads_mgr,
+        wiki_store=repo_wiki_store,
+        wiki_compiler=wiki_compiler,
     )
     hitl_phase = HITLPhase(
         config,
@@ -501,6 +526,8 @@ def build_services(
         wal=hindsight_wal,
         active_issues_cb=active_issues_cb,
         transcript_summarizer=summarizer,
+        wiki_store=repo_wiki_store,
+        wiki_compiler=wiki_compiler,
     )
 
     # Background loops — shared deps bundled into a single LoopDeps object
@@ -552,7 +579,7 @@ def build_services(
         deps=loop_deps,
         prs=prs,
     )
-    bot_pr_loop = BotPRLoop(
+    dependabot_merge_loop = DependabotMergeLoop(  # noqa: F841
         config=config,
         cache=gh_cache,
         prs=prs,
@@ -566,6 +593,13 @@ def build_services(
         deps=loop_deps,
     )
     gh_cache_loop = GitHubCacheLoop(config, gh_cache, deps=loop_deps)  # noqa: F841
+    from dedup_store import DedupStore  # noqa: PLC0415
+
+    sentry_dedup = DedupStore(
+        "sentry_filed_ids",
+        config.data_root / "dedup" / "sentry_filed.json",
+        dolt=dolt_backend,
+    )
     sentry_loop = SentryLoop(
         config=config,
         prs=prs,
@@ -573,6 +607,8 @@ def build_services(
         store=store,
         runner=subprocess_runner,
         credentials=credentials,
+        dedup=sentry_dedup,
+        state=state,
     )
     stale_issue_gc_loop = StaleIssueGCLoop(  # noqa: F841
         config=config,
@@ -599,6 +635,21 @@ def build_services(
         config=config,
         state=state,
         hindsight=hindsight_client,
+        deps=loop_deps,
+    )
+    repo_wiki_loop = RepoWikiLoop(
+        config=config,
+        wiki_store=repo_wiki_store,
+        deps=loop_deps,
+        wiki_compiler=wiki_compiler,
+        state=state,
+    )
+    diagnostic_runner = DiagnosticRunner(config=config, event_bus=event_bus)
+    diagnostic_loop = DiagnosticLoop(
+        config=config,
+        runner=diagnostic_runner,
+        prs=prs,
+        state=state,
         deps=loop_deps,
     )
 
@@ -640,7 +691,7 @@ def build_services(
         runs_gc_loop=runs_gc_loop,
         adr_reviewer_loop=adr_reviewer_loop,
         health_monitor_loop=health_monitor_loop,
-        bot_pr_loop=bot_pr_loop,
+        dependabot_merge_loop=dependabot_merge_loop,
         stale_issue_loop=stale_issue_loop,
         hindsight=hindsight_client,
         hindsight_wal=hindsight_wal,
@@ -652,4 +703,7 @@ def build_services(
         security_patch_loop=security_patch_loop,
         code_grooming_loop=code_grooming_loop,
         trace_mining_loop=trace_mining_loop,
+        repo_wiki_store=repo_wiki_store,
+        repo_wiki_loop=repo_wiki_loop,
+        diagnostic_loop=diagnostic_loop,
     )

@@ -79,7 +79,9 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         3,
     ),
     ("max_diff_sanity_attempts", "HYDRAFLOW_MAX_DIFF_SANITY_ATTEMPTS", 1),
+    ("max_scope_check_attempts", "HYDRAFLOW_MAX_SCOPE_CHECK_ATTEMPTS", 1),
     ("max_test_adequacy_attempts", "HYDRAFLOW_MAX_TEST_ADEQUACY_ATTEMPTS", 1),
+    ("max_plan_compliance_attempts", "HYDRAFLOW_MAX_PLAN_COMPLIANCE_ATTEMPTS", 1),
     ("max_review_fix_attempts", "HYDRAFLOW_MAX_REVIEW_FIX_ATTEMPTS", 2),
     ("min_review_findings", "HYDRAFLOW_MIN_REVIEW_FINDINGS", 3),
     ("max_issue_body_chars", "HYDRAFLOW_MAX_ISSUE_BODY_CHARS", 10_000),
@@ -94,7 +96,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("max_sessions_per_repo", "HYDRAFLOW_MAX_SESSIONS_PER_REPO", 10),
     ("max_transcript_summary_chars", "HYDRAFLOW_MAX_TRANSCRIPT_SUMMARY_CHARS", 50_000),
     ("pr_unstick_interval", "HYDRAFLOW_PR_UNSTICK_INTERVAL", 3600),
-    ("bot_pr_interval", "HYDRAFLOW_BOT_PR_INTERVAL", 3600),
+    ("dependabot_merge_interval", "HYDRAFLOW_DEPENDABOT_MERGE_INTERVAL", 3600),
     ("report_issue_interval", "HYDRAFLOW_REPORT_ISSUE_INTERVAL", 30),
     ("stale_report_threshold_hours", "HYDRAFLOW_STALE_REPORT_THRESHOLD_HOURS", 6),
     ("epic_monitor_interval", "HYDRAFLOW_EPIC_MONITOR_INTERVAL", 1800),
@@ -125,6 +127,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("quality_timeout", "HYDRAFLOW_QUALITY_TIMEOUT", 3600),
     ("git_command_timeout", "HYDRAFLOW_GIT_COMMAND_TIMEOUT", 30),
     ("summarizer_timeout", "HYDRAFLOW_SUMMARIZER_TIMEOUT", 120),
+    ("wiki_compilation_timeout", "HYDRAFLOW_WIKI_COMPILATION_TIMEOUT", 120),
     ("error_output_max_chars", "HYDRAFLOW_ERROR_OUTPUT_MAX_CHARS", 3000),
     (
         "max_troubleshooting_prompt_chars",
@@ -161,9 +164,13 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("stale_issue_interval", "HYDRAFLOW_STALE_ISSUE_INTERVAL", 86400),
     ("sentry_poll_interval", "SENTRY_POLL_INTERVAL", 600),
     ("sentry_min_events", "SENTRY_MIN_EVENTS", 2),
+    ("sentry_max_creation_attempts", "SENTRY_MAX_CREATION_ATTEMPTS", 3),
     ("security_patch_interval", "HYDRAFLOW_SECURITY_PATCH_INTERVAL", 3600),
     ("code_grooming_interval", "HYDRAFLOW_CODE_GROOMING_INTERVAL", 86400),
     ("trace_mining_interval", "HYDRAFLOW_TRACE_MINING_INTERVAL", 3600),
+    ("repo_wiki_interval", "HYDRAFLOW_REPO_WIKI_INTERVAL", 3600),
+    ("max_repo_wiki_chars", "HYDRAFLOW_MAX_REPO_WIKI_CHARS", 15_000),
+    ("diagnostic_interval", "HYDRAFLOW_DIAGNOSTIC_INTERVAL", 30),
 ]
 
 _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
@@ -180,6 +187,7 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("background_model", "HYDRAFLOW_BACKGROUND_MODEL", ""),
     ("memory_compaction_model", "HYDRAFLOW_MEMORY_COMPACTION_MODEL", "haiku"),
     ("transcript_summary_model", "HYDRAFLOW_TRANSCRIPT_SUMMARY_MODEL", "haiku"),
+    ("wiki_compilation_model", "HYDRAFLOW_WIKI_COMPILATION_MODEL", "haiku"),
     ("triage_model", "HYDRAFLOW_TRIAGE_MODEL", "haiku"),
     ("subskill_model", "HYDRAFLOW_SUBSKILL_MODEL", "haiku"),
     ("debug_model", "HYDRAFLOW_DEBUG_MODEL", "opus"),
@@ -253,6 +261,7 @@ _ENV_LITERAL_OVERRIDES: list[tuple[str, str]] = [
     ("planner_tool", "HYDRAFLOW_PLANNER_TOOL"),
     ("triage_tool", "HYDRAFLOW_TRIAGE_TOOL"),
     ("transcript_summary_tool", "HYDRAFLOW_TRANSCRIPT_SUMMARY_TOOL"),
+    ("wiki_compilation_tool", "HYDRAFLOW_WIKI_COMPILATION_TOOL"),
     ("memory_compaction_tool", "HYDRAFLOW_MEMORY_COMPACTION_TOOL"),
     ("ac_tool", "HYDRAFLOW_AC_TOOL"),
     ("verification_judge_tool", "HYDRAFLOW_VERIFICATION_JUDGE_TOOL"),
@@ -292,6 +301,8 @@ _ENV_LABEL_MAP: dict[str, tuple[str, list[str]]] = {
     "HYDRAFLOW_LABEL_EPIC": ("epic_label", ["hydraflow-epic"]),
     "HYDRAFLOW_LABEL_EPIC_CHILD": ("epic_child_label", ["hydraflow-epic-child"]),
     "HYDRAFLOW_LABEL_VERIFY": ("verify_label", ["hydraflow-verify"]),
+    "HYDRAFLOW_LABEL_PARKED": ("parked_label", ["hydraflow-parked"]),
+    "HYDRAFLOW_LABEL_DIAGNOSE": ("diagnose_label", ["hydraflow-diagnose"]),
 }
 
 
@@ -384,11 +395,23 @@ class HydraFlowConfig(BaseModel):
         le=3,
         description="Max diff sanity check passes (0 = disabled)",
     )
+    max_scope_check_attempts: int = Field(
+        default=1,
+        ge=0,
+        le=3,
+        description="Max scope check passes (0 = disabled)",
+    )
     max_test_adequacy_attempts: int = Field(
         default=1,
         ge=0,
         le=3,
         description="Max test adequacy check passes (0 = disabled)",
+    )
+    max_plan_compliance_attempts: int = Field(
+        default=1,
+        ge=0,
+        le=3,
+        description="Max plan compliance check passes (0 = disabled)",
     )
     max_review_fix_attempts: int = Field(
         default=2,
@@ -467,6 +490,26 @@ class HydraFlowConfig(BaseModel):
     dup_label: list[str] = Field(
         default=["hydraflow-dup"],
         description="Labels applied when issue is already satisfied (no changes needed)",
+    )
+    parked_label: list[str] = Field(
+        default=["hydraflow-parked"],
+        description="Labels for issues parked awaiting author clarification (OR logic)",
+    )
+    diagnose_label: list[str] = Field(
+        default=["hydraflow-diagnose"],
+        description="Labels for issues in diagnostic analysis (OR logic)",
+    )
+    max_diagnosticians: int = Field(
+        default=1,
+        description="Max concurrent diagnostic workers",
+    )
+    diagnostic_interval: int = Field(
+        default=30,
+        description="Poll interval in seconds for diagnostic loop",
+    )
+    max_diagnostic_attempts: int = Field(
+        default=2,
+        description="Fix attempts before escalating to HITL",
     )
     epic_label: list[str] = Field(
         default=["hydraflow-epic"],
@@ -838,6 +881,12 @@ class HydraFlowConfig(BaseModel):
         le=1000,
         description="Minimum Sentry event count before filing a GitHub issue",
     )
+    sentry_max_creation_attempts: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Max times to retry filing a GitHub issue for a Sentry error before parking",
+    )
 
     # Security patch monitoring
     security_patch_interval: int = Field(
@@ -856,6 +905,34 @@ class HydraFlowConfig(BaseModel):
         ge=3600,
         le=604800,
         description="Seconds between code grooming audit cycles",
+    )
+
+    # Repo wiki
+    repo_wiki_interval: int = Field(
+        default=3600,
+        ge=300,
+        le=604800,
+        description="Seconds between repo wiki lint cycles",
+    )
+    max_repo_wiki_chars: int = Field(
+        default=15_000,
+        ge=1_000,
+        le=100_000,
+        description="Max characters for repo wiki context injected into agent prompts",
+    )
+    wiki_compilation_model: str = Field(
+        default="haiku",
+        description="Model for wiki compilation and synthesis",
+    )
+    wiki_compilation_tool: Literal["claude", "codex", "pi"] = Field(
+        default="claude",
+        description="CLI backend for wiki compilation",
+    )
+    wiki_compilation_timeout: int = Field(
+        default=120,
+        ge=30,
+        le=600,
+        description="Timeout in seconds for wiki compilation LLM calls",
     )
 
     # Hindsight semantic memory
@@ -1237,11 +1314,11 @@ class HydraFlowConfig(BaseModel):
         le=86400,
         description="Seconds between PR unsticker polls",
     )
-    bot_pr_interval: int = Field(
+    dependabot_merge_interval: int = Field(
         default=3600,
         ge=60,
         le=86400,
-        description="Seconds between bot PR auto-merge polls",
+        description="Seconds between Dependabot merge auto-merge polls",
     )
     pr_unstick_batch_size: int = Field(
         default=10,
@@ -1522,6 +1599,16 @@ class HydraFlowConfig(BaseModel):
     def visual_reports_dir(self) -> Path:
         """Return the directory for visual validation reports."""
         return self.data_root / "visual-reports"
+
+    @property
+    def diagnostics_dir(self) -> Path:
+        """Directory for factory diagnostics data."""
+        return self.data_root / "diagnostics"
+
+    @property
+    def factory_metrics_path(self) -> Path:
+        """Path to the factory metrics JSONL store."""
+        return self.diagnostics_dir / "factory_metrics.jsonl"
 
     def data_path(self, *parts: str | os.PathLike[str]) -> Path:
         """Return an absolute path inside the HydraFlow data_root."""
