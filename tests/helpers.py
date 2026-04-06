@@ -1525,6 +1525,8 @@ def make_review_phase(
     mock_wt.destroy = AsyncMock()
 
     mock_reviewers = AsyncMock()
+    mock_reviewers.set_tracing_context = MagicMock()
+    mock_reviewers.clear_tracing_context = MagicMock()
     mock_prs = AsyncMock()
     # expected_pr_title is a sync staticmethod on PRManager — use MagicMock
     # so callers don't get an unawaited coroutine when invoking it without await.
