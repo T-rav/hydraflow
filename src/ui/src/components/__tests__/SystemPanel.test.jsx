@@ -41,7 +41,7 @@ const mockBgWorkers = [
   { name: 'retrospective', status: 'error', enabled: true, last_run: '2026-02-20T10:28:00Z', details: { last_issue: 42 } },
   { name: 'health_monitor', status: 'ok', enabled: true, last_run: '2026-02-20T10:25:00Z', details: {} },
   { name: 'review_insights', status: 'disabled', enabled: false, last_run: null, details: {} },
-  { name: 'bot_pr', status: 'ok', enabled: false, last_run: null, details: {} },
+  { name: 'dependabot_merge', status: 'ok', enabled: false, last_run: null, details: {} },
 ]
 
 describe('SystemPanel', () => {
@@ -93,9 +93,9 @@ describe('SystemPanel', () => {
       }
     })
 
-    it('renders Bot PR Manager worker card', () => {
+    it('renders Dependabot Merge worker card', () => {
       render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
-      expect(screen.getByText('Bot PR Manager')).toBeInTheDocument()
+      expect(screen.getByText('Dependabot Merge')).toBeInTheDocument()
     })
 
     it('shows correct status dot color for ok workers when orchestrator running', () => {
@@ -193,29 +193,26 @@ describe('SystemPanel', () => {
       expect(screen.getByText('unpruned tokens est')).toBeInTheDocument()
     })
 
-    it('shows System section heading that groups system workers', () => {
+    it('shows group headers that organize workers by category', () => {
       render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
-      expect(screen.getByText('System')).toBeInTheDocument()
+      expect(screen.getByText('Repo Health')).toBeInTheDocument()
+      expect(screen.getByText('Learning & Insights')).toBeInTheDocument()
+      expect(screen.getByText('Operations')).toBeInTheDocument()
+      expect(screen.getByText('Intake')).toBeInTheDocument()
     })
 
-    it('shows system worker status as colored pill (green for ok) when orchestrator running', () => {
+    it('shows system badge on system workers', () => {
       mockUseHydraFlow.mockReturnValue(defaultMockContext({ orchestratorStatus: 'running' }))
       render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
-      const okPill = screen.getByTestId('status-pill-memory_sync')
-      expect(okPill).toHaveTextContent('ok')
-      expect(okPill.style.color).toBe('var(--green)')
-      expect(okPill.style.background).toBe('var(--green-subtle)')
-      const healthPill = screen.getByTestId('status-pill-health_monitor')
-      expect(healthPill).toHaveTextContent('ok')
-      expect(healthPill.style.color).toBe('var(--green)')
+      // memory_sync is a system worker — its card should contain a system badge
+      const memCard = screen.getByTestId('worker-card-memory_sync')
+      expect(within(memCard).getByText('system')).toBeInTheDocument()
     })
 
-    it('shows red pill for stopped system workers', () => {
-      render(<SystemPanel backgroundWorkers={[]} />)
-      const pollerPill = screen.getByTestId('status-pill-pipeline_poller')
-      expect(pollerPill).toHaveTextContent('stopped')
-      expect(pollerPill.style.color).toBe('var(--red)')
-      expect(pollerPill.style.background).toBe('var(--red-subtle)')
+    it('shows tag pills on workers', () => {
+      render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
+      const retroCard = screen.getByTestId('worker-card-retrospective')
+      expect(within(retroCard).getByText('insights')).toBeInTheDocument()
     })
   })
 
@@ -384,22 +381,22 @@ describe('SystemPanel', () => {
 
     it('Workers sub-tab is active by default showing background worker content', () => {
       render(<SystemPanel backgroundWorkers={[]} />)
-      expect(screen.getByText('Background Workers')).toBeInTheDocument()
+      expect(screen.getByText('Repo Health')).toBeInTheDocument()
     })
 
     it('clicking Livestream sub-tab shows event stream', () => {
       render(<SystemPanel backgroundWorkers={[]} />)
       fireEvent.click(screen.getByText('Livestream'))
       expect(screen.getByText('Waiting for events...')).toBeInTheDocument()
-      expect(screen.queryByText('Background Workers')).not.toBeInTheDocument()
+      expect(screen.queryByText('Repo Health')).not.toBeInTheDocument()
     })
 
     it('clicking Workers sub-tab returns to worker content', () => {
       render(<SystemPanel backgroundWorkers={[]} />)
       fireEvent.click(screen.getByText('Livestream'))
-      expect(screen.queryByText('Background Workers')).not.toBeInTheDocument()
+      expect(screen.queryByText('Repo Health')).not.toBeInTheDocument()
       fireEvent.click(screen.getByText('Workers'))
-      expect(screen.getByText('Background Workers')).toBeInTheDocument()
+      expect(screen.getByText('Repo Health')).toBeInTheDocument()
     })
 
     it('active sub-tab has accent color styling', () => {
@@ -425,22 +422,22 @@ describe('SystemPanel', () => {
       render(<SystemPanel backgroundWorkers={[]} />)
       fireEvent.click(screen.getByText('Pipeline'))
       expect(screen.getByText('Pipeline Controls')).toBeInTheDocument()
-      expect(screen.queryByText('Background Workers')).not.toBeInTheDocument()
+      expect(screen.queryByText('Repo Health')).not.toBeInTheDocument()
     })
 
     it('clicking Workers sub-tab after Pipeline returns to worker content', () => {
       render(<SystemPanel backgroundWorkers={[]} />)
       fireEvent.click(screen.getByText('Pipeline'))
-      expect(screen.queryByText('Background Workers')).not.toBeInTheDocument()
+      expect(screen.queryByText('Repo Health')).not.toBeInTheDocument()
       fireEvent.click(screen.getByText('Workers'))
-      expect(screen.getByText('Background Workers')).toBeInTheDocument()
+      expect(screen.getByText('Repo Health')).toBeInTheDocument()
     })
 
     it('clicking Insights sub-tab shows InsightsPanel content', () => {
       render(<SystemPanel backgroundWorkers={[]} />)
       fireEvent.click(screen.getByText('Insights'))
       expect(screen.getByText('Failure Patterns')).toBeInTheDocument()
-      expect(screen.queryByText('Background Workers')).not.toBeInTheDocument()
+      expect(screen.queryByText('Repo Health')).not.toBeInTheDocument()
     })
 
     it('renders event data in Livestream sub-tab', () => {
