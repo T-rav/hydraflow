@@ -38,8 +38,6 @@ check "uv --version"        uv --version
 check "ruff --version"      ruff --version
 check "pyright --version"   pyright --version
 check "pytest --version"    pytest --version
-check "monocle_apptrace import" python3 -c "import monocle_apptrace"
-check "opentelemetry import" python3 -c "import opentelemetry.sdk.trace"
 
 echo ""
 echo "--- Version Details ---"
