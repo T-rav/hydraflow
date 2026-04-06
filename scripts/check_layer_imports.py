@@ -105,6 +105,8 @@ FILE_ALLOWLIST: dict[str, set[str]] = {
     "base_background_loop": {"runner_utils"},
     "code_grooming_loop": {"runner_utils"},
     "report_issue_loop": {"runner_utils"},
+    "architecture_audit_loop": {"runner_utils"},
+    "test_audit_loop": {"runner_utils"},
 }
 
 # Pattern-based layer inference (checked in order; first match wins)
