@@ -12,7 +12,7 @@ from skill_registry import (
 
 class TestAgentSkill:
     def test_builtin_skills_count(self):
-        assert len(BUILTIN_SKILLS) == 3
+        assert len(BUILTIN_SKILLS) == 4
 
     def test_diff_sanity_skill(self):
         skill = BUILTIN_SKILLS[0]
@@ -30,8 +30,16 @@ class TestAgentSkill:
         assert callable(skill.prompt_builder)
         assert callable(skill.result_parser)
 
-    def test_test_adequacy_skill(self):
+    def test_plan_compliance_skill(self):
         skill = BUILTIN_SKILLS[2]
+        assert skill.name == "plan-compliance"
+        assert skill.blocking is False
+        assert skill.config_key == "max_plan_compliance_attempts"
+        assert callable(skill.prompt_builder)
+        assert callable(skill.result_parser)
+
+    def test_test_adequacy_skill(self):
+        skill = BUILTIN_SKILLS[3]
         assert skill.name == "test-adequacy"
         assert skill.blocking is False
         assert skill.config_key == "max_test_adequacy_attempts"
@@ -53,7 +61,7 @@ class TestGetSkills:
     def test_modifying_copy_doesnt_affect_builtin(self):
         skills = get_skills()
         skills.clear()
-        assert len(BUILTIN_SKILLS) == 3
+        assert len(BUILTIN_SKILLS) == 4
 
 
 class TestFormatSkillsForPrompt:
@@ -61,6 +69,7 @@ class TestFormatSkillsForPrompt:
         result = format_skills_for_prompt(get_skills())
         assert "diff-sanity" in result
         assert "scope-check" in result
+        assert "plan-compliance" in result
         assert "test-adequacy" in result
         assert "[blocking]" in result
         assert "[non-blocking]" in result
@@ -123,8 +132,29 @@ class TestSkillPromptBuilders:
         )
         assert "SCOPE_CHECK_RESULT: OK" in prompt
 
-    def test_test_adequacy_builder(self):
+    def test_plan_compliance_builder_with_plan(self):
         skill = BUILTIN_SKILLS[2]
+        prompt = skill.prompt_builder(
+            issue_number=50,
+            issue_title="Add feature",
+            diff="+ new code",
+            plan_text="## File Delta\nMODIFIED: src/agent.py",
+        )
+        assert "#50" in prompt
+        assert "File Delta" in prompt
+
+    def test_plan_compliance_builder_without_plan(self):
+        skill = BUILTIN_SKILLS[2]
+        prompt = skill.prompt_builder(
+            issue_number=50,
+            issue_title="Add feature",
+            diff="+ new code",
+            plan_text="",
+        )
+        assert prompt == ""
+
+    def test_test_adequacy_builder(self):
+        skill = BUILTIN_SKILLS[3]
         prompt = skill.prompt_builder(
             issue_number=99, issue_title="Add tests", diff="+ test code"
         )
@@ -168,15 +198,32 @@ class TestSkillResultParsers:
         assert passed is False
         assert len(unplanned) == 1
 
-    def test_test_adequacy_parser_ok(self):
+    def test_plan_compliance_parser_ok(self):
         skill = BUILTIN_SKILLS[2]
+        passed, summary, findings = skill.result_parser(
+            "PLAN_COMPLIANCE_RESULT: OK\nSUMMARY: Matches plan"
+        )
+        assert passed is True
+        assert findings == []
+
+    def test_plan_compliance_parser_retry(self):
+        skill = BUILTIN_SKILLS[2]
+        passed, summary, findings = skill.result_parser(
+            "PLAN_COMPLIANCE_RESULT: RETRY\nSUMMARY: scope creep\n"
+            "FINDINGS:\n- src/extra.py — unplanned"
+        )
+        assert passed is False
+        assert len(findings) == 1
+
+    def test_test_adequacy_parser_ok(self):
+        skill = BUILTIN_SKILLS[3]
         passed, summary, gaps = skill.result_parser(
             "TEST_ADEQUACY_RESULT: OK\nSUMMARY: All covered"
         )
         assert passed is True
 
     def test_test_adequacy_parser_retry(self):
-        skill = BUILTIN_SKILLS[2]
+        skill = BUILTIN_SKILLS[3]
         passed, summary, gaps = skill.result_parser(
             "TEST_ADEQUACY_RESULT: RETRY\nSUMMARY: missing tests\nGAPS:\n- src/bar.py:func — needs test"
         )
