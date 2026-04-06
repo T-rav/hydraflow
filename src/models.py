@@ -1617,6 +1617,9 @@ class StateData(BaseModel):
     )
     diagnosis_severities: dict[str, str] = Field(default_factory=dict)
     sentry_creation_attempts: dict[str, int] = Field(default_factory=dict)
+    trace_runs: dict[str, dict[str, object]] = Field(
+        default_factory=lambda: {"active": {}, "next_run_id": {}}
+    )
     last_updated: str | None = None
 
 
