@@ -173,25 +173,6 @@ def resolve_layer(module_name: str) -> int | str | None:
 # ---------------------------------------------------------------------------
 
 
-def _is_in_type_checking_block(node: ast.stmt, tree: ast.Module) -> bool:
-    """Check if a node is inside an `if TYPE_CHECKING:` block."""
-    for top_node in ast.walk(tree):
-        if not isinstance(top_node, ast.If):
-            continue
-        test = top_node.test
-        is_type_checking = (
-            isinstance(test, ast.Name) and test.id == "TYPE_CHECKING"
-        ) or (
-            isinstance(test, ast.Attribute)
-            and isinstance(test.value, ast.Name)
-            and test.value.id == "typing"
-            and test.attr == "TYPE_CHECKING"
-        )
-        if is_type_checking and node in ast.iter_child_nodes(top_node):
-            return True
-    return False
-
-
 class ImportInfo(NamedTuple):
     module: str
     line: int
@@ -199,7 +180,15 @@ class ImportInfo(NamedTuple):
 
 
 def extract_imports(source: str) -> list[ImportInfo]:
-    """Extract intra-project imports from Python source, skipping TYPE_CHECKING."""
+    """Extract intra-project top-level imports from Python source.
+
+    Only module-level (top-level) import statements are checked. Imports inside
+    ``if TYPE_CHECKING:`` blocks are naturally excluded because
+    ``ast.iter_child_nodes(Module)`` yields only direct Module children — the
+    ``If`` node itself, not its body. Imports inside functions or methods are
+    also excluded; deferred imports used intentionally to break circular
+    dependencies are therefore not flagged.
+    """
     try:
         tree = ast.parse(source)
     except SyntaxError:
@@ -208,15 +197,11 @@ def extract_imports(source: str) -> list[ImportInfo]:
     imports: list[ImportInfo] = []
     for node in ast.iter_child_nodes(tree):
         if isinstance(node, ast.ImportFrom) and node.module:
-            if _is_in_type_checking_block(node, tree):
-                continue
             top_module = node.module.split(".")[0]
             names = ", ".join(a.name for a in node.names)
             raw = f"from {node.module} import {names}"
             imports.append(ImportInfo(module=top_module, line=node.lineno, raw=raw))
         elif isinstance(node, ast.Import):
-            if _is_in_type_checking_block(node, tree):
-                continue
             for alias in node.names:
                 top_module = alias.name.split(".")[0]
                 imports.append(
