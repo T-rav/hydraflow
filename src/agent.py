@@ -733,14 +733,27 @@ Run through this checklist before your final commit:
 
 {body}{plan_section}{review_feedback_section}{prior_failure_section}{comments_section}{memory_section}{log_section}
 
-## Instructions
+## Instructions — Test-Driven Development
+
+Follow TDD discipline: **tests first, then implementation**.
 
 1. Understand the issue and relevant code paths.
-2. Implement the solution — write the code changes first.
-3. Write tests to ensure functionality, prevent regressions, and catch bugs.
-4. Run the available tools at their checkpoints (see below).
-5. Fix any issues found before proceeding.
-6. Commit with: "Fixes #{issue.id}: <concise summary>"
+2. **Plan tests** — list the tests you will write covering zero/empty, one, many,
+   boundary, interface, and exception cases (ZOMBIES heuristic).
+3. **RED** — Write one failing test. Predict the failure, run the test suite, confirm it fails.
+4. **GREEN** — Write the minimal code to make the test pass. No more.
+5. **Simplify** — For each line you added, ask: "Does a failing test require this?"
+   Remove anything not demanded by a test. Re-run tests after each removal.
+6. **Refactor** — Improve expressiveness and clarity while keeping tests green.
+7. Repeat steps 3-6 for each planned test.
+8. Run the available tools at their checkpoints (see below).
+9. Fix any issues found before proceeding.
+10. Commit with: "Fixes #{issue.id}: <concise summary>"
+
+Key rules:
+- Write only one test at a time. See it fail before writing implementation.
+- Run **all** tests every cycle, not just the new one.
+- Never write implementation code that no test requires.
 
 {tools_section}
 
@@ -760,7 +773,7 @@ Run through this checklist before your final commit:
 - Follow the project's CLAUDE.md guidelines strictly.
 - NEVER delete or overwrite existing CLAUDE.md content. You may append new sections or
   modify existing sections, but you must preserve all information already present.
-- Write tests for all new code — tests are mandatory. Run tests with: `{test_cmd}`
+- Tests are mandatory — follow the TDD process above. Run tests with: `{test_cmd}`
 - Do NOT push to remote. Do NOT create pull requests.
 - Do NOT run `git push` or `gh pr create`.
 - Run `make quality-lite` (lint + typecheck + security, no tests) as a sense check.
