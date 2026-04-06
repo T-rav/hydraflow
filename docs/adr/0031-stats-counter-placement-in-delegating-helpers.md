@@ -1,4 +1,4 @@
-# ADR-0023: Stats Counter Placement When Delegating to Conditional Helpers
+# ADR-0031: Stats Counter Placement When Delegating to Conditional Helpers
 
 **Status:** Rejected
 **Date:** 2026-03-16
