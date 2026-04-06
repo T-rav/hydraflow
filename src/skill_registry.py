@@ -45,7 +45,8 @@ class AgentSkill:
         If ``True``, a failed skill stops the pipeline. If ``False``,
         failures are logged as warnings.
     prompt_builder:
-        ``(issue_number, issue_title, diff) -> str`` — builds the skill prompt.
+        ``(issue_number, issue_title, diff, **kwargs) -> str`` — builds the skill prompt.
+        Skills that need the plan text receive it via the ``plan_text`` kwarg.
     result_parser:
         ``(transcript) -> (passed, summary, findings)`` — parses structured
         markers from the agent's response.
