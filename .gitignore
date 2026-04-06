@@ -241,3 +241,6 @@ src/ui/src/test/shims/generated/
 # Dolt database files (added by bd init)
 .dolt/
 *.db
+
+# Local superpowers drafts (plans, specs)
+docs/superpowers/

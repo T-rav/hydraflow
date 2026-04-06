@@ -47,8 +47,8 @@ class TestInitialization:
             "active_workspaces",
             "baseline_audit",
             "bg_worker_states",
-            "bot_pr_processed",
-            "bot_pr_settings",
+            "dependabot_merge_processed",
+            "dependabot_merge_settings",
             "ci_monitor_settings",
             "ci_monitor_tracked_failures",
             "code_grooming_filed",
@@ -93,6 +93,10 @@ class TestInitialization:
             "worker_heartbeats",
             "worker_intervals",
             "worker_result_meta",
+            "escalation_contexts",
+            "diagnostic_attempts",
+            "diagnosis_severities",
+            "sentry_creation_attempts",
         }
         assert set(d.keys()) == expected_keys
 

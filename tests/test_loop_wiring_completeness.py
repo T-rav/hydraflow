@@ -1,6 +1,6 @@
 """Factory validation: every BaseBackgroundLoop subclass is properly wired.
 
-Auto-discovers loop classes from ``src/*_loop.py`` (and ``src/github_cache.py``)
+Auto-discovers loop classes from ``src/*_loop.py``
 and verifies they appear in:
 
 1. ``orchestrator.py`` ``bg_loop_registry`` dict
@@ -28,14 +28,6 @@ SRC = Path(__file__).resolve().parent.parent / "src"
 # are managed through a different mechanism (e.g. not dashboard-editable).
 # ---------------------------------------------------------------------------
 _INTERVAL_BOUNDS_SKIP: set[str] = {
-    "report_issue",
-    "epic_monitor",
-    "epic_sweeper",
-    "workspace_gc",
-    "runs_gc",
-    "health_monitor",
-    "bot_pr",
-    "sentry_ingest",
     "github_cache",
 }
 
@@ -57,15 +49,10 @@ _CONSTANTS_JS_SKIP: set[str] = {
 def _discover_loops() -> dict[str, str]:
     """Return {worker_name: class_name} for all BaseBackgroundLoop subclasses.
 
-    Scans ``src/*_loop.py`` plus ``src/github_cache.py`` for classes extending
-    ``BaseBackgroundLoop``, then extracts the ``worker_name=`` string from the
-    ``super().__init__()`` call.
+    Scans ``src/*_loop.py`` for classes extending ``BaseBackgroundLoop``,
+    then extracts the ``worker_name=`` string from the ``super().__init__()`` call.
     """
     loop_files = sorted(SRC.glob("*_loop.py"))
-    # github_cache.py also contains a BaseBackgroundLoop subclass
-    github_cache = SRC / "github_cache.py"
-    if github_cache.exists() and github_cache not in loop_files:
-        loop_files.append(github_cache)
 
     result: dict[str, str] = {}
     class_re = re.compile(r"class\s+(\w+)\s*\(.*BaseBackgroundLoop.*\)")

@@ -31,6 +31,7 @@ HydraFlow runs five concurrent async loops from `orchestrator.py`:
 **Phase implementations:**
 - `plan_phase.py` / `implement_phase.py` / `review_phase.py` / `triage_phase.py` / `hitl_phase.py`
 - `phase_utils.py` — Shared phase utilities
+- `pr_unsticker.py` — Stale PR recovery coordinator
 
 **Agents/runners:**
 - `agent.py` — `AgentRunner` (implementation agent)
@@ -43,7 +44,6 @@ HydraFlow runs five concurrent async loops from `orchestrator.py`:
 - `worktree.py` — `WorktreeManager` (git worktree lifecycle)
 - `pr_manager.py` — `PRManager` (all `gh` CLI operations)
 - `merge_conflict_resolver.py` — Merge conflict resolution
-- `pr_unsticker.py` / `pr_unsticker_loop.py` — Stale PR recovery
 - `post_merge_handler.py` — Post-merge cleanup
 
 **Background loops:**
@@ -164,7 +164,8 @@ make lint           # Auto-fix linting
 make lint-check     # Check linting (no fix)
 make typecheck      # Run Pyright type checks
 make security       # Run Bandit security scan
-make quality        # Lint + typecheck + security + test (parallel)
+make layer-check    # Static import-direction checker (layer boundaries)
+make quality        # Lint + typecheck + security + test + layer-check (parallel)
 make quality-lite   # Lint + typecheck + security (no tests)
 make setup          # Install hooks, assets, config, labels
 make prep           # Sync agent assets + run full repo prep (labels, audit, CI/tests)

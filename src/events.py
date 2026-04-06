@@ -90,6 +90,8 @@ class EventType(StrEnum):
     CRATE_ACTIVATED = "crate_activated"
     CRATE_COMPLETED = "crate_completed"
     AGENT_ACTIVITY = "agent_activity"
+    SYSTEM_REROUTE = "system_reroute"
+    DIAGNOSTIC_UPDATE = "diagnostic_update"
 
 
 _T = TypeVar("_T")

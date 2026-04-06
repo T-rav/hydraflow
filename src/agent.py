@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from execution import SubprocessRunner
     from hindsight import HindsightClient
     from hindsight_wal import HindsightWAL
+    from repo_wiki import RepoWikiStore
 
 logger = logging.getLogger("hydraflow.agent")
 
@@ -135,9 +136,15 @@ Run through this checklist before your final commit:
         dolt: DoltBackend | None = None,
         wal: HindsightWAL | None = None,
         credentials: Credentials | None = None,
+        wiki_store: RepoWikiStore | None = None,
     ) -> None:
         super().__init__(
-            config, event_bus, runner, hindsight=hindsight, credentials=credentials
+            config,
+            event_bus,
+            runner,
+            hindsight=hindsight,
+            credentials=credentials,
+            wiki_store=wiki_store,
         )
         self._insights = ReviewInsightStore(
             config.memory_dir, hindsight=hindsight, dolt=dolt, wal=wal
@@ -681,6 +688,29 @@ Run through this checklist before your final commit:
                 + f"\n\n[Body truncated at {max_body:,} chars — see full issue on GitHub]"
             )
         builder.record_context("Issue body", issue.body, body)
+
+        # --- Cross-section paragraph dedup ---
+        from prompt_dedup import PromptDeduplicator  # noqa: PLC0415
+
+        section_deduper = PromptDeduplicator()
+        deduped, section_chars_saved = section_deduper.dedup_sections(
+            ("Issue body", body),
+            ("Implementation plan", plan_section),
+            ("Review feedback", review_feedback_section),
+            ("Prior failure", prior_failure_section),
+            ("Discussion", comments_section),
+            ("Memory", memory_section),
+        )
+        dedup_map = dict(deduped)
+        body = dedup_map["Issue body"]
+        plan_section = dedup_map["Implementation plan"]
+        review_feedback_section = dedup_map["Review feedback"]
+        prior_failure_section = dedup_map["Prior failure"]
+        comments_section = dedup_map["Discussion"]
+        memory_section = dedup_map["Memory"]
+
+        if section_chars_saved:
+            self._last_context_stats["section_dedup_chars_saved"] = section_chars_saved
 
         test_cmd = self._config.test_command  # noqa: F841 — used in f-string prompt
         tools_section = format_tools_for_prompt(discover_tools(self._config.repo_root))

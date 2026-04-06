@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { ACTIVE_STATUSES, PIPELINE_STAGES, PIPELINE_LOOPS, INTERVAL_PRESETS, EDITABLE_INTERVAL_WORKERS, REPORT_ISSUE_PRESETS, WORKER_PRESETS, PIPELINE_POLLER_PRESETS, ADR_REVIEWER_PRESETS, BOT_PR_PRESETS, BACKGROUND_WORKERS } from '../../constants'
+import { ACTIVE_STATUSES, PIPELINE_STAGES, PIPELINE_LOOPS, INTERVAL_PRESETS, EDITABLE_INTERVAL_WORKERS, REPORT_ISSUE_PRESETS, WORKER_PRESETS, PIPELINE_POLLER_PRESETS, ADR_REVIEWER_PRESETS, DEPENDABOT_MERGE_PRESETS, BACKGROUND_WORKERS, WORKER_GROUPS } from '../../constants'
 import { theme } from '../../theme'
 
 describe('ACTIVE_STATUSES', () => {
@@ -209,31 +209,31 @@ describe('REPORT_ISSUE_PRESETS', () => {
   })
 })
 
-describe('BOT_PR_PRESETS', () => {
+describe('DEPENDABOT_MERGE_PRESETS', () => {
   it('has 5 presets from 1h to 24h', () => {
-    expect(BOT_PR_PRESETS).toHaveLength(5)
-    expect(BOT_PR_PRESETS[0].seconds).toBe(3600)
-    expect(BOT_PR_PRESETS[4].seconds).toBe(86400)
+    expect(DEPENDABOT_MERGE_PRESETS).toHaveLength(5)
+    expect(DEPENDABOT_MERGE_PRESETS[0].seconds).toBe(3600)
+    expect(DEPENDABOT_MERGE_PRESETS[4].seconds).toBe(86400)
   })
 })
 
-describe('BACKGROUND_WORKERS bot_pr entry', () => {
-  it('includes bot_pr worker', () => {
-    const botPr = BACKGROUND_WORKERS.find(w => w.key === 'bot_pr')
-    expect(botPr).toBeDefined()
-    expect(botPr.label).toBe('Bot PR Manager')
+describe('BACKGROUND_WORKERS dependabot_merge entry', () => {
+  it('includes dependabot_merge worker', () => {
+    const depMerge = BACKGROUND_WORKERS.find(w => w.key === 'dependabot_merge')
+    expect(depMerge).toBeDefined()
+    expect(depMerge.label).toBe('Dependabot Merge')
   })
 })
 
-describe('EDITABLE_INTERVAL_WORKERS includes bot_pr', () => {
-  it('bot_pr is editable', () => {
-    expect(EDITABLE_INTERVAL_WORKERS.has('bot_pr')).toBe(true)
+describe('EDITABLE_INTERVAL_WORKERS includes dependabot_merge', () => {
+  it('dependabot_merge is editable', () => {
+    expect(EDITABLE_INTERVAL_WORKERS.has('dependabot_merge')).toBe(true)
   })
 })
 
 describe('WORKER_PRESETS', () => {
   it('has exactly the expected worker keys', () => {
-    expect(Object.keys(WORKER_PRESETS).sort()).toEqual(['adr_reviewer', 'bot_pr', 'ci_monitor', 'code_grooming', 'pipeline_poller', 'report_issue', 'security_patch', 'sentry_ingest', 'stale_issue'])
+    expect(Object.keys(WORKER_PRESETS).sort()).toEqual(['adr_reviewer', 'ci_monitor', 'code_grooming', 'dependabot_merge', 'pipeline_poller', 'report_issue', 'security_patch', 'sentry_ingest', 'stale_issue'])
   })
 
   it('maps pipeline_poller to PIPELINE_POLLER_PRESETS', () => {
@@ -246,5 +246,34 @@ describe('WORKER_PRESETS', () => {
 
   it('maps report_issue to REPORT_ISSUE_PRESETS', () => {
     expect(WORKER_PRESETS.report_issue).toBe(REPORT_ISSUE_PRESETS)
+  })
+})
+
+describe('WORKER_GROUPS', () => {
+  it('has 4 groups', () => {
+    expect(WORKER_GROUPS).toHaveLength(4)
+  })
+
+  it('every group has key, label, color, and tags', () => {
+    for (const g of WORKER_GROUPS) {
+      expect(g).toHaveProperty('key')
+      expect(g).toHaveProperty('label')
+      expect(g).toHaveProperty('color')
+      expect(g).toHaveProperty('tags')
+      expect(g.tags.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('every BACKGROUND_WORKERS entry has a valid group', () => {
+    const groupKeys = new Set(WORKER_GROUPS.map(g => g.key))
+    for (const w of BACKGROUND_WORKERS) {
+      expect(groupKeys).toContain(w.group)
+    }
+  })
+
+  it('every BACKGROUND_WORKERS entry has at least one tag', () => {
+    for (const w of BACKGROUND_WORKERS) {
+      expect(w.tags.length).toBeGreaterThan(0)
+    }
   })
 })

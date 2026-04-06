@@ -383,9 +383,6 @@ class ScriptedHITLPhase:
     def skip_issue(self, issue_number: int) -> None:
         self._corrections.pop(issue_number, None)
 
-    async def attempt_auto_fixes(self, hitl_issues: list) -> None:
-        pass
-
     async def process_corrections(self) -> None:
         pending = dict(self._corrections)
         self._corrections.clear()
@@ -475,7 +472,7 @@ def build_scripted_services(
     services.runs_gc_loop = FakeBackgroundLoop()
     services.adr_reviewer_loop = FakeBackgroundLoop()
     services.health_monitor_loop = FakeBackgroundLoop()
-    services.bot_pr_loop = FakeBackgroundLoop()
+    services.dependabot_merge_loop = FakeBackgroundLoop()
     services.stale_issue_loop = FakeBackgroundLoop()
     services.sentry_loop = FakeBackgroundLoop()
     services.stale_issue_gc_loop = FakeBackgroundLoop()
@@ -483,6 +480,16 @@ def build_scripted_services(
     services.security_patch_loop = FakeBackgroundLoop()
     services.code_grooming_loop = FakeBackgroundLoop()
     services.trace_mining_loop = FakeBackgroundLoop()
+    services.repo_wiki_loop = FakeBackgroundLoop()
+    services.diagnostic_loop = FakeBackgroundLoop()
+    services.repo_wiki_store = SimpleNamespace(
+        is_ingested=MagicMock(return_value=False),
+        mark_ingested=MagicMock(),
+        ingest=MagicMock(),
+        query=MagicMock(return_value=""),
+        active_lint=MagicMock(),
+        list_repos=MagicMock(return_value=[]),
+    )
     services.crate_manager = SimpleNamespace(
         active_crate_number=None,
         check_and_advance=AsyncMock(),

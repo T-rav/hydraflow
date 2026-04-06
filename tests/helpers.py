@@ -290,7 +290,7 @@ class ConfigFactory:
         transcript_summary_tool: Literal["claude", "codex", "pi"] = "claude",
         max_transcript_summary_chars: int = 50_000,
         pr_unstick_interval: int = 3600,
-        bot_pr_interval: int = 3600,
+        dependabot_merge_interval: int = 3600,
         stale_issue_interval: int = 86400,
         pr_unstick_batch_size: int = 10,
         max_sessions_per_repo: int = 10,
@@ -494,7 +494,7 @@ class ConfigFactory:
                 transcript_summary_tool=transcript_summary_tool,
                 max_transcript_summary_chars=max_transcript_summary_chars,
                 pr_unstick_interval=pr_unstick_interval,
-                bot_pr_interval=bot_pr_interval,
+                dependabot_merge_interval=dependabot_merge_interval,
                 stale_issue_interval=stale_issue_interval,
                 pr_unstick_batch_size=pr_unstick_batch_size,
                 max_sessions_per_repo=max_sessions_per_repo,
@@ -799,6 +799,7 @@ class PipelineHarness:
         self.prs.create_task = AsyncMock(return_value=12345)
         self.prs.close_task = AsyncMock()
         self.prs.close_issue = AsyncMock()
+        self.prs.find_existing_issue = AsyncMock(return_value=0)
         self.prs.push_branch = AsyncMock(return_value=True)
         self.prs.create_pr = AsyncMock(side_effect=_make_pr)
         self.prs.find_open_pr_for_branch = AsyncMock(side_effect=_find_pr)
@@ -1317,6 +1318,7 @@ def make_triage_phase(config):
     prs.add_labels = AsyncMock()
     prs.swap_pipeline_labels = AsyncMock()
     prs.post_comment = AsyncMock()
+    prs.find_existing_issue = AsyncMock(return_value=0)
     stop_event = asyncio.Event()
     phase = TriagePhase(config, state, store, triage, prs, bus, stop_event)
     return phase, state, triage, prs, store, stop_event
@@ -1452,6 +1454,7 @@ def make_pr_manager_mock(**overrides: Any) -> AsyncMock:
     prs.submit_review = AsyncMock(return_value=True)
     prs.create_task = AsyncMock(return_value=99)
     prs.close_task = AsyncMock()
+    prs.find_existing_issue = AsyncMock(return_value=0)
     prs.add_pr_labels = AsyncMock()
     prs.remove_pr_label = AsyncMock()
     for k, v in overrides.items():
@@ -1651,3 +1654,59 @@ def make_pr_manager(config: Any, event_bus: Any) -> Any:
     from pr_manager import PRManager
 
     return PRManager(config=config, event_bus=event_bus)
+
+
+class MemoryHarness:
+    """Pre-wired Hindsight mocks for memory lifecycle integration tests.
+
+    Composes with ``ConfigFactory`` and ``EventBus`` to provide:
+    - A mock ``HindsightClient`` with configurable per-bank recall responses
+    - A concrete ``BaseRunner`` subclass wired with the mock client
+    """
+
+    def __init__(
+        self,
+        tmp_path: Path,
+        *,
+        bank_responses: dict[str, list[Any]] | None = None,
+    ) -> None:
+        import logging
+
+        from base_runner import BaseRunner
+        from events import EventBus
+
+        self.config = ConfigFactory.create(
+            repo_root=tmp_path / "repo",
+            max_memory_prompt_chars=4000,
+        )
+
+        self.bus = EventBus()
+        self.mock_client = MagicMock()
+        self._bank_responses: dict[str, list[Any]] = bank_responses or {}
+
+        class _MemoryTestRunner(BaseRunner):
+            _log = logging.getLogger("hydraflow.memory_test_runner")
+
+        self._runner_cls = _MemoryTestRunner
+
+    def set_bank_responses(self, responses: dict[str, list[Any]]) -> None:
+        """Configure per-bank recall responses for the mock client."""
+        self._bank_responses = responses
+
+    def make_runner(self) -> Any:
+        """Create a BaseRunner wired with the mock Hindsight client."""
+        return self._runner_cls(
+            self.config,
+            self.bus,
+            hindsight=self.mock_client,
+        )
+
+    def make_runner_without_hindsight(self) -> Any:
+        """Create a BaseRunner with no Hindsight client (degradation mode)."""
+        return self._runner_cls(self.config, self.bus)
+
+    def recall_side_effect(
+        self, _client: Any, bank: Any, _query: str, **_kw: Any
+    ) -> list[Any]:
+        """Side-effect function for patching ``hindsight.recall_safe``."""
+        return self._bank_responses.get(str(bank), [])

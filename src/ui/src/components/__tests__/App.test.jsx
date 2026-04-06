@@ -183,7 +183,7 @@ describe('System and Metrics tabs', () => {
     const { default: App } = await import('../../App')
     render(<App />)
     fireEvent.click(screen.getByText('System'))
-    expect(screen.getByText('Background Workers')).toBeInTheDocument()
+    expect(screen.getByText('Repo Health')).toBeInTheDocument()
   })
 
   it('metrics still accessible from System tab sub-navigation', async () => {
