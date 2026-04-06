@@ -385,6 +385,8 @@ class ConfigFactory:
         security_patch_interval: int = 3600,
         security_patch_severity_threshold: str = "high",
         code_grooming_interval: int = 86400,
+        architecture_audit_interval: int = 86400,
+        test_audit_interval: int = 86400,
     ):
         """Create a HydraFlowConfig with test-friendly defaults."""
         from config import HydraFlowConfig
@@ -604,6 +606,8 @@ class ConfigFactory:
                 security_patch_interval=security_patch_interval,
                 security_patch_severity_threshold=security_patch_severity_threshold,
                 code_grooming_interval=code_grooming_interval,
+                architecture_audit_interval=architecture_audit_interval,
+                test_audit_interval=test_audit_interval,
             )
 
 

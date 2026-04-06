@@ -138,6 +138,8 @@ class HydraFlowOrchestrator:
             "ci_monitor": svc.ci_monitor_loop,
             "security_patch": svc.security_patch_loop,
             "code_grooming": svc.code_grooming_loop,
+            "architecture_audit": svc.architecture_audit_loop,
+            "test_audit": svc.test_audit_loop,
             "trace_mining": svc.trace_mining_loop,
             "repo_wiki": svc.repo_wiki_loop,
             "diagnostic": svc.diagnostic_loop,

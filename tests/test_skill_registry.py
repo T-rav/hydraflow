@@ -12,7 +12,7 @@ from skill_registry import (
 
 class TestAgentSkill:
     def test_builtin_skills_count(self):
-        assert len(BUILTIN_SKILLS) == 4
+        assert len(BUILTIN_SKILLS) == 6
 
     def test_diff_sanity_skill(self):
         skill = BUILTIN_SKILLS[0]
@@ -38,11 +38,27 @@ class TestAgentSkill:
         assert callable(skill.prompt_builder)
         assert callable(skill.result_parser)
 
-    def test_test_adequacy_skill(self):
+    def test_architecture_compliance_skill(self):
         skill = BUILTIN_SKILLS[3]
+        assert skill.name == "architecture-compliance"
+        assert skill.blocking is True
+        assert skill.config_key == "max_architecture_compliance_attempts"
+        assert callable(skill.prompt_builder)
+        assert callable(skill.result_parser)
+
+    def test_test_adequacy_skill(self):
+        skill = BUILTIN_SKILLS[4]
         assert skill.name == "test-adequacy"
         assert skill.blocking is False
         assert skill.config_key == "max_test_adequacy_attempts"
+
+    def test_test_quality_skill(self):
+        skill = BUILTIN_SKILLS[5]
+        assert skill.name == "test-quality"
+        assert skill.blocking is False
+        assert skill.config_key == "max_test_quality_attempts"
+        assert callable(skill.prompt_builder)
+        assert callable(skill.result_parser)
 
     def test_skill_is_frozen(self):
         skill = BUILTIN_SKILLS[0]
@@ -61,7 +77,7 @@ class TestGetSkills:
     def test_modifying_copy_doesnt_affect_builtin(self):
         skills = get_skills()
         skills.clear()
-        assert len(BUILTIN_SKILLS) == 4
+        assert len(BUILTIN_SKILLS) == 6
 
 
 class TestFormatSkillsForPrompt:
@@ -70,7 +86,9 @@ class TestFormatSkillsForPrompt:
         assert "diff-sanity" in result
         assert "scope-check" in result
         assert "plan-compliance" in result
+        assert "architecture-compliance" in result
         assert "test-adequacy" in result
+        assert "test-quality" in result
         assert "[blocking]" in result
         assert "[non-blocking]" in result
 
@@ -153,12 +171,28 @@ class TestSkillPromptBuilders:
         )
         assert prompt == ""
 
-    def test_test_adequacy_builder(self):
+    def test_architecture_compliance_builder(self):
         skill = BUILTIN_SKILLS[3]
+        prompt = skill.prompt_builder(
+            issue_number=30, issue_title="Fix layers", diff="+ import from orchestrator"
+        )
+        assert "#30" in prompt
+        assert "diff" in prompt.lower()
+
+    def test_test_adequacy_builder(self):
+        skill = BUILTIN_SKILLS[4]
         prompt = skill.prompt_builder(
             issue_number=99, issue_title="Add tests", diff="+ test code"
         )
         assert "#99" in prompt
+        assert "diff" in prompt.lower()
+
+    def test_test_quality_builder(self):
+        skill = BUILTIN_SKILLS[5]
+        prompt = skill.prompt_builder(
+            issue_number=77, issue_title="Fix tests", diff="+ def test_it():"
+        )
+        assert "#77" in prompt
         assert "diff" in prompt.lower()
 
 
@@ -215,20 +249,54 @@ class TestSkillResultParsers:
         assert passed is False
         assert len(findings) == 1
 
-    def test_test_adequacy_parser_ok(self):
+    def test_architecture_compliance_parser_ok(self):
         skill = BUILTIN_SKILLS[3]
+        passed, summary, violations = skill.result_parser(
+            "ARCHITECTURE_COMPLIANCE_RESULT: OK\nSUMMARY: No violations"
+        )
+        assert passed is True
+        assert violations == []
+
+    def test_architecture_compliance_parser_retry(self):
+        skill = BUILTIN_SKILLS[3]
+        passed, summary, violations = skill.result_parser(
+            "ARCHITECTURE_COMPLIANCE_RESULT: RETRY\nSUMMARY: upward imports\n"
+            "VIOLATIONS:\n- src/config.py:10 — imports from orchestrator"
+        )
+        assert passed is False
+        assert len(violations) == 1
+
+    def test_test_adequacy_parser_ok(self):
+        skill = BUILTIN_SKILLS[4]
         passed, summary, gaps = skill.result_parser(
             "TEST_ADEQUACY_RESULT: OK\nSUMMARY: All covered"
         )
         assert passed is True
 
     def test_test_adequacy_parser_retry(self):
-        skill = BUILTIN_SKILLS[3]
+        skill = BUILTIN_SKILLS[4]
         passed, summary, gaps = skill.result_parser(
             "TEST_ADEQUACY_RESULT: RETRY\nSUMMARY: missing tests\nGAPS:\n- src/bar.py:func — needs test"
         )
         assert passed is False
         assert len(gaps) == 1
+
+    def test_test_quality_parser_ok(self):
+        skill = BUILTIN_SKILLS[5]
+        passed, summary, issues = skill.result_parser(
+            "TEST_QUALITY_RESULT: OK\nSUMMARY: Test quality is acceptable"
+        )
+        assert passed is True
+        assert issues == []
+
+    def test_test_quality_parser_retry(self):
+        skill = BUILTIN_SKILLS[5]
+        passed, summary, issues = skill.result_parser(
+            "TEST_QUALITY_RESULT: RETRY\nSUMMARY: duplicate helpers\n"
+            "ISSUES:\n- tests/test_foo.py:make_config — duplicates ConfigFactory"
+        )
+        assert passed is False
+        assert len(issues) == 1
 
 
 # ---------------------------------------------------------------------------

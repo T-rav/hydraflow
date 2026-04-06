@@ -13,6 +13,7 @@ from acceptance_criteria import AcceptanceCriteriaGenerator
 from adr_reviewer import ADRCouncilReviewer
 from adr_reviewer_loop import ADRReviewerLoop
 from agent import AgentRunner
+from architecture_audit_loop import ArchitectureAuditLoop  # noqa: TCH001
 from base_background_loop import LoopDeps
 from baseline_policy import BaselinePolicy
 from beads_manager import BeadsManager
@@ -66,6 +67,7 @@ from shape_runner import ShapeRunner
 from stale_issue_gc_loop import StaleIssueGCLoop  # noqa: TCH001
 from stale_issue_loop import StaleIssueLoop
 from state import StateTracker
+from test_audit_loop import TestAuditLoop  # noqa: TCH001
 from trace_mining_loop import TraceMiningLoop  # noqa: TCH001
 from transcript_summarizer import TranscriptSummarizer
 from triage import TriageRunner
@@ -144,6 +146,8 @@ class ServiceRegistry:
     ci_monitor_loop: CIMonitorLoop
     security_patch_loop: SecurityPatchLoop
     code_grooming_loop: CodeGroomingLoop
+    architecture_audit_loop: ArchitectureAuditLoop
+    test_audit_loop: TestAuditLoop
     trace_mining_loop: TraceMiningLoop
     repo_wiki_store: RepoWikiStore
     repo_wiki_loop: RepoWikiLoop
@@ -631,6 +635,18 @@ def build_services(
         deps=loop_deps,
         credentials=credentials,
     )
+    architecture_audit_loop = ArchitectureAuditLoop(  # noqa: F841
+        config=config,
+        pr_manager=prs,
+        deps=loop_deps,
+        credentials=credentials,
+    )
+    test_audit_loop = TestAuditLoop(  # noqa: F841
+        config=config,
+        pr_manager=prs,
+        deps=loop_deps,
+        credentials=credentials,
+    )
     trace_mining_loop = TraceMiningLoop(
         config=config,
         state=state,
@@ -702,6 +718,8 @@ def build_services(
         ci_monitor_loop=ci_monitor_loop,
         security_patch_loop=security_patch_loop,
         code_grooming_loop=code_grooming_loop,
+        architecture_audit_loop=architecture_audit_loop,
+        test_audit_loop=test_audit_loop,
         trace_mining_loop=trace_mining_loop,
         repo_wiki_store=repo_wiki_store,
         repo_wiki_loop=repo_wiki_loop,

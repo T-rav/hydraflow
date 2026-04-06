@@ -82,6 +82,12 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("max_scope_check_attempts", "HYDRAFLOW_MAX_SCOPE_CHECK_ATTEMPTS", 1),
     ("max_test_adequacy_attempts", "HYDRAFLOW_MAX_TEST_ADEQUACY_ATTEMPTS", 1),
     ("max_plan_compliance_attempts", "HYDRAFLOW_MAX_PLAN_COMPLIANCE_ATTEMPTS", 1),
+    (
+        "max_architecture_compliance_attempts",
+        "HYDRAFLOW_MAX_ARCHITECTURE_COMPLIANCE_ATTEMPTS",
+        1,
+    ),
+    ("max_test_quality_attempts", "HYDRAFLOW_MAX_TEST_QUALITY_ATTEMPTS", 1),
     ("max_review_fix_attempts", "HYDRAFLOW_MAX_REVIEW_FIX_ATTEMPTS", 2),
     ("min_review_findings", "HYDRAFLOW_MIN_REVIEW_FINDINGS", 3),
     ("max_issue_body_chars", "HYDRAFLOW_MAX_ISSUE_BODY_CHARS", 10_000),
@@ -167,6 +173,8 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("sentry_max_creation_attempts", "SENTRY_MAX_CREATION_ATTEMPTS", 3),
     ("security_patch_interval", "HYDRAFLOW_SECURITY_PATCH_INTERVAL", 3600),
     ("code_grooming_interval", "HYDRAFLOW_CODE_GROOMING_INTERVAL", 86400),
+    ("architecture_audit_interval", "HYDRAFLOW_ARCHITECTURE_AUDIT_INTERVAL", 86400),
+    ("test_audit_interval", "HYDRAFLOW_TEST_AUDIT_INTERVAL", 86400),
     ("trace_mining_interval", "HYDRAFLOW_TRACE_MINING_INTERVAL", 3600),
     ("repo_wiki_interval", "HYDRAFLOW_REPO_WIKI_INTERVAL", 3600),
     ("max_repo_wiki_chars", "HYDRAFLOW_MAX_REPO_WIKI_CHARS", 15_000),
@@ -412,6 +420,18 @@ class HydraFlowConfig(BaseModel):
         ge=0,
         le=3,
         description="Max plan compliance check passes (0 = disabled)",
+    )
+    max_architecture_compliance_attempts: int = Field(
+        default=1,
+        ge=0,
+        le=3,
+        description="Max architecture compliance check passes (0 = disabled)",
+    )
+    max_test_quality_attempts: int = Field(
+        default=1,
+        ge=0,
+        le=3,
+        description="Max test quality check passes (0 = disabled)",
     )
     max_review_fix_attempts: int = Field(
         default=2,
@@ -905,6 +925,18 @@ class HydraFlowConfig(BaseModel):
         ge=3600,
         le=604800,
         description="Seconds between code grooming audit cycles",
+    )
+    architecture_audit_interval: int = Field(
+        default=86400,
+        ge=3600,
+        le=604800,
+        description="Seconds between architecture audit cycles",
+    )
+    test_audit_interval: int = Field(
+        default=86400,
+        ge=3600,
+        le=604800,
+        description="Seconds between test audit cycles",
     )
 
     # Repo wiki

@@ -223,6 +223,20 @@ export const CODE_GROOMING_PRESETS = [
   { label: '7d', seconds: 604800 },
 ]
 
+const ARCHITECTURE_AUDIT_PRESETS = [
+  { label: '12h', seconds: 43200 },
+  { label: '24h', seconds: 86400 },
+  { label: '3d', seconds: 259200 },
+  { label: '7d', seconds: 604800 },
+]
+
+const TEST_AUDIT_PRESETS = [
+  { label: '12h', seconds: 43200 },
+  { label: '24h', seconds: 86400 },
+  { label: '3d', seconds: 259200 },
+  { label: '7d', seconds: 604800 },
+]
+
 const SENTRY_INGEST_PRESETS = [
   { label: '30m', seconds: 1800 },
   { label: '1h', seconds: 3600 },
@@ -243,13 +257,15 @@ export const WORKER_PRESETS = {
   security_patch: SECURITY_PATCH_PRESETS,
   ci_monitor: CI_MONITOR_PRESETS,
   code_grooming: CODE_GROOMING_PRESETS,
+  architecture_audit: ARCHITECTURE_AUDIT_PRESETS,
+  test_audit: TEST_AUDIT_PRESETS,
   sentry_ingest: SENTRY_INGEST_PRESETS,
 }
 
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'pr_unsticker', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_sweeper', 'dependabot_merge', 'stale_issue', 'security_patch', 'ci_monitor', 'code_grooming', 'sentry_ingest'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'pr_unsticker', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_sweeper', 'dependabot_merge', 'stale_issue', 'security_patch', 'ci_monitor', 'code_grooming', 'architecture_audit', 'test_audit', 'sentry_ingest'])
 
 /**
  * Default intervals (in seconds) for system workers.
@@ -269,6 +285,8 @@ export const SYSTEM_WORKER_INTERVALS = {
   security_patch: 21600,
   ci_monitor: 1800,
   code_grooming: 86400,
+  architecture_audit: 86400,
+  test_audit: 86400,
 }
 
 /**
@@ -306,6 +324,8 @@ export const BACKGROUND_WORKERS = [
   { key: 'ci_monitor', label: 'CI Monitor', description: 'Detects failing CI on main and files/auto-closes issues.', color: theme.yellow, group: 'repo_health', tags: ['quality'] },
   { key: 'security_patch', label: 'Security Patch', description: 'Polls Dependabot alerts and files issues for fixable vulnerabilities.', color: theme.red, group: 'repo_health', tags: ['security'] },
   { key: 'code_grooming', label: 'Code Grooming', description: 'Runs periodic audit scans and files issues for critical findings.', color: theme.accent, group: 'repo_health', tags: ['quality'] },
+  { key: 'architecture_audit', label: 'Architecture Audit', description: 'Runs periodic architecture audits and files issues for layer violations.', color: theme.purple, group: 'repo_health', tags: ['quality'] },
+  { key: 'test_audit', label: 'Test Audit', description: 'Runs periodic test audits and files issues for test quality findings.', color: theme.blue, group: 'repo_health', tags: ['quality'] },
   { key: 'trace_mining', label: 'Trace Mining', description: 'Parses Monocle traces, aggregates tool/token stats, and syncs insights to Hindsight.', color: theme.accent, group: 'learning', tags: ['observability'] },
   { key: 'repo_wiki', label: 'Repo Wiki', description: 'Lints and maintains per-repo knowledge wikis compiled from plan/implement/review cycles.', color: theme.purple, group: 'learning', tags: ['knowledge'] },
   { key: 'diagnostic', label: 'Diagnostic Agent', description: 'Analyzes escalated issues, classifies severity, and attempts targeted fixes before HITL.', color: theme.blue, system: true, group: 'operations', tags: ['recovery'] },

@@ -18,10 +18,15 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from architecture_compliance import (
+    build_architecture_compliance_prompt,
+    parse_architecture_compliance_result,
+)
 from diff_sanity import build_diff_sanity_prompt, parse_diff_sanity_result
 from plan_compliance import build_plan_compliance_prompt, parse_plan_compliance_result
 from scope_check import build_scope_check_prompt, parse_scope_check_result
 from test_adequacy import build_test_adequacy_prompt, parse_test_adequacy_result
+from test_quality import build_test_quality_prompt, parse_test_quality_result
 
 
 @dataclass(frozen=True)
@@ -84,12 +89,28 @@ BUILTIN_SKILLS: list[AgentSkill] = [
         result_parser=parse_plan_compliance_result,
     ),
     AgentSkill(
+        name="architecture-compliance",
+        purpose="Check diff for layer boundary violations, circular imports, and improper phase coupling",
+        config_key="max_architecture_compliance_attempts",
+        blocking=True,
+        prompt_builder=build_architecture_compliance_prompt,
+        result_parser=parse_architecture_compliance_result,
+    ),
+    AgentSkill(
         name="test-adequacy",
         purpose="Assess whether changed production code has adequate test coverage, edge cases, and regression safety",
         config_key="max_test_adequacy_attempts",
         blocking=False,
         prompt_builder=build_test_adequacy_prompt,
         result_parser=parse_test_adequacy_result,
+    ),
+    AgentSkill(
+        name="test-quality",
+        purpose="Check test naming conventions, duplicate helpers, and assertion quality",
+        config_key="max_test_quality_attempts",
+        blocking=False,
+        prompt_builder=build_test_quality_prompt,
+        result_parser=parse_test_quality_result,
     ),
 ]
 
