@@ -1351,7 +1351,7 @@ class TraceSkillProfile(BaseModel):
 
 
 class TraceSummary(BaseModel):
-    """Parsed summary of Monocle trace files for one issue/phase."""
+    """Aggregated trace data for one phase run of one issue."""
 
     issue_number: int
     phase: str
@@ -1361,6 +1361,56 @@ class TraceSummary(BaseModel):
     tokens: TraceTokenStats
     tools: TraceToolProfile
     skills: TraceSkillProfile
+    # New fields for in-process tracing (default for backward compatibility):
+    run_id: int = 0
+    subprocess_count: int = 0
+    crashed: bool = False
+    phase_run_started_at: str = ""
+    phase_run_ended_at: str = ""
+
+
+class ToolCallSpan(BaseModel):
+    """One tool invocation observed during a subprocess."""
+
+    tool_name: str
+    started_at: str  # ISO 8601
+    duration_ms: int
+    input_summary: str  # human-readable preview from _summarize_tool
+    succeeded: bool
+    error: str | None = None
+
+
+class SkillResultRecord(BaseModel):
+    """Outcome of a single skill loop run."""
+
+    skill_name: str
+    passed: bool
+    attempts: int
+    duration_seconds: float
+    blocking: bool
+
+
+class SubprocessTrace(BaseModel):
+    """One subprocess trace file (`run-N/subprocess-<idx>.json`)."""
+
+    issue_number: int
+    phase: str
+    source: str
+    run_id: int
+    subprocess_idx: int
+    backend: str  # "claude" / "codex" / "pi"
+    started_at: str  # ISO 8601
+    ended_at: str | None = None
+    success: bool
+    crashed: bool = False
+    error: str | None = None
+
+    tokens: TraceTokenStats
+    tools: TraceToolProfile
+    tool_calls: list[ToolCallSpan] = Field(default_factory=list)
+    skill_results: list[SkillResultRecord] = Field(default_factory=list)
+    turn_count: int = 0
+    inference_count: int = 0
 
 
 class HITLSummaryCacheEntry(BaseModel):
