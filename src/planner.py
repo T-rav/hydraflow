@@ -437,15 +437,10 @@ class PlannerRunner(BaseRunner):
 
 ## Instructions
 
-{mode_note}You are in READ-ONLY mode for the repository. Do NOT modify any repository files.
+{mode_note}You are in PLAN-ONLY mode. Do NOT create or modify source code files.
 Do NOT run any commands that change state (no git commit, no installs).
-
-You MAY write architecture diagram files to `/tmp/hydraflow-diagrams/issue-{issue.id}/`
-using the Write tool. Use LikeC4 (.likec4) or Mermaid (.md) format to capture the code
-topology around the change area. These files will be copied into the implementation
-worktree and attached to the issue comment so the implementer has full architectural
-context. Also include the diagram inline in your plan as a ```mermaid code block so it
-renders on GitHub.
+You MAY write architecture diagram artifacts under `docs/architecture/` using
+the `/diagram` skill — these help the implementer understand code topology.
 
 Your job: explore code, map the relevant architecture, and produce a concrete implementation plan.
 
@@ -468,10 +463,8 @@ Use semantic tools first (before grep):
 
 1. Restate the issue in your own words.
 2. Explore relevant code with semantic tools.
-3. Map the code topology — trace call graphs, data flows, and component boundaries.
-   Write diagram files to `/tmp/hydraflow-diagrams/issue-{issue.id}/` (LikeC4 or Mermaid).
-   Also include a `## Code Topology` section in your plan with a ```mermaid code block
-   showing the relevant components and relationships (this renders on GitHub).
+3. Generate an architecture diagram with `/diagram` — map the code topology around the
+   change area (components, call flows, data paths). Write it to `docs/architecture/`.
 4. Identify concrete file-level deltas.
 5. Build a Task Graph with dependency-ordered phases (full plans only).
 6. Write behavioral test specs for each phase — describe observable outcomes, not test code.

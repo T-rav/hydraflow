@@ -118,8 +118,8 @@ def test_build_command_includes_verbose(config):
     assert "--verbose" in cmd
 
 
-def test_build_command_disallows_edit_but_allows_write(config):
-    """Write is allowed for /tmp diagram files; Edit and NotebookEdit are blocked."""
+def test_build_command_disallows_edit_tools_but_allows_write(config):
+    """Write is allowed so the planner can produce architecture diagrams via /diagram."""
     runner = _make_runner(config, None)
     cmd = runner._build_command()
 
@@ -176,21 +176,9 @@ async def test_build_prompt_includes_read_only_instructions(config, event_bus, i
     task = issue.to_task()
     prompt, _ = await runner._build_prompt_with_stats(task)
 
-    assert "READ-ONLY" in prompt
-    assert "Do NOT modify any repository files" in prompt
-
-
-@pytest.mark.asyncio
-async def test_build_prompt_includes_diagram_instructions(config, event_bus, issue):
-    """Planner should be told to write diagrams to /tmp and include inline Mermaid."""
-    runner = _make_runner(config, event_bus)
-    task = issue.to_task()
-    prompt, _ = await runner._build_prompt_with_stats(task)
-
-    assert "/tmp/hydraflow-diagrams/" in prompt
-    assert "Code Topology" in prompt
-    assert "mermaid" in prompt
-    assert "Mermaid" in prompt
+    assert "PLAN-ONLY" in prompt
+    assert "Do NOT create or modify source code files" in prompt
+    assert "docs/architecture/" in prompt
 
 
 @pytest.mark.asyncio
