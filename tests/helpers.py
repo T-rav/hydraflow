@@ -1332,6 +1332,8 @@ def make_triage_phase(config):
     fetcher = AsyncMock()
     store = IssueStore(config, fetcher, bus)
     triage = AsyncMock()
+    triage.set_tracing_context = MagicMock()
+    triage.clear_tracing_context = MagicMock()
     prs = AsyncMock()
     prs.remove_label = AsyncMock()
     prs.add_labels = AsyncMock()
