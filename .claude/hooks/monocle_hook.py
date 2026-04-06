@@ -46,6 +46,7 @@ LOCK_FILE = STATE_DIR / "monocle_state.lock"
 DEBUG = os.environ.get("MONOCLE_CLAUDE_DEBUG", "").lower() == "true"
 SERVICE_NAME = os.environ.get("MONOCLE_SERVICE_NAME", "claude-cli")
 
+
 # --- Logging (fail-open, never block) ---
 def _log(level: str, message: str) -> None:
     try:
@@ -56,15 +57,19 @@ def _log(level: str, message: str) -> None:
     except Exception:
         pass
 
+
 def debug(msg: str) -> None:
     if DEBUG:
         _log("DEBUG", msg)
 
+
 def info(msg: str) -> None:
     _log("INFO", msg)
 
+
 def error(msg: str) -> None:
     _log("ERROR", msg)
+
 
 # --- State Management ---
 class FileLock:
@@ -78,6 +83,7 @@ class FileLock:
         self._fh = open(self.path, "a+", encoding="utf-8")
         try:
             import fcntl
+
             deadline = time.time() + self.timeout_s
             while True:
                 try:
@@ -96,11 +102,13 @@ class FileLock:
             return
         try:
             import fcntl
+
             fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
         except Exception:
             pass
         with contextlib.suppress(Exception):
             self._fh.close()
+
 
 def load_state() -> dict[str, Any]:
     try:
@@ -109,6 +117,7 @@ def load_state() -> dict[str, Any]:
         return json.loads(STATE_FILE.read_text(encoding="utf-8"))
     except Exception:
         return {}
+
 
 def save_state(state: dict[str, Any]) -> None:
     try:
@@ -119,9 +128,11 @@ def save_state(state: dict[str, Any]) -> None:
     except Exception as e:
         debug(f"save_state failed: {e}")
 
+
 def state_key(session_id: str, transcript_path: str) -> str:
     raw = f"{session_id}::{transcript_path}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
 
 # --- Hook Payload ---
 def read_hook_payload() -> dict[str, Any]:
@@ -133,7 +144,10 @@ def read_hook_payload() -> dict[str, Any]:
     except Exception:
         return {}
 
-def extract_session_and_transcript(payload: dict[str, Any]) -> tuple[str | None, Path | None]:
+
+def extract_session_and_transcript(
+    payload: dict[str, Any],
+) -> tuple[str | None, Path | None]:
     session_id = (
         payload.get("sessionId")
         or payload.get("session_id")
@@ -150,6 +164,7 @@ def extract_session_and_transcript(payload: dict[str, Any]) -> tuple[str | None,
         except Exception:
             pass
     return session_id, None
+
 
 # --- Main ---
 def main() -> int:  # noqa: PLR0911 — early-return validation gates
@@ -196,6 +211,7 @@ def main() -> int:  # noqa: PLR0911 — early-return validation gates
 
     try:
         import importlib.metadata
+
         sdk_version = importlib.metadata.version("monocle_apptrace")
     except Exception:
         sdk_version = "0.7.6"
@@ -218,7 +234,8 @@ def main() -> int:  # noqa: PLR0911 — early-return validation gates
             msgs, ss = read_new_jsonl(transcript_path, ss)
             if not msgs:
                 state[key] = {
-                    "offset": ss.offset, "buffer": ss.buffer,
+                    "offset": ss.offset,
+                    "buffer": ss.buffer,
                     "turn_count": ss.turn_count,
                     "subagents_processed": ss.subagents_processed,
                     "updated": datetime.now(UTC).isoformat(),
@@ -230,7 +247,8 @@ def main() -> int:  # noqa: PLR0911 — early-return validation gates
             turns = build_turns(msgs)
             if not turns:
                 state[key] = {
-                    "offset": ss.offset, "buffer": ss.buffer,
+                    "offset": ss.offset,
+                    "buffer": ss.buffer,
                     "turn_count": ss.turn_count,
                     "subagents_processed": ss.subagents_processed,
                     "updated": datetime.now(UTC).isoformat(),
@@ -263,7 +281,8 @@ def main() -> int:  # noqa: PLR0911 — early-return validation gates
 
             # Save state
             state[key] = {
-                "offset": ss.offset, "buffer": ss.buffer,
+                "offset": ss.offset,
+                "buffer": ss.buffer,
                 "turn_count": ss.turn_count,
                 "subagents_processed": ss.subagents_processed,
                 "updated": datetime.now(UTC).isoformat(),
@@ -284,8 +303,10 @@ def main() -> int:  # noqa: PLR0911 — early-return validation gates
     except Exception as e:
         error(f"Unexpected failure: {e}")
         import traceback
+
         debug(traceback.format_exc())
         return 0  # Always exit 0 to not block Claude Code
+
 
 if __name__ == "__main__":
     sys.exit(main())
