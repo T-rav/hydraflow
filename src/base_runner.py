@@ -116,7 +116,7 @@ class BaseRunner:
         # Build trace collector from active context, if any.
         # Created ONCE for the entire _execute call (including all auth retries)
         # and finalized exactly once on either success or exception.
-        trace_collector: object = None
+        trace_collector: TraceCollector | None = None
         ctx = self._tracing_ctx
         if ctx is not None:
             from trace_collector import TraceCollector  # noqa: PLC0415
