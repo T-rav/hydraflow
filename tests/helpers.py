@@ -1654,3 +1654,62 @@ def make_pr_manager(config: Any, event_bus: Any) -> Any:
     from pr_manager import PRManager
 
     return PRManager(config=config, event_bus=event_bus)
+
+
+class MemoryHarness:
+    """Pre-wired Hindsight mocks for memory lifecycle integration tests.
+
+    Composes with ``ConfigFactory`` and ``EventBus`` to provide:
+    - A mock ``HindsightClient`` with configurable per-bank recall responses
+    - A real ``HindsightWAL`` backed by ``tmp_path``
+    - A concrete ``BaseRunner`` subclass wired with the mock client
+    """
+
+    def __init__(
+        self,
+        tmp_path: Path,
+        *,
+        bank_responses: dict[str, list[Any]] | None = None,
+    ) -> None:
+        import logging
+
+        from base_runner import BaseRunner
+        from events import EventBus
+        from hindsight_wal import HindsightWAL
+
+        self.config = ConfigFactory.create(
+            repo_root=tmp_path / "repo",
+            max_memory_prompt_chars=4000,
+        )
+
+        self.bus = EventBus()
+        self.mock_client = MagicMock()
+        self.wal = HindsightWAL(tmp_path / "wal" / "hindsight.jsonl")
+        self._bank_responses: dict[str, list[Any]] = bank_responses or {}
+
+        class _MemoryTestRunner(BaseRunner):
+            _log = logging.getLogger("hydraflow.memory_test_runner")
+
+        self._runner_cls = _MemoryTestRunner
+
+    def set_bank_responses(self, responses: dict[str, list[Any]]) -> None:
+        """Configure per-bank recall responses for the mock client."""
+        self._bank_responses = responses
+
+    def make_runner(self) -> Any:
+        """Create a BaseRunner wired with the mock Hindsight client."""
+        return self._runner_cls(
+            self.config,
+            self.bus,
+            hindsight=self.mock_client,
+        )
+
+    def make_runner_without_hindsight(self) -> Any:
+        """Create a BaseRunner with no Hindsight client (degradation mode)."""
+        return self._runner_cls(self.config, self.bus)
+
+    def recall_side_effect(
+        self, _client: Any, bank: Any, _query: str, **_kw: Any
+    ) -> list[Any]:
+        """Side-effect function for patching ``hindsight.recall_safe``."""
+        return self._bank_responses.get(str(bank), [])
