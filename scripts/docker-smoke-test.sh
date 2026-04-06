@@ -78,6 +78,13 @@ else
     FAIL=$((FAIL + 1))
 fi
 
+# Plugin checks
+echo ""
+echo "--- Claude Code Plugins ---"
+check "claude-plugins-official" test -d /opt/plugins/claude-plugins-official
+check "superpowers"             test -d /opt/plugins/superpowers
+check "lightfactory"            test -d /opt/plugins/lightfactory
+
 # Directory checks
 if [ -d /workspace ]; then
     echo "  [PASS] /workspace exists"
