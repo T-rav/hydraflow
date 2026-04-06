@@ -112,6 +112,25 @@ class BaseRunner:
         transcript = ""
         succeeded = False
         usage_stats: dict[str, object] = {}
+
+        # Build trace collector from active context, if any.
+        # Created ONCE for the entire _execute call (including all auth retries)
+        # and finalized exactly once on either success or exception.
+        trace_collector: object = None
+        ctx = self._tracing_ctx
+        if ctx is not None:
+            from trace_collector import TraceCollector  # noqa: PLC0415
+
+            trace_collector = TraceCollector(
+                issue_number=ctx.issue_number,
+                phase=ctx.phase,
+                source=ctx.source,
+                subprocess_idx=ctx.subprocess_idx,
+                run_id=ctx.run_id,
+                config=self._config,
+                event_bus=self._bus,
+            )
+
         try:
             try:
                 import sentry_sdk as _sentry  # noqa: PLC0415
@@ -143,8 +162,11 @@ class BaseRunner:
                         runner=self._runner,
                         usage_stats=usage_stats,
                         gh_token=self._credentials.gh_token,
+                        trace_collector=trace_collector,
                     )
                     succeeded = True
+                    if trace_collector is not None:
+                        trace_collector.finalize(success=True)
                     return transcript
                 except AuthenticationRetryError as exc:
                     last_auth_error = exc
@@ -164,7 +186,13 @@ class BaseRunner:
                             self._AUTH_RETRY_MAX,
                             exc,
                         )
+            if trace_collector is not None:
+                trace_collector.finalize(success=False)
             raise last_auth_error  # type: ignore[misc]
+        except Exception:
+            if trace_collector is not None:
+                trace_collector.finalize(success=False)
+            raise
         finally:
             duration = time.monotonic() - start
             source = str(event_data.get("source", "unknown"))
