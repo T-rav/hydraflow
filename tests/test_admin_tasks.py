@@ -511,6 +511,66 @@ class TestRunCompact:
         assert any("Evicted" in line for line in result.log)
 
     @pytest.mark.asyncio
+    async def test_compact_filters_items_jsonl(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Evicted items are removed from items.jsonl as well as item_scores.json."""
+        config = self._setup_config(tmp_path, monkeypatch)
+        mem_dir = tmp_path / "memory"
+        mem_dir.mkdir(parents=True)
+
+        # Build items.jsonl entries and compute their integer IDs using the same
+        # hash formula as run_compact (abs(hash(str(id))) % 10**9).
+        item_a_str = "keep-item"
+        item_b_str = "evict-me"
+        int_id_a = abs(hash(str(item_a_str))) % (10**9)
+        int_id_b = abs(hash(str(item_b_str))) % (10**9)
+
+        items_path = mem_dir / "items.jsonl"
+        items_path.write_text(
+            json.dumps({"id": item_a_str, "body": "keep"})
+            + "\n"
+            + json.dumps({"id": item_b_str, "body": "evict"})
+            + "\n",
+            encoding="utf-8",
+        )
+
+        scores_file = mem_dir / "item_scores.json"
+        scores_file.write_text(
+            json.dumps(
+                {
+                    str(int_id_a): {
+                        "score": 0.9,
+                        "appearances": 5,
+                        "trail": [],
+                        "condensed_summary": "",
+                    },
+                    str(int_id_b): {
+                        "score": 0.05,
+                        "appearances": 10,
+                        "trail": [],
+                        "condensed_summary": "",
+                    },
+                }
+            )
+        )
+
+        result = await run_compact(config)
+
+        assert result.success is True
+        remaining_lines = [
+            json.loads(ln)
+            for ln in items_path.read_text(encoding="utf-8").splitlines()
+            if ln.strip()
+        ]
+        remaining_ids = {item["id"] for item in remaining_lines}
+        assert item_a_str in remaining_ids, "Keep item should remain in items.jsonl"
+        assert item_b_str not in remaining_ids, (
+            "Evicted item should be removed from items.jsonl"
+        )
+        assert any("items.jsonl" in line for line in result.log)
+
+    @pytest.mark.asyncio
     async def test_compact_no_eviction_candidates(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -556,7 +616,7 @@ class TestRunCompact:
         mem_dir.mkdir(parents=True)
         scores_file = mem_dir / "item_scores.json"
         # score=0.25 is between _AUTO_EVICT_SCORE (0.2) and _NEEDS_CURATION_SCORE (0.4)
-        # but appearances < 5, so not an eviction candidate; add enough appearances
+        # appearances=6 >= 5 threshold, so this IS an eviction candidate, classified as needs_curation
         scores_file.write_text(
             json.dumps(
                 {

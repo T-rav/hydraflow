@@ -626,26 +626,65 @@ async def run_clean(config: HydraFlowConfig) -> TaskResult:
 
 async def run_compact(config: HydraFlowConfig) -> TaskResult:
     """Run manual memory compaction — evict stale items and flag items needing curation."""
+    import json  # noqa: PLC0415
+
     from memory_scoring import MemoryScorer  # noqa: PLC0415
 
     log: list[str] = ["Running memory compaction..."]
     warnings: list[str] = []
 
     scorer = MemoryScorer(config.memory_dir)
+    all_scores = scorer.load_item_scores()
+    log.append(f"Total scored items: {len(all_scores)}")
+
     candidates = scorer.eviction_candidates()
+    log.append(f"Eviction candidates: {len(candidates)}")
 
     auto_evict: list[int] = []
     needs_curation: list[int] = []
+    keep: list[int] = []
     for item_id in candidates:
         classification = scorer.classify_for_compaction(item_id)
         if classification == "auto_evict":
             auto_evict.append(item_id)
         elif classification == "needs_curation":
             needs_curation.append(item_id)
+        else:
+            keep.append(item_id)
+
+    log.append(
+        f"Classification: auto_evict={len(auto_evict)}, needs_curation={len(needs_curation)}, keep={len(keep)}"
+    )
 
     if auto_evict:
         removed = scorer.evict_items(auto_evict)
-        log.append(f"Evicted {len(removed)} items: {removed}")
+        log.append(f"Evicted {len(removed)} items from item_scores.json: {removed}")
+
+        # Also remove evicted items from items.jsonl
+        items_path = config.memory_dir / "items.jsonl"
+        if items_path.exists():
+            evicted_set = set(removed)
+            kept_lines: list[str] = []
+            for raw_line in items_path.read_text(encoding="utf-8").splitlines():
+                stripped = raw_line.strip()
+                if not stripped:
+                    continue
+                try:
+                    item = json.loads(stripped)
+                    item_int_id = abs(hash(str(item.get("id", "")))) % (10**9)
+                    if item_int_id not in evicted_set:
+                        kept_lines.append(stripped)
+                except (json.JSONDecodeError, Exception):
+                    kept_lines.append(stripped)
+            items_path.write_text(
+                "\n".join(kept_lines) + ("\n" if kept_lines else ""),
+                encoding="utf-8",
+            )
+            log.append(
+                f"Filtered items.jsonl: removed {len(removed)} entries, {len(kept_lines)} remain"
+            )
+        else:
+            log.append("items.jsonl not found — score-only eviction performed")
     else:
         log.append("No items to evict.")
 
