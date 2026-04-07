@@ -468,6 +468,9 @@ def build_services(
         dolt=dolt_backend,
         wal=hindsight_wal,
     )
+    retrospective_queue = RetrospectiveQueue(
+        config.data_path("memory", "retrospective_queue.jsonl"),
+    )
     retrospective = RetrospectiveCollector(
         config,
         state,
@@ -475,6 +478,7 @@ def build_services(
         hindsight=hindsight_client,
         dolt=dolt_backend,
         wal=hindsight_wal,
+        queue=retrospective_queue,
     )
     ac_generator = AcceptanceCriteriaGenerator(
         config, prs, event_bus, runner=subprocess_runner, credentials=credentials
@@ -510,10 +514,6 @@ def build_services(
     # Inject shared store into AgentRunner (replacing its self-constructed copy)
     agents._insights = review_insights
 
-    retrospective_queue = RetrospectiveQueue(  # noqa: F841
-        config.data_path("memory", "retrospective_queue.jsonl"),
-    )
-
     reviewer = ReviewPhase(
         config,
         state,
@@ -536,6 +536,7 @@ def build_services(
         transcript_summarizer=summarizer,
         wiki_store=repo_wiki_store,
         wiki_compiler=wiki_compiler,
+        retrospective_queue=retrospective_queue,
     )
 
     # Background loops — shared deps bundled into a single LoopDeps object
@@ -586,6 +587,7 @@ def build_services(
         config=config,
         deps=loop_deps,
         prs=prs,
+        retrospective_queue=retrospective_queue,
     )
     dependabot_merge_loop = DependabotMergeLoop(  # noqa: F841
         config=config,
