@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from dolt_backend import DoltBackend
     from hindsight import HindsightClient
     from hindsight_wal import HindsightWAL
+    from memory_judge import MemoryJudge  # noqa: TCH004
     from ports import IssueStorePort, PRPort, WorkspacePort
     from repo_wiki import RepoWikiStore  # noqa: TCH004 — used in __init__ signature
     from visual_validator import VisualValidator
@@ -125,6 +126,7 @@ class ReviewPhase:
         transcript_summarizer: TranscriptSummarizer | None = None,
         wiki_store: RepoWikiStore | None = None,
         wiki_compiler: WikiCompiler | None = None,
+        judge: MemoryJudge | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -135,7 +137,7 @@ class ReviewPhase:
         self._stop_event = stop_event
         self._store = store
         self._bus = event_bus or EventBus()
-        self._suggest_memory = MemorySuggester(config, hindsight=hindsight)
+        self._suggest_memory = MemorySuggester(config, hindsight=hindsight, judge=judge)
         self._summarizer = transcript_summarizer
         self._wiki_store = wiki_store
         self._wiki_compiler = wiki_compiler

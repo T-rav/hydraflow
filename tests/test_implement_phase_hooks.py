@@ -124,7 +124,7 @@ class TestPostImplTranscript:
         ) as mock_mem:
             await phase._post_impl_transcript(result, status="failed")
             mock_mem.assert_awaited_once_with(
-                "tx", "implementer", "issue #7", ANY, hindsight=None
+                "tx", "implementer", "issue #7", ANY, hindsight=None, judge=None
             )
 
     @pytest.mark.asyncio

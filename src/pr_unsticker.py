@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from hindsight import HindsightClient
     from hitl_runner import HITLRunner
     from issue_store import IssueStore
+    from memory_judge import MemoryJudge  # noqa: TCH004
     from merge_conflict_resolver import MergeConflictResolver
     from models import GitHubIssue, HITLItem, UnstickResult
     from ports import IssueFetcherPort, PRPort, WorkspacePort
@@ -115,6 +116,7 @@ class PRUnsticker:
         store: IssueStore | None = None,
         credentials: Credentials | None = None,
         hindsight: HindsightClient | None = None,
+        judge: MemoryJudge | None = None,
     ) -> None:
         from config import Credentials as _Credentials  # noqa: PLC0415
 
@@ -131,7 +133,7 @@ class PRUnsticker:
         self._troubleshooting_store = troubleshooting_store
         self._store = store
         self._credentials = credentials or _Credentials()
-        self._suggest_memory = MemorySuggester(config, hindsight=hindsight)
+        self._suggest_memory = MemorySuggester(config, hindsight=hindsight, judge=judge)
 
     async def unstick(self, hitl_items: list[HITLItem]) -> UnstickResult:
         """Process HITL items and return stats.

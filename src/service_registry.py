@@ -78,6 +78,7 @@ from workspace_gc_loop import WorkspaceGCLoop
 if TYPE_CHECKING:
     from hindsight import HindsightClient
     from hindsight_wal import HindsightWAL
+    from memory_judge import MemoryJudge
     from metrics_manager import MetricsManager
 
 logger = logging.getLogger("hydraflow.service_registry")
@@ -152,6 +153,7 @@ class ServiceRegistry:
     # Optional integrations
     hindsight: HindsightClient | None = None
     hindsight_wal: HindsightWAL | None = None
+    memory_judge: MemoryJudge | None = None
 
 
 @dataclass(frozen=True)
@@ -225,6 +227,16 @@ def build_services(
             timeout=config.hindsight_timeout,
         )
         hindsight_wal = HindsightWAL(config.data_path("memory", "hindsight_wal.jsonl"))
+
+    # Memory judge — LLM quality gate for tribal memory candidates
+    from execution import get_default_runner as _get_default_runner  # noqa: PLC0415
+    from memory_judge import MemoryJudge as _MemoryJudge  # noqa: PLC0415
+
+    memory_judge = _MemoryJudge(
+        config=config,
+        runner=_get_default_runner(),
+        gh_token=credentials.gh_token if credentials else "",
+    )
 
     # Dolt embedded state backend (preferred, graceful fallback)
     from dolt_backend import DoltBackend
@@ -376,6 +388,7 @@ def build_services(
         shape_runner=shape_runner,
         whatsapp_bridge=wa_bridge,
         hindsight=hindsight_client,
+        judge=memory_judge,
     )
     # Wire expert council for auto-decision on directions
     from expert_council import ExpertCouncil  # noqa: PLC0415
@@ -397,6 +410,7 @@ def build_services(
         wiki_store=repo_wiki_store,
         wiki_compiler=wiki_compiler,
         hindsight=hindsight_client,
+        judge=memory_judge,
     )
     hitl_phase = HITLPhase(
         config,
@@ -410,6 +424,7 @@ def build_services(
         stop_event,
         active_issues_cb=active_issues_cb,
         hindsight=hindsight_client,
+        judge=memory_judge,
     )
     run_recorder = RunRecorder(config)
     implementer = ImplementPhase(
@@ -426,6 +441,7 @@ def build_services(
         active_issues_cb=active_issues_cb,
         transcript_summarizer=summarizer,
         hindsight=hindsight_client,
+        judge=memory_judge,
     )
 
     from metrics_manager import MetricsManager
@@ -441,7 +457,9 @@ def build_services(
         event_bus=event_bus,
         state=state,
         summarizer=summarizer,
-        suggest_memory=MemorySuggester(config, hindsight=hindsight_client),
+        suggest_memory=MemorySuggester(
+            config, hindsight=hindsight_client, judge=memory_judge
+        ),
     )
     pr_unsticker = PRUnsticker(
         config,
@@ -458,6 +476,7 @@ def build_services(
         store=store,
         credentials=credentials,
         hindsight=hindsight_client,
+        judge=memory_judge,
     )
     memory_sync = MemorySyncWorker(
         config,
@@ -533,6 +552,7 @@ def build_services(
         transcript_summarizer=summarizer,
         wiki_store=repo_wiki_store,
         wiki_compiler=wiki_compiler,
+        judge=memory_judge,
     )
 
     # Background loops — shared deps bundled into a single LoopDeps object
@@ -701,6 +721,7 @@ def build_services(
         stale_issue_loop=stale_issue_loop,
         hindsight=hindsight_client,
         hindsight_wal=hindsight_wal,
+        memory_judge=memory_judge,
         github_cache=gh_cache,
         github_cache_loop=gh_cache_loop,
         sentry_loop=sentry_loop,

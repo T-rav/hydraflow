@@ -194,7 +194,7 @@ class TestPostReviewTranscript:
         ) as mock_mem:
             await phase._post_review_transcript(result, status="completed")
             mock_mem.assert_awaited_once_with(
-                "tx", "reviewer", "PR #50", ANY, hindsight=None
+                "tx", "reviewer", "PR #50", ANY, hindsight=None, judge=None
             )
 
     @pytest.mark.asyncio

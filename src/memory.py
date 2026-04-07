@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from dolt_backend import DoltBackend
     from hindsight import HindsightClient
     from hindsight_wal import HindsightWAL
+    from memory_judge import MemoryJudge  # noqa: TCH004
     from ports import PRPort
 
 logger = logging.getLogger("hydraflow.memory")
@@ -118,6 +119,7 @@ async def file_memory_suggestion(
     config: HydraFlowConfig,
     *,
     hindsight: HindsightClient | None = None,
+    judge: MemoryJudge | None = None,
 ) -> None:
     """Parse and store a tribal-memory suggestion from an agent transcript.
 
@@ -144,6 +146,33 @@ async def file_memory_suggestion(
     except Exception:  # noqa: BLE001
         logger.warning("Tribal memory failed schema validation: %s", reference)
         return
+
+    if judge is not None:
+        verdict = await judge.evaluate(
+            principle=mem.principle,
+            rationale=mem.rationale,
+            failure_mode=mem.failure_mode,
+            scope=mem.scope,
+        )
+        if not verdict.accepted:
+            try:
+                rejected_path = config.data_path("memory", "rejected.jsonl")
+                rejected_path.parent.mkdir(parents=True, exist_ok=True)
+                with rejected_path.open("a") as f:
+                    record = mem.model_dump()
+                    record["judge_score"] = verdict.score
+                    record["judge_reason"] = verdict.reason
+                    import json as _json  # noqa: PLC0415
+
+                    f.write(_json.dumps(record) + "\n")
+            except OSError:
+                logger.warning("Failed to record rejected memory", exc_info=True)
+            logger.info(
+                "Memory rejected by judge (score=%.2f): %s",
+                verdict.score,
+                verdict.reason,
+            )
+            return
 
     try:
         items_path = config.data_path("memory", "items.jsonl")

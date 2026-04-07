@@ -21,6 +21,7 @@ from subprocess_util import AuthenticationError, CreditExhaustedError
 
 if TYPE_CHECKING:
     from hindsight import HindsightClient
+    from memory_judge import MemoryJudge  # noqa: TCH004
     from ports import IssueFetcherPort, IssueStorePort, PRPort, WorkspacePort
 
 logger = logging.getLogger("hydraflow.hitl_phase")
@@ -49,6 +50,7 @@ class HITLPhase:
         stop_event: asyncio.Event,
         active_issues_cb: Callable[[], None] | None = None,
         hindsight: HindsightClient | None = None,
+        judge: MemoryJudge | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -60,7 +62,7 @@ class HITLPhase:
         self._bus = event_bus
         self._stop_event = stop_event
         self._active_issues_cb = active_issues_cb
-        self._suggest_memory = MemorySuggester(config, hindsight=hindsight)
+        self._suggest_memory = MemorySuggester(config, hindsight=hindsight, judge=judge)
         # HITL corrections: {issue_number: correction_text}
         self._hitl_corrections: dict[int, str] = {}
         # In-memory tracking of active HITL issues

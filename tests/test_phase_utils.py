@@ -358,6 +358,7 @@ class TestSafeFileMemorySuggestion:
                 "issue #42",
                 config,
                 hindsight=None,
+                judge=None,
             )
 
     @pytest.mark.asyncio
@@ -727,7 +728,12 @@ class TestMemorySuggester:
             await suggest("transcript text", "planner", "issue #42")
 
             mock_sfms.assert_awaited_once_with(
-                "transcript text", "planner", "issue #42", config, hindsight=None
+                "transcript text",
+                "planner",
+                "issue #42",
+                config,
+                hindsight=None,
+                judge=None,
             )
 
     @pytest.mark.asyncio

@@ -24,6 +24,7 @@ from events import EventBus, EventType, HydraFlowEvent
 
 if TYPE_CHECKING:
     from hindsight import HindsightClient
+    from memory_judge import MemoryJudge  # noqa: TCH004
 
 # Exception classification — canonical definitions live in
 # ``exception_classify`` (cross-cutting); re-exported here for backward
@@ -252,6 +253,7 @@ async def safe_file_memory_suggestion(
     config: HydraFlowConfig,
     *,
     hindsight: HindsightClient | None = None,
+    judge: MemoryJudge | None = None,
 ) -> None:
     """File a memory suggestion, swallowing and logging exceptions."""
     try:
@@ -261,6 +263,7 @@ async def safe_file_memory_suggestion(
             reference,
             config,
             hindsight=hindsight,
+            judge=judge,
         )
     except Exception:
         logger.exception(
@@ -402,29 +405,36 @@ async def run_with_fatal_guard(
 class MemorySuggester:
     """Pre-bound callable for :func:`safe_file_memory_suggestion`.
 
-    Stores config + hindsight client so call sites only need to pass
+    Stores config + hindsight client + judge so call sites only need to pass
     (transcript, source, reference).
 
     Usage::
 
-        suggest = MemorySuggester(config, hindsight=hindsight_client)
+        suggest = MemorySuggester(config, hindsight=hindsight_client, judge=judge)
         await suggest(transcript, "planner", f"issue #{issue.id}")
     """
 
-    __slots__ = ("_config", "_hindsight")
+    __slots__ = ("_config", "_hindsight", "_judge")
 
     def __init__(
         self,
         config: HydraFlowConfig,
         *,
         hindsight: HindsightClient | None = None,
+        judge: MemoryJudge | None = None,
     ) -> None:
         self._config = config
         self._hindsight = hindsight
+        self._judge = judge
 
     async def __call__(self, transcript: str, source: str, reference: str) -> None:
         await safe_file_memory_suggestion(
-            transcript, source, reference, self._config, hindsight=self._hindsight
+            transcript,
+            source,
+            reference,
+            self._config,
+            hindsight=self._hindsight,
+            judge=self._judge,
         )
 
 
