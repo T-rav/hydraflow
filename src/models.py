@@ -2424,6 +2424,7 @@ class MemorySyncResult(TypedDict):
     digest_chars: int
     pruned: NotRequired[int]
     issues_closed: NotRequired[int]
+    decayed_items: NotRequired[int]
 
 
 class UnstickResult(TypedDict):
