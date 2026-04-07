@@ -624,9 +624,44 @@ async def run_clean(config: HydraFlowConfig) -> TaskResult:
     return TaskResult(success=True, log=log)
 
 
+async def run_compact(config: HydraFlowConfig) -> TaskResult:
+    """Run manual memory compaction — evict stale items and flag items needing curation."""
+    from memory_scoring import MemoryScorer  # noqa: PLC0415
+
+    log: list[str] = ["Running memory compaction..."]
+    warnings: list[str] = []
+
+    scorer = MemoryScorer(config.memory_dir)
+    candidates = scorer.eviction_candidates()
+
+    auto_evict: list[int] = []
+    needs_curation: list[int] = []
+    for item_id in candidates:
+        classification = scorer.classify_for_compaction(item_id)
+        if classification == "auto_evict":
+            auto_evict.append(item_id)
+        elif classification == "needs_curation":
+            needs_curation.append(item_id)
+
+    if auto_evict:
+        removed = scorer.evict_items(auto_evict)
+        log.append(f"Evicted {len(removed)} items: {removed}")
+    else:
+        log.append("No items to evict.")
+
+    if needs_curation:
+        warnings.append(
+            f"{len(needs_curation)} items need manual curation: {needs_curation}"
+        )
+
+    log.append("Compaction complete.")
+    return TaskResult(success=True, log=log, warnings=warnings)
+
+
 __all__ = [
     "TaskResult",
     "run_clean",
+    "run_compact",
     "run_ensure_labels",
     "run_prep",
     "run_scaffold",
