@@ -375,6 +375,7 @@ def build_services(
         stop_event,
         shape_runner=shape_runner,
         whatsapp_bridge=wa_bridge,
+        hindsight=hindsight_client,
     )
     # Wire expert council for auto-decision on directions
     from expert_council import ExpertCouncil  # noqa: PLC0415
@@ -395,6 +396,7 @@ def build_services(
         beads_manager=beads_mgr,
         wiki_store=repo_wiki_store,
         wiki_compiler=wiki_compiler,
+        hindsight=hindsight_client,
     )
     hitl_phase = HITLPhase(
         config,
@@ -407,6 +409,7 @@ def build_services(
         event_bus,
         stop_event,
         active_issues_cb=active_issues_cb,
+        hindsight=hindsight_client,
     )
     run_recorder = RunRecorder(config)
     implementer = ImplementPhase(
@@ -422,6 +425,7 @@ def build_services(
         beads_manager=beads_mgr,
         active_issues_cb=active_issues_cb,
         transcript_summarizer=summarizer,
+        hindsight=hindsight_client,
     )
 
     from metrics_manager import MetricsManager
@@ -437,7 +441,7 @@ def build_services(
         event_bus=event_bus,
         state=state,
         summarizer=summarizer,
-        suggest_memory=MemorySuggester(config, prs, state),
+        suggest_memory=MemorySuggester(config, hindsight=hindsight_client),
     )
     pr_unsticker = PRUnsticker(
         config,
@@ -453,6 +457,7 @@ def build_services(
         troubleshooting_store=troubleshooting_store,
         store=store,
         credentials=credentials,
+        hindsight=hindsight_client,
     )
     memory_sync = MemorySyncWorker(
         config,

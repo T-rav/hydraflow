@@ -124,8 +124,8 @@ async def file_memory_suggestion(
     source: str,
     reference: str,
     config: HydraFlowConfig,
-    prs: PRPort | None = None,  # no longer needed — kept for signature compat
-    state: StateTracker | None = None,  # no longer needed — kept for signature compat
+    *,
+    hindsight: HindsightClient | None = None,
 ) -> None:
     """Parse and store a memory suggestion from an agent transcript.
 
@@ -165,7 +165,7 @@ async def file_memory_suggestion(
         from hindsight import Bank, schedule_retain  # noqa: PLC0415
 
         schedule_retain(
-            None,  # client — resolved by schedule_retain from global state
+            hindsight,
             Bank.LEARNINGS,
             item["learning"],
             metadata={

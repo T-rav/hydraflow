@@ -6,6 +6,10 @@ import asyncio
 import logging
 import re
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from hindsight import HindsightClient
 
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
@@ -66,6 +70,7 @@ class ShapePhase:
         stop_event: asyncio.Event,
         shape_runner: ShapeRunner | None = None,
         whatsapp_bridge: WhatsAppBridge | None = None,
+        hindsight: HindsightClient | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -77,7 +82,7 @@ class ShapePhase:
         self._runner = shape_runner
         self._whatsapp = whatsapp_bridge
         self._council: ExpertCouncil | None = None
-        self._suggest_memory = MemorySuggester(config, prs, state)
+        self._suggest_memory = MemorySuggester(config, hindsight=hindsight)
 
     async def shape_issues(self) -> bool:
         """Process shape-labeled issues. Returns True if work was done."""

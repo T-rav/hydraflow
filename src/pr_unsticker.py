@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from agent import AgentRunner
     from config import Credentials, HydraFlowConfig
     from events import EventBus
+    from hindsight import HindsightClient
     from hitl_runner import HITLRunner
     from issue_store import IssueStore
     from merge_conflict_resolver import MergeConflictResolver
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
         TroubleshootingPattern,
         TroubleshootingPatternStore,
     )
+
 
 logger = logging.getLogger("hydraflow.pr_unsticker")
 
@@ -112,6 +114,7 @@ class PRUnsticker:
         troubleshooting_store: TroubleshootingPatternStore | None = None,
         store: IssueStore | None = None,
         credentials: Credentials | None = None,
+        hindsight: HindsightClient | None = None,
     ) -> None:
         from config import Credentials as _Credentials  # noqa: PLC0415
 
@@ -128,7 +131,7 @@ class PRUnsticker:
         self._troubleshooting_store = troubleshooting_store
         self._store = store
         self._credentials = credentials or _Credentials()
-        self._suggest_memory = MemorySuggester(config, pr_manager, state)
+        self._suggest_memory = MemorySuggester(config, hindsight=hindsight)
 
     async def unstick(self, hitl_items: list[HITLItem]) -> UnstickResult:
         """Process HITL items and return stats.

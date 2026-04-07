@@ -1,0 +1,38 @@
+"""Regression test for #6164 — file_memory_suggestion must pass the real
+Hindsight client to schedule_retain so writes actually reach the vector store."""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+
+@pytest.mark.asyncio
+async def test_file_memory_suggestion_passes_real_client(tmp_path):
+    from config import HydraFlowConfig
+    from memory import file_memory_suggestion
+
+    cfg = HydraFlowConfig(state_dir=tmp_path)
+    fake_client = MagicMock(name="HindsightClient")
+    transcript = (
+        "MEMORY_SUGGESTION_START\n"
+        "title: test\n"
+        "learning: a meaningful thing\n"
+        "context: irrelevant\n"
+        "MEMORY_SUGGESTION_END\n"
+    )
+
+    with patch("hindsight.schedule_retain") as mock_schedule:
+        await file_memory_suggestion(
+            transcript,
+            source="review",
+            reference="test",
+            config=cfg,
+            hindsight=fake_client,
+        )
+
+    mock_schedule.assert_called_once()
+    assert mock_schedule.call_args.args[0] is fake_client, (
+        "schedule_retain must receive the real client, not None"
+    )
