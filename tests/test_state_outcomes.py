@@ -441,6 +441,8 @@ class TestSessionCounters:
         tracker.increment_session_counter("triaged")
         counters = tracker.get_session_counters()
         assert counters.triaged == 1
+        assert counters.discovered == 0
+        assert counters.shaped == 0
         assert counters.planned == 0
         assert counters.implemented == 0
         assert counters.reviewed == 0
@@ -474,6 +476,8 @@ class TestSessionCounters:
         tracker.increment_session_counter("nonexistent")
         counters = tracker.get_session_counters()
         assert counters.triaged == 0
+        assert counters.discovered == 0
+        assert counters.shaped == 0
         assert counters.planned == 0
 
     def test_session_counters_persist_across_reload(self, tmp_path: Path) -> None:
