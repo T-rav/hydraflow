@@ -846,6 +846,45 @@ class TestAppendEntryOSError:
 
 
 # ---------------------------------------------------------------------------
+# File locking tests
+# ---------------------------------------------------------------------------
+
+
+class TestAppendEntryFileLocking:
+    """Verify _append_entry acquires file_lock before append_jsonl."""
+
+    def test_append_entry_acquires_file_lock(self, config: HydraFlowConfig) -> None:
+        """_append_entry wraps append_jsonl inside file_lock."""
+        collector, _, _ = _make_collector(config)
+        entry = RetrospectiveEntry(
+            issue_number=42,
+            pr_number=100,
+            timestamp="2026-02-20T10:30:00Z",
+        )
+
+        call_order: list[str] = []
+
+        class FakeLock:
+            def __enter__(self_lock):
+                call_order.append("lock_enter")
+                return self_lock
+
+            def __exit__(self_lock, *args):
+                call_order.append("lock_exit")
+
+        def fake_append(path, data):
+            call_order.append("append_jsonl")
+
+        with (
+            patch("file_util.file_lock", return_value=FakeLock()),
+            patch("file_util.append_jsonl", fake_append),
+        ):
+            collector._append_entry(entry)
+
+        assert call_order == ["lock_enter", "append_jsonl", "lock_exit"]
+
+
+# ---------------------------------------------------------------------------
 # Hindsight dual-write tests
 # ---------------------------------------------------------------------------
 

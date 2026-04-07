@@ -535,6 +535,43 @@ class TestAppendReviewOSError:
 
 
 # ---------------------------------------------------------------------------
+# File locking tests
+# ---------------------------------------------------------------------------
+
+
+class TestAppendReviewFileLocking:
+    """Verify append_review acquires file_lock before append_jsonl."""
+
+    def test_append_review_acquires_file_lock(self, tmp_path) -> None:
+        """append_review wraps append_jsonl inside file_lock."""
+        from unittest.mock import patch
+
+        store = ReviewInsightStore(tmp_path / "memory")
+        record = _make_record(categories=["missing_tests"])
+
+        call_order: list[str] = []
+
+        class FakeLock:
+            def __enter__(self_lock):
+                call_order.append("lock_enter")
+                return self_lock
+
+            def __exit__(self_lock, *args):
+                call_order.append("lock_exit")
+
+        def fake_append(path, data):
+            call_order.append("append_jsonl")
+
+        with (
+            patch("file_util.file_lock", return_value=FakeLock()),
+            patch("file_util.append_jsonl", fake_append),
+        ):
+            store.append_review(record)
+
+        assert call_order == ["lock_enter", "append_jsonl", "lock_exit"]
+
+
+# ---------------------------------------------------------------------------
 # ReviewRecord timestamp validation (issue #1048)
 # ---------------------------------------------------------------------------
 

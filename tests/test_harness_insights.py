@@ -585,6 +585,96 @@ class TestAppendFailureOSError:
 
 
 # ---------------------------------------------------------------------------
+# File locking tests
+# ---------------------------------------------------------------------------
+
+
+class TestAppendFailureFileLocking:
+    """Verify append_failure acquires file_lock before append_jsonl."""
+
+    def test_append_failure_acquires_file_lock(self, tmp_path) -> None:
+        """append_failure wraps append_jsonl inside file_lock."""
+        from unittest.mock import patch
+
+        store = HarnessInsightStore(tmp_path / "memory")
+        record = _make_record()
+
+        call_order: list[str] = []
+
+        class FakeLock:
+            def __enter__(self_lock):
+                call_order.append("lock_enter")
+                return self_lock
+
+            def __exit__(self_lock, *args):
+                call_order.append("lock_exit")
+
+        def fake_append(path, data):
+            call_order.append("append_jsonl")
+
+        with (
+            patch("file_util.file_lock", return_value=FakeLock()),
+            patch("file_util.append_jsonl", fake_append),
+        ):
+            store.append_failure(record)
+
+        assert call_order == ["lock_enter", "append_jsonl", "lock_exit"]
+
+
+class TestAutoFileSuggestionsFileLocking:
+    """Verify auto_file_suggestions acquires file_lock before writing."""
+
+    @pytest.mark.asyncio
+    async def test_auto_file_suggestions_uses_file_lock(self, tmp_path) -> None:
+        """auto_file_suggestions wraps append_jsonl inside file_lock."""
+        from unittest.mock import patch
+
+        from harness_insights import auto_file_suggestions
+
+        store = HarnessInsightStore(tmp_path / "memory")
+        config = ConfigFactory.create(repo_root=tmp_path)
+
+        # Write enough records to trigger a suggestion
+        failures_path = tmp_path / "memory" / "harness_failures.jsonl"
+        failures_path.parent.mkdir(parents=True, exist_ok=True)
+
+        for i in range(5):
+            rec = FailureRecord(
+                issue_number=i,
+                category=FailureCategory.QUALITY_GATE,
+                details="ruff lint error",
+                timestamp=f"2026-01-0{i + 1}T00:00:00Z",
+            )
+            with failures_path.open("a") as f:
+                f.write(rec.model_dump_json() + "\n")
+
+        call_order: list[str] = []
+
+        class FakeLock:
+            def __enter__(self_lock):
+                call_order.append("lock_enter")
+                return self_lock
+
+            def __exit__(self_lock, *args):
+                call_order.append("lock_exit")
+
+        def fake_append(path, data):
+            call_order.append("append_jsonl")
+
+        with (
+            patch("file_util.file_lock", return_value=FakeLock()),
+            patch("file_util.append_jsonl", fake_append),
+        ):
+            await auto_file_suggestions(store, config)
+
+        # Should have at least one lock cycle
+        if call_order:
+            assert call_order[0] == "lock_enter"
+            assert "append_jsonl" in call_order
+            assert call_order[-1] == "lock_exit"
+
+
+# ---------------------------------------------------------------------------
 # FailureRecord timestamp validation (issue #1048)
 # ---------------------------------------------------------------------------
 

@@ -162,9 +162,11 @@ class HarnessInsightStore:
         """Append *record* as a JSON line to ``harness_failures.jsonl``."""
         if not self._hindsight:
             try:
-                from file_util import append_jsonl  # noqa: PLC0415
+                from file_util import append_jsonl, file_lock  # noqa: PLC0415
 
-                append_jsonl(self._failures_path, record.model_dump_json())
+                lock_path = self._failures_path.with_suffix(".lock")
+                with file_lock(lock_path):
+                    append_jsonl(self._failures_path, record.model_dump_json())
             except OSError:
                 logger.warning(
                     "Could not append failure to %s",
@@ -434,6 +436,8 @@ async def auto_file_suggestions(
 
         import json as _json  # noqa: PLC0415
 
+        from file_util import append_jsonl, file_lock  # noqa: PLC0415
+
         suggestions_path = config.data_path("memory", "harness_suggestions.jsonl")
         suggestions_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -453,8 +457,9 @@ async def auto_file_suggestions(
                     "suggestion": suggestion.suggestion,
                     "timestamp": datetime.now(UTC).isoformat(),
                 }
-                with suggestions_path.open("a") as f:
-                    f.write(_json.dumps(rec) + "\n")
+                lock_path = suggestions_path.with_suffix(".lock")
+                with file_lock(lock_path):
+                    append_jsonl(suggestions_path, _json.dumps(rec))
                 store.mark_pattern_proposed(key)
                 logger.warning(
                     "Harness insight: %s (%d occurrences)",

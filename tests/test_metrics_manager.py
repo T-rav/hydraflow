@@ -507,5 +507,68 @@ class TestLoadLocalHistoryOSError:
 
 
 # ---------------------------------------------------------------------------
+# TestFileLocking
+# ---------------------------------------------------------------------------
+
+
+class TestFileLocking:
+    """Verify _save_to_local_cache acquires file_lock before append_jsonl."""
+
+    def test_save_to_local_cache_acquires_file_lock(
+        self, state, event_bus, tmp_path
+    ) -> None:
+        """_save_to_local_cache wraps append_jsonl inside file_lock."""
+        mgr, _, _, _ = make_manager(
+            state, event_bus, state_file=tmp_path / "state.json"
+        )
+        snapshot = MetricsSnapshot(timestamp="2025-01-01T00:00:00")
+
+        call_order: list[str] = []
+
+        class FakeLock:
+            def __enter__(self_lock):
+                call_order.append("lock_enter")
+                return self_lock
+
+            def __exit__(self_lock, *args):
+                call_order.append("lock_exit")
+
+        def fake_append(path, data):
+            call_order.append("append_jsonl")
+
+        with (
+            patch("metrics_manager.file_lock", return_value=FakeLock()),
+            patch("metrics_manager.append_jsonl", fake_append),
+        ):
+            mgr._save_to_local_cache(snapshot)
+
+        assert call_order == ["lock_enter", "append_jsonl", "lock_exit"]
+
+    def test_lock_file_path_is_sibling_of_snapshots(
+        self, state, event_bus, tmp_path
+    ) -> None:
+        """The lock file used is in the same directory as snapshots.jsonl."""
+        mgr, _, _, _ = make_manager(
+            state, event_bus, state_file=tmp_path / "state.json"
+        )
+        snapshot = MetricsSnapshot(timestamp="2025-01-01T00:00:00")
+
+        lock_path_used = None
+
+        with (
+            patch("metrics_manager.file_lock") as mock_lock,
+            patch("metrics_manager.append_jsonl"),
+        ):
+            mock_lock.return_value.__enter__ = lambda s: s
+            mock_lock.return_value.__exit__ = lambda s, *a: None
+            mgr._save_to_local_cache(snapshot)
+            lock_path_used = mock_lock.call_args[0][0]
+
+        expected_dir = tmp_path / "metrics" / "test-owner-test-repo"
+        assert lock_path_used.parent == expected_dir
+        assert lock_path_used.name == ".snapshots.lock"
+
+
+# ---------------------------------------------------------------------------
 # TestMetricsIssueOptIn
 # ---------------------------------------------------------------------------

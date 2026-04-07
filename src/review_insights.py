@@ -230,9 +230,11 @@ class ReviewInsightStore:
         """Append *record* as a JSON line to ``reviews.jsonl``."""
         if not self._hindsight:
             try:
-                from file_util import append_jsonl  # noqa: PLC0415
+                from file_util import append_jsonl, file_lock  # noqa: PLC0415
 
-                append_jsonl(self._reviews_path, record.model_dump_json())
+                lock_path = self._reviews_path.with_suffix(".lock")
+                with file_lock(lock_path):
+                    append_jsonl(self._reviews_path, record.model_dump_json())
             except OSError:
                 logger.warning(
                     "Could not append review to %s",
