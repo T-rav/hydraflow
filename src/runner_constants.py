@@ -8,20 +8,36 @@ from __future__ import annotations
 # "implementation", "planning", "review", "correction", "conflict resolution",
 # or "rebuild".
 MEMORY_SUGGESTION_PROMPT = """\
-## Optional: Tribal-Memory Suggestion
+## Optional: Tribal-Knowledge Suggestion
 
-If during this {context} you discovered a durable, load-bearing insight that
-future agent runs would be strictly worse without, you may output ONE tribal
-memory suggestion. Bar is HIGH: the insight should be a principle-level rule
-that prevents a real failure mode, not a trivial observation.
+This {context} may have surfaced tribal knowledge — the kind of durable,
+hard-won fact a senior engineer would write on a whiteboard for a new hire
+on day one. If — and ONLY if — what you learned meets ALL of these criteria:
+
+  1. Durable: still true a year from now, across releases and refactors.
+  2. Non-obvious: a senior engineer would NOT figure it out by reading the code.
+  3. Load-bearing: ignoring it causes a real failure or wastes real time.
+  4. General: applies to a subsystem or pattern, not a single issue/PR.
+
+…then emit a single block at the end of your response:
 
 MEMORY_SUGGESTION_START
-principle: A single-sentence rule agents should follow going forward
-rationale: Why this rule holds — the causal reasoning behind it
-failure_mode: The concrete bad outcome that occurs when the rule is violated
-scope: The module/subsystem the rule applies to (e.g. hydraflow/shape, hydraflow/db)
+principle: <the durable rule, one sentence>
+rationale: <why — historical incident, design constraint, or hard-won lesson>
+failure_mode: <what concretely breaks if this is ignored>
+scope: <subsystem path, file glob, or "all">
 MEMORY_SUGGESTION_END
 
-All four fields are required. Blocks missing any field are silently dropped.
-Do NOT emit a suggestion unless you can fill all four fields non-trivially.
+STRICT FORMATTING RULES:
+- DO NOT include issue numbers, PR numbers, commit hashes, dates, or other
+  short-lived references in any field. They will rot.
+- DO NOT emit a block for routine observations, refactor notes, code-review
+  nitpicks, or implementation details.
+- DO NOT restate facts that are already obvious from CLAUDE.md or the code.
+- All four fields are required and non-trivial. Blocks missing any field
+  (or with empty/placeholder values) are silently dropped.
+
+When in doubt, omit the block. The bar is "would I tell a new hire this on
+day one." Most {context} runs should produce no block at all — that is the
+expected and correct outcome.
 """
