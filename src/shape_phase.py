@@ -470,7 +470,7 @@ class ShapePhase:
         # Source 2: GitHub comments (authoritative, works for all channels)
         enriched = await self._store.enrich_with_comments(issue)
         reply = self._find_human_reply(enriched.comments or [])
-        if reply:
+        if reply is not None:
             return (reply, "github")
         return None
 

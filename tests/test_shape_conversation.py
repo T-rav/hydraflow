@@ -78,11 +78,13 @@ class TestConversationStateModel:
                     content="Go deeper on B",
                     timestamp="t2",
                     signal="positive",
+                    source="github",
                 ),
             ],
         )
         assert len(conv.turns) == 2
         assert conv.turns[1].signal == "positive"
+        assert conv.turns[1].source == "github"
 
 
 class TestFinalizeDetection:
