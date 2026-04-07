@@ -22,6 +22,7 @@ from config import HydraFlowConfig
 
 if TYPE_CHECKING:
     from ports import PRPort
+    from retrospective_queue import RetrospectiveQueue
 
 logger = logging.getLogger("hydraflow.health_monitor_loop")
 
@@ -283,6 +284,7 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         *,
         prs: PRPort | None = None,
         verification_window: int = 20,
+        retrospective_queue: RetrospectiveQueue | None = None,
     ) -> None:
         super().__init__(
             worker_name="health_monitor",
@@ -291,6 +293,7 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         )
         self._prs = prs
         self._verification_window = verification_window
+        self._retrospective_queue = retrospective_queue
         self._decisions_dir: Path = config.memory_dir
         self._pending: list[PendingAdjustment] = []
         self._last_log_scan: datetime | None = None
@@ -450,39 +453,30 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         except Exception:  # noqa: BLE001
             logger.debug("Harness suggestion ingestion failed", exc_info=True)
 
-        # Verify improvement proposal outcomes
-        try:
-            from review_insights import (  # noqa: PLC0415
-                ReviewInsightStore,
-                verify_proposals,
-            )
+        # Enqueue proposal verification for the retrospective loop
+        if self._retrospective_queue is not None:
+            from retrospective_queue import QueueItem, QueueKind  # noqa: PLC0415
 
-            insight_store = ReviewInsightStore(self._config.memory_dir)
-            records = insight_store.load_recent(50)
-            stale = verify_proposals(insight_store, records)
-            for category in stale:
-                title = f"[Health Monitor] Unresolved review insight: {category}"
-                body = f"Review insight '{category}' was proposed but pattern frequency has not decreased after 30 days."
-                try:
-                    rec = {
-                        "title": title,
-                        "body": body,
-                        "timestamp": datetime.now(UTC).isoformat(),
-                        "type": "recommendation",
-                    }
-                    rec_path = self._config.data_path(
-                        "memory", "hitl_recommendations.jsonl"
+            self._retrospective_queue.append(QueueItem(kind=QueueKind.VERIFY_PROPOSALS))
+        else:
+            # Fallback: inline verification when queue not wired
+            try:
+                from review_insights import (  # noqa: PLC0415
+                    ReviewInsightStore,
+                    verify_proposals,
+                )
+
+                insight_store = ReviewInsightStore(self._config.memory_dir)
+                records = insight_store.load_recent(50)
+                stale = verify_proposals(insight_store, records)
+                for category in stale:
+                    logger.warning(
+                        "HITL recommendation: stale review insight '%s'", category
                     )
-                    rec_path.parent.mkdir(parents=True, exist_ok=True)
-                    with rec_path.open("a") as f:
-                        f.write(json.dumps(rec) + "\n")
-                    logger.warning("HITL recommendation: %s", title)
-                except OSError:
-                    logger.debug("Failed to write HITL recommendation", exc_info=True)
-        except ImportError:
-            pass
-        except Exception:  # noqa: BLE001
-            logger.debug("Proposal verification failed", exc_info=True)
+            except ImportError:
+                pass
+            except Exception:  # noqa: BLE001
+                logger.debug("Proposal verification failed", exc_info=True)
 
         # Cross-project log pattern detection
         try:

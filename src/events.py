@@ -92,6 +92,7 @@ class EventType(StrEnum):
     AGENT_ACTIVITY = "agent_activity"
     SYSTEM_REROUTE = "system_reroute"
     DIAGNOSTIC_UPDATE = "diagnostic_update"
+    RETROSPECTIVE_UPDATE = "retrospective_update"
 
 
 _T = TypeVar("_T")

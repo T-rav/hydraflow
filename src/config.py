@@ -171,6 +171,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("repo_wiki_interval", "HYDRAFLOW_REPO_WIKI_INTERVAL", 3600),
     ("max_repo_wiki_chars", "HYDRAFLOW_MAX_REPO_WIKI_CHARS", 15_000),
     ("diagnostic_interval", "HYDRAFLOW_DIAGNOSTIC_INTERVAL", 30),
+    ("retrospective_interval", "HYDRAFLOW_RETROSPECTIVE_INTERVAL", 1800),
 ]
 
 _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
@@ -1400,6 +1401,12 @@ class HydraFlowConfig(BaseModel):
         ge=3,
         le=100,
         description="Number of recent retrospective entries to scan for patterns",
+    )
+    retrospective_interval: int = Field(
+        default=1800,
+        ge=60,
+        le=86400,
+        description="Poll interval in seconds for retrospective analysis loop",
     )
 
     # Credit pause

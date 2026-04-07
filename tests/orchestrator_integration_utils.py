@@ -482,6 +482,7 @@ def build_scripted_services(
     services.trace_mining_loop = FakeBackgroundLoop()
     services.repo_wiki_loop = FakeBackgroundLoop()
     services.diagnostic_loop = FakeBackgroundLoop()
+    services.retrospective_loop = FakeBackgroundLoop()
     services.repo_wiki_store = SimpleNamespace(
         is_ingested=MagicMock(return_value=False),
         mark_ingested=MagicMock(),

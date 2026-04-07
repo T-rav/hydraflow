@@ -249,7 +249,7 @@ export const WORKER_PRESETS = {
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'pr_unsticker', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_sweeper', 'dependabot_merge', 'stale_issue', 'security_patch', 'ci_monitor', 'code_grooming', 'sentry_ingest'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'pr_unsticker', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_sweeper', 'dependabot_merge', 'stale_issue', 'security_patch', 'ci_monitor', 'code_grooming', 'sentry_ingest', 'retrospective'])
 
 /**
  * Default intervals (in seconds) for system workers.
@@ -269,6 +269,7 @@ export const SYSTEM_WORKER_INTERVALS = {
   security_patch: 21600,
   ci_monitor: 1800,
   code_grooming: 86400,
+  retrospective: 1800,
 }
 
 /**
@@ -289,8 +290,7 @@ export const CRATE_STATUSES = ['open', 'closed']
  * Workers with `system: true` are internal services shown with a "system" badge.
  */
 export const BACKGROUND_WORKERS = [
-  { key: 'retrospective',   label: 'Retrospective',  description: 'Captures post-merge outcomes and recurring delivery patterns.', color: theme.purple, group: 'learning', tags: ['insights'] },
-  { key: 'review_insights', label: 'Review Insights', description: 'Aggregates recurring review feedback into improvement opportunities.', color: theme.orange, group: 'learning', tags: ['insights'] },
+  { key: 'retrospective', label: 'Retrospective', description: 'Periodic analysis of delivery patterns and review feedback. Runs pattern detection, proposal verification, and improvement filing.', color: theme.purple, group: 'learning', tags: ['insights'] },
   { key: 'pipeline_poller', label: 'Pipeline Poller', description: 'Refreshes live pipeline snapshots for queue and status visibility.', color: theme.textMuted, system: true, group: 'operations', tags: ['infra'] },
   { key: 'memory_sync',     label: 'Memory Manager', description: 'Ingests memory and transcript issues into durable learnings.', color: theme.accent, system: true, group: 'intake', tags: ['memory'] },
   { key: 'pr_unsticker',    label: 'PR Unsticker',   description: 'Requeues stalled HITL PRs once requirements are actionable.', color: theme.orange, system: true, group: 'operations', tags: ['recovery'] },
