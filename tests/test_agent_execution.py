@@ -1359,3 +1359,27 @@ class TestTestAdequacyLoop:
             )
         assert result.passed is True
         assert result.attempts == 2
+
+
+# ---------------------------------------------------------------------------
+# DI: ReviewInsightStore injection (issue #5948)
+# ---------------------------------------------------------------------------
+
+
+class TestAgentRunnerReviewInsightsDI:
+    """AgentRunner should accept ReviewInsightStore via constructor."""
+
+    def test_accepts_insights_via_constructor(
+        self, config, event_bus: EventBus
+    ) -> None:
+        from review_insights import ReviewInsightStore
+
+        store = ReviewInsightStore(config.memory_dir)
+        runner = AgentRunner(config, event_bus, review_insights=store)
+        assert runner._insights is store
+
+    def test_falls_back_when_not_provided(self, config, event_bus: EventBus) -> None:
+        from review_insights import ReviewInsightStore
+
+        runner = AgentRunner(config, event_bus)
+        assert isinstance(runner._insights, ReviewInsightStore)

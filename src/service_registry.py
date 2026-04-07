@@ -251,6 +251,13 @@ def build_services(
         runner=subprocess_runner,
         credentials=credentials,
     )
+    # ReviewInsightStore shared between AgentRunner and ReviewPhase
+    review_insights = ReviewInsightStore(
+        config.memory_dir,
+        hindsight=hindsight_client,
+        dolt=dolt_backend,
+        wal=hindsight_wal,
+    )
     agents = AgentRunner(
         config,
         event_bus,
@@ -260,6 +267,7 @@ def build_services(
         wal=hindsight_wal,
         credentials=credentials,
         wiki_store=repo_wiki_store,
+        review_insights=review_insights,
     )
     planners = PlannerRunner(
         config,
@@ -496,16 +504,6 @@ def build_services(
         epic_manager=epic_manager,
         store=store,
     )
-    # ReviewInsightStore shared between AgentRunner and ReviewPhase
-    review_insights = ReviewInsightStore(
-        config.memory_dir,
-        hindsight=hindsight_client,
-        dolt=dolt_backend,
-        wal=hindsight_wal,
-    )
-    # Inject shared store into AgentRunner (replacing its self-constructed copy)
-    agents._insights = review_insights
-
     reviewer = ReviewPhase(
         config,
         state,

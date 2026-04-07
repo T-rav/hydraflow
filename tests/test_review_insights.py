@@ -1038,3 +1038,144 @@ class TestReviewInsightsSentryBreadcrumbs:
                 if c[1].get("category") == "review_insights.pattern_detected"
             ]
             assert len(pattern_calls) >= 1
+
+
+# ---------------------------------------------------------------------------
+# ReviewInsightStore class-level methods (issue #5948)
+# ---------------------------------------------------------------------------
+
+
+class TestStoreProposalStaleDays:
+    """PROPOSAL_STALE_DAYS is exposed as a class constant."""
+
+    def test_class_constant_equals_30(self) -> None:
+        assert ReviewInsightStore.PROPOSAL_STALE_DAYS == 30
+
+
+class TestStoreExtractCategories:
+    """extract_categories as a static method on ReviewInsightStore."""
+
+    def test_returns_matching_categories(self) -> None:
+        result = ReviewInsightStore.extract_categories("missing test coverage")
+        assert "missing_tests" in result
+
+    def test_returns_empty_for_unrelated_text(self) -> None:
+        result = ReviewInsightStore.extract_categories("all good")
+        assert result == []
+
+
+class TestStoreGetFeedbackSection:
+    """get_feedback_section wraps get_common_feedback_section."""
+
+    def test_returns_markdown_with_category_descriptions(self) -> None:
+        records = [
+            _make_record(categories=["missing_tests"]),
+            _make_record(categories=["missing_tests"]),
+            _make_record(categories=["missing_tests"]),
+        ]
+        result = ReviewInsightStore.get_feedback_section(records)
+        assert "## Common Review Feedback" in result
+        assert "Missing or insufficient test coverage" in result
+
+    def test_returns_empty_for_empty_records(self) -> None:
+        result = ReviewInsightStore.get_feedback_section([])
+        assert result == ""
+
+    def test_returns_empty_for_only_approve_records(self) -> None:
+        records = [
+            _make_record(verdict=ReviewVerdict.APPROVE, categories=["missing_tests"])
+        ]
+        result = ReviewInsightStore.get_feedback_section(records)
+        assert result == ""
+
+
+class TestStoreGetEscalation:
+    """get_escalation wraps get_escalation_data."""
+
+    def test_returns_escalation_dicts_for_recurring_categories(self) -> None:
+        records = [
+            _make_record(categories=["missing_tests"]),
+            _make_record(categories=["missing_tests"]),
+            _make_record(categories=["missing_tests"]),
+        ]
+        result = ReviewInsightStore.get_escalation(records, threshold=3)
+        assert len(result) == 1
+        assert result[0]["category"] == "missing_tests"
+        assert "mandatory_block" in result[0]
+
+    def test_returns_empty_for_empty_records(self) -> None:
+        result = ReviewInsightStore.get_escalation([])
+        assert result == []
+
+    def test_returns_empty_below_threshold(self) -> None:
+        records = [
+            _make_record(categories=["missing_tests"]),
+            _make_record(categories=["missing_tests"]),
+        ]
+        result = ReviewInsightStore.get_escalation(records, threshold=3)
+        assert result == []
+
+
+class TestStoreAnalyzePatterns:
+    """analyze_patterns as a static method on ReviewInsightStore."""
+
+    def test_returns_patterns_above_threshold(self) -> None:
+        records = [
+            _make_record(categories=["missing_tests"]),
+            _make_record(categories=["missing_tests"]),
+            _make_record(categories=["missing_tests"]),
+        ]
+        result = ReviewInsightStore.analyze_patterns(records, threshold=3)
+        assert len(result) == 1
+        assert result[0][0] == "missing_tests"
+
+    def test_returns_empty_for_no_records(self) -> None:
+        result = ReviewInsightStore.analyze_patterns([], threshold=3)
+        assert result == []
+
+
+class TestStoreBuildInsightIssueBody:
+    """build_insight_issue_body as a static method on ReviewInsightStore."""
+
+    def test_returns_markdown_with_evidence(self) -> None:
+        evidence = [_make_record(categories=["missing_tests"])]
+        body = ReviewInsightStore.build_insight_issue_body(
+            "missing_tests", 3, 10, evidence
+        )
+        assert "## Review Insight:" in body
+        assert "PR #101" in body
+
+    def test_handles_empty_evidence(self) -> None:
+        body = ReviewInsightStore.build_insight_issue_body("missing_tests", 0, 0, [])
+        assert "## Review Insight:" in body
+
+
+class TestStoreVerifyProposalsCheck:
+    """verify_proposals_check as an instance method."""
+
+    def test_returns_stale_categories(self, tmp_path: Path) -> None:
+        store = ReviewInsightStore(tmp_path)
+        # Record a proposal from 40 days ago
+        import json
+        from datetime import UTC, datetime, timedelta
+
+        old_time = (datetime.now(UTC) - timedelta(days=40)).isoformat()
+        meta = {
+            "missing_tests": {
+                "pre_count": 5,
+                "proposed_at": old_time,
+                "verified": False,
+            }
+        }
+        (tmp_path / "proposal_metadata.json").write_text(json.dumps(meta))
+
+        records = [
+            _make_record(categories=["missing_tests"]),
+        ] * 5
+        stale = store.verify_proposals_check(records)
+        assert "missing_tests" in stale
+
+    def test_returns_empty_when_no_metadata(self, tmp_path: Path) -> None:
+        store = ReviewInsightStore(tmp_path)
+        stale = store.verify_proposals_check([])
+        assert stale == []

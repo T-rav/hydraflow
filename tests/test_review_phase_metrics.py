@@ -1284,7 +1284,9 @@ class TestRecordReviewInsight:
         mock_insights.get_proposed_categories.return_value = set()
         phase._insights = mock_insights
 
-        with patch("review_phase.analyze_patterns", return_value=[]):
+        with patch(
+            "review_insights.ReviewInsightStore.analyze_patterns", return_value=[]
+        ):
             await phase._record_review_insight(result)
 
         mock_insights.append_review.assert_called_once()
@@ -1326,7 +1328,7 @@ class TestRecordReviewInsight:
             ),
         ]
         with patch(
-            "review_phase.analyze_patterns",
+            "review_insights.ReviewInsightStore.analyze_patterns",
             return_value=[("test_coverage", 4, mock_evidence)],
         ):
             await phase._record_review_insight(result)
@@ -1358,7 +1360,7 @@ class TestRecordReviewInsight:
             MagicMock(pr_number=2, issue_number=20, summary="missing coverage"),
         ]
         with patch(
-            "review_phase.analyze_patterns",
+            "review_insights.ReviewInsightStore.analyze_patterns",
             return_value=[("test_coverage", 4, mock_evidence)],
         ):
             await phase._record_review_insight(result)
@@ -1392,7 +1394,9 @@ class TestRecordReviewInsight:
         mock_insights.get_proposed_categories.return_value = set()
         phase._insights = mock_insights
 
-        with patch("review_phase.analyze_patterns", return_value=[]):
+        with patch(
+            "review_insights.ReviewInsightStore.analyze_patterns", return_value=[]
+        ):
             await phase._record_review_insight(result)
 
         status_cb.assert_called_with(
@@ -1440,7 +1444,9 @@ class TestRecordReviewInsight:
         mock_insights.get_proposed_categories.return_value = set()
         phase._insights = mock_insights
 
-        with patch("review_phase.analyze_patterns", return_value=[]):
+        with patch(
+            "review_insights.ReviewInsightStore.analyze_patterns", return_value=[]
+        ):
             await phase._record_review_insight(result)
 
         mock_insights.append_review.assert_called_once()

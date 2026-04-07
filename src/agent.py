@@ -15,11 +15,7 @@ from events import EventBus, EventType, HydraFlowEvent
 from exception_classify import is_likely_bug, reraise_on_credit_or_bug
 from models import LoopResult, Task, WorkerResult, WorkerStatus, WorkerUpdatePayload
 from prompt_builder import PromptBuilder
-from review_insights import (
-    ReviewInsightStore,
-    get_common_feedback_section,
-    get_escalation_data,
-)
+from review_insights import ReviewInsightStore
 from runner_constants import MEMORY_SUGGESTION_PROMPT
 from skill_registry import (  # noqa: F401
     AgentSkill,
@@ -138,6 +134,7 @@ Run through this checklist before your final commit:
         wal: HindsightWAL | None = None,
         credentials: Credentials | None = None,
         wiki_store: RepoWikiStore | None = None,
+        review_insights: ReviewInsightStore | None = None,
     ) -> None:
         super().__init__(
             config,
@@ -147,7 +144,7 @@ Run through this checklist before your final commit:
             credentials=credentials,
             wiki_store=wiki_store,
         )
-        self._insights = ReviewInsightStore(
+        self._insights = review_insights or ReviewInsightStore(
             config.memory_dir, hindsight=hindsight, dolt=dolt, wal=wal
         )
         from context_cache import ContextSectionCache
@@ -399,7 +396,7 @@ Run through this checklist before your final commit:
 
             def _load_feedback(_cfg: HydraFlowConfig) -> str:
                 recent = self._insights.load_recent(self._config.review_insight_window)
-                return get_common_feedback_section(recent)
+                return ReviewInsightStore.get_feedback_section(recent)
 
             feedback, _hit = self._context_cache.get_or_load(
                 key="common_review_feedback",
@@ -424,7 +421,7 @@ Run through this checklist before your final commit:
 
             def _load_escalations(_cfg: HydraFlowConfig) -> str:
                 recent = self._insights.load_recent(self._config.review_insight_window)
-                data = get_escalation_data(
+                data = ReviewInsightStore.get_escalation(
                     recent,
                     threshold=self._config.review_pattern_threshold,
                 )

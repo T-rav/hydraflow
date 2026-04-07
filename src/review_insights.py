@@ -207,6 +207,59 @@ def extract_categories(summary: str) -> list[str]:
 class ReviewInsightStore:
     """File-backed store for review records and proposed-category tracking."""
 
+    PROPOSAL_STALE_DAYS: int = 30
+
+    # ------------------------------------------------------------------
+    # Static wrappers — encapsulate module-level analysis functions
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def extract_categories(summary: str) -> list[str]:
+        """Extract feedback categories from a review summary."""
+        return extract_categories(summary)
+
+    @staticmethod
+    def analyze_patterns(
+        records: list[ReviewRecord],
+        threshold: int = 3,
+    ) -> list[tuple[str, int, list[ReviewRecord]]]:
+        """Identify recurring feedback categories above *threshold*."""
+        return analyze_patterns(records, threshold)
+
+    @staticmethod
+    def build_insight_issue_body(
+        category: str,
+        count: int,
+        total: int,
+        evidence: list[ReviewRecord],
+    ) -> str:
+        """Build markdown body for a review improvement proposal issue."""
+        return build_insight_issue_body(category, count, total, evidence)
+
+    @staticmethod
+    def get_feedback_section(
+        records: list[ReviewRecord],
+        top_n: int = 3,
+    ) -> str:
+        """Build a ``## Common Review Feedback`` section."""
+        return get_common_feedback_section(records, top_n)
+
+    @staticmethod
+    def get_escalation(
+        records: list[ReviewRecord],
+        top_n: int = 3,
+        threshold: int = 3,
+    ) -> list[dict[str, str | int | list[str]]]:
+        """Return structured escalation data for recurring categories."""
+        return get_escalation_data(records, top_n, threshold)
+
+    def verify_proposals_check(
+        self,
+        records: list[ReviewRecord],
+    ) -> list[str]:
+        """Check filed proposals and return stale category names."""
+        return verify_proposals(self, records)
+
     def __init__(
         self,
         memory_dir: Path,
