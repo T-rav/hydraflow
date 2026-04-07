@@ -160,7 +160,7 @@ class HarnessInsightStore:
 
     def append_failure(self, record: FailureRecord) -> None:
         """Append *record* as a JSON line to ``harness_failures.jsonl``."""
-        if not self._hindsight:
+        if self._hindsight is None:
             try:
                 from file_util import append_jsonl, file_lock  # noqa: PLC0415
 
@@ -173,8 +173,7 @@ class HarnessInsightStore:
                     self._failures_path,
                     exc_info=True,
                 )
-
-        if self._hindsight:
+        else:
             from hindsight import Bank, schedule_retain  # noqa: PLC0415
 
             schedule_retain(
