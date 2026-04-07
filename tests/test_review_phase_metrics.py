@@ -1396,14 +1396,14 @@ class TestRecordReviewInsight:
             await phase._record_review_insight(result)
 
         status_cb.assert_called_with(
-            "review_insights",
+            "retrospective",
             "ok",
             {"issue_number": 42, "pr_number": 101},
         )
 
     @pytest.mark.asyncio
     async def test_updates_bg_status_on_error(self, config: HydraFlowConfig) -> None:
-        """Insight recording failure should mark review_insights worker as error."""
+        """Insight recording failure should mark retrospective worker as error."""
         phase = make_review_phase(config)
         result = ReviewResultFactory.create(issue_number=42, pr_number=101)
         status_cb = MagicMock()
@@ -1416,7 +1416,7 @@ class TestRecordReviewInsight:
         await phase._record_review_insight(result)
 
         status_cb.assert_called_with(
-            "review_insights",
+            "retrospective",
             "error",
             {
                 "issue_number": 42,

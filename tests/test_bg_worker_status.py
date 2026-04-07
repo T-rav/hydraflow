@@ -683,7 +683,7 @@ class TestBgWorkerIntervalEndpoint:
         )
         endpoint = self._find_endpoint(router, "/api/control/bg-worker/interval")
 
-        response = await endpoint({"name": "retrospective", "interval_seconds": 3600})
+        response = await endpoint({"name": "triage", "interval_seconds": 3600})
         data = json.loads(response.body)
         assert response.status_code == 400
         assert "not editable" in data["error"]
