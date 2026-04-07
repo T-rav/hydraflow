@@ -1240,3 +1240,60 @@ class TestEventLogMaybeRotate:
         # Simulate by making the file disappear between checks
         log_path.unlink()
         assert await event_log.maybe_rotate() is False
+
+
+# ---------------------------------------------------------------------------
+# File locking tests
+# ---------------------------------------------------------------------------
+
+
+class TestAppendSyncFileLocking:
+    """Verify _append_sync acquires file_lock before append_jsonl."""
+
+    def test_append_sync_acquires_file_lock(self, tmp_path: Path) -> None:
+        """_append_sync wraps append_jsonl inside file_lock."""
+        from events import EventLog
+
+        log_path = tmp_path / "events.jsonl"
+        event_log = EventLog(log_path)
+
+        call_order: list[str] = []
+
+        class FakeLock:
+            def __enter__(self_lock):
+                call_order.append("lock_enter")
+                return self_lock
+
+            def __exit__(self_lock, *args):
+                call_order.append("lock_exit")
+
+        def fake_append(path, data):
+            call_order.append("append_jsonl")
+
+        with (
+            patch("events.file_lock", return_value=FakeLock()),
+            patch("events.append_jsonl", fake_append),
+        ):
+            event_log._append_sync('{"type":"test"}')
+
+        assert call_order == ["lock_enter", "append_jsonl", "lock_exit"]
+
+    def test_append_sync_lock_path_is_sibling(self, tmp_path: Path) -> None:
+        """Lock file is a sibling of the JSONL file with .lock suffix."""
+        from events import EventLog
+
+        log_path = tmp_path / "events.jsonl"
+        event_log = EventLog(log_path)
+
+        lock_path_used = None
+
+        with (
+            patch("events.file_lock") as mock_lock,
+            patch("events.append_jsonl"),
+        ):
+            mock_lock.return_value.__enter__ = lambda s: s
+            mock_lock.return_value.__exit__ = lambda s, *a: None
+            event_log._append_sync('{"type":"test"}')
+            lock_path_used = mock_lock.call_args[0][0]
+
+        assert lock_path_used == tmp_path / "events.lock"

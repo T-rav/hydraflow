@@ -14,7 +14,7 @@ from typing import Any, TypeVar, cast
 
 from pydantic import BaseModel, Field, ValidationError
 
-from file_util import append_jsonl, atomic_write
+from file_util import append_jsonl, atomic_write, file_lock
 
 
 class _Counter:
@@ -140,8 +140,10 @@ class EventLog:
 
     def _append_sync(self, line: str) -> None:
         """Synchronous append — called via ``asyncio.to_thread``."""
+        lock_path = self._path.with_suffix(".lock")
         try:
-            append_jsonl(self._path, line)
+            with file_lock(lock_path):
+                append_jsonl(self._path, line)
         except OSError:
             logger.warning(
                 "Could not append to event log %s",
