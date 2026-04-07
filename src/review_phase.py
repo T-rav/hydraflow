@@ -1770,10 +1770,10 @@ class ReviewPhase:
         finally:
             if self._update_bg_worker_status:
                 try:
-                    self._update_bg_worker_status("review_insights", status, details)
+                    self._update_bg_worker_status("retrospective", status, details)
                 except (RuntimeError, OSError):
                     logger.warning(
-                        "review_insights status callback failed for PR #%d",
+                        "retrospective status callback failed for PR #%d",
                         result.pr_number,
                         exc_info=True,
                     )

@@ -458,6 +458,25 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             from retrospective_queue import QueueItem, QueueKind  # noqa: PLC0415
 
             self._retrospective_queue.append(QueueItem(kind=QueueKind.VERIFY_PROPOSALS))
+        else:
+            # Fallback: inline verification when queue not wired
+            try:
+                from review_insights import (  # noqa: PLC0415
+                    ReviewInsightStore,
+                    verify_proposals,
+                )
+
+                insight_store = ReviewInsightStore(self._config.memory_dir)
+                records = insight_store.load_recent(50)
+                stale = verify_proposals(insight_store, records)
+                for category in stale:
+                    logger.warning(
+                        "HITL recommendation: stale review insight '%s'", category
+                    )
+            except ImportError:
+                pass
+            except Exception:  # noqa: BLE001
+                logger.debug("Proposal verification failed", exc_info=True)
 
         # Cross-project log pattern detection
         try:

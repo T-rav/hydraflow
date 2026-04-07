@@ -17,6 +17,7 @@ from events import EventType, HydraFlowEvent
 from retrospective_queue import QueueKind
 
 if TYPE_CHECKING:
+    from ports import PRPort
     from retrospective import RetrospectiveCollector
     from retrospective_queue import QueueItem, RetrospectiveQueue
     from review_insights import ReviewInsightStore
@@ -39,11 +40,13 @@ class RetrospectiveLoop(BaseBackgroundLoop):
         retrospective: RetrospectiveCollector,
         insights: ReviewInsightStore,
         queue: RetrospectiveQueue,
+        prs: PRPort | None = None,
     ) -> None:
         super().__init__(worker_name="retrospective", config=config, deps=deps)
         self._retro = retrospective
         self._insights = insights
         self._queue = queue
+        self._prs = prs
 
     def _get_default_interval(self) -> int:
         return self._config.retrospective_interval
@@ -101,19 +104,65 @@ class RetrospectiveLoop(BaseBackgroundLoop):
         return {"patterns_filed": 0}
 
     async def _handle_review_patterns(self) -> dict[str, int]:
-        """Run review insight pattern analysis."""
-        from review_insights import analyze_patterns  # noqa: PLC0415
+        """Run review insight pattern analysis and file issues for new patterns."""
+        from review_insights import (  # noqa: PLC0415
+            CATEGORY_DESCRIPTIONS,
+            analyze_patterns,
+            build_insight_issue_body,
+        )
 
         records = self._insights.load_recent(self._config.review_insight_window)
         patterns = analyze_patterns(records, self._config.review_pattern_threshold)
-        return {"patterns_filed": len(patterns)}
+        proposed = self._insights.get_proposed_categories()
+        filed = 0
+
+        for category, count, evidence in patterns:
+            if category in proposed:
+                continue
+            if self._prs is None:
+                logger.warning(
+                    "Retrospective: cannot file review insight issue — no PRPort"
+                )
+                break
+            body = build_insight_issue_body(category, count, len(records), evidence)
+            desc = CATEGORY_DESCRIPTIONS.get(category, category)
+            title = f"[Review Insight] Recurring feedback: {desc}"
+            labels = self._config.find_label[:1]
+            await self._prs.create_issue(title, body, labels)
+            self._insights.mark_category_proposed(category)
+            self._insights.record_proposal(category, pre_count=count)
+            filed += 1
+
+        return {"patterns_filed": filed}
 
     async def _handle_verify_proposals(self) -> dict[str, int]:
-        """Verify improvement proposal outcomes."""
-        from review_insights import verify_proposals  # noqa: PLC0415
+        """Verify improvement proposal outcomes and escalate stale ones."""
+        from review_insights import (  # noqa: PLC0415
+            _PROPOSAL_STALE_DAYS,
+            CATEGORY_DESCRIPTIONS,
+            verify_proposals,
+        )
 
         records = self._insights.load_recent(50)
         stale = verify_proposals(self._insights, records)
+
+        for category in stale:
+            if self._prs is None:
+                logger.warning("Retrospective: cannot file HITL issue — no PRPort")
+                break
+            desc = CATEGORY_DESCRIPTIONS.get(category, category)
+            title = f"[HITL] Stale review insight: {desc}"
+            body = (
+                f"## Stale Improvement Proposal\n\n"
+                f"The improvement proposal for **{category}** ({desc}) "
+                f"was filed over {_PROPOSAL_STALE_DAYS} days ago but the "
+                f"pattern frequency has not decreased. Human intervention is "
+                f"required to resolve this recurring feedback loop.\n\n"
+                f"---\n*Auto-escalated by HydraFlow review insight verification.*"
+            )
+            hitl_labels = list(self._config.hitl_label)
+            await self._prs.create_issue(title, body, hitl_labels)
+
         return {"stale_proposals": len(stale)}
 
     async def _publish_update(self, item: QueueItem, status: str) -> None:

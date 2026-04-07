@@ -669,6 +669,7 @@ def build_services(
         retrospective=retrospective,
         insights=review_insights,
         queue=retrospective_queue,
+        prs=prs,
     )
 
     return ServiceRegistry(
