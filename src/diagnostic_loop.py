@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from diagnostic_runner import DiagnosisResult, DiagnosticRunner
     from ports import PRPort
     from state import StateTracker
+    from workspace import WorkspaceManager
 
 logger = logging.getLogger("hydraflow.diagnostic_loop")
 
@@ -70,6 +71,7 @@ class DiagnosticLoop(BaseBackgroundLoop):
         prs: PRPort,
         state: StateTracker,
         deps: LoopDeps,
+        workspaces: WorkspaceManager | None = None,  # noqa: UP007
     ) -> None:
         super().__init__(
             worker_name="diagnostic",
@@ -79,6 +81,7 @@ class DiagnosticLoop(BaseBackgroundLoop):
         self._runner = runner
         self._prs = prs
         self._state = state
+        self._workspaces = workspaces
 
     def _get_default_interval(self) -> int:
         return self._config.diagnostic_interval
@@ -108,7 +111,7 @@ class DiagnosticLoop(BaseBackgroundLoop):
 
         return {"processed": processed, "fixed": fixed, "escalated": escalated}
 
-    async def _process_issue(
+    async def _process_issue(  # noqa: PLR0911
         self,
         issue_number: int,
         issue_title: str,
@@ -143,6 +146,11 @@ class DiagnosticLoop(BaseBackgroundLoop):
                 ),
             )
             return "escalated"
+
+        # --- Enrich context with previous attempts ---
+        prior_attempts = self._state.get_diagnostic_attempts(issue_number)
+        if prior_attempts:
+            context = context.model_copy(update={"previous_attempts": prior_attempts})
 
         # --- Stage 1: Diagnose ---
         logger.info(
@@ -187,10 +195,37 @@ class DiagnosticLoop(BaseBackgroundLoop):
         )
         await self._publish_update(issue_number, "fixing")
 
+        branch = f"agent/diag-{issue_number}"
         wt_path = self._config.workspace_path_for_issue(issue_number)
-        success, transcript = await self._runner.fix(
-            issue_number, issue_title, issue_body, diagnosis, str(wt_path)
-        )
+
+        # Create workspace if we have a manager and the path doesn't exist
+        created_workspace = False
+        if self._workspaces is not None and not wt_path.exists():
+            try:
+                wt_path = await self._workspaces.create(issue_number, branch)
+                created_workspace = True
+            except Exception:
+                logger.exception(
+                    "Diagnostic: workspace creation failed for issue #%d",
+                    issue_number,
+                )
+                await self._escalate_to_hitl(issue_number, comment=diagnosis_comment)
+                return "escalated"
+
+        try:
+            success, transcript = await self._runner.fix(
+                issue_number, issue_title, issue_body, diagnosis, str(wt_path)
+            )
+        finally:
+            if created_workspace and self._workspaces is not None:
+                try:
+                    await self._workspaces.destroy(issue_number)
+                except Exception:
+                    logger.warning(
+                        "Diagnostic: workspace cleanup failed for issue #%d",
+                        issue_number,
+                        exc_info=True,
+                    )
 
         # Record this attempt regardless of outcome
         record = AttemptRecord(
