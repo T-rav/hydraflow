@@ -54,6 +54,8 @@ SKIP_LIST: set[str] = {
     "system_reroute",
     # Diagnostic events are internal loop state, not dashboard-dispatched
     "diagnostic_update",
+    # Retrospective events are consumed server-side (post-merge learning)
+    "retrospective_update",
 }
 
 

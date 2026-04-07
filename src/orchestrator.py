@@ -138,9 +138,9 @@ class HydraFlowOrchestrator:
             "ci_monitor": svc.ci_monitor_loop,
             "security_patch": svc.security_patch_loop,
             "code_grooming": svc.code_grooming_loop,
-            "trace_mining": svc.trace_mining_loop,
             "repo_wiki": svc.repo_wiki_loop,
             "diagnostic": svc.diagnostic_loop,
+            "retrospective": svc.retrospective_loop,
         }
         self._bg_workers = BGWorkerManager(config, self._state, bg_loop_registry)
         self._hitl_ctrl = HITLController(svc.hitl_phase, svc.fetcher, config.hitl_label)
@@ -858,6 +858,13 @@ class HydraFlowOrchestrator:
             ("sentry_ingest", self._svc.sentry_loop.run),
             ("github_cache", self._svc.github_cache_loop.run),
             ("pipeline_stats", self._pipeline_stats_loop),
+            ("diagnostic", self._svc.diagnostic_loop.run),
+            ("ci_monitor", self._svc.ci_monitor_loop.run),
+            ("code_grooming", self._svc.code_grooming_loop.run),
+            ("repo_wiki", self._svc.repo_wiki_loop.run),
+            ("security_patch", self._svc.security_patch_loop.run),
+            ("stale_issue_gc", self._svc.stale_issue_gc_loop.run),
+            ("retrospective", self._svc.retrospective_loop.run),
         ]
 
         # Optional: WAL replay loop for Hindsight crash recovery

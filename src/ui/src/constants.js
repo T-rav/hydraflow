@@ -249,7 +249,7 @@ export const WORKER_PRESETS = {
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'pr_unsticker', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_sweeper', 'dependabot_merge', 'stale_issue', 'security_patch', 'ci_monitor', 'code_grooming', 'sentry_ingest'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'pr_unsticker', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_sweeper', 'dependabot_merge', 'stale_issue', 'security_patch', 'ci_monitor', 'code_grooming', 'sentry_ingest', 'retrospective'])
 
 /**
  * Default intervals (in seconds) for system workers.
@@ -269,6 +269,7 @@ export const SYSTEM_WORKER_INTERVALS = {
   security_patch: 21600,
   ci_monitor: 1800,
   code_grooming: 86400,
+  retrospective: 1800,
 }
 
 /**
@@ -289,8 +290,7 @@ export const CRATE_STATUSES = ['open', 'closed']
  * Workers with `system: true` are internal services shown with a "system" badge.
  */
 export const BACKGROUND_WORKERS = [
-  { key: 'retrospective',   label: 'Retrospective',  description: 'Captures post-merge outcomes and recurring delivery patterns.', color: theme.purple, group: 'learning', tags: ['insights'] },
-  { key: 'review_insights', label: 'Review Insights', description: 'Aggregates recurring review feedback into improvement opportunities.', color: theme.orange, group: 'learning', tags: ['insights'] },
+  { key: 'retrospective', label: 'Retrospective', description: 'Periodic analysis of delivery patterns and review feedback. Runs pattern detection, proposal verification, and improvement filing.', color: theme.purple, group: 'learning', tags: ['insights'] },
   { key: 'pipeline_poller', label: 'Pipeline Poller', description: 'Refreshes live pipeline snapshots for queue and status visibility.', color: theme.textMuted, system: true, group: 'operations', tags: ['infra'] },
   { key: 'memory_sync',     label: 'Memory Manager', description: 'Ingests memory and transcript issues into durable learnings.', color: theme.accent, system: true, group: 'intake', tags: ['memory'] },
   { key: 'pr_unsticker',    label: 'PR Unsticker',   description: 'Requeues stalled HITL PRs once requirements are actionable.', color: theme.orange, system: true, group: 'operations', tags: ['recovery'] },
@@ -306,7 +306,6 @@ export const BACKGROUND_WORKERS = [
   { key: 'ci_monitor', label: 'CI Monitor', description: 'Detects failing CI on main and files/auto-closes issues.', color: theme.yellow, group: 'repo_health', tags: ['quality'] },
   { key: 'security_patch', label: 'Security Patch', description: 'Polls Dependabot alerts and files issues for fixable vulnerabilities.', color: theme.red, group: 'repo_health', tags: ['security'] },
   { key: 'code_grooming', label: 'Code Grooming', description: 'Runs periodic audit scans and files issues for critical findings.', color: theme.accent, group: 'repo_health', tags: ['quality'] },
-  { key: 'trace_mining', label: 'Trace Mining', description: 'Parses Monocle traces, aggregates tool/token stats, and syncs insights to Hindsight.', color: theme.accent, group: 'learning', tags: ['observability'] },
   { key: 'repo_wiki', label: 'Repo Wiki', description: 'Lints and maintains per-repo knowledge wikis compiled from plan/implement/review cycles.', color: theme.purple, group: 'learning', tags: ['knowledge'] },
   { key: 'diagnostic', label: 'Diagnostic Agent', description: 'Analyzes escalated issues, classifies severity, and attempts targeted fixes before HITL.', color: theme.blue, system: true, group: 'operations', tags: ['recovery'] },
 ]

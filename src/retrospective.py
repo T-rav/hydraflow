@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from hindsight_wal import HindsightWAL
     from models import ReviewResult
     from pr_manager import PRManager
+    from retrospective_queue import RetrospectiveQueue
     from state import StateTracker
 
 logger = logging.getLogger("hydraflow.retrospective")
@@ -55,6 +56,7 @@ class RetrospectiveCollector:
         hindsight: HindsightClient | None = None,
         dolt: DoltBackend | None = None,
         wal: HindsightWAL | None = None,
+        queue: RetrospectiveQueue | None = None,
     ) -> None:
         from dedup_store import DedupStore  # noqa: PLC0415
 
@@ -64,6 +66,7 @@ class RetrospectiveCollector:
         self._hindsight = hindsight
         self._dolt = dolt
         self._wal = wal
+        self._queue = queue
         self._retro_path = config.data_path("memory", "retrospectives.jsonl")
         self._filed = DedupStore(
             "filed_patterns",
@@ -99,8 +102,19 @@ class RetrospectiveCollector:
                 )
             except ImportError:
                 pass
-            recent = self._load_recent(self._config.retrospective_window)
-            await self._detect_patterns(recent)
+            if self._queue is not None:
+                from retrospective_queue import QueueItem, QueueKind  # noqa: PLC0415
+
+                self._queue.append(
+                    QueueItem(
+                        kind=QueueKind.RETRO_PATTERNS,
+                        issue_number=issue_number,
+                    )
+                )
+            else:
+                # Fallback: inline detection when queue not wired
+                recent = self._load_recent(self._config.retrospective_window)
+                await self._detect_patterns(recent)
         except Exception:
             logger.warning(
                 "Retrospective failed for issue #%d — continuing",

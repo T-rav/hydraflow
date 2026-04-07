@@ -94,6 +94,7 @@ class TestEventTypeEnum:
             "AGENT_ACTIVITY",
             "SYSTEM_REROUTE",
             "DIAGNOSTIC_UPDATE",
+            "RETROSPECTIVE_UPDATE",
         }
         actual = {member.name for member in EventType}
         assert expected == actual

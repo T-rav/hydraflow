@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from memory_judge import MemoryJudge  # noqa: TCH004
     from ports import IssueStorePort, PRPort, WorkspacePort
     from repo_wiki import RepoWikiStore  # noqa: TCH004 — used in __init__ signature
+    from retrospective_queue import RetrospectiveQueue
     from visual_validator import VisualValidator
     from wiki_compiler import WikiCompiler  # noqa: TCH004 — used in __init__ signature
 
@@ -127,6 +128,7 @@ class ReviewPhase:
         wiki_store: RepoWikiStore | None = None,
         wiki_compiler: WikiCompiler | None = None,
         judge: MemoryJudge | None = None,
+        retrospective_queue: RetrospectiveQueue | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -154,6 +156,7 @@ class ReviewPhase:
         self._post_merge = post_merge
         self._baseline_policy = baseline_policy
         self._hindsight = hindsight
+        self._retrospective_queue = retrospective_queue
         self._visual_validator: VisualValidator | None = None
         if config.visual_validation_enabled:
             from visual_validator import VisualValidator  # noqa: PLC0415
@@ -1712,36 +1715,52 @@ class ReviewPhase:
                     wal=self._wal,
                 )
 
-            recent = self._insights.load_recent(self._config.review_insight_window)
-            patterns = analyze_patterns(recent, self._config.review_pattern_threshold)
-            proposed = self._insights.get_proposed_categories()
+            # Enqueue pattern analysis for the retrospective loop
+            if self._retrospective_queue is not None:
+                from retrospective_queue import QueueItem, QueueKind  # noqa: PLC0415
 
-            for category, count, evidence in patterns:
-                if category in proposed:
-                    continue
-                body = build_insight_issue_body(category, count, len(recent), evidence)
-                desc = CATEGORY_DESCRIPTIONS.get(category, category)
-                title = f"[Review Insight] Recurring feedback: {desc}"
-                labels = self._config.find_label[:1]
-                await self._transitioner.create_task(title, body, labels)
-                self._insights.mark_category_proposed(category)
-                self._insights.record_proposal(category, pre_count=count)
-
-            # Verify existing proposals — re-file stale ones as HITL issues
-            stale = verify_proposals(self._insights, recent)
-            for category in stale:
-                desc = CATEGORY_DESCRIPTIONS.get(category, category)
-                title = f"[HITL] Stale review insight: {desc}"
-                body = (
-                    f"## Stale Improvement Proposal\n\n"
-                    f"The improvement proposal for **{category}** ({desc}) "
-                    f"was filed over {_PROPOSAL_STALE_DAYS} days ago but the "
-                    f"pattern frequency has not decreased. Human intervention is "
-                    f"required to resolve this recurring feedback loop.\n\n"
-                    f"---\n*Auto-escalated by HydraFlow review insight verification.*"
+                self._retrospective_queue.append(
+                    QueueItem(
+                        kind=QueueKind.REVIEW_PATTERNS,
+                        pr_number=result.pr_number,
+                        issue_number=result.issue_number,
+                    )
                 )
-                hitl_labels = list(self._config.hitl_label)
-                await self._transitioner.create_task(title, body, hitl_labels)
+            else:
+                # Fallback: inline analysis when queue not wired
+                recent = self._insights.load_recent(self._config.review_insight_window)
+                patterns = analyze_patterns(
+                    recent, self._config.review_pattern_threshold
+                )
+                proposed = self._insights.get_proposed_categories()
+
+                for category, count, evidence in patterns:
+                    if category in proposed:
+                        continue
+                    body = build_insight_issue_body(
+                        category, count, len(recent), evidence
+                    )
+                    desc = CATEGORY_DESCRIPTIONS.get(category, category)
+                    title = f"[Review Insight] Recurring feedback: {desc}"
+                    labels = self._config.find_label[:1]
+                    await self._transitioner.create_task(title, body, labels)
+                    self._insights.mark_category_proposed(category)
+                    self._insights.record_proposal(category, pre_count=count)
+
+                stale = verify_proposals(self._insights, recent)
+                for category in stale:
+                    desc = CATEGORY_DESCRIPTIONS.get(category, category)
+                    title = f"[HITL] Stale review insight: {desc}"
+                    body = (
+                        f"## Stale Improvement Proposal\n\n"
+                        f"The improvement proposal for **{category}** ({desc}) "
+                        f"was filed over {_PROPOSAL_STALE_DAYS} days ago but the "
+                        f"pattern frequency has not decreased. Human intervention is "
+                        f"required to resolve this recurring feedback loop.\n\n"
+                        f"---\n*Auto-escalated by HydraFlow review insight verification.*"
+                    )
+                    hitl_labels = list(self._config.hitl_label)
+                    await self._transitioner.create_task(title, body, hitl_labels)
         except (RuntimeError, OSError):
             status = "error"
             details["error"] = "review insight recording failed"
@@ -1753,10 +1772,10 @@ class ReviewPhase:
         finally:
             if self._update_bg_worker_status:
                 try:
-                    self._update_bg_worker_status("review_insights", status, details)
+                    self._update_bg_worker_status("retrospective", status, details)
                 except (RuntimeError, OSError):
                     logger.warning(
-                        "review_insights status callback failed for PR #%d",
+                        "retrospective status callback failed for PR #%d",
                         result.pr_number,
                         exc_info=True,
                     )
