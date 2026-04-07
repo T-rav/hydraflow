@@ -54,6 +54,8 @@ from repo_wiki_loop import RepoWikiLoop  # noqa: TCH001
 from report_issue_loop import ReportIssueLoop
 from research_runner import ResearchRunner
 from retrospective import RetrospectiveCollector
+from retrospective_loop import RetrospectiveLoop  # noqa: TCH001
+from retrospective_queue import RetrospectiveQueue  # noqa: TCH001
 from review_insights import ReviewInsightStore
 from review_phase import ReviewPhase
 from reviewer import ReviewRunner
@@ -148,6 +150,8 @@ class ServiceRegistry:
     repo_wiki_store: RepoWikiStore
     repo_wiki_loop: RepoWikiLoop
     diagnostic_loop: DiagnosticLoop
+    retrospective_loop: RetrospectiveLoop
+    retrospective_queue: RetrospectiveQueue
 
     # Optional integrations
     hindsight: HindsightClient | None = None
@@ -506,6 +510,10 @@ def build_services(
     # Inject shared store into AgentRunner (replacing its self-constructed copy)
     agents._insights = review_insights
 
+    retrospective_queue = RetrospectiveQueue(  # noqa: F841
+        config.data_path("memory", "retrospective_queue.jsonl"),
+    )
+
     reviewer = ReviewPhase(
         config,
         state,
@@ -653,6 +661,13 @@ def build_services(
         deps=loop_deps,
         workspaces=workspaces,
     )
+    retrospective_loop = RetrospectiveLoop(  # noqa: F841
+        config=config,
+        deps=loop_deps,
+        retrospective=retrospective,
+        insights=review_insights,
+        queue=retrospective_queue,
+    )
 
     return ServiceRegistry(
         workspaces=workspaces,
@@ -707,4 +722,6 @@ def build_services(
         repo_wiki_store=repo_wiki_store,
         repo_wiki_loop=repo_wiki_loop,
         diagnostic_loop=diagnostic_loop,
+        retrospective_loop=retrospective_loop,
+        retrospective_queue=retrospective_queue,
     )
