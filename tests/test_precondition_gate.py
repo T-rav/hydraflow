@@ -21,34 +21,13 @@ from models import Task
 from precondition_gate import PreconditionGate
 from route_back import RouteBackCoordinator
 from stage_preconditions import Stage
+from tests.helpers import InMemoryRouteBackCounter
 
 # ---------------------------------------------------------------------------
-# Stubs
+# Stubs — InMemoryRouteBackCounter is defined in tests/helpers.py to
+# stay in sync with test_route_back.py and avoid drift between two
+# parallel stubs implementing the same RouteBackCounterPort contract.
 # ---------------------------------------------------------------------------
-
-
-class _InMemoryCounter:
-    def __init__(self) -> None:
-        self._counts: dict[int, int] = {}
-
-    def get_route_back_count(self, issue_id: int) -> int:
-        return self._counts.get(issue_id, 0)
-
-    def increment_route_back_count(self, issue_id: int) -> int:
-        new = self._counts.get(issue_id, 0) + 1
-        self._counts[issue_id] = new
-        return new
-
-    def decrement_route_back_count(self, issue_id: int) -> int:
-        current = self._counts.get(issue_id, 0)
-        if current <= 0:
-            return 0
-        new = current - 1
-        if new == 0:
-            self._counts.pop(issue_id, None)
-        else:
-            self._counts[issue_id] = new
-        return new
 
 
 def _task(issue_id: int) -> Task:
@@ -59,11 +38,11 @@ def _build_gate(
     tmp_path: Path,
     *,
     enabled: bool = True,
-) -> tuple[PreconditionGate, IssueCache, AsyncMock, _InMemoryCounter]:
+) -> tuple[PreconditionGate, IssueCache, AsyncMock, InMemoryRouteBackCounter]:
     cache = IssueCache(tmp_path / "cache", enabled=True)
     prs = AsyncMock()
     prs.swap_pipeline_labels = AsyncMock()
-    counter = _InMemoryCounter()
+    counter = InMemoryRouteBackCounter()
     coordinator = RouteBackCoordinator(
         cache=cache,
         prs=prs,

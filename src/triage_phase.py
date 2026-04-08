@@ -273,12 +273,17 @@ class TriagePhase:
                         "Issue #%d enriched by triage before promotion",
                         issue.id,
                     )
-                self._store.enqueue_transition(issue, "plan")
-                await self._transitioner.transition(issue.id, "plan")
-                self._state.increment_session_counter("triaged")
+                # IMPORTANT: do NOT swap the label yet. We need to write
+                # the classification record AND run the bug reproducer
+                # (for bug-classified issues) BEFORE the plan loop can
+                # observe the new label and start work. The swap happens
+                # below after the cache writes complete. Setting
+                # routing_outcome here marks the intent for the
+                # post-cache transition block.
                 routing_outcome = "plan"
                 logger.info(
-                    "Issue #%d triaged → %s (ready for planning)",
+                    "Issue #%d triaged → %s (ready for planning, "
+                    "deferred swap until cache records written)",
                     issue.id,
                     self._config.planner_label[0],
                 )
@@ -352,6 +357,11 @@ class TriagePhase:
         # reproduction and routes them back to triage with the
         # investigation as feedback. This method just produces the
         # data the gate consumes — the gate handles enforcement.
+        #
+        # CRITICAL: this MUST run before the label swap to plan
+        # below. Otherwise the plan loop can pick up the issue
+        # before the reproduction record exists, the READY gate
+        # finds nothing, and the issue ping-pongs forever.
         if (
             self._bug_reproducer is not None
             and self._issue_cache is not None
@@ -380,6 +390,17 @@ class TriagePhase:
                     issue.id,
                     exc_info=True,
                 )
+
+        # Deferred plan-stage label swap. Now that the classification
+        # record + reproduction record (if applicable) are written, the
+        # implement loop's READY gate has data to check when the issue
+        # eventually transitions through plan → ready. The discover/
+        # parked/sentry paths swapped their labels inline above because
+        # they have no race window with downstream consumers.
+        if routing_outcome == "plan":
+            self._store.enqueue_transition(issue, "plan")
+            await self._transitioner.transition(issue.id, "plan")
+            self._state.increment_session_counter("triaged")
 
         return 1
 

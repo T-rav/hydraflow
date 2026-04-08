@@ -247,6 +247,16 @@ class PlanPhase:
         # Ingest plan knowledge into the per-repo wiki
         await self._wiki_ingest_plan(issue.id, result.plan)
 
+        # IMPORTANT: cache writes (plan_stored + review_stored) and the
+        # adversarial reviewer MUST run BEFORE the label swap to ready.
+        # If the swap happened first, the implement loop could pick up
+        # the issue and the READY-stage precondition gate would find
+        # no records and route the issue back to plan — causing an
+        # infinite ping-pong loop. The eager-transition guard at
+        # `enqueue_transition` is in-memory only and does not protect
+        # against the GitHub label being visible to other pollers.
+        await self._write_plan_records(issue, result)
+
         # Activate eager-transition protection BEFORE the GitHub label swap
         # so that concurrent polling cannot re-queue the issue during the
         # non-atomic label add/remove window.
@@ -276,70 +286,74 @@ class PlanPhase:
         if result.duration_seconds > 0:
             self._state.record_plan_duration(result.duration_seconds)
         self._state.increment_session_counter("planned")
+        logger.info("Plan posted and labels swapped for issue #%d", issue.id)
 
-        # Mirror the plan into the local JSONL cache with per-issue
-        # version counter so plan v1 → v2 → v3 history survives without
-        # overwriting comments (#6422). Downstream precondition gates
-        # (#6423) and the adversarial plan reviewer (#6421) read this
-        # structured record. Best-effort: the cache never raises.
-        #
-        # findings is intentionally empty on the success path —
-        # adversarial findings come from PlanReviewer (#6421) and are
-        # written via record_review_stored, not here. Conflating
-        # validation_errors with PlanFinding-shaped findings would
-        # poison the cache for review-stage consumers expecting the
-        # severity/dimension/description schema.
+    async def _write_plan_records(self, issue: Task, result: PlanResult) -> int:
+        """Write plan_stored + review_stored cache records.
+
+        Called BEFORE the label swap to ready so the records exist
+        before the implement loop can observe the new label and run
+        the READY-stage precondition gate. Returns the plan version
+        assigned by the cache (1 if no cache configured).
+
+        Best-effort across both writes — failures log at warning and
+        do not raise into the caller, so the plan still proceeds and
+        the gate handles the missing-record case via route-back with
+        the cause "no review_stored record" (effectively the same as
+        a blocking review, with a clearer human-readable cause).
+
+        Adversarial findings live in the review_stored record, not in
+        plan_stored — conflating validation_errors with PlanFinding-
+        shaped findings would poison the cache for review-stage
+        consumers.
+        """
         plan_version = 1
-        if self._issue_cache is not None:
-            plan_version = self._issue_cache.record_plan_stored(
+        if self._issue_cache is None:
+            return plan_version
+
+        plan_version = self._issue_cache.record_plan_stored(
+            issue.id,
+            plan_text=result.plan,
+            actionability_score=result.actionability_score,
+        )
+
+        if self._plan_reviewer is None:
+            return plan_version
+
+        try:
+            review = await self._plan_reviewer.review(
+                issue, result, plan_version=plan_version
+            )
+            if review.success:
+                self._issue_cache.record_review_stored(
+                    issue.id,
+                    review_text=review.summary,
+                    has_blocking=review.has_blocking_findings,
+                    findings=[f.model_dump() for f in review.findings],
+                )
+                if review.has_blocking_findings:
+                    logger.warning(
+                        "Plan review for issue #%d found blocking "
+                        "findings — READY-stage gate will route back "
+                        "to PLAN: %s",
+                        issue.id,
+                        review.summary,
+                    )
+            else:
+                logger.warning(
+                    "Plan review skipped for issue #%d: %s",
+                    issue.id,
+                    review.error or "reviewer returned no result",
+                )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Plan reviewer raised for issue #%d — leaving plan "
+                "without a review record",
                 issue.id,
-                plan_text=result.plan,
-                actionability_score=result.actionability_score,
+                exc_info=True,
             )
 
-        # Run the adversarial plan reviewer (#6421) and write its
-        # findings as a review_stored cache record. The reviewer is
-        # best-effort here — if it fails or the subprocess shim
-        # raises NotImplementedError (until the runner wiring lands),
-        # we log at warning and proceed. The downstream READY-stage
-        # gate (PreconditionGate against has_clean_review) is what
-        # actually enforces blocking findings; this method just
-        # produces the data the gate consumes.
-        if self._plan_reviewer is not None and self._issue_cache is not None:
-            try:
-                review = await self._plan_reviewer.review(
-                    issue, result, plan_version=plan_version
-                )
-                if review.success:
-                    self._issue_cache.record_review_stored(
-                        issue.id,
-                        review_text=review.summary,
-                        has_blocking=review.has_blocking_findings,
-                        findings=[f.model_dump() for f in review.findings],
-                    )
-                    if review.has_blocking_findings:
-                        logger.warning(
-                            "Plan review for issue #%d found blocking "
-                            "findings — READY-stage gate will route back "
-                            "to PLAN: %s",
-                            issue.id,
-                            review.summary,
-                        )
-                else:
-                    logger.warning(
-                        "Plan review skipped for issue #%d: %s",
-                        issue.id,
-                        review.error or "reviewer returned no result",
-                    )
-            except Exception:  # noqa: BLE001
-                logger.warning(
-                    "Plan reviewer raised for issue #%d — leaving plan "
-                    "without a review record",
-                    issue.id,
-                    exc_info=True,
-                )
-
-        logger.info("Plan posted and labels swapped for issue #%d", issue.id)
+        return plan_version
 
     _WIKI_INGEST_MAX_CHARS = 40_000
 

@@ -18,34 +18,11 @@ from route_back import (
 )
 
 # ---------------------------------------------------------------------------
-# Stubs
+# Stubs — InMemoryRouteBackCounter lives in tests/helpers.py so the
+# stub shape stays consistent across test_route_back and
+# test_precondition_gate.
 # ---------------------------------------------------------------------------
-
-
-class _InMemoryCounter:
-    """Minimal RouteBackCounterPort for tests."""
-
-    def __init__(self) -> None:
-        self._counts: dict[int, int] = {}
-
-    def get_route_back_count(self, issue_id: int) -> int:
-        return self._counts.get(issue_id, 0)
-
-    def increment_route_back_count(self, issue_id: int) -> int:
-        new = self._counts.get(issue_id, 0) + 1
-        self._counts[issue_id] = new
-        return new
-
-    def decrement_route_back_count(self, issue_id: int) -> int:
-        current = self._counts.get(issue_id, 0)
-        if current <= 0:
-            return 0
-        new = current - 1
-        if new == 0:
-            self._counts.pop(issue_id, None)
-        else:
-            self._counts[issue_id] = new
-        return new
+from tests.helpers import InMemoryRouteBackCounter
 
 
 def _coordinator(
@@ -53,11 +30,11 @@ def _coordinator(
     *,
     max_route_backs: int = 2,
     counter: RouteBackCounterPort | None = None,
-) -> tuple[RouteBackCoordinator, IssueCache, AsyncMock, _InMemoryCounter]:
+) -> tuple[RouteBackCoordinator, IssueCache, AsyncMock, InMemoryRouteBackCounter]:
     cache = IssueCache(tmp_path / "cache", enabled=True)
     prs = AsyncMock()
     prs.swap_pipeline_labels = AsyncMock()
-    counter_impl = counter if counter is not None else _InMemoryCounter()
+    counter_impl = counter if counter is not None else InMemoryRouteBackCounter()
     coordinator = RouteBackCoordinator(
         cache=cache,
         prs=prs,

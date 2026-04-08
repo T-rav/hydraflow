@@ -404,10 +404,16 @@ def build_services(
         hitl_label=config.hitl_label[0],
         max_route_backs=2,
     )
+    # The gate enforces stage preconditions only when BOTH the cache is
+    # enabled (so records exist to check) AND the dedicated gate flag
+    # is set. The gate flag defaults to False so that turning on the
+    # cache doesn't automatically activate enforcement on a fresh
+    # install with no historical records — operators flip the gate
+    # flag separately after confirming cache coverage.
     precondition_gate = PreconditionGate(
         cache=issue_cache,
         coordinator=route_back_coordinator,
-        enabled=config.issue_cache_enabled,
+        enabled=(config.issue_cache_enabled and config.precondition_gate_enabled),
     )
 
     # Adversarial plan reviewer (#6421) and triage-time bug reproducer

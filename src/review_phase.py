@@ -103,6 +103,39 @@ class PreReviewContext:
     code_scanning_alerts: list[CodeScanningAlert] | None
 
 
+# Marker substrings indicating a ReviewResult that did NOT reach a real
+# verdict and therefore must NOT be cached. Caching these as
+# has_blocking=False would silently let a non-reviewed PR satisfy the
+# downstream gate.
+_NON_VERDICT_SUMMARY_MARKERS: tuple[str, ...] = (
+    "stopped",
+    "Issue not found",
+    "Merge conflicts with main",
+    "Review failed due to unexpected error",
+)
+
+
+def _is_meaningful_verdict(result: ReviewResult) -> bool:
+    """Return True if *result* represents a real review decision worth caching.
+
+    Skips:
+      - COMMENT verdicts (advisory only, no decision)
+      - results whose summary contains a non-verdict marker substring
+        (stopped, infrastructure error, missing issue, merge conflict)
+
+    Keeps:
+      - APPROVE / REQUEST_CHANGES with a normal summary
+
+    Used by ReviewPhase.review_prs to gate the review_stored cache
+    write so a no-real-review result cannot poison the downstream
+    READY-stage precondition gate.
+    """
+    if result.verdict == ReviewVerdict.COMMENT:
+        return False
+    summary = result.summary or ""
+    return not any(marker in summary for marker in _NON_VERDICT_SUMMARY_MARKERS)
+
+
 class ReviewPhase:
     """Runs reviewer agents on PRs, merging approved ones inline."""
 
@@ -333,11 +366,19 @@ class ReviewPhase:
         # Mirror review verdicts into the issue cache as review_stored
         # records (#6422 + #6421). The READY-stage precondition gate
         # for downstream PR-driven re-review reads has_blocking from
-        # these records. REQUEST_CHANGES verdicts are blocking; APPROVE
-        # and SKIP are not. Best-effort: cache failures never raise.
+        # these records. Only meaningful verdicts produce a cache
+        # record:
+        #   APPROVE          → has_blocking=False (good to go)
+        #   REQUEST_CHANGES  → has_blocking=True  (must re-review)
+        # No-verdict / stopped / errored results are SKIPPED entirely
+        # so they cannot poison a downstream gate by silently caching
+        # has_blocking=False for a review that never actually ran.
+        # See _is_meaningful_verdict for the skip rules.
         if self._issue_cache is not None:
             for result in results:
                 if result.issue_number <= 0:
+                    continue
+                if not _is_meaningful_verdict(result):
                     continue
                 try:
                     self._issue_cache.record_review_stored(
