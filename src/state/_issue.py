@@ -34,8 +34,6 @@ class IssueStateMixin:
 
     # --- issue tracking ---
 
-    _TERMINAL_STATUSES = frozenset({"merged", "failed", "completed", "hitl_closed"})
-
     # Statuses that indicate the issue is truly done — workspace can be safely
     # removed.  "failed" is intentionally excluded because failed issues may
     # be retried; premature workspace cleanup causes the GC loop to destroy

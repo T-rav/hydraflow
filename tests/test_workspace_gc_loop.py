@@ -347,6 +347,20 @@ class TestWorktreeGCOrphanedBranches:
         assert m.await_count == 1
 
     @pytest.mark.asyncio
+    async def test_skips_branch_with_retries_remaining(self, tmp_path: Path) -> None:
+        """Branches for retryable issues must not be deleted."""
+        loop, state, _e = _make_loop(tmp_path)
+        state.increment_issue_attempts(99)  # 1 attempt, retries remain
+        loop._collect_orphaned_branches = (
+            WorkspaceGCLoop._collect_orphaned_branches.__get__(loop)
+        )  # type: ignore[attr-defined]
+        with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
+            m.return_value = "  agent/issue-99\n"
+            count = await loop._collect_orphaned_branches()
+        assert count == 0
+        assert m.await_count == 1  # only the branch list call, no delete
+
+    @pytest.mark.asyncio
     async def test_branch_budget_cap(self, tmp_path: Path) -> None:
         loop, _s, _e = _make_loop(tmp_path)
         loop._collect_orphaned_branches = (

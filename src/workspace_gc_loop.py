@@ -307,10 +307,15 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
                 continue
             issue_number = int(match.group(1))
             try:
-                # Skip if worktree exists, issue is active, or in pipeline
+                # Skip if worktree exists, issue is active, in pipeline,
+                # or still has retries remaining.
                 if issue_number in active_workspaces or issue_number in active_issues:
                     continue
                 if self._is_in_pipeline and self._is_in_pipeline(issue_number):
+                    continue
+                max_attempts = self._config.max_issue_attempts
+                attempts = self._state.get_issue_attempts(issue_number)
+                if 0 < attempts < max_attempts:
                     continue
                 if await self._issue_has_pipeline_label(issue_number):
                     continue
