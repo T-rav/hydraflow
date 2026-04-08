@@ -390,20 +390,47 @@ class TestReviewOrchestration:
         assert result.plan_version == 3
 
     @pytest.mark.asyncio
-    async def test_subprocess_method_default_raises_not_implemented(self) -> None:
-        """The unwired subprocess method should NotImplementedError if
-        called without a patch — proving tests must opt-in via patch."""
+    async def test_subprocess_calls_base_runner_execute(self) -> None:
+        """The wired subprocess delegates to BaseRunner._execute,
+        passing the prompt built from _build_prompt and the repo_root
+        cwd. Patches _execute (the BaseRunner method) instead of
+        _run_review_subprocess to verify the wiring at one level
+        deeper than the other orchestration tests.
+        """
         reviewer = _reviewer()
         plan = _plan_result()
 
-        # Without a patch, the orchestrator path catches the NIE and
-        # records it as the error string. This is the contract for the
-        # follow-up: phase wiring will replace _run_review_subprocess
-        # with a real implementation.
-        result = await reviewer.review(_task(), plan)
-        assert result.success is False
-        assert result.error is not None
-        assert "not wired" in result.error.lower()
+        clean_transcript = f"{PLAN_REVIEW_START}\n{PLAN_REVIEW_END}"
+        execute_calls: list[dict] = []
+
+        async def _fake_execute(cmd, prompt, cwd, event_data, **kwargs):
+            del kwargs
+            execute_calls.append(
+                {
+                    "cmd": cmd,
+                    "prompt": prompt,
+                    "cwd": cwd,
+                    "event_data": event_data,
+                }
+            )
+            return clean_transcript
+
+        # Patch _execute and _build_command — _build_command needs a
+        # real config attribute (planner_tool/planner_model) which the
+        # stub config lacks, so we stub it.
+        with (
+            patch.object(PlanReviewer, "_execute", side_effect=_fake_execute),
+            patch.object(PlanReviewer, "_build_command", return_value=["claude", "-p"]),
+        ):
+            result = await reviewer.review(_task(), plan)
+
+        assert result.success is True
+        assert result.is_clean is True
+        assert len(execute_calls) == 1
+        # The prompt routed through _build_prompt — check that the
+        # event_data identifies the runner source.
+        assert execute_calls[0]["event_data"]["source"] == "plan_reviewer"
+        assert execute_calls[0]["event_data"]["issue"] == 42
 
 
 # ---------------------------------------------------------------------------

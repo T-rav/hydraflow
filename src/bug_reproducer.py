@@ -28,7 +28,9 @@ import contextlib
 import logging
 import re
 import time
+from pathlib import Path
 
+from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from models import (
     ReproductionOutcome,
@@ -131,17 +133,55 @@ class BugReproducer(BaseRunner):
     async def _run_reproducer_subprocess(self, task: Task) -> str:
         """Spawn the reproducer subprocess and return its raw transcript.
 
-        Test seam: patch this method to inject a hand-crafted transcript
-        without exercising the full BaseRunner subprocess machinery.
-        Phase wiring (the follow-up) will replace the body with a real
-        subprocess call using the ``_build_prompt`` output and a
-        write-scoped tool policy.
+        Builds the reproducer prompt via ``_build_prompt`` and runs it
+        through ``BaseRunner._execute`` against the read-only repo
+        root. The reproducer is allowed to write under
+        ``tests/regressions/`` (and only there) and to run ``Bash`` so
+        it can confirm the failing test is actually red — but it must
+        NOT modify ``src/`` or fix the bug. Tool-level enforcement of
+        the write scope is the agent runtime's responsibility; the
+        prompt explicitly forbids src/ modification as a backstop.
+
+        Terminates early when the ``REPRO_END`` marker appears, the
+        same way ``PlannerRunner.plan`` terminates on ``PLAN_END``.
         """
-        del task
-        raise NotImplementedError(
-            "Bug reproducer subprocess is not wired in this PR — patch "
-            "BugReproducer._run_reproducer_subprocess in tests to inject "
-            "a transcript, or call reproduce() in dry-run mode."
+        cmd = self._build_command()
+        prompt = self._build_prompt(task)
+
+        def _check_repro_complete(accumulated: str) -> bool:
+            if REPRO_END in accumulated:
+                logger.info(
+                    "Repro markers found for issue #%d — terminating reproducer",
+                    task.id,
+                )
+                return True
+            return False
+
+        return await self._execute(
+            cmd,
+            prompt,
+            self._config.repo_root,
+            {"issue": task.id, "source": "bug_reproducer"},
+            on_output=_check_repro_complete,
+        )
+
+    def _build_command(self, _worktree_path: Path | None = None) -> list[str]:
+        """Build the reproducer CLI invocation.
+
+        The reproducer needs Write + Bash to create a failing test
+        and confirm it is red. NotebookEdit is disallowed (no
+        notebook reproductions). The agent prompt itself constrains
+        Write targets to ``tests/regressions/``; CLI-level scoping
+        is the agent runtime's responsibility.
+
+        ``_worktree_path`` is accepted for ``BaseRunner._build_command``
+        signature compatibility but unused — the reproducer always
+        runs against ``self._config.repo_root``.
+        """
+        return build_agent_command(
+            tool=self._config.planner_tool,
+            model=self._config.planner_model,
+            disallowed_tools="NotebookEdit",
         )
 
     # ------------------------------------------------------------------

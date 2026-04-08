@@ -15,10 +15,10 @@ This runner is deliberately small. It owns:
   3. The ``review`` orchestration entry point that ties subprocess
      execution to the parser, with a dry-run shortcut.
 
-Subprocess execution reuses the ``BaseRunner`` infrastructure
-(``stream_claude_process``, ``_execute``) — no new shell wrangling.
-The actual integration into ``plan_phase._handle_plan_success`` is a
-follow-up; this module lands the unit-testable surface.
+Subprocess execution reuses ``BaseRunner._execute`` — same pattern
+as ``PlannerRunner.plan``. The reviewer launches a read-only agent
+(disallowed_tools: Edit, Write) and waits for the
+``PLAN_REVIEW_END`` marker before terminating.
 """
 
 from __future__ import annotations
@@ -26,8 +26,10 @@ from __future__ import annotations
 import logging
 import re
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from models import (
     PlanFinding,
@@ -152,20 +154,53 @@ class PlanReviewer(BaseRunner):
     async def _run_review_subprocess(self, task: Task, plan_result: PlanResult) -> str:
         """Spawn the reviewer subprocess and return its raw transcript.
 
-        Split out so unit tests can patch this single method to return
-        a hand-crafted transcript without exercising the full BaseRunner
-        subprocess machinery.
+        Builds the reviewer prompt from ``_build_prompt`` and runs it
+        through ``BaseRunner._execute`` against the read-only repo
+        root. The reviewer is configured with ``disallowed_tools=
+        "Edit,Write,NotebookEdit"`` so it cannot mutate the codebase
+        — its job is to critique the plan, not implement it.
 
-        The actual subprocess wiring lands in the phase-integration
-        follow-up — this method is a thin shim today so the public
-        ``review`` method has a clean injection point for tests. The
-        prompt built by ``_build_prompt`` is the input.
+        Terminates early when the ``PLAN_REVIEW_END`` marker appears
+        in the streamed output, the same way ``PlannerRunner.plan``
+        terminates on ``PLAN_END``.
         """
-        _ = (task, plan_result)  # unused until follow-up wiring
-        raise NotImplementedError(
-            "Plan reviewer subprocess is not wired in this PR — patch "
-            "PlanReviewer._run_review_subprocess in tests to inject a "
-            "transcript, or call review() in dry-run mode."
+        cmd = self._build_command()
+        prompt = self._build_prompt(task, plan_result.plan)
+
+        def _check_review_complete(accumulated: str) -> bool:
+            if PLAN_REVIEW_END in accumulated:
+                logger.info(
+                    "Plan review markers found for issue #%d — terminating reviewer",
+                    task.id,
+                )
+                return True
+            return False
+
+        return await self._execute(
+            cmd,
+            prompt,
+            self._config.repo_root,
+            {"issue": task.id, "source": "plan_reviewer"},
+            on_output=_check_review_complete,
+        )
+
+    def _build_command(self, _worktree_path: Path | None = None) -> list[str]:
+        """Build the reviewer CLI invocation.
+
+        Mirrors ``PlannerRunner._build_command``: read-only against
+        the repo root, no Edit/Write tools, planner model so the
+        reviewer is a peer of the planner rather than a downgraded
+        agent. Disallows ``Bash`` so the reviewer cannot run tests
+        or shell commands — pure code reading + reasoning.
+
+        ``_worktree_path`` is accepted for ``BaseRunner._build_command``
+        signature compatibility but unused — the reviewer always runs
+        against ``self._config.repo_root``.
+        """
+        return build_agent_command(
+            tool=self._config.planner_tool,
+            model=self._config.planner_model,
+            disallowed_tools="Edit,Write,NotebookEdit,Bash",
         )
 
     # ------------------------------------------------------------------

@@ -285,9 +285,44 @@ class TestReproduceOrchestration:
         assert "no repro steps" in result.investigation
 
     @pytest.mark.asyncio
-    async def test_subprocess_default_raises_not_wired(self) -> None:
+    async def test_subprocess_calls_base_runner_execute(self) -> None:
+        """The wired subprocess delegates to BaseRunner._execute,
+        passing the prompt built from _build_prompt and the repo_root
+        cwd. Patches _execute (the BaseRunner method) instead of
+        _run_reproducer_subprocess to verify the wiring at one level
+        deeper than the other orchestration tests.
+        """
         reproducer = _reproducer()
-        result = await reproducer.reproduce(_task())
-        assert result.outcome == ReproductionOutcome.UNABLE
-        assert result.error is not None
-        assert "not wired" in result.error.lower()
+        body = (
+            "Outcome: success\n"
+            "Test_path: tests/regressions/test_issue_42.py\n"
+            "Confidence: 0.9"
+        )
+        execute_calls: list[dict] = []
+
+        async def _fake_execute(cmd, prompt, cwd, event_data, **kwargs):
+            del kwargs
+            execute_calls.append(
+                {
+                    "cmd": cmd,
+                    "prompt": prompt,
+                    "cwd": cwd,
+                    "event_data": event_data,
+                }
+            )
+            return _wrap(body)
+
+        with (
+            patch.object(BugReproducer, "_execute", side_effect=_fake_execute),
+            patch.object(
+                BugReproducer,
+                "_build_command",
+                return_value=["claude", "-p"],
+            ),
+        ):
+            result = await reproducer.reproduce(_task())
+
+        assert result.outcome == ReproductionOutcome.SUCCESS
+        assert len(execute_calls) == 1
+        assert execute_calls[0]["event_data"]["source"] == "bug_reproducer"
+        assert execute_calls[0]["event_data"]["issue"] == 42
