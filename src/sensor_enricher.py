@@ -154,9 +154,15 @@ def enrich(
     rules fire. When at least one rule fires, the return value is
     ``<raw_output>\\n\\n## Agent Hints\\n\\n- <hint1>\\n- <hint2>\\n``.
 
+    Idempotent: if ``raw_output`` already contains an ``## Agent Hints``
+    heading (because it was previously enriched), the function returns
+    the input unchanged rather than appending a second hints block.
+
     Agents are instructed (in their system prompt, see #6426) to prefer
     the Agent Hints block over general reasoning when it is present.
     """
+    if "## Agent Hints" in raw_output:
+        return raw_output
     result = matching_rules(
         rules,
         tool=tool,

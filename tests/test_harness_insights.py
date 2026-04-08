@@ -586,17 +586,29 @@ class TestSensorEnrichmentIntegration:
         assert record.hints == []
 
     def test_explicit_hints_are_respected(self, tmp_path: Path) -> None:
-        """Caller-supplied hints should not be overwritten."""
+        """Caller-supplied hints should not be overwritten and the
+        matching engine should not be invoked at all when hints are
+        already populated."""
         store = HarnessInsightStore(tmp_path / "memory")
         record = _make_record(
             details="ModuleNotFoundError: No module named 'hindsight'",
         )
         record.hints = ["caller-supplied hint"]
-        store.append_failure(record)
+
+        # If matching_rules is invoked despite the early-return guard,
+        # the assert_not_called below will fail. This proves the guard
+        # is the reason hints are preserved, not just a happy accident.
+        with patch("sensor_enricher.matching_rules") as mock_rules:
+            store.append_failure(record)
+            mock_rules.assert_not_called()
+
         assert record.hints == ["caller-supplied hint"]
 
     def test_enrichment_never_raises_on_internal_error(self, tmp_path: Path) -> None:
-        """Enrichment is best-effort — an exception must not prevent persistence."""
+        """Enrichment is best-effort — an exception must not prevent
+        persistence, AND the failing exception path must leave hints
+        empty (proving the except clause was reached, not just that
+        persistence happened to work via an unrelated path)."""
         store = HarnessInsightStore(tmp_path / "memory")
         record = _make_record(details="some details")
 
@@ -606,6 +618,10 @@ class TestSensorEnrichmentIntegration:
             side_effect=RuntimeError("boom"),
         ):
             store.append_failure(record)
+
+        # Hints stayed empty — the except clause swallowed the exception
+        # rather than enrichment silently succeeding via another path.
+        assert record.hints == []
 
         failures_path = tmp_path / "memory" / "harness_failures.jsonl"
         assert failures_path.exists()

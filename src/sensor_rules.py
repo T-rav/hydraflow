@@ -58,7 +58,7 @@ SEED_RULES: list[Rule] = [
             "enforces entries in src/service_registry.py, src/orchestrator.py, "
             "src/ui/src/constants.js, src/dashboard_routes/_common.py, and "
             "src/config.py. Confirm all five are updated before committing. "
-            "See CLAUDE.md — 'Background Loop Guidelines'."
+            "See docs/agents/background-loops.md."
         ),
     ),
     Rule(
@@ -81,10 +81,11 @@ SEED_RULES: list[Rule] = [
     Rule(
         id="falsy-optional-check",
         tool="pytest",
-        trigger=ErrorPattern(
-            r"assert.*is None|AttributeError.*NoneType|"
-            r"TypeError.*NoneType"
-        ),
+        # Match the actual code anti-pattern (`if not self._field`) appearing
+        # in failure tracebacks or source snippets, NOT generic `is None`
+        # assertion lines or NoneType tracebacks (which appear in countless
+        # unrelated failures and would produce noisy hints).
+        trigger=ErrorPattern(r"if not self\._\w+|if not self\.\w+:"),
         hint=(
             "Optional-attribute errors often come from `if not self._x` "
             "style falsy checks on values typed `X | None`. Mock objects "

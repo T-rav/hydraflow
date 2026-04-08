@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from sensor_enricher import (
     ANY_TOOL,
+    MATCH_ALL_TOOLS,
     ErrorPattern,
     FileChanged,
     Rule,
@@ -256,16 +257,16 @@ class TestSeedRules:
         ids = [r.id for r in SEED_RULES]
         assert len(ids) == len(set(ids)), f"duplicate rule ids: {ids}"
 
-    def test_seed_rules_reference_avoided_patterns_doc(self) -> None:
+    def test_seed_rules_reference_docs_agents(self) -> None:
         from sensor_rules import SEED_RULES
 
-        # Every hint should point at the canonical doc so rule text stays
-        # consistent with the human-facing rule descriptions.
+        # Every hint must point at a doc under docs/agents/ so rule text
+        # stays consistent with the human-facing rule descriptions and we
+        # never accumulate stale CLAUDE.md references after a refactor.
         for rule in SEED_RULES:
-            assert (
-                "docs/agents/avoided-patterns.md" in rule.hint
-                or "CLAUDE.md" in rule.hint
-            ), f"rule {rule.id} has no doc reference"
+            assert "docs/agents/" in rule.hint, (
+                f"rule {rule.id} has no docs/agents/ reference; hint={rule.hint!r}"
+            )
 
     def test_pydantic_rule_fires_for_models_edit(self) -> None:
         from sensor_rules import SEED_RULES
@@ -290,3 +291,171 @@ class TestSeedRules:
         )
         rule_ids = {r.id for r in result.fired}
         assert "optional-dep-toplevel-import" in rule_ids
+
+    def test_falsy_optional_rule_does_not_fire_on_generic_assertion(
+        self,
+    ) -> None:
+        """The falsy-optional rule should match the source anti-pattern,
+        not arbitrary `is None` assertion lines from unrelated tests."""
+        from sensor_rules import SEED_RULES
+
+        result = matching_rules(
+            SEED_RULES,
+            tool="pytest",
+            raw_output=(
+                "AssertionError: assert result is None\n  + where result = compute()"
+            ),
+            changed_files=[],
+        )
+        rule_ids = {r.id for r in result.fired}
+        assert "falsy-optional-check" not in rule_ids
+
+    def test_falsy_optional_rule_fires_on_actual_anti_pattern(self) -> None:
+        from sensor_rules import SEED_RULES
+
+        result = matching_rules(
+            SEED_RULES,
+            tool="pytest",
+            raw_output="src/foo.py:42:        if not self._hindsight:",
+            changed_files=[],
+        )
+        rule_ids = {r.id for r in result.fired}
+        assert "falsy-optional-check" in rule_ids
+
+
+# ---------------------------------------------------------------------------
+# MATCH_ALL_TOOLS sentinel
+# ---------------------------------------------------------------------------
+
+
+class TestMatchAllToolsSentinel:
+    """The MATCH_ALL_TOOLS caller-side sentinel matches every rule
+    regardless of the rule's `tool` filter. Used by integration points
+    that don't know which tool produced the failure (HarnessInsightStore).
+    """
+
+    def test_match_all_fires_tool_specific_rule(self) -> None:
+        rule = Rule(
+            id="pytest-only",
+            tool="pytest",
+            trigger=ErrorPattern(r"boom"),
+            hint="hint",
+        )
+        result = matching_rules(
+            [rule],
+            tool=MATCH_ALL_TOOLS,
+            raw_output="boom",
+            changed_files=[],
+        )
+        assert result.fired == [rule]
+
+    def test_match_all_fires_any_tool_rule(self) -> None:
+        rule = Rule(
+            id="universal",
+            tool=ANY_TOOL,
+            trigger=ErrorPattern(r"boom"),
+            hint="hint",
+        )
+        result = matching_rules(
+            [rule],
+            tool=MATCH_ALL_TOOLS,
+            raw_output="boom",
+            changed_files=[],
+        )
+        assert result.fired == [rule]
+
+    def test_match_all_with_no_matching_rules_returns_empty(self) -> None:
+        rule = Rule(
+            id="pytest-only",
+            tool="pytest",
+            trigger=ErrorPattern(r"KeyError"),
+            hint="hint",
+        )
+        result = matching_rules(
+            [rule],
+            tool=MATCH_ALL_TOOLS,
+            raw_output="TypeError: bad",
+            changed_files=[],
+        )
+        assert result.fired == []
+
+    def test_match_all_does_not_match_rules_with_other_tool_names(
+        self,
+    ) -> None:
+        """A rule scoped to 'ruff' should match under MATCH_ALL_TOOLS but
+        NOT under tool='pytest' — sanity check that the sentinel and
+        per-tool dispatch are independent."""
+        rule = Rule(
+            id="ruff-only",
+            tool="ruff",
+            trigger=ErrorPattern(r"E501"),
+            hint="hint",
+        )
+        # Under MATCH_ALL_TOOLS, fires.
+        all_result = matching_rules(
+            [rule],
+            tool=MATCH_ALL_TOOLS,
+            raw_output="E501 line too long",
+            changed_files=[],
+        )
+        assert all_result.fired == [rule]
+        # Under tool='pytest', does NOT fire.
+        pytest_result = matching_rules(
+            [rule],
+            tool="pytest",
+            raw_output="E501 line too long",
+            changed_files=[],
+        )
+        assert pytest_result.fired == []
+
+
+# ---------------------------------------------------------------------------
+# enrich() idempotency
+# ---------------------------------------------------------------------------
+
+
+class TestEnrichIdempotency:
+    """enrich() must not stack `## Agent Hints` headings on already-
+    enriched output. Callers may inadvertently double-enrich (e.g., a
+    failure record passed through two integration points)."""
+
+    def test_already_enriched_output_returns_unchanged(self) -> None:
+        rule = Rule(
+            id="r",
+            tool=ANY_TOOL,
+            trigger=ErrorPattern(r"boom"),
+            hint="A hint.",
+        )
+        first = enrich(
+            tool="pytest",
+            raw_output="boom",
+            changed_files=[],
+            rules=[rule],
+        )
+        # First call appends a hints block.
+        assert "## Agent Hints" in first
+        # Second call returns the input unchanged — no second block.
+        second = enrich(
+            tool="pytest",
+            raw_output=first,
+            changed_files=[],
+            rules=[rule],
+        )
+        assert second == first
+        assert second.count("## Agent Hints") == 1
+
+    def test_pre_existing_hints_heading_blocks_enrichment(self) -> None:
+        rule = Rule(
+            id="r",
+            tool=ANY_TOOL,
+            trigger=ErrorPattern(r"boom"),
+            hint="A hint.",
+        )
+        raw = "## Agent Hints\n\n- something else\n\nboom happened"
+        result = enrich(
+            tool="pytest",
+            raw_output=raw,
+            changed_files=[],
+            rules=[rule],
+        )
+        assert result == raw
