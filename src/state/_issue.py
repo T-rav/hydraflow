@@ -36,15 +36,23 @@ class IssueStateMixin:
 
     _TERMINAL_STATUSES = frozenset({"merged", "failed", "completed", "hitl_closed"})
 
+    # Statuses that indicate the issue is truly done — workspace can be safely
+    # removed.  "failed" is intentionally excluded because failed issues may
+    # be retried; premature workspace cleanup causes the GC loop to destroy
+    # worktrees mid-retry, leading to zero-commit failures.
+    _WORKSPACE_CLEAR_STATUSES = frozenset({"merged", "completed", "hitl_closed"})
+
     def mark_issue(self, issue_number: int, status: str) -> None:
         """Record the processing status for *issue_number*.
 
-        When *status* is terminal (merged, failed, completed, hitl_closed),
-        the corresponding ``active_branches`` and ``active_workspaces``
-        entries are removed to prevent stale state accumulation.
+        When *status* is in ``_WORKSPACE_CLEAR_STATUSES`` (merged, completed,
+        hitl_closed), the corresponding ``active_branches`` and
+        ``active_workspaces`` entries are removed.  ``"failed"`` does NOT
+        clear these entries because the issue may be retried and the
+        workspace must survive until the attempt cap is exceeded.
         """
         self._data.processed_issues[self._key(issue_number)] = status
-        if status in self._TERMINAL_STATUSES:
+        if status in self._WORKSPACE_CLEAR_STATUSES:
             key = self._key(issue_number)
             self._data.active_branches.pop(key, None)
             self._data.active_workspaces.pop(key, None)

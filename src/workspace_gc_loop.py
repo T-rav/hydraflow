@@ -119,6 +119,22 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
             logger.debug("GC: #%d is active/HITL/pipeline — skipping", issue_number)
             return safe_to_gc
 
+        # Skip issues that still have retries remaining.  Between the moment
+        # an implementation fails and the next retry picks up the issue, the
+        # issue is temporarily not in any active set.  Without this guard the
+        # GC can destroy the worktree in that window, causing the retry to
+        # start from a blank checkout and produce zero commits.
+        attempts = self._state.get_issue_attempts(issue_number)
+        max_attempts = self._config.max_issue_attempts
+        if 0 < attempts < max_attempts:
+            logger.debug(
+                "GC: #%d has %d/%d attempts — retries remaining, skipping",
+                issue_number,
+                attempts,
+                max_attempts,
+            )
+            return safe_to_gc
+
         # Check issue state via GitHub API
         try:
             issue_state = await self._get_issue_state(issue_number)
