@@ -10,23 +10,39 @@ from tests.helpers import make_tracker
 
 
 class TestTerminalStateCleanup:
-    """mark_issue() with a terminal status removes branch and worktree entries."""
+    """mark_issue() with a workspace-clear status removes branch and worktree entries."""
 
-    @pytest.mark.parametrize("status", ["merged", "failed", "completed", "hitl_closed"])
-    def test_terminal_status_removes_branch(self, tmp_path: Path, status: str) -> None:
+    @pytest.mark.parametrize("status", ["merged", "completed", "hitl_closed"])
+    def test_workspace_clear_status_removes_branch(
+        self, tmp_path: Path, status: str
+    ) -> None:
         tracker = make_tracker(tmp_path)
         tracker.set_branch(42, "agent/issue-42")
         tracker.mark_issue(42, status)
         assert tracker.get_branch(42) is None
 
-    @pytest.mark.parametrize("status", ["merged", "failed", "completed", "hitl_closed"])
-    def test_terminal_status_removes_worktree(
+    @pytest.mark.parametrize("status", ["merged", "completed", "hitl_closed"])
+    def test_workspace_clear_status_removes_worktree(
         self, tmp_path: Path, status: str
     ) -> None:
         tracker = make_tracker(tmp_path)
         tracker.set_workspace(42, "/tmp/wt-42")
         tracker.mark_issue(42, status)
         assert tracker.get_active_workspaces().get(42) is None
+
+    def test_failed_status_preserves_branch(self, tmp_path: Path) -> None:
+        """'failed' is retryable — workspace and branch must survive for retries."""
+        tracker = make_tracker(tmp_path)
+        tracker.set_branch(42, "agent/issue-42")
+        tracker.mark_issue(42, "failed")
+        assert tracker.get_branch(42) == "agent/issue-42"
+
+    def test_failed_status_preserves_worktree(self, tmp_path: Path) -> None:
+        """'failed' is retryable — workspace must survive for retries."""
+        tracker = make_tracker(tmp_path)
+        tracker.set_workspace(42, "/tmp/wt-42")
+        tracker.mark_issue(42, "failed")
+        assert tracker.get_active_workspaces()[42] == "/tmp/wt-42"
 
     def test_non_terminal_status_preserves_branch(self, tmp_path: Path) -> None:
         tracker = make_tracker(tmp_path)
@@ -58,10 +74,20 @@ class TestTerminalStateCleanup:
         tracker = make_tracker(tmp_path)
         tracker.set_branch(10, "agent/issue-10")
         tracker.set_workspace(10, "/tmp/wt-10")
-        tracker.mark_issue(10, "failed")
+        tracker.mark_issue(10, "merged")
         reloaded = make_tracker(tmp_path)
         assert reloaded.get_branch(10) is None
         assert 10 not in reloaded.get_active_workspaces()
+
+    def test_failed_preserves_state_across_reload(self, tmp_path: Path) -> None:
+        """Failed issues must retain workspace state even after state reload."""
+        tracker = make_tracker(tmp_path)
+        tracker.set_branch(10, "agent/issue-10")
+        tracker.set_workspace(10, "/tmp/wt-10")
+        tracker.mark_issue(10, "failed")
+        reloaded = make_tracker(tmp_path)
+        assert reloaded.get_branch(10) == "agent/issue-10"
+        assert reloaded.get_active_workspaces()[10] == "/tmp/wt-10"
 
     def test_terminal_cleanup_noop_when_no_entries(self, tmp_path: Path) -> None:
         """Cleaning up non-existent entries should not raise."""

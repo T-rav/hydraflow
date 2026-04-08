@@ -178,6 +178,52 @@ class TestWorktreeGCSkipsActive:
         assert result["skipped"] == 1
 
 
+class TestWorktreeGCSkipsRetryableIssues:
+    """GC must not destroy worktrees for issues that still have retries remaining."""
+
+    @pytest.mark.asyncio
+    async def test_skips_issue_with_retries_remaining(self, tmp_path: Path) -> None:
+        """Issue with 1/3 attempts used must not be GC'd."""
+        loop, state, _e = _make_loop(tmp_path, active_workspaces={42: "/p/42"})
+        state.increment_issue_attempts(42)  # 1 attempt used
+        loop._get_issue_state = AsyncMock(return_value="open")
+        result = await loop._do_work()
+        loop._workspaces.destroy.assert_not_awaited()
+        assert result["skipped"] == 1
+
+    @pytest.mark.asyncio
+    async def test_skips_issue_at_penultimate_attempt(self, tmp_path: Path) -> None:
+        """Issue with 2/3 attempts used still has one retry left."""
+        loop, state, _e = _make_loop(tmp_path, active_workspaces={42: "/p/42"})
+        state.increment_issue_attempts(42)
+        state.increment_issue_attempts(42)  # 2 attempts used, max is 3
+        loop._get_issue_state = AsyncMock(return_value="open")
+        result = await loop._do_work()
+        loop._workspaces.destroy.assert_not_awaited()
+        assert result["skipped"] == 1
+
+    @pytest.mark.asyncio
+    async def test_gc_allowed_after_attempts_exhausted(self, tmp_path: Path) -> None:
+        """Once all attempts are used, GC should proceed normally."""
+        loop, state, _e = _make_loop(tmp_path, active_workspaces={42: "/p/42"})
+        for _ in range(loop._config.max_issue_attempts):
+            state.increment_issue_attempts(42)  # exhaust all attempts
+        loop._get_issue_state = AsyncMock(return_value="closed")
+        result = await loop._do_work()
+        loop._workspaces.destroy.assert_awaited_once_with(42)
+        assert result["collected"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_gc_allowed_when_zero_attempts(self, tmp_path: Path) -> None:
+        """Issues with zero attempts (never started) are fine to GC."""
+        loop, state, _e = _make_loop(tmp_path, active_workspaces={42: "/p/42"})
+        # No attempts recorded
+        loop._get_issue_state = AsyncMock(return_value="closed")
+        result = await loop._do_work()
+        loop._workspaces.destroy.assert_awaited_once_with(42)
+        assert result["collected"] >= 1
+
+
 class TestWorktreeGCBudgetCap:
     @pytest.mark.asyncio
     async def test_budget_caps_phase1_at_max(self, tmp_path: Path) -> None:
@@ -299,6 +345,20 @@ class TestWorktreeGCOrphanedBranches:
             count = await loop._collect_orphaned_branches()
         assert count == 0
         assert m.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_skips_branch_with_retries_remaining(self, tmp_path: Path) -> None:
+        """Branches for retryable issues must not be deleted."""
+        loop, state, _e = _make_loop(tmp_path)
+        state.increment_issue_attempts(99)  # 1 attempt, retries remain
+        loop._collect_orphaned_branches = (
+            WorkspaceGCLoop._collect_orphaned_branches.__get__(loop)
+        )  # type: ignore[attr-defined]
+        with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
+            m.return_value = "  agent/issue-99\n"
+            count = await loop._collect_orphaned_branches()
+        assert count == 0
+        assert m.await_count == 1  # only the branch list call, no delete
 
     @pytest.mark.asyncio
     async def test_branch_budget_cap(self, tmp_path: Path) -> None:
