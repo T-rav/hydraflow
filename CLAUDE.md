@@ -6,6 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **HydraFlow** — Intent in. Software out. A multi-agent orchestration system that automates the full GitHub issue lifecycle via git issues and labels.
 
+## Knowledge Lookup
+
+Before exploring the codebase from scratch, consult existing knowledge. HydraFlow maintains three structured sources — use them proactively when you need context on *why* something is the way it is, or on prior decisions and learnings.
+
+- **Architecture Decision Records** — [`docs/adr/`](docs/adr/README.md) is the authoritative record of key design decisions (40+ entries). Read the index and open the relevant ADR before making changes that touch a documented decision area. Examples: `0001-five-concurrent-async-loops.md`, `0002-labels-as-state-machine.md`, `0003-git-worktrees-for-isolation.md`, `0021-persistence-architecture-and-data-layout.md`, `0029-caretaker-loop-pattern.md`, `0032-per-repo-wiki-knowledge-base.md`. Each ADR follows the format in `docs/adr/README.md`. If you're about to contradict an Accepted ADR, stop and escalate instead — ADRs aren't overridden by code changes, they're superseded by a new ADR.
+- **Repository wiki** — [`src/repo_wiki.py`](src/repo_wiki.py) implements a per-target-repo LLM knowledge base (Karpathy pattern). Wiki entries live under the repo's state directory as topic-categorized markdown (`architecture`, `patterns`, `gotchas`, `testing`, `dependencies`). These capture learnings distilled from prior plan/implement/review cycles on managed repos. Query via `RepoWikiStore` when planning or reviewing work on a target repo.
+- **Other planning docs** — [`docs/`](docs/) contains `self-improving-harness.md`, `ops-audit-plan.md`, `sentry-alerts.md`, and similar strategy documents. Consult these when your task touches the areas they describe.
+
+When you find a gap in the ADRs or wiki that would have helped you, file a `hydraflow-find` issue so the next run has better context.
+
 ## Architecture
 
 HydraFlow runs five concurrent async loops from `orchestrator.py`:
@@ -96,13 +106,9 @@ HydraFlow creates isolated git worktrees for each issue. **Always clean up workt
 
 ## Avoided Patterns
 
-Common mistakes agents make in this codebase — avoid these:
+See [`docs/agents/avoided-patterns.md`](docs/agents/avoided-patterns.md) for the canonical list of recurring agent mistakes in this codebase (Pydantic field additions without test updates, top-level imports of optional deps in tests, sleep-loop polling, mocking at the wrong level, falsy checks on optional objects). Read it before editing the areas each rule calls out.
 
-- **Adding a Pydantic model field without updating serialization tests.** When you add a field to any model in `models.py` (e.g., `PRListItem`, `StateData`), grep `tests/` for the model name and update ALL exact-match serialization tests (`model_dump()` assertions, expected key sets in smoke tests).
-- **Top-level imports of optional dependencies in test files.** Never `from hindsight import Bank` at module level in tests — `httpx` is not always available. Use deferred imports inside test methods: `from hindsight import Bank`.
-- **Spawning background sleep loops to poll for results.** Never `sleep(N)` in a loop waiting for a test suite or background process. Use `run_in_background` with a single command, or run in foreground.
-- **Mocking at the wrong level.** Patch functions at their *import site*, not their *definition site*. If `base_runner.py` does `from hindsight import recall_safe`, patch `hindsight.recall_safe` (the definition module), not `base_runner.recall_safe`.
-- **Using `not obj` instead of `obj is None` for optional dependencies.** Falsy checks on optional objects (e.g., `not self._hindsight`) can trigger incorrectly with mock objects. Use `self._hindsight is None` for explicit null checks.
+When you observe a new recurring failure, add it to `docs/agents/avoided-patterns.md` — the same doc feeds `src/sensor_enricher.py` hints and the `hf.audit-code` convention-drift sweep.
 
 ## Reasoning Triggers
 
