@@ -14,6 +14,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from models import (
@@ -92,7 +94,7 @@ class TestPlanReview:
     def test_clean_review_passes(self) -> None:
         review = PlanReview(issue_number=42, success=True)
         assert review.is_clean is True
-        assert review.has_critical is False
+        assert review.has_blocking_findings is False
 
     def test_critical_finding_blocks_advance(self) -> None:
         review = PlanReview(
@@ -106,7 +108,7 @@ class TestPlanReview:
                 )
             ],
         )
-        assert review.has_critical is True
+        assert review.has_blocking_findings is True
         assert review.is_clean is False
 
     def test_high_finding_also_blocks_advance(self) -> None:
@@ -121,7 +123,7 @@ class TestPlanReview:
                 )
             ],
         )
-        assert review.has_critical is True
+        assert review.has_blocking_findings is True
         assert review.is_clean is False
 
     def test_medium_finding_does_not_block(self) -> None:
@@ -136,7 +138,7 @@ class TestPlanReview:
                 )
             ],
         )
-        assert review.has_critical is False
+        assert review.has_blocking_findings is False
         assert review.is_clean is True
 
     def test_failed_review_is_not_clean(self) -> None:
@@ -146,6 +148,30 @@ class TestPlanReview:
     def test_default_plan_version_is_one(self) -> None:
         review = PlanReview(issue_number=42, success=True)
         assert review.plan_version == 1
+
+    def test_default_instantiation_has_expected_keys(self) -> None:
+        """A PlanReview built with only required fields must serialize
+        with the same key set as a fully-explicit instance — guards
+        against default_factory regressions where adding a field with
+        a broken default lambda would only be caught by explicit-value
+        tests, never by the default path.
+        """
+        default_dump = PlanReview(issue_number=42, success=True).model_dump()
+        explicit_dump = PlanReview(
+            issue_number=42,
+            plan_version=1,
+            success=True,
+            findings=[],
+            summary="",
+            transcript="",
+            duration_seconds=0.0,
+            error=None,
+        ).model_dump()
+        assert set(default_dump.keys()) == set(explicit_dump.keys())
+        assert default_dump["issue_number"] == 42
+        assert default_dump["findings"] == []
+        assert default_dump["plan_version"] == 1
+        assert default_dump["error"] is None
 
     def test_serialization_includes_all_fields(self) -> None:
         review = PlanReview(
@@ -223,16 +249,32 @@ class TestReproductionResult:
         assert result.outcome == "unable"
         assert "stack trace" in result.investigation
 
-    def test_confidence_bounded(self) -> None:
-        # Confidence must be in [0, 1].
-        try:
+    def test_confidence_above_one_raises(self) -> None:
+        """Pydantic ValidationError fires when confidence > 1.
+
+        Uses pytest.raises so a future change that drops the bound is
+        an immediate failure rather than a silent green test (the
+        previous try/except form would pass with zero assertions if
+        the constructor stopped raising).
+        """
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="less than or equal to 1"):
             ReproductionResult(
                 issue_number=42,
                 outcome=ReproductionOutcome.SUCCESS,
                 confidence=1.5,
             )
-        except Exception as exc:  # noqa: BLE001
-            assert "less than or equal to 1" in str(exc).lower()
+
+    def test_confidence_below_zero_raises(self) -> None:
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="greater than or equal to 0"):
+            ReproductionResult(
+                issue_number=42,
+                outcome=ReproductionOutcome.SUCCESS,
+                confidence=-0.1,
+            )
 
     def test_serialization_round_trip(self) -> None:
         original = ReproductionResult(

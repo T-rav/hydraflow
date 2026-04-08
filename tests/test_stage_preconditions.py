@@ -50,6 +50,27 @@ class TestHasPlan:
         cache.record_plan_stored(42, plan_text="v2")
         assert has_plan(cache, 42).ok is True
 
+    def test_fails_when_only_review_record_exists(self, tmp_path: Path) -> None:
+        """has_plan must not be tricked into passing by a review_stored
+        record. Catches a regression where the predicate accidentally
+        queried the wrong record kind."""
+        cache = _cache(tmp_path)
+        cache.record_review_stored(42, review_text="reviewed", has_blocking=False)
+        result = has_plan(cache, 42)
+        assert result.ok is False
+        assert "no plan_stored" in result.reason
+
+    def test_fails_when_only_classification_record_exists(self, tmp_path: Path) -> None:
+        cache = _cache(tmp_path)
+        cache.record_classification(
+            42,
+            issue_type="feature",
+            complexity_score=3,
+            complexity_rank="low",
+        )
+        result = has_plan(cache, 42)
+        assert result.ok is False
+
 
 # ---------------------------------------------------------------------------
 # has_clean_review
@@ -59,7 +80,7 @@ class TestHasPlan:
 class TestHasCleanReview:
     def test_passes_when_clean_review(self, tmp_path: Path) -> None:
         cache = _cache(tmp_path)
-        cache.record_review_stored(42, review_text="looks good", has_critical=False)
+        cache.record_review_stored(42, review_text="looks good", has_blocking=False)
         assert has_clean_review(cache, 42).ok is True
 
     def test_fails_when_no_review(self, tmp_path: Path) -> None:
@@ -70,7 +91,7 @@ class TestHasCleanReview:
     def test_fails_when_critical_findings(self, tmp_path: Path) -> None:
         cache = _cache(tmp_path)
         cache.record_review_stored(
-            42, review_text="missing edge cases", has_critical=True
+            42, review_text="missing edge cases", has_blocking=True
         )
         result = has_clean_review(cache, 42)
         assert result.ok is False
@@ -79,8 +100,8 @@ class TestHasCleanReview:
     def test_uses_latest_review(self, tmp_path: Path) -> None:
         """When v1 was critical and v2 is clean, the gate must pass."""
         cache = _cache(tmp_path)
-        cache.record_review_stored(42, review_text="bad", has_critical=True)
-        cache.record_review_stored(42, review_text="good", has_critical=False)
+        cache.record_review_stored(42, review_text="bad", has_blocking=True)
+        cache.record_review_stored(42, review_text="good", has_blocking=False)
         assert has_clean_review(cache, 42).ok is True
 
 
@@ -170,13 +191,13 @@ class TestCheckPreconditions:
             complexity_rank="low",
         )
         cache.record_plan_stored(42, plan_text="full plan")
-        cache.record_review_stored(42, review_text="LGTM", has_critical=False)
+        cache.record_review_stored(42, review_text="LGTM", has_blocking=False)
         result = check_preconditions(cache, 42, Stage.READY)
         assert result.ok is True
 
     def test_ready_fails_without_plan(self, tmp_path: Path) -> None:
         cache = _cache(tmp_path)
-        cache.record_review_stored(42, review_text="LGTM", has_critical=False)
+        cache.record_review_stored(42, review_text="LGTM", has_blocking=False)
         result = check_preconditions(cache, 42, Stage.READY)
         assert result.ok is False
         assert "no plan_stored" in result.reason
@@ -199,7 +220,7 @@ class TestCheckPreconditions:
             complexity_rank="medium",
         )
         cache.record_plan_stored(42, plan_text="fix the bug")
-        cache.record_review_stored(42, review_text="LGTM", has_critical=False)
+        cache.record_review_stored(42, review_text="LGTM", has_blocking=False)
         result = check_preconditions(cache, 42, Stage.READY)
         assert result.ok is False
         assert "no reproduction_stored" in result.reason
@@ -207,16 +228,80 @@ class TestCheckPreconditions:
     def test_review_stage_requires_plan_and_review(self, tmp_path: Path) -> None:
         cache = _cache(tmp_path)
         cache.record_plan_stored(42, plan_text="plan")
-        cache.record_review_stored(42, review_text="clean", has_critical=False)
+        cache.record_review_stored(42, review_text="clean", has_blocking=False)
         assert check_preconditions(cache, 42, Stage.REVIEW).ok is True
 
-    def test_review_stage_blocks_when_review_has_critical(self, tmp_path: Path) -> None:
+    def test_review_stage_blocks_when_review_is_blocking(self, tmp_path: Path) -> None:
         cache = _cache(tmp_path)
         cache.record_plan_stored(42, plan_text="plan")
-        cache.record_review_stored(42, review_text="bad", has_critical=True)
+        cache.record_review_stored(42, review_text="bad", has_blocking=True)
         result = check_preconditions(cache, 42, Stage.REVIEW)
         assert result.ok is False
         assert "critical findings" in result.reason
+
+    def test_unknown_stage_returns_ok(self, tmp_path: Path) -> None:
+        """check_preconditions returns ok=True for stages not in the
+        registry — locks in the current safety-valve contract so a
+        future change to raise instead is an explicit decision."""
+        from typing import cast
+
+        # Cast around the StrEnum check by passing a literal Stage value
+        # that is not in STAGE_PRECONDITIONS. Today both Stage members
+        # ARE in the registry, so simulate an unknown by deleting locally.
+        cache = _cache(tmp_path)
+        # Build a fake unknown stage by passing a value not in the
+        # registry. We cast through the enum constructor to satisfy the
+        # type signature without monkey-patching the registry.
+        fake_stage = cast(Stage, "unknown_stage")
+        result = check_preconditions(cache, 42, fake_stage)
+        assert result.ok is True
+
+    def test_bug_reproduction_outcome_case_insensitive(self, tmp_path: Path) -> None:
+        """has_reproduction_for_bug normalizes the outcome string before
+        comparing — a hand-edited cache record with 'UNABLE' or 'Unable'
+        must still trip the gate. Tests the predicate directly so the
+        test is not gated on plan/review records existing."""
+        cache = _cache(tmp_path)
+        cache.record_classification(
+            42,
+            issue_type="bug",
+            complexity_score=5,
+            complexity_rank="medium",
+        )
+        # Write a reproduction record with non-canonical casing.
+        from issue_cache import CacheRecord, CacheRecordKind
+
+        cache.record(
+            CacheRecord(
+                issue_id=42,
+                kind=CacheRecordKind.REPRODUCTION_STORED,
+                payload={"outcome": "UNABLE", "test_path": "", "details": ""},
+            )
+        )
+        result = has_reproduction_for_bug(cache, 42)
+        assert result.ok is False
+        assert "escalate to HITL" in result.reason
+
+    def test_bug_reproduction_outcome_titlecase_also_blocks(
+        self, tmp_path: Path
+    ) -> None:
+        cache = _cache(tmp_path)
+        cache.record_classification(
+            42,
+            issue_type="bug",
+            complexity_score=5,
+            complexity_rank="medium",
+        )
+        from issue_cache import CacheRecord, CacheRecordKind
+
+        cache.record(
+            CacheRecord(
+                issue_id=42,
+                kind=CacheRecordKind.REPRODUCTION_STORED,
+                payload={"outcome": "Unable", "test_path": "", "details": ""},
+            )
+        )
+        assert has_reproduction_for_bug(cache, 42).ok is False
 
 
 # ---------------------------------------------------------------------------

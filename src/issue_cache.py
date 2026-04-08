@@ -291,10 +291,15 @@ class IssueCache:
         issue_id: int,
         *,
         review_text: str,
-        has_critical: bool,
+        has_blocking: bool,
         findings: Iterable[dict[str, Any]] | None = None,
     ) -> int:
         """Record an adversarial plan review or PR review (#6421 composes).
+
+        ``has_blocking`` mirrors ``PlanReview.has_blocking_findings`` —
+        True when the review surfaced any CRITICAL or HIGH severity
+        finding. The READY-stage precondition gate reads this key to
+        decide whether to advance the issue or route it back to PLAN.
 
         Thread/coroutine-safe via a per-issue lock — see record_plan_stored.
         """
@@ -307,7 +312,7 @@ class IssueCache:
                     version=version,
                     payload={
                         "review_text": review_text,
-                        "has_critical": has_critical,
+                        "has_blocking": has_blocking,
                         "findings": list(findings or []),
                     },
                 )

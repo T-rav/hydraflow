@@ -598,11 +598,16 @@ class PlanReview(BaseModel):
     )
 
     @property
-    def has_critical(self) -> bool:
-        """Return True if any finding is critical or high severity.
+    def has_blocking_findings(self) -> bool:
+        """Return True if any finding has critical OR high severity.
 
-        Critical/high findings block the ``ready`` transition; the plan
-        is routed back to planning with the findings as feedback context.
+        Critical/high findings block the READY transition; the plan is
+        routed back to planning with the findings as feedback context.
+        Medium and below pass through.
+
+        Named ``has_blocking_findings`` (not ``has_critical``) because
+        it includes HIGH-severity findings — using just ``has_critical``
+        would mislead readers into thinking it filters on CRITICAL only.
         """
         return any(
             f.severity in (PlanFindingSeverity.CRITICAL, PlanFindingSeverity.HIGH)
@@ -611,8 +616,8 @@ class PlanReview(BaseModel):
 
     @property
     def is_clean(self) -> bool:
-        """Return True if the plan can advance — no critical/high findings."""
-        return self.success and not self.has_critical
+        """Return True if the plan can advance — no blocking findings."""
+        return self.success and not self.has_blocking_findings
 
 
 # ---------------------------------------------------------------------------

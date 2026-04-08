@@ -101,8 +101,12 @@ def has_clean_review(cache: IssueCache, issue_id: int) -> PreconditionResult:
                 "adversarial plan review has not run yet"
             ),
         )
-    has_critical = bool(record.payload.get("has_critical", False))
-    if has_critical:
+    # Read has_blocking from the payload — set by IssueCache
+    # record_review_stored from PlanReview.has_blocking_findings.
+    # Coerce to bool defensively in case a malformed cache record
+    # stored a non-bool value (e.g. a string from a hand-edited file).
+    has_blocking = bool(record.payload.get("has_blocking", False))
+    if has_blocking:
         return PreconditionResult(
             ok=False,
             reason=(
@@ -139,7 +143,12 @@ def has_reproduction_for_bug(cache: IssueCache, issue_id: int) -> PreconditionRe
                 "record — bug reproduction has not run"
             ),
         )
-    outcome = repro.payload.get("outcome", "")
+    # Normalize outcome to lowercase string. Pydantic StrEnum serializes
+    # ReproductionOutcome.UNABLE as "unable" via model_dump_json, but a
+    # hand-edited cache file or a caller passing the wrong case would
+    # otherwise silently bypass the check. Defensive lowercase ensures
+    # the gate fires regardless of casing.
+    outcome = str(repro.payload.get("outcome", "")).lower()
     if outcome == "unable":
         return PreconditionResult(
             ok=False,
