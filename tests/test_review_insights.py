@@ -753,8 +753,10 @@ class TestReviewInsightHindsightDualWrite:
         assert reviews_path.exists()
         assert "42" in reviews_path.read_text()
 
-    def test_no_event_loop_skips_dual_write(self, tmp_path: Path) -> None:
-        """When no event loop is running, dual-write is silently skipped."""
+    def test_no_event_loop_skips_hindsight_but_writes_file(
+        self, tmp_path: Path
+    ) -> None:
+        """When no event loop is running, hindsight write is skipped but file write still happens."""
         from unittest.mock import MagicMock, patch
 
         mock_hindsight = MagicMock()
@@ -767,12 +769,12 @@ class TestReviewInsightHindsightDualWrite:
         ):
             store.append_review(record)  # should not raise
 
-        # File write skipped because hindsight is set
+        # File write always happens
         reviews_path = tmp_path / "reviews.jsonl"
-        assert not reviews_path.exists()
+        assert reviews_path.exists()
 
-    def test_file_write_skipped_when_hindsight_configured(self, tmp_path: Path) -> None:
-        """When hindsight client is set, JSONL file write is skipped."""
+    def test_dual_write_file_and_hindsight(self, tmp_path: Path) -> None:
+        """When hindsight client is set, both JSONL file and hindsight are written."""
         from unittest.mock import MagicMock, patch
 
         mock_hindsight = MagicMock()
@@ -790,9 +792,9 @@ class TestReviewInsightHindsightDualWrite:
             mock_loop.create_task.assert_called_once()
             mock_retain.assert_called_once()
 
-        # File write does NOT happen
+        # File write also happens
         reviews_path = tmp_path / "reviews.jsonl"
-        assert not reviews_path.exists()
+        assert reviews_path.exists()
 
     def test_falsy_mock_hindsight_still_retains(self, tmp_path: Path) -> None:
         """A falsy-but-non-None hindsight mock must still trigger schedule_retain."""
@@ -808,9 +810,9 @@ class TestReviewInsightHindsightDualWrite:
             # schedule_retain must be called even though mock is falsy
             mock_retain.assert_called_once()
 
-        # File write must NOT happen when hindsight is set (even if falsy)
+        # File write always happens (dual-write)
         reviews_path = tmp_path / "reviews.jsonl"
-        assert not reviews_path.exists()
+        assert reviews_path.exists()
 
 
 # ---------------------------------------------------------------------------

@@ -160,18 +160,18 @@ class HarnessInsightStore:
 
     def append_failure(self, record: FailureRecord) -> None:
         """Append *record* as a JSON line to ``harness_failures.jsonl``."""
-        if self._hindsight is None:
-            try:
-                from file_util import append_jsonl  # noqa: PLC0415
+        try:
+            from file_util import append_jsonl  # noqa: PLC0415
 
-                append_jsonl(self._failures_path, record.model_dump_json())
-            except OSError:
-                logger.warning(
-                    "Could not append failure to %s",
-                    self._failures_path,
-                    exc_info=True,
-                )
-        else:
+            append_jsonl(self._failures_path, record.model_dump_json())
+        except OSError:
+            logger.warning(
+                "Could not append failure to %s",
+                self._failures_path,
+                exc_info=True,
+            )
+
+        if self._hindsight is not None:
             from hindsight import Bank, schedule_retain  # noqa: PLC0415
 
             schedule_retain(
