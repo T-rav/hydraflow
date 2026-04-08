@@ -544,6 +544,150 @@ class PlanResult(BaseModel):
     )
 
 
+class PlanFindingSeverity(StrEnum):
+    """Severity scale for adversarial plan review findings (#6421)."""
+
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    INFO = "info"
+
+
+class PlanFinding(BaseModel):
+    """A single adversarial-review finding against a plan (#6421)."""
+
+    severity: PlanFindingSeverity = Field(description="Severity of the finding")
+    dimension: str = Field(
+        description=(
+            "Dimension being reviewed: correctness, edge_cases, test_strategy, "
+            "scope_creep, convention, security, reproduction"
+        ),
+    )
+    description: str = Field(description="What is wrong with the plan")
+    suggestion: str = Field(
+        default="", description="Concrete remediation the reviewer suggests"
+    )
+
+
+class PlanReview(BaseModel):
+    """Outcome of an adversarial plan review run (#6421).
+
+    Produced by ``PlanReviewer`` against a ``PlanResult``. Determines
+    whether the plan can advance to the implement stage or must be
+    routed back to planning with feedback context.
+    """
+
+    issue_number: int = Field(description="GitHub issue number being reviewed")
+    plan_version: int = Field(
+        default=1, description="Version of the plan being reviewed"
+    )
+    success: bool = Field(
+        default=False, description="Whether the review run completed cleanly"
+    )
+    findings: list[PlanFinding] = Field(
+        default_factory=list, description="All findings, in severity order"
+    )
+    summary: str = Field(default="", description="Short summary of the review outcome")
+    transcript: str = Field(default="", description="Raw reviewer transcript")
+    duration_seconds: float = Field(
+        default=0.0, ge=0, description="Wall-clock seconds for the review run"
+    )
+    error: str | None = Field(
+        default=None, description="Error message if the review run failed"
+    )
+
+    @property
+    def has_critical(self) -> bool:
+        """Return True if any finding is critical or high severity.
+
+        Critical/high findings block the ``ready`` transition; the plan
+        is routed back to planning with the findings as feedback context.
+        """
+        return any(
+            f.severity in (PlanFindingSeverity.CRITICAL, PlanFindingSeverity.HIGH)
+            for f in self.findings
+        )
+
+    @property
+    def is_clean(self) -> bool:
+        """Return True if the plan can advance — no critical/high findings."""
+        return self.success and not self.has_critical
+
+
+# ---------------------------------------------------------------------------
+# Bug reproduction (#6424)
+# ---------------------------------------------------------------------------
+
+
+class ReproductionOutcome(StrEnum):
+    """Outcome of a triage-time bug reproduction attempt (#6424)."""
+
+    SUCCESS = "success"  # failing test written and confirmed red
+    PARTIAL = "partial"  # repro script produced but no automated test
+    UNABLE = "unable"  # could not reproduce — escalate to HITL
+
+
+class ReproductionResult(BaseModel):
+    """Outcome of a ``BugReproducer`` run (#6424)."""
+
+    issue_number: int = Field(description="GitHub issue number being reproduced")
+    outcome: ReproductionOutcome = Field(description="Reproduction outcome")
+    test_path: str = Field(
+        default="",
+        description=(
+            "Path to a failing test that demonstrates the bug. Empty for "
+            "PARTIAL/UNABLE outcomes."
+        ),
+    )
+    repro_script: str = Field(
+        default="",
+        description="Manual reproduction script for PARTIAL outcomes",
+    )
+    failing_output: str = Field(
+        default="",
+        description="Stdout/stderr from the failing test (for SUCCESS)",
+    )
+    confidence: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Reproducer confidence in the result, 0..1",
+    )
+    investigation: str = Field(
+        default="",
+        description="Investigation transcript / notes for UNABLE outcomes",
+    )
+    duration_seconds: float = Field(default=0.0, ge=0)
+    error: str | None = Field(default=None)
+
+
+# ---------------------------------------------------------------------------
+# Stage preconditions and route-back (#6423)
+# ---------------------------------------------------------------------------
+
+
+class RouteBackRecord(BaseModel):
+    """Record of a stage route-back transition (#6423).
+
+    Persisted via :class:`StateTracker` so the route-back counter
+    survives restart, and emitted to the issue cache as a ``route_back``
+    snapshot for the audit trail.
+    """
+
+    issue_number: int
+    from_stage: str = Field(description="Stage the issue was being picked up from")
+    to_stage: str = Field(description="Stage the issue was routed back to")
+    reason: str = Field(description="Why the route-back fired (precondition fail)")
+    feedback_context: str = Field(
+        default="",
+        description="Feedback the upstream phase should consume on retry",
+    )
+    timestamp: IsoTimestamp = Field(
+        default_factory=lambda: datetime.now(UTC).isoformat(),
+    )
+
+
 class ResearchResult(BaseModel):
     """Outcome of a research agent run (pre-plan exploration)."""
 
