@@ -27,6 +27,7 @@ from triage import TriageRunner
 
 if TYPE_CHECKING:
     from epic import EpicManager
+    from issue_cache import IssueCache
     from ports import IssueStorePort, PRPort
 
 logger = logging.getLogger("hydraflow.triage_phase")
@@ -52,6 +53,7 @@ class TriagePhase:
         event_bus: EventBus,
         stop_event: asyncio.Event,
         epic_manager: EpicManager | None = None,
+        issue_cache: IssueCache | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -62,6 +64,7 @@ class TriagePhase:
         self._bus = event_bus
         self._stop_event = stop_event
         self._epic_manager = epic_manager
+        self._issue_cache = issue_cache
 
     def _enrich_parent_epic(self, issue: Task) -> None:
         """Set the parent_epic field if this issue belongs to a tracked epic."""
@@ -70,6 +73,21 @@ class TriagePhase:
         parents = self._epic_manager.find_parent_epics(issue.id)
         if parents:
             issue.parent_epic = parents[0]
+
+    @staticmethod
+    def _complexity_rank(score: int) -> str:
+        """Convert a 0-10 complexity score into a coarse rank label.
+
+        The cache stores both the raw score and a label so downstream
+        phases can read the rank without hardcoding thresholds.
+        """
+        if score >= 8:
+            return "high"
+        if score >= 5:
+            return "medium"
+        if score >= 2:
+            return "low"
+        return "trivial"
 
     async def triage_issues(self) -> int:
         """Evaluate ``find_label`` issues and route them.
@@ -221,6 +239,19 @@ class TriagePhase:
                 exc,
             )
             return 0
+
+        # Mirror classification into the local JSONL cache (#6422 + #6423).
+        # Downstream precondition gates read this structured record
+        # instead of re-parsing triage comments. Best-effort: the cache
+        # itself never raises into the domain layer.
+        if self._issue_cache is not None:
+            self._issue_cache.record_classification(
+                issue.id,
+                issue_type=str(result.issue_type),
+                complexity_score=result.complexity_score,
+                complexity_rank=self._complexity_rank(result.complexity_score),
+                reasoning="; ".join(result.reasons) if result.reasons else "",
+            )
 
         if self._config.dry_run:
             return 1

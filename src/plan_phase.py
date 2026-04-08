@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from beads_manager import BeadsManager
     from epic import EpicManager
     from hindsight import HindsightClient
+    from issue_cache import IssueCache
     from memory_judge import MemoryJudge  # noqa: TCH004
     from ports import IssueStorePort, PRPort
     from repo_wiki import RepoWikiStore  # noqa: TCH004
@@ -63,6 +64,7 @@ class PlanPhase:
         wiki_compiler: WikiCompiler | None = None,
         hindsight: HindsightClient | None = None,
         judge: MemoryJudge | None = None,
+        issue_cache: IssueCache | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -79,6 +81,7 @@ class PlanPhase:
         self._beads_manager = beads_manager
         self._wiki_store = wiki_store
         self._wiki_compiler = wiki_compiler
+        self._issue_cache = issue_cache
         self._suggest_memory = MemorySuggester(config, hindsight=hindsight, judge=judge)
         self._escalator = PipelineEscalator(
             state,
@@ -270,6 +273,20 @@ class PlanPhase:
         if result.duration_seconds > 0:
             self._state.record_plan_duration(result.duration_seconds)
         self._state.increment_session_counter("planned")
+
+        # Mirror the plan into the local JSONL cache with per-issue
+        # version counter so plan v1 → v2 → v3 history survives without
+        # overwriting comments (#6422). Downstream precondition gates
+        # (#6423) and the adversarial plan reviewer (#6421) read this
+        # structured record. Best-effort: the cache never raises.
+        if self._issue_cache is not None:
+            self._issue_cache.record_plan_stored(
+                issue.id,
+                plan_text=result.plan,
+                actionability_score=result.actionability_score,
+                findings=[{"message": e} for e in result.validation_errors],
+            )
+
         logger.info("Plan posted and labels swapped for issue #%d", issue.id)
 
     _WIKI_INGEST_MAX_CHARS = 40_000

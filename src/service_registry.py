@@ -382,6 +382,13 @@ def build_services(
     beads_mgr = BeadsManager()
 
     # Phase coordinators
+    # Local JSONL issue cache — append-only mirror of GitHub issue state.
+    # See src/issue_cache.py and issue #6422.
+    issue_cache = IssueCache(
+        config.data_path("cache"),
+        enabled=config.issue_cache_enabled,
+    )
+
     triager = TriagePhase(
         config,
         state,
@@ -391,6 +398,7 @@ def build_services(
         event_bus,
         stop_event,
         epic_manager=epic_manager,
+        issue_cache=issue_cache,
     )
     discover_runner = DiscoverRunner(config, event_bus)
     discover_phase = DiscoverPhase(  # noqa: F841
@@ -445,6 +453,7 @@ def build_services(
         wiki_compiler=wiki_compiler,
         hindsight=hindsight_client,
         judge=memory_judge,
+        issue_cache=issue_cache,
     )
     hitl_phase = HITLPhase(
         config,

@@ -1749,6 +1749,10 @@ class StateData(BaseModel):
         default_factory=SecurityPatchSettings
     )
     security_patch_processed: list[str] = Field(default_factory=list)
+    # Per-issue route-back counter (#6423). Keyed by str(issue_id) for
+    # JSON-compat with the rest of StateData. See route_back.py and
+    # state/_route_back.py.
+    route_back_counts: dict[str, int] = Field(default_factory=dict)
     ci_monitor_settings: CIMonitorSettings = Field(default_factory=CIMonitorSettings)
     ci_monitor_tracked_failures: dict[str, str] = Field(default_factory=dict)
     code_grooming_settings: CodeGroomingSettings = Field(
