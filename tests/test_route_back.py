@@ -30,6 +30,7 @@ def _coordinator(
     *,
     max_route_backs: int = 2,
     counter: RouteBackCounterPort | None = None,
+    diagnose_label: str = "",
 ) -> tuple[RouteBackCoordinator, IssueCache, AsyncMock, InMemoryRouteBackCounter]:
     cache = IssueCache(tmp_path / "cache", enabled=True)
     prs = AsyncMock()
@@ -40,6 +41,7 @@ def _coordinator(
         prs=prs,
         counter=counter_impl,
         hitl_label="hydraflow-hitl",
+        diagnose_label=diagnose_label,
         max_route_backs=max_route_backs,
     )
     return coordinator, cache, prs, counter_impl  # type: ignore[return-value]
@@ -307,6 +309,110 @@ class TestEscalationLabelFailure:
         )
         assert result.outcome == RouteBackOutcome.FAILED
         assert "escalation label swap failed" in result.reason
+
+
+# ---------------------------------------------------------------------------
+# Diagnose-first escalation chain
+# ---------------------------------------------------------------------------
+
+
+class TestDiagnoseEscalationChain:
+    """When ``diagnose_label`` is configured, the coordinator should
+    try to swap to diagnose FIRST when route-backs are exhausted, and
+    only fall back to HITL if the diagnose swap fails. Matches the
+    existing ``PipelineEscalator`` pattern in src/phase_utils.py and
+    keeps autonomy by giving the diagnostic agent one more shot at
+    triaging the failure before requiring a human."""
+
+    @pytest.mark.asyncio
+    async def test_escalates_to_diagnose_first(self, tmp_path: Path) -> None:
+        coordinator, _, prs, _ = _coordinator(
+            tmp_path,
+            max_route_backs=0,
+            diagnose_label="hydraflow-diagnose",
+        )
+
+        result = await coordinator.route_back(
+            42, from_stage="ready", to_stage="plan", reason="r"
+        )
+
+        assert result.outcome == RouteBackOutcome.ESCALATED
+        # Diagnose label was applied — NOT HITL.
+        prs.swap_pipeline_labels.assert_awaited_once_with(42, "hydraflow-diagnose")
+        assert "diagnose" in result.reason
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_hitl_when_diagnose_swap_fails(
+        self, tmp_path: Path
+    ) -> None:
+        coordinator, _, prs, _ = _coordinator(
+            tmp_path,
+            max_route_backs=0,
+            diagnose_label="hydraflow-diagnose",
+        )
+
+        # First call (diagnose) raises, second call (HITL) succeeds.
+        call_count = {"n": 0}
+
+        async def _swap(issue_id: int, label: str) -> None:
+            del issue_id, label
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise RuntimeError("diagnose label swap failed")
+
+        prs.swap_pipeline_labels = AsyncMock(side_effect=_swap)
+
+        result = await coordinator.route_back(
+            42, from_stage="ready", to_stage="plan", reason="r"
+        )
+
+        assert result.outcome == RouteBackOutcome.ESCALATED
+        # Both diagnose AND hitl swaps were attempted, in that order.
+        calls = prs.swap_pipeline_labels.await_args_list
+        assert len(calls) == 2
+        assert calls[0].args == (42, "hydraflow-diagnose")
+        assert calls[1].args == (42, "hydraflow-hitl")
+
+    @pytest.mark.asyncio
+    async def test_returns_failed_when_both_diagnose_and_hitl_fail(
+        self, tmp_path: Path
+    ) -> None:
+        coordinator, _, prs, _ = _coordinator(
+            tmp_path,
+            max_route_backs=0,
+            diagnose_label="hydraflow-diagnose",
+        )
+        prs.swap_pipeline_labels = AsyncMock(
+            side_effect=RuntimeError("everything is on fire")
+        )
+
+        result = await coordinator.route_back(
+            42, from_stage="ready", to_stage="plan", reason="r"
+        )
+
+        assert result.outcome == RouteBackOutcome.FAILED
+        # Both swaps were attempted before giving up.
+        assert prs.swap_pipeline_labels.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_no_diagnose_label_skips_directly_to_hitl(
+        self, tmp_path: Path
+    ) -> None:
+        """Empty diagnose_label preserves the original direct-HITL
+        behavior — operators that don't want the diagnose hop can
+        opt out by passing diagnose_label=''."""
+        coordinator, _, prs, _ = _coordinator(
+            tmp_path,
+            max_route_backs=0,
+            diagnose_label="",  # disabled
+        )
+
+        result = await coordinator.route_back(
+            42, from_stage="ready", to_stage="plan", reason="r"
+        )
+
+        assert result.outcome == RouteBackOutcome.ESCALATED
+        prs.swap_pipeline_labels.assert_awaited_once_with(42, "hydraflow-hitl")
 
 
 # ---------------------------------------------------------------------------
