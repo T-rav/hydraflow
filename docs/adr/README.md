@@ -54,6 +54,7 @@ Consequences), use `module:function_or_class` format (e.g. `src/config.py:HydraF
 | [0038](0038-multi-repo-architecture-wiring-pattern.md) | Multi-Repo Architecture Wiring Pattern | Proposed |
 | [0039](0039-stats-counter-placement-in-delegating-helpers.md) | Stats Counter Placement in Delegating Helpers | Rejected |
 | [0040](0040-adr-reviewer-proposed-only-filter.md) | ADR Reviewer Proposed-Only Filter and Validator Scope | Rejected |
+| [0041](0041-github-source-of-truth-cache-as-sidecar.md) | GitHub as Source of Truth, Local Cache as Sidecar | Accepted |
 
 ## Adding a new ADR
 
