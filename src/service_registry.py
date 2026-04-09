@@ -394,14 +394,20 @@ def build_services(
     )
 
     # Route-back coordinator + precondition gate (#6423). The coordinator
-    # ties label swap + cache record + counter + HITL escalation. The gate
+    # ties label swap + cache record + counter + escalation. The gate
     # is the consumer-side filter implement_phase / review_phase use to
     # drop issues that fail their stage preconditions.
+    #
+    # Escalation chain when route-backs are exhausted: diagnose first
+    # (automated diagnostic agent gets one more autonomous shot at
+    # triaging the failure), HITL as fallback. Matches the existing
+    # PipelineEscalator pattern in src/phase_utils.py.
     route_back_coordinator = RouteBackCoordinator(
         cache=issue_cache,
         prs=prs,
         counter=state,  # StateTracker satisfies RouteBackCounterPort
         hitl_label=config.hitl_label[0],
+        diagnose_label=config.diagnose_label[0],
         max_route_backs=2,
     )
     # The gate enforces stage preconditions only when BOTH the cache is

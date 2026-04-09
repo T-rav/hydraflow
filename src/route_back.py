@@ -115,7 +115,25 @@ class RouteBackCounterPort(Protocol):
 
 
 class RouteBackCoordinator:
-    """Coordinates label swap + cache record + counter + escalation."""
+    """Coordinates label swap + cache record + counter + escalation.
+
+    Escalation chain when ``max_route_backs`` is exceeded:
+
+      1. Try to swap to ``diagnose_label`` first. The diagnostic stage
+         runs an automated diagnostic agent that triages the failure
+         (reads recent transcripts, classifies the root cause, and
+         either re-queues the issue with feedback or hands it to HITL).
+         This matches the existing :class:`PipelineEscalator` pattern
+         and gives the pipeline one more autonomous shot at recovering
+         before requiring a human.
+      2. If the diagnose label swap fails (or no ``diagnose_label`` was
+         configured), fall back to swapping the ``hitl_label`` directly.
+      3. If the HITL swap also fails, the result is ``FAILED`` and the
+         issue stays in its current stage for the next cycle to retry.
+
+    A direct-to-HITL coordinator (no diagnose stage) can be built by
+    passing ``diagnose_label=""``.
+    """
 
     def __init__(
         self,
@@ -124,19 +142,29 @@ class RouteBackCoordinator:
         prs: PRPort,
         counter: RouteBackCounterPort,
         hitl_label: str,
+        diagnose_label: str = "",
         max_route_backs: int = 2,
     ) -> None:
         """Build the coordinator.
 
-        ``hitl_label`` is the GitHub label applied when the counter
-        exceeds the cap (e.g. ``"hydraflow-hitl"``). ``max_route_backs``
-        is the soft cap — once an issue has been routed back this many
-        times, the next route-back attempt escalates instead.
+        ``hitl_label`` is the GitHub label applied as the final-fallback
+        escalation target (e.g. ``"hydraflow-hitl"``).
+
+        ``diagnose_label`` is the intermediate escalation target tried
+        BEFORE HITL when the counter exceeds the cap. Default empty
+        string disables the diagnose hop and goes straight to HITL.
+        Operators should pass ``config.diagnose_label[0]`` to match
+        the existing :class:`PipelineEscalator` behavior.
+
+        ``max_route_backs`` is the soft cap — once an issue has been
+        routed back this many times, the next route-back attempt
+        escalates instead.
         """
         self._cache = cache
         self._prs = prs
         self._counter = counter
         self._hitl_label = hitl_label
+        self._diagnose_label = diagnose_label
         self._max_route_backs = max_route_backs
 
     @property
@@ -267,7 +295,48 @@ class RouteBackCoordinator:
         reason: str,
         counter: int,
     ) -> RouteBackResult:
-        """Apply the HITL label and return an ESCALATED result."""
+        """Escalate via diagnose stage first, HITL as fallback.
+
+        Tries the ``diagnose_label`` swap first when one is configured.
+        The diagnostic stage runs an automated diagnostic agent that
+        triages the failure and either re-queues the issue with
+        feedback or hands it off to HITL — one more autonomous shot
+        at recovery before requiring a human.
+
+        Falls back to ``hitl_label`` directly if the diagnose swap
+        fails or no diagnose label was configured. If the HITL swap
+        also fails, returns ``FAILED`` so the next cycle can retry.
+        """
+        # Try diagnose stage first when configured.
+        if self._diagnose_label:
+            try:
+                await self._prs.swap_pipeline_labels(issue_id, self._diagnose_label)
+                escalation_reason = (
+                    f"route-back cap exceeded after {counter} attempts "
+                    f"(max={self._max_route_backs}); last reason from "
+                    f"{from_stage}: {reason} — escalated to diagnose for "
+                    f"automated triage before HITL"
+                )
+                logger.warning(
+                    "Issue #%d escalated to DIAGNOSE after %d route-backs: %s",
+                    issue_id,
+                    counter,
+                    reason,
+                )
+                return RouteBackResult(
+                    RouteBackOutcome.ESCALATED,
+                    counter=counter,
+                    reason=escalation_reason,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "route_back: diagnose escalation failed for issue #%d, "
+                    "falling back to HITL: %s",
+                    issue_id,
+                    exc,
+                )
+
+        # Fallback (or no diagnose configured): direct HITL swap.
         try:
             await self._prs.swap_pipeline_labels(issue_id, self._hitl_label)
         except Exception as exc:  # noqa: BLE001
