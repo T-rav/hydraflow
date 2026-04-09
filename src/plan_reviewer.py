@@ -17,8 +17,13 @@ This runner is deliberately small. It owns:
 
 Subprocess execution reuses ``BaseRunner._execute`` — same pattern
 as ``PlannerRunner.plan``. The reviewer launches a read-only agent
-(disallowed_tools: Edit, Write) and waits for the
-``PLAN_REVIEW_END`` marker before terminating.
+(``disallowed_tools="Write,Edit,NotebookEdit"`` — the standard
+read-only tool set used by every other read-only runner in this
+codebase) and waits for the ``PLAN_REVIEW_END`` marker before
+terminating. ``Bash`` is intentionally allowed so the reviewer can
+``grep``, run a single test file, or inspect file structure when
+evaluating the plan's ``test_strategy`` and ``reproduction``
+dimensions.
 """
 
 from __future__ import annotations
@@ -168,6 +173,15 @@ class PlanReviewer(BaseRunner):
         prompt = self._build_prompt(task, plan_result.plan)
 
         def _check_review_complete(accumulated: str) -> bool:
+            # Only checks the END marker, not START — same shape as
+            # PlannerRunner._check_plan_complete. If the agent emits
+            # PLAN_REVIEW_END in prose before its structured findings
+            # block, the callback fires early and the parser hands
+            # back an empty findings list (clean review). The
+            # downstream gate will route the issue back via the
+            # "no review_stored" path on the next cycle, which is the
+            # correct conservative behavior. Accept the false-negative
+            # risk to keep the runner's exit-time bounded.
             if PLAN_REVIEW_END in accumulated:
                 logger.info(
                     "Plan review markers found for issue #%d — terminating reviewer",
@@ -187,11 +201,19 @@ class PlanReviewer(BaseRunner):
     def _build_command(self, _worktree_path: Path | None = None) -> list[str]:
         """Build the reviewer CLI invocation.
 
-        Mirrors ``PlannerRunner._build_command``: read-only against
-        the repo root, no Edit/Write tools, planner model so the
-        reviewer is a peer of the planner rather than a downgraded
-        agent. Disallows ``Bash`` so the reviewer cannot run tests
-        or shell commands — pure code reading + reasoning.
+        Read-only against the repo root using the standard read-only
+        tool set (``disallowed_tools="Write,Edit,NotebookEdit"``),
+        matching every other read-only runner in this codebase
+        (``research_runner``, ``expert_council``, ``acceptance_criteria``,
+        ``verification_judge``, ``shape_runner``, ``discover_runner``).
+        Bash IS allowed so the reviewer can grep, run a single test
+        file, or inspect file structure when evaluating the plan's
+        ``test_strategy`` and ``reproduction`` dimensions — those
+        checks would be impossible with only the agent's built-in
+        Read/Glob/Grep tools.
+
+        Uses the planner model so the reviewer is a peer of the
+        planner rather than a downgraded agent.
 
         ``_worktree_path`` is accepted for ``BaseRunner._build_command``
         signature compatibility but unused — the reviewer always runs
@@ -200,7 +222,7 @@ class PlanReviewer(BaseRunner):
         return build_agent_command(
             tool=self._config.planner_tool,
             model=self._config.planner_model,
-            disallowed_tools="Edit,Write,NotebookEdit,Bash",
+            disallowed_tools="Write,Edit,NotebookEdit",
         )
 
     # ------------------------------------------------------------------

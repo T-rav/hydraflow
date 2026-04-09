@@ -324,5 +324,49 @@ class TestReproduceOrchestration:
 
         assert result.outcome == ReproductionOutcome.SUCCESS
         assert len(execute_calls) == 1
+        # The prompt routed through _build_prompt — check task title,
+        # body, the test path template, and the marker contract.
+        prompt = execute_calls[0]["prompt"]
+        assert "Bug: thing breaks" in prompt  # task title
+        assert "when N=0 it crashes" in prompt  # task body
+        assert "tests/regressions/test_issue_42.py" in prompt  # test path
+        assert REPRO_START in prompt  # marker contract
+        assert REPRO_END in prompt
+        # Event data carries source + issue id for tracing.
         assert execute_calls[0]["event_data"]["source"] == "bug_reproducer"
         assert execute_calls[0]["event_data"]["issue"] == 42
+
+    @pytest.mark.asyncio
+    async def test_subprocess_passes_on_output_callback_that_terminates_on_marker(
+        self,
+    ) -> None:
+        """The on_output callback returns True when REPRO_END appears
+        in the accumulated stream. Catches a regression where the
+        callback always returns False (subprocess never terminates).
+        """
+        reproducer = _reproducer()
+        captured_callbacks: list = []
+
+        async def _capture_execute(cmd, prompt, cwd, event_data, **kwargs):
+            del cmd, prompt, cwd, event_data
+            on_output = kwargs.get("on_output")
+            if on_output is not None:
+                captured_callbacks.append(on_output)
+            return _wrap("Outcome: success")
+
+        with (
+            patch.object(BugReproducer, "_execute", side_effect=_capture_execute),
+            patch.object(
+                BugReproducer,
+                "_build_command",
+                return_value=["claude", "-p"],
+            ),
+        ):
+            await reproducer.reproduce(_task())
+
+        assert len(captured_callbacks) == 1
+        callback = captured_callbacks[0]
+        # No END marker yet → keep streaming.
+        assert callback("partial reproducer output") is False
+        # END marker present → terminate.
+        assert callback(f"some output\n{REPRO_END}\n") is True

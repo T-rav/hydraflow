@@ -427,10 +427,51 @@ class TestReviewOrchestration:
         assert result.success is True
         assert result.is_clean is True
         assert len(execute_calls) == 1
-        # The prompt routed through _build_prompt — check that the
-        # event_data identifies the runner source.
+        # The prompt routed through _build_prompt — check the issue
+        # title, body, plan text, and marker contract are present
+        # so a regression that drops _build_prompt's output (e.g.
+        # passing prompt="") would fail this test.
+        prompt = execute_calls[0]["prompt"]
+        assert "Add foo" in prompt  # task title
+        assert "do the thing" in prompt  # task body
+        assert "step 1" in prompt  # plan text
+        assert PLAN_REVIEW_START in prompt  # marker contract
+        assert PLAN_REVIEW_END in prompt
+        # Event data carries source + issue id for tracing.
         assert execute_calls[0]["event_data"]["source"] == "plan_reviewer"
         assert execute_calls[0]["event_data"]["issue"] == 42
+
+    @pytest.mark.asyncio
+    async def test_subprocess_passes_on_output_callback_that_terminates_on_marker(
+        self,
+    ) -> None:
+        """The on_output callback passed to _execute returns True when
+        PLAN_REVIEW_END appears in the accumulated stream. A regression
+        where the callback always returns False would let the
+        subprocess run forever; this test catches that.
+        """
+        reviewer = _reviewer()
+        captured_callbacks: list = []
+
+        async def _capture_execute(cmd, prompt, cwd, event_data, **kwargs):
+            del cmd, prompt, cwd, event_data
+            on_output = kwargs.get("on_output")
+            if on_output is not None:
+                captured_callbacks.append(on_output)
+            return f"{PLAN_REVIEW_START}\n{PLAN_REVIEW_END}"
+
+        with (
+            patch.object(PlanReviewer, "_execute", side_effect=_capture_execute),
+            patch.object(PlanReviewer, "_build_command", return_value=["claude", "-p"]),
+        ):
+            await reviewer.review(_task(), _plan_result())
+
+        assert len(captured_callbacks) == 1
+        callback = captured_callbacks[0]
+        # No END marker yet → keep streaming.
+        assert callback("partial output\nsome prose") is False
+        # END marker present → terminate.
+        assert callback(f"some output\n{PLAN_REVIEW_END}\n") is True
 
 
 # ---------------------------------------------------------------------------

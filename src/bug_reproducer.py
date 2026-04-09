@@ -149,6 +149,14 @@ class BugReproducer(BaseRunner):
         prompt = self._build_prompt(task)
 
         def _check_repro_complete(accumulated: str) -> bool:
+            # Only checks the END marker, not START — same shape as
+            # PlannerRunner._check_plan_complete and PlanReviewer's
+            # _check_review_complete. If the agent emits REPRO_END in
+            # prose before its structured outcome block, the callback
+            # fires early and the parser falls back to the default
+            # UNABLE outcome. Triage logs at warning and the issue
+            # stays in the find queue for retry — correct conservative
+            # behavior.
             if REPRO_END in accumulated:
                 logger.info(
                     "Repro markers found for issue #%d — terminating reproducer",
