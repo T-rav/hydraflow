@@ -434,6 +434,25 @@ class TestIndex:
         assert 42 in cache.known_issue_ids()
         assert 43 in cache.known_issue_ids()
 
+    def test_duplicate_lines_in_index_file_dedupe_at_read(self, tmp_path: Path) -> None:
+        """Two processes restarting against the same cache directory
+        can both append the same issue id to index.jsonl (no cross-
+        process lock — accepted tradeoff per the docstring). The
+        next process to read must dedupe so known_issue_ids returns
+        each id exactly once."""
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir(parents=True)
+
+        # Hand-write an index with duplicate entries (simulating two
+        # processes that both wrote 42 and 7).
+        index_path = cache_dir / "index.jsonl"
+        index_path.write_text("42\n7\n42\n7\n42\n")
+
+        cache = IssueCache(cache_dir, enabled=True)
+        ids = cache.known_issue_ids()
+        # Each id appears exactly once despite duplicate lines.
+        assert ids == [7, 42]
+
 
 # ---------------------------------------------------------------------------
 # Concurrent versioned writes

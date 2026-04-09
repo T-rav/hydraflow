@@ -292,13 +292,35 @@ class TestEnrichRead:
         assert inner.enrich_call_count == 1
 
     @pytest.mark.asyncio
-    async def test_unparseable_cache_record_falls_through(self, tmp_path: Path) -> None:
-        """A cached record with bad data must not crash; falls through
-        to the inner store. Uses an integer for `tags` (which must be
-        a list) — Pydantic rejects this and the decorator catches the
-        ValidationError, returning to the inner store path.
+    async def test_enrich_falls_through_when_cached_returns_none(
+        self, tmp_path: Path
+    ) -> None:
+        """When _cached_enrichment returns None for any reason
+        (no record, stale, model_copy raised), enrich_with_comments
+        delegates to the inner store. Verified at the public API
+        level by patching the helper directly."""
+        from unittest.mock import patch as mock_patch
+
+        decorator, inner, _ = _build(tmp_path)
+        with mock_patch.object(
+            CachingIssueStore, "_cached_enrichment", return_value=None
+        ):
+            await decorator.enrich_with_comments(_task(42))
+
+        assert inner.enrich_call_count == 1
+
+    def test_cached_enrichment_returns_none_on_model_copy_failure(
+        self, tmp_path: Path
+    ) -> None:
+        """_cached_enrichment must catch exceptions raised inside
+        Task.model_copy and return None so the public path falls
+        through cleanly. Direct sync unit test on the helper —
+        avoids the inner store's own model_copy calls poisoning
+        the patch.
         """
-        decorator, inner, cache = _build(tmp_path)
+        from unittest.mock import patch as mock_patch
+
+        decorator, _, cache = _build(tmp_path)
         cache.record(
             CacheRecord(
                 issue_id=42,
@@ -306,14 +328,47 @@ class TestEnrichRead:
                 payload={
                     "title": "x",
                     "body": "",
-                    "tags": 12345,  # invalid for Task.tags (must be list)
-                    "comments": [],
+                    "tags": [],
+                    "comments": ["from-cache"],
                 },
             )
         )
-        # Inner store gets the call regardless.
+        with mock_patch.object(Task, "model_copy", side_effect=ValueError("injected")):
+            result = decorator._cached_enrichment(_task(42))
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_cached_task_preserves_original_fields(self, tmp_path: Path) -> None:
+        """A task served from cache must carry over metadata,
+        source_url, links, parent_epic, and complexity_score from
+        the live task. Constructing a fresh Task from the cached
+        payload (instead of model_copy) would silently drop these
+        fields and break downstream readers like
+        plan_phase / crate_manager that read task.metadata."""
+        decorator, _, _ = _build(tmp_path)
+        # First call populates the cache.
         await decorator.enrich_with_comments(_task(42))
-        assert inner.enrich_call_count == 1
+
+        # Second call: pass a richer task with metadata, source_url,
+        # parent_epic, complexity_score. The cached enrichment should
+        # use model_copy to preserve all of these fields.
+        rich_task = _task(
+            42,
+            metadata={"epic_number": 7, "milestone_number": 3},
+            source_url="https://github.com/test/repo/issues/42",
+            parent_epic=7,
+            complexity_score=5,
+        )
+        result = await decorator.enrich_with_comments(rich_task)
+
+        # Comments came from the cached enrichment.
+        assert "fetched-from-inner" in result.comments
+        # All other fields preserved from the live task.
+        assert result.metadata == {"epic_number": 7, "milestone_number": 3}
+        assert result.source_url == "https://github.com/test/repo/issues/42"
+        assert result.parent_epic == 7
+        assert result.complexity_score == 5
 
     @pytest.mark.asyncio
     async def test_independent_cache_per_issue(self, tmp_path: Path) -> None:

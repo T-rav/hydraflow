@@ -158,7 +158,7 @@ class CachingIssueStore:
         Cache misses (no record / stale / parse error) silently fall
         through to the inner store. The cache is best-effort.
         """
-        cached = self._cached_enrichment(task.id)
+        cached = self._cached_enrichment(task)
         if cached is not None:
             logger.debug(
                 "CachingIssueStore: serving cached enrichment for #%d",
@@ -188,32 +188,43 @@ class CachingIssueStore:
             )
         return enriched
 
-    def _cached_enrichment(self, issue_id: int) -> Task | None:
-        """Return a fresh cached enriched Task for *issue_id*, or None.
+    def _cached_enrichment(self, task: Task) -> Task | None:
+        """Return a fresh cached enriched Task for *task*, or None.
 
         "Fresh" means an ``ENRICHED`` record exists with a timestamp
         within the last ``cache_ttl_seconds``. Stale records and
         records that fail to materialize as a Task return None so the
         caller falls through to the inner store.
+
+        IMPORTANT: the returned Task is built via ``task.model_copy``,
+        not by constructing a fresh ``Task`` from the cached payload.
+        This preserves every field on the original task that the
+        cache does not store explicitly — ``metadata`` (issue
+        author/milestone/epic), ``source_url``, ``links``,
+        ``parent_epic``, ``complexity_score``, ``created_at``.
+        Without this, downstream phases reading e.g.
+        ``task.metadata.get("epic_number")`` would silently get
+        defaults instead of the real value when served from cache.
         """
-        record = self._cache.latest_record_of_kind(issue_id, CacheRecordKind.ENRICHED)
+        record = self._cache.latest_record_of_kind(task.id, CacheRecordKind.ENRICHED)
         if record is None:
             return None
         if not self._is_fresh(record):
             return None
         try:
-            return Task(
-                id=issue_id,
-                title=str(record.payload.get("title", "")),
-                body=str(record.payload.get("body", "")),
-                tags=list(record.payload.get("tags", [])),
-                comments=list(record.payload.get("comments", [])),
+            return task.model_copy(
+                update={
+                    "title": str(record.payload.get("title", task.title)),
+                    "body": str(record.payload.get("body", task.body)),
+                    "tags": list(record.payload.get("tags", task.tags)),
+                    "comments": list(record.payload.get("comments", task.comments)),
+                }
             )
         except Exception:  # noqa: BLE001
             logger.warning(
                 "CachingIssueStore: enriched record for #%d could not be "
                 "materialized as Task — falling through to inner store",
-                issue_id,
+                task.id,
             )
             return None
 

@@ -94,6 +94,61 @@ class TestBuildServices:
         assert isinstance(registry.store._fetcher, GitHubTaskFetcher)
         assert registry.store._fetcher._fetcher is registry.fetcher
 
+    def test_phase_store_is_raw_store_when_caching_disabled(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """When caching_issue_store_enabled is False (default),
+        phase_store points at the raw IssueStore — not a wrapper."""
+        # Defaults: issue_cache_enabled=True, caching_issue_store_enabled=False
+        bus = EventBus()
+        state = StateTracker(config.state_file)
+        stop_event = asyncio.Event()
+        callbacks = _make_callbacks()
+
+        registry = build_services(config, bus, state, stop_event, callbacks)
+
+        assert registry.phase_store is registry.store
+
+    def test_phase_store_is_caching_decorator_when_both_flags_enabled(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """With both flags True, phase_store wraps store in
+        CachingIssueStore. Catches a regression where the conditional
+        always returns the raw store."""
+        from caching_issue_store import CachingIssueStore
+
+        config.issue_cache_enabled = True  # type: ignore[misc]
+        config.caching_issue_store_enabled = True  # type: ignore[misc]
+
+        bus = EventBus()
+        state = StateTracker(config.state_file)
+        stop_event = asyncio.Event()
+        callbacks = _make_callbacks()
+
+        registry = build_services(config, bus, state, stop_event, callbacks)
+
+        assert isinstance(registry.phase_store, CachingIssueStore)
+        # The decorator wraps the same underlying store.
+        assert registry.phase_store._inner is registry.store
+
+    def test_phase_store_raw_when_only_cache_flag_enabled(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """If issue_cache_enabled=True but caching_issue_store_enabled
+        is False, phase_store stays raw — the cache flag alone is
+        not enough to opt into the decorator."""
+        config.issue_cache_enabled = True  # type: ignore[misc]
+        config.caching_issue_store_enabled = False  # type: ignore[misc]
+
+        bus = EventBus()
+        state = StateTracker(config.state_file)
+        stop_event = asyncio.Event()
+        callbacks = _make_callbacks()
+
+        registry = build_services(config, bus, state, stop_event, callbacks)
+
+        assert registry.phase_store is registry.store
+
     def test_uses_get_docker_runner(self, config: HydraFlowConfig) -> None:
         """build_services should use get_docker_runner to create the subprocess runner."""
         bus = EventBus()
