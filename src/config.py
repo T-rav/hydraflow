@@ -106,6 +106,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("stale_issue_threshold_days", "HYDRAFLOW_STALE_ISSUE_THRESHOLD_DAYS", 14),
     ("ci_monitor_interval", "HYDRAFLOW_CI_MONITOR_INTERVAL", 300),
     ("collaborator_cache_ttl", "HYDRAFLOW_COLLABORATOR_CACHE_TTL", 600),
+    (
+        "issue_cache_enrich_ttl_seconds",
+        "HYDRAFLOW_ISSUE_CACHE_ENRICH_TTL_SECONDS",
+        300,
+    ),
     ("artifact_retention_days", "HYDRAFLOW_ARTIFACT_RETENTION_DAYS", 30),
     ("artifact_max_size_mb", "HYDRAFLOW_ARTIFACT_MAX_SIZE_MB", 500),
     ("runs_gc_interval", "HYDRAFLOW_RUNS_GC_INTERVAL", 3600),
@@ -220,6 +225,12 @@ _ENV_FLOAT_RATIO_OVERRIDES: list[tuple[str, str, float]] = [
 _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("dry_run", "HYDRAFLOW_DRY_RUN", False),
     ("sensor_enrichment_enabled", "HYDRAFLOW_SENSOR_ENRICHMENT_ENABLED", True),
+    ("issue_cache_enabled", "HYDRAFLOW_ISSUE_CACHE_ENABLED", True),
+    (
+        "caching_issue_store_enabled",
+        "HYDRAFLOW_CACHING_ISSUE_STORE_ENABLED",
+        False,
+    ),
     ("docker_read_only_root", "HYDRAFLOW_DOCKER_READ_ONLY_ROOT", True),
     ("docker_no_new_privileges", "HYDRAFLOW_DOCKER_NO_NEW_PRIVILEGES", True),
     (
@@ -910,6 +921,44 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Append Agent Hints blocks to captured tool-failure output "
             "based on rules in sensor_rules.SEED_RULES."
+        ),
+    )
+
+    # Local JSONL issue cache — append-only mirror of GitHub issue state.
+    # See src/issue_cache.py and issue #6422.
+    issue_cache_enabled: bool = Field(
+        default=True,
+        description=(
+            "Write structured snapshots (classification, plans, reviews, "
+            "reproductions, route-backs) to a local JSONL cache alongside "
+            "GitHub. GitHub remains the primary source of truth."
+        ),
+    )
+
+    # Read-through cache decorator (#6422). When enabled, IssueStore
+    # is wrapped in CachingIssueStore which records every queue read
+    # as a fetch snapshot and serves enrich_with_comments from the
+    # cache when records are within the TTL window. Defaults to False
+    # so that turning on issue_cache_enabled does NOT automatically
+    # change read paths — operators flip this separately after
+    # confirming write coverage.
+    caching_issue_store_enabled: bool = Field(
+        default=False,
+        description=(
+            "Wrap IssueStore in CachingIssueStore for read-through "
+            "caching of fetches and enrich_with_comments. Requires "
+            "issue_cache_enabled."
+        ),
+    )
+
+    issue_cache_enrich_ttl_seconds: int = Field(
+        default=300,
+        ge=0,
+        le=86400,
+        description=(
+            "TTL window for cached enrich_with_comments results. "
+            "Records older than this are treated as stale and the "
+            "decorator falls through to the inner store."
         ),
     )
 

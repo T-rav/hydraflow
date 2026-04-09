@@ -16,6 +16,7 @@ from agent import AgentRunner
 from base_background_loop import LoopDeps
 from baseline_policy import BaselinePolicy
 from beads_manager import BeadsManager
+from caching_issue_store import CachingIssueStore
 from ci_monitor_loop import CIMonitorLoop  # noqa: TCH001
 from code_grooming_loop import CodeGroomingLoop  # noqa: TCH001
 from config import Credentials, HydraFlowConfig
@@ -37,6 +38,7 @@ from health_monitor_loop import HealthMonitorLoop
 from hitl_phase import HITLPhase
 from hitl_runner import HITLRunner
 from implement_phase import ImplementPhase
+from issue_cache import IssueCache
 from issue_fetcher import GitHubTaskFetcher, IssueFetcher
 from issue_store import IssueStore
 from memory import MemorySyncWorker
@@ -45,6 +47,7 @@ from merge_conflict_resolver import MergeConflictResolver
 from models import StatusCallback
 from plan_phase import PlanPhase
 from planner import PlannerRunner
+from ports import IssueStorePort
 from post_merge_handler import PostMergeHandler
 from pr_manager import PRManager
 from pr_unsticker import PRUnsticker
@@ -103,7 +106,14 @@ class ServiceRegistry:
     # Data layer
     fetcher: IssueFetcher
     store: IssueStore
+    # Optional read-through cache decorator wrapping `store`. Phases
+    # that want stale-bounded enrich_with_comments + fetch recording
+    # consume this instead of `store` directly. Defaults to the same
+    # object as `store` when caching_issue_store_enabled is False so
+    # consumers can opt in without conditional wiring.
+    phase_store: IssueStorePort
     crate_manager: CrateManager
+    issue_cache: IssueCache
 
     # Phase coordinators
     triager: TriagePhase
@@ -328,6 +338,27 @@ def build_services(
     # Crate management
     crate_manager = CrateManager(config, state, prs, event_bus)
     store.set_crate_manager(crate_manager)
+
+    # Local JSONL issue cache (append-only mirror; see src/issue_cache.py and #6422)
+    issue_cache = IssueCache(
+        config.data_path("cache"),
+        enabled=config.issue_cache_enabled,
+    )
+
+    # Optional read-through cache decorator. Wraps `store` when both
+    # the cache and the decorator flag are enabled, otherwise points
+    # at the raw IssueStore. Phases consume `phase_store` (the
+    # IssueStorePort interface) so the wiring is unchanged whether
+    # caching is enabled or not.
+    phase_store: IssueStorePort = (
+        CachingIssueStore(
+            store,
+            cache=issue_cache,
+            cache_ttl_seconds=config.issue_cache_enrich_ttl_seconds,
+        )
+        if config.issue_cache_enabled and config.caching_issue_store_enabled
+        else store
+    )
 
     # Harness insight store (shared across phases)
     harness_insights = HarnessInsightStore(
@@ -703,7 +734,9 @@ def build_services(
         summarizer=summarizer,
         fetcher=fetcher,
         store=store,
+        phase_store=phase_store,
         crate_manager=crate_manager,
+        issue_cache=issue_cache,
         triager=triager,
         discover_phase=discover_phase,
         shape_phase=shape_phase,
