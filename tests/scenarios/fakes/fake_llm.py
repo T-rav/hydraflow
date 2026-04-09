@@ -62,8 +62,14 @@ class _FakeTriageRunner(_ScriptedRunner):
 
 class _FakePlannerRunner(_ScriptedRunner):
     async def plan(
-        self, task: Any, _worker_id: int = 0, _research_context: str = ""
+        self,
+        task: Any,
+        *,
+        worker_id: int = 0,
+        research_context: str = "",
+        **_unused: Any,
     ) -> Any:
+        _ = (worker_id, research_context)
         issue_number = getattr(task, "id", getattr(task, "number", 0))
         return self._pop(
             issue_number,
@@ -85,11 +91,14 @@ class _FakeAgentRunner(_ScriptedRunner):
         task: Any,
         worktree_path: Path,
         branch: str,
-        _worker_id: int = 0,
-        _review_feedback: str = "",
-        _prior_failure: str = "",
-        _bead_mapping: dict[str, str] | None = None,
+        *,
+        worker_id: int = 0,
+        review_feedback: str = "",
+        prior_failure: str = "",
+        bead_mapping: dict[str, str] | None = None,
+        **_unused: Any,
     ) -> Any:
+        _ = (worker_id, review_feedback, prior_failure, bead_mapping)
         issue_number = getattr(task, "id", getattr(task, "number", 0))
         return self._pop(
             issue_number,
@@ -110,10 +119,13 @@ class _FakeReviewRunner(_ScriptedRunner):
         issue: Any,
         _worktree_path: Path,
         _diff: str,
-        _worker_id: int = 0,
-        _code_scanning_alerts: list[Any] | None = None,
-        _bead_tasks: list[Any] | None = None,
+        *,
+        worker_id: int = 0,
+        code_scanning_alerts: list[Any] | None = None,
+        bead_tasks: list[Any] | None = None,
+        **_unused: Any,
     ) -> Any:
+        _ = (worker_id, code_scanning_alerts, bead_tasks)
         issue_number = getattr(issue, "id", getattr(issue, "number", 0))
         pr_number = getattr(pr, "number", 0)
         return self._pop(

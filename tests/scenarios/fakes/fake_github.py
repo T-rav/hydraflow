@@ -87,14 +87,29 @@ class FakeGitHub:
     # --- PRManager interface (async methods called by phases) ---
 
     async def transition(
-        self, issue_number: int, from_label: str, to_label: str
+        self,
+        issue_number: int,
+        new_stage: str,
+        *,
+        pr_number: int | None = None,
     ) -> None:
+        _ = pr_number
+        stage_label_map = {
+            "find": "hydraflow-find",
+            "triage": "hydraflow-triage",
+            "plan": "hydraflow-plan",
+            "ready": "hydraflow-ready",
+            "review": "hydraflow-review",
+            "done": "hydraflow-done",
+            "hitl": "hydraflow-hitl",
+        }
+        new_label = stage_label_map.get(new_stage, new_stage)
         if issue_number in self._issues:
             issue = self._issues[issue_number]
-            if from_label in issue.labels:
-                issue.labels.remove(from_label)
-            if to_label not in issue.labels:
-                issue.labels.append(to_label)
+            issue.labels = [
+                lbl for lbl in issue.labels if not lbl.startswith("hydraflow-")
+            ]
+            issue.labels.append(new_label)
 
     async def swap_pipeline_labels(self, issue_number: int, new_label: str) -> None:
         if issue_number in self._issues:
@@ -148,7 +163,12 @@ class FakeGitHub:
                 return issue.number
         return 0
 
-    async def push_branch(self, branch: str, worktree_path: Any = None) -> bool:
+    async def push_branch(
+        self,
+        *args: Any,
+        **_kwargs: Any,
+    ) -> bool:
+        _ = args
         return True
 
     async def create_pr(
@@ -190,10 +210,9 @@ class FakeGitHub:
                     issue_number=p.issue_number,
                     branch=p.branch,
                 )
-        number = self._pr_counter
-        self._pr_counter += 1
+        # No open PR for this branch — signal absence with number=0
         return PRInfoFactory.create(
-            number=number,
+            number=0,
             issue_number=issue_number or 0,
             branch=branch,
         )

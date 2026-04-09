@@ -66,7 +66,7 @@ class TestFakeGitHubMutations:
     async def test_transition_updates_labels(self):
         gh = FakeGitHub()
         gh.add_issue(1, "t", "b", labels=["hydraflow-find"])
-        await gh.transition(1, "hydraflow-find", "hydraflow-plan")
+        await gh.transition(1, "plan")
         assert gh.issue(1).labels == ["hydraflow-plan"]
 
     async def test_swap_pipeline_labels_removes_existing(self):
