@@ -353,6 +353,89 @@ class TestKnownIssueIds:
 
 
 # ---------------------------------------------------------------------------
+# Index optimization
+# ---------------------------------------------------------------------------
+
+
+class TestIndex:
+    """index.jsonl mirrors known_issue_ids in O(1) instead of glob walks.
+
+    The index file is append-only and additive: every successful
+    record() append also writes the issue id to index.jsonl. On
+    first read, the index is loaded from disk + a one-time directory
+    walk to absorb any pre-index records.
+    """
+
+    def test_index_file_created_on_first_record(self, tmp_path: Path) -> None:
+        cache = _cache(tmp_path)
+        cache.record_fetch(42, {})
+        index_path = tmp_path / "cache" / "index.jsonl"
+        assert index_path.exists()
+        content = index_path.read_text().strip().splitlines()
+        assert "42" in content
+
+    def test_index_dedupes_repeated_writes(self, tmp_path: Path) -> None:
+        cache = _cache(tmp_path)
+        for _ in range(5):
+            cache.record_fetch(42, {})
+        index_path = tmp_path / "cache" / "index.jsonl"
+        # Issue 42 written once even though we recorded 5 times.
+        content = index_path.read_text().strip().splitlines()
+        assert content.count("42") == 1
+
+    def test_known_issue_ids_uses_in_memory_index(self, tmp_path: Path) -> None:
+        cache = _cache(tmp_path)
+        cache.record_fetch(1, {})
+        cache.record_fetch(2, {})
+        cache.record_fetch(3, {})
+        # Drop a stray file that the OLD glob-based path would have
+        # tried to parse but the index correctly ignores.
+        (cache.issues_dir / "scratch.txt").write_text("garbage")
+        assert cache.known_issue_ids() == [1, 2, 3]
+
+    def test_restart_loads_index_from_disk(self, tmp_path: Path) -> None:
+        """Pre-existing index.jsonl is read on first known_issue_ids
+        call after a restart — no need to glob the directory."""
+        cache1 = _cache(tmp_path)
+        cache1.record_fetch(42, {})
+        cache1.record_fetch(7, {})
+
+        # Fresh cache instance against the same directory.
+        cache2 = _cache(tmp_path)
+        assert cache2.known_issue_ids() == [7, 42]
+
+    def test_restart_picks_up_records_without_index(self, tmp_path: Path) -> None:
+        """If the index file is missing but issue files exist (e.g.
+        records written by a pre-index version), the directory walk
+        on first load picks them up."""
+        cache1 = _cache(tmp_path)
+        cache1.record_fetch(42, {})
+        # Manually delete the index to simulate a pre-index installation.
+        (tmp_path / "cache" / "index.jsonl").unlink()
+
+        cache2 = _cache(tmp_path)
+        assert 42 in cache2.known_issue_ids()
+
+    def test_index_disk_write_failure_keeps_in_memory(self, tmp_path: Path) -> None:
+        """A failure to append to index.jsonl on disk must not prevent
+        the in-memory index from updating — the next process restart
+        will rebuild via the directory walk."""
+        cache = _cache(tmp_path)
+        cache.record_fetch(42, {})
+
+        # Make the index path unwritable by replacing it with a directory.
+        index_path = tmp_path / "cache" / "index.jsonl"
+        index_path.unlink()
+        index_path.mkdir()
+
+        # Subsequent record must not raise.
+        cache.record_fetch(43, {})
+        # In-memory index still has both ids.
+        assert 42 in cache.known_issue_ids()
+        assert 43 in cache.known_issue_ids()
+
+
+# ---------------------------------------------------------------------------
 # Concurrent versioned writes
 # ---------------------------------------------------------------------------
 

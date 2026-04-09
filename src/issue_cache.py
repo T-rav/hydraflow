@@ -85,6 +85,10 @@ class CacheRecordKind(StrEnum):
 
     # Raw GitHub state observed on a fetch cycle.
     FETCH = "fetch"
+    # An enriched Task snapshot (issue body + comments) — used by
+    # CachingIssueStore.enrich_with_comments to serve stale-bounded
+    # reads without re-fetching from GitHub.
+    ENRICHED = "enriched"
     # Triage classification — see #6422 amendment for structured classification.
     CLASSIFIED = "classified"
     # A comment was posted to GitHub by HydraFlow.
@@ -139,6 +143,7 @@ class IssueCache:
     def __init__(self, cache_dir: Path, *, enabled: bool = True) -> None:
         self._cache_dir = cache_dir
         self._issues_dir = cache_dir / "issues"
+        self._index_path = cache_dir / "index.jsonl"
         self._enabled = enabled
         # Per-issue locks serialize versioned writers so two concurrent
         # record_plan_stored / record_review_stored calls cannot allocate
@@ -147,6 +152,17 @@ class IssueCache:
         # Concurrency for the design rationale.
         self._version_locks: dict[int, threading.Lock] = {}
         self._version_locks_guard = threading.Lock()
+        # In-memory mirror of the index — set of issue ids that have
+        # at least one cache record. Lazily loaded on first access.
+        # _index_ids is the union of disk-indexed entries and entries
+        # added in this process; _indexed_on_disk tracks ONLY the
+        # entries that have been written to index.jsonl, so a brand-
+        # new record() call can detect that the issue file exists
+        # (visible to a directory walk) but the index entry has not
+        # been persisted yet.
+        self._index_loaded: bool = False
+        self._index_ids: set[int] = set()
+        self._indexed_on_disk: set[int] = set()
 
     def _get_version_lock(self, issue_id: int) -> threading.Lock:
         """Lazily create and return the per-issue versioning lock."""
@@ -177,6 +193,10 @@ class IssueCache:
 
         Best-effort: on OSError, logs at warning level and returns. A
         broken cache must never break the domain layer.
+
+        Also adds the issue id to the in-memory index and appends to
+        ``index.jsonl`` so :func:`known_issue_ids` can return in O(1)
+        instead of glob-walking the issues directory on every call.
         """
         if not self._enabled:
             return
@@ -190,6 +210,10 @@ class IssueCache:
                 record.issue_id,
                 exc_info=True,
             )
+            return
+        # Update the index AFTER the write succeeds — never index an
+        # issue whose record didn't actually land.
+        self._index_add(record.issue_id)
 
     def record_fetch(self, issue_id: int, payload: dict[str, Any]) -> None:
         self.record(
@@ -396,13 +420,88 @@ class IssueCache:
         return (latest.version + 1) if latest else 1
 
     def known_issue_ids(self) -> list[int]:
-        """Return every issue id that has at least one cache record."""
-        if not self._issues_dir.exists():
-            return []
-        ids: list[int] = []
-        for path in self._issues_dir.glob("*.jsonl"):
+        """Return every issue id that has at least one cache record.
+
+        Uses the in-memory index when loaded; falls back to a glob
+        over the issues directory on first call (also populates the
+        index from disk). Subsequent calls are O(1) instead of O(n)
+        in the number of issue files.
+        """
+        self._ensure_index_loaded()
+        return sorted(self._index_ids)
+
+    def _ensure_index_loaded(self) -> None:
+        """Lazily populate the in-memory index from index.jsonl + glob.
+
+        Reads ``index.jsonl`` if it exists (populates ``_indexed_on_disk``),
+        then walks the issues directory to catch any files written
+        before the index existed or by an external process (these go
+        into ``_index_ids`` but NOT ``_indexed_on_disk``, so the next
+        :func:`_index_add` call for those issues will write them to
+        index.jsonl).
+
+        Idempotent: subsequent calls return immediately.
+        """
+        if self._index_loaded:
+            return
+        on_disk: set[int] = set()
+        # Read the persistent index file if present.
+        if self._index_path.exists():
             try:
-                ids.append(int(path.stem))
-            except ValueError:
-                continue
-        return sorted(ids)
+                for line in self._index_path.read_text(encoding="utf-8").splitlines():
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    try:
+                        on_disk.add(int(stripped))
+                    except ValueError:
+                        continue
+            except OSError:
+                logger.warning(
+                    "issue_cache: failed to read index file",
+                    exc_info=True,
+                )
+        all_ids = set(on_disk)
+        # Walk issues/ to catch entries that predate the index or
+        # were written by another process. This is the same scan the
+        # old known_issue_ids() used; running it once on first access
+        # absorbs the cost without paying it on every call.
+        if self._issues_dir.exists():
+            for path in self._issues_dir.glob("*.jsonl"):
+                try:
+                    all_ids.add(int(path.stem))
+                except ValueError:
+                    continue
+        self._index_ids = all_ids
+        self._indexed_on_disk = on_disk
+        self._index_loaded = True
+
+    def _index_add(self, issue_id: int) -> None:
+        """Add *issue_id* to the index, persisting to disk if not present.
+
+        Called from :func:`record` after a successful append. Checks
+        ``_indexed_on_disk`` (NOT ``_index_ids``) to decide whether
+        to write — a brand-new issue's file is visible to the
+        directory walk in ``_ensure_index_loaded`` and gets added to
+        the in-memory ``_index_ids``, but the index.jsonl entry has
+        not been persisted until this method writes it.
+
+        Best-effort: a disk write failure leaves the index in
+        memory only; the next process restart will rebuild via the
+        directory walk in ``_ensure_index_loaded``.
+        """
+        self._ensure_index_loaded()
+        self._index_ids.add(issue_id)
+        if issue_id in self._indexed_on_disk:
+            return
+        try:
+            self._index_path.parent.mkdir(parents=True, exist_ok=True)
+            with self._index_path.open("a", encoding="utf-8") as f:
+                f.write(f"{issue_id}\n")
+            self._indexed_on_disk.add(issue_id)
+        except OSError:
+            logger.warning(
+                "issue_cache: failed to append issue #%d to index",
+                issue_id,
+                exc_info=True,
+            )
