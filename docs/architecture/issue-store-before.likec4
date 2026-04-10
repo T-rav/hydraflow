@@ -1,0 +1,80 @@
+// IssueStore BEFORE refactor — single monolith with 5 concern groups
+// C4 Component diagram showing internal structure and external consumers
+
+specification {
+  element system
+  element container
+  element component
+  element person
+}
+
+model {
+  hydraflow = system "HydraFlow" {
+    issueStore = container "IssueStore (BEFORE)" {
+      description "742 lines, 25 public methods, 42 total"
+
+      routing = component "Queue Routing" {
+        description "enqueue_transition, _route_issues, _route_incoming_tasks, _compute_stage_map, _dedupe_tasks, _build_label_map, _take_from_queue"
+      }
+      accessors = component "Queue Accessors" {
+        description "get_triageable, get_discoverable, get_shapeable, get_plannable, get_implementable, get_reviewable, get_hitl_issues, get_cached, get_uncrated_issues"
+      }
+      activeTracking = component "Active Issue Tracking" {
+        description "mark_active, mark_complete, is_active, get_active_issues, release_in_flight, clear_active, mark_merged, get_merged_numbers, is_in_pipeline"
+      }
+      snapshot = component "Snapshot Building" {
+        description "get_pipeline_snapshot, _snapshot_queued, _snapshot_active, _snapshot_hitl, _snapshot_merged, _snapshot_in_flight, _epic_metadata"
+      }
+      stats = component "Stats Reporting" {
+        description "get_queue_stats"
+      }
+      lifecycle = component "Lifecycle" {
+        description "start, refresh, set_crate_manager, enrich_with_comments"
+      }
+      sharedState = component "Shared Mutable State" {
+        description "_queues, _queue_members, _hitl_numbers, _merged_numbers, _issue_cache, _active, _in_flight, _eagerly_transitioned, _processed_count, _dedup_stats"
+      }
+
+      routing -> sharedState "reads/writes"
+      accessors -> sharedState "reads"
+      activeTracking -> sharedState "reads/writes"
+      snapshot -> sharedState "reads"
+      stats -> sharedState "reads"
+      lifecycle -> routing "calls"
+      accessors -> routing "calls _take_from_queue"
+    }
+
+    port = container "IssueStorePort" {
+      description "Protocol: 11 methods consumed by phases"
+    }
+    cachingStore = container "CachingIssueStore" {
+      description "Read-through cache decorator wrapping IssueStorePort"
+    }
+    phases = container "Phase Loops" {
+      description "triage, plan, implement, review, hitl, discover, shape"
+    }
+    orchestrator = container "Orchestrator" {
+      description "Exposes concrete IssueStore for dashboard"
+    }
+    dashboard = container "Dashboard Routes" {
+      description "get_queue_stats, get_pipeline_snapshot, get_merged_numbers"
+    }
+    serviceRegistry = container "ServiceRegistry" {
+      description "Constructs IssueStore, wires CrateManager"
+    }
+
+    issueStore -> port "satisfies"
+    cachingStore -> port "wraps"
+    phases -> cachingStore "consumes via port"
+    orchestrator -> issueStore "exposes .issue_store"
+    dashboard -> issueStore "calls concrete methods"
+    serviceRegistry -> issueStore "constructs"
+  }
+}
+
+views {
+  view issueStoreBefore of hydraflow.issueStore {
+    title "IssueStore BEFORE Refactor — Monolithic Class"
+    include *
+  }
+}

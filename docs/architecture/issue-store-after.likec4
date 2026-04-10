@@ -1,0 +1,73 @@
+// IssueStore AFTER refactor — facade + 3 extracted components
+// C4 Component diagram showing the decomposed architecture
+
+specification {
+  element system
+  element container
+  element component
+}
+
+model {
+  hydraflow = system "HydraFlow" {
+    issueStoreFacade = container "IssueStore Facade" {
+      description "Slim facade: delegates to 3 sub-components, keeps lifecycle + enrichment + thin accessors"
+
+      facade = component "IssueStore (Facade)" {
+        description "Owns shared state dicts, delegates to sub-components, ~180 lines"
+      }
+      router = component "IssueQueueRouter" {
+        description "3 public methods: route_issues, enqueue_transition, take_from_queue. Owns all routing logic. ~190 lines"
+      }
+      snapshot = component "IssueSnapshotBuilder" {
+        description "2 public methods: get_pipeline_snapshot, get_queue_stats. Owns all _snapshot_* and _epic_metadata. ~155 lines"
+      }
+      tracker = component "ActiveIssueTracker" {
+        description "6 public methods: mark_active, mark_complete, is_active, get_active_issues, release_in_flight, clear_active. ~50 lines"
+      }
+      sharedState = component "Shared State (dicts by reference)" {
+        description "_queues, _queue_members, _hitl_numbers, _merged_numbers, _issue_cache, _active, _in_flight, _eagerly_transitioned, _processed_count, _dedup_stats"
+      }
+
+      facade -> router "delegates routing"
+      facade -> snapshot "delegates snapshots/stats"
+      facade -> tracker "delegates lifecycle"
+      router -> sharedState "reads/writes via references"
+      snapshot -> sharedState "reads via references"
+      tracker -> sharedState "reads/writes via references"
+      facade -> sharedState "owns, passes refs to sub-components"
+    }
+
+    port = container "IssueStorePort" {
+      description "Protocol: 11 methods — UNCHANGED"
+    }
+    cachingStore = container "CachingIssueStore" {
+      description "Wraps IssueStorePort — UNCHANGED"
+    }
+    phases = container "Phase Loops" {
+      description "Consume via IssueStorePort — UNCHANGED"
+    }
+    orchestrator = container "Orchestrator" {
+      description "Exposes .issue_store (concrete) — UNCHANGED"
+    }
+    dashboard = container "Dashboard Routes" {
+      description "Calls concrete methods — UNCHANGED"
+    }
+    serviceRegistry = container "ServiceRegistry" {
+      description "Constructs IssueStore — UNCHANGED"
+    }
+
+    issueStoreFacade -> port "satisfies (same public API)"
+    cachingStore -> port "wraps"
+    phases -> cachingStore "consumes via port"
+    orchestrator -> issueStoreFacade "exposes .issue_store"
+    dashboard -> issueStoreFacade "calls via delegation stubs"
+    serviceRegistry -> issueStoreFacade "constructs"
+  }
+}
+
+views {
+  view issueStoreAfter of hydraflow.issueStoreFacade {
+    title "IssueStore AFTER Refactor — Facade + 3 Components"
+    include *
+  }
+}

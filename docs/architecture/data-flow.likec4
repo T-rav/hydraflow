@@ -1,0 +1,49 @@
+// Data flow through the refactored IssueStore
+// Dynamic view showing how a typical refresh + consume cycle works
+
+specification {
+  element actor
+  element system
+  element component
+}
+
+model {
+  github = actor "GitHub API"
+  fetcher = component "TaskFetcher"
+  facade = component "IssueStore (Facade)"
+  router = component "IssueQueueRouter"
+  tracker = component "ActiveIssueTracker"
+  snapshot = component "IssueSnapshotBuilder"
+  eventBus = component "EventBus"
+  phase = actor "Phase Loop"
+  dashboard = actor "Dashboard"
+
+  // Refresh cycle
+  github -> fetcher "fetch_all()"
+  fetcher -> facade "returns tasks"
+  facade -> router "route_issues(tasks)"
+  router -> eventBus "publish_fn() → QUEUE_UPDATE"
+
+  // Phase consume cycle
+  phase -> facade "get_plannable(n)"
+  facade -> router "take_from_queue(PLAN, n)"
+  phase -> facade "mark_active(id, stage)"
+  facade -> tracker "mark_active(id, stage)"
+  phase -> facade "enqueue_transition(task, next)"
+  facade -> router "enqueue_transition(task, next)"
+  phase -> facade "mark_complete(id)"
+  facade -> tracker "mark_complete(id)"
+
+  // Dashboard query cycle
+  dashboard -> facade "get_pipeline_snapshot()"
+  facade -> snapshot "get_pipeline_snapshot()"
+  dashboard -> facade "get_queue_stats()"
+  facade -> snapshot "get_queue_stats(last_poll_ts)"
+}
+
+views {
+  view dataFlow {
+    title "Data Flow Through Refactored IssueStore"
+    include *
+  }
+}
