@@ -1515,3 +1515,214 @@ class TestNarrowedExceptionHandling:
         # Should not raise — ValueError is now caught
         await handler._notify_epic_approval(42)
         mock_epic_manager.on_child_approved.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Extracted private method tests — _run_ci_gate
+# ---------------------------------------------------------------------------
+
+
+class TestRunCiGate:
+    """Tests for _run_ci_gate extracted from handle_approved."""
+
+    @pytest.mark.asyncio
+    async def test_ci_gate_skipped_when_max_attempts_zero(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """When max_ci_fix_attempts is 0, returns True without calling ci_gate_fn."""
+        handler = _make_handler(config)
+        ci_gate_fn = AsyncMock(return_value=False)
+        ctx = MergeApprovalContext(
+            pr=PRInfoFactory.create(),
+            issue=TaskFactory.create(),
+            result=ReviewResultFactory.create(),
+            diff="diff",
+            worker_id=0,
+            ci_gate_fn=ci_gate_fn,
+            escalate_fn=AsyncMock(),
+            publish_fn=AsyncMock(),
+        )
+
+        result = await handler._run_ci_gate(ctx)
+
+        assert result is True
+        ci_gate_fn.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_ci_gate_called_when_max_attempts_positive(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """When max_ci_fix_attempts > 0, ci_gate_fn is called and result forwarded."""
+        from tests.helpers import ConfigFactory as CF
+
+        cfg = CF.create(
+            max_ci_fix_attempts=3,
+            repo_root=config.repo_root,
+            workspace_base=config.workspace_base,
+            state_file=config.state_file,
+        )
+        handler = _make_handler(cfg)
+        ci_gate_fn = AsyncMock(return_value=False)
+        ctx = MergeApprovalContext(
+            pr=PRInfoFactory.create(),
+            issue=TaskFactory.create(),
+            result=ReviewResultFactory.create(),
+            diff="diff",
+            worker_id=0,
+            ci_gate_fn=ci_gate_fn,
+            escalate_fn=AsyncMock(),
+            publish_fn=AsyncMock(),
+        )
+
+        result = await handler._run_ci_gate(ctx)
+
+        assert result is False
+        ci_gate_fn.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_ci_gate_returns_true_on_pass(self, config: HydraFlowConfig) -> None:
+        """When ci_gate_fn returns True, _run_ci_gate returns True."""
+        from tests.helpers import ConfigFactory as CF
+
+        cfg = CF.create(
+            max_ci_fix_attempts=1,
+            repo_root=config.repo_root,
+            workspace_base=config.workspace_base,
+            state_file=config.state_file,
+        )
+        handler = _make_handler(cfg)
+        ci_gate_fn = AsyncMock(return_value=True)
+        ctx = MergeApprovalContext(
+            pr=PRInfoFactory.create(),
+            issue=TaskFactory.create(),
+            result=ReviewResultFactory.create(),
+            diff="diff",
+            worker_id=0,
+            ci_gate_fn=ci_gate_fn,
+            escalate_fn=AsyncMock(),
+            publish_fn=AsyncMock(),
+        )
+
+        result = await handler._run_ci_gate(ctx)
+
+        assert result is True
+
+
+# ---------------------------------------------------------------------------
+# Extracted private method tests — _run_visual_gate
+# ---------------------------------------------------------------------------
+
+
+class TestRunVisualGate:
+    """Tests for _run_visual_gate extracted from handle_approved."""
+
+    @pytest.mark.asyncio
+    async def test_visual_gate_disabled_returns_true(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """When visual_gate_enabled is False, returns True without calling gate fn."""
+        handler = _make_handler(config)
+        visual_gate_fn = AsyncMock(return_value=False)
+        ctx = MergeApprovalContext(
+            pr=PRInfoFactory.create(),
+            issue=TaskFactory.create(),
+            result=ReviewResultFactory.create(),
+            diff="diff",
+            worker_id=0,
+            ci_gate_fn=AsyncMock(),
+            escalate_fn=AsyncMock(),
+            publish_fn=AsyncMock(),
+            visual_gate_fn=visual_gate_fn,
+        )
+
+        result = await handler._run_visual_gate(ctx)
+
+        assert result is True
+        visual_gate_fn.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_visual_gate_enabled_no_fn_returns_false(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """When visual_gate_enabled but no fn provided, returns False."""
+        cfg = ConfigFactory.create(
+            visual_gate_enabled=True,
+            repo_root=config.repo_root,
+            workspace_base=config.workspace_base,
+            state_file=config.state_file,
+        )
+        handler = _make_handler(cfg)
+        handler._bus.publish = AsyncMock()
+        ctx = MergeApprovalContext(
+            pr=PRInfoFactory.create(),
+            issue=TaskFactory.create(),
+            result=ReviewResultFactory.create(),
+            diff="diff",
+            worker_id=0,
+            ci_gate_fn=AsyncMock(),
+            escalate_fn=AsyncMock(),
+            publish_fn=AsyncMock(),
+        )
+
+        result = await handler._run_visual_gate(ctx)
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_visual_gate_enabled_pass_returns_true(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """When visual gate enabled and fn returns True, returns True."""
+        cfg = ConfigFactory.create(
+            visual_gate_enabled=True,
+            repo_root=config.repo_root,
+            workspace_base=config.workspace_base,
+            state_file=config.state_file,
+        )
+        handler = _make_handler(cfg)
+        visual_gate_fn = AsyncMock(return_value=True)
+        ctx = MergeApprovalContext(
+            pr=PRInfoFactory.create(),
+            issue=TaskFactory.create(),
+            result=ReviewResultFactory.create(),
+            diff="diff",
+            worker_id=0,
+            ci_gate_fn=AsyncMock(),
+            escalate_fn=AsyncMock(),
+            publish_fn=AsyncMock(),
+            visual_gate_fn=visual_gate_fn,
+        )
+
+        result = await handler._run_visual_gate(ctx)
+
+        assert result is True
+        visual_gate_fn.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_visual_gate_enabled_fail_returns_false(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """When visual gate enabled and fn returns False, returns False."""
+        cfg = ConfigFactory.create(
+            visual_gate_enabled=True,
+            repo_root=config.repo_root,
+            workspace_base=config.workspace_base,
+            state_file=config.state_file,
+        )
+        handler = _make_handler(cfg)
+        visual_gate_fn = AsyncMock(return_value=False)
+        ctx = MergeApprovalContext(
+            pr=PRInfoFactory.create(),
+            issue=TaskFactory.create(),
+            result=ReviewResultFactory.create(),
+            diff="diff",
+            worker_id=0,
+            ci_gate_fn=AsyncMock(),
+            escalate_fn=AsyncMock(),
+            publish_fn=AsyncMock(),
+            visual_gate_fn=visual_gate_fn,
+        )
+
+        result = await handler._run_visual_gate(ctx)
+
+        assert result is False

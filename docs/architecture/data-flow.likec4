@@ -1,0 +1,45 @@
+// Dynamic view: data flow through handle_approved after refactor
+// Shows how MergeApprovalContext flows through the extracted methods
+
+specification {
+  element actor
+  element method
+  element data
+}
+
+model {
+  caller = actor "ReviewPhase._handle_approved_merge"
+  ctx = data "MergeApprovalContext" {
+    description "pr, issue, result, diff, worker_id, ci_gate_fn, escalate_fn, publish_fn, ..."
+  }
+
+  orchestrator = method "handle_approved(ctx)"
+  ciGate = method "_run_ci_gate(ctx) -> bool"
+  visualGate = method "_run_visual_gate(ctx) -> bool"
+  titleNorm = method "_normalize_pr_title(pr, issue)"
+  merge = method "_attempt_merge_with_conflict_recovery(ctx) -> (success, mergeable)"
+  successPath = method "_record_successful_merge(ctx, mergeable)"
+  failurePath = method "_escalate_merge_failure(ctx, mergeable)"
+
+  mergeResult = data "(success: bool, mergeable: bool | None)" {
+    description "Return value from merge attempt — shared between success/failure paths"
+  }
+
+  // Flow
+  caller -> orchestrator "ctx"
+  orchestrator -> ciGate "ctx → bool (early return if False)"
+  orchestrator -> visualGate "ctx → bool (early return if False)"
+  orchestrator -> titleNorm "pr, issue"
+  orchestrator -> merge "ctx → (success, mergeable)"
+  merge -> mergeResult "produces"
+  mergeResult -> orchestrator "consumed"
+  orchestrator -> successPath "ctx, when success=True"
+  orchestrator -> failurePath "ctx + mergeable, when success=False"
+}
+
+views {
+  view dataFlow {
+    title "Data flow: handle_approved orchestrator"
+    include *
+  }
+}
