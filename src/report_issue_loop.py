@@ -25,7 +25,7 @@ from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import Credentials, HydraFlowConfig
 from execution import SubprocessRunner
 from models import PendingReport, TranscriptEventData
-from runner_utils import AuthenticationRetryError, stream_claude_process
+from runner_utils import AuthenticationRetryError, StreamConfig, stream_claude_process
 from screenshot_scanner import scan_base64_for_secrets
 from state import StateTracker
 
@@ -318,8 +318,10 @@ class ReportIssueLoop(BaseBackgroundLoop):
                 event_bus=self._bus,
                 event_data=event_data,
                 logger=logger,
-                runner=self._runner,
-                gh_token=self._credentials.gh_token,
+                config=StreamConfig(
+                    runner=self._runner,
+                    gh_token=self._credentials.gh_token,
+                ),
             )
             issue_number = self._extract_issue_number_from_transcript(transcript)
         except AuthenticationRetryError:

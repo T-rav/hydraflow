@@ -29,7 +29,7 @@ from tests.helpers import ConfigFactory, make_streaming_proc, mock_fetcher_noop
 if TYPE_CHECKING:
     from config import HydraFlowConfig
 
-from runner_utils import stream_claude_process
+from runner_utils import StreamConfig, stream_claude_process
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -38,6 +38,17 @@ from runner_utils import stream_claude_process
 
 def _default_stream_kwargs(event_bus, **overrides):
     """Build default kwargs for stream_claude_process."""
+    _CONFIG_KEYS = {
+        "on_output",
+        "timeout",
+        "runner",
+        "usage_stats",
+        "gh_token",
+        "trace_collector",
+    }
+    config_overrides = {
+        k: overrides.pop(k) for k in list(overrides) if k in _CONFIG_KEYS
+    }
     defaults = {
         "cmd": ["claude", "-p"],
         "prompt": "test prompt",
@@ -48,6 +59,8 @@ def _default_stream_kwargs(event_bus, **overrides):
         "logger": logging.getLogger("test"),
     }
     defaults.update(overrides)
+    if config_overrides:
+        defaults["config"] = StreamConfig(**config_overrides)
     return defaults
 
 

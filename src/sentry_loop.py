@@ -328,7 +328,7 @@ class SentryLoop(BaseBackgroundLoop):
 
         from agent_cli import build_agent_command  # noqa: PLC0415
         from models import TranscriptEventData  # noqa: PLC0415
-        from runner_utils import stream_claude_process  # noqa: PLC0415
+        from runner_utils import StreamConfig, stream_claude_process  # noqa: PLC0415
 
         cmd = build_agent_command(
             tool=self._config.report_issue_tool,
@@ -347,8 +347,10 @@ class SentryLoop(BaseBackgroundLoop):
                 event_bus=self._bus,
                 event_data=event_data,
                 logger=logger,
-                runner=self._runner,
-                gh_token=self._credentials.gh_token,
+                config=StreamConfig(
+                    runner=self._runner,
+                    gh_token=self._credentials.gh_token,
+                ),
             )
             match = _ISSUE_URL_RE.search(transcript)
             if match:

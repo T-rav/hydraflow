@@ -16,7 +16,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from events import EventType
-from runner_utils import stream_claude_process, terminate_processes
+from runner_utils import StreamConfig, stream_claude_process, terminate_processes
 from tests.helpers import make_streaming_proc
 
 # ---------------------------------------------------------------------------
@@ -25,7 +25,23 @@ from tests.helpers import make_streaming_proc
 
 
 def _default_kwargs(event_bus, **overrides):
-    """Build default kwargs for stream_claude_process."""
+    """Build default kwargs for stream_claude_process.
+
+    Keys that belong on :class:`StreamConfig` (``on_output``, ``timeout``,
+    ``runner``, ``usage_stats``, ``gh_token``, ``trace_collector``) are
+    extracted and bundled into a ``config`` kwarg automatically.
+    """
+    _CONFIG_KEYS = {
+        "on_output",
+        "timeout",
+        "runner",
+        "usage_stats",
+        "gh_token",
+        "trace_collector",
+    }
+    config_overrides = {
+        k: overrides.pop(k) for k in list(overrides) if k in _CONFIG_KEYS
+    }
     defaults = {
         "cmd": ["claude", "-p"],
         "prompt": "test prompt",
@@ -36,6 +52,8 @@ def _default_kwargs(event_bus, **overrides):
         "logger": logging.getLogger("test"),
     }
     defaults.update(overrides)
+    if config_overrides:
+        defaults["config"] = StreamConfig(**config_overrides)
     return defaults
 
 
@@ -492,7 +510,9 @@ class TestStreamClaudeProcessLifecycle:
             patch("asyncio.create_subprocess_exec", mock_create),
             pytest.raises(RuntimeError, match="timed out"),
         ):
-            await stream_claude_process(**_default_kwargs(event_bus), timeout=0.01)
+            await stream_claude_process(
+                **_default_kwargs(event_bus), config=StreamConfig(timeout=0.01)
+            )
 
         # The finally block in stream_claude_process already cancelled and awaited
         # stderr_task before raising, so no sleep(0) is needed here.
@@ -538,7 +558,9 @@ class TestStreamClaudeProcessLifecycle:
             patch("asyncio.create_subprocess_exec", mock_create),
             pytest.raises(RuntimeError, match="timed out") as exc_info,
         ):
-            await stream_claude_process(**_default_kwargs(event_bus), timeout=0.01)
+            await stream_claude_process(
+                **_default_kwargs(event_bus), config=StreamConfig(timeout=0.01)
+            )
 
         assert exc_info.value.__cause__ is not None
         assert isinstance(exc_info.value.__cause__, TimeoutError)
@@ -764,7 +786,7 @@ class TestStreamClaudeProcessTimeout:
         ):
             await stream_claude_process(
                 **_default_kwargs(event_bus, active_procs=active_procs),
-                timeout=0.01,
+                config=StreamConfig(timeout=0.01),
             )
 
         mock_proc.kill.assert_called_once()
@@ -802,7 +824,7 @@ class TestStreamClaudeProcessTimeout:
         ):
             await stream_claude_process(
                 **_default_kwargs(event_bus, active_procs=active_procs),
-                timeout=0.01,
+                config=StreamConfig(timeout=0.01),
             )
 
         assert len(active_procs) == 0
@@ -830,7 +852,8 @@ class TestStreamClaudeProcessGhToken:
 
         with patch("asyncio.create_subprocess_exec", side_effect=capture_env):
             await stream_claude_process(
-                **_default_kwargs(event_bus), gh_token="ghp_bot_token"
+                **_default_kwargs(event_bus),
+                config=StreamConfig(gh_token="ghp_bot_token"),
             )
 
         assert captured_env.get("GH_TOKEN") == "ghp_bot_token"
@@ -847,7 +870,9 @@ class TestStreamClaudeProcessGhToken:
             return await original_create(*args, **kwargs)
 
         with patch("asyncio.create_subprocess_exec", side_effect=capture_env):
-            await stream_claude_process(**_default_kwargs(event_bus), gh_token="")
+            await stream_claude_process(
+                **_default_kwargs(event_bus), config=StreamConfig(gh_token="")
+            )
 
         # GH_TOKEN is only set if it was already in os.environ (inherited),
         # not explicitly injected by make_clean_env.
@@ -858,3 +883,37 @@ class TestStreamClaudeProcessGhToken:
         if "GH_TOKEN" in captured_env:
             # If present, it was inherited from os.environ, not injected
             assert captured_env["GH_TOKEN"] == os.environ.get("GH_TOKEN", "")
+
+
+# ---------------------------------------------------------------------------
+# StreamConfig — dataclass for rarely-varying options
+# ---------------------------------------------------------------------------
+
+
+class TestStreamConfig:
+    """Tests for StreamConfig dataclass."""
+
+    def test_defaults(self) -> None:
+        """All optional fields default to sensible values."""
+        cfg = StreamConfig()
+        assert cfg.on_output is None
+        assert cfg.timeout == 3600.0
+        assert cfg.runner is None
+        assert cfg.usage_stats is None
+        assert cfg.gh_token == ""
+        assert cfg.trace_collector is None
+
+    def test_custom_values(self) -> None:
+        """StreamConfig accepts overrides for every field."""
+        cb = lambda _: False  # noqa: E731
+        stats: dict[str, object] = {}
+        cfg = StreamConfig(
+            on_output=cb,
+            timeout=120.0,
+            usage_stats=stats,
+            gh_token="ghp_test",
+        )
+        assert cfg.on_output is cb
+        assert cfg.timeout == 120.0
+        assert cfg.usage_stats is stats
+        assert cfg.gh_token == "ghp_test"
