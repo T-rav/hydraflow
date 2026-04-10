@@ -1,0 +1,90 @@
+// C4 Component diagram: AgentRunner decomposition for issue #6330
+//
+// BEFORE: AgentRunner (1309 lines, 30 methods, 5+ concerns in run() and _build_prompt_with_stats())
+// AFTER:  AgentRunner delegates to extracted private methods, no new classes needed
+
+specification {
+  element system
+  element container
+  element component
+  element module
+}
+
+model {
+  system hydraflow "HydraFlow" {
+    container runners "Runners (L3)" {
+      component agentRunner "AgentRunner" {
+        // --- PUBLIC API (unchanged) ---
+        module run "run()" "Orchestration: calls sub-steps in sequence"
+
+        // --- EXTRACTED from run() ---
+        module setupForRun "_setup_for_run()" "Pre-flight: dry-run check, snapshot CLAUDE.md, build prompt, execute agent"
+        module runSkillLoop "_run_skill_loop()" "Iterate registered post-implementation skills"
+        module recordRunResult "_record_run_result()" "Count commits, emit status, set result fields"
+
+        // --- EXTRACTED from _build_prompt_with_stats() ---
+        module buildPromptWithStats "_build_prompt_with_stats()" "Orchestrates prompt assembly (now thin coordinator)"
+        module buildPlanSection "_build_plan_section()" "Plan extraction, fallback loading, TDD detection"
+        module buildFeedbackSections "_build_feedback_sections()" "Review feedback, prior failure, escalation assembly"
+        module buildContextSections "_build_context_sections()" "Comments, common feedback, memory, logs, body truncation"
+        module dedupAndAssemble "_dedup_and_assemble_prompt()" "Cross-section dedup + final f-string prompt assembly"
+
+        // --- EXISTING methods (unchanged) ---
+        module forceCommit "_force_commit_uncommitted()" "Host-side git salvage commit"
+        module runSkill "_run_skill()" "Single skill dispatch with retry"
+        module tddPlan "_build_tdd_subagent_plan()" "TDD sub-agent plan builder"
+      }
+
+      component baseRunner "BaseRunner" {
+        module execute "_execute()" "Subprocess launch + streaming"
+        module injectMemory "_inject_memory()" "Hindsight/file memory recall"
+        module verifyQuality "_verify_quality()" "make quality gate"
+        module saveTranscript "_save_transcript()" "Persist transcript to disk"
+      }
+    }
+
+    container phases "Phases (L2)" {
+      component implementPhase "ImplementPhase" {
+        module runSingleIssue "_run_single_issue()" "Sole caller of AgentRunner.run()"
+      }
+    }
+
+    container infra "Infrastructure (L1/Cross-cutting)" {
+      component promptBuilder "PromptBuilder" "Shared section stats tracker"
+      component promptDedup "PromptDeduplicator" "Cross-section paragraph dedup"
+      component contextCache "ContextSectionCache" "Expensive-section cache"
+      component skillRegistry "SkillRegistry" "Post-impl skill definitions"
+      component taskGraph "TaskGraph" "Phase parsing for TDD plans"
+    }
+  }
+
+  // --- Relationships ---
+  implementPhase -> agentRunner "calls run()"
+  run -> setupForRun "1. pre-flight"
+  run -> runSkillLoop "2. skills"
+  run -> recordRunResult "3. record result"
+
+  buildPromptWithStats -> buildPlanSection "plan section"
+  buildPromptWithStats -> buildFeedbackSections "feedback sections"
+  buildPromptWithStats -> buildContextSections "context sections"
+  buildPromptWithStats -> dedupAndAssemble "dedup + assemble"
+
+  agentRunner -> baseRunner "inherits"
+  buildPromptWithStats -> promptBuilder "stats tracking"
+  dedupAndAssemble -> promptDedup "cross-section dedup"
+  buildPlanSection -> taskGraph "phase extraction"
+  buildContextSections -> contextCache "cached sections"
+  runSkillLoop -> skillRegistry "skill iteration"
+}
+
+views {
+  view agentDecomposition of agentRunner {
+    title "AgentRunner Method Decomposition (Issue #6330)"
+    include *
+  }
+
+  view dataFlow of hydraflow {
+    title "run() Pipeline Flow"
+    include implementPhase, agentRunner, baseRunner, promptBuilder, promptDedup, skillRegistry
+  }
+}
