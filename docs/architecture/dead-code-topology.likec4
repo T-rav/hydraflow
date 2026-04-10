@@ -1,0 +1,83 @@
+// C4 Component diagram: Dead code in epic.py and dolt_backend.py
+// Issue #6313 — Remove unused methods
+
+specification {
+  element component
+  element method
+  element config
+  element adr
+
+  tag dead {
+    color red
+    shape rectangle
+  }
+  tag alive {
+    color green
+    shape rectangle
+  }
+  tag vestigial {
+    color amber
+    shape rectangle
+  }
+}
+
+model {
+  component epicModule = "src/epic.py" {
+    method doCloseEpic = "_do_close_epic (line 201)" #alive {
+      description "Inner close logic — closes epic when all sub-issues resolved"
+    }
+    method releaseUrl = "release_url = '' (line 279)" #dead {
+      description "Dead variable — always empty string, never assigned from _create_release_for_epic"
+    }
+    method generatedChangelog = "generated_changelog = '' (line 280)" #vestigial {
+      description "Always empty — guard at line 293 is always True"
+    }
+    method releaseUrlCheck = "if release_url: (line 286)" #dead {
+      description "Dead branch — release_url is always ''"
+    }
+    method createRelease = "_create_release_for_epic (line 475)" #dead {
+      description "66-line method — creates GitHub Release for epic. Never called."
+    }
+    method releaseImport = "Release import (line 34)" #dead {
+      description "Only used inside _create_release_for_epic"
+    }
+  }
+
+  component doltModule = "src/dolt_backend.py" {
+    method diffState = "diff_state (line 260)" #dead {
+      description "7-line method — shows diff of state table. Never called."
+    }
+  }
+
+  component configModule = "src/config.py" {
+    config releaseVersionSource = "release_version_source (line 642)" #vestigial {
+      description "Only consumed inside _create_release_for_epic — becomes dead after removal. Out of scope."
+    }
+    config releaseTagPrefix = "release_tag_prefix (line 646)" #vestigial {
+      description "Only consumed inside _create_release_for_epic — becomes dead after removal. Out of scope."
+    }
+  }
+
+  adr adr0011 = "docs/adr/0011-epic-release-creation-architecture.md" {
+    description "Documents _create_release_for_epic call chain — needs update to reflect removal"
+  }
+
+  // Relationships
+  doCloseEpic -> releaseUrl "initializes"
+  doCloseEpic -> generatedChangelog "initializes"
+  doCloseEpic -> releaseUrlCheck "checks (always false)"
+  createRelease -> releaseImport "instantiates Release model"
+  createRelease -> releaseVersionSource "reads"
+  createRelease -> releaseTagPrefix "reads"
+  adr0011 -> createRelease "documents call chain"
+}
+
+views {
+  view deadCodeTopology of epicModule {
+    title "Dead Code Topology — Issue #6313"
+    include *
+    include doltModule, doltModule.*
+    include configModule, configModule.*
+    include adr0011
+  }
+}
