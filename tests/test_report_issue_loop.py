@@ -712,6 +712,332 @@ class TestHfIssueSkillPrompt:
 
 
 # ---------------------------------------------------------------------------
+# _prepare_screenshot tests
+# ---------------------------------------------------------------------------
+
+
+class TestPrepareScreenshot:
+    """Tests for _prepare_screenshot extracting screenshot preparation logic."""
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_screenshot(self, tmp_path: Path) -> None:
+        """When report has no screenshot_base64, returns None."""
+        loop, _stop, state, _pr = _make_loop(tmp_path)
+        report = PendingReport(description="No screenshot")
+        result = loop._prepare_screenshot(report)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_path_for_valid_screenshot(self, tmp_path: Path) -> None:
+        """When report has valid base64 screenshot, returns a Path to a temp file."""
+        loop, _stop, state, _pr = _make_loop(tmp_path)
+        b64 = base64.b64encode(b"\x89PNG\r\n").decode()
+        report = PendingReport(description="Has screenshot", screenshot_base64=b64)
+        result = loop._prepare_screenshot(report)
+        try:
+            assert result is not None
+            assert result.exists()
+            assert result.suffix == ".png"
+        finally:
+            if result:
+                result.unlink(missing_ok=True)
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_secrets_detected(self, tmp_path: Path) -> None:
+        """When screenshot contains secrets, returns None."""
+        loop, _stop, state, _pr = _make_loop(tmp_path)
+        report = PendingReport(
+            description="Secret screenshot",
+            screenshot_base64="ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijkl",
+        )
+        result = loop._prepare_screenshot(report)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_for_invalid_base64(self, tmp_path: Path) -> None:
+        """When screenshot is invalid base64, returns None gracefully."""
+        loop, _stop, state, _pr = _make_loop(tmp_path)
+        report = PendingReport(
+            description="Bad base64",
+            screenshot_base64="data:image/png;base64,not-valid-base64",
+        )
+        result = loop._prepare_screenshot(report)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_skips_scan_when_redaction_disabled(self, tmp_path: Path) -> None:
+        """When screenshot_redaction_enabled=False, scan is skipped."""
+        loop, _stop, state, _pr = _make_loop(tmp_path)
+        object.__setattr__(loop._config, "screenshot_redaction_enabled", False)
+        b64 = base64.b64encode(b"fake-png-data").decode()
+        report = PendingReport(
+            description="No scan",
+            screenshot_base64=b64,
+        )
+        result = loop._prepare_screenshot(report)
+        try:
+            assert result is not None
+            assert result.exists()
+        finally:
+            if result:
+                result.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# _upload_screenshot tests
+# ---------------------------------------------------------------------------
+
+
+class TestUploadScreenshot:
+    """Tests for _upload_screenshot extracting screenshot upload logic."""
+
+    @pytest.mark.asyncio
+    async def test_returns_url_on_success(self, tmp_path: Path) -> None:
+        """When upload succeeds, returns the URL."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
+        screenshot_path = tmp_path / "test.png"
+        screenshot_path.write_bytes(b"\x89PNG\r\n")
+        result = await loop._upload_screenshot(screenshot_path, "report-1")
+        assert result == "https://gist.example.com/screenshot.png"
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_string_on_failure(self, tmp_path: Path) -> None:
+        """When upload fails (returns empty), returns empty string."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
+        pr_mgr.upload_screenshot = AsyncMock(return_value="")
+        screenshot_path = tmp_path / "test.png"
+        screenshot_path.write_bytes(b"\x89PNG\r\n")
+        result = await loop._upload_screenshot(screenshot_path, "report-1")
+        assert result == ""
+
+
+# ---------------------------------------------------------------------------
+# _build_report_prompt tests
+# ---------------------------------------------------------------------------
+
+
+class TestBuildReportPrompt:
+    """Tests for _build_report_prompt extracting prompt construction logic."""
+
+    def test_includes_description(self, tmp_path: Path) -> None:
+        """The prompt includes the report description."""
+        loop, _stop, state, _pr = _make_loop(tmp_path)
+        report = PendingReport(description="Login page 500 error")
+        prompt = loop._build_report_prompt(report, None, "", "hydraflow-plan")
+        assert "Login page 500 error" in prompt
+        assert prompt.startswith("/hf.issue ")
+
+    def test_includes_screenshot_path(self, tmp_path: Path) -> None:
+        """When screenshot_path is provided, prompt references it."""
+        loop, _stop, state, _pr = _make_loop(tmp_path)
+        report = PendingReport(description="UI bug")
+        screenshot_path = tmp_path / "screenshot.png"
+        prompt = loop._build_report_prompt(
+            report, screenshot_path, "https://example.com/img.png", "hydraflow-plan"
+        )
+        assert str(screenshot_path) in prompt
+        assert "Read tool" in prompt
+        assert "![Screenshot](https://example.com/img.png)" in prompt
+
+    def test_no_screenshot_url_warns_about_broken_image(self, tmp_path: Path) -> None:
+        """When screenshot exists but upload failed, warns about broken image."""
+        loop, _stop, state, _pr = _make_loop(tmp_path)
+        report = PendingReport(description="UI bug")
+        screenshot_path = tmp_path / "screenshot.png"
+        prompt = loop._build_report_prompt(
+            report, screenshot_path, "", "hydraflow-plan"
+        )
+        assert "broken image" in prompt.lower()
+
+    def test_includes_plan_label(self, tmp_path: Path) -> None:
+        """The prompt instructs the agent to use the plan label."""
+        loop, _stop, state, _pr = _make_loop(tmp_path)
+        report = PendingReport(description="Bug")
+        prompt = loop._build_report_prompt(report, None, "", "hydraflow-plan")
+        assert "IMPORTANT: Use the label `hydraflow-plan`" in prompt
+
+
+# ---------------------------------------------------------------------------
+# _invoke_report_agent tests
+# ---------------------------------------------------------------------------
+
+
+class TestInvokeReportAgent:
+    """Tests for _invoke_report_agent extracting agent invocation logic."""
+
+    @pytest.mark.asyncio
+    async def test_returns_transcript_and_issue_number(self, tmp_path: Path) -> None:
+        """On success, returns (transcript, issue_number)."""
+        loop, _stop, state, _pr = _make_loop(tmp_path)
+        with patch(
+            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+        ) as mock_stream:
+            mock_stream.return_value = "https://github.com/acme/repo/issues/42"
+            transcript, issue_number = await loop._invoke_report_agent("/hf.issue test")
+        assert issue_number == 42
+        assert "issues/42" in transcript
+
+    @pytest.mark.asyncio
+    async def test_returns_zero_when_no_issue_url(self, tmp_path: Path) -> None:
+        """When transcript has no issue URL, returns issue_number=0."""
+        loop, _stop, state, _pr = _make_loop(tmp_path)
+        with patch(
+            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+        ) as mock_stream:
+            mock_stream.return_value = "no url in output"
+            transcript, issue_number = await loop._invoke_report_agent("/hf.issue test")
+        assert issue_number == 0
+
+    @pytest.mark.asyncio
+    async def test_propagates_auth_error(self, tmp_path: Path) -> None:
+        """AuthenticationRetryError is propagated, not caught."""
+        from runner_utils import AuthenticationRetryError
+
+        loop, _stop, state, _pr = _make_loop(tmp_path)
+        with patch(
+            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+        ) as mock_stream:
+            mock_stream.side_effect = AuthenticationRetryError("auth failed")
+            with pytest.raises(AuthenticationRetryError):
+                await loop._invoke_report_agent("/hf.issue test")
+
+    @pytest.mark.asyncio
+    async def test_returns_zero_on_generic_exception(self, tmp_path: Path) -> None:
+        """On generic exception, returns issue_number=0 (doesn't crash)."""
+        loop, _stop, state, _pr = _make_loop(tmp_path)
+        with patch(
+            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+        ) as mock_stream:
+            mock_stream.side_effect = RuntimeError("agent died")
+            transcript, issue_number = await loop._invoke_report_agent("/hf.issue test")
+        assert issue_number == 0
+
+
+# ---------------------------------------------------------------------------
+# _handle_report_success tests
+# ---------------------------------------------------------------------------
+
+
+class TestHandleReportSuccess:
+    """Tests for _handle_report_success extracting success handling logic."""
+
+    @pytest.mark.asyncio
+    async def test_returns_processed_dict(self, tmp_path: Path) -> None:
+        """Returns dict with processed=1 and issue details."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
+        report = _enqueue_with_tracking(state)
+        state.update_tracked_report(
+            report.id, status="in-progress", action_label="processing"
+        )
+        result = await loop._handle_report_success(report, 42, "hydraflow-plan", "")
+        assert result["processed"] == 1
+        assert result["issue_number"] == 42
+        assert result["report_id"] == report.id
+
+    @pytest.mark.asyncio
+    async def test_sets_tracked_report_to_filed(self, tmp_path: Path) -> None:
+        """Updates tracked report status to filed."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
+        report = _enqueue_with_tracking(state)
+        state.update_tracked_report(
+            report.id, status="in-progress", action_label="processing"
+        )
+        await loop._handle_report_success(report, 42, "hydraflow-plan", "")
+        tracked = state.get_tracked_report(report.id)
+        assert tracked is not None
+        assert tracked.status == "filed"
+
+    @pytest.mark.asyncio
+    async def test_sets_linked_issue_url(self, tmp_path: Path) -> None:
+        """Sets linked_issue_url on the tracked report."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
+        report = _enqueue_with_tracking(state)
+        state.update_tracked_report(
+            report.id, status="in-progress", action_label="processing"
+        )
+        await loop._handle_report_success(report, 55, "hydraflow-plan", "")
+        tracked = state.get_tracked_report(report.id)
+        assert tracked is not None
+        assert "issues/55" in tracked.linked_issue_url
+
+    @pytest.mark.asyncio
+    async def test_removes_from_queue(self, tmp_path: Path) -> None:
+        """Report is removed from the pending queue."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
+        report = _enqueue_with_tracking(state)
+        state.update_tracked_report(
+            report.id, status="in-progress", action_label="processing"
+        )
+        await loop._handle_report_success(report, 42, "hydraflow-plan", "")
+        assert state.peek_report() is None
+
+
+# ---------------------------------------------------------------------------
+# _handle_report_failure tests
+# ---------------------------------------------------------------------------
+
+
+class TestHandleReportFailure:
+    """Tests for _handle_report_failure extracting failure handling logic."""
+
+    @pytest.mark.asyncio
+    async def test_increments_attempt_and_returns_error(self, tmp_path: Path) -> None:
+        """Increments attempt counter and returns error dict."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
+        report = _enqueue_with_tracking(state)
+        state.update_tracked_report(
+            report.id, status="in-progress", action_label="processing"
+        )
+        result = await loop._handle_report_failure(report)
+        assert result["processed"] == 0
+        assert result["error"] is True
+        assert result["report_id"] == report.id
+        # Should NOT be escalated (first failure)
+        assert "escalated" not in result
+
+    @pytest.mark.asyncio
+    async def test_escalates_after_max_attempts(self, tmp_path: Path) -> None:
+        """After max attempts, escalates to HITL and returns escalated=True."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
+        report = _enqueue_with_tracking(state)
+        state.update_tracked_report(
+            report.id, status="in-progress", action_label="processing"
+        )
+        for _ in range(4):
+            state.fail_report(report.id)
+        result = await loop._handle_report_failure(report)
+        assert result["escalated"] is True
+        assert state.peek_report() is None
+        pr_mgr.create_issue.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_report_stays_in_queue_on_retry(self, tmp_path: Path) -> None:
+        """On non-final failure, report stays in queue."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
+        report = _enqueue_with_tracking(state)
+        state.update_tracked_report(
+            report.id, status="in-progress", action_label="processing"
+        )
+        await loop._handle_report_failure(report)
+        pending = state.get_pending_reports()
+        assert len(pending) == 1
+        assert pending[0].attempts == 1
+
+    @pytest.mark.asyncio
+    async def test_tracked_report_reverts_to_queued(self, tmp_path: Path) -> None:
+        """On retry, tracked report status reverts to queued."""
+        loop, _stop, state, pr_mgr = _make_loop(tmp_path)
+        report = _enqueue_with_tracking(state)
+        state.update_tracked_report(
+            report.id, status="in-progress", action_label="processing"
+        )
+        await loop._handle_report_failure(report)
+        tracked = state.get_tracked_report(report.id)
+        assert tracked is not None
+        assert tracked.status == "queued"
+
+
+# ---------------------------------------------------------------------------
 # _save_screenshot resource management tests
 # ---------------------------------------------------------------------------
 

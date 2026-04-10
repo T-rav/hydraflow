@@ -1,0 +1,95 @@
+// C4 Component diagram: ReportIssueLoop._do_work decomposition
+// Shows current monolithic method and target extracted stages
+
+specification {
+  element actor
+  element system
+  element component
+  element stage
+}
+
+model {
+  actor user = "User / UI" {
+    description "Submits bug reports via dashboard"
+  }
+
+  system hydraflow = "HydraFlow" {
+    component reportIssueLoop = "ReportIssueLoop" {
+      description "Background loop — dequeues pending reports, invokes agent to file GitHub issues"
+
+      // Current: single 183-line _do_work
+      // Target: sequencer delegates to 6 stages
+
+      stage sweep = "_sweep_stale_reports()" {
+        description "Auto-close reports older than threshold [already extracted]"
+      }
+      stage sync = "_sync_filed_reports()" {
+        description "Check linked issues for state transitions [already extracted]"
+      }
+      stage prepare = "_prepare_screenshot(report)" {
+        description "Secret-scan + base64 decode + save to temp PNG → Path | None"
+      }
+      stage upload = "_upload_screenshot(path)" {
+        description "Upload via PRManager.upload_screenshot → URL string"
+      }
+      stage buildPrompt = "_build_report_prompt(report, screenshot_path, screenshot_url, plan_label)" {
+        description "Assemble /hf.issue prompt with description + screenshot markdown + label instruction → str"
+      }
+      stage invoke = "_invoke_report_agent(prompt)" {
+        description "stream_claude_process + extract issue number → (transcript, issue_number)"
+      }
+      stage handleSuccess = "_handle_report_success(report, issue_number, plan_label, screenshot_url)" {
+        description "Verify label, set linked_issue_url, transition to 'filed', remove from queue"
+      }
+      stage handleFailure = "_handle_report_failure(report)" {
+        description "Increment attempts, escalate or revert to queued"
+      }
+      stage doWork = "_do_work() [sequencer]" {
+        description "~30-line orchestrator: sweep → sync → peek → prepare → upload → build → try(invoke) → success/failure"
+      }
+    }
+
+    component state = "StateTracker" {
+      description "peek_report, remove_report, fail_report, update_tracked_report, get_tracked_report"
+    }
+    component prManager = "PRManager" {
+      description "upload_screenshot, _run_gh, add_labels, create_issue, get_issue_state"
+    }
+    component agentCli = "Agent CLI" {
+      description "build_agent_command + stream_claude_process"
+    }
+    component scanner = "ScreenshotScanner" {
+      description "scan_base64_for_secrets"
+    }
+    component eventBus = "EventBus" {
+      description "REPORT_UPDATE event publishing"
+    }
+  }
+
+  // Data flow through stages
+  doWork -> sweep "1. auto-close stale"
+  doWork -> sync "2. sync filed→fixed"
+  doWork -> prepare "3. screenshot prep"
+  doWork -> upload "4. upload to gist"
+  doWork -> buildPrompt "5. assemble prompt"
+  doWork -> invoke "6. run agent"
+  doWork -> handleSuccess "7a. on issue created"
+  doWork -> handleFailure "7b. on failure"
+
+  // External dependencies per stage
+  prepare -> scanner "secret scan"
+  upload -> prManager "upload_screenshot"
+  invoke -> agentCli "stream_claude_process"
+  handleSuccess -> prManager "_run_gh, add_labels"
+  handleSuccess -> state "update_tracked_report, remove_report"
+  handleSuccess -> eventBus "REPORT_UPDATE filed"
+  handleFailure -> state "fail_report, update_tracked_report"
+  handleFailure -> eventBus "REPORT_UPDATE queued/closed"
+}
+
+views {
+  view decomposition of reportIssueLoop {
+    title "ReportIssueLoop._do_work Decomposition"
+    include *
+  }
+}

@@ -201,68 +201,58 @@ class ReportIssueLoop(BaseBackgroundLoop):
         m = cls._ISSUE_URL_RE.search(url)
         return int(m.group(1)) if m else 0
 
-    async def _do_work(self) -> dict[str, Any] | None:
-        if self._config.dry_run:
+    def _prepare_screenshot(self, report: PendingReport) -> Path | None:
+        """Scan for secrets, decode, and save screenshot to a temp PNG.
+
+        Returns the path to the temp file, or ``None`` if the report has no
+        screenshot, the screenshot contains secrets, or the base64 is invalid.
+        """
+        if not report.screenshot_base64:
             return None
 
-        await self._sweep_stale_reports()
-        await self._sync_filed_reports()
-
-        report = self._state.peek_report()
-        if report is None:
-            return None
-
-        # Transition tracked report to "in-progress" so the UI reflects
-        # that the report is actively being processed.
-        self._state.update_tracked_report(
-            report.id,
-            status="in-progress",
-            action_label="processing",
-            detail="Agent started processing bug report",
+        secret_hits = (
+            scan_base64_for_secrets(report.screenshot_base64)
+            if self._config.screenshot_redaction_enabled
+            else []
         )
-        await self._emit_report_event(report.id, "in-progress", detail="processing")
-
-        # Save screenshot to a temp PNG so the agent can *see* it via Read
-        # and reference it as a markdown image in the issue body.  The `gh
-        # issue create` CLI auto-uploads local image paths used in markdown.
-        screenshot_path: Path | None = None
-        if report.screenshot_base64:
-            secret_hits = (
-                scan_base64_for_secrets(report.screenshot_base64)
-                if self._config.screenshot_redaction_enabled
-                else []
+        if secret_hits:
+            logger.warning(
+                "Screenshot for report %s contains potential secrets (%s); "
+                "stripping screenshot from report",
+                report.id,
+                ", ".join(secret_hits),
             )
-            if secret_hits:
-                logger.warning(
-                    "Screenshot for report %s contains potential secrets (%s); "
-                    "stripping screenshot from report",
-                    report.id,
-                    ", ".join(secret_hits),
-                )
-            else:
-                try:
-                    screenshot_path = self._save_screenshot(report.screenshot_base64)
-                except (ValueError, binascii.Error):
-                    logger.warning(
-                        "Screenshot for report %s was not valid base64; "
-                        "continuing without screenshot attachment",
-                        report.id,
-                    )
+            return None
 
-        # Upload screenshot to GitHub (via gist) so the issue body can
-        # reference a real URL instead of a local temp path.
-        screenshot_url: str = ""
-        if screenshot_path:
-            screenshot_url = await self._pr_manager.upload_screenshot(screenshot_path)
-            if not screenshot_url:
-                logger.warning(
-                    "Screenshot upload failed for report %s; "
-                    "issue will be created without inline image",
-                    report.id,
-                )
+        try:
+            return self._save_screenshot(report.screenshot_base64)
+        except (ValueError, binascii.Error):
+            logger.warning(
+                "Screenshot for report %s was not valid base64; "
+                "continuing without screenshot attachment",
+                report.id,
+            )
+            return None
 
-        # Build prompt — invoke /hf.issue so Claude gets the full skill
-        # instructions (codebase research, duplicate check, structured body).
+    async def _upload_screenshot(self, screenshot_path: Path, report_id: str) -> str:
+        """Upload a screenshot and return its URL, or ``""`` on failure."""
+        screenshot_url = await self._pr_manager.upload_screenshot(screenshot_path)
+        if not screenshot_url:
+            logger.warning(
+                "Screenshot upload failed for report %s; "
+                "issue will be created without inline image",
+                report_id,
+            )
+        return screenshot_url
+
+    def _build_report_prompt(
+        self,
+        report: PendingReport,
+        screenshot_path: Path | None,
+        screenshot_url: str,
+        plan_label: str,
+    ) -> str:
+        """Construct the ``/hf.issue`` prompt with description, screenshot, and label."""
         description = report.description
         if screenshot_path:
             description += (
@@ -283,32 +273,26 @@ class ReportIssueLoop(BaseBackgroundLoop):
                     "broken image."
                 )
 
-        # Use hydraflow-plan so bug reports go through the planning phase
-        # (lite plan auto-detected) before implementation. This ensures every
-        # issue has a plan comment that the implement agent can reference.
-        plan_label = (
-            self._config.planner_label[0]
-            if self._config.planner_label
-            else "hydraflow-plan"
-        )
         description += (
             f"\n\nIMPORTANT: Use the label `{plan_label}` instead of "
             f"`hydraflow-find` for this issue."
         )
+        return f"/hf.issue {description}"
 
-        prompt = f"/hf.issue {description}"
+    async def _invoke_report_agent(self, prompt: str) -> tuple[str, int]:
+        """Stream the agent CLI and extract the created issue number.
 
+        Returns ``(transcript, issue_number)``.  Raises
+        :class:`AuthenticationRetryError` on auth failures; other exceptions
+        are logged and yield ``issue_number=0``.
+        """
         cmd = build_agent_command(
             tool=self._config.report_issue_tool,
             model=self._config.report_issue_model,
             max_turns=10,
         )
+        event_data: TranscriptEventData = {"source": "report_issue"}
 
-        event_data: TranscriptEventData = {
-            "source": "report_issue",
-        }
-
-        issue_number = 0
         try:
             transcript = await stream_claude_process(
                 cmd=cmd,
@@ -321,60 +305,56 @@ class ReportIssueLoop(BaseBackgroundLoop):
                 runner=self._runner,
                 gh_token=self._credentials.gh_token,
             )
-            issue_number = self._extract_issue_number_from_transcript(transcript)
+            return transcript, self._extract_issue_number_from_transcript(transcript)
         except AuthenticationRetryError:
-            logger.warning(
-                "Report %s hit authentication error — deferring to next cycle",
-                report.id,
-            )
             raise
         except Exception:
-            logger.exception("Report issue agent failed for report %s", report.id)
-        finally:
-            if screenshot_path:
-                screenshot_path.unlink(missing_ok=True)
+            logger.exception("Report issue agent failed")
+            return "", 0
 
-        if issue_number > 0:
-            # Verify the agent applied the correct label and screenshot
-            await self._verify_issue(issue_number, plan_label, screenshot_url)
+    async def _handle_report_success(
+        self,
+        report: PendingReport,
+        issue_number: int,
+        plan_label: str,
+        screenshot_url: str,
+    ) -> dict[str, Any]:
+        """Verify the issue, update state, emit events, and clean up."""
+        await self._verify_issue(issue_number, plan_label, screenshot_url)
 
-            issue_url = f"https://github.com/{self._config.repo}/issues/{issue_number}"
+        issue_url = f"https://github.com/{self._config.repo}/issues/{issue_number}"
 
-            # Set linked_issue_url before update_tracked_report so both
-            # fields are persisted atomically in the same save() call.
-            tracked = self._state.get_tracked_report(report.id)
-            if tracked:
-                tracked.linked_issue_url = issue_url
+        tracked = self._state.get_tracked_report(report.id)
+        if tracked:
+            tracked.linked_issue_url = issue_url
 
-            # Success — mark as "filed" (issue created, not yet resolved).
-            # The report only becomes "fixed" when the linked issue is
-            # confirmed closed/merged via the status-refresh endpoint.
-            self._state.update_tracked_report(
-                report.id,
-                status="filed",
-                action_label="filed",
-                detail=f"Created issue #{issue_number}",
-            )
-            await self._emit_report_event(
-                report.id,
-                "filed",
-                issue_number=issue_number,
-                issue_url=issue_url,
-            )
-            self._state.remove_report(report.id)
-            logger.info(
-                "Processed report %s as issue #%d: %s",
-                report.id,
-                issue_number,
-                f"[Bug Report] {report.description[:100]}",
-            )
-            return {
-                "processed": 1,
-                "report_id": report.id,
-                "issue_number": issue_number,
-            }
+        self._state.update_tracked_report(
+            report.id,
+            status="filed",
+            action_label="filed",
+            detail=f"Created issue #{issue_number}",
+        )
+        await self._emit_report_event(
+            report.id,
+            "filed",
+            issue_number=issue_number,
+            issue_url=issue_url,
+        )
+        self._state.remove_report(report.id)
+        logger.info(
+            "Processed report %s as issue #%d: %s",
+            report.id,
+            issue_number,
+            f"[Bug Report] {report.description[:100]}",
+        )
+        return {
+            "processed": 1,
+            "report_id": report.id,
+            "issue_number": issue_number,
+        }
 
-        # Failed — increment attempts and check cap
+    async def _handle_report_failure(self, report: PendingReport) -> dict[str, Any]:
+        """Increment attempts, escalate if at cap, or revert to queued."""
         attempt_count = self._state.fail_report(report.id)
         if attempt_count >= _MAX_REPORT_ATTEMPTS:
             self._state.remove_report(report.id)
@@ -390,7 +370,6 @@ class ReportIssueLoop(BaseBackgroundLoop):
                 "closed",
                 detail=f"Escalated after {attempt_count} failed attempts",
             )
-
             logger.error(
                 "Report %s failed %d times — escalated to HITL",
                 report.id,
@@ -403,7 +382,6 @@ class ReportIssueLoop(BaseBackgroundLoop):
                 "escalated": True,
             }
 
-        # Revert tracked report to queued for retry
         self._state.update_tracked_report(
             report.id,
             status="queued",
@@ -415,7 +393,6 @@ class ReportIssueLoop(BaseBackgroundLoop):
             "queued",
             detail=f"Retry attempt {attempt_count}/{_MAX_REPORT_ATTEMPTS}",
         )
-
         logger.warning(
             "Report %s failed (attempt %d/%d) — will retry next cycle",
             report.id,
@@ -423,6 +400,58 @@ class ReportIssueLoop(BaseBackgroundLoop):
             _MAX_REPORT_ATTEMPTS,
         )
         return {"processed": 0, "report_id": report.id, "error": True}
+
+    async def _do_work(self) -> dict[str, Any] | None:
+        if self._config.dry_run:
+            return None
+
+        await self._sweep_stale_reports()
+        await self._sync_filed_reports()
+
+        report = self._state.peek_report()
+        if report is None:
+            return None
+
+        self._state.update_tracked_report(
+            report.id,
+            status="in-progress",
+            action_label="processing",
+            detail="Agent started processing bug report",
+        )
+        await self._emit_report_event(report.id, "in-progress", detail="processing")
+
+        screenshot_path = self._prepare_screenshot(report)
+        screenshot_url = ""
+        if screenshot_path:
+            screenshot_url = await self._upload_screenshot(screenshot_path, report.id)
+
+        plan_label = (
+            self._config.planner_label[0]
+            if self._config.planner_label
+            else "hydraflow-plan"
+        )
+        prompt = self._build_report_prompt(
+            report, screenshot_path, screenshot_url, plan_label
+        )
+
+        try:
+            _transcript, issue_number = await self._invoke_report_agent(prompt)
+        except AuthenticationRetryError:
+            logger.warning(
+                "Report %s hit authentication error — deferring to next cycle",
+                report.id,
+            )
+            raise
+        finally:
+            if screenshot_path:
+                screenshot_path.unlink(missing_ok=True)
+
+        if issue_number > 0:
+            return await self._handle_report_success(
+                report, issue_number, plan_label, screenshot_url
+            )
+
+        return await self._handle_report_failure(report)
 
     async def _escalate_failed_report(self, report: PendingReport) -> None:
         """Create a HITL issue with the raw report content for manual review."""
