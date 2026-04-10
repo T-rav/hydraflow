@@ -1,0 +1,112 @@
+// C4 Component diagram: IsoTimestamp type propagation scope
+// Issue #6318 — Replace bare `str` with `IsoTimestamp` on Pydantic model fields
+
+specification {
+  element model
+  element field
+  element validator
+  element producer
+  element testFile
+  tag affected
+  tag safe
+}
+
+model {
+  validator isoTimestamp = "IsoTimestamp" {
+    description "Annotated[str, AfterValidator(_check_iso_timestamp)] — accepts empty string or valid ISO 8601"
+  }
+
+  // --- Target models (fields changing str -> IsoTimestamp) ---
+
+  model issueOutcome = "IssueOutcome" {
+    #affected
+    field closedAt = "closed_at: str -> IsoTimestamp" { #affected }
+  }
+
+  model hookFailureRecord = "HookFailureRecord" {
+    #affected
+    field hfrTimestamp = "timestamp: str -> IsoTimestamp" { #affected }
+  }
+
+  model attemptRecord = "AttemptRecord" {
+    #affected
+    field arTimestamp = "timestamp: str -> IsoTimestamp" { #affected }
+  }
+
+  model toolCallSpan = "ToolCallSpan" {
+    #affected
+    field tcsStartedAt = "started_at: str -> IsoTimestamp" { #affected }
+  }
+
+  model subprocessTrace = "SubprocessTrace" {
+    #affected
+    field stStartedAt = "started_at: str -> IsoTimestamp" { #affected }
+  }
+
+  model conversationTurn = "ConversationTurn" {
+    #affected
+    field ctTimestamp = "timestamp: str -> IsoTimestamp" { #affected }
+  }
+
+  model shapeConversation = "ShapeConversation" {
+    #affected
+    field scStartedAt = "started_at: str -> IsoTimestamp" { #affected }
+    field scLastActivity = "last_activity_at: str -> IsoTimestamp" { #affected }
+  }
+
+  // --- Producers (create instances with datetime.now(UTC).isoformat()) ---
+
+  producer stateIssue = "src/state/_issue.py" {
+    description "record_outcome() -> IssueOutcome, record_hook_failure() -> HookFailureRecord"
+    #safe
+  }
+
+  producer diagnosticLoop = "src/diagnostic_loop.py" {
+    description "Creates AttemptRecord with datetime.now(UTC).isoformat()"
+    #safe
+  }
+
+  producer traceCollector = "src/trace_collector.py" {
+    description "Creates ToolCallSpan and SubprocessTrace"
+    #safe
+  }
+
+  producer shapePhase = "src/shape_phase.py" {
+    description "Creates ConversationTurn and ShapeConversation"
+    #safe
+  }
+
+  producer dashboardRoutes = "src/dashboard_routes/_routes.py" {
+    description "Derives IssueOutcome from history (closed_at=i.last_seen or empty)"
+    #safe
+  }
+
+  // --- Test files ---
+
+  testFile testShapeConv = "tests/test_shape_conversation.py" {
+    description "BREAKING: uses timestamp='t1'/'t2' — must fix"
+    #affected
+  }
+
+  testFile testModelsValidation = "tests/test_models_validation.py" {
+    description "Add new validation rejection tests for changed models"
+    #affected
+  }
+
+  // Relationships
+  stateIssue -> issueOutcome
+  stateIssue -> hookFailureRecord
+  diagnosticLoop -> attemptRecord
+  traceCollector -> toolCallSpan
+  traceCollector -> subprocessTrace
+  shapePhase -> conversationTurn
+  shapePhase -> shapeConversation
+  dashboardRoutes -> issueOutcome
+}
+
+views {
+  view index {
+    title "IsoTimestamp Type Migration Scope"
+    include *
+  }
+}
