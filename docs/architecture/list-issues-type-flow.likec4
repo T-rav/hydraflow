@@ -1,0 +1,80 @@
+// C4 Component Diagram: list_issues_by_label type flow
+// Issue #6322 — Return type change from list[dict[str, Any]] to list[GitHubIssue]
+
+specification {
+  element system
+  element container
+  element component
+}
+
+model {
+  githubApi = system "GitHub API" {
+    description "External GitHub REST/GraphQL API"
+  }
+
+  hydraflow = system "HydraFlow" {
+    ports = container "ports.py" {
+      description "Protocol definitions (PRPort)"
+      prPort = component "PRPort.list_issues_by_label" {
+        description "BEFORE: -> list[dict[str, Any]]\nAFTER:  -> list[GitHubIssue]"
+      }
+      dependabotPort = component "PRPort.get_dependabot_alerts" {
+        description "BEFORE: -> list[dict]\nAFTER:  -> list[dict[str, Any]]"
+      }
+    }
+
+    prManager = container "pr_manager.py" {
+      description "Concrete PRPort implementation"
+      listIssuesImpl = component "PRManager.list_issues_by_label" {
+        description "Fetches via gh issue list --json\nBEFORE: returns raw dicts\nAFTER: returns GitHubIssue.model_validate()"
+      }
+      dependabotImpl = component "PRManager.get_dependabot_alerts" {
+        description "BEFORE: -> list[dict]\nAFTER:  -> list[dict[str, Any]]"
+      }
+    }
+
+    models = container "models.py" {
+      description "Pydantic models and TypedDicts"
+      githubIssue = component "GitHubIssue" {
+        description "number: int, title: str, body: str=''\nlabels, comments, url, author, state, milestone_number, created_at — all with defaults"
+      }
+    }
+
+    callers = container "Caller Loops" {
+      diagnosticLoop = component "diagnostic_loop._do_work" {
+        description "Accesses .number, .title, .body\nBEFORE: raw_issue.get('number', 0)\nAFTER: raw_issue.number"
+      }
+      ciMonitorLoop = component "ci_monitor_loop._rehydrate" {
+        description "Accesses .number only\nBEFORE: issues[0].get('number')\nAFTER: issues[0].number"
+      }
+      staleGcLoop = component "stale_issue_gc_loop._do_work" {
+        description "Accesses .number only\nBEFORE: issue.get('number', 0)\nAFTER: issue.number"
+      }
+    }
+
+    issueFetcher = container "issue_fetcher.py" {
+      description "Reference: already returns list[GitHubIssue]"
+      fetchIssues = component "fetch_issues_by_labels" {
+        description "Uses GitHubIssue.model_validate(raw)"
+      }
+    }
+  }
+
+  // Data flow
+  githubApi -> listIssuesImpl "gh issue list --json"
+  listIssuesImpl -> prPort "implements"
+  listIssuesImpl -> githubIssue "model_validate(raw_dict)"
+
+  prPort -> diagnosticLoop "list[GitHubIssue]"
+  prPort -> ciMonitorLoop "list[GitHubIssue]"
+  prPort -> staleGcLoop "list[GitHubIssue]"
+
+  fetchIssues -> githubIssue "model_validate(raw) — existing pattern"
+}
+
+views {
+  view of hydraflow {
+    title "list_issues_by_label Type Flow (Issue #6322)"
+    include *
+  }
+}
