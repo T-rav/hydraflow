@@ -2357,3 +2357,24 @@ class TestDiagramHelpers:
     def test_cleanup_diagrams_noop_when_missing(self) -> None:
         """Should not raise when directory doesn't exist."""
         PlannerRunner.cleanup_diagrams(999999)
+
+    @pytest.mark.parametrize(
+        "method_name",
+        [
+            "diagram_dir_for_issue",
+            "collect_diagram_attachments",
+            "copy_diagrams_to_workspace",
+            "cleanup_diagrams",
+        ],
+    )
+    def test_diagram_methods_use_issue_number_param(self, method_name: str) -> None:
+        """All diagram helpers must use 'issue_number', not 'issue_id'."""
+        import inspect  # noqa: PLC0415
+
+        method = getattr(PlannerRunner, method_name)
+        sig = inspect.signature(method)
+        param_names = list(sig.parameters.keys())
+        assert "issue_number" in param_names, (
+            f"{method_name} should use 'issue_number' not 'issue_id'"
+        )
+        assert "issue_id" not in param_names, f"{method_name} still uses 'issue_id'"
