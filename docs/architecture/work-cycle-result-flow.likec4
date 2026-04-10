@@ -1,0 +1,153 @@
+// C4 Component diagram: WorkCycleResult data flow through background loop system
+// Issue #6331 — Typed _do_work return values
+
+specification {
+  element system
+  element container
+  element component
+  element type_boundary
+
+  relationship returns
+  relationship consumes
+  relationship serializes
+}
+
+model {
+  system hydraflow "HydraFlow" {
+
+    container background_loops "Background Loops (L2)" {
+      component base_loop "BaseBackgroundLoop" {
+        description "ABC in base_background_loop.py — _do_work(), _build_details(), _execute_cycle()"
+      }
+
+      // --- Simple loops (single return shape, all int/float values) ---
+      component runs_gc "RunsGCLoop" {
+        description "Returns: expired_purged, oversized_purged, total_runs, total_mb, issues"
+      }
+      component retrospective "RetrospectiveLoop" {
+        description "Returns: processed, patterns_filed, stale_proposals"
+      }
+      component workspace_gc "WorkspaceGCLoop" {
+        description "Returns: collected, skipped, errors"
+      }
+      component stale_issue_gc "StaleIssueGCLoop" {
+        description "Returns: closed, skipped, errors"
+      }
+      component security_patch "SecurityPatchLoop" {
+        description "Returns: total_alerts, filed, skipped_dedup, skipped_unfixable, skipped_severity"
+      }
+      component epic_monitor "EpicMonitorLoop" {
+        description "Returns: stale_count, tracked_epics"
+      }
+      component stale_issue "StaleIssueLoop" {
+        description "Returns: scanned, closed, skipped"
+      }
+      component diagnostic "DiagnosticLoop" {
+        description "Returns: processed, fixed, escalated, retried"
+      }
+      component dependabot "DependabotMergeLoop" {
+        description "Returns: merged, skipped, failed"
+      }
+      component epic_sweeper "EpicSweeperLoop" {
+        description "Returns: checked, swept, total_open_epics"
+      }
+
+      // --- Complex loops (conditional shapes, delegation, mixed types) ---
+      component adr_reviewer "ADRReviewerLoop" {
+        description "Delegates to review_proposed_adrs() -> dict[str, int]"
+      }
+      component github_cache "GitHubCacheLoop" {
+        description "Delegates to poll() -> dict with optional keys per dataset"
+      }
+      component ci_monitor "CIMonitorLoop" {
+        description "Conditional: {status} | {status, issue_created} | {error}"
+      }
+      component memory_sync "MemorySyncLoop" {
+        description "Delegates to sync() -> MemorySyncResult TypedDict"
+      }
+      component pr_unsticker "PRUnstickerLoop" {
+        description "Delegates to unstick() -> UnstickResult TypedDict"
+      }
+      component code_grooming "CodeGroomingLoop" {
+        description "Conditional: {total_findings, filed, ...} | {filed, error}"
+      }
+      component repo_wiki "RepoWikiLoop" {
+        description "Returns: repos, total_entries, stale_entries, + 5 more"
+      }
+      component sentry "SentryLoop" {
+        description "Conditional: {skipped, reason} | {projects_polled, ...}"
+      }
+      component health_monitor "HealthMonitorLoop" {
+        description "Returns: 4 float rates + 3 int counters"
+      }
+      component report_issue "ReportIssueLoop" {
+        description "Conditional: success{processed,report_id,issue_number} | error variants"
+      }
+    }
+
+    container type_system "Type System" {
+      component work_cycle_result "WorkCycleResult" {
+        description "Type alias: Mapping[str, Any] — abstract return contract in base_background_loop.py"
+      }
+      component per_loop_typeddict "Per-Loop TypedDicts" {
+        description "18 new + 2 existing TypedDicts narrowing WorkCycleResult per loop"
+      }
+    }
+
+    container event_system "Event & State System" {
+      component build_details "_build_details()" {
+        description "Coerces WorkCycleResult|None -> dict[str,Any] for downstream"
+      }
+      component event_bus "EventBus" {
+        description "Publishes BACKGROUND_WORKER_STATUS with details: dict[str,object]"
+      }
+      component status_cb "StatusCallback" {
+        description "Protocol: (name, status, details: dict[str,Any]|None)"
+      }
+      component worker_state "WorkerState" {
+        description "state/_worker.py persists details as dict[str,Any]"
+      }
+      component dashboard "Dashboard API" {
+        description "BackgroundWorkerStatus Pydantic model, details: dict[str,Any]"
+      }
+    }
+  }
+
+  // Data flow: _do_work -> _build_details -> downstream
+  base_loop -> work_cycle_result "abstract return type"
+  per_loop_typeddict -> work_cycle_result "satisfies (TypedDict is Mapping)"
+
+  runs_gc -> per_loop_typeddict "RunsGCResult"
+  retrospective -> per_loop_typeddict "RetrospectiveResult"
+  adr_reviewer -> per_loop_typeddict "ADRReviewResult"
+  github_cache -> per_loop_typeddict "GitHubCacheResult"
+  ci_monitor -> per_loop_typeddict "CIMonitorResult"
+  memory_sync -> per_loop_typeddict "MemorySyncResult (existing)"
+  workspace_gc -> per_loop_typeddict "WorkspaceGCResult"
+  stale_issue_gc -> per_loop_typeddict "StaleIssueGCResult"
+  security_patch -> per_loop_typeddict "SecurityPatchResult"
+  epic_monitor -> per_loop_typeddict "EpicMonitorResult"
+  pr_unsticker -> per_loop_typeddict "UnstickResult (existing)"
+  code_grooming -> per_loop_typeddict "CodeGroomingResult"
+  stale_issue -> per_loop_typeddict "StaleIssueResult"
+  repo_wiki -> per_loop_typeddict "RepoWikiResult"
+  diagnostic -> per_loop_typeddict "DiagnosticResult"
+  sentry -> per_loop_typeddict "SentryResult"
+  dependabot -> per_loop_typeddict "DependabotMergeResult"
+  health_monitor -> per_loop_typeddict "HealthMonitorResult"
+  report_issue -> per_loop_typeddict "ReportIssueResult"
+  epic_sweeper -> per_loop_typeddict "EpicSweeperResult"
+
+  work_cycle_result -> build_details "WorkCycleResult | None"
+  build_details -> event_bus "dict[str, Any]"
+  build_details -> status_cb "dict[str, Any]"
+  status_cb -> worker_state "persists"
+  worker_state -> dashboard "reads"
+}
+
+views {
+  view data_flow of hydraflow {
+    title "WorkCycleResult Data Flow"
+    include *
+  }
+}
