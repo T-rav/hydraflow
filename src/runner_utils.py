@@ -74,6 +74,60 @@ def _route_prompt_to_cmd(cmd: list[str], prompt: str) -> tuple[list[str], int]:
     return cmd, asyncio.subprocess.PIPE
 
 
+def _post_stream_result(
+    *,
+    raw_lines: list[str],
+    accumulated_text: str,
+    result_text: str,
+    early_killed: bool,
+    returncode: int | None,
+    stderr_text: str,
+    parser: StreamParser,
+    config: StreamConfig,
+    logger: logging.Logger,
+) -> str:
+    """Validate post-stream state, check for errors, and assemble the transcript.
+
+    Raises :class:`AuthenticationRetryError` or :class:`CreditExhaustedError`
+    when the raw output indicates a retryable auth or billing failure
+    (skipped when *early_killed* is ``True``).
+    """
+    if not early_killed and returncode != 0:
+        logger.warning(
+            "Process exited with code %d: %s",
+            returncode,
+            stderr_text[:500],
+        )
+
+    # Skip auth/credit checks when early_killed — killing the process can cause
+    # in-flight API requests to fail with spurious errors.
+    raw_output = "\n".join(raw_lines)
+    if not early_killed and "authentication_failed" in raw_output:
+        raise AuthenticationRetryError(
+            "Agent CLI authentication failed — check "
+            "ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN"
+        )
+
+    combined = f"{stderr_text}\n{accumulated_text}"
+    if not early_killed and is_credit_exhaustion(combined):
+        resume_at = parse_credit_resume_time(combined)
+        raise CreditExhaustedError("API credit limit reached", resume_at=resume_at)
+
+    if config.usage_stats is not None:
+        config.usage_stats.update(parser.usage_snapshot)
+
+    transcript = result_text or accumulated_text.rstrip("\n") or "\n".join(raw_lines)
+
+    if not transcript.strip() and stderr_text:
+        logger.warning(
+            "Process produced empty stdout (rc=%d), stderr: %s",
+            returncode or 0,
+            stderr_text[:500],
+        )
+
+    return transcript
+
+
 async def _stream_and_collect(
     proc: asyncio.subprocess.Process,
     stderr_task: asyncio.Task[bytes],
@@ -137,40 +191,17 @@ async def _stream_and_collect(
     await proc.wait()
     stderr_text = stderr_bytes.decode(errors="replace").strip()
 
-    if not early_killed and proc.returncode != 0:
-        logger.warning(
-            "Process exited with code %d: %s",
-            proc.returncode,
-            stderr_text[:500],
-        )
-
-    # Skip auth/credit checks when early_killed — killing the process can cause
-    # in-flight API requests to fail with spurious errors.
-    raw_output = "\n".join(raw_lines)
-    if not early_killed and "authentication_failed" in raw_output:
-        raise AuthenticationRetryError(
-            "Agent CLI authentication failed — check "
-            "ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN"
-        )
-
-    combined = f"{stderr_text}\n{accumulated_text}"
-    if not early_killed and is_credit_exhaustion(combined):
-        resume_at = parse_credit_resume_time(combined)
-        raise CreditExhaustedError("API credit limit reached", resume_at=resume_at)
-
-    if config.usage_stats is not None:
-        config.usage_stats.update(parser.usage_snapshot)
-
-    transcript = result_text or accumulated_text.rstrip("\n") or "\n".join(raw_lines)
-
-    if not transcript.strip() and stderr_text:
-        logger.warning(
-            "Process produced empty stdout (rc=%d), stderr: %s",
-            proc.returncode or 0,
-            stderr_text[:500],
-        )
-
-    return transcript
+    return _post_stream_result(
+        raw_lines=raw_lines,
+        accumulated_text=accumulated_text,
+        result_text=result_text,
+        early_killed=early_killed,
+        returncode=proc.returncode,
+        stderr_text=stderr_text,
+        parser=parser,
+        config=config,
+        logger=logger,
+    )
 
 
 async def stream_claude_process(
