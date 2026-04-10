@@ -1,0 +1,57 @@
+// Issue #6316 — Replace Any-typed parameters with specific types
+// Code topology around the four target files
+
+specification {
+  element component
+  element module
+  element function
+}
+
+model {
+  component dashboard_routes {
+    module metrics_routes = "_metrics_routes.py" {
+      function load_local_metrics_cache = "_load_local_metrics_cache(target_config: Any -> HydraFlowConfig)"
+    }
+  }
+
+  component stream_parsing {
+    module stream_parser = "stream_parser.py" {
+      function map_usage_payload = "_map_usage_payload(obj: Any -> JsonValue)"
+      function iter_numeric_fields = "_iter_numeric_fields(obj: Any -> JsonValue)"
+    }
+  }
+
+  component whatsapp {
+    module whatsapp_bridge = "whatsapp_bridge.py" {
+      function parse_webhook = "parse_webhook(payload: dict -> dict[str, object])"
+    }
+  }
+
+  component security {
+    module security_patch_loop = "security_patch_loop.py" {
+      function is_fixable = "_is_fixable(alert: dict -> dict[str, object])"
+      function extract_info = "_extract_info(alert: dict -> dict[str, object])"
+    }
+  }
+
+  // Dependencies
+  component config_layer {
+    module config = "config.py — HydraFlowConfig(BaseModel)"
+    module metrics_manager = "metrics_manager.py — get_metrics_cache_dir(config: HydraFlowConfig)"
+  }
+
+  // Data flow: config -> metrics routes
+  config_layer.config -> dashboard_routes.metrics_routes.load_local_metrics_cache "passes HydraFlowConfig"
+  config_layer.metrics_manager -> dashboard_routes.metrics_routes.load_local_metrics_cache "called inside"
+
+  // Data flow: JSON events -> stream parser
+  stream_parsing.stream_parser.map_usage_payload -> stream_parsing.stream_parser.iter_numeric_fields "delegates to"
+  stream_parsing.stream_parser.iter_numeric_fields -> stream_parsing.stream_parser.iter_numeric_fields "recursive"
+}
+
+views {
+  view type_tightening of * {
+    title "Issue #6316 — Type tightening targets"
+    include *
+  }
+}
