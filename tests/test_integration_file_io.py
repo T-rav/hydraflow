@@ -60,7 +60,7 @@ class TestAtomicWrite:
         import os
         import unittest.mock
 
-        def failing_fdopen(fd: int, mode: str) -> None:  # type: ignore[return]
+        def failing_fdopen(fd: int, mode: str, **_kwargs: object) -> None:  # type: ignore[return]
             os.close(fd)
             raise BoomError("simulated write failure")
 
