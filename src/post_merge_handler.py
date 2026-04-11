@@ -164,6 +164,19 @@ class PostMergeHandler:
                     exc_info=True,
                 )
 
+    async def _run_ci_gate(self, ctx: MergeApprovalContext) -> bool:
+        """Run CI gate if configured; return True to proceed, False to abort."""
+        if self._config.max_ci_fix_attempts > 0:
+            return await ctx.ci_gate_fn(
+                ctx.pr,
+                ctx.issue,
+                self._config.workspace_path_for_issue(ctx.pr.issue_number),
+                ctx.result,
+                ctx.worker_id,
+                code_scanning_alerts=ctx.code_scanning_alerts,
+            )
+        return True
+
     async def handle_approved(
         self,
         ctx: MergeApprovalContext,
@@ -178,10 +191,8 @@ class PostMergeHandler:
         result = ctx.result
         diff = ctx.diff
         worker_id = ctx.worker_id
-        ci_gate_fn = ctx.ci_gate_fn
         escalate_fn = ctx.escalate_fn
         publish_fn = ctx.publish_fn
-        code_scanning_alerts = ctx.code_scanning_alerts
         visual_gate_fn = ctx.visual_gate_fn
         visual_decision = ctx.visual_decision
         merge_conflict_fix_fn = ctx.merge_conflict_fix_fn
@@ -200,17 +211,7 @@ class PostMergeHandler:
             )
             return
 
-        should_merge = True
-        if self._config.max_ci_fix_attempts > 0:
-            should_merge = await ci_gate_fn(
-                pr,
-                issue,
-                self._config.workspace_path_for_issue(pr.issue_number),
-                result,
-                worker_id,
-                code_scanning_alerts=code_scanning_alerts,
-            )
-        if not should_merge:
+        if not await self._run_ci_gate(ctx):
             return
 
         # Visual validation gate
