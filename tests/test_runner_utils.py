@@ -16,7 +16,12 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from events import EventType
-from runner_utils import stream_claude_process, terminate_processes
+from runner_utils import (
+    StreamConfig,
+    _post_stream_result,
+    stream_claude_process,
+    terminate_processes,
+)
 from tests.helpers import make_streaming_proc
 
 # ---------------------------------------------------------------------------
@@ -25,7 +30,23 @@ from tests.helpers import make_streaming_proc
 
 
 def _default_kwargs(event_bus, **overrides):
-    """Build default kwargs for stream_claude_process."""
+    """Build default kwargs for stream_claude_process.
+
+    Keys that belong on :class:`StreamConfig` (``on_output``, ``timeout``,
+    ``runner``, ``usage_stats``, ``gh_token``, ``trace_collector``) are
+    extracted and bundled into a ``config`` kwarg automatically.
+    """
+    _CONFIG_KEYS = {
+        "on_output",
+        "timeout",
+        "runner",
+        "usage_stats",
+        "gh_token",
+        "trace_collector",
+    }
+    config_overrides = {
+        k: overrides.pop(k) for k in list(overrides) if k in _CONFIG_KEYS
+    }
     defaults = {
         "cmd": ["claude", "-p"],
         "prompt": "test prompt",
@@ -36,6 +57,8 @@ def _default_kwargs(event_bus, **overrides):
         "logger": logging.getLogger("test"),
     }
     defaults.update(overrides)
+    if config_overrides:
+        defaults["config"] = StreamConfig(**config_overrides)
     return defaults
 
 
@@ -492,7 +515,9 @@ class TestStreamClaudeProcessLifecycle:
             patch("asyncio.create_subprocess_exec", mock_create),
             pytest.raises(RuntimeError, match="timed out"),
         ):
-            await stream_claude_process(**_default_kwargs(event_bus), timeout=0.01)
+            await stream_claude_process(
+                **_default_kwargs(event_bus), config=StreamConfig(timeout=0.01)
+            )
 
         # The finally block in stream_claude_process already cancelled and awaited
         # stderr_task before raising, so no sleep(0) is needed here.
@@ -538,7 +563,9 @@ class TestStreamClaudeProcessLifecycle:
             patch("asyncio.create_subprocess_exec", mock_create),
             pytest.raises(RuntimeError, match="timed out") as exc_info,
         ):
-            await stream_claude_process(**_default_kwargs(event_bus), timeout=0.01)
+            await stream_claude_process(
+                **_default_kwargs(event_bus), config=StreamConfig(timeout=0.01)
+            )
 
         assert exc_info.value.__cause__ is not None
         assert isinstance(exc_info.value.__cause__, TimeoutError)
@@ -764,7 +791,7 @@ class TestStreamClaudeProcessTimeout:
         ):
             await stream_claude_process(
                 **_default_kwargs(event_bus, active_procs=active_procs),
-                timeout=0.01,
+                config=StreamConfig(timeout=0.01),
             )
 
         mock_proc.kill.assert_called_once()
@@ -802,7 +829,7 @@ class TestStreamClaudeProcessTimeout:
         ):
             await stream_claude_process(
                 **_default_kwargs(event_bus, active_procs=active_procs),
-                timeout=0.01,
+                config=StreamConfig(timeout=0.01),
             )
 
         assert len(active_procs) == 0
@@ -830,7 +857,8 @@ class TestStreamClaudeProcessGhToken:
 
         with patch("asyncio.create_subprocess_exec", side_effect=capture_env):
             await stream_claude_process(
-                **_default_kwargs(event_bus), gh_token="ghp_bot_token"
+                **_default_kwargs(event_bus),
+                config=StreamConfig(gh_token="ghp_bot_token"),
             )
 
         assert captured_env.get("GH_TOKEN") == "ghp_bot_token"
@@ -847,7 +875,9 @@ class TestStreamClaudeProcessGhToken:
             return await original_create(*args, **kwargs)
 
         with patch("asyncio.create_subprocess_exec", side_effect=capture_env):
-            await stream_claude_process(**_default_kwargs(event_bus), gh_token="")
+            await stream_claude_process(
+                **_default_kwargs(event_bus), config=StreamConfig(gh_token="")
+            )
 
         # GH_TOKEN is only set if it was already in os.environ (inherited),
         # not explicitly injected by make_clean_env.
@@ -858,3 +888,201 @@ class TestStreamClaudeProcessGhToken:
         if "GH_TOKEN" in captured_env:
             # If present, it was inherited from os.environ, not injected
             assert captured_env["GH_TOKEN"] == os.environ.get("GH_TOKEN", "")
+
+
+# ---------------------------------------------------------------------------
+# StreamConfig — dataclass for rarely-varying options
+# ---------------------------------------------------------------------------
+
+
+class TestStreamConfig:
+    """Tests for StreamConfig dataclass."""
+
+    def test_defaults(self) -> None:
+        """All optional fields default to sensible values."""
+        cfg = StreamConfig()
+        assert cfg.on_output is None
+        assert cfg.timeout == 3600.0
+        assert cfg.runner is None
+        assert cfg.usage_stats is None
+        assert cfg.gh_token == ""
+        assert cfg.trace_collector is None
+
+    def test_custom_values(self) -> None:
+        """StreamConfig accepts overrides for every field."""
+        cb = lambda _: False  # noqa: E731
+        stats: dict[str, object] = {}
+        cfg = StreamConfig(
+            on_output=cb,
+            timeout=120.0,
+            usage_stats=stats,
+            gh_token="ghp_test",
+        )
+        assert cfg.on_output is cb
+        assert cfg.timeout == 120.0
+        assert cfg.usage_stats is stats
+        assert cfg.gh_token == "ghp_test"
+
+
+# ---------------------------------------------------------------------------
+# _post_stream_result — post-loop validation and transcript assembly
+# ---------------------------------------------------------------------------
+
+
+class TestPostStreamResult:
+    """Tests for _post_stream_result extracted helper."""
+
+    def _make_parser_with_snapshot(
+        self, snapshot: dict[str, object] | None = None
+    ) -> MagicMock:
+        parser = MagicMock()
+        parser.usage_snapshot = snapshot or {}
+        return parser
+
+    def test_returns_result_text_when_available(self) -> None:
+        """result_text takes priority over accumulated and raw lines."""
+        transcript = _post_stream_result(
+            raw_lines=["raw"],
+            accumulated_text="accumulated",
+            result_text="final result",
+            early_killed=False,
+            returncode=0,
+            stderr_text="",
+            parser=self._make_parser_with_snapshot(),
+            config=StreamConfig(),
+            logger=logging.getLogger("test"),
+        )
+        assert transcript == "final result"
+
+    def test_falls_back_to_accumulated_text(self) -> None:
+        """When no result_text, accumulated display text is used."""
+        transcript = _post_stream_result(
+            raw_lines=["raw"],
+            accumulated_text="display line\n",
+            result_text="",
+            early_killed=False,
+            returncode=0,
+            stderr_text="",
+            parser=self._make_parser_with_snapshot(),
+            config=StreamConfig(),
+            logger=logging.getLogger("test"),
+        )
+        assert transcript == "display line"
+
+    def test_falls_back_to_raw_lines(self) -> None:
+        """When no result_text and no accumulated text, raw lines are joined."""
+        transcript = _post_stream_result(
+            raw_lines=["line1", "line2"],
+            accumulated_text="",
+            result_text="",
+            early_killed=False,
+            returncode=0,
+            stderr_text="",
+            parser=self._make_parser_with_snapshot(),
+            config=StreamConfig(),
+            logger=logging.getLogger("test"),
+        )
+        assert transcript == "line1\nline2"
+
+    def test_raises_auth_error_when_auth_failed(self) -> None:
+        """authentication_failed in raw output raises AuthenticationRetryError."""
+        from runner_utils import AuthenticationRetryError
+
+        with pytest.raises(AuthenticationRetryError):
+            _post_stream_result(
+                raw_lines=['{"error": "authentication_failed"}'],
+                accumulated_text="",
+                result_text="",
+                early_killed=False,
+                returncode=1,
+                stderr_text="",
+                parser=self._make_parser_with_snapshot(),
+                config=StreamConfig(),
+                logger=logging.getLogger("test"),
+            )
+
+    def test_skips_auth_check_when_early_killed(self) -> None:
+        """Auth check is skipped when early_killed=True."""
+        transcript = _post_stream_result(
+            raw_lines=['{"error": "authentication_failed"}'],
+            accumulated_text="good output\n",
+            result_text="",
+            early_killed=True,
+            returncode=0,
+            stderr_text="",
+            parser=self._make_parser_with_snapshot(),
+            config=StreamConfig(),
+            logger=logging.getLogger("test"),
+        )
+        assert "good output" in transcript
+
+    def test_raises_credit_error_when_exhausted(self) -> None:
+        """Credit exhaustion in combined output raises CreditExhaustedError."""
+        from subprocess_util import CreditExhaustedError
+
+        with pytest.raises(CreditExhaustedError):
+            _post_stream_result(
+                raw_lines=["output"],
+                accumulated_text="Your credit balance is too low\n",
+                result_text="",
+                early_killed=False,
+                returncode=0,
+                stderr_text="",
+                parser=self._make_parser_with_snapshot(),
+                config=StreamConfig(),
+                logger=logging.getLogger("test"),
+            )
+
+    def test_skips_credit_check_when_early_killed(self) -> None:
+        """Credit check is skipped when early_killed=True."""
+        transcript = _post_stream_result(
+            raw_lines=["output"],
+            accumulated_text="Your credit balance is too low\n",
+            result_text="",
+            early_killed=True,
+            returncode=0,
+            stderr_text="",
+            parser=self._make_parser_with_snapshot(),
+            config=StreamConfig(),
+            logger=logging.getLogger("test"),
+        )
+        assert "credit balance" in transcript
+
+    def test_updates_usage_stats(self) -> None:
+        """usage_stats dict is updated from parser snapshot when provided."""
+        stats: dict[str, object] = {}
+        snapshot = {"input_tokens": 50, "usage_status": "available"}
+        _post_stream_result(
+            raw_lines=["line"],
+            accumulated_text="line\n",
+            result_text="",
+            early_killed=False,
+            returncode=0,
+            stderr_text="",
+            parser=self._make_parser_with_snapshot(snapshot),
+            config=StreamConfig(usage_stats=stats),
+            logger=logging.getLogger("test"),
+        )
+        assert stats["input_tokens"] == 50
+        assert stats["usage_status"] == "available"
+
+    def test_logs_warning_on_nonzero_exit(self) -> None:
+        """Non-zero exit code logs a warning."""
+        mock_logger = MagicMock()
+        _post_stream_result(
+            raw_lines=["output"],
+            accumulated_text="output\n",
+            result_text="",
+            early_killed=False,
+            returncode=1,
+            stderr_text="error details",
+            parser=self._make_parser_with_snapshot(),
+            config=StreamConfig(),
+            logger=mock_logger,
+        )
+        mock_logger.warning.assert_called_once()
+        assert (
+            "code 1"
+            in mock_logger.warning.call_args[0][0]
+            % mock_logger.warning.call_args[0][1:]
+        )

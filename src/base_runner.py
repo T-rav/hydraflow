@@ -17,6 +17,7 @@ from models import LoopResult, TranscriptEventData
 from prompt_telemetry import PromptTelemetry, parse_command_tool_model
 from runner_utils import (
     AuthenticationRetryError,
+    StreamConfig,
     stream_claude_process,
     terminate_processes,
 )
@@ -171,12 +172,14 @@ class BaseRunner:
                         event_bus=self._bus,
                         event_data=event_data,
                         logger=self._log,
-                        on_output=on_output,
-                        timeout=self._config.agent_timeout,
-                        runner=self._runner,
-                        usage_stats=usage_stats,
-                        gh_token=self._credentials.gh_token,
-                        trace_collector=trace_collector,
+                        config=StreamConfig(
+                            on_output=on_output,
+                            timeout=self._config.agent_timeout,
+                            runner=self._runner,
+                            usage_stats=usage_stats,
+                            gh_token=self._credentials.gh_token,
+                            trace_collector=trace_collector,
+                        ),
                     )
                     succeeded = True
                     if trace_collector is not None:

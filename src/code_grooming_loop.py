@@ -11,7 +11,7 @@ from agent_cli import build_agent_command
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import Credentials, HydraFlowConfig
 from dedup_store import DedupStore
-from runner_utils import stream_claude_process
+from runner_utils import StreamConfig, stream_claude_process
 
 if TYPE_CHECKING:
     from ports import PRPort
@@ -76,7 +76,7 @@ class CodeGroomingLoop(BaseBackgroundLoop):
             event_bus=self._bus,
             event_data={"source": "code_grooming"},
             logger=logger,
-            gh_token=self._credentials.gh_token,
+            config=StreamConfig(gh_token=self._credentials.gh_token),
         )
 
         return self._parse_findings(transcript)

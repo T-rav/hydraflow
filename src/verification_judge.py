@@ -22,7 +22,7 @@ from models import (
     VerificationJudgePayload,
 )
 from precheck import run_precheck_context
-from runner_utils import stream_claude_process, terminate_processes
+from runner_utils import StreamConfig, stream_claude_process, terminate_processes
 
 if TYPE_CHECKING:
     from execution import SubprocessRunner
@@ -559,9 +559,11 @@ Diff excerpt:
             event_bus=self._bus,
             event_data={"issue": issue_number, "source": "verification_judge"},
             logger=logger,
-            timeout=self._config.agent_timeout,
-            runner=self._runner,
-            gh_token=self._credentials.gh_token,
+            config=StreamConfig(
+                timeout=self._config.agent_timeout,
+                runner=self._runner,
+                gh_token=self._credentials.gh_token,
+            ),
         )
 
     def terminate(self) -> None:
