@@ -18,8 +18,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hydraflow.code_grooming_loop")
 
-# Severities that warrant filing an issue.
-_ACTIONABLE_SEVERITIES = frozenset({"critical", "high"})
+# Severities that warrant filing an issue. P0-only by policy: "high" findings
+# are deliberately ignored — code is fluid, over-investing in non-critical
+# cleanup crowds the factory out of work that actually ships.
+_ACTIONABLE_SEVERITIES = frozenset({"critical"})
 
 
 class CodeGroomingLoop(BaseBackgroundLoop):
