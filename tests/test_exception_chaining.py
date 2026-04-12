@@ -396,17 +396,14 @@ class TestMergeConflictResolverExceptionChaining:
         assert result.success is False
 
     @pytest.mark.asyncio
-    async def test_summarize_narrows_to_runtime_os_error(self) -> None:
-        """_maybe_summarize_conflict should only catch RuntimeError/OSError."""
+    async def test_maybe_summarize_conflict_is_noop(self) -> None:
+        """_maybe_summarize_conflict is a retained no-op — transcript summarization was removed."""
         from merge_conflict_resolver import MergeConflictResolver
 
         resolver = MergeConflictResolver.__new__(MergeConflictResolver)
-        resolver._summarizer = AsyncMock()
-        resolver._summarizer.summarize_and_publish.side_effect = TypeError(
-            "bug in summarizer"
-        )
-        with pytest.raises(TypeError, match="bug in summarizer"):
-            await resolver._maybe_summarize_conflict("transcript", 1, 2)
+        # Should return cleanly even without any wiring — proves the method is a no-op
+        result = await resolver._maybe_summarize_conflict("transcript", 1, 2)
+        assert result is None
 
 
 # ---------------------------------------------------------------------------

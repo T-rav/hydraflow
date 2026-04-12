@@ -1388,4 +1388,4 @@ class TestExecuteGhToken:
         ) as mock_stream:
             await judge._execute(["claude", "-p"], "prompt", 42)
 
-        assert mock_stream.call_args[1]["gh_token"] == "ghp_bot_judge"
+        assert mock_stream.call_args[1]["config"].gh_token == "ghp_bot_judge"

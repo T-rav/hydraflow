@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 import pytest  # noqa: E402
 
 from events import EventBus  # noqa: E402
-from runner_utils import stream_claude_process  # noqa: E402
+from runner_utils import StreamConfig, stream_claude_process  # noqa: E402
 from trace_collector import TraceCollector  # noqa: E402
 
 
@@ -87,8 +87,7 @@ async def test_trace_collector_receives_each_line(tmp_path: Path):
         event_bus=bus,
         event_data={"issue": 42, "source": "implementer"},
         logger=logging.getLogger("test"),
-        runner=runner,
-        trace_collector=collector,
+        config=StreamConfig(runner=runner, trace_collector=collector),
     )
 
     # Collector should have processed the assistant event
@@ -118,5 +117,5 @@ async def test_no_collector_does_not_break_existing_flow(tmp_path: Path):
         event_bus=bus,
         event_data={"issue": 42, "source": "implementer"},
         logger=logging.getLogger("test"),
-        runner=runner,
+        config=StreamConfig(runner=runner),
     )

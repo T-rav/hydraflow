@@ -61,9 +61,9 @@ async def test_execute_passes_collector_when_ctx_set(tmp_path: Path):
             event_data={"issue": 42, "source": "implementer"},
         )
 
-    assert captured_kwargs.get("trace_collector") is not None
+    collector = captured_kwargs["config"].trace_collector
+    assert collector is not None
     # The collector instance should be built from the context values
-    collector = captured_kwargs["trace_collector"]
     assert collector._issue_number == 42
     assert collector._phase == "implement"
     assert collector._run_id == 1
@@ -88,7 +88,7 @@ async def test_execute_passes_no_collector_when_ctx_unset(tmp_path: Path):
             event_data={"issue": 42, "source": "implementer"},
         )
 
-    assert captured_kwargs.get("trace_collector") is None
+    assert captured_kwargs["config"].trace_collector is None
 
 
 @pytest.mark.asyncio

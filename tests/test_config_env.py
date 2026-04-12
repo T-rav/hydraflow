@@ -123,6 +123,7 @@ class TestEnvVarOverrideTable:
     # Generic tests can't use arbitrary strings for these fields.
     _EXPLICIT_VALUES: dict[str, str] = {
         "execution_mode": "docker",
+        "security_patch_severity_threshold": "critical",
     }
 
     @pytest.mark.parametrize(

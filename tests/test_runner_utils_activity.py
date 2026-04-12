@@ -7,6 +7,7 @@ import json
 import pytest
 
 from events import EventBus, EventType, HydraFlowEvent
+from runner_utils import StreamConfig
 
 
 @pytest.mark.asyncio
@@ -70,7 +71,7 @@ async def test_activity_event_emitted_for_tool_use(tmp_path):
         event_bus=bus,
         event_data={"issue": 42, "source": "implementer"},
         logger=__import__("logging").getLogger("test"),
-        runner=runner_mock,
+        config=StreamConfig(runner=runner_mock),
     )
 
     activity_events = [e for e in collected if e.type == EventType.AGENT_ACTIVITY]
@@ -137,7 +138,7 @@ async def test_no_activity_event_for_session_lines(tmp_path):
         event_bus=bus,
         event_data={"issue": 99, "source": "planner"},
         logger=__import__("logging").getLogger("test"),
-        runner=runner_mock,
+        config=StreamConfig(runner=runner_mock),
     )
 
     activity_events = [e for e in collected if e.type == EventType.AGENT_ACTIVITY]
@@ -216,7 +217,7 @@ async def test_codex_backend_detection(tmp_path):
         event_bus=bus,
         event_data={"issue": 10, "source": "implementer"},
         logger=__import__("logging").getLogger("test"),
-        runner=runner,
+        config=StreamConfig(runner=runner),
     )
 
     activity_events = [e for e in collected if e.type == EventType.AGENT_ACTIVITY]
@@ -267,7 +268,7 @@ async def test_activity_parser_exception_does_not_crash_stream(tmp_path):
             event_bus=bus,
             event_data={"issue": 1, "source": "implementer"},
             logger=__import__("logging").getLogger("test"),
-            runner=runner,
+            config=StreamConfig(runner=runner),
         )
 
     # TRANSCRIPT_LINE should still be emitted even if activity parsing exploded
