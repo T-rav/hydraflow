@@ -105,7 +105,7 @@ class TestCodeGroomingLoopWork:
     async def test_duplicate_finding_skipped(self, tmp_path: Path) -> None:
         finding = {
             "id": "dead-code-auth-module",
-            "severity": "high",
+            "severity": "critical",
             "title": "Dead code in auth module",
             "description": "Unused function",
         }
@@ -157,3 +157,21 @@ class TestCodeGroomingLoopWork:
         assert result is not None
         assert result["filed"] == 0
         assert result["skipped_severity"] == 1
+
+    @pytest.mark.asyncio
+    async def test_high_severity_finding_skipped(self, tmp_path: Path) -> None:
+        finding = {
+            "id": "refactor-opportunity",
+            "severity": "high",
+            "title": "Duplicate logic across helpers",
+            "description": "Two helpers share near-identical branches",
+        }
+        loop, pm, _stop = _make_loop(tmp_path)
+        with patch.object(
+            loop, "_run_audit", new_callable=AsyncMock, return_value=[finding]
+        ):
+            result = await loop._do_work()
+        assert result is not None
+        assert result["filed"] == 0
+        assert result["skipped_severity"] == 1
+        pm.create_issue.assert_not_called()
