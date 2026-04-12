@@ -89,7 +89,7 @@ class TestSubprocessCounter:
         captured_indices: list[int] = []
 
         async def fake_stream(**kwargs):
-            collector = kwargs["trace_collector"]
+            collector = kwargs["config"].trace_collector
             captured_indices.append(collector._subprocess_idx)
             return "transcript"
 
@@ -113,7 +113,7 @@ class TestSubprocessCounter:
         # No context set
 
         async def fake_stream(**kwargs):
-            assert kwargs["trace_collector"] is None
+            assert kwargs["config"].trace_collector is None
             return "transcript"
 
         with patch("base_runner.stream_claude_process", side_effect=fake_stream):

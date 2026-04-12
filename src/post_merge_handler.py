@@ -164,6 +164,30 @@ class PostMergeHandler:
                     exc_info=True,
                 )
 
+    async def _run_visual_gate(self, ctx: MergeApprovalContext) -> bool:
+        """Run the visual validation gate; return True if merge may proceed."""
+        if not self._config.visual_gate_enabled:
+            return True
+        if ctx.visual_gate_fn is None:
+            logger.warning(
+                "PR #%d: visual_gate_enabled but no visual_gate_fn provided — blocking merge",
+                ctx.pr.number,
+            )
+            await self._bus.publish(
+                HydraFlowEvent(
+                    type=EventType.VISUAL_GATE,
+                    data=VisualGatePayload(
+                        pr=ctx.pr.number,
+                        issue=ctx.issue.id,
+                        worker=ctx.worker_id,
+                        verdict="blocked",
+                        reason="no visual_gate_fn provided to handle_approved",
+                    ),
+                )
+            )
+            return False
+        return await ctx.visual_gate_fn(ctx.pr, ctx.issue, ctx.result, ctx.worker_id)
+
     async def _run_ci_gate(self, ctx: MergeApprovalContext) -> bool:
         """Run CI gate if configured; return True to proceed, False to abort."""
         if self._config.max_ci_fix_attempts > 0:
@@ -193,7 +217,6 @@ class PostMergeHandler:
         worker_id = ctx.worker_id
         escalate_fn = ctx.escalate_fn
         publish_fn = ctx.publish_fn
-        visual_gate_fn = ctx.visual_gate_fn
         visual_decision = ctx.visual_decision
         merge_conflict_fix_fn = ctx.merge_conflict_fix_fn
 
@@ -214,30 +237,8 @@ class PostMergeHandler:
         if not await self._run_ci_gate(ctx):
             return
 
-        # Visual validation gate
-        if self._config.visual_gate_enabled:
-            if visual_gate_fn is None:
-                logger.warning(
-                    "PR #%d: visual_gate_enabled but no visual_gate_fn provided — blocking merge",
-                    pr.number,
-                )
-                await self._bus.publish(
-                    HydraFlowEvent(
-                        type=EventType.VISUAL_GATE,
-                        data=VisualGatePayload(
-                            pr=pr.number,
-                            issue=issue.id,
-                            worker=worker_id,
-                            verdict="blocked",
-                            reason="no visual_gate_fn provided to handle_approved",
-                        ),
-                    )
-                )
-                return
-            else:
-                visual_ok = await visual_gate_fn(pr, issue, result, worker_id)
-                if not visual_ok:
-                    return
+        if not await self._run_visual_gate(ctx):
+            return
 
         # Normalize PR title to canonical "Fixes #N: title" before merge
         # so the merge commit and event history show a consistent format.

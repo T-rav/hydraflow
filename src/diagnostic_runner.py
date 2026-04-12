@@ -148,6 +148,11 @@ class DiagnosticRunner(BaseRunner):
                 issue_number,
                 exc_info=True,
             )
+            logger.debug(
+                "raw parsed diagnosis dict for issue #%d: %s",
+                issue_number,
+                parsed,
+            )
             return DiagnosisResult(
                 root_cause=str(
                     parsed.get("root_cause", transcript[:500] if transcript else "")

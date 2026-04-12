@@ -167,7 +167,7 @@ class TestMemorySearchEndpoint:
     async def test_search_with_results(self, router_with_hindsight):
         router, mock_hs, _ = router_with_hindsight
         mock_hs.recall_banks.return_value = {
-            Bank.LEARNINGS: [
+            Bank.TRIBAL: [
                 HindsightMemory(
                     text="CI timeout fix: increase timeout to 300s",
                     content="CI timeout fix",
@@ -200,7 +200,7 @@ class TestMemorySearchEndpoint:
     async def test_search_with_bank_filter(self, router_with_hindsight):
         router, mock_hs, _ = router_with_hindsight
         mock_hs.recall_banks.return_value = {
-            Bank.LEARNINGS: [
+            Bank.TRIBAL: [
                 HindsightMemory(
                     text="something", content="something", relevance_score=0.5
                 ),
@@ -208,14 +208,14 @@ class TestMemorySearchEndpoint:
         }
 
         handler = find_endpoint(router, "/api/memory/search", "GET")
-        resp = await handler(q="test", bank=str(Bank.LEARNINGS), limit=10)
+        resp = await handler(q="test", bank=str(Bank.TRIBAL), limit=10)
 
         payload = json.loads(resp.body)
-        assert payload["bank_filter"] == str(Bank.LEARNINGS)
+        assert payload["bank_filter"] == str(Bank.TRIBAL)
         # recall_banks should have been called with specific bank
         mock_hs.recall_banks.assert_called_once()
         call_args = mock_hs.recall_banks.call_args
-        assert call_args[0][1] == [Bank.LEARNINGS]
+        assert call_args[0][1] == [Bank.TRIBAL]
 
     @pytest.mark.asyncio
     async def test_search_invalid_bank_returns_empty(self, router_with_hindsight):
@@ -280,7 +280,7 @@ class TestMemoryForIssueEndpoint:
     async def test_returns_context_for_issue(self, router_with_hindsight):
         router, mock_hs, _ = router_with_hindsight
         mock_hs.recall_banks.return_value = {
-            Bank.LEARNINGS: [
+            Bank.TRIBAL: [
                 HindsightMemory(
                     text="Relevant learning",
                     content="Relevant learning",
@@ -376,7 +376,7 @@ class TestMemoryForHITLEndpoint:
         call_args = mock_hs.recall_banks.call_args
         banks_arg = call_args[0][1]
         assert Bank.TROUBLESHOOTING in banks_arg
-        assert Bank.LEARNINGS in banks_arg
+        assert Bank.TRIBAL in banks_arg
         assert Bank.REVIEW_INSIGHTS in banks_arg
 
     @pytest.mark.asyncio
@@ -444,10 +444,10 @@ class TestRecallBanks:
 
         results = await client.recall_banks(
             "test",
-            [Bank.LEARNINGS, Bank.TROUBLESHOOTING],
+            [Bank.TRIBAL, Bank.TROUBLESHOOTING],
         )
         assert len(results) == 2
-        assert Bank.LEARNINGS in results
+        assert Bank.TRIBAL in results
         assert Bank.TROUBLESHOOTING in results
         assert client.recall.call_count == 2
         await client.close()
@@ -464,7 +464,7 @@ class TestRecallBanks:
         async def mock_recall(bank, query, *, limit=10):
             nonlocal call_count
             call_count += 1
-            if bank == Bank.LEARNINGS:
+            if bank == Bank.TRIBAL:
                 raise Exception("timeout")
             return [HindsightMemory(text="ok", content="ok", relevance_score=0.5)]
 
@@ -472,8 +472,8 @@ class TestRecallBanks:
 
         results = await client.recall_banks(
             "test",
-            [Bank.LEARNINGS, Bank.TROUBLESHOOTING],
+            [Bank.TRIBAL, Bank.TROUBLESHOOTING],
         )
-        assert results[Bank.LEARNINGS] == []
+        assert results[Bank.TRIBAL] == []
         assert len(results[Bank.TROUBLESHOOTING]) == 1
         await client.close()

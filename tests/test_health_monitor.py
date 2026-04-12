@@ -1326,12 +1326,15 @@ class TestRunLogIngestionCycle:
 
     @pytest.mark.asyncio
     async def test_returns_none_on_import_error(self, tmp_path: Path) -> None:
-        """Returns None when log_ingestion module is not available."""
+        """Returns None when log_ingestion import fails mid-cycle."""
         loop = _make_loop(tmp_path)
-        # Even with a log dir, if log_ingestion is missing, returns None
         log_dir = loop._config.data_root / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
-        result = await loop._run_log_ingestion_cycle()
+        # Force the function-local import to fail by patching the source module.
+        with patch(
+            "log_ingestion.parse_log_files", side_effect=ImportError("simulated")
+        ):
+            result = await loop._run_log_ingestion_cycle()
         assert result is None
 
     @pytest.mark.asyncio
@@ -1348,24 +1351,15 @@ class TestRunLogIngestionCycle:
         mock_result.escalated = 1
 
         with (
-            patch("health_monitor_loop.parse_log_files", create=True, return_value=[]),
+            patch("log_ingestion.parse_log_files", return_value=[]),
+            patch("log_ingestion.detect_log_patterns", return_value=[]),
+            patch("log_ingestion.load_known_patterns", return_value={}),
             patch(
-                "health_monitor_loop.detect_log_patterns", create=True, return_value=[]
-            ),
-            patch(
-                "health_monitor_loop.load_known_patterns", create=True, return_value={}
-            ),
-            patch(
-                "health_monitor_loop.file_log_patterns",
-                create=True,
+                "log_ingestion.file_log_patterns",
                 new_callable=AsyncMock,
                 return_value=mock_result,
             ),
-            patch(
-                "health_monitor_loop.save_known_patterns",
-                create=True,
-                return_value=None,
-            ),
+            patch("log_ingestion.save_known_patterns", return_value=None),
         ):
             result = await loop._run_log_ingestion_cycle()
 
@@ -1394,16 +1388,8 @@ class TestRunHarnessAutoFileCycle:
         mock_store_cls.return_value = mock_store_instance
 
         with (
-            patch(
-                "health_monitor_loop.HarnessInsightStore",
-                create=True,
-                new=mock_store_cls,
-            ),
-            patch(
-                "health_monitor_loop.auto_file_suggestions",
-                create=True,
-                new=mock_auto_file,
-            ),
+            patch("harness_insights.HarnessInsightStore", new=mock_store_cls),
+            patch("harness_insights.auto_file_suggestions", new=mock_auto_file),
         ):
             await loop._run_harness_auto_file_cycle()
 
@@ -1491,16 +1477,8 @@ class TestRunCrossProjectPatternCycle:
         mock_detect = MagicMock(return_value=[{"pattern": "timeout"}])
 
         with (
-            patch(
-                "health_monitor_loop.detect_cross_project_log_patterns",
-                create=True,
-                new=mock_detect,
-            ),
-            patch(
-                "health_monitor_loop.load_known_patterns",
-                create=True,
-                return_value={"p1": "v1"},
-            ),
+            patch("log_ingestion.detect_cross_project_log_patterns", new=mock_detect),
+            patch("log_ingestion.load_known_patterns", return_value={"p1": "v1"}),
         ):
             loop._run_cross_project_pattern_cycle()
 

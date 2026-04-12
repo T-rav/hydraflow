@@ -994,23 +994,6 @@ class TestMemoryModels:
         assert issue.created_at == "2024-01-01"
 
 
-# --- Config: memory_compaction_model tests ---
-
-
-class TestMemoryCompactionModelConfig:
-    """Tests for the memory_compaction_model config field."""
-
-    def test_default_is_haiku(self) -> None:
-        from config import HydraFlowConfig
-
-        config = HydraFlowConfig(repo="test/repo")
-        assert config.memory_compaction_model == "haiku"
-
-    def test_custom_model(self) -> None:
-        config = ConfigFactory.create(memory_compaction_model="sonnet")
-        assert config.memory_compaction_model == "sonnet"
-
-
 # --- PR Manager tests ---
 
 
