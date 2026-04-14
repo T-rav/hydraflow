@@ -54,5 +54,5 @@ class IssueBuilder:
         )
         fake_issue = world.github.issue(number)
         if hasattr(fake_issue, "author"):
-            fake_issue.author = self._author
+            setattr(fake_issue, "author", self._author)  # noqa: B010
         return fake_issue
