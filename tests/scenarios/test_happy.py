@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from tests.conftest import PlanResultFactory
+from tests.scenarios.builders import IssueBuilder, RepoStateBuilder
 
 pytestmark = pytest.mark.scenario
 
@@ -13,9 +14,10 @@ class TestH1SingleIssueEndToEnd:
     """H1: Single issue flows find → triage → plan → implement → review → done."""
 
     async def test_single_issue_lifecycle(self, mock_world):
-        world = mock_world.add_issue(
-            1, "Add login button", "Add a login button to the homepage"
-        )
+        world = mock_world
+        IssueBuilder().numbered(1).titled("Add login button").bodied(
+            "Add a login button to the homepage"
+        ).at(world)
         result = await world.run_pipeline()
 
         outcome = result.issue(1)
@@ -31,10 +33,26 @@ class TestH2MultiIssueConcurrentBatch:
     """H2: Multiple issues processed without cross-contamination."""
 
     async def test_three_issues_all_complete(self, mock_world):
-        world = (
-            mock_world.add_issue(1, "Bug fix A", "Fix the A module")
-            .add_issue(2, "Bug fix B", "Fix the B module")
-            .add_issue(3, "Bug fix C", "Fix the C module")
+        world = mock_world
+        await (
+            RepoStateBuilder()
+            .with_issues(
+                [
+                    IssueBuilder()
+                    .numbered(1)
+                    .titled("Bug fix A")
+                    .bodied("Fix the A module"),
+                    IssueBuilder()
+                    .numbered(2)
+                    .titled("Bug fix B")
+                    .bodied("Fix the B module"),
+                    IssueBuilder()
+                    .numbered(3)
+                    .titled("Bug fix C")
+                    .bodied("Fix the C module"),
+                ]
+            )
+            .at(world)
         )
         result = await world.run_pipeline()
 
@@ -44,8 +62,16 @@ class TestH2MultiIssueConcurrentBatch:
             assert outcome.merged is True, f"Issue {num} PR not merged"
 
     async def test_no_cross_contamination(self, mock_world):
-        world = mock_world.add_issue(10, "Feature X", "Build X").add_issue(
-            20, "Feature Y", "Build Y"
+        world = mock_world
+        await (
+            RepoStateBuilder()
+            .with_issues(
+                [
+                    IssueBuilder().numbered(10).titled("Feature X").bodied("Build X"),
+                    IssueBuilder().numbered(20).titled("Feature Y").bodied("Build Y"),
+                ]
+            )
+            .at(world)
         )
         result = await world.run_pipeline()
 
@@ -59,7 +85,10 @@ class TestH4ReviewApproveAndMerge:
     """H4: Review returns APPROVE, CI passes, PR merged."""
 
     async def test_approve_merge_flow(self, mock_world):
-        world = mock_world.add_issue(1, "Small refactor", "Clean up utils module")
+        world = mock_world
+        IssueBuilder().numbered(1).titled("Small refactor").bodied(
+            "Clean up utils module"
+        ).at(world)
         result = await world.run_pipeline()
 
         outcome = result.issue(1)
@@ -84,9 +113,9 @@ class TestH5PlanProducesSubIssues:
                 NewIssueSpec(title="Sub-task 2", body="Do sub-task 2"),
             ],
         )
-        world = mock_world.add_issue(1, "Epic task", "Big feature").set_phase_result(
-            "plan", 1, plan_with_subs
-        )
+        world = mock_world
+        IssueBuilder().numbered(1).titled("Epic task").bodied("Big feature").at(world)
+        world.set_phase_result("plan", 1, plan_with_subs)
         result = await world.run_pipeline()
 
         outcome = result.issue(1)
