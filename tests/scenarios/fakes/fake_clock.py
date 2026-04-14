@@ -14,6 +14,9 @@ class FakeClock:
     def now(self) -> float:
         return self._time
 
+    def monotonic(self) -> float:
+        return self._time
+
     def advance(self, seconds: float) -> None:
         self._time += seconds
 
