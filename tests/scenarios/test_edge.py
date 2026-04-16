@@ -230,10 +230,15 @@ class TestE10ClockJumpsBackward:
 
 
 class TestE11StopEventMidPhase:
-    """E11: Stop event fires mid-run_with_loops — graceful shutdown."""
+    """E11: run_with_loops completes without hanging when called with cycles=1.
 
-    async def test_stop_event_respected_across_cycles(self, mock_world):
-        # cycles=1 already exercises the stop path; assert it completes without hanging.
+    NOTE: ``run_with_loops`` invokes ``_do_work()`` directly, so stop-event
+    lifecycle isn't actually exercised here — this test asserts completion,
+    not graceful shutdown. A real graceful-shutdown scenario would need to
+    drive ``loop.run()`` with a stop event.
+    """
+
+    async def test_run_with_loops_completes(self, mock_world):
         stats = await mock_world.run_with_loops(["ci_monitor"], cycles=1)
         assert "ci_monitor" in stats
 
