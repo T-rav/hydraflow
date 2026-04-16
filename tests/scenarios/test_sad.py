@@ -10,6 +10,7 @@ from tests.conftest import (
     ReviewResultFactory,
     WorkerResultFactory,
 )
+from tests.scenarios.builders import IssueBuilder
 
 pytestmark = pytest.mark.scenario
 
@@ -23,9 +24,9 @@ class TestS1PlanFailsThenSucceeds:
         )
         succeed = PlanResultFactory.create(issue_number=1, success=True)
 
-        world = mock_world.add_issue(1, "Fix auth", "Auth is broken").set_phase_results(
-            "plan", 1, [fail, succeed]
-        )
+        world = mock_world
+        IssueBuilder().numbered(1).titled("Fix auth").bodied("Auth is broken").at(world)
+        world.set_phase_results("plan", 1, [fail, succeed])
         result = await world.run_pipeline()
 
         # The pipeline should have produced a plan result even if the first attempt failed
@@ -40,9 +41,11 @@ class TestS2ImplementExhaustsAttempts:
         fail = WorkerResultFactory.create(
             issue_number=1, success=False, error="compilation error"
         )
-        world = mock_world.add_issue(
-            1, "Fix DB migration", "Migration is broken"
-        ).set_phase_result("implement", 1, fail)
+        world = mock_world
+        IssueBuilder().numbered(1).titled("Fix DB migration").bodied(
+            "Migration is broken"
+        ).at(world)
+        world.set_phase_result("implement", 1, fail)
         result = await world.run_pipeline()
 
         outcome = result.issue(1)
@@ -62,9 +65,11 @@ class TestS3ReviewRejects:
             verdict=ReviewVerdict.REQUEST_CHANGES,
             merged=False,
         )
-        world = mock_world.add_issue(
-            1, "Fix UI glitch", "Button misaligned"
-        ).set_phase_result("review", 1, reject)
+        world = mock_world
+        IssueBuilder().numbered(1).titled("Fix UI glitch").bodied(
+            "Button misaligned"
+        ).at(world)
+        world.set_phase_result("review", 1, reject)
         result = await world.run_pipeline()
 
         outcome = result.issue(1)
@@ -77,7 +82,10 @@ class TestS5HindsightDown:
     """S5: Pipeline continues with Hindsight in fail mode."""
 
     async def test_pipeline_completes_without_hindsight(self, mock_world):
-        world = mock_world.add_issue(1, "Add feature", "New feature request")
+        world = mock_world
+        IssueBuilder().numbered(1).titled("Add feature").bodied(
+            "New feature request"
+        ).at(world)
         world.fail_service("hindsight")
         result = await world.run_pipeline()
 
@@ -92,7 +100,10 @@ class TestS6CIFailsFirstThenPasses:
     """S6: Scripted CI returns failure first, then passes."""
 
     async def test_ci_script_sequence(self, mock_world):
-        world = mock_world.add_issue(1, "Fix tests", "Flaky test suite")
+        world = mock_world
+        IssueBuilder().numbered(1).titled("Fix tests").bodied("Flaky test suite").at(
+            world
+        )
         result = await world.run_pipeline()
 
         # With default fakes the PR should pass CI and merge — this test

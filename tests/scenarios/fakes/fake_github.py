@@ -34,6 +34,11 @@ class FakePR:
     ci_status: str = "pass"
     draft: bool = False
     url: str = ""
+    mergeable: bool = True
+    additions: int = 0
+    deletions: int = 0
+    reviews: list[tuple[str, str]] = field(default_factory=list)
+    checks: list[tuple[str, str]] = field(default_factory=list)
 
 
 class FakeGitHub:
@@ -322,13 +327,39 @@ class FakeGitHub:
         return self._ci_main_status
 
     async def create_issue(
-        self, title: str, body: str, labels: list[str] | None = None
+        self,
+        title: str,
+        body: str,
+        labels: list[str] | None = None,
+        **_unused: Any,
     ) -> int:
         """Create a new issue and return its number."""
         num = max(self._issues.keys(), default=9000) + 1
         self.add_issue(num, title, body, labels=labels)
         return num
 
-    async def get_dependabot_alerts(self, state: str = "open") -> list[dict[str, Any]]:
+    async def get_dependabot_alerts(self, **_kw: Any) -> list[dict[str, Any]]:
         """Return Dependabot alerts."""
         return []
+
+    # --- Additional PRPort methods for port conformance (phase 1) ---
+
+    @staticmethod
+    def expected_pr_title(issue_number: int, issue_title: str) -> str:
+        return f"[#{issue_number}] {issue_title}"
+
+    async def get_pr_mergeable(self, pr_number: int) -> bool | None:
+        return True
+
+    async def pull_main(self, **_kw: Any) -> None:
+        pass
+
+    async def update_issue_body(self, issue_number: int, body: str) -> None:
+        if issue_number in self._issues:
+            self._issues[issue_number].body = body
+
+    async def update_pr_title(self, pr_number: int, title: str) -> bool:
+        return True
+
+    async def upload_screenshot(self, **_kw: Any) -> str:
+        return ""

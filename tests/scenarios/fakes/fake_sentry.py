@@ -20,3 +20,9 @@ class FakeSentry:
 
     def capture_exception(self, error: Exception | None = None) -> None:
         self.events.append({"type": "exception", "error": str(error)})
+
+    def capture_message(self, message: str, **kwargs: Any) -> None:
+        self.events.append({"type": "message", "message": message, **kwargs})
+
+    def set_tag(self, key: str, value: str) -> None:
+        self.breadcrumbs.append({"type": "tag", "key": key, "value": value})

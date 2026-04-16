@@ -94,6 +94,10 @@ class _FakePlannerRunner(_ScriptedRunner):
 
 
 class _FakeAgentRunner(_ScriptedRunner):
+    def __init__(self) -> None:
+        super().__init__()
+        self._streams: dict[int, list[Any]] = {}
+
     async def run(
         self,
         task: Any,
@@ -118,6 +122,12 @@ class _FakeAgentRunner(_ScriptedRunner):
                 commits=1,
             ),
         )
+
+    def script_stream(self, issue_number: int, events: list[Any]) -> None:
+        self._streams[issue_number] = list(events)
+
+    def events_for(self, issue_number: int) -> list[Any]:
+        return list(self._streams.get(issue_number, []))
 
 
 class _FakeReviewRunner(_ScriptedRunner):
