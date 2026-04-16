@@ -55,7 +55,7 @@ class RateLimited:
                         )
                         raise RateLimitExceeded(msg)
                     self_ref._remaining -= 1
-                    return await attr(*args, **kwargs)
+                    return await attr(*args, **kwargs)  # pyright: ignore[reportGeneralTypeIssues]
 
                 return _gated_async
 
