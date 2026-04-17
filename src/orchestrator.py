@@ -59,6 +59,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hydraflow.orchestrator")
 
+
+def _log_deferred_task_failure(task: asyncio.Task[Any]) -> None:
+    """Log unhandled exceptions from fire-and-forget background tasks (#6513)."""
+    try:
+        exc = task.exception()
+    except asyncio.CancelledError:
+        return
+    if exc is not None:
+        logger.warning("Deferred orchestrator task failed", exc_info=exc)
+
+
 # Delay after a merge to allow GitHub to propagate the merge state.
 _POST_MERGE_DELAY: int = 5
 
@@ -102,6 +113,9 @@ class HydraFlowOrchestrator:
         self._session_issue_results: dict[int, bool] = {}
         # Loop tasks (set by _supervise_loops for stop() to cancel)
         self._loop_tasks: dict[str, asyncio.Task[None]] = {}
+        # Strong references for fire-and-forget background tasks (#6513) —
+        # without this the GC can collect the Task before it completes.
+        self._deferred_tasks: set[asyncio.Task[None]] = set()
 
         # Build all services via the factory
         svc = build_services(
@@ -196,8 +210,13 @@ class HydraFlowOrchestrator:
         was_disabled = not self._pipeline_enabled
         self._pipeline_enabled = value
         if value and was_disabled and self._running:
-            # Pipeline just turned on — run deferred repo init in background
-            asyncio.create_task(self._deferred_pipeline_start())
+            # Pipeline just turned on — run deferred repo init in background.
+            # Store the Task ref (#6513) so the GC can't collect it mid-flight
+            # and attach a done_callback that logs unhandled exceptions.
+            task = asyncio.create_task(self._deferred_pipeline_start())
+            self._deferred_tasks.add(task)
+            task.add_done_callback(self._deferred_tasks.discard)
+            task.add_done_callback(_log_deferred_task_failure)
 
     async def _deferred_pipeline_start(self) -> None:
         """Run repo initialization that was skipped when pipeline was disabled.
