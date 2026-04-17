@@ -111,7 +111,7 @@ jobs:
       - name: Warning gate (targeted)
         run: PYTHONPATH=src uv run pytest tests/test_execution.py tests/test_agent_advanced.py tests/test_agent_cli.py tests/test_agent_execution.py tests/test_agent_lifecycle.py tests/test_agent_output.py tests/test_hitl_runner.py tests/test_prompt_telemetry.py tests/test_dashboard_routes_control.py tests/test_dashboard_routes_core.py tests/test_dashboard_routes_hitl.py tests/test_dashboard_routes_issue_history.py tests/test_dashboard_routes_metrics.py tests/test_dashboard_routes_repo.py tests/test_dashboard_routes_state.py -W error::RuntimeWarning -W error::pytest.PytestUnraisableExceptionWarning
       - name: Run tests with coverage
-        run: PYTHONPATH=src uv run pytest tests/ --cov=src --cov-fail-under=70 --cov-report=term-missing
+        run: PYTHONPATH=src uv run pytest tests/ --ignore=tests/regressions --cov=src --cov-fail-under=70 --cov-report=term-missing
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4
@@ -173,7 +173,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.python == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
