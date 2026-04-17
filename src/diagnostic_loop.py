@@ -230,9 +230,18 @@ class DiagnosticLoop(BaseBackgroundLoop):
             success, transcript = await self._runner.fix(
                 issue_number, issue_title, issue_body, diagnosis, str(wt_path)
             )
-        except Exception:
-            logger.exception(
-                "Diagnostic: runner.fix() crashed for issue #%d", issue_number
+        except Exception as exc:
+            # PermissionError / OSError / auth / credit / likely-bug are
+            # infrastructure-level failures that should abort the diagnostic
+            # cycle rather than burn attempt budget pretending the fix merely
+            # failed (issue #6411).
+            reraise_on_credit_or_bug(exc)
+            if isinstance(exc, OSError):
+                raise
+            logger.warning(
+                "Diagnostic: runner.fix() crashed for issue #%d",
+                issue_number,
+                exc_info=True,
             )
             success, transcript = False, "runner.fix() crashed"
         finally:

@@ -143,7 +143,18 @@ class DoltBackend:
         # Write SQL to temp file and execute via source
         sql_file = self._dir / ".tmp_state.sql"
         try:
-            sql_file.write_text(sql)
+            try:
+                sql_file.write_text(sql)
+            except OSError:
+                # Disk full / permission denied — log loudly before
+                # propagating so operators can see state persistence failed
+                # (issue #6443).
+                logger.error(
+                    "Failed to write temp SQL for state persistence (%s)",
+                    sql_file,
+                    exc_info=True,
+                )
+                raise
             self._run("sql", "--file", str(sql_file))
         finally:
             sql_file.unlink(missing_ok=True)

@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hydraflow.trace_rollup")
 
 
-def write_phase_rollup(
+def write_phase_rollup(  # noqa: PLR0911 — early-return guards for missing/malformed trace files
     *,
     config: HydraFlowConfig,
     issue_number: int,
@@ -76,17 +76,35 @@ def write_phase_rollup(
     )
 
     summary_path = run_dir / "summary.json"
-    summary_path.write_text(summary.model_dump_json(indent=2), encoding="utf-8")
+    try:
+        summary_path.write_text(summary.model_dump_json(indent=2), encoding="utf-8")
+    except OSError:
+        # Disk full / permission — summary is best-effort, don't crash
+        # the caller (issue #6556).
+        logger.warning("Failed to write trace summary %s", summary_path, exc_info=True)
+        return None
 
     # Update the latest pointer atomically (temp write + replace)
     latest_path = run_dir.parent / "latest"
     latest_tmp = run_dir.parent / "latest.tmp"
-    latest_tmp.write_text(f"run-{run_id}\n", encoding="utf-8")
+    try:
+        latest_tmp.write_text(f"run-{run_id}\n", encoding="utf-8")
+    except OSError:
+        latest_tmp.unlink(missing_ok=True)
+        logger.warning(
+            "Failed to write latest.tmp for run %d — cleaned up", run_id, exc_info=True
+        )
+        return None
     try:
         latest_tmp.replace(latest_path)
     except OSError:
         latest_tmp.unlink(missing_ok=True)
-        raise
+        logger.warning(
+            "Failed to atomic-rename latest.tmp for run %d — cleaned up",
+            run_id,
+            exc_info=True,
+        )
+        return None
 
     # Append to factory_metrics.jsonl for the diagnostics dashboard
     try:
