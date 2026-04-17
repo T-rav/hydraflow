@@ -39,7 +39,7 @@ class DoltBackend:
     def __init__(self, dolt_dir: Path) -> None:
         self._dir = dolt_dir
         self._dolt = shutil.which("dolt")
-        if not self._dolt:
+        if self._dolt is None:
             msg = "dolt CLI not found — install via 'brew install dolt' or https://docs.dolthub.com"
             raise FileNotFoundError(msg)
         self._ensure_repo()

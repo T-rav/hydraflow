@@ -705,10 +705,13 @@ class HydraFlowOrchestrator:
         # no repo sanitization, no session.
         try:
             import sentry_sdk as _sentry  # noqa: PLC0415
-
-            _sentry.set_tag("hydraflow.repo", self._config.repo or "")
-        except Exception:
+        except ImportError:
             pass
+        else:
+            try:
+                _sentry.set_tag("hydraflow.repo", self._config.repo or "")
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("sentry_sdk.set_tag failed: %s", exc)
 
         session_started = False
         if self._pipeline_enabled:
