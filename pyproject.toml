@@ -131,7 +131,7 @@ asyncio_mode = "auto"
 addopts = [
     "-q",
     "--tb=short",
-    "-m", "not soak and not docker and not scenario_loops",
+    "-m", "not soak and not docker",
 ]
 markers = [
     "integration: marks tests as integration tests",
