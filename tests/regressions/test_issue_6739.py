@@ -12,7 +12,7 @@ Expected behaviour after fix:
     than silently falling back to a hardcoded constant.
 
 These tests intentionally assert the *correct* behaviour, so they are RED
-against the current (buggy) code.
+against the current (buggy) code.  The src-side fix lives in pass #5b.
 """
 
 from __future__ import annotations

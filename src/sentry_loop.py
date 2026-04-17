@@ -320,11 +320,7 @@ class SentryLoop(BaseBackgroundLoop):
         permalink = sentry_issue.get("permalink", "")
         short_id = sentry_issue.get("shortId", sentry_id)
 
-        plan_lbl = (
-            self._config.planner_label[0]
-            if self._config.planner_label
-            else "hydraflow-plan"
-        )
+        plan_lbl = self._config.planner_label[0] if self._config.planner_label else ""
 
         parts = [
             f"Sentry error from project {project_slug}: {title}",

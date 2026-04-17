@@ -151,18 +151,17 @@ class BaseRunner:
         except ImportError:
             _sentry = None  # Sentry not installed — optional dependency
         if _sentry is not None:
-            try:
-                _sentry.set_tag("hydraflow.issue", str(event_data.get("issue", "")))
-                _sentry.set_tag("hydraflow.source", str(event_data.get("source", "")))
-                _sentry.set_context(
-                    "hydraflow_runner",
-                    {
-                        "model": self._config.model,
-                        "tool": self._config.implementation_tool,
-                    },
-                )
-            except Exception as exc:  # noqa: BLE001
-                self._log.debug("sentry_sdk tag/context failed: %s", exc)
+            # Programming errors (AttributeError, TypeError, etc.) from the
+            # Sentry SDK must propagate so misconfiguration surfaces loudly.
+            _sentry.set_tag("hydraflow.issue", str(event_data.get("issue", "")))
+            _sentry.set_tag("hydraflow.source", str(event_data.get("source", "")))
+            _sentry.set_context(
+                "hydraflow_runner",
+                {
+                    "model": self._config.model,
+                    "tool": self._config.implementation_tool,
+                },
+            )
 
         try:
             last_auth_error: AuthenticationRetryError | None = None

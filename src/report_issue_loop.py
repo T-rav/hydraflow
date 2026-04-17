@@ -254,11 +254,7 @@ class ReportIssueLoop(BaseBackgroundLoop):
         # Everything from here on must clean up the screenshot temp file.
         issue_number = 0
         screenshot_url: str = ""
-        plan_label = (
-            self._config.planner_label[0]
-            if self._config.planner_label
-            else "hydraflow-plan"
-        )
+        plan_label = self._config.planner_label[0] if self._config.planner_label else ""
         try:
             # Upload screenshot to GitHub (via gist) so the issue body can
             # reference a real URL instead of a local temp path.
