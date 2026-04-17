@@ -200,7 +200,13 @@ class HydraFlowOrchestrator:
             asyncio.create_task(self._deferred_pipeline_start())
 
     async def _deferred_pipeline_start(self) -> None:
-        """Run repo initialization that was skipped when pipeline was disabled."""
+        """Run repo initialization that was skipped when pipeline was disabled.
+
+        On failure the pipeline toggle is reverted to ``False`` and a
+        ``SYSTEM_ALERT`` is published so the dashboard can surface the error
+        (#6360). Without this the pipeline would be left enabled with no
+        session and no retry — a silently broken state.
+        """
         try:
             await self._svc.workspaces.sanitize_repo()
             await self._svc.prs.ensure_labels_exist()
@@ -209,8 +215,20 @@ class HydraFlowOrchestrator:
             if self._current_session is None:
                 await self._start_session()
             logger.info("Pipeline enabled — repo initialized and session started")
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
             logger.exception("Failed deferred pipeline start")
+            self._pipeline_enabled = False
+            data: SystemAlertPayload = {
+                "message": (
+                    "Pipeline start failed during deferred repo "
+                    f"initialization: {exc}. Pipeline has been disabled — "
+                    "fix the underlying cause and re-enable."
+                ),
+                "source": "deferred_pipeline_start",
+            }
+            await self._bus.publish(
+                HydraFlowEvent(type=EventType.SYSTEM_ALERT, data=data)
+            )
 
     @property
     def current_session_id(self) -> str | None:
