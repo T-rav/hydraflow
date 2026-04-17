@@ -82,6 +82,22 @@ describe('SystemPanel', () => {
       expect(metricsPanel.parentElement).toBe(subTabContent)
       expect(metricsPanel.style.overflowY).toBe('auto')
     })
+
+    it('renders MemoryBrowser when Memory sub-tab selected', async () => {
+      const originalFetch = global.fetch
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ banks: [] }),
+      })
+      try {
+        render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
+        fireEvent.click(screen.getByText('Memory'))
+        expect(screen.getByText('Memory Browser')).toBeInTheDocument()
+        expect(screen.getByTestId('memory-search-input')).toBeInTheDocument()
+      } finally {
+        global.fetch = originalFetch
+      }
+    })
   })
 
   describe('Background Workers', () => {
