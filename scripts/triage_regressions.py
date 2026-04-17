@@ -55,6 +55,20 @@ def issue_number_for(path: Path) -> str | None:
     return m.group(1) if m else None
 
 
+def _insert_pytest_import(source: str) -> str:
+    """Add `import pytest` after any `from __future__ import ...` line.
+
+    Future-imports must precede all other module code, so a naive prepend
+    would raise SyntaxError. If no future-import is present, prepend.
+    """
+    lines = source.splitlines(keepends=True)
+    for idx, line in enumerate(lines):
+        if line.startswith("from __future__"):
+            lines.insert(idx + 1, "import pytest\n")
+            return "".join(lines)
+    return "import pytest\n" + source
+
+
 def add_xfail_markers(failing: set[str]) -> int:
     """Insert `@pytest.mark.xfail(...)` above every failing test function.
 
@@ -92,7 +106,7 @@ def add_xfail_markers(failing: set[str]) -> int:
             out.append(line)
         new_source = "".join(out)
         if need_import and added:
-            new_source = "import pytest\n" + new_source
+            new_source = _insert_pytest_import(new_source)
         path.write_text(new_source)
     return added
 
