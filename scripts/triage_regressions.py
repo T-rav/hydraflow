@@ -38,6 +38,12 @@ def collect_failing_nodeids() -> set[str]:
         text=True,
         check=False,
     )
+    if result.returncode not in (0, 1):
+        print(
+            f"Warning: pytest exited with code {result.returncode}. "
+            f"stderr: {result.stderr[:200]}",
+            file=sys.stderr,
+        )
     nodeids: set[str] = set()
     for line in result.stdout.splitlines():
         if line.startswith("FAILED "):
@@ -87,6 +93,7 @@ def add_xfail_markers(failing: set[str]) -> int:
         lines = source.splitlines(keepends=True)
         out: list[str] = []
         need_import = "import pytest" not in source
+        file_added = 0
         for line in lines:
             stripped = line.lstrip()
             for func in funcs:
@@ -101,13 +108,14 @@ def add_xfail_markers(failing: set[str]) -> int:
                             f'reason="Regression for issue #{issue} — fix not yet landed", '
                             f"strict=False)\n"
                         )
-                        added += 1
+                        file_added += 1
                     break
             out.append(line)
         new_source = "".join(out)
-        if need_import and added:
+        if need_import and file_added:
             new_source = _insert_pytest_import(new_source)
         path.write_text(new_source)
+        added += file_added
     return added
 
 
