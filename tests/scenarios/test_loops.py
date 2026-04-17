@@ -73,7 +73,10 @@ class TestL1HealthMonitorConfigAdjustment:
     reason=(
         "workspace_gc state mock returns empty active_workspaces (Phase 1 no-ops) and "
         "_is_safe_to_gc calls `gh api` via run_subprocess which is not stubbed in the "
-        "scenario harness; full GC coverage deferred to per-loop scenarios"
+        "scenario harness. Full GC coverage deferred to the per-loop scenarios track "
+        "documented in the Phase 3B plan's 'out of scope' section; remove this xfail "
+        "when that track lands and the workspace_gc registration feeds realistic "
+        "active-issue state to the loop."
     ),
     strict=False,
 )
