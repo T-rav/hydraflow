@@ -1058,13 +1058,13 @@ SUMMARY: <one-line summary>
         )
 
     async def _get_branch_diff(self, worktree_path: Path, branch: str) -> str:
-        """Return the combined diff of *branch* against main."""
+        """Return the combined diff of *branch* against the base branch."""
         try:
             result = await self._runner.run_simple(
                 [
                     "git",
                     "diff",
-                    f"origin/{self._config.main_branch}...{branch}",
+                    f"origin/{self._config.base_branch()}...{branch}",
                 ],
                 cwd=str(worktree_path),
                 timeout=self._config.git_command_timeout,
@@ -1321,14 +1321,14 @@ SUMMARY: <one-line summary>
             return False
 
     async def _count_commits(self, worktree_path: Path, branch: str) -> int:
-        """Count commits on *branch* ahead of main."""
+        """Count commits on *branch* ahead of the base branch."""
         try:
             result = await self._runner.run_simple(
                 [
                     "git",
                     "rev-list",
                     "--count",
-                    f"origin/{self._config.main_branch}..{branch}",
+                    f"origin/{self._config.base_branch()}..{branch}",
                 ],
                 cwd=str(worktree_path),
                 timeout=self._config.git_command_timeout,

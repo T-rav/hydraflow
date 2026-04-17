@@ -78,7 +78,7 @@ class MergeConflictResolver:
             logger.info(
                 "PR #%d has conflicts with %s — running agent to resolve",
                 pr.number,
-                self._config.main_branch,
+                self._config.base_branch(),
             )
             await publish_fn(pr, worker_id, WorkerStatus.MERGE_FIX.value)
             resolution = await self.resolve_merge_conflicts(
@@ -108,7 +108,7 @@ class MergeConflictResolver:
                 origin_label=self._config.review_label[0],
                 comment=(
                     f"**Merge conflicts** with "
-                    f"`{self._config.main_branch}` could not be "
+                    f"`{self._config.base_branch()}` could not be "
                     "resolved automatically. "
                     "Escalating to human review."
                 ),
