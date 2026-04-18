@@ -22,9 +22,15 @@ def _write_skill(
     name: str | None = None,
     description: str | None = None,
     frontmatter: str | None = None,
+    version: str = "1.0.0",
 ) -> Path:
-    """Create a SKILL.md under the cache layout and return its path."""
-    skill_dir = cache_root / marketplace / plugin / "skills" / skill
+    """Create a SKILL.md under the cache layout and return its path.
+
+    Real cache layout: ``<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md``.
+    ``version`` parameter defaults to ``"1.0.0"`` — override to simulate multiple
+    versions of the same plugin (used by the dedup test).
+    """
+    skill_dir = cache_root / marketplace / plugin / version / "skills" / skill
     skill_dir.mkdir(parents=True, exist_ok=True)
     skill_md = skill_dir / "SKILL.md"
     if frontmatter is not None:
@@ -129,9 +135,41 @@ class TestDiscoverPluginSkills:
         assert discover_plugin_skills(["superpowers"], cache_root=cache_root) == []
 
     def test_handles_plugin_with_no_skills_dir(self, cache_root: Path) -> None:
-        """Return empty list when a plugin has no skills/ subdirectory."""
+        """Return empty list when a plugin has no version/skills subdirectory."""
         (cache_root / "official" / "empty-plugin").mkdir(parents=True)
         assert discover_plugin_skills(["empty-plugin"], cache_root=cache_root) == []
+
+    def test_dedupes_skills_across_plugin_versions(self, cache_root: Path) -> None:
+        """Return one entry per skill name even when multiple versions exist."""
+        _write_skill(
+            cache_root,
+            "official",
+            "frontend-design",
+            "frontend-design",
+            version="1.0.0",
+        )
+        _write_skill(
+            cache_root,
+            "official",
+            "frontend-design",
+            "frontend-design",
+            version="unknown",
+        )
+
+        result = discover_plugin_skills(["frontend-design"], cache_root=cache_root)
+
+        assert len(result) == 1
+        assert result[0].qualified_name == "frontend-design:frontend-design"
+
+    def test_skips_plugin_version_without_skills_dir(self, cache_root: Path) -> None:
+        """Skip version directories that have no skills/ (e.g. commands-only)."""
+        # Create one version without skills/ and one with.
+        (cache_root / "official" / "multi" / "unknown" / "commands").mkdir(parents=True)
+        _write_skill(cache_root, "official", "multi", "real-skill", version="2.0.0")
+
+        result = discover_plugin_skills(["multi"], cache_root=cache_root)
+
+        assert {s.name for s in result} == {"real-skill"}
 
 
 class TestPluginSkillQualifiedName:

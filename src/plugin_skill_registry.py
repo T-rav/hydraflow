@@ -66,28 +66,40 @@ def discover_plugin_skills(
 
 
 def _discover_plugin(plugin_dir: Path) -> list[PluginSkill]:
-    skills_dir = plugin_dir / "skills"
-    if not skills_dir.is_dir():
-        return []
+    """Scan a plugin directory for skills.
 
+    The cache layout is ``<marketplace>/<plugin>/<version_or_hash>/skills/<skill>/SKILL.md``.
+    A single plugin can have multiple sibling version directories (e.g. a semver
+    tag and an ``unknown`` alias). We scan all of them and dedupe by skill name,
+    keeping the first occurrence in sorted directory order.
+    """
     out: list[PluginSkill] = []
-    for skill_dir in sorted(p for p in skills_dir.iterdir() if p.is_dir()):
-        if skill_dir.name in _EXCLUDED_SKILL_NAMES:
+    seen: set[str] = set()
+
+    for version_dir in sorted(p for p in plugin_dir.iterdir() if p.is_dir()):
+        skills_dir = version_dir / "skills"
+        if not skills_dir.is_dir():
             continue
-        skill_md = skill_dir / "SKILL.md"
-        if not skill_md.is_file():
-            continue
-        parsed = _parse_skill_md(skill_md)
-        if parsed is None:
-            logger.warning(
-                "Skipping %s — malformed or missing frontmatter",
-                skill_md,
+        for skill_dir in sorted(p for p in skills_dir.iterdir() if p.is_dir()):
+            if skill_dir.name in _EXCLUDED_SKILL_NAMES:
+                continue
+            skill_md = skill_dir / "SKILL.md"
+            if not skill_md.is_file():
+                continue
+            parsed = _parse_skill_md(skill_md)
+            if parsed is None:
+                logger.warning(
+                    "Skipping %s — malformed or missing frontmatter",
+                    skill_md,
+                )
+                continue
+            name, description = parsed
+            if name in seen:
+                continue
+            seen.add(name)
+            out.append(
+                PluginSkill(plugin=plugin_dir.name, name=name, description=description)
             )
-            continue
-        name, description = parsed
-        out.append(
-            PluginSkill(plugin=plugin_dir.name, name=name, description=description)
-        )
     return out
 
 

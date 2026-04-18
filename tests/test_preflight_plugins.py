@@ -11,8 +11,11 @@ from preflight import CheckStatus, _check_plugins
 
 
 def _make_plugin(cache_root: Path, plugin: str, skill: str = "some-skill") -> None:
-    """Create a minimal plugin with one well-formed skill."""
-    skill_dir = cache_root / "official" / plugin / "skills" / skill
+    """Create a minimal plugin with one well-formed skill.
+
+    Mirrors the real cache layout: ``<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md``.
+    """
+    skill_dir = cache_root / "official" / plugin / "1.0.0" / "skills" / skill
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text(
         f"---\nname: {skill}\ndescription: A skill description\n---\n\nBody.\n"
