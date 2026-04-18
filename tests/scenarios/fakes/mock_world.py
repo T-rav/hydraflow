@@ -40,8 +40,10 @@ class MockWorld:
         *,
         config: Any = None,
         install_subprocess_clock: bool = False,
+        use_real_agent_runner: bool = False,
     ) -> None:
         self._tmp_path = tmp_path
+        self._use_real_agent = use_real_agent_runner
         self._harness = PipelineHarness(tmp_path, config=config)
         self._llm = FakeLLM()
         self._github = FakeGitHub()
@@ -55,6 +57,7 @@ class MockWorld:
         self._http = FakeHTTP()
         self._issues: dict[int, dict[str, Any]] = {}
         self._phase_hooks: list[tuple[str, Callable[[], None]]] = []
+        self._ran = False
 
         self._wire_runners()
         self._wire_prs()
@@ -64,15 +67,30 @@ class MockWorld:
             self._clock.install_subprocess_clock()
 
     def _wire_runners(self) -> None:
-        """Replace harness AsyncMock runners with FakeLLM runners."""
+        """Replace harness AsyncMock runners with FakeLLM runners (or real AgentRunner)."""
         h = self._harness
         h.triage_runner.evaluate = self._llm.triage_runner.evaluate
         h.triage_runner.run_decomposition = self._llm.triage_runner.run_decomposition
         h.planners.plan = self._llm.planners.plan
         h.planners.run_gap_review = self._llm.planners.run_gap_review
-        h.agents.run = self._llm.agents.run
         h.reviewers.review = self._llm.reviewers.review
         h.reviewers.fix_ci = self._llm.reviewers.fix_ci
+
+        if self._use_real_agent:
+            from tests.scenarios.helpers.agent_runner_factory import (  # noqa: PLC0415
+                build_real_agent_runner,
+            )
+
+            h.set_agents(
+                build_real_agent_runner(
+                    docker=self._docker,
+                    hindsight=self._hindsight,
+                    event_bus=h.bus,
+                    tmp_path=self._tmp_path,
+                )
+            )
+        else:
+            h.agents.run = self._llm.agents.run
 
     def _wire_prs(self) -> None:
         """Replace harness PR manager mocks with FakeGitHub methods."""
@@ -155,11 +173,25 @@ class MockWorld:
     ) -> MockWorld:
         if name == "hindsight":
             self._hindsight.set_failing(True)
+        elif name == "docker":
+            self._docker.fail_next(kind="exit_nonzero")
+        elif name == "github":
+            self._github.set_rate_limit_mode(remaining=0)
+        else:
+            msg = f"unknown service: {name}"
+            raise ValueError(msg)
         return self
 
     def heal_service(self, name: str) -> MockWorld:
         if name == "hindsight":
             self._hindsight.set_failing(False)
+        elif name == "github":
+            self._github.clear_rate_limit()
+        elif name == "docker":
+            self._docker.clear_fault()
+        else:
+            msg = f"unknown service: {name}"
+            raise ValueError(msg)
         return self
 
     # --- Inspect world state ---
@@ -209,6 +241,13 @@ class MockWorld:
 
     async def run_pipeline(self) -> ScenarioResult:
         """Run all seeded issues through the full pipeline."""
+        if self._ran:
+            msg = (
+                "MockWorld.run_pipeline is single-shot; create a new MockWorld "
+                "to run again. Re-use would re-seed issues against stale fake state."
+            )
+            raise RuntimeError(msg)
+        self._ran = True
         h = self._harness
         start = time.monotonic()
 

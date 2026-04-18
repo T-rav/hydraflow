@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from tests.scenarios.fakes.fake_docker import FakeDocker
 from tests.scenarios.ports import DockerPort
 
@@ -55,3 +57,186 @@ async def test_run_agent_records_invocations() -> None:
     assert len(fake.invocations) == 1
     assert fake.invocations[0].command == ["agent", "--task", "42"]
     assert fake.invocations[0].env == {"FOO": "BAR"}
+
+
+async def test_fail_next_timeout_raises_on_consumption() -> None:
+    fake = FakeDocker()
+    fake.fail_next(kind="timeout")
+    with pytest.raises(TimeoutError):
+        async for _ in await fake.run_agent(command=["agent"]):
+            pass
+
+
+async def test_fail_next_oom_emits_exit_137() -> None:
+    fake = FakeDocker()
+    fake.fail_next(kind="oom")
+    events = [e async for e in await fake.run_agent(command=["agent"])]
+    assert events[-1]["type"] == "result"
+    assert events[-1]["success"] is False
+    assert events[-1]["exit_code"] == 137
+
+
+async def test_fail_next_exit_nonzero_emits_exit_1() -> None:
+    fake = FakeDocker()
+    fake.fail_next(kind="exit_nonzero")
+    events = [e async for e in await fake.run_agent(command=["agent"])]
+    assert events[-1] == {"type": "result", "success": False, "exit_code": 1}
+
+
+async def test_fail_next_malformed_stream_emits_garbage_then_result() -> None:
+    fake = FakeDocker()
+    fake.fail_next(kind="malformed_stream")
+    events = [e async for e in await fake.run_agent(command=["agent"])]
+    assert events[0]["type"] == "garbage"
+    assert events[-1]["type"] == "result"
+    assert events[-1]["success"] is False
+
+
+async def test_fail_next_is_single_shot() -> None:
+    fake = FakeDocker()
+    fake.fail_next(kind="exit_nonzero")
+    first = [e async for e in await fake.run_agent(command=["a"])]
+    second = [e async for e in await fake.run_agent(command=["b"])]
+    assert first[-1]["success"] is False
+    assert second[-1]["success"] is True
+
+
+async def test_clear_fault_removes_pending_fault() -> None:
+    fake = FakeDocker()
+    fake.fail_next(kind="exit_nonzero")
+    fake.clear_fault()
+    events = [e async for e in await fake.run_agent(command=["agent"])]
+    assert events[-1]["success"] is True
+
+
+async def test_script_run_with_commits_writes_files_and_commits(tmp_path) -> None:
+    import subprocess
+
+    # Init a real git repo in tmp_path
+    subprocess.run(
+        ["git", "init", "-b", "main"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "t@t"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "t"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-m", "init"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+
+    fake = FakeDocker()
+    fake.script_run_with_commits(
+        events=[{"type": "result", "success": True, "exit_code": 0}],
+        commits=[("file.txt", "hello")],
+        cwd=tmp_path,
+    )
+
+    events = [e async for e in await fake.run_agent(command=["agent"])]
+    assert events[-1]["type"] == "result"
+    assert (tmp_path / "file.txt").read_text() == "hello"
+
+    log = subprocess.run(
+        ["git", "log", "--oneline"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "fake-commit" in log.stdout
+
+
+async def test_script_run_with_commits_handles_unchanged_content(tmp_path) -> None:
+    """Identical back-to-back content must not raise CalledProcessError."""
+    import subprocess
+
+    subprocess.run(
+        ["git", "init", "-b", "main"], cwd=tmp_path, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "t@t"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "t"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-m", "init"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+
+    fake = FakeDocker()
+    fake.script_run_with_commits(
+        events=[{"type": "result", "success": True, "exit_code": 0}],
+        commits=[("file.txt", "content")],
+        cwd=tmp_path,
+    )
+    # First commit: creates the file
+    async for _ in await fake.run_agent(command=["agent"]):
+        pass
+
+    fake.script_run_with_commits(
+        events=[{"type": "result", "success": True, "exit_code": 0}],
+        commits=[("file.txt", "content")],  # SAME content — no change
+        cwd=tmp_path,
+    )
+    # Second commit: same content, must not raise
+    async for _ in await fake.run_agent(command=["agent"]):
+        pass
+
+
+async def test_script_run_with_commits_handles_nested_paths(tmp_path) -> None:
+    import subprocess
+
+    subprocess.run(
+        ["git", "init", "-b", "main"], cwd=tmp_path, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "t@t"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "t"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-m", "init"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+
+    fake = FakeDocker()
+    fake.script_run_with_commits(
+        events=[{"type": "result", "success": True, "exit_code": 0}],
+        commits=[("src/foo/bar.py", "body")],
+        cwd=tmp_path,
+    )
+
+    events = [e async for e in await fake.run_agent(command=["agent"])]
+    assert events[-1]["type"] == "result"
+    assert (tmp_path / "src" / "foo" / "bar.py").read_text() == "body"
