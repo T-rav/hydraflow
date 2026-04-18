@@ -452,15 +452,20 @@ class TestWorkspaceCreation:
         runner.fix.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_destroys_workspace_after_success(self, tmp_path: Path) -> None:
-        """Workspace is cleaned up after a successful fix."""
+    async def test_does_not_destroy_workspace_after_success(
+        self, tmp_path: Path
+    ) -> None:
+        """Workspace is RETAINED after a successful fix so the review phase
+        can read the committed changes (#6477).  Destroying here was
+        producing a zero-commit failure in the subsequent review phase.
+        """
         loop, runner, _, _, ws = _make_loop(tmp_path, with_workspaces=True)
         runner.fix.return_value = (True, "Fixed!")
         assert ws is not None
 
         await loop._process_issue(42, "Title", "Body")
 
-        ws.destroy.assert_awaited_once_with(42)
+        ws.destroy.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_destroys_workspace_after_failure(self, tmp_path: Path) -> None:

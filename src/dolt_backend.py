@@ -171,8 +171,8 @@ class DoltBackend:
     def save_session(self, session_id: str, repo: str, data: str, status: str) -> None:
         """Upsert a session record."""
         escaped_data = data.replace("\\", "\\\\").replace("'", "''")
-        escaped_id = session_id.replace("'", "''")
-        escaped_repo = repo.replace("'", "''")
+        escaped_id = session_id.replace("\\", "\\\\").replace("'", "''")
+        escaped_repo = repo.replace("\\", "\\\\").replace("'", "''")
         now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
         self._sql_exec(
             f"REPLACE INTO sessions (session_id, repo, data, started_at, status) "
@@ -181,7 +181,7 @@ class DoltBackend:
 
     def load_sessions(self, repo: str | None = None, limit: int = 50) -> list[dict]:
         """Load recent sessions, newest first."""
-        escaped_repo = repo.replace("'", "''") if repo else ""
+        escaped_repo = repo.replace("\\", "\\\\").replace("'", "''") if repo else ""
         where = f"WHERE repo = '{escaped_repo}'" if repo else ""
         try:
             raw = self._sql(
@@ -206,7 +206,7 @@ class DoltBackend:
 
     def get_session(self, session_id: str) -> dict[str, object] | None:
         """Load a single session by ID."""
-        escaped = session_id.replace("'", "''")
+        escaped = session_id.replace("\\", "\\\\").replace("'", "''")
         try:
             raw = self._sql(
                 f"SELECT data FROM sessions WHERE session_id = '{escaped}';"  # nosec B608
@@ -227,7 +227,7 @@ class DoltBackend:
 
     def delete_session(self, session_id: str) -> bool:
         """Delete a session. Returns True if a row was deleted."""
-        escaped = session_id.replace("'", "''")
+        escaped = session_id.replace("\\", "\\\\").replace("'", "''")
         try:
             self._sql_exec(f"DELETE FROM sessions WHERE session_id = '{escaped}';")  # nosec B608
             return True
@@ -253,7 +253,10 @@ class DoltBackend:
 
     def add_to_dedup_set(self, set_name: str, value: str) -> None:
         """Add a value to a dedup set."""
-        escaped = value.replace("'", "''")
+        # Escape backslash BEFORE quote so \' in the input becomes \\'' in
+        # the SQL literal (a literal backslash + literal single-quote) rather
+        # than being consumed by MySQL/Dolt as an escape sequence (#6454).
+        escaped = value.replace("\\", "\\\\").replace("'", "''")
         self._sql_exec(
             f"INSERT IGNORE INTO dedup_sets (set_name, value) "
             f"VALUES ('{set_name}', '{escaped}');"

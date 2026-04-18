@@ -253,6 +253,7 @@ class ReportIssueLoop(BaseBackgroundLoop):
 
         # Everything from here on must clean up the screenshot temp file.
         issue_number = 0
+        agent_crashed: bool = False  # set to True in the ``except Exception`` branch
         screenshot_url: str = ""
         plan_label = self._config.planner_label[0] if self._config.planner_label else ""
         try:
@@ -331,8 +332,12 @@ class ReportIssueLoop(BaseBackgroundLoop):
                 report.id,
             )
             raise
-        except Exception:
+        except Exception as exc:
             logger.exception("Report issue agent failed for report %s", report.id)
+            # Record the crash so the failure path below marks the tracked
+            # report "failed" instead of silently retrying (#6408 / #6490).
+            agent_crashed = True
+            _ = exc  # name used to make the binding read
         finally:
             if screenshot_path:
                 screenshot_path.unlink(missing_ok=True)
@@ -375,6 +380,29 @@ class ReportIssueLoop(BaseBackgroundLoop):
                 "processed": 1,
                 "report_id": report.id,
                 "issue_number": issue_number,
+            }
+
+        # Agent crash — mark tracked report "failed" immediately and do NOT
+        # burn retry budget. A crash is qualitatively different from "agent
+        # ran cleanly but produced no issue URL" — see #6408 / #6490.
+        if agent_crashed:
+            self._state.remove_report(report.id)
+            self._state.update_tracked_report(
+                report.id,
+                status="failed",
+                action_label="agent_crashed",
+                detail="Agent crashed with an unhandled exception",
+            )
+            await self._emit_report_event(report.id, "failed", detail="agent_crashed")
+            logger.error(
+                "Report %s marked failed — agent crashed with unhandled exception",
+                report.id,
+            )
+            return {
+                "processed": 0,
+                "report_id": report.id,
+                "error": "agent_crashed",
+                "agent_crashed": True,
             }
 
         # Failed — increment attempts and check cap
