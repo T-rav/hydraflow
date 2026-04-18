@@ -69,6 +69,10 @@ class _FakeTriageRunner(_ScriptedRunner):
 
 
 class _FakePlannerRunner(_ScriptedRunner):
+    def __init__(self, parent: FakeLLM) -> None:
+        super().__init__()
+        self._parent = parent
+
     async def plan(
         self,
         task: Any,
@@ -79,6 +83,12 @@ class _FakePlannerRunner(_ScriptedRunner):
     ) -> Any:
         _ = (worker_id, research_context)
         issue_number = getattr(task, "id", getattr(task, "number", 0))
+        if not self._parent._consume_budget(issue_number):
+            return PlanResultFactory.create(
+                issue_number=issue_number,
+                success=False,
+                error="token_budget exceeded",
+            )
         return self._pop(
             issue_number,
             lambda: PlanResultFactory.create(issue_number=issue_number, success=True),
@@ -137,6 +147,10 @@ class _FakeAgentRunner(_ScriptedRunner):
 
 
 class _FakeReviewRunner(_ScriptedRunner):
+    def __init__(self, parent: FakeLLM) -> None:
+        super().__init__()
+        self._parent = parent
+
     async def review(
         self,
         pr: Any,
@@ -152,6 +166,15 @@ class _FakeReviewRunner(_ScriptedRunner):
         _ = (worker_id, code_scanning_alerts, bead_tasks)
         issue_number = getattr(issue, "id", getattr(issue, "number", 0))
         pr_number = getattr(pr, "number", 0)
+        if not self._parent._consume_budget(issue_number):
+            return ReviewResultFactory.create(
+                pr_number=pr_number,
+                issue_number=issue_number,
+                verdict=ReviewVerdict.REQUEST_CHANGES,
+                merged=False,
+                ci_passed=False,
+                error="token_budget exceeded",
+            )
         return self._pop(
             issue_number,
             lambda: ReviewResultFactory.create(
@@ -185,10 +208,11 @@ class FakeLLM:
     """Composable scripted LLM runners for all pipeline phases."""
 
     def __init__(self) -> None:
+        self._token_budgets: dict[int, dict[str, int]] = {}
         self.triage_runner = _FakeTriageRunner()
-        self.planners = _FakePlannerRunner()
+        self.planners = _FakePlannerRunner(self)
         self.agents = _FakeAgentRunner()
-        self.reviewers = _FakeReviewRunner()
+        self.reviewers = _FakeReviewRunner(self)
 
     def script_triage(self, issue_number: int, results: list[Any]) -> None:
         self.triage_runner.add_script(issue_number, results)
@@ -201,3 +225,38 @@ class FakeLLM:
 
     def script_review(self, issue_number: int, results: list[Any]) -> None:
         self.reviewers.add_script(issue_number, results)
+
+    def set_token_budget(
+        self,
+        *,
+        issue_number: int,
+        max_tokens: int,
+        tokens_per_call: int = 100,
+    ) -> None:
+        """Gate planner/reviewer scripted results once cumulative tokens exceed budget.
+
+        Each call to ``planners.plan`` or ``reviewers.review`` for
+        ``issue_number`` adds ``tokens_per_call`` to the running total. Once
+        the total would exceed ``max_tokens``, subsequent calls return a
+        synthetic failure result (``error="token_budget exceeded"``) instead
+        of popping the scripted queue.
+        """
+        self._token_budgets[issue_number] = {
+            "max": max_tokens,
+            "per_call": tokens_per_call,
+            "used": 0,
+        }
+
+    def _consume_budget(self, issue_number: int) -> bool:
+        """Return True if the call fits the budget; False if exceeded.
+
+        When no budget is set for the issue, always returns True.
+        """
+        state = self._token_budgets.get(issue_number)
+        if state is None:
+            return True
+        new_used = state["used"] + state["per_call"]
+        if new_used > state["max"]:
+            return False
+        state["used"] = new_used
+        return True

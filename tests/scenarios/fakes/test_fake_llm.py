@@ -110,3 +110,60 @@ class TestFakeLLMScriptedResults:
         llm.agents.clear_tracing_context()
         llm.reviewers.set_tracing_context(None)
         llm.reviewers.clear_tracing_context()
+
+
+async def test_token_budget_planner_passes_first_call_then_fails() -> None:
+    from tests.scenarios.fakes.fake_llm import FakeLLM
+
+    llm = FakeLLM()
+    llm.script_plan(
+        1,
+        [
+            PlanResultFactory.create(issue_number=1, success=True),
+            PlanResultFactory.create(issue_number=1, success=True),
+        ],
+    )
+    llm.set_token_budget(issue_number=1, max_tokens=200, tokens_per_call=150)
+
+    first = await llm.planners.plan(TaskFactory.create(id=1))
+    second = await llm.planners.plan(TaskFactory.create(id=1))
+
+    assert first.success is True
+    assert second.success is False
+    assert "token_budget" in (second.error or "")
+
+
+async def test_token_budget_reviewer_same_behavior() -> None:
+    """Reviewer also honors the token budget."""
+    from models import PRInfo
+    from tests.scenarios.fakes.fake_llm import FakeLLM
+
+    llm = FakeLLM()
+    llm.script_review(
+        1,
+        [
+            ReviewResultFactory.create(pr_number=42, issue_number=1),
+            ReviewResultFactory.create(pr_number=42, issue_number=1),
+        ],
+    )
+    llm.set_token_budget(issue_number=1, max_tokens=200, tokens_per_call=150)
+
+    pr = PRInfo(number=42, issue_number=1, branch="feat/x")
+    issue = TaskFactory.create(id=1)
+    worktree = Path("/tmp/wt")
+
+    first = await llm.reviewers.review(pr, issue, worktree, "")
+    second = await llm.reviewers.review(pr, issue, worktree, "")
+
+    assert first.verdict is not None  # normal scripted result
+    # Second call exceeds budget — replaced with a failure result
+    assert getattr(second, "error", None) and "token_budget" in second.error
+
+
+async def test_no_budget_set_means_no_gating() -> None:
+    from tests.scenarios.fakes.fake_llm import FakeLLM
+
+    llm = FakeLLM()
+    llm.script_plan(1, [PlanResultFactory.create(issue_number=1, success=True)])
+    result = await llm.planners.plan(TaskFactory.create(id=1))
+    assert result.success is True
