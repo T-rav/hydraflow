@@ -101,8 +101,14 @@ def _run_gh(cmd: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _remove_worktree(repo_root: Path, worktree_path: Path) -> None:
-    """Best-effort worktree cleanup. Never raises."""
+def _remove_worktree(
+    repo_root: Path, worktree_path: Path, branch: str | None = None
+) -> None:
+    """Best-effort worktree cleanup. Never raises.
+
+    When `branch` is provided, also deletes the local branch so a retry with
+    the same branch name doesn't hit "branch already exists".
+    """
     try:
         _run_git(
             ["worktree", "remove", str(worktree_path), "--force"],
@@ -114,6 +120,11 @@ def _remove_worktree(repo_root: Path, worktree_path: Path) -> None:
 
     if worktree_path.exists():
         shutil.rmtree(worktree_path, ignore_errors=True)
+
+    if branch is not None:
+        # Best-effort: delete the local branch. Harmless if it was already
+        # removed by `git worktree remove`.
+        _run_git(["branch", "-D", branch], cwd=repo_root, check=False)
 
 
 # ---------------------------------------------------------------------------
@@ -193,16 +204,21 @@ def open_automated_pr(
             return AutoPrResult(status="no-diff", pr_url=None, branch=branch)
 
         # Copy each file into the worktree and stage it by relative path.
-        for src_path in files:
-            rel = src_path.resolve().relative_to(repo_root)
-            dst_path = worktree_path / rel
-            dst_path.parent.mkdir(parents=True, exist_ok=True)
-            dst_path.write_bytes(src_path.read_bytes())
-            _run_git(
-                ["add", str(rel)],
-                cwd=worktree_path,
-                check=True,
-            )
+        try:
+            for src_path in files:
+                rel = src_path.resolve().relative_to(repo_root)
+                dst_path = worktree_path / rel
+                dst_path.parent.mkdir(parents=True, exist_ok=True)
+                dst_path.write_bytes(src_path.read_bytes())
+                _run_git(
+                    ["add", str(rel)],
+                    cwd=worktree_path,
+                    check=True,
+                )
+        except (subprocess.CalledProcessError, OSError, ValueError) as exc:
+            raise AutoPrError(
+                f"failed to stage files for branch {branch!r}: {exc}"
+            ) from exc
 
         # Detect empty staged diff — e.g. the file contents matched origin.
         diff_check = _run_git(
@@ -270,6 +286,12 @@ def open_automated_pr(
             )
 
         pr_url = _extract_pr_url(create_proc.stdout)
+        if pr_url is None:
+            logger.warning(
+                "gh pr create succeeded for %s but no URL was parsed from stdout: %r",
+                branch,
+                create_proc.stdout,
+            )
 
         if auto_merge and pr_url is not None:
             merge_proc = _run_gh(
@@ -288,13 +310,17 @@ def open_automated_pr(
         return AutoPrResult(status="opened", pr_url=pr_url, branch=branch)
 
     finally:
-        _remove_worktree(repo_root, worktree_path)
+        _remove_worktree(repo_root, worktree_path, branch=branch)
 
 
 def _extract_pr_url(stdout: str) -> str | None:
-    """Pull the PR URL from the last non-empty line of `gh pr create` stdout."""
+    """Pull the PR URL from `gh pr create` stdout.
+
+    `gh` may emit warnings after the URL; scan from the end for the first
+    non-empty line that looks like an HTTPS URL.
+    """
     for line in reversed(stdout.splitlines()):
         stripped = line.strip()
-        if stripped:
+        if stripped.startswith("https://"):
             return stripped
     return None

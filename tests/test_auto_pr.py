@@ -136,3 +136,64 @@ def test_open_automated_pr_skips_when_no_diff(local_repo: Path) -> None:
 
     assert result.pr_url is None
     assert result.status == "no-diff"
+
+
+def test_open_automated_pr_skips_when_file_matches_base(local_repo: Path) -> None:
+    """A file whose content matches origin produces an empty staged diff → no-diff."""
+    from auto_pr import open_automated_pr
+
+    # README.md already exists on origin/main with content "init\n".
+    # Pass it unchanged — the staged diff will be empty.
+    result = open_automated_pr(
+        repo_root=local_repo,
+        branch="feature/identical",
+        files=[local_repo / "README.md"],
+        title="t",
+        body="b",
+    )
+
+    assert result.pr_url is None
+    assert result.status == "no-diff"
+
+
+def test_open_automated_pr_wraps_git_add_failure_in_autoprerror(
+    local_repo: Path,
+) -> None:
+    """A file outside repo_root triggers a ValueError in relative_to; must surface as AutoPrError."""
+    from auto_pr import AutoPrError, open_automated_pr
+
+    outside = local_repo.parent / "outside.txt"
+    outside.write_text("x\n")
+
+    with pytest.raises(AutoPrError, match="failed to stage files"):
+        open_automated_pr(
+            repo_root=local_repo,
+            branch="feature/bad-path",
+            files=[outside],
+            title="t",
+            body="b",
+        )
+
+
+def test_remove_worktree_deletes_local_branch(local_repo: Path) -> None:
+    """After open_automated_pr returns no-diff, the local branch is cleaned up so retries work."""
+    from auto_pr import open_automated_pr
+
+    branch = "feature/retry-me"
+    # First call: no-diff (files=[]).
+    open_automated_pr(
+        repo_root=local_repo,
+        branch=branch,
+        files=[],
+        title="t",
+        body="b",
+    )
+    # Second call with the same branch must not fail with "branch already exists".
+    result = open_automated_pr(
+        repo_root=local_repo,
+        branch=branch,
+        files=[],
+        title="t",
+        body="b",
+    )
+    assert result.status == "no-diff"
