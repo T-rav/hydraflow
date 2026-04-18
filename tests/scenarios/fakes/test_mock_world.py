@@ -58,3 +58,23 @@ class TestMockWorldLoopCatalog:
         world = MockWorld(tmp_path)
         stats = await world.run_with_loops(["ci_monitor"], cycles=1)
         assert "ci_monitor" in stats
+
+
+class TestMockWorldRealAgentRunner:
+    async def test_use_real_agent_runner_wires_real_runner(self, tmp_path) -> None:
+        from agent import AgentRunner
+        from tests.scenarios.fakes.mock_world import MockWorld
+
+        world = MockWorld(tmp_path, use_real_agent_runner=True)
+        assert isinstance(world.harness.agents, AgentRunner)
+
+    async def test_default_mockworld_still_uses_scripted_agent(self, tmp_path) -> None:
+        from tests.scenarios.fakes.mock_world import MockWorld
+
+        world = MockWorld(tmp_path)
+        # Scripted path: h.agents.run is the bound method of _FakeAgentRunner
+        # (patched onto a MagicMock-typed h.agents in the harness)
+        agents_run = world.harness.agents.run
+        owner = getattr(agents_run, "__self__", None)
+        assert owner is not None
+        assert "_FakeAgentRunner" in type(owner).__name__
