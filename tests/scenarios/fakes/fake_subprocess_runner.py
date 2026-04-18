@@ -4,10 +4,10 @@ Serializes FakeDocker event dicts to NDJSON on a duck-typed
 ``asyncio.subprocess.Process`` object so real ``stream_claude_process``
 (``src/runner_utils.py``) consumes them without any production code change.
 
-The fake Process exposes: stdout/stderr (StreamReader), stdin (None),
-pid (None), returncode, async wait(), kill(), terminate(). pid is None so
-``terminate_processes`` in ``runner_utils`` skips ``killpg`` (no real process
-group exists for a fake process).
+The fake Process exposes: stdout/stderr (StreamReader), stdin
+(_SilentStdinWriter), pid (None), returncode, async wait(), kill(),
+terminate(). pid is None so ``terminate_processes`` in ``runner_utils`` skips
+``killpg`` (no real process group exists for a fake process).
 """
 
 from __future__ import annotations
@@ -22,6 +22,29 @@ from execution import SimpleResult
 from tests.scenarios.fakes.fake_docker import FakeDocker
 
 
+class _SilentStdinWriter:
+    """Stub stdin writer — absorbs writes silently.
+
+    Exists so production code that does ``proc.stdin.write(...)`` +
+    ``proc.stdin.drain()`` + ``proc.stdin.close()`` (when ``stdin_mode`` is
+    ``asyncio.subprocess.PIPE``) works without error. The written bytes are
+    discarded — scenario tests drive behavior through ``FakeDocker.script_run``,
+    not through prompts.
+    """
+
+    def __init__(self) -> None:
+        self.written: list[bytes] = []
+
+    def write(self, data: bytes) -> None:
+        self.written.append(data)
+
+    async def drain(self) -> None:
+        return
+
+    def close(self) -> None:
+        return
+
+
 class _FakeProcess:
     """Duck-typed ``asyncio.subprocess.Process`` for scenario tests."""
 
@@ -30,7 +53,7 @@ class _FakeProcess:
         self.stdout: asyncio.StreamReader = asyncio.StreamReader()
         self.stderr: asyncio.StreamReader = asyncio.StreamReader()
         self.stderr.feed_eof()
-        self.stdin: asyncio.StreamWriter | None = None
+        self.stdin: _SilentStdinWriter | None = _SilentStdinWriter()
         self.pid: int | None = None
         self.returncode: int | None = None
         self._killed = False

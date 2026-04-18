@@ -98,3 +98,22 @@ async def test_run_simple_returns_stdout_as_string() -> None:
 async def test_cleanup_is_noop() -> None:
     runner = FakeSubprocessRunner(FakeDocker())
     await runner.cleanup()  # no raise
+
+
+async def test_stdin_absorbs_writes_and_close() -> None:
+    docker = FakeDocker()
+    docker.script_run([{"type": "result", "success": True, "exit_code": 0}])
+    runner = FakeSubprocessRunner(docker)
+
+    proc = await runner.create_streaming_process(["agent"])
+    assert proc.stdin is not None
+    proc.stdin.write(b"prompt bytes")
+    await proc.stdin.drain()
+    proc.stdin.close()
+
+    # Still able to consume stdout and exit normally
+    assert proc.stdout is not None
+    async for _ in proc.stdout:
+        pass
+    await proc.wait()
+    assert proc.returncode == 0
