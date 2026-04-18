@@ -117,3 +117,32 @@ async def test_stdin_absorbs_writes_and_close() -> None:
         pass
     await proc.wait()
     assert proc.returncode == 0
+
+
+async def test_run_simple_git_command_routes_to_host(tmp_path) -> None:
+    """git commands bypass FakeDocker and run on the real host."""
+    import subprocess
+
+    subprocess.run(
+        ["git", "init", "-b", "main"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    runner = FakeSubprocessRunner(FakeDocker())
+    result = await runner.run_simple(
+        ["git", "rev-parse", "--git-dir"], cwd=str(tmp_path)
+    )
+    assert result.returncode == 0
+    assert result.stdout == ".git"
+
+
+async def test_run_simple_non_host_command_still_goes_to_docker() -> None:
+    """Commands outside _HOST_COMMANDS route through FakeDocker."""
+    docker = FakeDocker()
+    docker.script_run([{"type": "result", "success": True, "exit_code": 7}])
+    runner = FakeSubprocessRunner(docker)
+
+    result = await runner.run_simple(["make", "quality"])
+    # Routes through FakeDocker — returncode comes from scripted result event
+    assert result.returncode == 7

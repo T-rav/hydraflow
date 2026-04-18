@@ -9,10 +9,12 @@ The fake Process exposes: stdout/stderr (StreamReader), stdin
 terminate(). pid is None so ``terminate_processes`` in ``runner_utils`` skips
 ``killpg`` (no real process group exists for a fake process).
 
-``run_simple`` dispatches host-side utilities (``git``, ``make``) directly via
-``asyncio.create_subprocess_exec`` so that ``AgentRunner._count_commits`` and
-``_verify_quality`` observe the real worktree state.  All other commands
-(agent CLI invocations) are routed through FakeDocker.
+``run_simple`` dispatches real ``git`` commands to the host (via
+``asyncio.create_subprocess_exec``) so that ``AgentRunner._count_commits`` and
+``_force_commit_uncommitted`` observe the actual worktree state.  All other
+commands (``make``, agent CLI) route through FakeDocker and return its scripted
+default success event; scenarios that need a real ``make quality`` signal must
+extend ``_HOST_COMMANDS`` or script a specific FakeDocker response.
 """
 
 from __future__ import annotations
@@ -27,10 +29,12 @@ from execution import SimpleResult
 from tests.scenarios.fakes.fake_docker import FakeDocker
 
 # Commands that must run on the real host rather than through FakeDocker.
-# ``git`` is required so that AgentRunner._count_commits and _get_branch_diff
-# observe the actual worktree commits written by script_run_with_commits.
-# Other commands (``make``, agent CLI) go through FakeDocker so scenario tests
-# can script their results without spawning real processes.
+# Only ``git`` is listed here: AgentRunner._count_commits and _get_branch_diff
+# need to observe real worktree commits written by script_run_with_commits.
+# NOTE: ``make`` is NOT in this set — quality-gate checks (make quality) are
+# routed through FakeDocker and use its scripted responses.  Scenarios that
+# need a real ``make quality`` result must add "make" here or script a
+# specific FakeDocker response via docker.script_run(...).
 _HOST_COMMANDS: frozenset[str] = frozenset({"git"})
 
 

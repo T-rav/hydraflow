@@ -95,8 +95,8 @@ async def test_A0_happy_path_realistic_agent(tmp_path) -> None:
     assert len(world.docker.invocations) >= 1
 
 
-async def test_A1_docker_timeout_then_retry_succeeds(tmp_path) -> None:
-    """A1: Timeout on first run — documents production retry behaviour.
+async def test_A1_docker_timeout_fails_issue_no_retry(tmp_path) -> None:
+    """A1: Timeout on first run — documents production timeout behaviour.
 
     Production does NOT retry on timeout; the issue fails.  This test asserts
     the observable outcome: at least 1 Docker invocation and a non-merged
@@ -169,7 +169,7 @@ async def test_A3_malformed_stream_recovers_to_failure(tmp_path) -> None:
     assert wr.success is False
 
 
-async def test_A4_auth_retry(tmp_path) -> None:
+async def test_A4_unknown_event_type_ignored_stream_continues(tmp_path) -> None:
     """A4: Unknown event type (auth_retry_required) is ignored by StreamParser.
 
     Production StreamParser does not recognise ``auth_retry_required`` as a
