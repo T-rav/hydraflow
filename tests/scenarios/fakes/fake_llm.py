@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,15 @@ from tests.conftest import (
     TriageResultFactory,
     WorkerResultFactory,
 )
+
+
+@dataclass(slots=True)
+class _BudgetState:
+    """Per-issue token budget accounting used by FakeLLM."""
+
+    max: int
+    per_call: int
+    used: int = 0
 
 
 class _ScriptedRunner:
@@ -208,7 +218,7 @@ class FakeLLM:
     """Composable scripted LLM runners for all pipeline phases."""
 
     def __init__(self) -> None:
-        self._token_budgets: dict[int, dict[str, int]] = {}
+        self._token_budgets: dict[int, _BudgetState] = {}
         self.triage_runner = _FakeTriageRunner()
         self.planners = _FakePlannerRunner(self)
         self.agents = _FakeAgentRunner()
@@ -241,22 +251,22 @@ class FakeLLM:
         synthetic failure result (``error="token_budget exceeded"``) instead
         of popping the scripted queue.
         """
-        self._token_budgets[issue_number] = {
-            "max": max_tokens,
-            "per_call": tokens_per_call,
-            "used": 0,
-        }
+        self._token_budgets[issue_number] = _BudgetState(
+            max=max_tokens, per_call=tokens_per_call
+        )
 
     def _consume_budget(self, issue_number: int) -> bool:
         """Return True if the call fits the budget; False if exceeded.
 
-        When no budget is set for the issue, always returns True.
+        When the budget is exceeded, the scripted queue is NOT popped — the
+        caller short-circuits to a synthetic failure result. A subsequent
+        call (after the block) therefore still sees the full remaining queue.
         """
         state = self._token_budgets.get(issue_number)
         if state is None:
             return True
-        new_used = state["used"] + state["per_call"]
-        if new_used > state["max"]:
+        new_used = state.used + state.per_call
+        if new_used > state.max:
             return False
-        state["used"] = new_used
+        state.used = new_used
         return True

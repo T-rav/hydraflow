@@ -135,7 +135,7 @@ async def test_token_budget_planner_passes_first_call_then_fails() -> None:
 
 async def test_token_budget_reviewer_same_behavior() -> None:
     """Reviewer also honors the token budget."""
-    from models import PRInfo
+    from tests.conftest import PRInfoFactory
     from tests.scenarios.fakes.fake_llm import FakeLLM
 
     llm = FakeLLM()
@@ -148,7 +148,7 @@ async def test_token_budget_reviewer_same_behavior() -> None:
     )
     llm.set_token_budget(issue_number=1, max_tokens=200, tokens_per_call=150)
 
-    pr = PRInfo(number=42, issue_number=1, branch="feat/x")
+    pr = PRInfoFactory.create(number=42, issue_number=1, branch="feat/x")
     issue = TaskFactory.create(id=1)
     worktree = Path("/tmp/wt")
 
@@ -157,7 +157,7 @@ async def test_token_budget_reviewer_same_behavior() -> None:
 
     assert first.verdict is not None  # normal scripted result
     # Second call exceeds budget — replaced with a failure result
-    assert getattr(second, "error", None) and "token_budget" in second.error
+    assert "token_budget" in (second.error or "")
 
 
 async def test_no_budget_set_means_no_gating() -> None:
