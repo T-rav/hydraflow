@@ -24,7 +24,6 @@ sys.path.insert(0, str(ROOT / "src"))
 async def main() -> int:
     from config import Credentials, HydraFlowConfig  # noqa: PLC0415
     from events import EventBus  # noqa: PLC0415
-    from execution import SubprocessRunner  # noqa: PLC0415
     from pr_manager import PRManager  # noqa: PLC0415
 
     repo = os.environ.get("HYDRAFLOW_REPO", "")
@@ -40,12 +39,7 @@ async def main() -> int:
         data_root=Path.cwd() / ".hydraflow-scratch" / "data",
     )
     credentials = Credentials(gh_token=os.environ.get("GH_TOKEN", ""))
-    pm = PRManager(
-        config=cfg,
-        bus=EventBus(),
-        credentials=credentials,
-        subprocess_runner=SubprocessRunner(),
-    )
+    pm = PRManager(config=cfg, event_bus=EventBus(), credentials=credentials)
 
     created = await pm.ensure_branch_exists(cfg.staging_branch, base=cfg.main_branch)
     if created:
