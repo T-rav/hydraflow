@@ -23,6 +23,7 @@ export function StatBox({ label, value }) {
   )
 }
 
+/** PatternCard. `title` accepts a ReactNode so consumers can embed badges. */
 export function PatternCard({ title, count, color, children }) {
   const [expanded, setExpanded] = useState(false)
   return (
