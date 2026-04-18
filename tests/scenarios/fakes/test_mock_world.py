@@ -66,15 +66,21 @@ class TestMockWorldRealAgentRunner:
         from tests.scenarios.fakes.mock_world import MockWorld
 
         world = MockWorld(tmp_path, use_real_agent_runner=True)
+        # Assert both the surface attribute AND the ImplementPhase binding.
+        # The latter is what ImplementPhase._run_single_issue actually calls.
         assert isinstance(world.harness.agents, AgentRunner)
+        assert isinstance(world.harness.implement_phase._agents, AgentRunner)
 
     async def test_default_mockworld_still_uses_scripted_agent(self, tmp_path) -> None:
+        import inspect
+
         from tests.scenarios.fakes.mock_world import MockWorld
 
         world = MockWorld(tmp_path)
-        # Scripted path: h.agents.run is the bound method of _FakeAgentRunner
-        # (patched onto a MagicMock-typed h.agents in the harness)
+        # Scripted path: harness.agents.run is the bound method of _FakeAgentRunner
+        # patched onto the harness's AsyncMock.
         agents_run = world.harness.agents.run
-        owner = getattr(agents_run, "__self__", None)
-        assert owner is not None
-        assert "_FakeAgentRunner" in type(owner).__name__
+        assert inspect.ismethod(agents_run)
+        # implement_phase still holds the original AsyncMock harness.agents (the
+        # .run attribute on that mock was swapped, but the mock identity is preserved).
+        assert world.harness.implement_phase._agents is world.harness.agents

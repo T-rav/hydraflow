@@ -80,11 +80,13 @@ class MockWorld:
                 build_real_agent_runner,
             )
 
-            h.agents = build_real_agent_runner(
-                docker=self._docker,
-                hindsight=self._hindsight,
-                event_bus=h.bus,
-                tmp_path=self._tmp_path,
+            h.set_agents(
+                build_real_agent_runner(
+                    docker=self._docker,
+                    hindsight=self._hindsight,
+                    event_bus=h.bus,
+                    tmp_path=self._tmp_path,
+                )
             )
         else:
             h.agents.run = self._llm.agents.run

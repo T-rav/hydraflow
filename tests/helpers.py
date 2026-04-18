@@ -772,6 +772,26 @@ class PipelineHarness:
             stop_event=self.stop_event,
         )
 
+    def set_agents(self, agents: Any) -> None:
+        """Replace the agents runner and rebuild ImplementPhase to use it.
+
+        ImplementPhase captures ``agents`` by reference in its constructor, so
+        callers must not simply assign to ``self.agents`` — the rebuild is
+        required to propagate the new runner into the phase.
+        """
+        from implement_phase import ImplementPhase  # noqa: PLC0415
+
+        self.agents = agents
+        self.implement_phase = ImplementPhase(
+            config=self.config,
+            state=self.state,
+            workspaces=self.workspaces,
+            agents=agents,
+            prs=self.prs,
+            store=self.store,
+            stop_event=self.stop_event,
+        )
+
     def _ensure_test_dirs(self) -> None:
         paths = {
             self.config.repo_root,
