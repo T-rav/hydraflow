@@ -699,3 +699,32 @@ async def test_A14_three_issues_concurrent_realistic(tmp_path) -> None:
 
     # At least 3 docker invocations (expect many more: skills, quality, etc.)
     assert len(world.docker.invocations) >= 3
+
+
+async def test_A16_credit_exhausted_halts_pipeline(tmp_path) -> None:
+    """CreditExhaustedError from _execute propagates out of run_pipeline.
+
+    run_refilling_pool's re-raise allowlist (src/phase_utils.py:130-137)
+    re-raises CreditExhaustedError (along with AuthenticationError and
+    MemoryError) after cancelling sibling tasks. Non-allowlisted exceptions
+    are swallowed and logged at warning.
+    """
+    from unittest import mock
+
+    from subprocess_util import CreditExhaustedError
+
+    world = MockWorld(tmp_path, use_real_agent_runner=True)
+    world.add_issue(1, "t", "b", labels=["hydraflow-ready"])
+    worktree_cwd = tmp_path / "worktrees" / "issue-1"
+    init_test_worktree(worktree_cwd)
+
+    agent_runner = world.harness.agents
+
+    async def raising_execute(*args, **kwargs):
+        raise CreditExhaustedError("API credit limit reached", resume_at=None)
+
+    with (
+        mock.patch.object(agent_runner, "_execute", raising_execute),
+        pytest.raises(CreditExhaustedError),
+    ):
+        await world.run_pipeline()
