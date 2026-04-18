@@ -12,53 +12,12 @@ their outcomes.
 
 from __future__ import annotations
 
-import subprocess
-from pathlib import Path
-
 import pytest
 
 from tests.scenarios.fakes.mock_world import MockWorld
+from tests.scenarios.helpers.git_worktree_fixture import init_test_worktree
 
 pytestmark = pytest.mark.scenario
-
-
-def _init_test_worktree(path: Path, *, branch: str = "agent/issue-1") -> None:
-    """Prepare *path* as a git repo suitable for scenario testing.
-
-    Sets up:
-    - A bare ``origin.git`` sibling directory used as the remote.
-    - An initial commit on ``main`` (so ``origin/main`` is reachable).
-    - The working branch *branch* checked out and pushed to origin.
-
-    After this function returns, ``git rev-list --count origin/main..{branch}``
-    will return ``"0"`` until a new commit is added on *branch*.
-    """
-    path.mkdir(parents=True, exist_ok=True)
-    origin = path.parent / "origin.git"
-    origin.mkdir(parents=True, exist_ok=True)
-
-    run = lambda *args, cwd=path: subprocess.run(  # noqa: E731
-        list(args), cwd=cwd, check=True, capture_output=True
-    )
-
-    # Bare origin
-    subprocess.run(
-        ["git", "init", "--bare", str(origin)],
-        check=True,
-        capture_output=True,
-    )
-
-    # Worktree
-    run("git", "init", "-b", "main")
-    run("git", "config", "user.email", "test@test")
-    run("git", "config", "user.name", "test")
-    run("git", "commit", "--allow-empty", "-m", "init")
-    run("git", "remote", "add", "origin", str(origin))
-    run("git", "push", "-u", "origin", "main")
-
-    # Create and push the feature branch
-    run("git", "checkout", "-b", branch)
-    run("git", "push", "-u", "origin", branch)
 
 
 async def test_A0_happy_path_realistic_agent(tmp_path) -> None:
@@ -76,7 +35,7 @@ async def test_A0_happy_path_realistic_agent(tmp_path) -> None:
 
     # FakeWorkspace creates the dir at tmp_path / "worktrees" / "issue-1".
     worktree_cwd = tmp_path / "worktrees" / "issue-1"
-    _init_test_worktree(worktree_cwd, branch="agent/issue-1")
+    init_test_worktree(worktree_cwd, branch="agent/issue-1")
 
     world.docker.script_run_with_commits(
         events=[{"type": "result", "success": True, "exit_code": 0}],
@@ -106,7 +65,7 @@ async def test_A1_docker_timeout_fails_issue_no_retry(tmp_path) -> None:
     world.add_issue(1, "t", "b", labels=["hydraflow-ready"])
 
     worktree_cwd = tmp_path / "worktrees" / "issue-1"
-    _init_test_worktree(worktree_cwd, branch="agent/issue-1")
+    init_test_worktree(worktree_cwd, branch="agent/issue-1")
 
     world.docker.fail_next(kind="timeout")
 
@@ -132,7 +91,7 @@ async def test_A2_oom_fails_issue(tmp_path) -> None:
     world.add_issue(1, "t", "b", labels=["hydraflow-ready"])
 
     worktree_cwd = tmp_path / "worktrees" / "issue-1"
-    _init_test_worktree(worktree_cwd, branch="agent/issue-1")
+    init_test_worktree(worktree_cwd, branch="agent/issue-1")
 
     world.docker.fail_next(kind="oom")
 
@@ -156,7 +115,7 @@ async def test_A3_malformed_stream_recovers_to_failure(tmp_path) -> None:
     world.add_issue(1, "t", "b", labels=["hydraflow-ready"])
 
     worktree_cwd = tmp_path / "worktrees" / "issue-1"
-    _init_test_worktree(worktree_cwd, branch="agent/issue-1")
+    init_test_worktree(worktree_cwd, branch="agent/issue-1")
 
     world.docker.fail_next(kind="malformed_stream")
 
@@ -185,7 +144,7 @@ async def test_A4_unknown_event_type_ignored_stream_continues(tmp_path) -> None:
     world.add_issue(1, "t", "b", labels=["hydraflow-ready"])
 
     worktree_cwd = tmp_path / "worktrees" / "issue-1"
-    _init_test_worktree(worktree_cwd, branch="agent/issue-1")
+    init_test_worktree(worktree_cwd, branch="agent/issue-1")
 
     world.docker.script_run_with_commits(
         events=[
@@ -223,7 +182,7 @@ async def test_A5_token_budget_exceeded_halts_implement(tmp_path) -> None:
     world.add_issue(1, "t", "b", labels=["hydraflow-ready"])
 
     worktree_cwd = tmp_path / "worktrees" / "issue-1"
-    _init_test_worktree(worktree_cwd)
+    init_test_worktree(worktree_cwd)
 
     world.docker.script_run(
         [
@@ -258,7 +217,7 @@ async def test_A6_github_rate_limit_at_triage_halts_pipeline(tmp_path) -> None:
     world.add_issue(1, "t", "b", labels=["hydraflow-ready"])
 
     worktree_cwd = tmp_path / "worktrees" / "issue-1"
-    _init_test_worktree(worktree_cwd)
+    init_test_worktree(worktree_cwd)
 
     world.docker.script_run_with_commits(
         events=[{"type": "result", "success": True, "exit_code": 0}],
@@ -295,7 +254,7 @@ async def test_A7_github_secondary_rate_limit_surfaces(tmp_path) -> None:
     world.add_issue(1, "t", "b", labels=["hydraflow-ready"])
 
     worktree_cwd = tmp_path / "worktrees" / "issue-1"
-    _init_test_worktree(worktree_cwd)
+    init_test_worktree(worktree_cwd)
 
     world.docker.script_run_with_commits(
         events=[{"type": "result", "success": True, "exit_code": 0}],
