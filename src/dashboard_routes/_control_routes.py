@@ -39,18 +39,19 @@ from update_check import load_cached_update_result
 logger = logging.getLogger("hydraflow.dashboard")
 
 
-def _safe_error_message(exc: Exception) -> str:
+def _safe_error_message(exc: ValueError | ValidationError) -> str:
     """Return a validation-style message without leaking stack trace details.
 
     For ``ValidationError``, surfaces ``loc: msg`` per field (safe; Pydantic
-    designs these strings for end-users). For everything else, returns a
-    generic string — callers should ``logger.exception`` separately to keep
-    diagnostic context on the server. CodeQL rule ``py/stack-trace-exposure``.
+    designs these strings for end-users). For bare ``ValueError`` or when
+    the error list is empty, returns a generic string — callers should
+    ``logger.exception`` to keep diagnostic context on the server.
+    CodeQL rule ``py/stack-trace-exposure``.
     """
-    if isinstance(exc, ValidationError):
-        parts = [f"{e['loc'][-1]}: {e['msg']}" for e in exc.errors() if e.get("loc")]
-        return "; ".join(parts) if parts else "Invalid settings"
-    return "Invalid settings"
+    if not isinstance(exc, ValidationError):
+        return "Invalid settings"
+    parts = [f"{e['loc'][-1]}: {e['msg']}" for e in exc.errors() if e.get("loc")]
+    return "; ".join(parts) if parts else "Invalid settings"
 
 
 # Known workers with human-friendly labels (pipeline loops + background)
