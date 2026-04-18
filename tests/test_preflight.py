@@ -287,8 +287,8 @@ async def test_run_preflight_checks_host_mode(tmp_path: Path) -> None:
     ):
         results = await run_preflight_checks(config)
 
-    # git, gh-cli, gh-auth, repo-root, disk-space, 3x agent-cli
-    assert len(results) == 8
+    # git, gh-cli, gh-auth, repo-root, disk-space, 3x agent-cli, plugins
+    assert len(results) == 9
     # No docker check in host mode
     assert not any(r.name == "docker" for r in results)
 
@@ -319,7 +319,7 @@ async def test_run_preflight_checks_docker_mode(tmp_path: Path) -> None:
         results = await run_preflight_checks(config)
 
     assert any(r.name == "docker" for r in results)
-    assert len(results) == 9  # 8 base + docker
+    assert len(results) == 10  # 9 base + docker
 
 
 @pytest.mark.asyncio

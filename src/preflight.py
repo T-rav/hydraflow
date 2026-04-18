@@ -42,6 +42,11 @@ async def run_preflight_checks(config: HydraFlowConfig) -> list[CheckResult]:
         tool = getattr(config, tool_field)
         if tool != "inherit":
             results.append(_check_agent_cli(tool))
+
+    # Plugin skill registry — verify required plugins are installed.
+    # Language detection runs per-repo later; at preflight we only check Tier 1.
+    results.append(_check_plugins(config, detected_languages=set()))
+
     return results
 
 

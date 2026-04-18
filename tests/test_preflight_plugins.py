@@ -129,3 +129,22 @@ class TestCheckPlugins:
         assert result.status == CheckStatus.WARN
         assert "for python" in result.message
         assert "pyright-lsp" in result.message
+
+
+class TestRunPreflightChecksWiring:
+    """Verify _check_plugins is invoked by run_preflight_checks."""
+
+    @pytest.mark.asyncio
+    async def test_plugin_check_appears_in_results(self, tmp_path: Path) -> None:
+        """run_preflight_checks includes a 'plugins' result entry."""
+        from preflight import run_preflight_checks
+
+        config = HydraFlowConfig(
+            required_plugins=["superpowers"],
+            language_plugins={},
+            repo_root=str(tmp_path),
+            data_root=str(tmp_path),
+        )
+        results = await run_preflight_checks(config)
+        names = [r.name for r in results]
+        assert "plugins" in names
