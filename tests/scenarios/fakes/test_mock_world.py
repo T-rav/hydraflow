@@ -201,3 +201,33 @@ async def test_mock_world_add_repo_registers_in_store(tmp_path):
     store = RepoRegistryStore(tmp_path)
     records = store.list()
     assert any(r.slug == "acme/app" for r in records)
+
+
+async def test_wire_targets_accepts_duck_typed_target(tmp_path):
+    from unittest.mock import MagicMock
+
+    from tests.scenarios.fakes.mock_world import MockWorld
+
+    world = MockWorld(tmp_path)
+    fake_target = MagicMock()
+    fake_target.prs = MagicMock()
+    fake_target.triage_runner = MagicMock()
+    fake_target.planners = MagicMock()
+    fake_target.agents = MagicMock()
+    fake_target.reviewers = MagicMock()
+    fake_target.workspaces = MagicMock()
+
+    # Capture expected bound methods before wiring (bound methods are not
+    # identity-stable across repeated attribute accesses, so we snapshot them).
+    expected_create_pr = world.github.create_pr
+    expected_merge_pr = world.github.merge_pr
+    expected_evaluate = world._llm.triage_runner.evaluate
+    expected_workspace_create = world._workspace.create
+
+    world._wire_targets(fake_target)
+
+    # After wiring, PR methods must be FakeGitHub's bound methods
+    assert fake_target.prs.create_pr == expected_create_pr
+    assert fake_target.prs.merge_pr == expected_merge_pr
+    assert fake_target.triage_runner.evaluate == expected_evaluate
+    assert fake_target.workspaces.create == expected_workspace_create

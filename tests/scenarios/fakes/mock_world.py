@@ -62,73 +62,91 @@ class MockWorld:
         self._phase_hooks: list[tuple[str, Callable[[], None]]] = []
         self._ran = False
 
-        self._wire_runners()
-        self._wire_prs()
-        self._wire_workspaces()
-
-        if install_subprocess_clock:
-            self._clock.install_subprocess_clock()
-
-    def _wire_runners(self) -> None:
-        """Replace harness AsyncMock runners with FakeLLM runners (or real AgentRunner)."""
-        h = self._harness
-        h.triage_runner.evaluate = self._llm.triage_runner.evaluate
-        h.triage_runner.run_decomposition = self._llm.triage_runner.run_decomposition
-        h.planners.plan = self._llm.planners.plan
-        h.planners.run_gap_review = self._llm.planners.run_gap_review
-        h.reviewers.review = self._llm.reviewers.review
-        h.reviewers.fix_ci = self._llm.reviewers.fix_ci
+        self._wire_targets(self._harness)
 
         if self._use_real_agent:
             from tests.scenarios.helpers.agent_runner_factory import (  # noqa: PLC0415
                 build_real_agent_runner,
             )
 
-            h.set_agents(
+            self._harness.set_agents(
                 build_real_agent_runner(
                     docker=self._docker,
                     hindsight=self._hindsight,
-                    event_bus=h.bus,
+                    event_bus=self._harness.bus,
                     tmp_path=self._tmp_path,
                 )
             )
-        else:
-            h.agents.run = self._llm.agents.run
+
+        if install_subprocess_clock:
+            self._clock.install_subprocess_clock()
+
+    def _wire_targets(self, target: Any) -> None:
+        """Patch runner/PR/workspace attributes on ``target`` to this world's fakes.
+
+        ``target`` must expose ``.prs``, ``.triage_runner``, ``.planners``,
+        ``.agents``, ``.reviewers``, and ``.workspaces`` objects whose methods
+        are replaceable. Works for both ``PipelineHarness`` and a small
+        duck-typed wrapper around the service registry on a real
+        ``HydraFlowOrchestrator`` (used in Task 9).
+        """
+        # Runners
+        target.triage_runner.evaluate = self._llm.triage_runner.evaluate
+        target.triage_runner.run_decomposition = (
+            self._llm.triage_runner.run_decomposition
+        )
+        target.planners.plan = self._llm.planners.plan
+        target.planners.run_gap_review = self._llm.planners.run_gap_review
+        target.agents.run = self._llm.agents.run
+        target.reviewers.review = self._llm.reviewers.review
+        target.reviewers.fix_ci = self._llm.reviewers.fix_ci
+
+        # PRs
+        prs = target.prs
+        gh = self._github
+        for method in (
+            "transition",
+            "swap_pipeline_labels",
+            "add_labels",
+            "remove_label",
+            "post_comment",
+            "post_pr_comment",
+            "submit_review",
+            "create_task",
+            "close_task",
+            "close_issue",
+            "find_existing_issue",
+            "push_branch",
+            "create_pr",
+            "find_open_pr_for_branch",
+            "branch_has_diff_from_main",
+            "add_pr_labels",
+            "get_pr_diff",
+            "get_pr_head_sha",
+            "get_pr_diff_names",
+            "get_pr_approvers",
+            "fetch_code_scanning_alerts",
+            "wait_for_ci",
+            "fetch_ci_failure_logs",
+            "merge_pr",
+        ):
+            setattr(prs, method, getattr(gh, method))
+
+        # Workspaces
+        target.workspaces.create = self._workspace.create
+        target.workspaces.destroy = self._workspace.destroy
+
+    def _wire_runners(self) -> None:
+        """Backward-compatible wrapper — delegates to _wire_targets."""
+        self._wire_targets(self._harness)
 
     def _wire_prs(self) -> None:
-        """Replace harness PR manager mocks with FakeGitHub methods."""
-        h = self._harness
-        gh = self._github
-        h.prs.transition = gh.transition
-        h.prs.swap_pipeline_labels = gh.swap_pipeline_labels
-        h.prs.add_labels = gh.add_labels
-        h.prs.remove_label = gh.remove_label
-        h.prs.post_comment = gh.post_comment
-        h.prs.post_pr_comment = gh.post_pr_comment
-        h.prs.submit_review = gh.submit_review
-        h.prs.create_task = gh.create_task
-        h.prs.close_task = gh.close_task
-        h.prs.close_issue = gh.close_issue
-        h.prs.find_existing_issue = gh.find_existing_issue
-        h.prs.push_branch = gh.push_branch
-        h.prs.create_pr = gh.create_pr
-        h.prs.find_open_pr_for_branch = gh.find_open_pr_for_branch
-        h.prs.branch_has_diff_from_main = gh.branch_has_diff_from_main
-        h.prs.add_pr_labels = gh.add_pr_labels
-        h.prs.get_pr_diff = gh.get_pr_diff
-        h.prs.get_pr_head_sha = gh.get_pr_head_sha
-        h.prs.get_pr_diff_names = gh.get_pr_diff_names
-        h.prs.get_pr_approvers = gh.get_pr_approvers
-        h.prs.fetch_code_scanning_alerts = gh.fetch_code_scanning_alerts
-        h.prs.wait_for_ci = gh.wait_for_ci
-        h.prs.fetch_ci_failure_logs = gh.fetch_ci_failure_logs
-        h.prs.merge_pr = gh.merge_pr
+        """Backward-compatible wrapper — delegates to _wire_targets."""
+        self._wire_targets(self._harness)
 
     def _wire_workspaces(self) -> None:
-        """Replace harness workspace mocks with FakeWorkspace."""
-        h = self._harness
-        h.workspaces.create = self._workspace.create
-        h.workspaces.destroy = self._workspace.destroy
+        """Backward-compatible wrapper — delegates to _wire_targets."""
+        self._wire_targets(self._harness)
 
     # --- Seed API (fluent, returns self) ---
 
