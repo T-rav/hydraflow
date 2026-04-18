@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from tests.scenarios.fakes.fake_docker import FakeDocker
 from tests.scenarios.ports import DockerPort
 
@@ -55,3 +57,45 @@ async def test_run_agent_records_invocations() -> None:
     assert len(fake.invocations) == 1
     assert fake.invocations[0].command == ["agent", "--task", "42"]
     assert fake.invocations[0].env == {"FOO": "BAR"}
+
+
+async def test_fail_next_timeout_raises_on_consumption() -> None:
+    fake = FakeDocker()
+    fake.fail_next(kind="timeout")
+    with pytest.raises(TimeoutError):
+        async for _ in await fake.run_agent(command=["agent"]):
+            pass
+
+
+async def test_fail_next_oom_emits_exit_137() -> None:
+    fake = FakeDocker()
+    fake.fail_next(kind="oom")
+    events = [e async for e in await fake.run_agent(command=["agent"])]
+    assert events[-1]["type"] == "result"
+    assert events[-1]["success"] is False
+    assert events[-1]["exit_code"] == 137
+
+
+async def test_fail_next_exit_nonzero_emits_exit_1() -> None:
+    fake = FakeDocker()
+    fake.fail_next(kind="exit_nonzero")
+    events = [e async for e in await fake.run_agent(command=["agent"])]
+    assert events[-1] == {"type": "result", "success": False, "exit_code": 1}
+
+
+async def test_fail_next_malformed_stream_emits_garbage_then_result() -> None:
+    fake = FakeDocker()
+    fake.fail_next(kind="malformed_stream")
+    events = [e async for e in await fake.run_agent(command=["agent"])]
+    assert events[0]["type"] == "garbage"
+    assert events[-1]["type"] == "result"
+    assert events[-1]["success"] is False
+
+
+async def test_fail_next_is_single_shot() -> None:
+    fake = FakeDocker()
+    fake.fail_next(kind="exit_nonzero")
+    first = [e async for e in await fake.run_agent(command=["a"])]
+    second = [e async for e in await fake.run_agent(command=["b"])]
+    assert first[-1]["success"] is False
+    assert second[-1]["success"] is True
