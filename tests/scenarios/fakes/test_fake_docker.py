@@ -101,6 +101,14 @@ async def test_fail_next_is_single_shot() -> None:
     assert second[-1]["success"] is True
 
 
+async def test_clear_fault_removes_pending_fault() -> None:
+    fake = FakeDocker()
+    fake.fail_next(kind="exit_nonzero")
+    fake.clear_fault()
+    events = [e async for e in await fake.run_agent(command=["agent"])]
+    assert events[-1]["success"] is True
+
+
 async def test_script_run_with_commits_writes_files_and_commits(tmp_path) -> None:
     import subprocess
 

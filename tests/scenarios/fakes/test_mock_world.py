@@ -84,3 +84,57 @@ class TestMockWorldRealAgentRunner:
         # implement_phase still holds the original AsyncMock harness.agents (the
         # .run attribute on that mock was swapped, but the mock identity is preserved).
         assert world.harness.implement_phase._agents is world.harness.agents
+
+
+async def test_fail_service_docker_arms_exit_nonzero(tmp_path) -> None:
+    from tests.scenarios.fakes.mock_world import MockWorld
+
+    world = MockWorld(tmp_path)
+    world.fail_service("docker")
+    events = [e async for e in await world.docker.run_agent(command=["x"])]
+    assert events[-1]["success"] is False
+
+
+async def test_fail_service_github_arms_rate_limit(tmp_path) -> None:
+    import pytest
+
+    from tests.scenarios.fakes.fake_github import RateLimitError
+    from tests.scenarios.fakes.mock_world import MockWorld
+
+    world = MockWorld(tmp_path)
+    world.github.add_issue(1, "t", "b", labels=[])
+    world.fail_service("github")
+    with pytest.raises(RateLimitError):
+        await world.github.add_labels(1, ["x"])
+
+
+async def test_heal_service_github_clears_rate_limit(tmp_path) -> None:
+    from tests.scenarios.fakes.mock_world import MockWorld
+
+    world = MockWorld(tmp_path)
+    world.github.add_issue(1, "t", "b", labels=[])
+    world.fail_service("github")
+    world.heal_service("github")
+    await world.github.add_labels(1, ["x"])  # no raise
+    assert "x" in world.github.issue(1).labels
+
+
+async def test_heal_service_docker_clears_pending_fault(tmp_path) -> None:
+    from tests.scenarios.fakes.mock_world import MockWorld
+
+    world = MockWorld(tmp_path)
+    world.fail_service("docker")
+    world.heal_service("docker")
+    events = [e async for e in await world.docker.run_agent(command=["x"])]
+    # After healing the pending fault, next run_agent returns the default success
+    assert events[-1]["success"] is True
+
+
+async def test_fail_service_unknown_raises(tmp_path) -> None:
+    import pytest
+
+    from tests.scenarios.fakes.mock_world import MockWorld
+
+    world = MockWorld(tmp_path)
+    with pytest.raises(ValueError, match="unknown service"):
+        world.fail_service("bogus-service")

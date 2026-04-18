@@ -172,11 +172,25 @@ class MockWorld:
     ) -> MockWorld:
         if name == "hindsight":
             self._hindsight.set_failing(True)
+        elif name == "docker":
+            self._docker.fail_next(kind="exit_nonzero")
+        elif name == "github":
+            self._github.set_rate_limit_mode(remaining=0)
+        else:
+            msg = f"unknown service: {name}"
+            raise ValueError(msg)
         return self
 
     def heal_service(self, name: str) -> MockWorld:
         if name == "hindsight":
             self._hindsight.set_failing(False)
+        elif name == "github":
+            self._github.clear_rate_limit()
+        elif name == "docker":
+            self._docker.clear_fault()
+        else:
+            msg = f"unknown service: {name}"
+            raise ValueError(msg)
         return self
 
     # --- Inspect world state ---

@@ -58,6 +58,10 @@ class FakeDocker:
         """Inject a single-shot fault into the next run_agent call."""
         self._next_fault = kind
 
+    def clear_fault(self) -> None:
+        """Clear any pending single-shot fault (idempotent)."""
+        self._next_fault = None
+
     async def run_agent(
         self,
         *,
