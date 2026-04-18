@@ -632,6 +632,61 @@ function StagingPromotionSettingsPanel() {
           {error}
         </div>
       )}
+      <StagingBranchSetupButton />
+    </div>
+  )
+}
+
+function StagingBranchSetupButton() {
+  const [state, setState] = useState('idle')
+  const [message, setMessage] = useState(null)
+
+  const run = useCallback(async () => {
+    setState('running')
+    setMessage(null)
+    try {
+      const resp = await fetch('/api/admin/setup-staging-branch', { method: 'POST' })
+      const data = await resp.json().catch(() => ({}))
+      if (resp.ok && data.status === 'ok') {
+        setState('done')
+        setMessage(
+          data.created
+            ? `Created ${data.branch} and applied protection.`
+            : `${data.branch} already existed; protection applied.`,
+        )
+      } else {
+        setState('error')
+        setMessage(data.message || `Setup failed (${resp.status})`)
+      }
+    } catch (e) {
+      setState('error')
+      setMessage(String(e))
+    }
+  }, [])
+
+  return (
+    <div style={styles.depMergeSection}>
+      <button
+        type="button"
+        onClick={run}
+        disabled={state === 'running'}
+        style={styles.depMergeAddBtn}
+        data-testid="staging-branch-setup-btn"
+      >
+        {state === 'running' ? 'Setting up…' : 'Initialize staging branch'}
+      </button>
+      {message && (
+        <div
+          style={{
+            fontSize: 11,
+            color: state === 'error' ? theme.red : theme.textMuted,
+            marginTop: 4,
+          }}
+          data-testid="staging-branch-setup-message"
+        >
+          {message}
+        </div>
+      )}
     </div>
   )
 }

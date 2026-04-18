@@ -539,6 +539,33 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             {"status": "ok", "name": name, "interval_seconds": interval}
         )
 
+    @router.post("/api/admin/setup-staging-branch")
+    async def setup_staging_branch(
+        repo: RepoSlugParam = None,
+    ) -> JSONResponse:
+        """One-shot: create staging branch from main (if missing) + protect it."""
+        _cfg, _state, _bus, _get_orch = ctx.resolve_runtime(repo)
+        try:
+            created = await ctx.pr_manager.ensure_branch_exists(
+                _cfg.staging_branch, base=_cfg.main_branch
+            )
+            protection = await ctx.pr_manager.apply_staging_branch_protection(
+                _cfg.staging_branch
+            )
+        except RuntimeError as exc:
+            return JSONResponse(
+                {"status": "error", "message": str(exc)},
+                status_code=502,
+            )
+        return JSONResponse(
+            {
+                "status": "ok",
+                "branch": _cfg.staging_branch,
+                "created": created,
+                "protection": protection,
+            }
+        )
+
     @router.get("/api/staging-promotion/status")
     async def get_staging_promotion_status(  # noqa: PLR0914
         repo: RepoSlugParam = None,

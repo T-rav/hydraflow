@@ -913,6 +913,41 @@ describe('StagingPromotionSettingsPanel', () => {
     expect(statusBlock.textContent).toMatch(/1 failed/)
     expect(statusBlock.textContent).toMatch(/25% fail rate/)
   })
+
+  it('initialize staging branch button POSTs to the admin endpoint', async () => {
+    globalThis.fetch = vi.fn((url, opts) => {
+      if (typeof url === 'string' && url === '/api/admin/setup-staging-branch') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            status: 'ok',
+            branch: 'staging',
+            created: true,
+            protection: { status: 'protected' },
+          }),
+        })
+      }
+      if (typeof url === 'string' && url.startsWith('/api/staging-promotion/status')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            enabled: false, cadence_hours: 4, cadence_progress_hours: null,
+            last_rc_cut_at: null, last_sweep_at: null, open_promotion_pr: null,
+            recent_window_days: 7, recent_promoted: 0, recent_failed: 0, recent_failure_rate: null,
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    render(<SystemPanel backgroundWorkers={bgWorkers} />)
+    fireEvent.click(screen.getByTestId('staging-branch-setup-btn'))
+    await waitFor(() => {
+      expect(screen.getByTestId('staging-branch-setup-message').textContent)
+        .toMatch(/Created staging/)
+    })
+    const call = globalThis.fetch.mock.calls.find(([u]) => u === '/api/admin/setup-staging-branch')
+    expect(call[1].method).toBe('POST')
+  })
 })
 
 

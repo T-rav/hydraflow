@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -225,3 +227,72 @@ class TestDeleteBranch:
     async def test_skips_gh_in_dry_run(self, tmp_path: Path) -> None:
         pm, _, _ = _build(tmp_path, dry_run=True)
         assert await pm.delete_branch("rc/x") is True
+
+
+class TestEnsureBranchExists:
+    async def test_returns_false_when_branch_already_exists(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pm, _, _ = _build(tmp_path)
+
+        async def fake_gh(*args, **_kwargs):
+            if "git/refs/heads/staging" in args[2]:
+                return '"refs/heads/staging"'
+            raise RuntimeError("unexpected call")
+
+        monkeypatch.setattr(pm, "_run_gh", fake_gh)
+        assert await pm.ensure_branch_exists("staging", base="main") is False
+
+    async def test_creates_branch_from_base_when_missing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pm, _, _ = _build(tmp_path)
+        call_log: list[tuple] = []
+
+        async def fake_gh(*args, **_kwargs):
+            call_log.append(args)
+            if args[2].endswith("/git/refs/heads/staging"):
+                raise RuntimeError("404")
+            if args[2].endswith("/git/refs/heads/main"):
+                return '"mainsha"'
+            return ""
+
+        monkeypatch.setattr(pm, "_run_gh", fake_gh)
+        assert await pm.ensure_branch_exists("staging", base="main") is True
+        post_args = call_log[-1]
+        assert "POST" in post_args
+        assert "ref=refs/heads/staging" in post_args
+        assert "sha=mainsha" in post_args
+
+
+class TestApplyStagingBranchProtection:
+    async def test_calls_protection_put_with_contexts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pm, _, _ = _build(tmp_path)
+        captured: dict[str, Any] = {}
+
+        async def fake_gh(*args, **_kwargs):
+            captured["args"] = args
+            # Read the JSON payload written to the temp file
+            if "--input" in args:
+                idx = args.index("--input")
+                captured["payload"] = Path(args[idx + 1]).read_text(encoding="utf-8")
+            return ""
+
+        monkeypatch.setattr(pm, "_run_gh", fake_gh)
+        result = await pm.apply_staging_branch_protection("staging")
+        assert result["status"] == "protected"
+        args = captured["args"]
+        assert "PUT" in args
+        assert "repos/owner/repo/branches/staging/protection" in args
+        payload = json.loads(captured["payload"])
+        assert payload["allow_force_pushes"] is False
+        assert payload["allow_deletions"] is False
+        assert "CI" in payload["required_status_checks"]["contexts"]
+        assert "Quality" in payload["required_status_checks"]["contexts"]
+
+    async def test_skips_gh_in_dry_run(self, tmp_path: Path) -> None:
+        pm, _, _ = _build(tmp_path, dry_run=True)
+        result = await pm.apply_staging_branch_protection("staging")
+        assert result["status"] == "dry-run"

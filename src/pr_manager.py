@@ -479,6 +479,97 @@ class PRManager:
             draft=bool(pr_data.get("isDraft", False)),
         )
 
+    async def ensure_branch_exists(self, branch: str, *, base: str) -> bool:
+        """Create *branch* from *base* HEAD if it doesn't already exist.
+
+        Returns ``True`` when the branch was created this call, ``False`` when
+        it already existed. Raises :class:`RuntimeError` on API failure.
+        """
+        self._assert_repo()
+        if self._config.dry_run:
+            logger.info("[dry-run] Would ensure branch %s from %s", branch, base)
+            return False
+        try:
+            await self._run_gh(
+                "gh",
+                "api",
+                f"repos/{self._repo}/git/refs/heads/{branch}",
+                "--jq",
+                ".ref",
+            )
+            return False
+        except RuntimeError:
+            pass
+
+        base_raw = await self._run_gh(
+            "gh",
+            "api",
+            f"repos/{self._repo}/git/refs/heads/{base}",
+            "--jq",
+            ".object.sha",
+        )
+        sha = base_raw.strip().strip('"')
+        if not sha:
+            raise RuntimeError(f"Could not resolve {base} HEAD sha")
+        await self._run_gh(
+            "gh",
+            "api",
+            f"repos/{self._repo}/git/refs",
+            "--method",
+            "POST",
+            "--field",
+            f"ref=refs/heads/{branch}",
+            "--field",
+            f"sha={sha}",
+        )
+        return True
+
+    async def apply_staging_branch_protection(self, branch: str) -> dict[str, Any]:
+        """Apply HydraFlow's default protection rules to *branch*.
+
+        Rules: no force-push, no deletion, require CI + Quality status checks
+        pass before merge, linear history not required (merge commits allowed).
+        Admin enforcement is OFF so the factory can still push via its bot.
+        """
+        self._assert_repo()
+        if self._config.dry_run:
+            logger.info("[dry-run] Would protect branch %s", branch)
+            return {"status": "dry-run"}
+
+        payload = {
+            "required_status_checks": {
+                "strict": False,
+                "contexts": ["CI", "Quality"],
+            },
+            "enforce_admins": False,
+            "required_pull_request_reviews": None,
+            "restrictions": None,
+            "allow_force_pushes": False,
+            "allow_deletions": False,
+            "required_linear_history": False,
+            "required_conversation_resolution": False,
+        }
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False, encoding="utf-8"
+        ) as fh:
+            fh.write(json.dumps(payload))
+            tmp_path = fh.name
+        try:
+            await self._run_gh(
+                "gh",
+                "api",
+                "--method",
+                "PUT",
+                "-H",
+                "Accept: application/vnd.github+json",
+                f"repos/{self._repo}/branches/{branch}/protection",
+                "--input",
+                tmp_path,
+            )
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+        return {"status": "protected", "branch": branch}
+
     async def list_recent_promotion_prs(self, days: int = 7) -> list[dict[str, Any]]:
         """Return recently closed ``rc/*`` promotion PRs.
 
