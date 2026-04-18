@@ -21,7 +21,19 @@ function CollapsibleSection({ label, defaultExpanded = true, children }) {
   const [expanded, setExpanded] = useState(defaultExpanded)
   return (
     <div style={styles.section}>
-      <div style={styles.sectionHeader} onClick={() => setExpanded(!expanded)}>
+      <div
+        style={styles.sectionHeader}
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        onClick={() => setExpanded(!expanded)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            setExpanded(!expanded)
+          }
+        }}
+      >
         <span style={styles.sectionLabel}>{label}</span>
         <span style={styles.sectionChevron}>{expanded ? '\u25B4' : '\u25BE'}</span>
       </div>

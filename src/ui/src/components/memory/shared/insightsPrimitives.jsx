@@ -28,7 +28,19 @@ export function PatternCard({ title, count, color, children }) {
   const [expanded, setExpanded] = useState(false)
   return (
     <div style={styles.patternCard}>
-      <div style={styles.patternHeader} onClick={() => setExpanded(!expanded)}>
+      <div
+        style={styles.patternHeader}
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        onClick={() => setExpanded(!expanded)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            setExpanded(!expanded)
+          }
+        }}
+      >
         <span style={{ ...styles.patternDot, background: color || theme.orange }} />
         <span style={styles.patternTitle}>{title}</span>
         <span style={{ ...styles.patternCount, color: color || theme.orange }}>{count}x</span>
