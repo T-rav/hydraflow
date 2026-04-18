@@ -176,6 +176,50 @@ class TestPatchConfigStagingPromotion:
         assert data["status"] == "error"
 
 
+class TestStagingPromotionStatus:
+    """GET /api/staging-promotion/status returns RC lifecycle telemetry."""
+
+    @pytest.mark.asyncio
+    async def test_reports_disabled_cleanly(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        config.staging_enabled = False
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        endpoint = find_endpoint(router, "/api/staging-promotion/status")
+        assert endpoint is not None
+        response = await endpoint()
+        data = json.loads(response.body)
+        assert data["enabled"] is False
+        assert data["cadence_hours"] == config.rc_cadence_hours
+        assert data["open_promotion_pr"] is None
+        assert data["recent_promoted"] == 0
+        assert data["recent_failed"] == 0
+        assert data["recent_failure_rate"] is None
+
+    @pytest.mark.asyncio
+    async def test_reports_cadence_progress_from_timestamp_file(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        config.staging_enabled = False  # skip gh calls
+        config.data_root = tmp_path / "data"
+        ts_dir = config.data_root / "memory"
+        ts_dir.mkdir(parents=True)
+        from datetime import UTC as _UTC  # noqa: PLC0415
+        from datetime import datetime as _dt  # noqa: PLC0415
+        from datetime import timedelta as _td  # noqa: PLC0415
+
+        cut = _dt.now(_UTC) - _td(hours=2, minutes=30)
+        (ts_dir / ".staging_promotion_last_rc").write_text(cut.isoformat())
+
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        endpoint = find_endpoint(router, "/api/staging-promotion/status")
+        assert endpoint is not None
+        response = await endpoint()
+        data = json.loads(response.body)
+        assert data["last_rc_cut_at"] is not None
+        assert 2.4 < data["cadence_progress_hours"] < 2.6
+
+
 class TestPatchConfigWithRegistry:
     """Tests that PATCH /api/control/config updates repo-specific configs via registry."""
 

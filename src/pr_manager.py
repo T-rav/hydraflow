@@ -12,6 +12,7 @@ import os
 import re
 import tempfile
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, TypeVar
 from urllib.parse import quote
@@ -477,6 +478,50 @@ class PRManager:
             url=str(pr_data.get("url", "")),
             draft=bool(pr_data.get("isDraft", False)),
         )
+
+    async def list_recent_promotion_prs(self, days: int = 7) -> list[dict[str, Any]]:
+        """Return recently closed ``rc/*`` promotion PRs.
+
+        Each entry: ``{number, branch, merged, closed_at, url}``. Used for
+        RC lifecycle dashboard metrics (throughput + failure rate). Only
+        PRs whose ``updated_at`` is within *days* of now are returned.
+        """
+        if self._config.dry_run:
+            return []
+        prefix = self._config.rc_branch_prefix
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+        try:
+            raw = await self._run_gh(
+                "gh",
+                "api",
+                f"repos/{self._repo}/pulls",
+                "--method",
+                "GET",
+                "--field",
+                "state=closed",
+                "--field",
+                f"base={self._config.main_branch}",
+                "--field",
+                "per_page=100",
+                "--field",
+                "sort=updated",
+                "--field",
+                "direction=desc",
+                "--jq",
+                (
+                    f'[.[] | select(.head.ref | startswith("{prefix}")) '
+                    f'| select(.updated_at > "{cutoff}") '
+                    "| {number, branch: .head.ref, merged: (.merged_at != null), "
+                    "closed_at: .closed_at, url: .html_url}]"
+                ),
+            )
+            text = raw.strip()
+            if not text:
+                return []
+            return json.loads(text)
+        except (RuntimeError, ValueError, json.JSONDecodeError):
+            logger.debug("Could not list recent promotion PRs", exc_info=True)
+            return []
 
     async def list_rc_branches(self) -> list[tuple[str, str]]:
         """Return ``[(branch_name, committer_date_iso), ...]`` for all ``rc/*`` refs.

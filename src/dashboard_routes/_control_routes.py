@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Query
@@ -536,6 +537,76 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         orch.set_bg_worker_interval(name, interval)
         return JSONResponse(
             {"status": "ok", "name": name, "interval_seconds": interval}
+        )
+
+    @router.get("/api/staging-promotion/status")
+    async def get_staging_promotion_status(  # noqa: PLR0914
+        repo: RepoSlugParam = None,
+    ) -> JSONResponse:
+        """RC lifecycle: cadence progress, open PR, recent throughput/failures."""
+        _cfg, _state, _bus, _get_orch = ctx.resolve_runtime(repo)
+
+        def _read_ts(path: Path) -> str | None:
+            if not path.exists():
+                return None
+            try:
+                return path.read_text().strip() or None
+            except OSError:
+                return None
+
+        memory_dir = _cfg.data_root / "memory"
+        last_rc_cut_at = _read_ts(memory_dir / ".staging_promotion_last_rc")
+        last_sweep_at = _read_ts(memory_dir / ".staging_promotion_last_sweep")
+
+        cadence_progress_hours: float | None = None
+        if last_rc_cut_at:
+            try:
+                last = datetime.fromisoformat(last_rc_cut_at)
+                if last.tzinfo is None:
+                    last = last.replace(tzinfo=UTC)
+                cadence_progress_hours = (
+                    datetime.now(UTC) - last
+                ).total_seconds() / 3600
+            except ValueError:
+                cadence_progress_hours = None
+
+        open_pr = None
+        if _cfg.staging_enabled:
+            try:
+                pr = await ctx.pr_manager.find_open_promotion_pr()
+            except Exception:  # noqa: BLE001
+                pr = None
+            if pr is not None:
+                open_pr = {
+                    "number": pr.number,
+                    "branch": pr.branch,
+                    "url": pr.url,
+                }
+
+        recent: list[dict[str, Any]] = []
+        if _cfg.staging_enabled:
+            try:
+                recent = await ctx.pr_manager.list_recent_promotion_prs(days=7)
+            except Exception:  # noqa: BLE001
+                recent = []
+
+        merged = sum(1 for p in recent if p.get("merged"))
+        closed_unmerged = len(recent) - merged
+        failure_rate = (closed_unmerged / len(recent)) if recent else None
+
+        return JSONResponse(
+            {
+                "enabled": _cfg.staging_enabled,
+                "cadence_hours": _cfg.rc_cadence_hours,
+                "cadence_progress_hours": cadence_progress_hours,
+                "last_rc_cut_at": last_rc_cut_at,
+                "last_sweep_at": last_sweep_at,
+                "open_promotion_pr": open_pr,
+                "recent_window_days": 7,
+                "recent_promoted": merged,
+                "recent_failed": closed_unmerged,
+                "recent_failure_rate": failure_rate,
+            }
         )
 
     @router.get("/api/dependabot-merge/settings")

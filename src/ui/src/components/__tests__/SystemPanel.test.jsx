@@ -838,7 +838,26 @@ describe('StagingPromotionSettingsPanel', () => {
       },
       selectedRepoSlug: null,
     }))
-    globalThis.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }))
+    globalThis.fetch = vi.fn((url) => {
+      if (typeof url === 'string' && url.startsWith('/api/staging-promotion/status')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            enabled: false,
+            cadence_hours: 4,
+            cadence_progress_hours: 2.5,
+            last_rc_cut_at: '2026-04-18T10:00:00+00:00',
+            last_sweep_at: null,
+            open_promotion_pr: null,
+            recent_window_days: 7,
+            recent_promoted: 3,
+            recent_failed: 1,
+            recent_failure_rate: 0.25,
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
   })
 
   const bgWorkers = [
@@ -881,6 +900,18 @@ describe('StagingPromotionSettingsPanel', () => {
     const input = screen.getByTestId('staging-branch-input')
     fireEvent.blur(input)
     expect(patchCalls()).toHaveLength(0)
+  })
+
+  it('renders cadence progress and 7d throughput from /api/staging-promotion/status', async () => {
+    render(<SystemPanel backgroundWorkers={bgWorkers} />)
+    await waitFor(() => {
+      expect(screen.getByTestId('staging-promotion-status')).toBeInTheDocument()
+    })
+    const statusBlock = screen.getByTestId('staging-promotion-status')
+    expect(statusBlock.textContent).toMatch(/2\.5h \/ 4h/)
+    expect(statusBlock.textContent).toMatch(/3 promoted/)
+    expect(statusBlock.textContent).toMatch(/1 failed/)
+    expect(statusBlock.textContent).toMatch(/25% fail rate/)
   })
 })
 

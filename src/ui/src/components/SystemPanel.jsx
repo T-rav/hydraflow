@@ -458,6 +458,71 @@ function DependabotMergeSettingsPanel() {
 }
 
 
+function StagingPromotionStatusRow() {
+  const [status, setStatus] = useState(null)
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const resp = await fetch('/api/staging-promotion/status')
+      if (resp.ok) setStatus(await resp.json())
+    } catch { /* ignore */ }
+  }, [])
+
+  React.useEffect(() => {
+    fetchStatus()
+    const id = setInterval(fetchStatus, 30000)
+    return () => clearInterval(id)
+  }, [fetchStatus])
+
+  if (!status) return null
+
+  const progress = status.cadence_progress_hours
+  const cadence = status.cadence_hours || 4
+  const pctRaw = progress === null || progress === undefined ? 0 : (progress / cadence) * 100
+  const pct = Math.max(0, Math.min(100, pctRaw))
+  const progressLabel = progress === null || progress === undefined
+    ? 'no cut yet'
+    : `${progress.toFixed(1)}h / ${cadence}h`
+
+  const failureRate = status.recent_failure_rate
+  const failureRatePct = failureRate === null || failureRate === undefined
+    ? null
+    : Math.round(failureRate * 100)
+
+  return (
+    <div style={styles.rcStatusBlock} data-testid="staging-promotion-status">
+      <div style={styles.rcStatusRow}>
+        <span style={styles.depMergeSectionLabel}>Cadence</span>
+        <span style={styles.rcStatusValue}>{progressLabel}</span>
+      </div>
+      <div style={styles.rcProgressTrack}>
+        <div style={{ ...styles.rcProgressBar, width: `${pct}%` }} />
+      </div>
+      {status.open_promotion_pr && (
+        <div style={styles.rcStatusRow}>
+          <span style={styles.depMergeSectionLabel}>Open PR</span>
+          <a
+            href={status.open_promotion_pr.url}
+            target="_blank"
+            rel="noreferrer"
+            style={styles.rcStatusLink}
+            data-testid="staging-promotion-open-pr"
+          >
+            #{status.open_promotion_pr.number} ({status.open_promotion_pr.branch})
+          </a>
+        </div>
+      )}
+      <div style={styles.rcStatusRow}>
+        <span style={styles.depMergeSectionLabel}>7d throughput</span>
+        <span style={styles.rcStatusValue}>
+          {status.recent_promoted} promoted · {status.recent_failed} failed
+          {failureRatePct !== null ? ` (${failureRatePct}% fail rate)` : ''}
+        </span>
+      </div>
+    </div>
+  )
+}
+
 function StagingPromotionSettingsPanel() {
   const { config, selectedRepoSlug } = useHydraFlow()
   const [local, setLocal] = useState(null)
@@ -500,6 +565,7 @@ function StagingPromotionSettingsPanel() {
 
   return (
     <div style={styles.depMergePanel} data-testid="staging-promotion-settings">
+      <StagingPromotionStatusRow />
       <div style={styles.depMergeSection}>
         <label style={styles.depMergeCheckbox}>
           <input
@@ -993,6 +1059,39 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     gap: 8,
+  },
+  rcStatusBlock: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+    paddingBottom: 8,
+    borderBottom: `1px solid ${theme.border}`,
+  },
+  rcStatusRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    fontSize: 12,
+  },
+  rcStatusValue: {
+    color: theme.text,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  rcStatusLink: {
+    color: theme.accent,
+    textDecoration: 'none',
+  },
+  rcProgressTrack: {
+    width: '100%',
+    height: 4,
+    background: theme.border,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  rcProgressBar: {
+    height: '100%',
+    background: theme.accent,
+    transition: 'width 0.3s ease',
   },
   depMergeSection: {
     display: 'flex',
