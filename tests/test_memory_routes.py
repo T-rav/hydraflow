@@ -507,6 +507,7 @@ class TestMemoryForPREndpoint:
         assert payload["query"] == "PR #567"
         assert len(payload["items"]) == 1
         assert payload["items"][0]["content"] == "Review flagged missing tests"
+        mock_hs.recall_banks.assert_called_once_with("PR #567", limit=5)
 
     @pytest.mark.asyncio
     async def test_pr_without_hindsight(self, router_no_hindsight):
