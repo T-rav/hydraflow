@@ -100,6 +100,9 @@ class CodeGroomingLoop(BaseBackgroundLoop):
         if self._config.dry_run:
             return None
 
+        if not self._config.code_grooming_enabled:
+            return {"skipped": "disabled"}
+
         try:
             findings = await self._run_audit()
         except Exception:

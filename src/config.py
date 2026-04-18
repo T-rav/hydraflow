@@ -235,6 +235,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_PRECONDITION_GATE_ENABLED",
         False,
     ),
+    ("code_grooming_enabled", "HYDRAFLOW_CODE_GROOMING_ENABLED", False),
     ("docker_read_only_root", "HYDRAFLOW_DOCKER_READ_ONLY_ROOT", True),
     ("docker_no_new_privileges", "HYDRAFLOW_DOCKER_NO_NEW_PRIVILEGES", True),
     (
@@ -981,6 +982,14 @@ class HydraFlowConfig(BaseModel):
     )
 
     # Code grooming
+    code_grooming_enabled: bool = Field(
+        default=False,
+        description=(
+            "Enable the daily code grooming audit worker. Defaults to "
+            "False because the audit tends to surface noisy, low-signal "
+            "findings; operators opt in explicitly when they want it."
+        ),
+    )
     code_grooming_interval: int = Field(
         default=86400,
         ge=3600,

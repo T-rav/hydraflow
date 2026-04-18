@@ -25,6 +25,7 @@ def _make_loop(
     *,
     enabled: bool = True,
     dry_run: bool = False,
+    code_grooming_enabled: bool = True,
     code_grooming_interval: int = 86400,
     existing_dedup: list[str] | None = None,
 ) -> tuple[CodeGroomingLoop, AsyncMock, asyncio.Event]:
@@ -33,6 +34,7 @@ def _make_loop(
         tmp_path,
         enabled=enabled,
         dry_run=dry_run,
+        code_grooming_enabled=code_grooming_enabled,
         code_grooming_interval=code_grooming_interval,
     )
     pr_manager = AsyncMock()
@@ -124,6 +126,15 @@ class TestCodeGroomingLoopWork:
         loop, pm, _stop = _make_loop(tmp_path, dry_run=True)
         result = await loop._do_work()
         assert result is None
+        pm.create_issue.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_disabled_skips_audit(self, tmp_path: Path) -> None:
+        loop, pm, _stop = _make_loop(tmp_path, code_grooming_enabled=False)
+        with patch.object(loop, "_run_audit", new_callable=AsyncMock) as run_audit:
+            result = await loop._do_work()
+        assert result == {"skipped": "disabled"}
+        run_audit.assert_not_called()
         pm.create_issue.assert_not_called()
 
     @pytest.mark.asyncio

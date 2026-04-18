@@ -33,7 +33,11 @@ def _make_loop(
     tmp_path: Path,
 ) -> tuple[CodeGroomingLoop, AsyncMock, asyncio.Event]:
     """Build a CodeGroomingLoop with test-friendly defaults."""
-    deps = make_bg_loop_deps(tmp_path, code_grooming_interval=86400)
+    deps = make_bg_loop_deps(
+        tmp_path,
+        code_grooming_interval=86400,
+        code_grooming_enabled=True,
+    )
     pr_manager = AsyncMock()
     pr_manager.create_issue = AsyncMock(return_value=42)
     loop = CodeGroomingLoop(
@@ -57,7 +61,9 @@ class TestDoWorkPropagatesFatalErrors:
     """
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6830 — fix not yet landed", strict=False)
+    @pytest.mark.xfail(
+        reason="Regression for issue #6830 — fix not yet landed", strict=False
+    )
     async def test_authentication_error_propagates(self, tmp_path: Path) -> None:
         """_do_work must let AuthenticationError escape.
 
@@ -78,7 +84,9 @@ class TestDoWorkPropagatesFatalErrors:
             await loop._do_work()
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6830 — fix not yet landed", strict=False)
+    @pytest.mark.xfail(
+        reason="Regression for issue #6830 — fix not yet landed", strict=False
+    )
     async def test_credit_exhausted_error_propagates(self, tmp_path: Path) -> None:
         """_do_work must let CreditExhaustedError escape.
 
