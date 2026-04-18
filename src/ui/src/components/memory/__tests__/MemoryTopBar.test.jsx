@@ -5,7 +5,7 @@ import { MemoryTopBar } from '../MemoryTopBar'
 
 const BANKS = [
   { id: 'hydraflow-tribal', name: 'TRIBAL' },
-  { id: 'hydraflow-retrospective', name: 'RETROSPECTIVE' },
+  { id: 'hydraflow-retrospectives', name: 'RETROSPECTIVES' },
 ]
 
 describe('MemoryTopBar', () => {
@@ -39,7 +39,7 @@ describe('MemoryTopBar', () => {
       />,
     )
     expect(screen.getByRole('option', { name: 'TRIBAL' })).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: 'RETROSPECTIVE' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'RETROSPECTIVES' })).toBeInTheDocument()
   })
 
   it('shows focus pill when entity is focused', () => {
