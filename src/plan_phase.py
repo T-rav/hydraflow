@@ -45,6 +45,36 @@ logger = logging.getLogger("hydraflow.plan_phase")
 _MIN_ISSUE_BODY_CHARS: int = 50
 
 
+def _run_fallback_ingest_plan(
+    *,
+    tracked_store: RepoWikiStore,
+    worktree_path: Path,
+    repo: str,
+    issue_number: int,
+    plan_text: str,
+    path_prefix: str,
+) -> None:
+    """Sync wrapper for the fallback plan-ingest path.
+
+    Module-level so it can be dispatched via ``asyncio.to_thread`` without
+    binding a bound-method reference to the loop.  See ADR-0001 — the
+    sync ``git commit`` call under ``commit_pending_entries`` must not
+    run on the event loop.
+    """
+    from repo_wiki_ingest import ingest_from_plan  # noqa: PLC0415
+
+    count = ingest_from_plan(
+        tracked_store, repo, issue_number, plan_text, git_backed=True
+    )
+    if count:
+        tracked_store.commit_pending_entries(
+            worktree_path=worktree_path,
+            phase="plan",
+            issue_number=issue_number,
+            path_prefix=path_prefix,
+        )
+
+
 class PlanPhase:
     """Runs planning agents on issues and posts results."""
 
@@ -392,7 +422,11 @@ class PlanPhase:
                 )
                 if entries:
                     if tracked_store is not None and worktree_path is not None:
-                        self._wiki_commit_compiler_entries(
+                        # Offload the sync file + git-subprocess work off the
+                        # event loop so the other four concurrent phase loops
+                        # (ADR-0001) don't stall on `git commit`.
+                        await asyncio.to_thread(
+                            self._wiki_commit_compiler_entries,
                             tracked_store=tracked_store,
                             worktree_path=worktree_path,
                             repo=repo,
@@ -409,20 +443,16 @@ class PlanPhase:
             from repo_wiki_ingest import ingest_from_plan  # noqa: PLC0415
 
             if tracked_store is not None and worktree_path is not None:
-                count = ingest_from_plan(
-                    tracked_store,
-                    repo,
-                    issue_number,
-                    plan_text,
-                    git_backed=True,
+                # Offload the sync write + commit.
+                await asyncio.to_thread(
+                    _run_fallback_ingest_plan,
+                    tracked_store=tracked_store,
+                    worktree_path=worktree_path,
+                    repo=repo,
+                    issue_number=issue_number,
+                    plan_text=plan_text,
+                    path_prefix=self._config.repo_wiki_path,
                 )
-                if count:
-                    tracked_store.commit_pending_entries(
-                        worktree_path=worktree_path,
-                        phase="plan",
-                        issue_number=issue_number,
-                        path_prefix=self._config.repo_wiki_path,
-                    )
             else:
                 ingest_from_plan(self._wiki_store, repo, issue_number, plan_text)
             self._wiki_store.mark_ingested(repo, issue_number, "plan")

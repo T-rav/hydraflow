@@ -110,8 +110,15 @@ class TestWikiTrackedStore:
 
         assert tracked is not None
         assert path == git_worktree
-        # Tracked store's root points at worktree/repo_wiki/.
-        assert tracked._wiki_root == git_worktree / "repo_wiki"
+
+        # Observe-behaviour check instead of peeking at the private
+        # `_wiki_root`: writing an entry should land a file under
+        # `worktree/repo_wiki/<topic>/`.
+        entry = WikiEntry(
+            title="sanity", content="x", source_type="plan", source_issue=42
+        )
+        out = tracked.write_entry("acme/widget", entry, topic="patterns")
+        assert out.is_relative_to(git_worktree / "repo_wiki")
 
 
 @pytest.mark.parametrize("phase_cls", [PlanPhase, ReviewPhase])

@@ -85,6 +85,35 @@ from transcript_summarizer import TranscriptSummarizer
 logger = logging.getLogger("hydraflow.review_phase")
 
 
+def _run_fallback_ingest_review(
+    *,
+    tracked_store: RepoWikiStore,
+    worktree_path: Path,
+    repo: str,
+    issue_number: int,
+    summary: str,
+    path_prefix: str,
+) -> None:
+    """Sync wrapper for the fallback review-ingest path.
+
+    Module-level so it can be dispatched via ``asyncio.to_thread`` — the
+    sync ``git commit`` in ``commit_pending_entries`` would otherwise
+    stall the event loop (ADR-0001).
+    """
+    from repo_wiki_ingest import ingest_from_review  # noqa: PLC0415
+
+    count = ingest_from_review(
+        tracked_store, repo, issue_number, summary, git_backed=True
+    )
+    if count:
+        tracked_store.commit_pending_entries(
+            worktree_path=worktree_path,
+            phase="review",
+            issue_number=issue_number,
+            path_prefix=path_prefix,
+        )
+
+
 @dataclass(slots=True)
 class ReviewGuardContext:
     """Successful result from _run_initial_guards."""
@@ -240,7 +269,11 @@ class ReviewPhase:
                 )
                 if entries:
                     if tracked_store is not None and worktree_path is not None:
-                        self._wiki_commit_compiler_entries(
+                        # Offload sync file + git-subprocess work off the
+                        # event loop — ADR-0001 — so other concurrent
+                        # phase loops don't stall on ``git commit``.
+                        await asyncio.to_thread(
+                            self._wiki_commit_compiler_entries,
                             tracked_store=tracked_store,
                             worktree_path=worktree_path,
                             repo=repo,
@@ -257,20 +290,15 @@ class ReviewPhase:
             from repo_wiki_ingest import ingest_from_review  # noqa: PLC0415
 
             if tracked_store is not None and worktree_path is not None:
-                count = ingest_from_review(
-                    tracked_store,
-                    repo,
-                    issue_number,
-                    summary,
-                    git_backed=True,
+                await asyncio.to_thread(
+                    _run_fallback_ingest_review,
+                    tracked_store=tracked_store,
+                    worktree_path=worktree_path,
+                    repo=repo,
+                    issue_number=issue_number,
+                    summary=summary,
+                    path_prefix=self._config.repo_wiki_path,
                 )
-                if count:
-                    tracked_store.commit_pending_entries(
-                        worktree_path=worktree_path,
-                        phase="review",
-                        issue_number=issue_number,
-                        path_prefix=self._config.repo_wiki_path,
-                    )
             else:
                 ingest_from_review(self._wiki_store, repo, issue_number, summary)
             self._wiki_store.mark_ingested(repo, issue_number, "review")
