@@ -148,6 +148,18 @@ class MockWorld:
         self._github.add_issue(number, title, body, labels=labels)
         return self
 
+    def add_repo(self, slug: str, path: str) -> MockWorld:
+        """Seed an entry into the RepoRegistryStore rooted at tmp_path.
+
+        Scenarios that exercise multi-repo controls (register / remove)
+        start with this rather than driving the UI's 'Add repo' button.
+        """
+        from repo_store import RepoRecord, RepoRegistryStore  # noqa: PLC0415
+
+        store = RepoRegistryStore(self._tmp_path)
+        store.upsert(RepoRecord(slug=slug, repo=slug, path=path))
+        return self
+
     def set_phase_result(self, phase: str, issue: int, result: Any) -> MockWorld:
         return self.set_phase_results(phase, issue, [result])
 

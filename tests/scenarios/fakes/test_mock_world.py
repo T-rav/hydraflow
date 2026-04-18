@@ -189,3 +189,15 @@ async def test_mock_world_default_clock_start_uses_wall_time(tmp_path):
     after = time.time()
 
     assert before <= world.clock.now() <= after + 1
+
+
+async def test_mock_world_add_repo_registers_in_store(tmp_path):
+    from repo_store import RepoRegistryStore
+    from tests.scenarios.fakes.mock_world import MockWorld
+
+    world = MockWorld(tmp_path)
+    world.add_repo("acme/app", str(tmp_path / "acme-app"))
+
+    store = RepoRegistryStore(tmp_path)
+    records = store.list()
+    assert any(r.slug == "acme/app" for r in records)
