@@ -211,13 +211,13 @@ async def test_A4_unknown_event_type_ignored_stream_continues(tmp_path) -> None:
 
 
 async def test_A5_token_budget_exceeded_halts_implement(tmp_path) -> None:
-    """Budget-exceeded event + failure result → issue fails, does not merge.
+    """Stream-level ``budget_exceeded`` event + failure result → issue fails.
 
-    Production code does not recognize the ``budget_exceeded`` event type
-    specifically; this scenario exercises the more general shape: a stream
-    that ends with ``success=False`` (regardless of what preceded it) causes
-    ``AgentRunner`` to return a failed ``WorkerResult`` and the pipeline to
-    skip merge.
+    This is distinct from ``FakeLLM.set_token_budget`` (which gates scripted
+    planner/reviewer turns). In realistic-agent mode, the scripted
+    _FakeAgentRunner is replaced by the real AgentRunner, so the FakeLLM
+    budget does not gate the implement path. Scenarios that need implement-
+    level budget enforcement must use FakeDocker stream events like this one.
     """
     world = MockWorld(tmp_path, use_real_agent_runner=True)
     world.add_issue(1, "t", "b", labels=["hydraflow-ready"])
@@ -240,8 +240,8 @@ async def test_A5_token_budget_exceeded_halts_implement(tmp_path) -> None:
     assert wr.success is False
 
 
-async def test_A6_github_rate_limit_during_pr_creation_surfaces_error(tmp_path) -> None:
-    """Rate-limit error is absorbed by run_refilling_pool; observable via no PR.
+async def test_A6_github_rate_limit_at_triage_halts_pipeline(tmp_path) -> None:
+    """Rate-limit armed before triage halts the pipeline at the earliest GitHub call (find_existing_issue in triage's dup-check), not at create_pr.
 
     `fail_service("github")` sets remaining=0.  The first GitHub call
     (find_existing_issue in the triage duplicate-check) raises RateLimitError.
