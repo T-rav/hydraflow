@@ -11,6 +11,10 @@ from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from exception_classify import reraise_on_credit_or_bug
 from models import ProductDirection, ShapeConversation, ShapeResult, ShapeTurnResult
+from plugin_skill_registry import (
+    discover_plugin_skills,
+    format_plugin_skills_for_prompt,
+)
 from runner_constants import MEMORY_SUGGESTION_PROMPT
 
 if TYPE_CHECKING:
@@ -238,7 +242,7 @@ We're deep in the conversation. Time to converge:
 {history}
 """
 
-        return f"""You are a product design agent having a conversation about GitHub issue #{task.id}.
+        prompt = f"""You are a product design agent having a conversation about GitHub issue #{task.id}.
 
 ## Issue: {task.title}
 
@@ -291,6 +295,14 @@ a final specification for the engineering team:
 
 {MEMORY_SUGGESTION_PROMPT}
 """
+
+        plugin_skills_section = format_plugin_skills_for_prompt(
+            discover_plugin_skills(self._config.required_plugins)
+        )
+        if plugin_skills_section:
+            prompt = f"{prompt}\n\n{plugin_skills_section}"
+
+        return prompt
 
     @staticmethod
     def _extract_between(text: str, start_marker: str, end_marker: str) -> str:

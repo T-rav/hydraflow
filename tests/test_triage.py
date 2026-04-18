@@ -557,28 +557,33 @@ class TestBuildCommand:
 class TestBuildPrompt:
     """Tests for TriageRunner._build_prompt_with_stats."""
 
-    def test_prompt_contains_issue_title_and_body(self) -> None:
+    def test_prompt_contains_issue_title_and_body(self, config, event_bus) -> None:
         issue = TaskFactory.create(
             id=42,
             title="Add dark mode toggle",
             body="The app should support dark mode in settings.",
         )
-        prompt, _ = TriageRunner._build_prompt_with_stats(issue)
+        runner = TriageRunner(config, event_bus)
+        prompt, _ = runner._build_prompt_with_stats(issue)
         assert "Add dark mode toggle" in prompt
         assert "dark mode in settings" in prompt
         assert "#42" in prompt
 
-    def test_prompt_contains_evaluation_criteria(self) -> None:
+    def test_prompt_contains_evaluation_criteria(self, config, event_bus) -> None:
         issue = TaskFactory.create(id=1)
-        prompt, _ = TriageRunner._build_prompt_with_stats(issue)
+        runner = TriageRunner(config, event_bus)
+        prompt, _ = runner._build_prompt_with_stats(issue)
         assert "Clarity" in prompt
         assert "Specificity" in prompt
         assert "Actionability" in prompt
         assert "Scope" in prompt
 
-    def test_build_prompt_with_stats_tracks_body_pruning(self) -> None:
+    def test_build_prompt_with_stats_tracks_body_pruning(
+        self, config, event_bus
+    ) -> None:
         issue = TaskFactory.create(id=9, body="a" * 200)
-        _prompt, stats = TriageRunner._build_prompt_with_stats(issue, max_body=50)
+        runner = TriageRunner(config, event_bus)
+        _prompt, stats = runner._build_prompt_with_stats(issue, max_body=50)
         assert stats["context_chars_before"] == 200
         assert stats["context_chars_after"] > 50
         assert stats["pruned_chars_total"] > 0

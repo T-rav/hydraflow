@@ -14,6 +14,10 @@ from base_runner import BaseRunner
 from events import EventBus, EventType, HydraFlowEvent
 from exception_classify import is_likely_bug, reraise_on_credit_or_bug
 from models import LoopResult, Task, WorkerResult, WorkerStatus, WorkerUpdatePayload
+from plugin_skill_registry import (
+    discover_plugin_skills,
+    format_plugin_skills_for_prompt,
+)
 from prompt_builder import PromptBuilder
 from review_insights import (
     ReviewInsightStore,
@@ -726,6 +730,9 @@ Run through this checklist before your final commit:
         test_cmd = self._config.test_command  # noqa: F841 — used in f-string prompt
         tools_section = format_tools_for_prompt(discover_tools(self._config.repo_root))
         skills_section = format_skills_for_prompt(get_skills())
+        plugin_skills_section = format_plugin_skills_for_prompt(
+            discover_plugin_skills(self._config.required_plugins)
+        )
 
         prompt = f"""You are implementing GitHub issue #{issue.id}.
 
@@ -790,6 +797,8 @@ Key rules:
   in files you are not otherwise changing for the issue. Each concern is a separate PR.
 
 {MEMORY_SUGGESTION_PROMPT.format(context="implementation")}"""
+        if plugin_skills_section:
+            prompt = f"{prompt}\n\n{plugin_skills_section}"
         return prompt, builder.build_stats()
 
     # ------------------------------------------------------------------
