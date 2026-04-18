@@ -44,6 +44,45 @@ DEFAULT_TOPICS: list[str] = [
 ]
 
 
+# Phase 3: map legacy on-disk ``source_type`` values to the Phase 3 YAML
+# frontmatter ``source_phase`` vocabulary. Anything unrecognised becomes
+# ``legacy-migrated`` so frontmatter stays introspectable without the
+# full legacy value bleeding through.
+_SOURCE_TYPE_TO_PHASE: dict[str, str] = {
+    "plan": "plan",
+    "review": "review",
+    "implement": "implement",
+    "synthesis": "synthesis",
+    "compiled": "synthesis",
+}
+
+_SLUG_STRIP_RE = re.compile(r"[^a-z0-9]+")
+_ENTRY_ID_RE = re.compile(r"^(\d+)-issue-")
+
+
+def _slugify(title: str, *, max_len: int = 50) -> str:
+    """Filesystem-safe slug for an entry title."""
+    slug = _SLUG_STRIP_RE.sub("-", title.lower()).strip("-")
+    return slug[:max_len] or "untitled"
+
+
+def _next_entry_id(topic_dir: Path) -> int:
+    """Next monotonic id within a topic directory.
+
+    Scans existing ``{id:04d}-issue-...`` filenames; returns ``max + 1``,
+    starting at 1 when empty.  IDs are scoped per topic so
+    ``patterns/0001`` and ``gotchas/0001`` coexist.
+    """
+    if not topic_dir.is_dir():
+        return 1
+    ids: list[int] = []
+    for p in topic_dir.glob("*.md"):
+        m = _ENTRY_ID_RE.match(p.name)
+        if m:
+            ids.append(int(m.group(1)))
+    return max(ids) + 1 if ids else 1
+
+
 class WikiEntry(BaseModel):
     """A single knowledge entry within a topic page."""
 
@@ -434,6 +473,138 @@ class RepoWikiStore:
         """Record that this (issue, source_type) has been ingested."""
         key = f"{issue_number}:{source_type}"
         self._get_dedup(repo_slug).add(key)
+
+    # -- Phase 3: per-entry write API --------------------------------------
+
+    def write_entry(
+        self,
+        repo_slug: str,
+        entry: WikiEntry,
+        *,
+        topic: str,
+    ) -> Path:
+        """Write one per-entry markdown file with YAML frontmatter.
+
+        Implements the Phase 3 write path (see
+        docs/git-backed-wiki-design.md). The file lands at
+        ``{wiki_root}/{repo_slug}/{topic}/{id:04d}-issue-{N}-{slug}.md``
+        with an id scoped per (repo, topic) — scanning existing files in
+        the topic directory for the next integer.
+
+        ``source_type`` on the entry maps to ``source_phase`` in the
+        frontmatter: ``plan``/``review`` pass through, ``compiled``
+        becomes ``synthesis``, anything else becomes ``legacy-migrated``.
+
+        Callers must provide ``topic`` explicitly — classification is
+        the caller's responsibility, not the store's.
+        """
+        repo_dir = self._repo_dir(repo_slug)
+        topic_dir = repo_dir / topic
+        topic_dir.mkdir(parents=True, exist_ok=True)
+
+        next_id = _next_entry_id(topic_dir)
+        issue_tag = (
+            str(entry.source_issue) if entry.source_issue is not None else "unknown"
+        )
+        slug = _slugify(entry.title)
+        filename = f"{next_id:04d}-issue-{issue_tag}-{slug}.md"
+        path = topic_dir / filename
+
+        source_phase = _SOURCE_TYPE_TO_PHASE.get(entry.source_type, "legacy-migrated")
+        status = "stale" if entry.stale else "active"
+
+        body = "\n".join(
+            [
+                "---",
+                f"id: {next_id:04d}",
+                f"topic: {topic}",
+                f"source_issue: {issue_tag}",
+                f"source_phase: {source_phase}",
+                f"created_at: {entry.created_at}",
+                f"status: {status}",
+                "---",
+                "",
+                f"# {entry.title}",
+                "",
+                entry.content,
+                "",
+            ]
+        )
+        path.write_text(body)
+        return path
+
+    def append_log(
+        self,
+        repo_slug: str,
+        issue_number: int,
+        record: dict[str, Any],
+    ) -> Path:
+        """Append a JSON line to the per-issue audit log.
+
+        Records are partitioned per-issue so concurrent issue PRs never
+        append to the same file on merge. The record is stamped with
+        ``issue_number`` so downstream consumers (console, migrations)
+        always have it.
+        """
+        log_dir = self._repo_dir(repo_slug) / "log"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / f"{issue_number}.jsonl"
+
+        payload = dict(record)
+        payload.setdefault("issue_number", issue_number)
+        with log_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(payload) + "\n")
+        return log_file
+
+    def commit_pending_entries(
+        self,
+        *,
+        worktree_path: Path,
+        phase: str,
+        issue_number: int,
+    ) -> None:
+        """Stage and commit new per-entry files under ``repo_wiki/`` in
+        the given worktree.
+
+        Uses targeted ``git add repo_wiki/`` — never ``git add -A`` — so
+        unrelated changes in the worktree are not swept into the wiki
+        commit. When there is nothing to commit (no changes under
+        ``repo_wiki/``), the method is a no-op and does not produce an
+        empty commit.
+
+        The commit message is ``wiki: ingest {phase} for #{issue_number}``.
+        """
+        import subprocess  # noqa: PLC0415 — isolated here, not a module-level dep
+
+        # Targeted status check: only look at repo_wiki/.
+        status = subprocess.run(
+            ["git", "-C", str(worktree_path), "status", "--porcelain", "repo_wiki"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        if not status:
+            return
+
+        subprocess.run(
+            ["git", "-C", str(worktree_path), "add", "repo_wiki"],
+            check=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(worktree_path),
+                "-c",
+                "user.email=hydraflow@noreply",
+                "-c",
+                "user.name=HydraFlow",
+                "commit",
+                "-m",
+                f"wiki: ingest {phase} for #{issue_number}",
+            ],
+            check=True,
+        )
 
     # -- internal ----------------------------------------------------------
 

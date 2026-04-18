@@ -23,58 +23,95 @@ def ingest_from_plan(
     repo: str,
     issue_number: int,
     plan_text: str,
+    *,
+    git_backed: bool = False,
 ) -> int:
     """Extract knowledge from a completed plan and ingest into the wiki.
+
+    When ``git_backed`` is True (Phase 3 layout), each entry is written as
+    a per-entry markdown file under the appropriate topic directory via
+    ``store.write_entry``; a per-issue log record is appended via
+    ``store.append_log``; the legacy topic-level ``store.ingest`` path is
+    skipped entirely.  Callers staging these writes in a worktree should
+    follow up with ``store.commit_pending_entries(...)`` to roll the new
+    files into the issue's PR.
+
+    When ``git_backed`` is False, preserves the legacy topic-level ingest.
 
     Returns the number of entries added/updated.
     """
     if not plan_text or not repo:
         return 0
 
-    entries: list[WikiEntry] = []
-
-    # Extract architecture insights from plan sections
+    # (entry, topic) pairs so each writable entry knows where to land
+    # under the per-entry layout.
+    pairs: list[tuple[WikiEntry, str]] = []
     sections = _extract_sections(plan_text)
 
     if "architecture" in sections or "design" in sections:
         content = sections.get("architecture", sections.get("design", ""))
         if content and len(content) > 50:
-            entries.append(
-                WikiEntry(
-                    title=f"Architecture notes from #{issue_number}",
-                    content=content[:2000],
-                    source_type="plan",
-                    source_issue=issue_number,
+            pairs.append(
+                (
+                    WikiEntry(
+                        title=f"Architecture notes from #{issue_number}",
+                        content=content[:2000],
+                        source_type="plan",
+                        source_issue=issue_number,
+                    ),
+                    "architecture",
                 )
             )
 
     if "risks" in sections or "edge cases" in sections:
         content = sections.get("risks", sections.get("edge cases", ""))
         if content and len(content) > 30:
-            entries.append(
-                WikiEntry(
-                    title=f"Gotchas identified in #{issue_number}",
-                    content=content[:2000],
-                    source_type="plan",
-                    source_issue=issue_number,
+            pairs.append(
+                (
+                    WikiEntry(
+                        title=f"Gotchas identified in #{issue_number}",
+                        content=content[:2000],
+                        source_type="plan",
+                        source_issue=issue_number,
+                    ),
+                    "gotchas",
                 )
             )
 
     if "testing" in sections or "test strategy" in sections:
         content = sections.get("testing", sections.get("test strategy", ""))
         if content and len(content) > 30:
-            entries.append(
-                WikiEntry(
-                    title=f"Test strategy from #{issue_number}",
-                    content=content[:2000],
-                    source_type="plan",
-                    source_issue=issue_number,
+            pairs.append(
+                (
+                    WikiEntry(
+                        title=f"Test strategy from #{issue_number}",
+                        content=content[:2000],
+                        source_type="plan",
+                        source_issue=issue_number,
+                    ),
+                    "testing",
                 )
             )
 
-    if not entries:
+    if not pairs:
         return 0
 
+    if git_backed:
+        for entry, topic in pairs:
+            store.write_entry(repo, entry, topic=topic)
+        store.append_log(
+            repo,
+            issue_number,
+            {"phase": "plan", "action": "ingest", "entries": len(pairs)},
+        )
+        logger.info(
+            "Wiki ingest from plan #%d: %d entries (git-backed)",
+            issue_number,
+            len(pairs),
+        )
+        return len(pairs)
+
+    entries = [e for e, _ in pairs]
     result = store.ingest(repo, entries)
     total = result.entries_added + result.entries_updated
     if total:
@@ -87,30 +124,52 @@ def ingest_from_review(
     repo: str,
     issue_number: int,
     review_feedback: str,
+    *,
+    git_backed: bool = False,
 ) -> int:
     """Extract patterns from review feedback and ingest into the wiki.
+
+    See ``ingest_from_plan`` for the ``git_backed`` contract. Review
+    feedback lands under the ``patterns`` topic.
 
     Returns the number of entries added/updated.
     """
     if not review_feedback or not repo:
         return 0
 
-    entries: list[WikiEntry] = []
-
-    # Look for recurring patterns in review feedback
+    pairs: list[tuple[WikiEntry, str]] = []
     if len(review_feedback) > 100:
-        entries.append(
-            WikiEntry(
-                title=f"Review patterns from #{issue_number}",
-                content=review_feedback[:2000],
-                source_type="review",
-                source_issue=issue_number,
+        pairs.append(
+            (
+                WikiEntry(
+                    title=f"Review patterns from #{issue_number}",
+                    content=review_feedback[:2000],
+                    source_type="review",
+                    source_issue=issue_number,
+                ),
+                "patterns",
             )
         )
 
-    if not entries:
+    if not pairs:
         return 0
 
+    if git_backed:
+        for entry, topic in pairs:
+            store.write_entry(repo, entry, topic=topic)
+        store.append_log(
+            repo,
+            issue_number,
+            {"phase": "review", "action": "ingest", "entries": len(pairs)},
+        )
+        logger.info(
+            "Wiki ingest from review #%d: %d entries (git-backed)",
+            issue_number,
+            len(pairs),
+        )
+        return len(pairs)
+
+    entries = [e for e, _ in pairs]
     result = store.ingest(repo, entries)
     total = result.entries_added + result.entries_updated
     if total:
