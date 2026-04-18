@@ -249,16 +249,20 @@ class DiagnosticLoop(BaseBackgroundLoop):
                 issue_number,
             )
             success, transcript = False, "runner.fix() crashed"
-        finally:
-            if self._workspaces is not None:
-                try:
-                    await self._workspaces.destroy(issue_number)
-                except Exception:
-                    logger.warning(
-                        "Diagnostic: workspace cleanup failed for issue #%d",
-                        issue_number,
-                        exc_info=True,
-                    )
+
+        # Only destroy the workspace on failure (#6477). When the fix
+        # succeeds the worktree contains the committed changes that the
+        # review phase must read — destroying here was producing a
+        # zero-commit error in the review phase.
+        if not success and self._workspaces is not None:
+            try:
+                await self._workspaces.destroy(issue_number)
+            except Exception:
+                logger.warning(
+                    "Diagnostic: workspace cleanup failed for issue #%d",
+                    issue_number,
+                    exc_info=True,
+                )
 
         # Record this attempt regardless of outcome
         record = AttemptRecord(

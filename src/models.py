@@ -2011,9 +2011,9 @@ class TrackedReport(BaseModel):
     id: str = Field(default_factory=lambda: uuid4().hex[:12])
     reporter_id: str
     description: str
-    status: Literal["queued", "in-progress", "filed", "fixed", "closed", "reopened"] = (
-        "queued"
-    )
+    status: Literal[
+        "queued", "in-progress", "filed", "fixed", "closed", "reopened", "failed"
+    ] = "queued"
     linked_issue_url: HttpUrl = ""
     linked_pr_url: HttpUrl = ""
     progress_summary: str = ""
@@ -2026,12 +2026,15 @@ class TrackedReport(BaseModel):
     history: list[ReportHistoryEntry] = Field(default_factory=list)
 
     _VALID_TRANSITIONS: ClassVar[dict[str, set[str]]] = {
-        "queued": {"in-progress", "closed"},
-        "in-progress": {"filed", "closed", "queued", "reopened"},
+        "queued": {"in-progress", "closed", "failed"},
+        "in-progress": {"filed", "closed", "queued", "reopened", "failed"},
         "filed": {"fixed", "closed", "reopened"},
         "fixed": {"closed", "reopened"},
         "closed": {"reopened"},
         "reopened": {"in-progress", "closed"},
+        # ``failed`` is a terminal-ish state for unrecoverable agent crashes
+        # (#6408 / #6490).  Operators can only close or reopen from here.
+        "failed": {"closed", "reopened"},
     }
 
     def transition(self, new_status: str, action: str, detail: str = "") -> None:

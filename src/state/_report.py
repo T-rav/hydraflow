@@ -97,7 +97,15 @@ class ReportStateMixin:
         self,
         report_id: str,
         *,
-        status: Literal["queued", "in-progress", "filed", "fixed", "closed", "reopened"]
+        status: Literal[
+            "queued",
+            "in-progress",
+            "filed",
+            "fixed",
+            "closed",
+            "reopened",
+            "failed",
+        ]
         | None = None,
         detail: str = "",
         action_label: str = "",

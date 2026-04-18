@@ -152,7 +152,12 @@ class TestReportIssueLoopDoWork:
 
         assert result is not None
         assert result["processed"] == 0
-        assert result["error"] is True
+        # After #6408 / #6490 an agent crash is signalled distinctly so the
+        # caller can tell a crash apart from a clean "agent ran, no issue"
+        # result; the error field carries ``"agent_crashed"`` instead of a
+        # plain truthy value.
+        assert result["error"] == "agent_crashed"
+        assert result["agent_crashed"] is True
         assert result["report_id"] == report.id
         pr_mgr.create_issue.assert_not_awaited()
 
@@ -705,7 +710,9 @@ class TestHfIssueSkillPrompt:
 
         assert result is not None
         assert result["processed"] == 0
-        assert result["error"] is True
+        # After #6408 / #6490 agent crashes carry a distinct error marker.
+        assert result["error"] == "agent_crashed"
+        assert result["agent_crashed"] is True
         pr_mgr.upload_screenshot_gist.assert_not_awaited()
         # Only escalation path should create issue after max retries.
         pr_mgr.create_issue.assert_not_awaited()
@@ -1000,10 +1007,13 @@ class TestTrackedReportStatusTransitions:
         assert result["error"] is True
 
     @pytest.mark.asyncio
-    async def test_status_reverts_to_queued_when_agent_raises_exception(
+    async def test_status_transitions_to_failed_when_agent_raises_exception(
         self, tmp_path: Path
     ) -> None:
-        """When stream_claude_process raises, status transitions in-progress -> queued."""
+        """When stream_claude_process raises, the status transitions
+        in-progress -> failed (#6408 / #6490).  Previously the status
+        silently reverted to "queued" for retry — hiding the crash from
+        operators and burning retry budget on a permanent error."""
         loop, _stop, state, _pr = _make_loop(tmp_path)
         report = _enqueue_with_tracking(state)
 
@@ -1015,14 +1025,17 @@ class TestTrackedReportStatusTransitions:
 
         assert result is not None
         assert result["processed"] == 0
-        assert result["error"] is True
+        assert result["error"] == "agent_crashed"
+        assert result["agent_crashed"] is True
 
         tracked = state.get_tracked_report(report.id)
         assert tracked is not None
-        assert tracked.status == "queued"
+        assert tracked.status == "failed"
         actions = [h.action for h in tracked.history]
         assert "processing" in actions
-        assert "retry" in actions
+        # Crash path records ``agent_crashed`` (not the benign ``retry``
+        # action that a soft "no issue produced" path uses).
+        assert "agent_crashed" in actions
 
 
 # ---------------------------------------------------------------------------

@@ -31,9 +31,25 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 
-from models import PendingReport
+from models import PendingReport, TrackedReport
 from report_issue_loop import ReportIssueLoop
+from state import StateTracker
 from tests.helpers import make_bg_loop_deps
+
+
+def _track(state: StateTracker, report: PendingReport) -> None:
+    """Wrap the public API for tracking a report.
+
+    The original test uses ``_track(state, report)`` but that method
+    does not exist.  The real API is ``state.add_tracked_report(TrackedReport)``.
+    """
+    state.add_tracked_report(
+        TrackedReport(
+            id=report.id,
+            reporter_id="test-user",
+            description=report.description,
+        )
+    )
 
 
 def _make_loop(
@@ -63,7 +79,9 @@ class TestCrashVsNoIssueDistinguishable:
     """The return value of _do_work must distinguish crashes from no-issue runs."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6408 — fix not yet landed", strict=False)
+    @pytest.mark.xfail(
+        reason="Regression for issue #6408 — fix not yet landed", strict=False
+    )
     async def test_agent_crash_result_differs_from_no_issue_result(
         self, tmp_path: Path
     ) -> None:
@@ -76,7 +94,7 @@ class TestCrashVsNoIssueDistinguishable:
         # --- Path A: agent runs successfully but finds no issue URL ---
         report_a = PendingReport(description="No issue produced")
         state.enqueue_report(report_a)
-        state.track_report(report_a)
+        _track(state, report_a)
 
         with patch(
             "report_issue_loop.stream_claude_process", new_callable=AsyncMock
@@ -87,7 +105,7 @@ class TestCrashVsNoIssueDistinguishable:
         # --- Path B: agent crashes with an exception ---
         report_b = PendingReport(description="Agent will crash")
         state.enqueue_report(report_b)
-        state.track_report(report_b)
+        _track(state, report_b)
 
         with patch(
             "report_issue_loop.stream_claude_process", new_callable=AsyncMock
@@ -109,7 +127,9 @@ class TestCrashVsNoIssueDistinguishable:
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6408 — fix not yet landed", strict=False)
+    @pytest.mark.xfail(
+        reason="Regression for issue #6408 — fix not yet landed", strict=False
+    )
     async def test_agent_crash_signals_crash_in_result(self, tmp_path: Path) -> None:
         """When the agent crashes, the result dict must include a crash indicator.
 
@@ -118,7 +138,7 @@ class TestCrashVsNoIssueDistinguishable:
         loop, state = _make_loop(tmp_path)
         report = PendingReport(description="Agent will crash")
         state.enqueue_report(report)
-        state.track_report(report)
+        _track(state, report)
 
         with patch(
             "report_issue_loop.stream_claude_process", new_callable=AsyncMock
@@ -141,7 +161,9 @@ class TestCrashVsNoIssueDistinguishable:
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6408 — fix not yet landed", strict=False)
+    @pytest.mark.xfail(
+        reason="Regression for issue #6408 — fix not yet landed", strict=False
+    )
     async def test_no_issue_result_does_not_signal_crash(self, tmp_path: Path) -> None:
         """A clean no-issue run must NOT have a crash indicator.
 
@@ -150,7 +172,7 @@ class TestCrashVsNoIssueDistinguishable:
         loop, state = _make_loop(tmp_path)
         report = PendingReport(description="Agent produces no issue")
         state.enqueue_report(report)
-        state.track_report(report)
+        _track(state, report)
 
         with patch(
             "report_issue_loop.stream_claude_process", new_callable=AsyncMock
