@@ -208,3 +208,33 @@ async def test_A4_unknown_event_type_ignored_stream_continues(tmp_path) -> None:
         f"A4: expected merged=True after auth_retry_required + result:success; "
         f"worker_result={outcome.worker_result!r}"
     )
+
+
+async def test_A5_token_budget_exceeded_halts_implement(tmp_path) -> None:
+    """Budget-exceeded event + failure result → issue fails, does not merge.
+
+    Production code does not recognize the ``budget_exceeded`` event type
+    specifically; this scenario exercises the more general shape: a stream
+    that ends with ``success=False`` (regardless of what preceded it) causes
+    ``AgentRunner`` to return a failed ``WorkerResult`` and the pipeline to
+    skip merge.
+    """
+    world = MockWorld(tmp_path, use_real_agent_runner=True)
+    world.add_issue(1, "t", "b", labels=["hydraflow-ready"])
+
+    worktree_cwd = tmp_path / "worktrees" / "issue-1"
+    _init_test_worktree(worktree_cwd)
+
+    world.docker.script_run(
+        [
+            {"type": "budget_exceeded", "tokens_used": 200_000},
+            {"type": "result", "success": False, "exit_code": 1},
+        ]
+    )
+
+    result = await world.run_pipeline()
+
+    assert not result.issue(1).merged
+    wr = result.issue(1).worker_result
+    assert wr is not None
+    assert wr.success is False
