@@ -23,10 +23,19 @@ export function EntityChip({ type, value, label, onFocusEntity }) {
     if (onFocusEntity) onFocusEntity({ type, value })
   }
 
+  const handleKey = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      handleClick(e)
+    }
+  }
+
   return (
     <span
       role="button"
+      tabIndex={0}
       onClick={handleClick}
+      onKeyDown={handleKey}
       data-testid={`entity-chip-${type}-${value}`}
       style={{
         display: 'inline-block',

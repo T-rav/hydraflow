@@ -26,4 +26,17 @@ describe('EntityChip', () => {
     expect(onFocus).toHaveBeenCalledWith({ type: 'issue', value: 42 })
   })
 
+  it('activates via Enter key', () => {
+    const onFocus = vi.fn()
+    render(<EntityChip type="issue" value={42} onFocusEntity={onFocus} />)
+    fireEvent.keyDown(screen.getByText('#42'), { key: 'Enter' })
+    expect(onFocus).toHaveBeenCalledWith({ type: 'issue', value: 42 })
+  })
+
+  it('activates via Space key', () => {
+    const onFocus = vi.fn()
+    render(<EntityChip type="issue" value={42} onFocusEntity={onFocus} />)
+    fireEvent.keyDown(screen.getByText('#42'), { key: ' ' })
+    expect(onFocus).toHaveBeenCalledWith({ type: 'issue', value: 42 })
+  })
 })
