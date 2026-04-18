@@ -185,7 +185,8 @@ class TestFormatPluginSkillsForPrompt:
         assert format_plugin_skills_for_prompt([]) == ""
 
     def test_mentions_skill_tool_usage(self) -> None:
-        """Output instructs the agent to invoke via the Skill tool."""
+        """Output tells the agent to invoke the Skill tool by qualified name."""
         skills = [PluginSkill("superpowers", "brainstorming", "Use when...")]
         output = format_plugin_skills_for_prompt(skills)
-        assert "Skill" in output
+        assert "`Skill` tool" in output
+        assert "qualified name" in output

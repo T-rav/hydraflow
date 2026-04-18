@@ -142,8 +142,9 @@ def format_plugin_skills_for_prompt(skills: list[PluginSkill]) -> str:
         "## Available Skills",
         "",
         "You have these Claude Code skills available via the `Skill` tool. "
-        'Invoke a skill with `Skill({skill: "plugin:name"})` when its '
-        "description matches your current task.",
+        "Invoke one by calling the `Skill` tool with its qualified name "
+        '(e.g. `skill: "superpowers:brainstorming"`) when its description '
+        "matches your current task.",
         "",
     ]
     for skill in skills:
