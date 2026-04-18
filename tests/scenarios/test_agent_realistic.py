@@ -731,6 +731,40 @@ async def test_A17_authentication_error_halts_pipeline(tmp_path) -> None:
         await world.run_pipeline()
 
 
+async def test_A18_rate_limit_heals_mid_pipeline(tmp_path) -> None:
+    """Arm rate-limit, let early calls succeed, heal via on_phase hook, complete.
+
+    Scripts `remaining=5` so the first 5 GitHub calls succeed. An `on_phase`
+    hook on `"implement"` heals the rate-limit before the implement-phase
+    starts its GitHub calls. Pipeline runs to completion.
+    """
+    from tests.scenarios.helpers.git_worktree_fixture import init_test_worktree
+
+    world = MockWorld(tmp_path, use_real_agent_runner=True)
+    world.add_issue(1, "t", "b", labels=["hydraflow-ready"])
+    worktree_cwd = tmp_path / "worktrees" / "issue-1"
+    init_test_worktree(worktree_cwd)
+
+    world.docker.script_run_with_commits(
+        events=[{"type": "result", "success": True, "exit_code": 0}],
+        commits=[("x.py", "ok")],
+        cwd=worktree_cwd,
+    )
+
+    # Allow 5 GitHub calls then raise; but heal before it matters
+    world.github.set_rate_limit_mode(remaining=5)
+
+    def heal_github() -> None:
+        world.github.clear_rate_limit()
+
+    world.on_phase("implement", heal_github)
+
+    result = await world.run_pipeline()
+
+    # Pipeline must complete and merge despite the rate-limit arming
+    assert result.issue(1).merged, f"expected merged=True; outcome={result.issue(1)}"
+
+
 async def test_A16_credit_exhausted_halts_pipeline(tmp_path) -> None:
     """CreditExhaustedError from _execute propagates out of run_pipeline.
 
