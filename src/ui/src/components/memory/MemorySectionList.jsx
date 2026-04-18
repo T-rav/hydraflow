@@ -85,19 +85,39 @@ function ReviewFeedbackView({ data, searchQuery, onFocusEntity }) {
     p => textContains(p.category, searchQuery)
       || textContains(p.category?.replace(/_/g, ' '), searchQuery),
   )
+  const maxCat = Math.max(...Object.values(data.category_counts || {}), 1)
   return (
     <>
       {Object.entries(data.category_counts || {}).map(([cat, count]) => (
         <InsightBar
           key={cat}
-          label={cat.replace(/_/g, ' ')}
+          label={
+            <EntityChip
+              type="category"
+              value={cat}
+              label={cat.replace(/_/g, ' ')}
+              onFocusEntity={onFocusEntity}
+            />
+          }
           count={count}
-          maxCount={Math.max(...Object.values(data.category_counts || {}), 1)}
+          maxCount={maxCat}
           color={theme.orange}
         />
       ))}
       {patterns.map((p, i) => (
-        <PatternCard key={i} title={p.category.replace(/_/g, ' ')} count={p.count} color={theme.orange}>
+        <PatternCard
+          key={i}
+          title={
+            <EntityChip
+              type="category"
+              value={p.category}
+              label={p.category.replace(/_/g, ' ')}
+              onFocusEntity={onFocusEntity}
+            />
+          }
+          count={p.count}
+          color={theme.orange}
+        >
           {(p.evidence || []).map((e, j) => (
             <div key={j} style={styles.evidenceRow}>
               <EntityChip type="issue" value={e.issue_number} onFocusEntity={onFocusEntity} />
@@ -125,7 +145,14 @@ function TroubleshootingView({ data, searchQuery, onFocusEntity }) {
       {patterns.map((p) => (
         <PatternCard
           key={`${p.language}:${p.pattern_name}`}
-          title={`${p.pattern_name} (${p.language})`}
+          title={
+            <EntityChip
+              type="pattern"
+              value={p.pattern_name}
+              label={`${p.pattern_name} (${p.language})`}
+              onFocusEntity={onFocusEntity}
+            />
+          }
           count={p.frequency}
           color={theme.orange}
         >

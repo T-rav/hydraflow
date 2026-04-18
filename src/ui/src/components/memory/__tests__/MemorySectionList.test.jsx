@@ -133,4 +133,53 @@ describe('MemorySectionList', () => {
     )
     expect(screen.getByText(/Dolt must use/)).toBeInTheDocument()
   })
+
+  it('emits category focus when category chip clicked in review insights', () => {
+    const onFocusEntity = vi.fn()
+    const contextWithPatterns = {
+      ...SAMPLE_CONTEXT,
+      reviewInsights: {
+        total_reviews: 1,
+        category_counts: { missing_tests: 3 },
+        patterns: [
+          { category: 'missing_tests', count: 3, evidence: [{ issue_number: 99, pr_number: 0, summary: '' }] },
+        ],
+      },
+    }
+    render(
+      <MemorySectionList
+        data={contextWithPatterns}
+        searchQuery=""
+        bankFilter=""
+        onFocusEntity={onFocusEntity}
+      />,
+    )
+    // The category chip appears in both the InsightBar and the PatternCard title. Click the first one.
+    const chips = screen.getAllByTestId('entity-chip-category-missing_tests')
+    fireEvent.click(chips[0])
+    expect(onFocusEntity).toHaveBeenCalledWith({ type: 'category', value: 'missing_tests' })
+  })
+
+  it('emits pattern focus when pattern chip clicked in troubleshooting', () => {
+    const onFocusEntity = vi.fn()
+    const contextWithPatterns = {
+      ...SAMPLE_CONTEXT,
+      troubleshooting: {
+        total_patterns: 1,
+        patterns: [
+          { pattern_name: 'Import Error', language: 'python', frequency: 2, description: 'missing dep', fix_strategy: 'pip install', source_issues: [] },
+        ],
+      },
+    }
+    render(
+      <MemorySectionList
+        data={contextWithPatterns}
+        searchQuery=""
+        bankFilter=""
+        onFocusEntity={onFocusEntity}
+      />,
+    )
+    fireEvent.click(screen.getByTestId('entity-chip-pattern-Import Error'))
+    expect(onFocusEntity).toHaveBeenCalledWith({ type: 'pattern', value: 'Import Error' })
+  })
 })

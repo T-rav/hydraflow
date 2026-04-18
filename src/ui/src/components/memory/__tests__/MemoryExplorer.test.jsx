@@ -79,6 +79,32 @@ describe('MemoryExplorer', () => {
     })
   })
 
+  it('category chip click renders client-side items without fetching', async () => {
+    mockUseHydraFlow.mockReturnValue({
+      ...BASE_CONTEXT,
+      reviewInsights: {
+        total_reviews: 1,
+        category_counts: { missing_tests: 2 },
+        patterns: [
+          { category: 'missing_tests', count: 2, evidence: [{ issue_number: 7, pr_number: 0, summary: 'test gap' }] },
+        ],
+      },
+    })
+    global.fetch.mockImplementation((url) => {
+      if (String(url).includes('/api/memory/banks')) {
+        return Promise.resolve({ ok: true, json: async () => ({ banks: [] }) })
+      }
+      // Should NOT reach any non-banks endpoint
+      throw new Error(`unexpected fetch to ${url}`)
+    })
+    render(<MemoryExplorer />)
+    const chips = await screen.findAllByTestId('entity-chip-category-missing_tests')
+    fireEvent.click(chips[0])
+    const panel = await screen.findByTestId('memory-related-panel')
+    expect(panel).toBeInTheDocument()
+    expect(await screen.findByText(/test gap/)).toBeInTheDocument()
+  })
+
   it('search input filters visible items in the section list', async () => {
     global.fetch.mockImplementation((url) => {
       if (String(url).includes('/api/memory/banks')) {

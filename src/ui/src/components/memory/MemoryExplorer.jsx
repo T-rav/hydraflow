@@ -5,6 +5,32 @@ import { MemoryTopBar } from './MemoryTopBar'
 import { MemorySectionList } from './MemorySectionList'
 import { MemoryRelatedPanel } from './MemoryRelatedPanel'
 
+function deriveClientSideItems(entity, data) {
+  if (!entity) return null
+  if (entity.type === 'category') {
+    const matching = (data.reviewInsights?.patterns || []).filter(p => p.category === entity.value)
+    const items = []
+    for (const p of matching) {
+      for (const e of (p.evidence || [])) {
+        items.push({
+          bank: 'hydraflow-review-insights',
+          content: `#${e.issue_number}${e.pr_number > 0 ? ` (PR #${e.pr_number})` : ''}${e.summary ? `: ${e.summary}` : ''}`,
+        })
+      }
+    }
+    return items
+  }
+  if (entity.type === 'pattern') {
+    const matching = (data.troubleshooting?.patterns || []).filter(p => p.pattern_name === entity.value)
+    return matching.map(p => ({
+      bank: 'hydraflow-troubleshooting',
+      content: `${p.pattern_name} (${p.language}) — ${p.description} — Fix: ${p.fix_strategy}`,
+      context: (p.source_issues || []).length > 0 ? `Issues: ${p.source_issues.map(n => `#${n}`).join(', ')}` : undefined,
+    }))
+  }
+  return null
+}
+
 export function MemoryExplorer() {
   const ctx = useHydraFlow()
   const [banks, setBanks] = useState([])
@@ -66,7 +92,11 @@ export function MemoryExplorer() {
           onFocusEntity={setFocusedEntity}
         />
         {focusedEntity && (
-          <MemoryRelatedPanel entity={focusedEntity} onClose={clearFocus} />
+          <MemoryRelatedPanel
+            entity={focusedEntity}
+            onClose={clearFocus}
+            clientSideItems={deriveClientSideItems(focusedEntity, data)}
+          />
         )}
       </div>
     </div>
