@@ -188,3 +188,30 @@ class TestDiscoverSkillInjection:
 
         assert "superpowers:brainstorming" in prompt
         assert "## Available Skills" in prompt
+
+
+class TestShapeSkillInjection:
+    """Verify plugin skills are injected into the shape turn prompt."""
+
+    def test_plugin_skills_appear_in_shape_prompt(self, config, event_bus) -> None:
+        """The formatted skills section appears in the shape turn prompt."""
+        from models import ShapeConversation
+        from plugin_skill_registry import PluginSkill
+        from shape_runner import ShapeRunner
+        from tests.conftest import TaskFactory
+
+        fake_skills = [
+            PluginSkill(
+                "superpowers", "brainstorming", "Use when starting creative work"
+            )
+        ]
+
+        issue = TaskFactory.create(id=1, title="shape this", body="rough idea")
+        conversation = ShapeConversation(issue_number=1)
+        runner = ShapeRunner(config, event_bus)
+
+        with patch("shape_runner.discover_plugin_skills", return_value=fake_skills):
+            prompt = runner._build_turn_prompt(issue, conversation)
+
+        assert "superpowers:brainstorming" in prompt
+        assert "## Available Skills" in prompt
