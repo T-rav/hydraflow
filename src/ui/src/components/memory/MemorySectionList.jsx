@@ -17,7 +17,7 @@ function textContains(value, query) {
   return String(value || '').toLowerCase().includes(query.toLowerCase())
 }
 
-function CollapsibleSection({ label, defaultExpanded = false, children }) {
+function CollapsibleSection({ label, defaultExpanded = true, children }) {
   const [expanded, setExpanded] = useState(defaultExpanded)
   return (
     <div style={styles.section}>

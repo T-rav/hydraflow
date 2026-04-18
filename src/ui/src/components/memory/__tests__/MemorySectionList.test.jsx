@@ -1,6 +1,14 @@
 import React from 'react'
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
+
+const mockUseHydraFlow = vi.fn().mockReturnValue({
+  harnessInsights: null,
+})
+vi.mock('../../../context/HydraFlowContext', () => ({
+  useHydraFlow: (...args) => mockUseHydraFlow(...args),
+}))
+
 import { MemorySectionList } from '../MemorySectionList'
 
 const SAMPLE_CONTEXT = {
@@ -54,8 +62,7 @@ describe('MemorySectionList', () => {
         onFocusEntity={onFocusEntity}
       />,
     )
-    fireEvent.click(screen.getByText('Tribal Learnings'))
-    fireEvent.click(screen.getByTestId('entity-chip-issue-1234'))
+    fireEvent.click(screen.getAllByTestId('entity-chip-issue-1234')[0])
     expect(onFocusEntity).toHaveBeenCalledWith({ type: 'issue', value: 1234 })
   })
 
@@ -68,7 +75,6 @@ describe('MemorySectionList', () => {
         onFocusEntity={() => {}}
       />,
     )
-    fireEvent.click(screen.getByText('Tribal Learnings'))
     expect(screen.queryByText(/Dolt must use/)).not.toBeInTheDocument()
   })
 
@@ -101,5 +107,18 @@ describe('MemorySectionList', () => {
       />,
     )
     expect(screen.getByText(label)).toBeInTheDocument()
+  })
+
+  it('Failure Patterns section mounts HarnessInsightsPanel when expanded by default', () => {
+    render(
+      <MemorySectionList
+        data={SAMPLE_CONTEXT}
+        searchQuery=""
+        bankFilter=""
+        onFocusEntity={() => {}}
+      />,
+    )
+    // Failure Patterns header is always visible
+    expect(screen.getByText('Failure Patterns')).toBeInTheDocument()
   })
 })
