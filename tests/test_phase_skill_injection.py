@@ -163,3 +163,28 @@ class TestPlannerSkillInjection:
 
         assert "superpowers:writing-plans" in prompt
         assert "## Available Skills" in prompt
+
+
+class TestDiscoverSkillInjection:
+    """Verify plugin skills are injected into the discover prompt."""
+
+    def test_plugin_skills_appear_in_discover_prompt(self, config, event_bus) -> None:
+        """The formatted skills section appears in the discover prompt."""
+        from discover_runner import DiscoverRunner
+        from plugin_skill_registry import PluginSkill
+        from tests.conftest import TaskFactory
+
+        fake_skills = [
+            PluginSkill(
+                "superpowers", "brainstorming", "Use when starting creative work"
+            )
+        ]
+
+        issue = TaskFactory.create(id=1, title="build something", body="vague")
+        runner = DiscoverRunner(config, event_bus)
+
+        with patch("discover_runner.discover_plugin_skills", return_value=fake_skills):
+            prompt = runner._build_prompt(issue)
+
+        assert "superpowers:brainstorming" in prompt
+        assert "## Available Skills" in prompt

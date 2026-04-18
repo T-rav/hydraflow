@@ -11,6 +11,10 @@ from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from exception_classify import reraise_on_credit_or_bug
 from models import DiscoverResult
+from plugin_skill_registry import (
+    discover_plugin_skills,
+    format_plugin_skills_for_prompt,
+)
 from runner_constants import MEMORY_SUGGESTION_PROMPT
 
 if TYPE_CHECKING:
@@ -130,7 +134,7 @@ class DiscoverRunner(BaseRunner):
 
     def _build_prompt(self, task: Task) -> str:
         """Build the product discovery prompt with deep product thinking frameworks."""
-        return f"""You are a senior product strategist conducting deep discovery research.
+        prompt = f"""You are a senior product strategist conducting deep discovery research.
 Think through the tradeoffs carefully before producing your analysis.
 
 ## Issue #{task.id}: {task.title}
@@ -229,6 +233,13 @@ Each opportunity should be:
 
 {MEMORY_SUGGESTION_PROMPT}
 """
+        cfg = getattr(self, "_config", None)
+        plugin_skills_section = format_plugin_skills_for_prompt(
+            discover_plugin_skills(cfg.required_plugins if cfg is not None else [])
+        )
+        if plugin_skills_section:
+            prompt = f"{prompt}\n\n{plugin_skills_section}"
+        return prompt
 
     def _extract_result(
         self, transcript: str, issue_number: int
