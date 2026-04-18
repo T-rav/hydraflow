@@ -246,9 +246,13 @@ async def probe_credit_availability() -> bool:
                 return True
             # Check response body for credit exhaustion patterns
             return not is_credit_exhaustion(resp.text)
-    except Exception:  # noqa: BLE001
-        # Network or other transient error — fail-safe, assume credits unavailable.
-        return False
+    except (httpx.HTTPError, OSError):
+        # Transient network error (DNS, connect, timeout, unreachable) — assume
+        # credits ARE available so agents don't stall on flaky DNS/proxy (#6381).
+        # Bugs (KeyError/TypeError from a malformed response) are NOT caught
+        # here — they propagate so they surface in logs instead of silently
+        # returning False.
+        return True
 
 
 def parse_credit_resume_time(text: str) -> datetime | None:

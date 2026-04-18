@@ -1128,7 +1128,9 @@ class EpicManager:
                     ),
                 )
             )
-        except RuntimeError as exc:
+        except Exception as exc:  # noqa: BLE001
+            # Background task — must always publish a failure event and clean
+            # up state, even for unexpected exception types (#6404).
             logger.warning(
                 "Release execution failed for epic #%d",
                 epic_number,

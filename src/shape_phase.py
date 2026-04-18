@@ -751,11 +751,23 @@ class ShapePhase:
         return ""
 
     def _save_html_artifact(self, issue_number: int, html: str) -> None:
-        """Save HTML artifact for dashboard/canvas serving."""
-        artifacts_dir = self._config.data_root / "artifacts" / "shape"
-        artifacts_dir.mkdir(parents=True, exist_ok=True)
-        path = artifacts_dir / f"issue-{issue_number}.html"
-        path.write_text(html, encoding="utf-8")
+        """Save HTML artifact for dashboard/canvas serving.
+
+        Best-effort — a disk-full or permission error here must not crash
+        shape finalization. The artifact is a dashboard convenience, not a
+        source of truth (issue #6449).
+        """
+        try:
+            artifacts_dir = self._config.data_root / "artifacts" / "shape"
+            artifacts_dir.mkdir(parents=True, exist_ok=True)
+            path = artifacts_dir / f"issue-{issue_number}.html"
+            path.write_text(html, encoding="utf-8")
+        except OSError:
+            logger.warning(
+                "Failed to save shape HTML artifact for issue #%d",
+                issue_number,
+                exc_info=True,
+            )
 
     @staticmethod
     def format_options_html(

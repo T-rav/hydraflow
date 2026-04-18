@@ -635,6 +635,6 @@ def verify_proposals(
                 )
 
     except Exception:
-        logger.exception("Error during proposal verification")
+        logger.warning("Error during proposal verification", exc_info=True)
 
     return stale_categories

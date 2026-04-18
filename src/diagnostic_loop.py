@@ -230,9 +230,23 @@ class DiagnosticLoop(BaseBackgroundLoop):
             success, transcript = await self._runner.fix(
                 issue_number, issue_title, issue_body, diagnosis, str(wt_path)
             )
-        except Exception:
+        except Exception as exc:
+            # Infra-level failures (auth, credit, OS permission/IO) propagate
+            # so the cycle aborts cleanly rather than burning attempt budget
+            # on a permanent error (#6411). Programming errors and other
+            # Exception subclasses are logged with exc_info and treated as a
+            # failed fix so the diagnostic loop can continue with the next
+            # issue (#6606).
+            from subprocess_util import (  # noqa: PLC0415
+                AuthenticationError,
+                CreditExhaustedError,
+            )
+
+            if isinstance(exc, AuthenticationError | CreditExhaustedError | OSError):
+                raise
             logger.exception(
-                "Diagnostic: runner.fix() crashed for issue #%d", issue_number
+                "Diagnostic: runner.fix() crashed for issue #%d",
+                issue_number,
             )
             success, transcript = False, "runner.fix() crashed"
         finally:

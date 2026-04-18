@@ -1004,21 +1004,28 @@ class TestProbeCreditAvailability:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_returns_false_on_network_error(self) -> None:
-        """Network failures should be treated as credits unavailable (fail-safe)."""
+    async def test_returns_true_on_network_error(self) -> None:
+        """Transient network failures (DNS / connect / timeout) should return
+        True — credits are assumed available so agents don't stall on flaky
+        DNS or proxy issues.  Only a genuine credit-exhaustion response from
+        the API returns False.  See issue #6381 for the rationale (the
+        previous fail-safe-to-False behaviour blocked agent scheduling on
+        every network blip)."""
+        import httpx  # noqa: PLC0415
+
         from subprocess_util import probe_credit_availability
 
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.post = AsyncMock(side_effect=ConnectionError("timeout"))
+        mock_client.post = AsyncMock(side_effect=httpx.ConnectError("timeout"))
 
         with (
             patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}),
             patch("httpx.AsyncClient", return_value=mock_client),
         ):
             result = await probe_credit_availability()
-        assert result is False
+        assert result is True
 
 
 # ===========================================================================

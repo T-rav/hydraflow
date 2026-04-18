@@ -273,9 +273,28 @@ async def _run_headless(config: HydraFlowConfig) -> None:
 
     runtime = await RepoRuntime.create(config)
 
+    # Strong refs + done-callback for shutdown tasks (#6513) so the GC can't
+    # collect the Task before ``runtime.stop()`` completes and exceptions are
+    # surfaced instead of silently swallowed by the event loop.
+    shutdown_tasks: set[asyncio.Task[None]] = set()
+
+    def _on_shutdown_done(t: asyncio.Task[None]) -> None:
+        shutdown_tasks.discard(t)
+        try:
+            exc = t.exception()
+        except asyncio.CancelledError:
+            return
+        if exc is not None:
+            logger.warning("runtime.stop() task failed", exc_info=exc)
+
+    def _schedule_stop() -> None:
+        task = asyncio.create_task(runtime.stop())
+        shutdown_tasks.add(task)
+        task.add_done_callback(_on_shutdown_done)
+
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, lambda: asyncio.create_task(runtime.stop()))
+        loop.add_signal_handler(sig, _schedule_stop)
 
     await runtime.run()
 

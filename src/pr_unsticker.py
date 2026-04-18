@@ -477,7 +477,7 @@ class PRUnsticker:
         branch: str,
     ) -> bool:
         """Use HITLRunner for generic/unknown causes."""
-        if not self._hitl_runner:
+        if self._hitl_runner is None:
             logger.warning(
                 "No HITL runner available for generic fix on issue #%d",
                 issue_number,

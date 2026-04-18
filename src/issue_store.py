@@ -23,6 +23,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hydraflow.issue_store")
 
 
+def _log_publish_failure(task: asyncio.Task[None]) -> None:
+    """Log unhandled exceptions from fire-and-forget queue-update publishes (#6513)."""
+    try:
+        exc = task.exception()
+    except asyncio.CancelledError:
+        return
+    if exc is not None:
+        logger.error("Queue-update publish task failed", exc_info=exc)
+
+
 class IssueStoreStage(StrEnum):
     """Internal routing stage names for the issue store queues."""
 
@@ -77,6 +87,9 @@ class IssueStore:
         self._config = config
         self._fetcher = fetcher
         self._bus = event_bus
+        # Strong refs for fire-and-forget publish tasks (#6513) so GC doesn't
+        # collect the Task before it completes.
+        self._pending_publish: set[asyncio.Task[None]] = set()
 
         # Per-stage queues (FIFO)
         self._queues: dict[IssueStoreStage, deque[Task]] = {
@@ -558,7 +571,7 @@ class IssueStore:
         except RuntimeError:
             return
         stats = self.get_queue_stats()
-        loop.create_task(
+        task = loop.create_task(
             self._bus.publish(
                 HydraFlowEvent(
                     type=EventType.QUEUE_UPDATE,
@@ -566,6 +579,9 @@ class IssueStore:
                 )
             )
         )
+        self._pending_publish.add(task)
+        task.add_done_callback(self._pending_publish.discard)
+        task.add_done_callback(_log_publish_failure)
 
     # ------------------------------------------------------------------
     # Stats

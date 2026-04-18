@@ -147,20 +147,23 @@ class BaseRunner:
             )
 
         try:
-            try:
-                import sentry_sdk as _sentry  # noqa: PLC0415
+            import sentry_sdk as _sentry  # noqa: PLC0415
+        except ImportError:
+            _sentry = None  # Sentry not installed — optional dependency
+        if _sentry is not None:
+            # Programming errors (AttributeError, TypeError, etc.) from the
+            # Sentry SDK must propagate so misconfiguration surfaces loudly.
+            _sentry.set_tag("hydraflow.issue", str(event_data.get("issue", "")))
+            _sentry.set_tag("hydraflow.source", str(event_data.get("source", "")))
+            _sentry.set_context(
+                "hydraflow_runner",
+                {
+                    "model": self._config.model,
+                    "tool": self._config.implementation_tool,
+                },
+            )
 
-                _sentry.set_tag("hydraflow.issue", str(event_data.get("issue", "")))
-                _sentry.set_tag("hydraflow.source", str(event_data.get("source", "")))
-                _sentry.set_context(
-                    "hydraflow_runner",
-                    {
-                        "model": self._config.model,
-                        "tool": self._config.implementation_tool,
-                    },
-                )
-            except Exception:
-                pass  # Sentry not installed or not initialized
+        try:
             last_auth_error: AuthenticationRetryError | None = None
             for attempt in range(1, self._AUTH_RETRY_MAX + 1):
                 try:

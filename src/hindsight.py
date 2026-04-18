@@ -70,11 +70,17 @@ class HindsightClient:
     # -- Health ---------------------------------------------------------------
 
     async def health_check(self) -> bool:
-        """Return ``True`` if the Hindsight server is reachable."""
+        """Return ``True`` if the Hindsight server is reachable.
+
+        Never-raise contract: any error (``httpx.HTTPError``, transport
+        ``OSError``, ``RuntimeError`` during pool shutdown, etc.) returns
+        ``False`` so callers' health-polling loops don't crash
+        (issue #6484).
+        """
         try:
             resp = await self._client.get("/health")
             return resp.status_code == 200
-        except httpx.HTTPError:
+        except Exception:  # noqa: BLE001 — intentionally broad; never-raise contract
             return False
 
     # -- Path helpers ---------------------------------------------------------

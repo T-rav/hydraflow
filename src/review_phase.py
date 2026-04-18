@@ -860,13 +860,41 @@ class ReviewPhase:
                 )
                 return False
             return True
-        except Exception:
+        except Exception as exc:
+            # Fatal infrastructure errors (auth, credit, likely-bug) must
+            # propagate so the pipeline's auth-retry / credit-pause / crash
+            # handling layers can react. Soft failures block the merge
+            # instead of silently approving — the merge gate must be
+            # fail-closed, not fail-open (issue #6357).
+            from subprocess_util import (  # noqa: PLC0415
+                AuthenticationError,
+                CreditExhaustedError,
+            )
+
+            if isinstance(exc, AuthenticationError | CreditExhaustedError):
+                raise
+            if isinstance(
+                exc,
+                TypeError
+                | KeyError
+                | AttributeError
+                | ValueError
+                | IndexError
+                | NotImplementedError,
+            ):
+                raise
+            # Credit/auth-looking string matches coming through non-SDK paths
+            # (e.g. wrapped by review runner). Keep these as raising too —
+            # the message is the only signal.
+            msg = str(exc)
+            if "CreditExhaustedError" in msg or "AuthenticationError" in msg:
+                raise
             logger.warning(
-                "Spec-match check failed for #%d — proceeding with merge",
+                "Spec-match check failed for #%d — blocking merge to avoid fail-open",
                 task.id,
                 exc_info=True,
             )
-            return True  # Don't block on check failure
+            return False
 
     def _compute_visual_validation(
         self, diff: str, task: Task

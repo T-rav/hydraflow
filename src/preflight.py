@@ -73,7 +73,16 @@ async def _check_gh_auth() -> CheckResult:
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )
-        rc = await proc.wait()
+        try:
+            rc = await asyncio.wait_for(proc.wait(), timeout=1.0)
+        except TimeoutError:
+            # Kill the hung process so it doesn't linger as an orphan (#6576).
+            proc.kill()
+            return CheckResult(
+                "gh-auth",
+                CheckStatus.FAIL,
+                "gh auth status timed out after 1s — gh CLI appears hung",
+            )
         if rc == 0:
             return CheckResult("gh-auth", CheckStatus.PASS, "gh CLI authenticated")
         return CheckResult(

@@ -254,8 +254,20 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
         if not repo_wt_base.exists():
             return 0
 
+        try:
+            entries = sorted(repo_wt_base.iterdir())
+        except OSError:
+            # Network mount unavailable, permission denied — skip this phase
+            # so subsequent GC phases still run (issue #6413).
+            logger.warning(
+                "GC: iterdir failed on %s — skipping orphan scan",
+                repo_wt_base,
+                exc_info=True,
+            )
+            return 0
+
         tracked_issues = set(tracked.keys())
-        for child in sorted(repo_wt_base.iterdir()):
+        for child in entries:
             if collected >= budget or self._stop_event.is_set():
                 break
             if not child.is_dir() or not child.name.startswith("issue-"):

@@ -187,7 +187,7 @@ def compute_trend_metrics(
                     if rec.get("outcome") == "success":
                         successes += 1
                 except Exception:  # noqa: BLE001
-                    pass  # malformed lines don't count toward total
+                    logger.debug("Skipping malformed outcomes line", exc_info=True)
         except OSError:
             pass
 
@@ -210,7 +210,14 @@ def compute_trend_metrics(
                     and int(s.get("appearances", 0)) >= 5
                 )
         except Exception:  # noqa: BLE001
-            pass
+            # Signal parse failure via a sentinel negative count (#6470) so
+            # callers can distinguish "no data" from "corrupt file".
+            logger.warning(
+                "Failed to parse item_scores.json — score metrics unavailable",
+                exc_info=True,
+            )
+            avg_memory_score = 0.0
+            stale_item_count = -1
 
     # --- harness_failures.jsonl — surprise & hitl rates ---
     total_failures = 0
@@ -231,9 +238,12 @@ def compute_trend_metrics(
                     if rec.get("category") == "review_rejection":
                         surprise_count += 1
                 except Exception:  # noqa: BLE001
-                    pass
+                    logger.debug(
+                        "Skipping malformed harness_failures line",
+                        exc_info=True,
+                    )
         except OSError:
-            pass
+            logger.warning("Failed to read harness_failures.jsonl", exc_info=True)
 
     surprise_rate = (surprise_count / total_failures) if total_failures > 0 else 0.0
     hitl_escalation_rate = (hitl_count / total_failures) if total_failures > 0 else 0.0

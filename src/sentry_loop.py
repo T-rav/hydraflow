@@ -71,7 +71,7 @@ class SentryLoop(BaseBackgroundLoop):
 
     def _exists_in_local_cache(self, sentry_id: str) -> bool:
         """Check the local issue store for an existing issue with this Sentry ID."""
-        if not self._store:
+        if self._store is None:
             return False
         marker = f"sentry:{sentry_id}"
         return any(marker in task.body for task in self._store._issue_cache.values())
@@ -86,78 +86,100 @@ class SentryLoop(BaseBackgroundLoop):
         if not self._credentials.sentry_auth_token or not self._config.sentry_org:
             return {"skipped": True, "reason": "no credentials"}
 
-        projects = await self._list_projects()
+        try:
+            projects = await self._list_projects()
+        except httpx.HTTPError:
+            logger.warning(
+                "Sentry API unreachable while listing projects", exc_info=True
+            )
+            projects = []
         total_created = 0
         total_skipped = 0
 
         min_events = self._config.sentry_min_events
 
         for project in projects:
-            issues = await self._fetch_unresolved(project["slug"])
+            try:
+                issues = await self._fetch_unresolved(project["slug"])
+            except httpx.HTTPError:
+                logger.warning(
+                    "Failed to fetch issues for project %s — skipping",
+                    project["slug"],
+                    exc_info=True,
+                )
+                continue
             for issue in issues:
-                sentry_id = str(issue["id"])
-                if sentry_id in self._filed:
-                    total_skipped += 1
-                    continue
-
-                # Skip low-event-count noise (single-occurrence transients)
-                event_count = int(issue.get("count", "0") or "0")
-                if event_count < min_events:
-                    total_skipped += 1
-                    continue
-
-                # Skip handled exceptions — only unhandled errors are real bugs.
-                # Works for any language (Python, JS, Go, etc.)
-                if not issue.get("isUnhandled", True):
-                    logger.debug(
-                        "Skipping handled Sentry issue %s: %s",
-                        sentry_id,
-                        issue.get("title", "")[:60],
+                try:
+                    created, skipped = await self._process_issue(
+                        issue, project["slug"], min_events
                     )
-                    self._mark_filed(sentry_id)
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "Sentry issue processing failed — skipping: %s",
+                        issue.get("title", "")[:60] if isinstance(issue, dict) else "",
+                        exc_info=True,
+                    )
                     total_skipped += 1
                     continue
-
-                if self._exists_in_local_cache(sentry_id):
-                    self._mark_filed(sentry_id)
-                    total_skipped += 1
-                    continue
-
-                if await self._already_filed_on_github(sentry_id):
-                    self._mark_filed(sentry_id)
-                    total_skipped += 1
-                    continue
-
-                # Check attempt budget — park after too many failures
-                if self._state:
-                    attempts = self._state.get_sentry_creation_attempts(sentry_id)
-                    if attempts >= self._config.sentry_max_creation_attempts:
-                        logger.warning(
-                            "Parking Sentry %s after %d failed creation attempts",
-                            sentry_id,
-                            attempts,
-                        )
-                        self._mark_filed(sentry_id)
-                        total_skipped += 1
-                        continue
-
-                created = await self._create_github_issue(issue, project["slug"])
-                if created:
-                    await self._resolve_sentry_issue(sentry_id)
-                    self._mark_filed(sentry_id)
-                    if self._state:
-                        self._state.clear_sentry_creation_attempts(sentry_id)
-                    total_created += 1
-                else:
-                    if self._state:
-                        self._state.fail_sentry_creation(sentry_id)
-                    total_skipped += 1
+                total_created += created
+                total_skipped += skipped
 
         return {
             "projects_polled": len(projects),
             "issues_created": total_created,
             "issues_skipped": total_skipped,
         }
+
+    async def _process_issue(  # noqa: PLR0911 — linear gate checks, each with its own return path
+        self, issue: dict[str, Any], project_slug: str, min_events: int
+    ) -> tuple[int, int]:
+        """Process a single Sentry issue. Returns (created, skipped) counts."""
+        sentry_id = str(issue["id"])
+        if sentry_id in self._filed:
+            return 0, 1
+
+        event_count = int(issue.get("count", "0") or "0")
+        if event_count < min_events:
+            return 0, 1
+
+        if not issue.get("isUnhandled", True):
+            logger.debug(
+                "Skipping handled Sentry issue %s: %s",
+                sentry_id,
+                issue.get("title", "")[:60],
+            )
+            self._mark_filed(sentry_id)
+            return 0, 1
+
+        if self._exists_in_local_cache(sentry_id):
+            self._mark_filed(sentry_id)
+            return 0, 1
+
+        if await self._already_filed_on_github(sentry_id):
+            self._mark_filed(sentry_id)
+            return 0, 1
+
+        if self._state:
+            attempts = self._state.get_sentry_creation_attempts(sentry_id)
+            if attempts >= self._config.sentry_max_creation_attempts:
+                logger.warning(
+                    "Parking Sentry %s after %d failed creation attempts",
+                    sentry_id,
+                    attempts,
+                )
+                self._mark_filed(sentry_id)
+                return 0, 1
+
+        created = await self._create_github_issue(issue, project_slug)
+        if created:
+            await self._resolve_sentry_issue(sentry_id)
+            self._mark_filed(sentry_id)
+            if self._state:
+                self._state.clear_sentry_creation_attempts(sentry_id)
+            return 1, 0
+        if self._state:
+            self._state.fail_sentry_creation(sentry_id)
+        return 0, 1
 
     async def _list_projects(self) -> list[dict[str, Any]]:
         """List Sentry projects, optionally filtered by config."""
@@ -221,7 +243,13 @@ class SentryLoop(BaseBackgroundLoop):
             logger.warning("Failed to resolve Sentry issue %s", issue_id, exc_info=True)
 
     async def _already_filed_on_github(self, sentry_id: str) -> bool:
-        """Check if a GitHub issue already references this Sentry issue ID."""
+        """Check if a GitHub issue already references this Sentry issue ID.
+
+        Fail-open dedup check: any error is treated as "unknown, proceed" so
+        a failing GitHub search does not block Sentry ingestion. Credit/auth
+        errors surface downstream when ``_create_github_issue`` invokes the
+        agent.
+        """
         marker = f"sentry:{sentry_id}"
         try:
             repo = self._config.repo
@@ -237,8 +265,7 @@ class SentryLoop(BaseBackgroundLoop):
                 ".total_count",
             )
             return int(raw.strip() or "0") > 0
-        except Exception as exc:  # noqa: BLE001
-            reraise_on_credit_or_bug(exc)
+        except Exception:  # noqa: BLE001
             logger.debug("GitHub search failed for sentry:%s", sentry_id, exc_info=True)
             return False
 
@@ -293,11 +320,7 @@ class SentryLoop(BaseBackgroundLoop):
         permalink = sentry_issue.get("permalink", "")
         short_id = sentry_issue.get("shortId", sentry_id)
 
-        plan_lbl = (
-            self._config.planner_label[0]
-            if self._config.planner_label
-            else "hydraflow-plan"
-        )
+        plan_lbl = self._config.planner_label[0] if self._config.planner_label else ""
 
         parts = [
             f"Sentry error from project {project_slug}: {title}",

@@ -59,6 +59,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hydraflow.orchestrator")
 
+
+def _log_deferred_task_failure(task: asyncio.Task[Any]) -> None:
+    """Log unhandled exceptions from fire-and-forget background tasks (#6513)."""
+    try:
+        exc = task.exception()
+    except asyncio.CancelledError:
+        return
+    if exc is not None:
+        logger.warning("Deferred orchestrator task failed", exc_info=exc)
+
+
 # Delay after a merge to allow GitHub to propagate the merge state.
 _POST_MERGE_DELAY: int = 5
 
@@ -102,6 +113,9 @@ class HydraFlowOrchestrator:
         self._session_issue_results: dict[int, bool] = {}
         # Loop tasks (set by _supervise_loops for stop() to cancel)
         self._loop_tasks: dict[str, asyncio.Task[None]] = {}
+        # Strong references for fire-and-forget background tasks (#6513) —
+        # without this the GC can collect the Task before it completes.
+        self._deferred_tasks: set[asyncio.Task[None]] = set()
 
         # Build all services via the factory
         svc = build_services(
@@ -196,11 +210,22 @@ class HydraFlowOrchestrator:
         was_disabled = not self._pipeline_enabled
         self._pipeline_enabled = value
         if value and was_disabled and self._running:
-            # Pipeline just turned on — run deferred repo init in background
-            asyncio.create_task(self._deferred_pipeline_start())
+            # Pipeline just turned on — run deferred repo init in background.
+            # Store the Task ref (#6513) so the GC can't collect it mid-flight
+            # and attach a done_callback that logs unhandled exceptions.
+            task = asyncio.create_task(self._deferred_pipeline_start())
+            self._deferred_tasks.add(task)
+            task.add_done_callback(self._deferred_tasks.discard)
+            task.add_done_callback(_log_deferred_task_failure)
 
     async def _deferred_pipeline_start(self) -> None:
-        """Run repo initialization that was skipped when pipeline was disabled."""
+        """Run repo initialization that was skipped when pipeline was disabled.
+
+        On failure the pipeline toggle is reverted to ``False`` and a
+        ``SYSTEM_ALERT`` is published so the dashboard can surface the error
+        (#6360). Without this the pipeline would be left enabled with no
+        session and no retry — a silently broken state.
+        """
         try:
             await self._svc.workspaces.sanitize_repo()
             await self._svc.prs.ensure_labels_exist()
@@ -209,8 +234,20 @@ class HydraFlowOrchestrator:
             if self._current_session is None:
                 await self._start_session()
             logger.info("Pipeline enabled — repo initialized and session started")
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
             logger.exception("Failed deferred pipeline start")
+            self._pipeline_enabled = False
+            data: SystemAlertPayload = {
+                "message": (
+                    "Pipeline start failed during deferred repo "
+                    f"initialization: {exc}. Pipeline has been disabled — "
+                    "fix the underlying cause and re-enable."
+                ),
+                "source": "deferred_pipeline_start",
+            }
+            await self._bus.publish(
+                HydraFlowEvent(type=EventType.SYSTEM_ALERT, data=data)
+            )
 
     @property
     def current_session_id(self) -> str | None:
@@ -705,10 +742,13 @@ class HydraFlowOrchestrator:
         # no repo sanitization, no session.
         try:
             import sentry_sdk as _sentry  # noqa: PLC0415
-
-            _sentry.set_tag("hydraflow.repo", self._config.repo or "")
-        except Exception:
+        except ImportError:
             pass
+        else:
+            try:
+                _sentry.set_tag("hydraflow.repo", self._config.repo or "")
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("sentry_sdk.set_tag failed: %s", exc)
 
         session_started = False
         if self._pipeline_enabled:
