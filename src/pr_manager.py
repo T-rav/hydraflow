@@ -394,6 +394,126 @@ class PRManager:
 
         return pr_number
 
+    async def create_rc_branch(self, rc_branch: str) -> str:
+        """Create *rc_branch* at the current tip of ``staging_branch``.
+
+        Used exclusively by :class:`StagingPromotionLoop`. Returns the SHA
+        the new ref points at. Raises ``RuntimeError`` when the GitHub API
+        rejects the create (e.g., the ref already exists).
+        """
+        self._assert_repo()
+        if self._config.dry_run:
+            logger.info(
+                "[dry-run] Would create %s from %s",
+                rc_branch,
+                self._config.staging_branch,
+            )
+            return "dry-run-sha"
+
+        staging_raw = await self._run_gh(
+            "gh",
+            "api",
+            f"repos/{self._repo}/git/refs/heads/{self._config.staging_branch}",
+            "--jq",
+            ".object.sha",
+        )
+        sha = staging_raw.strip().strip('"')
+        if not sha:
+            raise RuntimeError(
+                f"Could not resolve {self._config.staging_branch} HEAD sha"
+            )
+
+        await self._run_gh(
+            "gh",
+            "api",
+            f"repos/{self._repo}/git/refs",
+            "--method",
+            "POST",
+            "--field",
+            f"ref=refs/heads/{rc_branch}",
+            "--field",
+            f"sha={sha}",
+        )
+        return sha
+
+    async def find_open_promotion_pr(self) -> PRInfo | None:
+        """Return the open ``rc/*`` promotion PR targeting ``main_branch``, or None.
+
+        Used exclusively by :class:`StagingPromotionLoop`. Only one promotion
+        PR is expected at a time; if multiple exist, the first listed wins.
+        """
+        if self._config.dry_run:
+            return None
+        prefix = self._config.rc_branch_prefix
+        try:
+            raw = await self._run_gh(
+                "gh",
+                "api",
+                f"repos/{self._repo}/pulls",
+                "--method",
+                "GET",
+                "--field",
+                "state=open",
+                "--field",
+                f"base={self._config.main_branch}",
+                "--field",
+                "per_page=100",
+                "--jq",
+                f'[.[] | select(.head.ref | startswith("{prefix}")) | '
+                "{number, url: .html_url, isDraft: .draft, "
+                "branch: .head.ref}] | .[0] // empty",
+            )
+            text = raw.strip()
+            if not text:
+                return None
+            pr_data = json.loads(text)
+        except (RuntimeError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+            logger.debug("Could not resolve open promotion PR", exc_info=True)
+            return None
+        return PRInfo(
+            number=int(pr_data["number"]),
+            issue_number=0,
+            branch=str(pr_data.get("branch", "")),
+            url=str(pr_data.get("url", "")),
+            draft=bool(pr_data.get("isDraft", False)),
+        )
+
+    async def merge_promotion_pr(self, pr_number: int) -> bool:
+        """Merge *pr_number* via ``--merge`` (merge commit), not squash.
+
+        Used exclusively by :class:`StagingPromotionLoop`. Merge commit
+        preserves the staging integration history on ``main`` and avoids
+        the growing-diff problem a squash-merged promotion PR would create
+        on the next RC cycle. See ADR-0042.
+        """
+        self._assert_repo()
+        if self._config.dry_run:
+            logger.info("[dry-run] Would promotion-merge PR #%d", pr_number)
+            return True
+        try:
+            await run_subprocess(
+                "gh",
+                "pr",
+                "merge",
+                str(pr_number),
+                "--repo",
+                self._repo,
+                "--merge",
+                "--delete-branch",
+                cwd=self._config.repo_root,
+                gh_token=self._credentials.gh_token,
+            )
+            await self._bus.publish(
+                HydraFlowEvent(
+                    type=EventType.MERGE_UPDATE,
+                    data=MergeUpdatePayload(pr=pr_number, status="merged"),
+                )
+            )
+            return True
+        except RuntimeError as exc:
+            logger.warning("Promotion merge failed for PR #%d: %s", pr_number, exc)
+            return False
+
     async def find_open_pr_for_branch(
         self, branch: str, *, issue_number: int = 0
     ) -> PRInfo | None:

@@ -131,6 +131,40 @@ class PRPort(Protocol):
         """Attempt to merge *pr_number*. Returns True if merged."""
         ...
 
+    async def create_rc_branch(self, rc_branch: str) -> str:
+        """Create *rc_branch* at staging HEAD. Returns the SHA.
+
+        Matches ``pr_manager.PRManager.create_rc_branch`` exactly.
+        """
+        ...
+
+    async def create_promotion_pr(
+        self,
+        *,
+        rc_branch: str,
+        title: str,
+        body: str,
+    ) -> int:
+        """Open a promotion PR from *rc_branch* into ``main_branch``.
+
+        Matches ``pr_manager.PRManager.create_promotion_pr`` exactly.
+        """
+        ...
+
+    async def find_open_promotion_pr(self) -> PRInfo | None:
+        """Return the open rc/* promotion PR, or None.
+
+        Matches ``pr_manager.PRManager.find_open_promotion_pr`` exactly.
+        """
+        ...
+
+    async def merge_promotion_pr(self, pr_number: int) -> bool:
+        """Merge *pr_number* with merge-commit strategy (not squash).
+
+        Matches ``pr_manager.PRManager.merge_promotion_pr`` exactly.
+        """
+        ...
+
     async def get_pr_diff(self, pr_number: int) -> str:
         """Return the unified diff for *pr_number* as a string."""
         ...
