@@ -13,6 +13,16 @@ from plugin_skill_registry import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _reset_skill_cache():
+    """Clear the discovery cache before every test to prevent cross-test leakage."""
+    from plugin_skill_registry import clear_plugin_skill_cache
+
+    clear_plugin_skill_cache()
+    yield
+    clear_plugin_skill_cache()
+
+
 def _write_skill(
     cache_root: Path,
     marketplace: str,
@@ -228,3 +238,53 @@ class TestFormatPluginSkillsForPrompt:
         output = format_plugin_skills_for_prompt(skills)
         assert "`Skill` tool" in output
         assert "qualified name" in output
+
+
+class TestDiscoveryCache:
+    """Verify discover_plugin_skills caches results and clear_plugin_skill_cache resets state."""
+
+    def test_second_call_is_cached(self, cache_root: Path) -> None:
+        """Repeated calls with the same args do not re-scan the filesystem."""
+        from plugin_skill_registry import clear_plugin_skill_cache
+
+        clear_plugin_skill_cache()
+        _write_skill(cache_root, "official", "superpowers", "brainstorming")
+
+        first = discover_plugin_skills(["superpowers"], cache_root=cache_root)
+        assert len(first) == 1
+
+        # Remove the SKILL.md — cache should still serve the old result.
+        (
+            cache_root
+            / "official"
+            / "superpowers"
+            / "1.0.0"
+            / "skills"
+            / "brainstorming"
+            / "SKILL.md"
+        ).unlink()
+
+        second = discover_plugin_skills(["superpowers"], cache_root=cache_root)
+        assert second == first  # cache hit
+
+    def test_clear_cache_forces_rescan(self, cache_root: Path) -> None:
+        """clear_plugin_skill_cache drops the cache so next call rescans."""
+        from plugin_skill_registry import clear_plugin_skill_cache
+
+        clear_plugin_skill_cache()
+        _write_skill(cache_root, "official", "superpowers", "brainstorming")
+        discover_plugin_skills(["superpowers"], cache_root=cache_root)
+
+        # Drop the file and clear the cache — now we should see 0.
+        (
+            cache_root
+            / "official"
+            / "superpowers"
+            / "1.0.0"
+            / "skills"
+            / "brainstorming"
+            / "SKILL.md"
+        ).unlink()
+        clear_plugin_skill_cache()
+
+        assert discover_plugin_skills(["superpowers"], cache_root=cache_root) == []

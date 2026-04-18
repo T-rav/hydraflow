@@ -45,12 +45,22 @@ def discover_plugin_skills(
 ) -> list[PluginSkill]:
     """Discover skills from allowlisted plugins under ``cache_root``.
 
+    Results are cached in memory keyed by ``(frozenset(plugins), resolved_root)``
+    so repeated calls within a process do not re-scan the filesystem. Tests
+    must call :func:`clear_plugin_skill_cache` between cases to avoid leakage.
+
     Returns an empty list if ``cache_root`` is missing. Skills with malformed
     frontmatter are skipped with a warning. The ``using-superpowers``
     meta-skill is always excluded.
     """
     root = cache_root or _DEFAULT_CACHE_ROOT
+    key = (frozenset(plugins), root)
+    cached = _skill_cache.get(key)
+    if cached is not None:
+        return list(cached)
+
     if not root.is_dir():
+        _skill_cache[key] = ()
         return []
 
     allowlist = set(plugins)
@@ -62,6 +72,7 @@ def discover_plugin_skills(
                 continue
             skills.extend(_discover_plugin(plugin_dir))
 
+    _skill_cache[key] = tuple(skills)
     return skills
 
 
@@ -140,6 +151,19 @@ def _extract_key(frontmatter: str, key: str) -> str | None:
                 j += 1
             return value or None
     return None
+
+
+# ---------------------------------------------------------------------------
+# Discovery cache — keyed by (frozenset(plugins), resolved cache root).
+# Cleared via clear_plugin_skill_cache() in tests.
+# ---------------------------------------------------------------------------
+
+_skill_cache: dict[tuple[frozenset[str], Path], tuple[PluginSkill, ...]] = {}
+
+
+def clear_plugin_skill_cache() -> None:
+    """Clear the in-memory discovery cache. Intended for tests."""
+    _skill_cache.clear()
 
 
 def format_plugin_skills_for_prompt(skills: list[PluginSkill]) -> str:

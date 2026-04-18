@@ -197,9 +197,12 @@ def _check_plugins(
     - Tier 2 plugin missing for a detected language → WARN.
     - Everything present → PASS.
     """
-    from plugin_skill_registry import discover_plugin_skills  # noqa: PLC0415
+    from plugin_skill_registry import (
+        _DEFAULT_CACHE_ROOT,  # noqa: PLC0415
+        discover_plugin_skills,  # noqa: PLC0415
+    )
 
-    root = cache_root or (Path.home() / ".claude" / "plugins" / "cache")
+    root = cache_root or _DEFAULT_CACHE_ROOT
     langs = detected_languages or set()
 
     missing_tier1: list[str] = []

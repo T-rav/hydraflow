@@ -12,6 +12,16 @@ from unittest.mock import patch
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _reset_skill_cache():
+    """Clear the discovery cache before every test to prevent cross-test leakage."""
+    from plugin_skill_registry import clear_plugin_skill_cache
+
+    clear_plugin_skill_cache()
+    yield
+    clear_plugin_skill_cache()
+
+
 class TestImplementSkillInjection:
     """Verify plugin skills are injected into the implement prompt."""
 

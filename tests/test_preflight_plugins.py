@@ -10,6 +10,16 @@ from config import HydraFlowConfig
 from preflight import CheckStatus, _check_plugins
 
 
+@pytest.fixture(autouse=True)
+def _reset_skill_cache():
+    """Clear the discovery cache before every test to prevent cross-test leakage."""
+    from plugin_skill_registry import clear_plugin_skill_cache
+
+    clear_plugin_skill_cache()
+    yield
+    clear_plugin_skill_cache()
+
+
 def _make_plugin(cache_root: Path, plugin: str, skill: str = "some-skill") -> None:
     """Create a minimal plugin with one well-formed skill.
 
