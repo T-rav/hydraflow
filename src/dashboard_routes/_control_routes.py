@@ -142,6 +142,10 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         "unstick_all_causes",
         "memory_auto_approve",
         "workspace_base",
+        "staging_enabled",
+        "staging_branch",
+        "main_branch",
+        "rc_cadence_hours",
     }
 
     def _build_system_worker_inference_stats() -> dict[str, dict[str, int]]:

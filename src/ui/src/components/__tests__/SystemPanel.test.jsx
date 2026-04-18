@@ -827,4 +827,61 @@ describe('BackgroundWorkerCard schedule display', () => {
   })
 })
 
+describe('StagingPromotionSettingsPanel', () => {
+  beforeEach(() => {
+    mockUseHydraFlow.mockReturnValue(defaultMockContext({
+      config: {
+        staging_enabled: false,
+        main_branch: 'main',
+        staging_branch: 'staging',
+        rc_cadence_hours: 4,
+      },
+      selectedRepoSlug: null,
+    }))
+    globalThis.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }))
+  })
+
+  const bgWorkers = [
+    { name: 'staging_promotion', status: 'ok', enabled: true, last_run: null, details: {} },
+  ]
+
+  it('renders the four staging promotion controls', () => {
+    render(<SystemPanel backgroundWorkers={bgWorkers} />)
+    expect(screen.getByTestId('staging-promotion-settings')).toBeInTheDocument()
+    expect(screen.getByTestId('staging-enabled-toggle')).not.toBeChecked()
+    expect(screen.getByTestId('main-branch-input')).toHaveValue('main')
+    expect(screen.getByTestId('staging-branch-input')).toHaveValue('staging')
+    expect(screen.getByTestId('rc-cadence-hours-input')).toHaveValue(4)
+  })
+
+  const patchCalls = () =>
+    globalThis.fetch.mock.calls.filter(([url]) => url === '/api/control/config')
+
+  it('patches staging_enabled when toggle clicked', async () => {
+    render(<SystemPanel backgroundWorkers={bgWorkers} />)
+    fireEvent.click(screen.getByTestId('staging-enabled-toggle'))
+    await waitFor(() => {
+      const calls = patchCalls()
+      expect(calls.some(([, opts]) => opts.body.includes('"staging_enabled":true'))).toBe(true)
+    })
+  })
+
+  it('patches main_branch on blur when value changed', async () => {
+    render(<SystemPanel backgroundWorkers={bgWorkers} />)
+    const input = screen.getByTestId('main-branch-input')
+    fireEvent.change(input, { target: { value: 'release' } })
+    fireEvent.blur(input)
+    await waitFor(() => {
+      expect(patchCalls().some(([, opts]) => opts.body.includes('"main_branch":"release"'))).toBe(true)
+    })
+  })
+
+  it('does not patch when branch value unchanged on blur', async () => {
+    render(<SystemPanel backgroundWorkers={bgWorkers} />)
+    const input = screen.getByTestId('staging-branch-input')
+    fireEvent.blur(input)
+    expect(patchCalls()).toHaveLength(0)
+  })
+})
+
 

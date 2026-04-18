@@ -458,6 +458,119 @@ function DependabotMergeSettingsPanel() {
 }
 
 
+function StagingPromotionSettingsPanel() {
+  const { config, selectedRepoSlug } = useHydraFlow()
+  const [local, setLocal] = useState(null)
+  const [savingField, setSavingField] = useState(null)
+  const [error, setError] = useState(null)
+
+  const current = local || {
+    staging_enabled: config?.staging_enabled ?? false,
+    main_branch: config?.main_branch ?? 'main',
+    staging_branch: config?.staging_branch ?? 'staging',
+    rc_cadence_hours: config?.rc_cadence_hours ?? 4,
+  }
+
+  const patchField = useCallback(async (field, value) => {
+    const prev = current[field]
+    setLocal({ ...current, [field]: value })
+    setSavingField(field)
+    setError(null)
+    try {
+      const url = selectedRepoSlug
+        ? `/api/control/config?repo=${encodeURIComponent(selectedRepoSlug)}`
+        : '/api/control/config'
+      const resp = await fetch(url, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [field]: value, persist: true }),
+      })
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}))
+        setError(data.message || `Save failed (${resp.status})`)
+        setLocal({ ...current, [field]: prev })
+      }
+    } catch (e) {
+      setError(String(e))
+      setLocal({ ...current, [field]: prev })
+    } finally {
+      setSavingField(null)
+    }
+  }, [current, selectedRepoSlug])
+
+  return (
+    <div style={styles.depMergePanel} data-testid="staging-promotion-settings">
+      <div style={styles.depMergeSection}>
+        <label style={styles.depMergeCheckbox}>
+          <input
+            type="checkbox"
+            checked={!!current.staging_enabled}
+            disabled={savingField === 'staging_enabled'}
+            onChange={e => patchField('staging_enabled', e.target.checked)}
+            data-testid="staging-enabled-toggle"
+          />
+          <span style={styles.depMergeCheckboxLabel}>
+            Enable staging → main promotion
+          </span>
+        </label>
+      </div>
+      <div style={styles.depMergeSection}>
+        <div style={styles.depMergeSectionLabel}>Main branch</div>
+        <input
+          type="text"
+          value={current.main_branch}
+          disabled={savingField === 'main_branch'}
+          onChange={e => setLocal({ ...current, main_branch: e.target.value })}
+          onBlur={e => {
+            const val = e.target.value.trim()
+            if (val && val !== config?.main_branch) patchField('main_branch', val)
+          }}
+          style={styles.depMergeInput}
+          data-testid="main-branch-input"
+        />
+      </div>
+      <div style={styles.depMergeSection}>
+        <div style={styles.depMergeSectionLabel}>Staging branch</div>
+        <input
+          type="text"
+          value={current.staging_branch}
+          disabled={savingField === 'staging_branch'}
+          onChange={e => setLocal({ ...current, staging_branch: e.target.value })}
+          onBlur={e => {
+            const val = e.target.value.trim()
+            if (val && val !== config?.staging_branch) patchField('staging_branch', val)
+          }}
+          style={styles.depMergeInput}
+          data-testid="staging-branch-input"
+        />
+      </div>
+      <div style={styles.depMergeSection}>
+        <div style={styles.depMergeSectionLabel}>RC cadence (hours)</div>
+        <input
+          type="number"
+          min="1"
+          max="168"
+          value={current.rc_cadence_hours}
+          disabled={savingField === 'rc_cadence_hours'}
+          onChange={e => setLocal({ ...current, rc_cadence_hours: Number(e.target.value) })}
+          onBlur={e => {
+            const val = Number(e.target.value)
+            if (val >= 1 && val !== config?.rc_cadence_hours) patchField('rc_cadence_hours', val)
+          }}
+          style={styles.depMergeInput}
+          data-testid="rc-cadence-hours-input"
+        />
+      </div>
+      {error && (
+        <div style={{ fontSize: 11, color: theme.red }} data-testid="staging-promotion-error">
+          {error}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
 function WorkerGroupSection({ group, backgroundWorkers, pipelinePollerLastRun, pipelineIssues, orchestratorStatus, onToggleBgWorker, onTriggerBgWorker, onUpdateInterval, events }) {
   const [collapsed, setCollapsed] = useState(false)
   const workerCount = group.workers.length
@@ -499,6 +612,7 @@ function WorkerGroupSection({ group, backgroundWorkers, pipelinePollerLastRun, p
                 extraContent={
                   def.key === 'dependabot_merge' ? <DependabotMergeSettingsPanel /> :
                   def.key === 'pr_unsticker' ? <UnstickWorkersDropdown /> :
+                  def.key === 'staging_promotion' ? <StagingPromotionSettingsPanel /> :
                   undefined
                 }
               />

@@ -120,6 +120,62 @@ class TestPatchConfigMaxTriagers:
         assert config.max_triagers == 3
 
 
+class TestPatchConfigStagingPromotion:
+    """PATCH /api/control/config accepts the staging/RC promotion fields."""
+
+    @pytest.mark.asyncio
+    async def test_patches_staging_enabled(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        patch_config = find_endpoint(router, "/api/control/config")
+        assert patch_config is not None
+        response = await patch_config({"staging_enabled": True})
+        data = json.loads(response.body)
+        assert data["updated"]["staging_enabled"] is True
+        assert config.staging_enabled is True
+
+    @pytest.mark.asyncio
+    async def test_patches_branch_names(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        patch_config = find_endpoint(router, "/api/control/config")
+        assert patch_config is not None
+        response = await patch_config(
+            {"main_branch": "release", "staging_branch": "integration"}
+        )
+        data = json.loads(response.body)
+        assert data["updated"]["main_branch"] == "release"
+        assert data["updated"]["staging_branch"] == "integration"
+        assert config.main_branch == "release"
+        assert config.staging_branch == "integration"
+
+    @pytest.mark.asyncio
+    async def test_patches_rc_cadence_hours(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        patch_config = find_endpoint(router, "/api/control/config")
+        assert patch_config is not None
+        response = await patch_config({"rc_cadence_hours": 8})
+        data = json.loads(response.body)
+        assert data["updated"]["rc_cadence_hours"] == 8
+        assert config.rc_cadence_hours == 8
+
+    @pytest.mark.asyncio
+    async def test_rc_cadence_hours_rejects_out_of_range(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        patch_config = find_endpoint(router, "/api/control/config")
+        assert patch_config is not None
+        response = await patch_config({"rc_cadence_hours": 999})
+        data = json.loads(response.body)
+        assert response.status_code == 422
+        assert data["status"] == "error"
+
+
 class TestPatchConfigWithRegistry:
     """Tests that PATCH /api/control/config updates repo-specific configs via registry."""
 
