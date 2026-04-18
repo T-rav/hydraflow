@@ -90,4 +90,19 @@ describe('MemoryRelatedPanel', () => {
     close.click()
     expect(onClose).toHaveBeenCalled()
   })
+
+  it('uses clientSideItems and does NOT fetch for category entities', async () => {
+    const clientItems = [
+      { bank: 'hydraflow-review-insights', content: 'Tests missing' },
+    ]
+    render(
+      <MemoryRelatedPanel
+        entity={{ type: 'category', value: 'missing_tests' }}
+        onClose={() => {}}
+        clientSideItems={clientItems}
+      />,
+    )
+    expect(await screen.findByText('Tests missing')).toBeInTheDocument()
+    expect(global.fetch).not.toHaveBeenCalled()
+  })
 })
