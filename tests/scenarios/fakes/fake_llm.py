@@ -243,13 +243,21 @@ class FakeLLM:
         max_tokens: int,
         tokens_per_call: int = 100,
     ) -> None:
-        """Gate planner/reviewer scripted results once cumulative tokens exceed budget.
+        """Gate scripted planner/reviewer results by cumulative token cost.
 
-        Each call to ``planners.plan`` or ``reviewers.review`` for
+        Each ``planners.plan`` and ``reviewers.review`` call for
         ``issue_number`` adds ``tokens_per_call`` to the running total. Once
         the total would exceed ``max_tokens``, subsequent calls return a
-        synthetic failure result (``error="token_budget exceeded"``) instead
-        of popping the scripted queue.
+        synthetic failure (``error="token_budget exceeded"``) instead of
+        popping the scripted queue.
+
+        Triage and agent runners are intentionally exempt:
+
+        - Triage: production rarely token-bounded at this stage.
+        - Agent: in ``use_real_agent_runner=True`` mode the scripted
+          ``_FakeAgentRunner`` is replaced; the realistic path uses the
+          FakeDocker ``"budget_exceeded"`` stream event instead (see
+          scenario A5 in ``test_agent_realistic.py``).
         """
         self._token_budgets[issue_number] = _BudgetState(
             max=max_tokens, per_call=tokens_per_call
