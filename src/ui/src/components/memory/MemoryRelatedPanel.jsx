@@ -40,21 +40,20 @@ export function MemoryRelatedPanel({ entity, onClose, clientSideItems }) {
       return
     }
     setState({ loading: true, items: null, error: null })
-    let cancelled = false
-    fetch(endpoint)
+    const controller = new AbortController()
+    fetch(endpoint, { signal: controller.signal })
       .then(r => {
         if (!r.ok) throw new Error(`status ${r.status}`)
         return r.json()
       })
       .then(data => {
-        if (cancelled) return
         setState({ loading: false, items: data.items || [], error: null })
       })
-      .catch(() => {
-        if (cancelled) return
+      .catch((err) => {
+        if (err.name === 'AbortError') return
         setState({ loading: false, items: null, error: 'Hindsight unavailable' })
       })
-    return () => { cancelled = true }
+    return () => controller.abort()
   }, [entity, clientSideItems])
 
   if (!entity) return null

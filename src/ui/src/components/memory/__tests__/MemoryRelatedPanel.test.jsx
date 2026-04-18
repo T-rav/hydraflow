@@ -37,7 +37,7 @@ describe('MemoryRelatedPanel', () => {
       />,
     )
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith('/api/memory/issue/1234')
+      expect(global.fetch).toHaveBeenCalledWith('/api/memory/issue/1234', expect.objectContaining({ signal: expect.any(AbortSignal) }))
     })
     expect(await screen.findByText('Known fix')).toBeInTheDocument()
   })
@@ -51,7 +51,7 @@ describe('MemoryRelatedPanel', () => {
       />,
     )
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith('/api/memory/pr/567')
+      expect(global.fetch).toHaveBeenCalledWith('/api/memory/pr/567', expect.objectContaining({ signal: expect.any(AbortSignal) }))
     })
   })
 
