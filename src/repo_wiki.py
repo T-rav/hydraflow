@@ -376,7 +376,13 @@ class RepoWikiStore:
         return result
 
     def list_repos(self) -> list[str]:
-        """Return slugs for all repos with wikis."""
+        """Return slugs for all repos with wikis.
+
+        Accepts either the legacy ``index.json`` (topic-level layout) or the
+        new ``index.md`` (per-entry layout, see docs/git-backed-wiki-design.md
+        Phase 2). During the migration window both coexist; after migration
+        only ``index.md`` remains.
+        """
         if not self._wiki_root.exists():
             return []
         repos: list[str] = []
@@ -384,7 +390,11 @@ class RepoWikiStore:
             if not owner_dir.is_dir():
                 continue
             for repo_dir in sorted(owner_dir.iterdir()):
-                if repo_dir.is_dir() and (repo_dir / "index.json").exists():
+                if not repo_dir.is_dir():
+                    continue
+                has_legacy = (repo_dir / "index.json").exists()
+                has_new = (repo_dir / "index.md").exists()
+                if has_legacy or has_new:
                     repos.append(f"{owner_dir.name}/{repo_dir.name}")
         return repos
 
