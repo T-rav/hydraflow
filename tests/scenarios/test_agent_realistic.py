@@ -701,6 +701,36 @@ async def test_A14_three_issues_concurrent_realistic(tmp_path) -> None:
     assert len(world.docker.invocations) >= 3
 
 
+async def test_A17_authentication_error_halts_pipeline(tmp_path) -> None:
+    """AuthenticationError from _execute propagates out of run_pipeline.
+
+    Like CreditExhaustedError, AuthenticationError is in the re-raise
+    allowlist at src/phase_utils.py:130-137.
+    """
+    from unittest import mock
+
+    import pytest
+
+    from subprocess_util import AuthenticationError
+    from tests.scenarios.helpers.git_worktree_fixture import init_test_worktree
+
+    world = MockWorld(tmp_path, use_real_agent_runner=True)
+    world.add_issue(1, "t", "b", labels=["hydraflow-ready"])
+    worktree_cwd = tmp_path / "worktrees" / "issue-1"
+    init_test_worktree(worktree_cwd)
+
+    agent_runner = world.harness.agents
+
+    async def raising_execute(*args, **kwargs):
+        raise AuthenticationError("401 unauthorized")
+
+    with (
+        mock.patch.object(agent_runner, "_execute", raising_execute),
+        pytest.raises(AuthenticationError),
+    ):
+        await world.run_pipeline()
+
+
 async def test_A16_credit_exhausted_halts_pipeline(tmp_path) -> None:
     """CreditExhaustedError from _execute propagates out of run_pipeline.
 
