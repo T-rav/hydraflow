@@ -128,13 +128,19 @@ class TestLatestTmpOrphanOnReplaceFailure:
             "write_phase_rollup must clean up on OSError"
         )
 
-    def test_returns_none_when_replace_raises(self, tmp_path: Path) -> None:
-        """After the fix, ``write_phase_rollup`` should return ``None``
-        when the atomic rename fails, rather than propagating ``OSError``.
+    def test_replace_raise_is_propagated_after_cleanup(self, tmp_path: Path) -> None:
+        """A failed atomic rename is a "half-written" state (summary.json is
+        on disk but the ``latest`` pointer was never updated). The caller
+        must see the ``OSError`` so it can alert / retry — swallowing would
+        leave operators blind to the partial update.
 
-        Currently FAILS (RED) because the ``OSError`` propagates.
+        Cleanup of ``latest.tmp`` still happens before the re-raise (see
+        ``test_latest_tmp_cleaned_up_when_replace_raises``). This test
+        locks in the propagation half of that contract and matches
+        ``tests/test_critical_product_fixes.py::TestTraceRollupTempCleanup``.
         """
-        # Arrange
+        import pytest  # noqa: PLC0415
+
         _setup_trace_dir(tmp_path)
         config = _make_config(tmp_path)
 
@@ -145,18 +151,16 @@ class TestLatestTmpOrphanOnReplaceFailure:
                 raise OSError("Simulated disk error on atomic rename")
             return original_replace(self, target)  # type: ignore[arg-type]
 
-        # Act & Assert — should NOT raise
-        with patch.object(Path, "replace", _failing_replace):
-            result = write_phase_rollup(
+        with (
+            patch.object(Path, "replace", _failing_replace),
+            pytest.raises(OSError, match="Simulated disk error"),
+        ):
+            write_phase_rollup(
                 config=config,
                 issue_number=1,
                 phase="plan",
                 run_id=1,
             )
-
-        assert result is None, (
-            f"Expected None when atomic rename fails, got {type(result).__name__}"
-        )
 
 
 class TestLatestTmpOrphanOnWriteFailure:
