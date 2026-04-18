@@ -925,7 +925,7 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
                 "--body",
                 body,
                 "--base",
-                self._config.main_branch,
+                self._config.base_branch(),
                 "--head",
                 branch,
                 cwd=repo_root,

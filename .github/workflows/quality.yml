@@ -2,10 +2,10 @@ name: Quality
 # prep-managed: quality-workflow
 
 on:
-  pull_request:
-    branches: [main]
   push:
-    branches: [main]
+    branches: [main, staging]
+  pull_request:
+    branches: [main, staging]
 
 permissions:
   contents: read

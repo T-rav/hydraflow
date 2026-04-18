@@ -261,7 +261,7 @@ class PRManager:
             "--head",
             branch,
             "--base",
-            self._config.main_branch,
+            self._config.base_branch(),
             "--title",
             title,
         ]
@@ -328,6 +328,71 @@ class PRManager:
                 branch=branch,
                 draft=draft,
             )
+
+    async def create_promotion_pr(
+        self,
+        *,
+        rc_branch: str,
+        title: str,
+        body: str,
+    ) -> int:
+        """Open a promotion PR from *rc_branch* into ``main_branch``.
+
+        Used exclusively by :class:`StagingPromotionLoop`. Always targets
+        ``main_branch`` regardless of ``staging_enabled`` — this is the path
+        that promotes release candidates into the known-good branch.
+
+        Publishes a :data:`EventType.PR_CREATED` event with ``issue=0`` since
+        promotion PRs are not tied to a specific issue.
+        """
+        self._assert_repo()
+
+        if self._config.dry_run:
+            logger.info(
+                "[dry-run] Would create promotion PR from %s to %s",
+                rc_branch,
+                self._config.main_branch,
+            )
+            return 0
+
+        cmd = [
+            "gh",
+            "pr",
+            "create",
+            "--repo",
+            self._repo,
+            "--head",
+            rc_branch,
+            "--base",
+            self._config.main_branch,
+            "--title",
+            title,
+        ]
+        output = await self._run_with_body_file(
+            *cmd, body=body, cwd=self._config.repo_root
+        )
+        url = output.strip()
+        if "/pull/" not in url:
+            raise RuntimeError(
+                f"Unexpected gh pr create output (expected PR URL): {url[:200]}"
+            )
+        pr_number = int(url.rstrip("/").split("/")[-1])
+
+        await self._bus.publish(
+            HydraFlowEvent(
+                type=EventType.PR_CREATED,
+                data=PRCreatedPayload(
+                    pr=pr_number,
+                    issue=0,
+                    branch=rc_branch,
+                    draft=False,
+                    url=url,
+                    title=title,
+                ),
+            )
+        )
+
+        return pr_number
 
     async def find_open_pr_for_branch(
         self, branch: str, *, issue_number: int = 0
