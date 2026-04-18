@@ -220,7 +220,8 @@ class FakeGitHub:
 
     async def close_task(self, issue_number: int) -> None:
         self._maybe_rate_limit()
-        await self.close_issue(issue_number)
+        if issue_number in self._issues:
+            self._issues[issue_number].state = "closed"
 
     async def close_issue(self, issue_number: int) -> None:
         self._maybe_rate_limit()
