@@ -66,6 +66,7 @@ def _make_loop(
     prs.close_issue = AsyncMock()
     prs.create_rc_branch = AsyncMock(return_value="sha123")
     prs.create_promotion_pr = AsyncMock(return_value=42)
+    prs.create_issue = AsyncMock(return_value=1234)
 
     loop = StagingPromotionLoop(config=cfg, prs=prs, deps=loop_deps)
     return loop, prs
@@ -203,8 +204,41 @@ class TestOpenPromotionFailing:
             ci_result=(False, "ci failed: scenario tests"),
         )
         result = await loop._do_work()
-        assert result == {"status": "ci_failed", "pr": 99}
+        assert result == {"status": "ci_failed", "pr": 99, "find_issue": 1234}
         prs.post_comment.assert_called_once()
+        prs.close_issue.assert_called_once_with(99)
+
+    @pytest.mark.asyncio
+    async def test_files_hydraflow_find_issue_on_ci_failure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs = _make_loop(
+            tmp_path,
+            monkeypatch,
+            open_promotion=_make_pr(99),
+            ci_result=(False, "scenario suite failed"),
+        )
+        await loop._do_work()
+        prs.create_issue.assert_called_once()
+        args, _kwargs = prs.create_issue.call_args
+        title, body, labels = args
+        assert "RC promotion #99 failed CI" in title
+        assert "scenario suite failed" in body
+        assert labels == ["hydraflow-find"]
+
+    @pytest.mark.asyncio
+    async def test_closes_pr_even_if_issue_filing_fails(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs = _make_loop(
+            tmp_path,
+            monkeypatch,
+            open_promotion=_make_pr(99),
+            ci_result=(False, "boom"),
+        )
+        prs.create_issue.side_effect = RuntimeError("gh down")
+        result = await loop._do_work()
+        assert result == {"status": "ci_failed", "pr": 99, "find_issue": 0}
         prs.close_issue.assert_called_once_with(99)
 
     @pytest.mark.asyncio

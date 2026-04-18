@@ -72,13 +72,41 @@ class StagingPromotionLoop(BaseBackgroundLoop):
         if "timed out" in summary.lower():
             return {"status": "ci_pending", "pr": pr_number}
 
+        issue_number = await self._file_failure_issue(pr_number, summary)
         await self._prs.post_comment(
             pr_number,
-            f"Promotion CI failed — closing, next cadence cycle will retry.\n\n{summary}",
+            f"Promotion CI failed — closing, next cadence cycle will retry.\n\n"
+            f"Filed follow-up: #{issue_number}.\n\n{summary}",
         )
         await self._prs.close_issue(pr_number)
-        logger.warning("Promotion PR #%d closed after CI failure", pr_number)
-        return {"status": "ci_failed", "pr": pr_number}
+        logger.warning(
+            "Promotion PR #%d closed after CI failure; filed #%d",
+            pr_number,
+            issue_number,
+        )
+        return {
+            "status": "ci_failed",
+            "pr": pr_number,
+            "find_issue": issue_number,
+        }
+
+    async def _file_failure_issue(self, pr_number: int, summary: str) -> int:
+        labels = self._config.find_label or ["hydraflow-find"]
+        title = f"RC promotion #{pr_number} failed CI"
+        body = (
+            f"Automated promotion PR #{pr_number} failed CI and was closed.\n\n"
+            f"The StagingPromotionLoop will retry on the next cadence tick.\n\n"
+            "Investigate whether the failure is:\n"
+            "- a real regression → fix before the next cadence\n"
+            "- a flake → re-open the PR or wait for the next cycle\n"
+            "- an environmental issue → fix CI config\n\n"
+            f"```\n{summary}\n```"
+        )
+        try:
+            return await self._prs.create_issue(title, body, labels)
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to file hydraflow-find issue for PR %d", pr_number)
+            return 0
 
     async def _cut_new_rc(self) -> dict[str, Any]:
         now = datetime.now(UTC)
