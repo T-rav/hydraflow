@@ -202,20 +202,32 @@ def _check_plugins(
         if not _plugin_exists(root, plugin):
             missing_tier1.append(plugin)
 
+    if root.exists() and not root.is_dir():
+        return CheckResult(
+            "plugins",
+            CheckStatus.FAIL,
+            f"Plugin cache path exists but is not a directory: {root}",
+        )
+
     if missing_tier1:
         return CheckResult(
             "plugins",
             CheckStatus.FAIL,
-            f"Required plugins missing from {root}: {', '.join(missing_tier1)}",
+            (
+                f"Required plugins missing from {root}: "
+                f"{', '.join(missing_tier1)} — "
+                "install the missing plugins via Claude Code (`/plugin install <name>`) "
+                "or verify the cache path"
+            ),
         )
 
     required_tier2: list[str] = []
-    missing_tier2: list[str] = []
+    missing_tier2: list[tuple[str, str]] = []  # (language, plugin)
     for lang in langs:
         for plugin in config.language_plugins.get(lang, []):
             required_tier2.append(plugin)
             if not _plugin_exists(root, plugin):
-                missing_tier2.append(plugin)
+                missing_tier2.append((lang, plugin))
 
     all_plugins = config.required_plugins + required_tier2
     skills = discover_plugin_skills(all_plugins, cache_root=root)
@@ -227,10 +239,13 @@ def _check_plugins(
         )
 
     if missing_tier2:
+        formatted = ", ".join(
+            f"{plugin} (for {lang})" for lang, plugin in missing_tier2
+        )
         return CheckResult(
             "plugins",
             CheckStatus.WARN,
-            f"Language-conditional plugins missing: {', '.join(missing_tier2)}",
+            f"Language-conditional plugins missing: {formatted}",
         )
 
     return CheckResult(

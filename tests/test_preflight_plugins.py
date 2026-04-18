@@ -54,6 +54,7 @@ class TestCheckPlugins:
 
         assert result.status == CheckStatus.FAIL
         assert "code-review" in result.message
+        assert "/plugin install" in result.message
 
     def test_fails_when_zero_skills_discovered(self, cache_root: Path) -> None:
         """FAIL when the allowlisted plugin has no skills."""
@@ -98,3 +99,33 @@ class TestCheckPlugins:
         result = _check_plugins(config, cache_root=cache_root, detected_languages=set())
 
         assert result.status == CheckStatus.PASS
+
+    def test_fails_when_cache_root_is_file(self, tmp_path: Path) -> None:
+        """FAIL when cache_root exists but is a regular file, not a directory."""
+        cache_file = tmp_path / "cache"
+        cache_file.write_text("not a dir")
+
+        config = HydraFlowConfig(
+            required_plugins=["superpowers"],
+            language_plugins={},
+        )
+        result = _check_plugins(config, cache_root=cache_file, detected_languages=set())
+
+        assert result.status == CheckStatus.FAIL
+        assert "not a directory" in result.message
+
+    def test_warn_message_includes_language_context(self, cache_root: Path) -> None:
+        """WARN message identifies which language triggered the missing plugin."""
+        _make_plugin(cache_root, "superpowers")
+
+        config = HydraFlowConfig(
+            required_plugins=["superpowers"],
+            language_plugins={"python": ["pyright-lsp"]},
+        )
+        result = _check_plugins(
+            config, cache_root=cache_root, detected_languages={"python"}
+        )
+
+        assert result.status == CheckStatus.WARN
+        assert "for python" in result.message
+        assert "pyright-lsp" in result.message
