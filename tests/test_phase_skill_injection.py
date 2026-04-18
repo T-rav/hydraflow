@@ -112,3 +112,28 @@ class TestReviewSkillInjection:
             )
 
         assert "## Available Skills" not in prompt
+
+
+class TestTriageSkillInjection:
+    """Verify plugin skills are injected into the triage prompt."""
+
+    def test_plugin_skills_appear_in_triage_prompt(self, config, event_bus) -> None:
+        """The formatted skills section appears in the triage prompt."""
+        from plugin_skill_registry import PluginSkill
+        from tests.conftest import TaskFactory
+        from triage import TriageRunner
+
+        fake_skills = [
+            PluginSkill(
+                "superpowers", "brainstorming", "Use when starting creative work"
+            )
+        ]
+
+        issue = TaskFactory.create(id=1, title="Vague idea", body="do stuff")
+        triager = TriageRunner(config, event_bus)
+
+        with patch("triage.discover_plugin_skills", return_value=fake_skills):
+            prompt, _ = triager._build_prompt_with_stats(issue)
+
+        assert "superpowers:brainstorming" in prompt
+        assert "## Available Skills" in prompt

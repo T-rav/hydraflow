@@ -21,6 +21,10 @@ from models import (
     TriageStatus,
     TriageUpdatePayload,
 )
+from plugin_skill_registry import (
+    discover_plugin_skills,
+    format_plugin_skills_for_prompt,
+)
 from prompt_builder import PromptBuilder
 
 logger = logging.getLogger("hydraflow.triage")
@@ -187,9 +191,8 @@ class TriageRunner(BaseRunner):
             max_turns=1,
         )
 
-    @staticmethod
     def _build_prompt_with_stats(
-        issue: Task, max_body: int = 5000
+        self, issue: Task, max_body: int = 5000
     ) -> tuple[str, dict[str, object]]:
         """Build the triage evaluation prompt and pruning stats."""
         builder = PromptBuilder()
@@ -255,6 +258,11 @@ or for truly insufficient issues:
 {{"ready": false, "reasons": ["Specific reason why this cannot proceed"], "issue_type": "bug", "clarity_score": 0, "needs_discovery": false, "enrichment": ""}}
 ```
 """
+        plugin_skills_section = format_plugin_skills_for_prompt(
+            discover_plugin_skills(self._config.required_plugins)
+        )
+        if plugin_skills_section:
+            prompt = f"{prompt}\n\n{plugin_skills_section}"
         stats = builder.build_stats()
         return prompt, stats
 
