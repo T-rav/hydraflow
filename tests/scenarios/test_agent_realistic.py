@@ -326,3 +326,78 @@ async def test_A9_hindsight_failure_realistic_agent_still_succeeds(tmp_path) -> 
 
     # Hindsight down should not block the implement path.
     assert result.issue(1).merged
+
+
+async def test_A10_quality_fix_loop_retries_then_passes(tmp_path) -> None:
+    """make quality fails → fix agent runs → second make quality passes.
+
+    Proves the realistic path exercises production `AgentRunner._run_quality_fix_loop`.
+    `max_quality_fix_attempts` defaults to 2 in ConfigFactory, so one retry is
+    enough to pass.
+
+    FakeDocker scripts are consumed FIFO by ALL run_agent calls (both
+    create_streaming_process for agent _execute calls and run_simple for
+    make-quality calls). The post-implementation pipeline after the initial agent
+    run is:
+
+      1. Initial agent _execute (streaming) — commits broken code
+      2. diff-sanity skill _execute — default success (no marker → passed)
+      3. arch-compliance skill _execute — default success
+      4. scope-check skill _execute — default success (auto-pass, no plan)
+         plan-compliance is SKIPPED (empty prompt when no plan → no _execute call)
+      5. test-adequacy skill _execute — default success
+      6. pre-quality review _execute, attempt 1, review pass — default success
+      7. pre-quality run-tool _execute, attempt 1, run_tool pass — default success
+      8. First `make quality` (run_simple) — FAILS with exit_code=1
+      9. Quality-fix agent _execute (streaming) — commits fix
+     10. Second `make quality` (run_simple) — PASSES with exit_code=0
+
+    plan-compliance returns an empty prompt string when no plan is present,
+    causing _run_skill to return early without calling _execute. Only 4 of the
+    5 registered skills consume a FakeDocker slot. All skill/pre-quality slots
+    must be explicitly queued in FIFO order so that the fail/fix scripts land
+    in the correct positions.
+    """
+    world = MockWorld(tmp_path, use_real_agent_runner=True)
+    world.add_issue(1, "t", "b", labels=["hydraflow-ready"])
+    worktree_cwd = tmp_path / "worktrees" / "issue-1"
+    init_test_worktree(worktree_cwd)
+
+    _ok = [{"type": "result", "success": True, "exit_code": 0}]
+
+    # 1) Initial agent run: commits broken code
+    world.docker.script_run_with_commits(
+        events=[{"type": "result", "success": True, "exit_code": 0}],
+        commits=[("x.py", "broken")],
+        cwd=worktree_cwd,
+    )
+    # 2–5) Four post-implementation skill _execute calls — default success
+    # (diff-sanity, arch-compliance, scope-check, test-adequacy)
+    # plan-compliance is skipped: returns empty prompt with no plan → no _execute
+    for _ in range(4):
+        world.docker.script_run(_ok)
+    # 6–7) Pre-quality review loop attempt 1: review + run_tool — both default success
+    world.docker.script_run(_ok)  # review pass
+    world.docker.script_run(_ok)  # run_tool pass
+    # 8) First `make quality` via run_simple — FAILS
+    world.docker.script_run([{"type": "result", "success": False, "exit_code": 1}])
+    # 9) Quality-fix agent: commits the fix
+    world.docker.script_run_with_commits(
+        events=[{"type": "result", "success": True, "exit_code": 0}],
+        commits=[("x.py", "fixed")],
+        cwd=worktree_cwd,
+    )
+    # 10) Second `make quality` via run_simple — PASSES
+    world.docker.script_run(_ok)
+
+    result = await world.run_pipeline()
+
+    # Pipeline completed and merged
+    assert result.issue(1).merged, (
+        f"expected merged=True; outcome={result.issue(1)!r}; "
+        f"docker_invocations={len(world.docker.invocations)}"
+    )
+    # Exactly 10 FakeDocker invocations:
+    # 1 agent + 4 skills + 2 pre-quality + 1 make-quality-fail + 1 fix-agent +
+    # 1 make-quality-pass
+    assert len(world.docker.invocations) >= 10
