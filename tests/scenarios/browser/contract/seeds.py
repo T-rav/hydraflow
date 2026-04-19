@@ -10,30 +10,47 @@ from tests.scenarios.fakes.mock_world import MockWorld
 
 
 def seed_populated_pipeline(world: MockWorld) -> MockWorld:
-    """Seed an active-pipeline world with 10 issues across phases + 3 merged PRs."""
-    gh = world.github
+    """Seed an active-pipeline world with 10 issues across phases + 3 merged PRs.
 
-    # Triage
-    gh.add_issue(201, "Add rate limiting to API", "...", labels=["hydraflow-find"])
-    gh.add_issue(202, "Refactor auth middleware", "...", labels=["hydraflow-find"])
+    Stage mapping (IssueStore internal names):
+      - "find"   → triage queue  (hydraflow-find label)
+      - "plan"   → plan queue    (hydraflow-plan label)
+      - "ready"  → implement queue (hydraflow-ready label)
+      - "review" → review queue  (hydraflow-review label)
+      - "hitl"   → HITL set      (hydraflow-hitl-review label)
+
+    Note: "triage" and "implement" are NOT valid enqueue_transition stages;
+    use "find" and "ready" respectively.
+    """
+    from tests.conftest import TaskFactory  # noqa: PLC0415
+
+    gh = world.github
+    harness = world._harness
+
+    def _seed(num: int, title: str, labels: list[str], stage: str) -> None:
+        gh.add_issue(num, title, "...", labels=labels)
+        task = TaskFactory.create(id=num, title=title, body="...", tags=labels)
+        harness.seed_issue(task, stage=stage)
+
+    # Triage (internal stage: "find")
+    _seed(201, "Add rate limiting to API", ["hydraflow-find"], "find")
+    _seed(202, "Refactor auth middleware", ["hydraflow-find"], "find")
 
     # Plan
-    gh.add_issue(203, "Implement search indexing", "...", labels=["hydraflow-plan"])
+    _seed(203, "Implement search indexing", ["hydraflow-plan"], "plan")
 
-    # Implement
-    gh.add_issue(204, "Add CSV export to reports", "...", labels=["hydraflow-ready"])
-    gh.add_issue(205, "Dark mode toggle", "...", labels=["hydraflow-ready"])
-    gh.add_issue(206, "Fix pagination offset bug", "...", labels=["hydraflow-ready"])
+    # Implement (internal stage: "ready")
+    _seed(204, "Add CSV export to reports", ["hydraflow-ready"], "ready")
+    _seed(205, "Dark mode toggle", ["hydraflow-ready"], "ready")
+    _seed(206, "Fix pagination offset bug", ["hydraflow-ready"], "ready")
 
     # Review
-    gh.add_issue(207, "Upgrade Node runtime to v22", "...", labels=["hydraflow-review"])
+    _seed(207, "Upgrade Node runtime to v22", ["hydraflow-review"], "review")
 
     # HITL
-    gh.add_issue(
-        208, "Migrate legacy DB schema", "...", labels=["hydraflow-hitl-review"]
-    )
+    _seed(208, "Migrate legacy DB schema", ["hydraflow-hitl-review"], "hitl")
 
-    # Merged (closed)
+    # Merged (closed) — not seeded into the active pipeline store, but GH knows
     for num, title in (
         (190, "Add health-check endpoint"),
         (191, "Update CI badge in README"),

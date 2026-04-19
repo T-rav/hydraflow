@@ -31,6 +31,180 @@ from tests.scenarios.fakes.fake_workspace import FakeWorkspace
 from tests.scenarios.fakes.scenario_result import IssueOutcome, ScenarioResult
 
 
+class _SafeProxy:
+    """Recursive no-op proxy: any attribute access and any call returns another proxy.
+
+    Used as a fallback for orchestrator attributes that the dashboard UI polls
+    but the test shim doesn't implement (e.g. run_recorder, metrics_manager,
+    _svc.epic_manager).  Every method call returns an empty list/dict/None at
+    the leaf, so JSON serialisation and truth-value tests work safely.
+    """
+
+    def __getattr__(self, name: str) -> _SafeProxy:
+        return _SafeProxy()
+
+    def __call__(self, *args: Any, **kwargs: Any) -> _SafeProxy:
+        return _SafeProxy()
+
+    # Support async calls
+    def __await__(self):  # type: ignore[override]
+        yield
+        return _SafeProxy()
+
+    # Support iteration (e.g. list comprehensions over route results)
+    def __iter__(self):  # type: ignore[override]
+        return iter([])
+
+    def __bool__(self) -> bool:
+        return False
+
+    def model_dump(self) -> dict:
+        return {}
+
+    def list_issues(self) -> list:
+        return []
+
+    def list_runs(self, *a: Any, **kw: Any) -> list:
+        return []
+
+    def get_storage_stats(self) -> dict:
+        return {}
+
+    def get_run_artifact(self, *a: Any, **kw: Any) -> None:
+        return None
+
+
+class _StubMetricsManager:
+    """Stub MetricsManager that returns empty data for dashboard polling."""
+
+    async def fetch_history_from_issue(self) -> list:
+        return []
+
+    @property
+    def latest_snapshot(self) -> None:
+        return None
+
+
+class _StubRunRecorder:
+    """Stub RunRecorder that returns empty data for dashboard polling."""
+
+    def list_issues(self) -> list:
+        return []
+
+    def list_runs(self, issue_number: int) -> list:
+        return []
+
+    def get_run_artifact(
+        self, issue_number: int, timestamp: str, filename: str
+    ) -> None:
+        return None
+
+    def get_storage_stats(self) -> dict:
+        return {"total_size_bytes": 0, "run_count": 0}
+
+
+class _HarnessOrchestratorShim:
+    """Minimal orchestrator-like object that exposes a PipelineHarness's store.
+
+    Dashboard routes check ``orchestrator.running`` / ``orchestrator.pipeline_enabled``
+    to decide whether to serve live data.  This shim answers ``True`` for both so
+    the routes don't short-circuit to empty responses, and forwards
+    ``issue_store`` / ``build_pipeline_stats`` to the underlying harness store.
+
+    The UI polls many endpoints (metrics, workers, HITL, run_recorder, etc.).
+    A ``__getattr__`` fallback returns empty-safe sentinel objects so all routes
+    return 200 with empty payloads instead of 500 errors.  No ``github_cache``
+    attribute is exposed intentionally — routes that require it perform an
+    ``isinstance`` guard before accessing it.
+    """
+
+    def __init__(self, harness: Any) -> None:
+        self._harness = harness
+
+    # --- Core properties checked by route guards ---
+
+    @property
+    def running(self) -> bool:
+        return True
+
+    @property
+    def pipeline_enabled(self) -> bool:
+        return True
+
+    @pipeline_enabled.setter
+    def pipeline_enabled(self, value: bool) -> None:
+        pass  # no-op in test mode
+
+    # --- Pipeline data ---
+
+    @property
+    def issue_store(self) -> Any:
+        return self._harness.store
+
+    def build_pipeline_stats(self) -> Any:
+        from datetime import UTC, datetime  # noqa: PLC0415
+
+        from models import PipelineStats  # noqa: PLC0415
+
+        queue_stats = self._harness.store.get_queue_stats()
+        return PipelineStats(
+            timestamp=datetime.now(UTC).isoformat(),
+            queue=queue_stats,
+        )
+
+    # --- Attributes polled by the dashboard UI ---
+
+    @property
+    def current_session_id(self) -> str | None:
+        return None
+
+    @property
+    def run_status(self) -> str:
+        return "idle"
+
+    @property
+    def human_input_requests(self) -> dict:
+        return {}
+
+    @property
+    def credits_paused_until(self) -> None:
+        return None
+
+    def get_bg_worker_states(self) -> dict:
+        return {}
+
+    def is_bg_worker_enabled(self, name: str) -> bool:
+        return False
+
+    def get_bg_worker_interval(self, name: str) -> int:
+        return 60
+
+    def get_hitl_status(self, issue_number: int) -> str:
+        return "idle"
+
+    @property
+    def metrics_manager(self) -> Any:
+        """Stub metrics manager — returns empty snapshots for dashboard polling."""
+        return _StubMetricsManager()
+
+    @property
+    def run_recorder(self) -> Any:
+        """Stub run recorder — returns empty lists for dashboard polling."""
+        return _StubRunRecorder()
+
+    def __getattr__(self, name: str) -> Any:
+        """Return a safe proxy for any unrecognised attribute.
+
+        This prevents ``AttributeError`` 500s from dashboard routes that poll
+        optional orchestrator APIs (run_recorder, metrics_manager, _svc, etc.).
+        The returned proxy accepts any attribute access or call chain.
+        """
+        return _SafeProxy()
+
+    async def stop(self) -> None:
+        """No-op stop — shim has no background tasks to cancel."""
+
+
 class MockWorld:
     """Composable test world for scenario testing."""
 
@@ -479,26 +653,29 @@ class MockWorld:
 
         When ``with_orchestrator`` is True, MockWorld constructs a real
         HydraFlowOrchestrator wired against the fakes (Task 9). Otherwise
-        the dashboard serves UI only (this task).
+        the dashboard is wired to a lightweight shim that exposes the
+        harness's IssueStore so seeded issues are visible in the UI.
         """
         if self._dashboard_url is not None:
             return self._dashboard_url
 
         from dashboard import HydraFlowDashboard  # noqa: PLC0415
-        from events import EventBus, EventLog  # noqa: PLC0415
-        from service_registry import build_state_tracker  # noqa: PLC0415
 
         config = self._harness.config
         # Force ephemeral port; override static defaults from HydraFlowConfig.
         config.dashboard_host = "127.0.0.1"
         config.dashboard_port = 0
 
-        bus = EventBus(event_log=EventLog(self._tmp_path / "events.jsonl"))
-        state = build_state_tracker(config)
+        # Reuse the harness's bus and state tracker so seeded state reaches the UI.
+        bus = self._harness.bus
+        state = self._harness.state
 
-        orchestrator = None
         if with_orchestrator:
             orchestrator = await self._build_wired_orchestrator(config, bus, state)
+        else:
+            # Lightweight shim so /api/pipeline and /api/queue serve harness data
+            # without spinning up a full HydraFlowOrchestrator.
+            orchestrator = _HarnessOrchestratorShim(self._harness)
 
         dashboard = HydraFlowDashboard(
             config=config,
