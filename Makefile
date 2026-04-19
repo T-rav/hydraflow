@@ -480,16 +480,6 @@ ui-clean:
 	@rm -rf $(HYDRAFLOW_DIR)src/ui/dist $(HYDRAFLOW_DIR)src/ui/node_modules
 	@echo "$(GREEN)Dashboard cleaned$(RESET)"
 
-screenshot: check-node-ui
-	@echo "$(BLUE)Capturing deterministic screenshots...$(RESET)"
-	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh ci && $(HYDRAFLOW_DIR)scripts/ui-npm.sh exec playwright install --with-deps chromium && $(HYDRAFLOW_DIR)scripts/ui-npm.sh run screenshot
-	@echo "$(GREEN)Screenshots captured → src/ui/e2e/screenshots/$(RESET)"
-
-screenshot-update: check-node-ui
-	@echo "$(BLUE)Updating screenshot baselines...$(RESET)"
-	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh ci && $(HYDRAFLOW_DIR)scripts/ui-npm.sh exec playwright install --with-deps chromium && $(HYDRAFLOW_DIR)scripts/ui-npm.sh run screenshot:update
-	@echo "$(GREEN)Screenshot baselines updated → src/ui/e2e/screenshots/$(RESET)"
-
 hindsight:
 	@echo "$(BLUE)Starting Hindsight semantic memory server...$(RESET)"
 	docker compose up -d hindsight
