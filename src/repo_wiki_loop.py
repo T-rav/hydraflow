@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import subprocess
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from auto_pr import open_automated_pr_async
 from base_background_loop import BaseBackgroundLoop, LoopDeps
-from config import HydraFlowConfig
+from config import Credentials, HydraFlowConfig
 from repo_wiki import DEFAULT_TOPICS, RepoWikiStore
+from wiki_maint_queue import MaintenanceQueue
 
 if TYPE_CHECKING:
     from state import StateTracker
@@ -36,11 +42,26 @@ class RepoWikiLoop(BaseBackgroundLoop):
         deps: LoopDeps,
         wiki_compiler: WikiCompiler | None = None,
         state: StateTracker | None = None,
+        credentials: Credentials | None = None,
+        maintenance_queue: MaintenanceQueue | None = None,
     ) -> None:
         super().__init__(worker_name="repo_wiki", config=config, deps=deps)
         self._wiki_store = wiki_store
         self._wiki_compiler = wiki_compiler
         self._state = state
+        self._credentials = credentials
+        # Queue lives under the gitignored data path — single-host only
+        # in Phase 4 (multi-host coordination is an open question in the
+        # design doc).  ``maintenance_queue`` is injectable so tests can
+        # swap in a tmp-path queue without touching real state.
+        self._queue = maintenance_queue or MaintenanceQueue(
+            path=Path(config.data_path("wiki_maint_queue.json"))
+        )
+        # Tracks the currently-open maintenance PR so subsequent ticks
+        # can coalesce (append commits to the same branch) when
+        # ``repo_wiki_maintenance_pr_coalesce`` is True.
+        self._open_pr_branch: str | None = None
+        self._open_pr_url: str | None = None
 
     def _get_default_interval(self) -> int:
         return self._config.repo_wiki_interval
@@ -53,9 +74,25 @@ class RepoWikiLoop(BaseBackgroundLoop):
         return {int(k) for k, v in outcomes.items() if v.outcome in _TERMINAL_OUTCOMES}
 
     async def _do_work(self) -> dict[str, Any] | None:
+        # Drain console-triggered admin tasks up front — admin actions
+        # may target repos the store does not yet see (e.g. rebuild-index
+        # of a freshly migrated repo), so draining before the list_repos
+        # early-return keeps them from piling up in the queue.
+        drained = self._queue.drain()
+        if drained:
+            logger.info(
+                "Wiki maintenance queue drained %d tasks: %s",
+                len(drained),
+                [t.kind for t in drained],
+            )
+
         repos = self._wiki_store.list_repos()
         if not repos:
-            return {"repos": 0, "total_entries": 0}
+            return {
+                "repos": 0,
+                "total_entries": 0,
+                "queue_drained": len(drained),
+            }
 
         closed_issues = self._get_closed_issues()
 
@@ -119,4 +156,151 @@ class RepoWikiLoop(BaseBackgroundLoop):
                 len(repos),
             )
 
+        # Record the up-front queue drain and attempt to open a
+        # maintenance PR if the tracked layout has changes.  No-op today
+        # because Phase 4 does not yet teach ``active_lint`` /
+        # ``compile_topic`` to write into ``repo_root / repo_wiki/`` —
+        # those edits still land on the legacy gitignored store.  Once
+        # Phase 5 ports those paths, this block will start emitting PRs.
+        stats["queue_drained"] = len(drained)
+        await self._maybe_open_maintenance_pr(stats)
+
         return stats
+
+    async def _maybe_open_maintenance_pr(self, stats: dict[str, Any]) -> None:
+        """Open or coalesce a maintenance PR if the tracked wiki layout
+        has uncommitted changes.
+
+        Silently no-ops when:
+        - credentials are absent (no ``gh_token`` to push with)
+        - ``git status --porcelain {repo_wiki_path}`` is empty (no diffs)
+        - the repo root is not a git repo (defensive)
+        """
+        if self._credentials is None or not self._credentials.gh_token:
+            logger.debug("Wiki maintenance PR skipped: no gh_token available")
+            return
+
+        repo_root = Path(self._config.repo_root).resolve()
+        if not (repo_root / ".git").exists():
+            logger.debug("Wiki maintenance PR skipped: %s is not a git repo", repo_root)
+            return
+
+        path_prefix = self._config.repo_wiki_path
+        try:
+            diff_files = await asyncio.to_thread(
+                _porcelain_paths, repo_root, path_prefix
+            )
+        except subprocess.CalledProcessError as exc:
+            logger.warning(
+                "Wiki maintenance git status failed (stderr=%s)",
+                exc.stderr,
+            )
+            return
+
+        if not diff_files:
+            return
+
+        if (
+            self._open_pr_branch is not None
+            and self._config.repo_wiki_maintenance_pr_coalesce
+        ):
+            logger.info(
+                "Wiki maintenance PR %s is already open; Phase 5 will append",
+                self._open_pr_url,
+            )
+            stats["maintenance_pr"] = self._open_pr_url
+            return
+
+        timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+        branch = f"hydraflow/wiki-maint-{timestamp}"
+        today = datetime.now(UTC).date().isoformat()
+        title = f"chore(wiki): maintenance {today}"
+        body = _maintenance_pr_body(stats, diff_files)
+
+        result = await open_automated_pr_async(
+            repo_root=repo_root,
+            branch=branch,
+            files=[repo_root / p for p in diff_files],
+            pr_title=title,
+            pr_body=body,
+            base=self._config.base_branch(),
+            auto_merge=self._config.repo_wiki_maintenance_auto_merge,
+            gh_token=self._credentials.gh_token,
+            raise_on_failure=False,
+            commit_author_name=self._config.git_user_name,
+            commit_author_email=self._config.git_user_email,
+        )
+
+        if result.status == "opened":
+            self._open_pr_branch = branch
+            self._open_pr_url = result.pr_url
+            stats["maintenance_pr"] = result.pr_url
+            logger.info(
+                "Wiki maintenance PR opened: %s (%d files)",
+                result.pr_url,
+                len(diff_files),
+            )
+        elif result.status == "failed":
+            logger.warning(
+                "Wiki maintenance PR failed for %s: %s",
+                branch,
+                result.error,
+            )
+
+
+def _porcelain_paths(repo_root: Path, path_prefix: str) -> list[str]:
+    """Return relative paths under ``path_prefix`` with uncommitted changes.
+
+    Runs ``git status --porcelain`` scoped to ``path_prefix`` and parses
+    each entry.  Renamed entries take the destination path.  Empty
+    result means nothing to commit.
+    """
+    proc = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo_root),
+            "status",
+            "--porcelain",
+            "--",
+            path_prefix,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    paths: list[str] = []
+    for line in proc.stdout.splitlines():
+        if len(line) < 4:
+            continue
+        # Porcelain format: XY<space>path  (rename is XY<space>oldpath -> newpath)
+        payload = line[3:]
+        if " -> " in payload:
+            payload = payload.split(" -> ", 1)[1]
+        paths.append(payload.strip().strip('"'))
+    return paths
+
+
+def _maintenance_pr_body(stats: dict[str, Any], diff_files: list[str]) -> str:
+    """Render the PR body with a short action summary + changed files."""
+    lines = [
+        "Automated wiki maintenance PR opened by `RepoWikiLoop`.",
+        "",
+        "## Actions",
+        "",
+        f"- {stats.get('entries_marked_stale', 0)} entries marked stale",
+        f"- {stats.get('entries_pruned', 0)} entries pruned",
+        f"- {stats.get('entries_compiled', 0)} entries compiled / synthesized",
+        f"- {stats.get('queue_drained', 0)} console-triggered tasks drained",
+        "",
+        "## Files changed",
+        "",
+    ]
+    lines.extend(f"- `{p}`" for p in sorted(diff_files))
+    lines.append("")
+    lines.append(
+        "Auto-merge is enabled when CI is green; if CI fails, the PR "
+        "stays open and subsequent ticks will append commits instead of "
+        "opening a new PR."
+    )
+    return "\n".join(lines)

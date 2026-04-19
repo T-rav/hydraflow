@@ -780,6 +780,7 @@ def build_services(
         deps=loop_deps,
         wiki_compiler=wiki_compiler,
         state=state,
+        credentials=credentials,
     )
     diagnostic_runner = DiagnosticRunner(config=config, event_bus=event_bus)
     diagnostic_loop = DiagnosticLoop(
