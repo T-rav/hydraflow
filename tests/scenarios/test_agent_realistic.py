@@ -880,6 +880,28 @@ async def test_A20_workspace_create_permission_failure(tmp_path) -> None:
     )
 
 
+async def test_A20b_workspace_create_disk_full(tmp_path) -> None:
+    """OSError(ENOSPC) from FakeWorkspace is swallowed gracefully."""
+    world = MockWorld(tmp_path, use_real_agent_runner=True)
+    world.add_issue(1, "t", "b", labels=["hydraflow-ready"])
+
+    world._workspace.fail_next_create(kind="disk_full")
+
+    result = await world.run_pipeline()
+    assert not result.issue(1).merged
+
+
+async def test_A20c_workspace_create_branch_conflict(tmp_path) -> None:
+    """RuntimeError ('worktree already exists') from FakeWorkspace is swallowed."""
+    world = MockWorld(tmp_path, use_real_agent_runner=True)
+    world.add_issue(1, "t", "b", labels=["hydraflow-ready"])
+
+    world._workspace.fail_next_create(kind="branch_conflict")
+
+    result = await world.run_pipeline()
+    assert not result.issue(1).merged
+
+
 async def test_A21_state_json_corruption_graceful_fallback(tmp_path) -> None:
     """Corrupt state.json before run; StateTracker falls back to empty state.
 
