@@ -646,3 +646,73 @@ class TestTrackedActiveLintIntegration:
 
         # Tracked file untouched — lint only scans when the flag is on.
         assert "status: active" in entry_path.read_text(encoding="utf-8")
+
+
+class TestTrackedCompileStatsReporting:
+    """Regression for the ``total_compiled`` overcount: the loop must
+    report the *post-synthesis* count returned by
+    ``compile_topic_tracked`` rather than the pre-synthesis active
+    count.  Using ``active_count`` would inflate ``entries_compiled``
+    ~5-10× vs. the legacy ``compile_topic`` branch that aggregates
+    into the same field.
+    """
+
+    @pytest.mark.asyncio
+    async def test_adds_post_synthesis_count_not_active_count(
+        self, git_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from datetime import UTC, datetime
+        from unittest.mock import AsyncMock, MagicMock
+
+        from repo_wiki import RepoWikiStore
+
+        # 8 active entries in patterns, above the 5-entry threshold.
+        tracked_root = git_repo / "repo_wiki"
+        topic_dir = tracked_root / "acme" / "widget" / "patterns"
+        topic_dir.mkdir(parents=True)
+        for i in range(8):
+            (topic_dir / f"000{i}-issue-{i}-x.md").write_text(
+                "---\n"
+                f"id: 000{i}\n"
+                "topic: patterns\n"
+                f"source_issue: {i}\n"
+                "source_phase: plan\n"
+                f"created_at: {datetime.now(UTC).isoformat()}\n"
+                "status: active\n"
+                "---\n\n# Entry\n",
+                encoding="utf-8",
+            )
+        (tracked_root / "acme" / "widget" / "index.md").write_text(
+            "# index\n", encoding="utf-8"
+        )
+
+        legacy_store = MagicMock(spec=RepoWikiStore)
+        legacy_store.list_repos.return_value = []
+        legacy_store.active_lint.return_value = MagicMock(
+            stale_entries=0,
+            orphan_entries=0,
+            total_entries=0,
+            entries_marked_stale=0,
+            orphans_pruned=0,
+            empty_topics=[],
+        )
+
+        compiler = MagicMock()
+        compiler.compile_topic_tracked = AsyncMock(return_value=2)
+
+        loop = _stub_loop(_make_config(git_repo))
+        loop._wiki_store = legacy_store
+        loop._wiki_compiler = compiler
+        loop._state = None
+        monkeypatch.setattr(loop, "_maybe_open_maintenance_pr", AsyncMock())
+
+        stats = await loop._do_work()
+
+        assert stats is not None
+        # Must be 2 (post-synthesis), not 8 (active_count pre-fix).
+        assert stats["entries_compiled"] == 2
+        # Defence-in-depth: if the 5-entry threshold is ever raised above
+        # our 8-entry fixture, the outer assertion would still pass with
+        # entries_compiled == 0 (0 != 2 → fail, but for the wrong reason).
+        # Pinning await_count guarantees the compiler was actually invoked.
+        compiler.compile_topic_tracked.assert_awaited_once()

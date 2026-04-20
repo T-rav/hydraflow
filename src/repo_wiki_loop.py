@@ -193,8 +193,15 @@ class RepoWikiLoop(BaseBackgroundLoop):
                                     tracked_root, slug, topic
                                 )
                             )
+                            # Report the post-synthesis count — matches the
+                            # legacy ``compile_topic`` semantic and keeps
+                            # ``total_compiled`` comparable across legacy
+                            # and tracked ticks.  Using ``active_count``
+                            # here (pre-synthesis) would inflate the stat
+                            # roughly 5-10× because synthesis typically
+                            # collapses many entries into one or two.
                             if synthesized:
-                                total_compiled += active_count
+                                total_compiled += synthesized
                         except Exception:  # noqa: BLE001
                             logger.warning(
                                 "Wiki compile_tracked failed for %s/%s",
