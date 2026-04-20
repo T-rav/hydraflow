@@ -175,41 +175,46 @@ Out of scope for v1. MockWorld API is designed to support it.
 
 ### Realistic-Agent Scenarios (`test_agent_realistic.py`)
 
-| # | Scenario | Asserts |
-|---|----------|---------|
-| A0 | Happy path realistic agent | Single issue flows through real AgentRunner and merges |
-| A1 | AgentRunner sees no commits | 0 commits ahead of origin/main → not merged |
-| A2 | AgentRunner git commit failure | Git commit error is handled, issue does not merge |
-| A3 | AgentRunner quality gate fail | `make quality` non-zero → issue does not merge |
-| A4 | AgentRunner skill parse fail | Skill output unparseable → falls through gracefully |
-| A5 | AgentRunner pre-quality review | Pre-quality review rejects → issue does not merge |
-| A6 | AgentRunner multi-commit | Multiple commits ahead → merged successfully |
-| A7 | AgentRunner success=False | Docker reports failure → issue does not merge |
-| A8 | AgentRunner timeout | Docker run times out → issue does not merge |
-| A9 | AgentRunner exit_code non-zero | Non-zero exit code → not merged |
-| A10 | Beads claim + close | FakeBeads claim + close lifecycle verified |
-| A11 | Beads note mid-flight | Bead note written during implement |
-| A12 | Docker OOM kill | Out-of-memory Docker exit handled gracefully |
-| A13 | Multiple issues concurrent realistic | Two issues processed concurrently via real AgentRunner |
-| A14 | Hindsight recall seeded | Seeded memory recalled by planner |
-| A15 | Hindsight retain written | Pipeline writes retention entry after merge |
-| A16 | Hindsight down no crash | Hindsight unavailable, pipeline still merges |
-| A17 | Wiki pre-populated | RepoWikiStore wired; PlanPhase._wiki_store set |
-| A18 | Code-scanning alerts passed | Alerts fetched and forwarded to reviewer LLM |
-| A19 | Multiple commits batch | script_run_with_multiple_commits produces merged PR |
-| A20 | Workspace create permission failure | PermissionError swallowed, issue not merged |
-| A20b | Workspace create disk full | OSError(ENOSPC) swallowed, issue not merged |
-| A20c | Workspace create branch conflict | RuntimeError (worktree exists) swallowed, not merged |
-| A21 | State JSON corruption graceful fallback | StateTracker recovers to empty state, pipeline continues |
-| A22 | Wiki populated plan consults it | wiki_store wired to PlanPhase, no crash |
+| ID | Test | What it covers |
+|----|------|----------------|
+| A0 | `test_A0_happy_path_realistic_agent` | Base happy path: one issue, real AgentRunner, FakeDocker commits, merges. |
+| A1 | `test_A1_docker_timeout_fails_issue_no_retry` | Docker timeout — production does NOT retry; issue fails with `worker_result.success=False`. |
+| A2 | `test_A2_oom_fails_issue` | OOM (exit_code=137) causes agent failure; zero commits → `_verify_result` fails. |
+| A3 | `test_A3_malformed_stream_recovers_to_failure` | Garbage stream events plus exit_code=1 — StreamParser skips unknowns, result is failure. |
+| A4 | `test_A4_unknown_event_type_ignored_stream_continues` | `auth_retry_required` event silently skipped; trailing `result:success` still merges issue. |
+| A5 | `test_A5_token_budget_exceeded_halts_implement` | Stream-level `budget_exceeded` event plus failure result → issue fails without merge. |
+| A6 | `test_A6_github_rate_limit_at_triage_halts_pipeline` | Rate-limit armed before triage (remaining=0) — first GitHub call raises, pool absorbs, no PR created. |
+| A7 | `test_A7_github_secondary_rate_limit_surfaces` | Secondary (abuse-detection) rate-limit is also absorbed; issue never progresses. |
+| A8 | `test_A8_find_stage_to_done_realistic_agent` | Full pipeline from `hydraflow-find` through triage→plan→implement→review; issue merges. |
+| A9 | `test_A9_hindsight_failure_realistic_agent_still_succeeds` | `fail_service('hindsight')` during realistic-agent run does not halt pipeline; issue merges. |
+| A10 | `test_A10_quality_fix_loop_retries_then_passes` | `make quality` fails on first attempt; quality-fix agent commits fix; second quality run passes; merges. |
+| A11 | `test_A11_review_fix_ci_loop_resolves` | CI fails after PR creation; `fix_ci` loop resolves it; CI passes; merge proceeds. |
+| A12 | `test_A12_multi_commit_implement` | Real agent produces 3 commits; `git rev-list --count` confirms all three on branch. |
+| A13 | `test_A13_zero_diff_fails_without_merge` | Agent claims success but writes no commits; `_verify_result` fails on commit count; no merge. |
+| A14 | `test_A14_three_issues_concurrent_realistic` | Three issues processed concurrently via real AgentRunner; all merge; worktree isolation verified. |
+| A15 | `test_A15_epic_decomposition_creates_children` | High-complexity issue decomposed via EpicManager stub; two child issues created in FakeGitHub. |
+| A16 | `test_A16_credit_exhausted_halts_pipeline` | `CreditExhaustedError` from `_execute` propagates out of `run_pipeline` (re-raise allowlist). |
+| A17 | `test_A17_authentication_error_halts_pipeline` | `AuthenticationError` from `_execute` propagates out of `run_pipeline` (re-raise allowlist). |
+| A18 | `test_A18_rate_limit_heals_mid_pipeline` | Rate-limit armed with remaining=5; `on_phase("implement")` heals before it matters; merges. |
+| A19 | `test_A19_code_scanning_alerts_reach_reviewer` | `add_alerts(branch=...)` seeds alerts; ReviewPhase fetches by branch; reviewer receives them unchanged. |
+| A20 | `test_A20_workspace_create_permission_failure` | `PermissionError` from workspace creation is swallowed; issue does not merge; run_pipeline returns normally. |
+| A20b | `test_A20b_workspace_create_disk_full` | `OSError(ENOSPC)` from FakeWorkspace is swallowed gracefully; issue does not merge. |
+| A20c | `test_A20c_workspace_create_branch_conflict` | `RuntimeError` ("worktree already exists") from FakeWorkspace is swallowed; issue does not merge. |
+| A21 | `test_A21_state_json_corruption_graceful_fallback` | Corrupt state.json before run; `StateTracker.load` falls back to empty `StateData()`; pipeline continues. |
+| A22 | `test_A22_wiki_populated_plan_consults_it` | Pre-populated `RepoWikiStore` wired to `PlanPhase`; wiki accessible; pipeline completes without crash. |
 
-### Bead Workflow Scenarios
+**Boot smoke** (`test_realistic_agent_boot_smoke.py`): `test_real_agent_runner_single_event_smoke` — single invocation with tool_use + message + result events; proves the AgentRunner wiring stack boots.
 
-| # | Scenario | Asserts |
-|---|----------|---------|
-| B1 | Bead claim + complete lifecycle | Issue lifecycle writes claim, notes, and close bead |
+### Bead Workflow Scenarios (`test_bead_workflow.py`)
 
-### Background Loop Scenarios (`test_loops.py`) — Extended
+| ID | Test | What it covers |
+|----|------|----------------|
+| B1 | `test_B1_bead_workflow_end_to_end` | Plan with Task Graph headers creates 2 beads; implement calls `init`; tasks stay open (claim/close are agent-subprocess concerns). |
+| B1b | `test_B1_no_beads_without_task_graph_headers` | Plan text without `### P{N}` headers → `extract_phases` returns []; no beads created; `_initialized` stays False. |
+
+### Background Loop Scenarios (`test_loops.py` + `test_caretaker_loops.py` + `test_caretaker_loops_part2.py`)
+
+#### L1–L8 (`test_loops.py`)
 
 | # | Loop | Scenario | Asserts |
 |---|------|----------|---------|
@@ -221,21 +226,31 @@ Out of scope for v1. MockWorld API is designed to support it.
 | L6 | CIMonitor | CI recovery closes issue | Failure issue auto-closed on green CI |
 | L7 | DependabotMerge | Auto-merges bot PR on CI pass | PR approved, merged, processed set updated |
 | L8 | DependabotMerge | Skips bot PR on CI failure | PR not merged, skip recorded |
-| L9 | MemorySync | Syncs hindsight bank to state | State updated with latest memory entries |
-| L10 | MemorySync | Hindsight down → sync skipped | Graceful degradation, no crash |
-| L11 | PRUnsticker | Skips non-HITL PRs | Active non-HITL PRs not touched |
-| L12 | StaleIssueGC | Skips fresh HITL issues | Issues under threshold not closed |
-| L13 | WorkspaceGC | Preserves in-flight worktrees | Worktree for active issue not removed |
-| L14 | CIMonitor | Duplicate failure suppressed | Second CI failure for same branch not double-reported |
-| L15 | HealthMonitor | High pass rate → no bump | Config unchanged when health is good |
-| L16 | DependabotMerge | Multi-PR batch | Multiple bot PRs processed in one cycle |
-| L17 | StagingPromotion | Promotion PR created | Staging-to-main PR opened after all checks pass |
-| L18 | StagingPromotion | Promotion blocked by failing check | PR not created when staging CI fails |
-| L19 | CreditMonitor | Low credits → pause | `creditsPausedUntil` set when balance below threshold |
-| L20 | CreditMonitor | Credits recovered → resume | Pause cleared when balance restored |
-| L21 | RepoScanner | New repo registered | Supervised repo list extended on discovery |
-| L22 | RepoScanner | Existing repo skipped | No duplicate entry added |
-| L23 | PRUnsticker | Comment posted on stuck PR | Unstick comment written to GitHub |
+
+#### L9–L13 (`test_caretaker_loops.py`)
+
+| ID | Class | What it covers |
+|----|-------|----------------|
+| L9 | `TestL9ADRReviewerLoop` | `ADRReviewerLoop._do_work` delegates to `adr_reviewer.review_proposed_adrs`; stats pass through; None passthrough preserved. |
+| L10 | `TestL10MemorySyncLoop` | `MemorySyncLoop._do_work` calls `sync()` then `publish_sync_event(result)`; returned stats are a fresh copy. |
+| L11 | `TestL11RetrospectiveLoop` | `RetrospectiveLoop` drains queue; empty queue → zero stats; `RETRO_PATTERNS` item → processed=1, acknowledged. |
+| L12 | `TestL12EpicSweeperLoop` | `EpicSweeperLoop` sweeps open epics; no epics → zero counts; epic with all closed sub-issues auto-closed. |
+| L13 | `TestL13SecurityPatchLoop` | `SecurityPatchLoop` files issues from Dependabot alerts; no alerts → filed=0; high-severity fixable → filed=1; dry_run → None. |
+
+#### L14–L23 (`test_caretaker_loops_part2.py`)
+
+| ID | Class | What it covers |
+|----|-------|----------------|
+| L14 | `TestL14CodeGrooming` | `CodeGroomingLoop`: disabled → `{"skipped": "disabled"}`; dry_run → None; enabled with no findings → stats shape with `"filed"` key. |
+| L15 | `TestL15DiagnosticLoop` | `DiagnosticLoop` polls `hydraflow-diagnose` issues; no issues → zero counts; issue without escalation context → escalated=1. |
+| L16 | `TestL16EpicMonitorLoop` | `EpicMonitorLoop` delegates to `EpicManager`; no stale epics → stale_count=0; 3 stale + 5 tracked → stats match. |
+| L17 | `TestL17GitHubCacheLoop` | `GitHubCacheLoop` calls `cache.poll()` and forwards its stats; empty dict result → None (falsy guard). |
+| L18 | `TestL18RepoWikiLoop` | `RepoWikiLoop` lints per-repo wikis; no repos → zero stats; one repo → `active_lint` called, stale_entries reflected. |
+| L19 | `TestL19ReportIssueLoop` | `ReportIssueLoop` processes queued bug reports; dry_run → None; empty queue → None. |
+| L20 | `TestL20RunsGCLoop` | `RunsGCLoop` purges expired/oversized runs; no artifacts → zero purge; 3 expired + 1 oversized → stats match. |
+| L21 | `TestL21SentryLoop` | `SentryLoop` skips gracefully without credentials; empty org or empty token → `skipped=True` with reason. |
+| L22 | `TestL22StagingPromotionLoop` | `StagingPromotionLoop`: disabled → `status=staging_disabled`; cadence not elapsed → `status=cadence_not_elapsed`; elapsed → RC branch cut, promotion PR opened. |
+| L23 | `TestL23StaleIssueLoop` | `StaleIssueLoop` auto-closes stale issues; no issues → zero; fresh issue → scanned but not closed; stale + dry_run → closed=1, no API call; fetch failure → zero stats. |
 
 ---
 
