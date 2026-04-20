@@ -795,10 +795,11 @@ async def test_A16_credit_exhausted_halts_pipeline(tmp_path) -> None:
 async def test_A19_code_scanning_alerts_reach_reviewer(tmp_path) -> None:
     """Scripted code-scanning alerts propagate through review pipeline.
 
-    FakeGitHub.add_alerts(pr_number=...) seeds alerts for the PR that will be
-    created. Real ReviewPhase fetches them via fetch_code_scanning_alerts and
-    passes them to ReviewRunner.review. FakeLLM.reviewers records what it
-    received; we assert the alert list reached the reviewer unchanged.
+    FakeGitHub.add_alerts(branch=...) seeds alerts for the branch. Matches
+    PRPort.fetch_code_scanning_alerts(branch: str) signature — ReviewPhase
+    fetches by branch (not PR number) and passes the list to ReviewRunner.review.
+    FakeLLM.reviewers records what it received; we assert the alert list reached
+    the reviewer unchanged.
     """
     from models import CodeScanningAlert
     from tests.scenarios.helpers.git_worktree_fixture import init_test_worktree
