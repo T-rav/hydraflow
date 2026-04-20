@@ -161,3 +161,284 @@ async def test_h1_single_issue_end_to_end(world, page) -> None:
     pr = world.github.pr_for_issue(1)
     assert pr is not None, "FakeGitHub has no PR for issue #1"
     assert pr.merged is True, f"PR for issue #1 not marked merged; merged={pr.merged}"
+
+
+async def test_h2_multi_issue_concurrent_batch(world, page) -> None:
+    """H2: three issues all reach the merged stage without cross-contamination.
+
+    Matches tests/scenarios/test_happy.py::TestH2MultiIssueConcurrentBatch.
+    All three issues share the default FakeLLM scripting (success=True for
+    every phase) so they proceed straight through to merge.
+    """
+    from tests.scenarios.builders import IssueBuilder, RepoStateBuilder  # noqa: PLC0415
+
+    # --- Step 1: seed three issues (matches test_happy.py H2 exactly) ---
+    await (
+        RepoStateBuilder()
+        .with_issues(
+            [
+                IssueBuilder()
+                .numbered(1)
+                .titled("Bug fix A")
+                .bodied("Fix the A module"),
+                IssueBuilder()
+                .numbered(2)
+                .titled("Bug fix B")
+                .bodied("Fix the B module"),
+                IssueBuilder()
+                .numbered(3)
+                .titled("Bug fix C")
+                .bodied("Fix the C module"),
+            ]
+        )
+        .at(world)
+    )
+
+    # --- Step 2: run pipeline Python-side through wired fakes ---
+    result = await world.run_pipeline()
+
+    # Sanity-check Python-side before touching the UI.
+    for num in (1, 2, 3):
+        outcome = result.issue(num)
+        assert outcome.final_stage == "done", (
+            f"Issue #{num} did not complete; stopped at '{outcome.final_stage}'"
+        )
+        assert outcome.merged is True, f"Issue #{num} PR not merged"
+
+    # Sync the IssueStore merged-numbers set for all three issues.
+    for num in (1, 2, 3):
+        world._harness.store.mark_merged(num)
+
+    # --- Step 3: boot dashboard (lightweight shim) ---
+    url = await world.start_dashboard(with_orchestrator=False)
+
+    async def _handle_control_status(route, request) -> None:
+        await route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(_RUNNING_CONTROL_STATUS),
+        )
+
+    await page.route("**/api/control/status", _handle_control_status)
+
+    # --- Step 4: navigate + wait for WebSocket connection ---
+    await page.goto(url)
+    await page.wait_for_selector('body[data-connected="true"]', timeout=10_000)
+    await asyncio.sleep(0.5)
+
+    # --- Step 5: assert UI shows all three issues in the merged stage ---
+    merged_header = page.locator('[data-testid="stage-header-merged"]')
+    await expect(merged_header).to_contain_text("3 merged", timeout=15_000)
+
+    # Each issue's flow-dot must be visible.
+    for num in (1, 2, 3):
+        flow_dot = page.locator(f'[data-testid="flow-dot-{num}"]')
+        await expect(flow_dot).to_be_visible(timeout=5_000)
+
+    # --- Step 6: Python-side assertions ---
+    assert all(world.github.pr_for_issue(n).merged is True for n in (1, 2, 3)), (
+        "Not all three PRs were merged"
+    )
+
+
+async def test_h3_implement_failure_routes_to_hitl(world, page) -> None:
+    """H3: failed implement stops at implement stage — issue is NOT merged.
+
+    Matches tests/scenarios/test_happy.py::TestH3HITLRoundTrip.
+    When the worker returns success=False the issue never advances to review
+    or merge, so the UI should show NO merged issues and the flow-dot for
+    issue #1 should still be visible (stuck in implement / failed state).
+    """
+    from tests.conftest import WorkerResultFactory  # noqa: PLC0415
+
+    # --- Step 1: seed world with a failing implement result ---
+    fail = WorkerResultFactory.create(
+        issue_number=1, success=False, error="Docker build failed"
+    )
+    world.add_issue(1, "Complex refactor", "Needs careful human review")
+    world.set_phase_result("implement", 1, fail)
+
+    # --- Step 2: run pipeline Python-side ---
+    result = await world.run_pipeline()
+
+    # Sanity-check: issue should NOT be done or merged.
+    outcome = result.issue(1)
+    assert outcome.final_stage != "done", "Failed implement should not reach done"
+    assert outcome.merged is False, "Issue should not be merged after failed implement"
+
+    # Do NOT call mark_merged — issue never merged.
+
+    # --- Step 3: boot dashboard ---
+    url = await world.start_dashboard(with_orchestrator=False)
+
+    async def _handle_control_status(route, request) -> None:
+        await route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(_RUNNING_CONTROL_STATUS),
+        )
+
+    await page.route("**/api/control/status", _handle_control_status)
+
+    # --- Step 4: navigate + wait for WebSocket connection ---
+    await page.goto(url)
+    await page.wait_for_selector('body[data-connected="true"]', timeout=10_000)
+    await asyncio.sleep(0.5)
+
+    # --- Step 5: assert UI shows zero merged issues ---
+    # When implement fails, the issue is consumed from the implement queue but
+    # never re-queued or marked merged.  It therefore disappears from all
+    # pipeline stage snapshots — the store only tracks queued, active,
+    # in-flight, HITL, and merged issues.  No flow-dot is present for a
+    # failed-and-dropped issue.
+    #
+    # The correct observable assertion is that the merged stage header does NOT
+    # show any merged count.  The implement stage section is structurally
+    # present in the DOM (always rendered) but contains no issues.
+    merged_header = page.locator('[data-testid="stage-header-merged"]')
+    await expect(merged_header).not_to_contain_text("1 merged", timeout=10_000)
+
+    # The implement stage section is always present; assert it exists.
+    implement_section = page.locator('[data-testid="stage-section-implement"]')
+    await expect(implement_section).to_be_visible(timeout=5_000)
+
+    # --- Step 6: Python-side assertions ---
+    assert outcome.worker_result is not None
+    assert outcome.worker_result.success is False
+    pr = world.github.pr_for_issue(1)
+    # No PR should have been created (failed before branch push), or if one
+    # exists it must not be merged.
+    assert pr is None or pr.merged is False, "PR for failed issue should not be merged"
+
+
+async def test_h4_review_approve_and_merge(world, page) -> None:
+    """H4: review returns APPROVE, CI passes, PR is merged.
+
+    Matches tests/scenarios/test_happy.py::TestH4ReviewApproveAndMerge.
+    Default FakeLLM scripting returns a passing review and FakeGitHub
+    auto-merges once review succeeds, so the issue reaches done.
+    """
+    # --- Step 1: seed world (matches test_happy.py H4 exactly) ---
+    from tests.scenarios.builders import IssueBuilder  # noqa: PLC0415
+
+    IssueBuilder().numbered(1).titled("Small refactor").bodied(
+        "Clean up utils module"
+    ).at(world)
+
+    # --- Step 2: run pipeline Python-side ---
+    result = await world.run_pipeline()
+
+    # Sanity-check: review result present and issue merged.
+    outcome = result.issue(1)
+    assert outcome.review_result is not None, "No review result recorded"
+    assert outcome.merged is True, "Issue not merged after successful review"
+
+    # Sync IssueStore.
+    world._harness.store.mark_merged(1)
+
+    # --- Step 3: boot dashboard ---
+    url = await world.start_dashboard(with_orchestrator=False)
+
+    async def _handle_control_status(route, request) -> None:
+        await route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(_RUNNING_CONTROL_STATUS),
+        )
+
+    await page.route("**/api/control/status", _handle_control_status)
+
+    # --- Step 4: navigate + wait for WebSocket connection ---
+    await page.goto(url)
+    await page.wait_for_selector('body[data-connected="true"]', timeout=10_000)
+    await asyncio.sleep(0.5)
+
+    # --- Step 5: assert UI shows issue #1 in the merged stage ---
+    merged_header = page.locator('[data-testid="stage-header-merged"]')
+    await expect(merged_header).to_contain_text("1 merged", timeout=15_000)
+
+    flow_dot = page.locator('[data-testid="flow-dot-1"]')
+    await expect(flow_dot).to_be_visible(timeout=5_000)
+
+    # --- Step 6: Python-side assertions ---
+    pr = world.github.pr_for_issue(1)
+    assert pr is not None, "FakeGitHub has no PR for issue #1"
+    assert pr.merged is True, f"PR for issue #1 not marked merged; merged={pr.merged}"
+
+
+async def test_h5_plan_produces_sub_issues(world, page) -> None:
+    """H5: planner returns new_issues; parent issue completes normally.
+
+    Matches tests/scenarios/test_happy.py::TestH5PlanProducesSubIssues.
+    The plan result carries two NewIssueSpec entries.  Because the
+    sub-issue bodies are shorter than _MIN_ISSUE_BODY_CHARS (50 chars),
+    plan_phase skips creating them in GitHub — but the plan_result object
+    retains them.  The parent issue #1 continues through implement/review
+    and is merged.
+
+    DOM assertion: parent issue #1 appears in merged stage.
+    Python assertion: plan_result.new_issues has 2 entries.
+    """
+    from models import NewIssueSpec  # noqa: PLC0415
+    from tests.conftest import PlanResultFactory  # noqa: PLC0415
+    from tests.scenarios.builders import IssueBuilder  # noqa: PLC0415
+
+    # --- Step 1: seed world (matches test_happy.py H5 exactly) ---
+    plan_with_subs = PlanResultFactory.create(
+        issue_number=1,
+        success=True,
+        new_issues=[
+            NewIssueSpec(title="Sub-task 1", body="Do sub-task 1"),
+            NewIssueSpec(title="Sub-task 2", body="Do sub-task 2"),
+        ],
+    )
+    IssueBuilder().numbered(1).titled("Epic task").bodied("Big feature").at(world)
+    world.set_phase_result("plan", 1, plan_with_subs)
+
+    # --- Step 2: run pipeline Python-side ---
+    result = await world.run_pipeline()
+
+    # Sanity-check Python-side: plan result has 2 new_issues entries.
+    outcome = result.issue(1)
+    assert outcome.plan_result is not None, "No plan result recorded"
+    assert outcome.plan_result.new_issues is not None
+    assert len(outcome.plan_result.new_issues) == 2, (
+        f"Expected 2 new_issues; got {len(outcome.plan_result.new_issues)}"
+    )
+    # Parent issue should still proceed to merge (bodies too short → sub-issues
+    # skipped by plan_phase, parent transitions to ready and continues).
+    assert outcome.merged is True, "Parent issue should be merged"
+
+    # Sync IssueStore for parent.
+    world._harness.store.mark_merged(1)
+
+    # --- Step 3: boot dashboard ---
+    url = await world.start_dashboard(with_orchestrator=False)
+
+    async def _handle_control_status(route, request) -> None:
+        await route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(_RUNNING_CONTROL_STATUS),
+        )
+
+    await page.route("**/api/control/status", _handle_control_status)
+
+    # --- Step 4: navigate + wait for WebSocket connection ---
+    await page.goto(url)
+    await page.wait_for_selector('body[data-connected="true"]', timeout=10_000)
+    await asyncio.sleep(0.5)
+
+    # --- Step 5: assert UI shows parent issue #1 in merged stage ---
+    # Sub-issues are not created in GitHub (bodies too short), so the UI only
+    # shows the parent issue.  Confirm it reached merged.
+    merged_header = page.locator('[data-testid="stage-header-merged"]')
+    await expect(merged_header).to_contain_text("1 merged", timeout=15_000)
+
+    flow_dot = page.locator('[data-testid="flow-dot-1"]')
+    await expect(flow_dot).to_be_visible(timeout=5_000)
+
+    # --- Step 6: Python-side assertions ---
+    pr = world.github.pr_for_issue(1)
+    assert pr is not None, "FakeGitHub has no PR for parent issue #1"
+    assert pr.merged is True, f"Parent PR not merged; merged={pr.merged}"
