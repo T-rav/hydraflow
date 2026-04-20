@@ -328,7 +328,14 @@ def _write_tracked_synthesis_entry(
 def _mark_tracked_entry_superseded(entry_path: Path, *, superseded_by: str) -> None:
     """Flip ``status`` → ``superseded`` and add ``superseded_by`` in the
     frontmatter.  No-op when the file has no frontmatter block.
+
+    Uses ``file_util.atomic_write`` so an interrupted rewrite can't
+    leave the file as a half-frontmatter block that ``_split_tracked_entry``
+    would then silently drop (which would cost us both the
+    ``superseded_by`` pointer and the entry body).
     """
+    from file_util import atomic_write  # noqa: PLC0415
+
     try:
         text = entry_path.read_text(encoding="utf-8")
     except OSError:
@@ -342,7 +349,7 @@ def _mark_tracked_entry_superseded(entry_path: Path, *, superseded_by: str) -> N
         "---\n" + "\n".join(f"{k}: {v}" for k, v in fields.items()) + "\n---\n" + body
     )
     try:
-        entry_path.write_text(rebuilt, encoding="utf-8")
+        atomic_write(entry_path, rebuilt)
     except OSError:
         logger.warning(
             "mark_tracked_entry_superseded: failed to rewrite %s", entry_path
@@ -427,7 +434,12 @@ def active_lint_tracked(
                     stale_reason=f"source issue #{source_issue} closed",
                 )
                 if updated is not None:
-                    entry_path.write_text(updated, encoding="utf-8")
+                    # Atomic rewrite: an interrupted write would leave a
+                    # half-frontmatter block that _split_tracked_entry
+                    # silently drops, losing the entry entirely.
+                    from file_util import atomic_write  # noqa: PLC0415
+
+                    atomic_write(entry_path, updated)
                     result.entries_marked_stale += 1
                     status = "stale"
 
