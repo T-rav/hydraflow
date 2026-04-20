@@ -828,8 +828,8 @@ async def test_A19_code_scanning_alerts_reach_reviewer(tmp_path) -> None:
         ),
     ]
     # Production ReviewPhase calls fetch_code_scanning_alerts(pr.branch) — the
-    # branch is the key in FakeGitHub._alerts (positional arg maps to pr_number).
-    world.github.add_alerts(pr_number="agent/issue-1", alerts=alerts)
+    # branch is the key in FakeGitHub._alerts.
+    world.github.add_alerts(branch="agent/issue-1", alerts=alerts)
 
     await world.run_pipeline()
 
