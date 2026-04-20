@@ -410,6 +410,10 @@ async def test_A11_review_fix_ci_loop_resolves(tmp_path) -> None:
     wait_and_fix_ci catches the failure, invokes the scripted fix_ci (FakeLLM,
     always returns fixes_made=True), re-waits CI which now passes. Merge proceeds.
 
+    Requires max_ci_fix_attempts=1 — the CI gate is disabled by default
+    (ConfigFactory default is 0, which skips wait_for_ci entirely in
+    PostMergeHandler._run_ci_gate). We pass a custom config so the CI gate runs.
+
     FakeDocker invocations (8 total — quality passes first attempt):
       1. Initial agent _execute (streaming) — commits code
       2–5. Four post-implementation skill _execute calls — default success
@@ -422,7 +426,21 @@ async def test_A11_review_fix_ci_loop_resolves(tmp_path) -> None:
     CI fail/fix is handled by FakeGitHub.script_ci + FakeLLM.reviewers.fix_ci
     and does NOT consume FakeDocker slots.
     """
-    world = MockWorld(tmp_path, use_real_agent_runner=True)
+    from tests.helpers import ConfigFactory  # noqa: PLC0415
+
+    # max_ci_fix_attempts=1 enables the CI gate (PostMergeHandler._run_ci_gate
+    # returns True immediately if max_ci_fix_attempts == 0, skipping wait_for_ci).
+    config = ConfigFactory.create(
+        repo_root=tmp_path / "repo",
+        workspace_base=tmp_path / "worktrees",
+        state_file=tmp_path / "state.json",
+        max_workers=1,
+        max_planners=1,
+        max_reviewers=1,
+        visual_validation_enabled=False,
+        max_ci_fix_attempts=1,
+    )
+    world = MockWorld(tmp_path, use_real_agent_runner=True, config=config)
     world.add_issue(1, "t", "b", labels=["hydraflow-ready"])
     worktree_cwd = tmp_path / "worktrees" / "issue-1"
     init_test_worktree(worktree_cwd)
@@ -468,6 +486,14 @@ async def test_A11_review_fix_ci_loop_resolves(tmp_path) -> None:
 
     # 8 FakeDocker invocations: 1 agent + 4 skills + 2 pre-quality + 1 make-quality
     assert len(world.docker.invocations) >= 8
+
+    # Defense: if PR numbering changes, wait_for_ci returns default success and
+    # the scripted fail/pass queue stays full. Assert it was consumed.
+    assert pr.number in world.github._ci_scripts
+    assert len(world.github._ci_scripts[pr.number]) == 0, (
+        "fix_ci loop did not consume the scripted CI queue — wait_for_ci may have "
+        "missed the PR entirely (check FakeGitHub._pr_counter initial value)"
+    )
 
 
 async def test_A12_multi_commit_implement(tmp_path) -> None:
@@ -628,52 +654,24 @@ async def test_A14_three_issues_concurrent_realistic(tmp_path) -> None:
     issues. The scenario asserts overall pipeline success and worktree
     isolation (each issue's own file is present, others' are not).
 
-    Note: ``init_test_worktree`` places the bare origin at
-    ``path.parent / "origin.git"``. With 3 worktrees sharing the same
-    parent (``tmp_path / "worktrees"``), a single shared ``origin.git``
-    would conflict when the second and third repos try to push a different
-    ``main``. Each issue therefore gets its own origin under
-    ``tmp_path / "origins" / "issue-{n}.git"`` via inline git setup that
-    mirrors what ``init_test_worktree`` does but with an explicit origin path.
+    Each issue gets its own bare origin under ``tmp_path / "origins" /
+    "issue-{n}.git"`` via ``init_test_worktree(..., origin=...)``. This
+    avoids conflicts on the default ``origin.git`` name when multiple
+    worktrees share the same parent directory.
 
     If cross-contamination is observed (one issue gets another's file),
     this scenario would need keyed FakeDocker scripting — a separate fix.
     """
-    import subprocess
-
     world = MockWorld(tmp_path, use_real_agent_runner=True)
 
     for n in (1, 2, 3):
         world.add_issue(n, f"issue {n}", f"body {n}", labels=["hydraflow-ready"])
 
         wt = tmp_path / "worktrees" / f"issue-{n}"
-        wt.mkdir(parents=True, exist_ok=True)
-
         # Per-issue bare origin so that multiple repos don't conflict on push.
         origin = tmp_path / "origins" / f"issue-{n}.git"
-        origin.mkdir(parents=True, exist_ok=True)
 
-        branch = f"agent/issue-{n}"
-
-        def _git(*args: str, cwd) -> None:  # noqa: ANN001
-            subprocess.run(list(args), cwd=cwd, check=True, capture_output=True)
-
-        # Bare origin
-        subprocess.run(
-            ["git", "init", "--bare", str(origin)],
-            check=True,
-            capture_output=True,
-        )
-
-        # Worktree repo
-        _git("git", "init", "-b", "main", cwd=wt)
-        _git("git", "config", "user.email", "test@test", cwd=wt)
-        _git("git", "config", "user.name", "test", cwd=wt)
-        _git("git", "commit", "--allow-empty", "-m", "init", cwd=wt)
-        _git("git", "remote", "add", "origin", str(origin), cwd=wt)
-        _git("git", "push", "-u", "origin", "main", cwd=wt)
-        _git("git", "checkout", "-b", branch, cwd=wt)
-        _git("git", "push", "-u", "origin", branch, cwd=wt)
+        init_test_worktree(wt, branch=f"agent/issue-{n}", origin=origin)
 
         world.docker.script_run_with_commits(
             events=[{"type": "result", "success": True, "exit_code": 0}],
@@ -797,10 +795,11 @@ async def test_A16_credit_exhausted_halts_pipeline(tmp_path) -> None:
 async def test_A19_code_scanning_alerts_reach_reviewer(tmp_path) -> None:
     """Scripted code-scanning alerts propagate through review pipeline.
 
-    FakeGitHub.add_alerts(pr_number=...) seeds alerts for the PR that will be
-    created. Real ReviewPhase fetches them via fetch_code_scanning_alerts and
-    passes them to ReviewRunner.review. FakeLLM.reviewers records what it
-    received; we assert the alert list reached the reviewer unchanged.
+    FakeGitHub.add_alerts(branch=...) seeds alerts for the branch. Matches
+    PRPort.fetch_code_scanning_alerts(branch: str) signature — ReviewPhase
+    fetches by branch (not PR number) and passes the list to ReviewRunner.review.
+    FakeLLM.reviewers records what it received; we assert the alert list reached
+    the reviewer unchanged.
     """
     from models import CodeScanningAlert
     from tests.scenarios.helpers.git_worktree_fixture import init_test_worktree
@@ -828,8 +827,8 @@ async def test_A19_code_scanning_alerts_reach_reviewer(tmp_path) -> None:
         ),
     ]
     # Production ReviewPhase calls fetch_code_scanning_alerts(pr.branch) — the
-    # branch is the key in FakeGitHub._alerts (positional arg maps to pr_number).
-    world.github.add_alerts(pr_number="agent/issue-1", alerts=alerts)
+    # branch is the key in FakeGitHub._alerts.
+    world.github.add_alerts(branch="agent/issue-1", alerts=alerts)
 
     await world.run_pipeline()
 
@@ -855,6 +854,50 @@ async def test_A20_workspace_create_permission_failure(tmp_path) -> None:
 
     # Pipeline does not crash. Issue fails without merging.
     assert not result.issue(1).merged, f"expected no merge; outcome={result.issue(1)}"
+
+    # Workspace failure must produce a concrete observable signal.
+    # Production wraps the PermissionError in a WorkerResult(success=False) via
+    # run_with_fatal_guard → the worker_result is set and records the error.
+    # Assert the three real-signal arms; the tautological `worker_result is None`
+    # arm has been removed — if none of these hold the test must fail loudly.
+    outcome = result.issue(1)
+    observed_failure = (
+        # Worker recorded the failure (PermissionError surfaces as failed WorkerResult)
+        (outcome.worker_result is not None and outcome.worker_result.success is False)
+        # OR the issue was escalated / reset (HITL or find path)
+        or outcome.final_stage in ("hitl", "find")
+        # OR a comment was posted about the failure
+        or any(
+            "permission" in c[1].lower() or "workspace" in c[1].lower()
+            for c in world.github._comments
+        )
+    )
+    assert observed_failure, (
+        f"workspace failure produced no observable signal — "
+        f"outcome={outcome}, comments={world.github._comments}"
+    )
+
+
+async def test_A20b_workspace_create_disk_full(tmp_path) -> None:
+    """OSError(ENOSPC) from FakeWorkspace is swallowed gracefully."""
+    world = MockWorld(tmp_path, use_real_agent_runner=True)
+    world.add_issue(1, "t", "b", labels=["hydraflow-ready"])
+
+    world._workspace.fail_next_create(kind="disk_full")
+
+    result = await world.run_pipeline()
+    assert not result.issue(1).merged
+
+
+async def test_A20c_workspace_create_branch_conflict(tmp_path) -> None:
+    """RuntimeError ('worktree already exists') from FakeWorkspace is swallowed."""
+    world = MockWorld(tmp_path, use_real_agent_runner=True)
+    world.add_issue(1, "t", "b", labels=["hydraflow-ready"])
+
+    world._workspace.fail_next_create(kind="branch_conflict")
+
+    result = await world.run_pipeline()
+    assert not result.issue(1).merged
 
 
 async def test_A21_state_json_corruption_graceful_fallback(tmp_path) -> None:
@@ -890,24 +933,43 @@ async def test_A21_state_json_corruption_graceful_fallback(tmp_path) -> None:
     # StateTracker.load() catches JSONDecodeError and falls back to StateData().
     result = await world.run_pipeline()
 
-    # The real StateTracker was exercised: construction did not raise and the
-    # pipeline ran to completion with a fresh empty state.
-    assert result is not None
+    # Verify StateTracker fell back to empty state — _data must be a valid
+    # StateData object, not None and not the corrupted JSON string.
+    from models import StateData  # noqa: PLC0415
+
+    state_data = world.harness.state._data
+    assert state_data is not None, "StateTracker._data is None after corrupt load"
+    assert isinstance(state_data, StateData), (
+        f"StateTracker._data is not a StateData instance after corrupt load: "
+        f"{type(state_data)!r}"
+    )
+
+    # The pipeline reached a terminal stage — corruption did not prevent processing.
+    outcome = result.issue(1)
+    assert outcome.final_stage in ("triage", "plan", "implement", "review", "done"), (
+        f"unexpected final_stage={outcome.final_stage!r} after corrupt state recovery"
+    )
 
 
 async def test_A22_wiki_populated_plan_consults_it(tmp_path) -> None:
-    """Pre-populated RepoWikiStore is consulted by PlanPhase.
+    """Pre-populated RepoWikiStore is wired to PlanPhase; wiki is accessible.
 
-    We pre-ingest a learning entry, run the pipeline, and verify the wiki
-    log records activity (either ingest or query) scoped to the test repo.
+    NOTE: The realistic-agent path uses FakeLLM for planning (scripted), so
+    ``plan_phase._wiki_ingest_plan`` runs with the default FakeLLM plan text
+    (``"## Plan\\n\\n1. Do the thing\\n2. Test the thing"``).  That text contains
+    no "architecture", "design", "risks", or "testing" sections, so
+    ``ingest_from_plan`` extracts 0 entries and writes no additional log entry.
+    Therefore ``post_count > pre_count`` would be a false gate on the scripted
+    path.
 
-    PipelineHarness defaults to repo slug "test-org/test-repo", so the wiki
-    log lives at {wiki_root}/test-org/test-repo/log.jsonl.  The pre-ingest
-    call writes at least one log entry; if PlanPhase queries/ingests again,
-    more entries appear.
+    Instead, this test verifies:
+    1. The wiki_store is correctly wired to PlanPhase (_wiki_store attribute is set).
+    2. The pre-ingest call wrote a log entry (wiki storage works end-to-end).
+    3. The pipeline ran to completion with the wiki in place (no crash from wiki wiring).
+
+    A stricter query-consultation test requires a real LLM planner that reads wiki
+    context before generating the plan — that is exercised in integration tests.
     """
-    import pytest
-
     from repo_wiki import RepoWikiStore, WikiEntry
     from tests.scenarios.helpers.git_worktree_fixture import init_test_worktree
 
@@ -936,18 +998,24 @@ async def test_A22_wiki_populated_plan_consults_it(tmp_path) -> None:
         cwd=worktree_cwd,
     )
 
+    # Verify wiki_store is wired to PlanPhase BEFORE running the pipeline
+    assert world.harness.plan_phase._wiki_store is wiki, (
+        "wiki_store not wired to PlanPhase — PipelineHarness did not pass it through"
+    )
+
     result = await world.run_pipeline()
 
-    # The pre-ingest call above always writes a log entry.  PlanPhase may add
-    # more (query or ingest) depending on whether plan text is available.
+    # The pre-ingest call above always writes a log entry — verify end-to-end
+    # storage works (log file exists and is non-empty).
     log_path = tmp_path / "wiki" / "test-org" / "test-repo" / "log.jsonl"
-    if log_path.exists():
-        content = log_path.read_text()
-        assert content, (
-            "wiki log exists but is empty — pre-ingest should have written it"
-        )
-    else:
-        # RepoWikiStore layout has changed; adjust expectations.
-        pytest.skip("wiki log not found; RepoWikiStore layout may have changed")
+    assert log_path.exists(), (
+        f"wiki log missing at {log_path} — RepoWikiStore layout may have changed"
+    )
+    assert log_path.read_text().strip(), (
+        "wiki log exists but is empty — pre-ingest should have written it"
+    )
 
-    assert result is not None
+    # Pipeline completed without crashing despite wiki being wired.
+    assert result.issue(1).merged, (
+        f"expected merged=True with wiki wired; outcome={result.issue(1)}"
+    )

@@ -28,27 +28,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from tests.scenarios.fakes.mock_world import MockWorld
+from tests.scenarios.helpers.loop_port_seeding import seed_ports as _seed_ports
 
 pytestmark = pytest.mark.scenario_loops
-
-
-# ---------------------------------------------------------------------------
-# Helper: pre-seed loop ports before run_with_loops
-# ---------------------------------------------------------------------------
-
-
-def _seed_ports(world: MockWorld, **kwargs: object) -> None:
-    """Pre-seed world._loop_ports with mock variants before run_with_loops.
-
-    Ensures loop instantiation picks up the mocks we control rather than
-    the generic ones created on first call.  Note: ``github`` and
-    ``workspace`` are always reset by ``run_with_loops``; use Pattern B
-    (direct instantiation) if you need a custom prs mock.
-    """
-    if not hasattr(world, "_loop_ports"):
-        world._loop_ports = {}
-    for key, value in kwargs.items():
-        world._loop_ports[key] = value
 
 
 def _make_loop_deps(tmp_path, **config_overrides):
@@ -289,7 +271,10 @@ class TestL18RepoWikiLoop:
         stats = await world.run_with_loops(["repo_wiki"], cycles=1)
 
         result = stats["repo_wiki"]
-        assert result == {"repos": 0, "total_entries": 0}
+        # Assert required keys; allow additional keys as the loop stats evolve.
+        assert result is not None
+        assert result["repos"] == 0
+        assert result["total_entries"] == 0
 
     async def test_one_repo_lint_runs(self, tmp_path):
         """With one repo, active_lint is called and stats reflect its results."""

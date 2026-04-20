@@ -142,10 +142,41 @@ class TestFakeGitHubCodeScanningAlerts:
                 message="potential injection",
             ),
         ]
-        gh.add_alerts(pr_number=100, alerts=alerts)
-        out = await gh.fetch_code_scanning_alerts(pr_number=100)
+        gh.add_alerts(branch="refs/heads/x", alerts=alerts)
+        out = await gh.fetch_code_scanning_alerts(branch="refs/heads/x")
         assert out == alerts
 
     async def test_fetch_code_scanning_alerts_defaults_empty(self) -> None:
         gh = FakeGitHub()
-        assert await gh.fetch_code_scanning_alerts(pr_number=999) == []
+        assert await gh.fetch_code_scanning_alerts(branch="refs/heads/missing") == []
+
+    async def test_fetch_code_scanning_alerts_keyed_by_branch(self) -> None:
+        """Alerts are keyed by branch string, matching PRPort.fetch_code_scanning_alerts."""
+        from models import CodeScanningAlert
+
+        gh = FakeGitHub()
+        a1 = CodeScanningAlert(
+            number=1,
+            severity="error",
+            security_severity="high",
+            path="a.py",
+            start_line=1,
+            rule="r1",
+            message="m1",
+        )
+        a2 = CodeScanningAlert(
+            number=2,
+            severity="warning",
+            security_severity="medium",
+            path="b.py",
+            start_line=2,
+            rule="r2",
+            message="m2",
+        )
+        gh.add_alerts(branch="agent/issue-1", alerts=[a1])
+        gh.add_alerts(branch="agent/issue-2", alerts=[a2])
+
+        out1 = await gh.fetch_code_scanning_alerts(branch="agent/issue-1")
+        out2 = await gh.fetch_code_scanning_alerts(branch="agent/issue-2")
+        assert out1 == [a1]
+        assert out2 == [a2]
