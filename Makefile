@@ -220,7 +220,7 @@ scenario-loops: deps
 scenario-browser: deps
 	@echo "$(BLUE)Running browser scenario tests...$(RESET)"
 	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh ci && $(HYDRAFLOW_DIR)scripts/ui-npm.sh run build
-	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) run python -m playwright install --with-deps chromium
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python -m playwright install --with-deps chromium
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/scenarios/browser/ -m scenario_browser --reruns=1 -v
 	@echo "$(GREEN)Browser scenario tests passed$(RESET)"
 
