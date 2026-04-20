@@ -302,3 +302,62 @@ async def test_start_dashboard_with_orchestrator_wires_fakes(tmp_path):
         assert orch._svc.triage.evaluate == world._llm.triage_runner.evaluate
     finally:
         await world.stop_dashboard()
+
+
+async def test_mockworld_wires_wiki_store_to_plan_phase(tmp_path) -> None:
+    """MockWorld threads wiki_store through PipelineHarness to PlanPhase."""
+    from repo_wiki import RepoWikiStore
+    from tests.scenarios.fakes.mock_world import MockWorld
+
+    wiki = RepoWikiStore(tmp_path / "wiki")
+    world = MockWorld(tmp_path, wiki_store=wiki)
+
+    plan_phase = world.harness.plan_phase
+    # The attribute name on PlanPhase may be _wiki_store or wiki_store — verify
+    stored = getattr(plan_phase, "_wiki_store", None)
+    if stored is None:
+        stored = getattr(plan_phase, "wiki_store", None)
+    assert stored is wiki, f"PlanPhase did not receive wiki_store; saw {stored!r}"
+
+
+async def test_mockworld_default_wiki_store_is_none(tmp_path) -> None:
+    """Default (no wiki_store arg) leaves PlanPhase with no wiki wiring."""
+    from tests.scenarios.fakes.mock_world import MockWorld
+
+    world = MockWorld(tmp_path)
+    plan_phase = world.harness.plan_phase
+    stored = getattr(plan_phase, "_wiki_store", getattr(plan_phase, "wiki_store", None))
+    assert stored is None
+
+
+async def test_mockworld_wires_beads_manager_to_phases(tmp_path) -> None:
+    """MockWorld threads beads_manager through PipelineHarness to plan + implement phases."""
+    from tests.scenarios.fakes.fake_beads import FakeBeads
+    from tests.scenarios.fakes.mock_world import MockWorld
+
+    beads = FakeBeads()
+    world = MockWorld(tmp_path, beads_manager=beads)
+
+    assert world.harness.plan_phase._beads_manager is beads
+    assert world.harness.implement_phase._beads_manager is beads
+
+
+async def test_mockworld_default_beads_manager_is_none(tmp_path) -> None:
+    from tests.scenarios.fakes.mock_world import MockWorld
+
+    world = MockWorld(tmp_path)
+    assert world.harness.plan_phase._beads_manager is None
+    assert world.harness.implement_phase._beads_manager is None
+
+
+async def test_mockworld_set_agents_preserves_beads_manager(tmp_path) -> None:
+    """PipelineHarness.set_agents must not drop the beads_manager binding."""
+    from tests.scenarios.fakes.fake_beads import FakeBeads
+    from tests.scenarios.fakes.mock_world import MockWorld
+
+    beads = FakeBeads()
+    world = MockWorld(tmp_path, beads_manager=beads)
+    # set_agents rebuilds ImplementPhase — make sure beads_manager survives
+    sentinel = object()
+    world.harness.set_agents(sentinel)  # type: ignore[arg-type]
+    assert world.harness.implement_phase._beads_manager is beads

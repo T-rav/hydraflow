@@ -167,3 +167,105 @@ async def test_no_budget_set_means_no_gating() -> None:
     llm.script_plan(1, [PlanResultFactory.create(issue_number=1, success=True)])
     result = await llm.planners.plan(TaskFactory.create(id=1))
     assert result.success is True
+
+
+async def test_triage_runner_script_decomposition_returns_scripted_result() -> None:
+    from models import EpicDecompResult, NewIssueSpec
+    from tests.scenarios.fakes.fake_llm import FakeLLM
+
+    llm = FakeLLM()
+    decomp = EpicDecompResult(
+        should_decompose=True,
+        children=[
+            NewIssueSpec(title="child-a", body=""),
+            NewIssueSpec(title="child-b", body=""),
+        ],
+    )
+    llm.triage_runner.script_decomposition(42, decomp)
+
+    result = await llm.triage_runner.run_decomposition(TaskFactory.create(id=42))
+    assert result.should_decompose is True
+    assert len(result.children) == 2
+
+
+async def test_triage_runner_default_decomposition_is_false() -> None:
+    from tests.scenarios.fakes.fake_llm import FakeLLM
+
+    llm = FakeLLM()
+    result = await llm.triage_runner.run_decomposition(TaskFactory.create(id=99))
+    assert result.should_decompose is False
+
+
+async def test_review_runner_captures_code_scanning_alerts() -> None:
+    from models import CodeScanningAlert
+    from tests.conftest import PRInfoFactory
+    from tests.scenarios.fakes.fake_llm import FakeLLM
+
+    llm = FakeLLM()
+    alerts = [
+        CodeScanningAlert(
+            number=1,
+            severity="error",
+            security_severity="high",
+            path="x.py",
+            start_line=1,
+            rule="r",
+            message="m",
+        ),
+    ]
+    pr = PRInfoFactory.create(number=42, issue_number=7, branch="feat/x")
+    task = TaskFactory.create(id=7)
+    await llm.reviewers.review(pr, task, Path("/tmp"), "", code_scanning_alerts=alerts)
+
+    assert llm.alerts_received_by_reviewer(7) == alerts
+
+
+async def test_review_runner_no_alerts_captures_empty_list() -> None:
+    from tests.conftest import PRInfoFactory
+    from tests.scenarios.fakes.fake_llm import FakeLLM
+
+    llm = FakeLLM()
+    pr = PRInfoFactory.create(number=42, issue_number=7, branch="feat/x")
+    task = TaskFactory.create(id=7)
+    await llm.reviewers.review(pr, task, Path("/tmp"), "")
+
+    assert llm.alerts_received_by_reviewer(7) == []
+
+
+async def test_fix_ci_default_returns_fixes_made_true() -> None:
+    """Default fix_ci (no script) returns fixes_made=True."""
+    from tests.conftest import PRInfoFactory
+    from tests.scenarios.fakes.fake_llm import FakeLLM
+
+    llm = FakeLLM()
+    pr = PRInfoFactory.create(number=42, issue_number=1, branch="feat/x")
+    task = TaskFactory.create(id=1)
+    result = await llm.reviewers.fix_ci(pr, task, Path("/tmp"), "CI failed")
+
+    assert result.fixes_made is True
+    assert result.ci_passed is True
+
+
+async def test_fix_ci_scripted_result_overrides_default() -> None:
+    """script_fix_ci causes fix_ci to return the scripted result (fixes_made=False)."""
+    from models import ReviewVerdict
+    from tests.conftest import PRInfoFactory
+    from tests.scenarios.fakes.fake_llm import FakeLLM
+
+    llm = FakeLLM()
+    scripted = ReviewResultFactory.create(
+        pr_number=42,
+        issue_number=1,
+        verdict=ReviewVerdict.REQUEST_CHANGES,
+        fixes_made=False,
+        ci_passed=False,
+    )
+    llm.script_fix_ci(1, scripted)
+
+    pr = PRInfoFactory.create(number=42, issue_number=1, branch="feat/x")
+    task = TaskFactory.create(id=1)
+    result = await llm.reviewers.fix_ci(pr, task, Path("/tmp"), "CI failed")
+
+    assert result.fixes_made is False
+    assert result.ci_passed is False
+    assert result.verdict == ReviewVerdict.REQUEST_CHANGES

@@ -68,6 +68,7 @@ class FakeGitHub:
         self._rate_limit_remaining: int | None = None  # None = disabled
         self._rate_limit_reset_in: int = 60
         self._rate_limit_secondary: bool = False
+        self._alerts: dict[str, list[Any]] = {}
 
     # --- Seed API ---
 
@@ -107,6 +108,10 @@ class FakeGitHub:
             merged=merged,
             ci_status=ci_status,
         )
+
+    def add_alerts(self, *, branch: str, alerts: list[Any]) -> None:
+        """Script code-scanning alerts returned by fetch_code_scanning_alerts."""
+        self._alerts[branch] = list(alerts)
 
     def script_ci(self, pr_number: int, results: list[tuple[bool, str]]) -> None:
         self._ci_scripts[pr_number] = deque(results)
@@ -338,11 +343,13 @@ class FakeGitHub:
         self._maybe_rate_limit()
         return ["octocat"]
 
-    async def fetch_code_scanning_alerts(self, pr_number: int = 0, **_kw: Any) -> list:
+    async def fetch_code_scanning_alerts(self, branch: str = "", **_kw: Any) -> list:
         self._maybe_rate_limit()
-        return []
+        return list(self._alerts.get(branch, []))
 
-    async def wait_for_ci(self, pr_number: int, **_kw: Any) -> tuple[bool, str]:
+    async def wait_for_ci(
+        self, pr_number: int, *_args: Any, **_kw: Any
+    ) -> tuple[bool, str]:
         self._maybe_rate_limit()
         q = self._ci_scripts.get(pr_number)
         if q:
