@@ -217,6 +217,13 @@ scenario-loops: deps
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/scenarios/ -m scenario_loops -v
 	@echo "$(GREEN)Scenario loop tests passed$(RESET)"
 
+scenario-browser: deps
+	@echo "$(BLUE)Running browser scenario tests...$(RESET)"
+	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh ci && $(HYDRAFLOW_DIR)scripts/ui-npm.sh run build
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) run python -m playwright install --with-deps chromium
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/scenarios/browser/ -m scenario_browser --reruns=1 -v
+	@echo "$(GREEN)Browser scenario tests passed$(RESET)"
+
 test-fast: deps
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ -x --tb=short
 
