@@ -15,6 +15,7 @@ from hypothesis import strategies as st
 
 from tests.scenarios.builders.issue import IssueBuilder
 from tests.scenarios.builders.pr import PRBuilder
+from tests.scenarios.fakes.fake_beads import FakeBeads
 from tests.scenarios.fakes.fake_github import FakeGitHub
 from tests.scenarios.fakes.mock_world import MockWorld
 from tests.scenarios.fuzz.strategies import (
@@ -177,12 +178,6 @@ def test_seed_issue_with_valid_labels_preserves_them(labels: list[str]) -> None:
 @_DEFAULT_SETTINGS
 def test_fake_beads_sequential_deps_form_dag(n_tasks: int) -> None:
     """Creating N tasks with deps only on earlier tasks yields a DAG."""
-    fake_beads = pytest.importorskip(
-        "tests.scenarios.fakes.fake_beads",
-        reason="FakeBeads not available on this branch",
-    )
-    FakeBeads = fake_beads.FakeBeads  # noqa: N806
-
     import asyncio
     from pathlib import Path
 
