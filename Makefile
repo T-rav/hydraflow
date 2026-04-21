@@ -285,6 +285,11 @@ install:
 	@VIRTUAL_ENV=$(VENV) uv pip install fastapi uvicorn websockets
 	@echo "$(GREEN)Dashboard dependencies installed$(RESET)"
 
+install-plugins: deps
+	@echo "$(BLUE)Installing HydraFlow-required Claude Code plugins...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python -m install_plugins_cli
+	@echo "$(GREEN)Plugin install complete$(RESET)"
+
 setup: deps
 	@if ! command -v gh >/dev/null 2>&1; then \
 		echo "$(BLUE)Installing gh CLI...$(RESET)"; \
