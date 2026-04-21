@@ -1,0 +1,57 @@
+You are running the Test Adequacy skill for issue #42: Add S3 upload retry logic.
+
+Review the git diff below and assess whether the changed production code has adequate test coverage.
+
+## Diff
+
+```diff
+diff --git a/src/upload.py b/src/upload.py
+index abc1234..def5678 100644
+--- a/src/upload.py
++++ b/src/upload.py
+@@ -1,8 +1,20 @@
+ import boto3
++import time
+ 
+ def upload_file(bucket, key, data):
+-    client = boto3.client('s3')
+-    client.put_object(Bucket=bucket, Key=key, Body=data)
++    client = boto3.client('s3')
++    for attempt in range(3):
++        try:
++            client.put_object(Bucket=bucket, Key=key, Body=data)
++            return
++        except client.exceptions.ServiceUnavailable:
++            if attempt < 2:
++                time.sleep(2 ** attempt)
++    raise RuntimeError('Upload failed after 3 retries')
+
+```
+
+## Checks
+
+For each changed or added production function/method/class, verify:
+
+1. **Has a corresponding test** — at least one test exercises the new/changed path
+2. **Edge cases covered** — empty inputs, None values, boundary conditions, error paths
+3. **Regression safety** — if existing behavior changed, tests verify the new behavior
+4. **No test-only gaps** — new test utilities or fixtures are themselves tested if non-trivial
+
+## Instructions
+
+- List each gap found with the production file:function and what test is missing.
+- If coverage is adequate, report OK.
+- Do NOT modify any files. This is a read-only assessment.
+- Ignore test file changes when assessing adequacy — focus on whether production code is tested.
+
+## Required Output
+
+If coverage is adequate:
+TEST_ADEQUACY_RESULT: OK
+SUMMARY: All changed code has adequate test coverage
+
+If gaps exist:
+TEST_ADEQUACY_RESULT: RETRY
+SUMMARY: <comma-separated list of gap categories>
+GAPS:
+- <production_file:function — what test is missing>

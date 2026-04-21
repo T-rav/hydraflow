@@ -1,0 +1,68 @@
+Re-apply this PR's changes onto a clean branch from main. The original branch had unresolvable merge conflicts.
+
+- Issue: https://github.com/owner/repo/issues/42
+- PR: https://github.com/owner/repo/pull/99
+
+## Original PR Diff
+
+Adapt these changes to the current codebase — main may have evolved.
+
+```diff
+diff --git a/src/upload.py b/src/upload.py
+index abc1234..def5678 100644
+--- a/src/upload.py
++++ b/src/upload.py
+@@ -1,8 +1,20 @@
+ import boto3
++import time
+ 
+ def upload_file(bucket, key, data):
+-    client = boto3.client('s3')
+-    client.put_object(Bucket=bucket, Key=key, Body=data)
++    client = boto3.client('s3')
++    for attempt in range(3):
++        try:
++            client.put_object(Bucket=bucket, Key=key, Body=data)
++            return
++        except client.exceptions.ServiceUnavailable:
++            if attempt < 2:
++                time.sleep(2 ** attempt)
++    raise RuntimeError('Upload failed after 3 retries')
+
+```
+
+Ensure `make quality` passes. Commit with message: "Rebuild: Fixes #42"
+Do not push.
+
+## Optional: Tribal-Knowledge Suggestion
+
+This rebuild may have surfaced tribal knowledge — the kind of durable,
+hard-won fact a senior engineer would write on a whiteboard for a new hire
+on day one. If — and ONLY if — what you learned meets ALL of these criteria:
+
+  1. Durable: still true a year from now, across releases and refactors.
+  2. Non-obvious: a senior engineer would NOT figure it out by reading the code.
+  3. Load-bearing: ignoring it causes a real failure or wastes real time.
+  4. General: applies to a subsystem or pattern, not a single issue/PR.
+
+…then emit a single block at the end of your response:
+
+MEMORY_SUGGESTION_START
+principle: <the durable rule, one sentence>
+rationale: <why — historical incident, design constraint, or hard-won lesson>
+failure_mode: <what concretely breaks if this is ignored>
+scope: <subsystem path, file glob, or "all">
+MEMORY_SUGGESTION_END
+
+STRICT FORMATTING RULES:
+- DO NOT include issue numbers, PR numbers, commit hashes, dates, or other
+  short-lived references in any field. They will rot.
+- DO NOT emit a block for routine observations, refactor notes, code-review
+  nitpicks, or implementation details.
+- DO NOT restate facts that are already obvious from CLAUDE.md or the code.
+- All four fields are required and non-trivial. Blocks missing any field
+  (or with empty/placeholder values) are silently dropped.
+
+When in doubt, omit the block. The bar is "would I tell a new hire this on
+day one." Most rebuild runs should produce no block at all — that is the
+expected and correct outcome.

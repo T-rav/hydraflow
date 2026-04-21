@@ -1,0 +1,46 @@
+# Diagnostic Analysis — Issue #42
+
+**Title:** Retry transient S3 upload failures
+
+**Body:**
+The upload handler does not retry on transient S3 503 errors. Each failure kills the job immediately instead of retrying with exponential backoff.
+
+**Escalation cause:** CI test failures: upload_handler tests failed after 3 implementation attempts
+
+**Origin phase:** implement
+
+**CI Logs:**
+```
+FAILED tests/test_upload.py::test_upload_retries_on_503
+AssertionError: expected 3 retry attempts, got 0
+```
+
+**Review Feedback:**
+- Missing retry logic in upload_file()
+- No exponential backoff implemented
+
+**PR Diff:**
+```diff
+diff --git a/src/upload.py b/src/upload.py
+@@ -1,5 +1,5 @@
+-def upload_file(bucket, key, data):
++def upload_file(bucket, key, data, retries=0):
+     client = boto3.client('s3')
+     client.put_object(Bucket=bucket, Key=key, Body=data)
+
+```
+
+
+## Instructions
+
+Analyze the root cause. Classify severity:
+- P0: Secrets exposure, auth bypass, data loss
+- P1: Pipeline blocked, crash loop, state corruption
+- P2: Wrong behavior, system keeps running
+- P3: Missing wiring, incomplete setup
+- P4: Housekeeping, renaming, non-urgent
+
+Respond with a JSON block:
+```json
+{"root_cause": "...", "severity": "P0-P4", "fixable": true/false, "fix_plan": "...", "human_guidance": "...", "affected_files": [...]}
+```
