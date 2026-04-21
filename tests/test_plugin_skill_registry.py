@@ -189,6 +189,28 @@ def test_format_plugin_skills_for_prompt_empty_returns_empty_string():
     assert format_plugin_skills_for_prompt([]) == ""
 
 
+def test_format_plugin_skills_for_prompt_renders_every_skill_as_bullet():
+    skills = [
+        PluginSkill(
+            plugin="superpowers",
+            name="test-driven-development",
+            description="Use when implementing any feature or bugfix",
+        ),
+        PluginSkill(
+            plugin="code-review",
+            name="code-review",
+            description="Review a pull request",
+        ),
+    ]
+    out = format_plugin_skills_for_prompt(skills)
+    # Both qualified names rendered as bullets.
+    assert "- **superpowers:test-driven-development** —" in out
+    assert "- **code-review:code-review** —" in out
+    # Descriptions passed through verbatim (not reordered, not rewritten).
+    assert "Use when implementing any feature or bugfix" in out
+    assert "Review a pull request" in out
+
+
 class TestDiscoveryCache:
     """Verify discover_plugin_skills caches results and clear_plugin_skill_cache resets state."""
 
