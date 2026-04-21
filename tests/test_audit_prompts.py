@@ -336,3 +336,33 @@ def test_score_integrates_rules_and_severity():
     )
     card = score(rendered)
     assert severity_for(card) in ("Low", "Medium")
+
+
+# ---------------------------------------------------------------------------
+# Task 12 — Fakes module
+# ---------------------------------------------------------------------------
+
+
+def test_fakes_registry_has_empty_repo_wiki_store():
+    from tests.fixtures.prompts.fakes import get_fake
+
+    fake = get_fake("repo_wiki_store", "empty")
+    assert fake.get_entries() == []
+
+
+def test_fakes_registry_has_minimal_manifest():
+    from tests.fixtures.prompts.fakes import get_fake
+
+    manifest = get_fake("manifest", "minimal")
+    assert isinstance(manifest, list)
+    assert len(manifest) >= 1
+    assert len(manifest) <= 10
+
+
+def test_fakes_raises_on_unknown_key():
+    import pytest as _pytest
+
+    from tests.fixtures.prompts.fakes import get_fake
+
+    with _pytest.raises(KeyError):
+        get_fake("nonexistent_dep", "shape")
