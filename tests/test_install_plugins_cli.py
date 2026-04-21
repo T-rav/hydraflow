@@ -21,7 +21,7 @@ def test_installs_all_missing_tier1_plugins(tmp_path: Path):
         called_argvs.append(argv)
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
 
-    with patch("install_plugins_cli.subprocess.run", side_effect=fake_run):
+    with patch("preflight.subprocess.run", side_effect=fake_run):
         exit_code = run(cfg, cache_root=tmp_path)
 
     assert exit_code == 0
@@ -52,7 +52,7 @@ def test_skips_already_installed_plugins(tmp_path: Path):
         parents=True
     )
 
-    with patch("install_plugins_cli.subprocess.run") as mock_run:
+    with patch("preflight.subprocess.run") as mock_run:
         exit_code = run(cfg, cache_root=tmp_path)
 
     assert exit_code == 0
@@ -65,7 +65,7 @@ def test_nonzero_exit_on_any_install_failure(tmp_path: Path):
     def fake_run(argv, **kwargs):
         return subprocess.CompletedProcess(argv, 1, stdout="", stderr="boom")
 
-    with patch("install_plugins_cli.subprocess.run", side_effect=fake_run):
+    with patch("preflight.subprocess.run", side_effect=fake_run):
         exit_code = run(cfg, cache_root=tmp_path)
 
     assert exit_code != 0

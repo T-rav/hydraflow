@@ -184,7 +184,7 @@ def log_preflight_results(results: list[CheckResult]) -> bool:
     return not any(r.status == CheckStatus.FAIL for r in results)
 
 
-def _install_plugin(
+def install_plugin(
     name: str, marketplace: str, *, timeout_s: int = 120
 ) -> tuple[bool, str]:
     """Attempt ``claude plugin install name@marketplace --scope user``.
@@ -278,7 +278,7 @@ def _check_plugins(  # noqa: PLR0911 — linear gate checks, each with its own r
     install_errors: list[str] = []
     if missing_tier1 and config.auto_install_plugins:
         for name, marketplace in missing_tier1:
-            ok, detail = _install_plugin(name, marketplace)
+            ok, detail = install_plugin(name, marketplace)
             if ok:
                 logger.info("installed %s@%s", name, marketplace)
             else:
@@ -319,7 +319,7 @@ def _check_plugins(  # noqa: PLR0911 — linear gate checks, each with its own r
     if config.auto_install_plugins:
         for _, name, marketplace in tier2_specs:
             if not _plugin_exists(root, name):
-                ok, detail = _install_plugin(name, marketplace)
+                ok, detail = install_plugin(name, marketplace)
                 if not ok:
                     tier2_install_errors[name] = detail
 
