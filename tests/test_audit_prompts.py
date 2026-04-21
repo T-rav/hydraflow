@@ -6,6 +6,7 @@ from scripts.audit_prompts import (
     AuditTarget,
     score_leads_with_request,
     score_specific,
+    score_xml_tags,
 )
 
 # ---------------------------------------------------------------------------
@@ -79,3 +80,27 @@ def test_score_specific_fail_when_no_cues():
 def test_score_specific_partial_when_two_cues():
     prompt = "Produce a JSON object. All fields must be present."
     assert score_specific(prompt) == "Partial"
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — Rubric #3: XML tags
+# ---------------------------------------------------------------------------
+
+
+def test_score_xml_tags_pass_with_three_distinct_tags():
+    prompt = "<issue>hi</issue><diff>foo</diff><plan>bar</plan>"
+    assert score_xml_tags(prompt) == "Pass"
+
+
+def test_score_xml_tags_partial_with_one_or_two():
+    assert score_xml_tags("<issue>hi</issue>") == "Partial"
+    assert score_xml_tags("<issue>hi</issue><diff>foo</diff>") == "Partial"
+
+
+def test_score_xml_tags_fail_with_none():
+    assert score_xml_tags("## Heading\nBody") == "Fail"
+
+
+def test_score_xml_tags_excludes_thinking_and_scratchpad():
+    prompt = "<thinking>step</thinking><scratchpad>note</scratchpad>"
+    assert score_xml_tags(prompt) == "Fail"

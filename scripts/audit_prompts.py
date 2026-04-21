@@ -100,6 +100,24 @@ def score_specific(rendered: str) -> str:
     return "Fail"
 
 
+# ---------------------------------------------------------------------------
+# Rubric #3 — XML tag structure
+# ---------------------------------------------------------------------------
+
+_TAG_PAIR = re.compile(r"<(\w+)>.*?</\1>", re.DOTALL)
+_EXCLUDED_TAGS = frozenset({"thinking", "scratchpad"})
+
+
+def score_xml_tags(rendered: str) -> str:
+    tags = {m.group(1).lower() for m in _TAG_PAIR.finditer(rendered)}
+    content_tags = tags - _EXCLUDED_TAGS
+    if len(content_tags) >= 3:
+        return "Pass"
+    if len(content_tags) >= 1:
+        return "Partial"
+    return "Fail"
+
+
 def main() -> None:
     raise NotImplementedError("wired up in later tasks")
 
