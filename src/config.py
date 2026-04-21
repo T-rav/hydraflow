@@ -374,6 +374,56 @@ class HydraFlowConfig(BaseModel):
         },
         description="Language-conditional plugins loaded only when the language is detected in a target repo",
     )
+    auto_install_plugins: bool = Field(
+        default=True,
+        description=(
+            "When True, preflight attempts `claude plugin install name@marketplace --scope user` "
+            "for missing Tier-1/Tier-2 plugins before failing."
+        ),
+    )
+    # Per-phase whitelist. See ADR-0043 for rationale behind which skills are
+    # included/excluded per phase (e.g., dialog-only and human-author skills
+    # are excluded from every subagent phase).
+    phase_skills: dict[str, list[str]] = Field(
+        default_factory=lambda: {
+            "triage": ["superpowers:systematic-debugging"],
+            "discover": ["superpowers:systematic-debugging"],
+            "shape": ["superpowers:writing-plans"],
+            "planner": [
+                "superpowers:writing-plans",
+                "superpowers:systematic-debugging",
+            ],
+            "agent": [
+                "superpowers:test-driven-development",
+                "superpowers:systematic-debugging",
+                "superpowers:verification-before-completion",
+                "code-simplifier:simplify",
+                "frontend-design:frontend-design",
+            ],
+            "reviewer": [
+                "code-review:code-review",
+                "superpowers:systematic-debugging",
+            ],
+        },
+        description=(
+            "Per-phase whitelist of qualified skill names (`plugin:skill`) "
+            "rendered into each runner's prompt."
+        ),
+    )
+
+    @field_validator("phase_skills")
+    @classmethod
+    def _validate_phase_names(cls, v: dict[str, list[str]]) -> dict[str, list[str]]:
+        from plugin_skill_registry import PHASE_NAMES  # noqa: PLC0415
+
+        unknown = set(v) - PHASE_NAMES
+        if unknown:
+            raise ValueError(
+                f"unknown phase name(s) in phase_skills: {sorted(unknown)}; "
+                f"expected subset of {sorted(PHASE_NAMES)}"
+            )
+        return v
+
     system_tool: Literal["inherit", "claude", "codex", "pi"] = Field(
         default="inherit",
         description="Optional global default tool for system agents; 'inherit' keeps per-agent defaults",

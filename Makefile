@@ -36,7 +36,7 @@ RESET := \033[0m
 DOCKER_IMAGE ?= ghcr.io/t-rav/hydraflow-agent:latest
 DOCKER_BASE_IMAGE ?= ghcr.io/t-rav/hydraflow-agent-base:latest
 
-.PHONY: help run dev dry-run clean clean-assets compact coverage cover smoke test test-fast test-cov lint lint-check lint-fix typecheck security quality quality-lite install setup status ui ui-dev ui-clean ensure-labels prep scaffold hot docker-build docker-ensure docker-test deps integration soak screenshot screenshot-update check-node-ui
+.PHONY: help run dev dry-run clean clean-assets compact coverage cover smoke test test-fast test-cov lint lint-check lint-fix typecheck security quality quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels prep scaffold hot docker-build docker-ensure docker-test deps integration soak screenshot screenshot-update check-node-ui
 
 check-node-ui:
 	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh --version >/dev/null
@@ -291,6 +291,11 @@ install:
 	@echo "$(BLUE)Installing HydraFlow dashboard dependencies...$(RESET)"
 	@VIRTUAL_ENV=$(VENV) uv pip install fastapi uvicorn websockets
 	@echo "$(GREEN)Dashboard dependencies installed$(RESET)"
+
+install-plugins: deps
+	@echo "$(BLUE)Installing HydraFlow-required Claude Code plugins...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python -m install_plugins_cli
+	@echo "$(GREEN)Plugin install complete$(RESET)"
 
 setup: deps
 	@if ! command -v gh >/dev/null 2>&1; then \

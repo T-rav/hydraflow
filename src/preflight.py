@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
+import subprocess
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -142,7 +143,6 @@ def _check_docker() -> CheckResult:
     """Check that Docker is available and responsive."""
     if not shutil.which("docker"):
         return CheckResult("docker", CheckStatus.FAIL, "docker not found on PATH")
-    import subprocess  # noqa: PLC0415
 
     try:
         result = subprocess.run(  # noqa: S603, S607
@@ -184,7 +184,42 @@ def log_preflight_results(results: list[CheckResult]) -> bool:
     return not any(r.status == CheckStatus.FAIL for r in results)
 
 
-def _check_plugins(
+def install_plugin(
+    name: str, marketplace: str, *, timeout_s: int = 120
+) -> tuple[bool, str]:
+    """Attempt ``claude plugin install name@marketplace --scope user``.
+
+    Returns ``(success, detail)`` where ``detail`` is the tail of stderr
+    (or a human-readable error string) for logging.
+    """
+
+    argv = [
+        "claude",
+        "plugin",
+        "install",
+        f"{name}@{marketplace}",
+        "--scope",
+        "user",
+    ]
+    try:
+        result = subprocess.run(  # noqa: S603
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            check=False,
+        )
+    except FileNotFoundError:
+        return False, "`claude` binary not found on PATH"
+    except subprocess.TimeoutExpired:
+        return False, f"install timed out after {timeout_s}s"
+
+    if result.returncode == 0:
+        return True, result.stdout.strip()
+    return False, (result.stderr or result.stdout or "non-zero exit").strip()
+
+
+def _check_plugins(  # noqa: PLR0911 — linear gate checks, each with its own return path
     config: HydraFlowConfig,
     *,
     cache_root: Path | None = None,
@@ -192,23 +227,22 @@ def _check_plugins(
 ) -> CheckResult:
     """Verify required plugins are installed under the plugin cache.
 
-    - Tier 1 (``config.required_plugins``) missing → FAIL.
+    - Tier 1 (``config.required_plugins``) missing → attempt auto-install when
+      ``config.auto_install_plugins`` is True; otherwise FAIL immediately. FAIL
+      with a rich error message if still missing after install.
     - Zero total skills discovered → FAIL.
-    - Tier 2 plugin missing for a detected language → WARN.
+    - Tier 2 plugin missing for a detected language → best-effort install, then
+      WARN if still missing.
     - Everything present → PASS.
     """
     from plugin_skill_registry import (
-        _DEFAULT_CACHE_ROOT,  # noqa: PLC0415
+        DEFAULT_CACHE_ROOT,  # noqa: PLC0415
         discover_plugin_skills,  # noqa: PLC0415
+        parse_plugin_spec,  # noqa: PLC0415
     )
 
-    root = cache_root or _DEFAULT_CACHE_ROOT
+    root = cache_root or DEFAULT_CACHE_ROOT
     langs = detected_languages or set()
-
-    missing_tier1: list[str] = []
-    for plugin in config.required_plugins:
-        if not _plugin_exists(root, plugin):
-            missing_tier1.append(plugin)
 
     if root.exists() and not root.is_dir():
         return CheckResult(
@@ -217,28 +251,84 @@ def _check_plugins(
             f"Plugin cache path exists but is not a directory: {root}",
         )
 
-    if missing_tier1:
+    # Collect Tier-1 + Tier-2 specs.
+    tier1_specs: list[tuple[str, str]] = []
+    for entry in config.required_plugins:
+        try:
+            tier1_specs.append(parse_plugin_spec(entry))
+        except ValueError as exc:
+            return CheckResult(
+                "plugins", CheckStatus.FAIL, f"Bad required_plugins entry: {exc}"
+            )
+
+    tier2_specs: list[tuple[str, str, str]] = []  # (lang, name, marketplace)
+    for lang in langs:
+        for entry in config.language_plugins.get(lang, []):
+            try:
+                name, marketplace = parse_plugin_spec(entry)
+            except ValueError as exc:
+                return CheckResult(
+                    "plugins", CheckStatus.FAIL, f"Bad language_plugins entry: {exc}"
+                )
+            tier2_specs.append((lang, name, marketplace))
+
+    # Identify missing Tier-1 before any install attempt.
+    missing_tier1 = [(n, m) for n, m in tier1_specs if not plugin_exists(root, n)]
+
+    install_errors: list[str] = []
+    if missing_tier1 and config.auto_install_plugins:
+        for name, marketplace in missing_tier1:
+            ok, detail = install_plugin(name, marketplace)
+            if ok:
+                logger.info("installed %s@%s", name, marketplace)
+            else:
+                install_errors.append(f"{name}@{marketplace}: {detail}")
+
+    # Re-check after install attempt.
+    still_missing = [(n, m) for n, m in tier1_specs if not plugin_exists(root, n)]
+    if still_missing:
+        pretty = ", ".join(f"{n}@{m}" for n, m in still_missing)
+        if config.auto_install_plugins:
+            header = f"Plugin install failed for: {pretty}"
+            errors_block = (
+                "\n".join(f"  {e}" for e in install_errors)
+                or "  (no install errors captured)"
+            )
+            middle = f"Last errors:\n{errors_block}\n"
+        else:
+            header = f"Required plugins missing: {pretty}"
+            middle = "Auto-install disabled (auto_install_plugins=False).\n"
         return CheckResult(
             "plugins",
             CheckStatus.FAIL,
             (
-                f"Required plugins missing from {root}: "
-                f"{', '.join(missing_tier1)} — "
-                "install the missing plugins via Claude Code (`/plugin install <name>`) "
-                "or verify the cache path"
+                f"{header}\n"
+                f"{middle}"
+                "Manual fix:\n"
+                "  make install-plugins          # preferred — reads config, installs all missing\n"
+                "  # or per-plugin:\n"
+                "  claude plugin install <name>@<marketplace> --scope user\n"
+                "\nIf `claude plugin install` reports a login error, run:\n"
+                "  claude login"
             ),
         )
 
-    required_tier2: list[str] = []
-    missing_tier2: list[tuple[str, str]] = []  # (language, plugin)
-    for lang in langs:
-        for plugin in config.language_plugins.get(lang, []):
-            required_tier2.append(plugin)
-            if not _plugin_exists(root, plugin):
-                missing_tier2.append((lang, plugin))
+    # Tier-2 install (best effort). Capture per-plugin errors so the WARN
+    # message can report WHY an install failed, not just that it's missing.
+    tier2_install_errors: dict[str, str] = {}  # plugin_name → detail
+    if config.auto_install_plugins:
+        for _, name, marketplace in tier2_specs:
+            if not plugin_exists(root, name):
+                ok, detail = install_plugin(name, marketplace)
+                if not ok:
+                    tier2_install_errors[name] = detail
 
-    all_plugins = config.required_plugins + required_tier2
-    skills = discover_plugin_skills(all_plugins, cache_root=root)
+    missing_tier2 = [
+        (lang, n) for lang, n, _ in tier2_specs if not plugin_exists(root, n)
+    ]
+
+    all_plugin_names = [n for n, _ in tier1_specs] + [n for _, n, _ in tier2_specs]
+    skills = discover_plugin_skills(all_plugin_names, cache_root=root)
     if not skills:
         return CheckResult(
             "plugins",
@@ -247,13 +337,17 @@ def _check_plugins(
         )
 
     if missing_tier2:
-        formatted = ", ".join(
-            f"{plugin} (for {lang})" for lang, plugin in missing_tier2
-        )
+        parts: list[str] = []
+        for lang, name in missing_tier2:
+            detail = tier2_install_errors.get(name)
+            if detail:
+                parts.append(f"{name} (for {lang}: {detail})")
+            else:
+                parts.append(f"{name} (for {lang})")
         return CheckResult(
             "plugins",
             CheckStatus.WARN,
-            f"Language-conditional plugins missing: {formatted}",
+            f"Language-conditional plugins missing: {', '.join(parts)}",
         )
 
     return CheckResult(
@@ -263,7 +357,7 @@ def _check_plugins(
     )
 
 
-def _plugin_exists(cache_root: Path, plugin: str) -> bool:
+def plugin_exists(cache_root: Path, plugin: str) -> bool:
     """Return True if ``plugin`` directory exists under any marketplace in ``cache_root``."""
     if not cache_root.is_dir():
         return False

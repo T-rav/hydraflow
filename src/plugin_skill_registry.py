@@ -17,7 +17,7 @@ from pathlib import Path
 
 logger = logging.getLogger("hydraflow.plugin_skill_registry")
 
-_DEFAULT_CACHE_ROOT = Path.home() / ".claude" / "plugins" / "cache"
+DEFAULT_CACHE_ROOT = Path.home() / ".claude" / "plugins" / "cache"
 
 # Meta-skills that route to other skills — excluded from factory prompts
 # because the factory advertises skills directly.
@@ -25,6 +25,29 @@ _EXCLUDED_SKILL_NAMES: frozenset[str] = frozenset({"using-superpowers"})
 
 _FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---", re.DOTALL)
 _KEY_PREFIX_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$")
+
+DEFAULT_MARKETPLACE = "claude-plugins-official"
+
+PHASE_NAMES: frozenset[str] = frozenset(
+    {"triage", "discover", "shape", "planner", "agent", "reviewer"}
+)
+
+
+def parse_plugin_spec(spec: str) -> tuple[str, str]:
+    """Parse a plugin spec into ``(name, marketplace)``.
+
+    Accepts ``"name"`` (default marketplace) or ``"name@marketplace"``.
+    Raises :class:`ValueError` on empty, double-``@``, or empty halves.
+    """
+    cleaned = spec.strip()
+    if not cleaned:
+        raise ValueError(f"Empty plugin spec: {spec!r}")
+    parts = [p.strip() for p in cleaned.split("@")]
+    if len(parts) == 1:
+        return parts[0], DEFAULT_MARKETPLACE
+    if len(parts) == 2 and parts[0] and parts[1]:
+        return parts[0], parts[1]
+    raise ValueError(f"Malformed plugin spec: {spec!r}")
 
 
 @dataclass(frozen=True)
@@ -54,7 +77,7 @@ def discover_plugin_skills(
     frontmatter are skipped with a warning. The ``using-superpowers``
     meta-skill is always excluded.
     """
-    root = cache_root or _DEFAULT_CACHE_ROOT
+    root = cache_root or DEFAULT_CACHE_ROOT
     key = (frozenset(plugins), root)
     cached = _skill_cache.get(key)
     if cached is not None:
@@ -170,8 +193,29 @@ def clear_plugin_skill_cache() -> None:
     _skill_cache.clear()
 
 
+def skills_for_phase(
+    phase: str,
+    discovered: list[PluginSkill],
+    phase_skills: dict[str, list[str]],
+) -> list[PluginSkill]:
+    """Return the subset of ``discovered`` whitelisted for ``phase``.
+
+    Order follows the whitelist's declaration order. Qualified names
+    ``<plugin>:<skill>`` not present in ``discovered`` are silently
+    omitted (allows disabling a plugin without synchronous config edits).
+    Raises :class:`ValueError` if ``phase`` is not a known factory phase.
+    """
+    if phase not in PHASE_NAMES:
+        raise ValueError(
+            f"unknown phase {phase!r}; expected one of {sorted(PHASE_NAMES)}"
+        )
+    allowed = phase_skills.get(phase, [])
+    by_qualified = {s.qualified_name: s for s in discovered}
+    return [by_qualified[q] for q in allowed if q in by_qualified]
+
+
 def format_plugin_skills_for_prompt(skills: list[PluginSkill]) -> str:
-    """Format discovered skills as a prompt section for a factory agent.
+    """Format discovered skills as a prompt section carrying the skill-use discipline.
 
     Returns an empty string when ``skills`` is empty so callers can
     unconditionally concatenate the result.
@@ -181,10 +225,22 @@ def format_plugin_skills_for_prompt(skills: list[PluginSkill]) -> str:
     lines = [
         "## Available Skills",
         "",
-        "You have these Claude Code skills available via the `Skill` tool. "
-        "Invoke one by calling the `Skill` tool with its qualified name "
-        '(e.g. `skill: "superpowers:brainstorming"`) when its description '
-        "matches your current task.",
+        (
+            "You have Claude Code skills available via the `Skill` tool. "
+            "**If any skill's description may apply to your current task — "
+            "even at 1% confidence — you MUST invoke it before proceeding.** "
+            "Skills encode proven discipline you would otherwise skip."
+        ),
+        "",
+        "Priority when multiple apply:",
+        "1. **Process skills first** (debugging, planning) — they shape *how* you work.",
+        "2. **Implementation skills second** (TDD, simplify) — they shape *what* you build.",
+        "",
+        (
+            "Do not rationalize past a skill because the task feels simple, "
+            'because you "remember" the skill, or because invoking it feels '
+            "like overhead. Invoke it."
+        ),
         "",
     ]
     for skill in skills:
