@@ -381,6 +381,9 @@ class HydraFlowConfig(BaseModel):
             "for missing Tier-1/Tier-2 plugins before failing."
         ),
     )
+    # Per-phase whitelist. See ADR-0043 for rationale behind which skills are
+    # included/excluded per phase (e.g., dialog-only and human-author skills
+    # are excluded from every subagent phase).
     phase_skills: dict[str, list[str]] = Field(
         default_factory=lambda: {
             "triage": ["superpowers:systematic-debugging"],

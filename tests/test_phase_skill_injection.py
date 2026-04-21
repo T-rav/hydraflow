@@ -28,6 +28,10 @@ def _reset_skill_cache():
 # ---------------------------------------------------------------------------
 
 
+# Mirror of the skills in the src/config.py phase_skills default, used to
+# populate the test cache with every phase's expected skills. Keep in sync
+# when the default whitelist changes — no automated enforcement (the tests
+# must exercise actual filtering, which requires a concrete list here).
 def _all_phase_skills():
     """Return a PluginSkill list covering every whitelisted skill across phases."""
     from plugin_skill_registry import PluginSkill
