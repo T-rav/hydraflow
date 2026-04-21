@@ -328,7 +328,11 @@ def test_score_returns_scorecard_with_all_eight_rules_applied():
 
 def test_score_integrates_rules_and_severity():
     rendered = (
-        "Classify.\n<issue>body</issue>\nReturn only JSON. If empty, return unknown."
+        "Classify the issue. The output must be a JSON object with fields `ready` and `reasons`.\n"
+        "<issue>body</issue><plan>p</plan><diff>d</diff>\n"
+        '<example>{"ready": true}</example>\n'
+        "<thinking>reason first</thinking>\n"
+        "Return only JSON. If empty, return unknown."
     )
     card = score(rendered)
     assert severity_for(card) in ("Low", "Medium")
