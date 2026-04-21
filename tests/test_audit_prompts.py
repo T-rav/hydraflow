@@ -391,3 +391,28 @@ def test_render_invokes_builder_and_returns_string():
 
     result = render(_builder, args={"x": 2, "y": 3}, faked_deps={})
     assert result == "sum=5"
+
+
+# ---------------------------------------------------------------------------
+# Task 14 — PROMPT_REGISTRY coverage
+# ---------------------------------------------------------------------------
+
+
+def test_prompt_registry_covers_every_loop():
+    from scripts.audit_prompts import PROMPT_REGISTRY
+
+    categories = {t.category for t in PROMPT_REGISTRY}
+    assert {"Triage", "Plan", "Implement", "Review", "HITL", "Adjacent"} <= categories
+
+
+def test_prompt_registry_has_expected_minimum_entries():
+    from scripts.audit_prompts import PROMPT_REGISTRY
+
+    assert len(PROMPT_REGISTRY) >= 20
+
+
+def test_prompt_registry_entries_are_unique_by_name():
+    from scripts.audit_prompts import PROMPT_REGISTRY
+
+    names = [t.name for t in PROMPT_REGISTRY]
+    assert len(names) == len(set(names)), "duplicate registry names detected"
