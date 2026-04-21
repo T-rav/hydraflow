@@ -366,3 +366,28 @@ def test_fakes_raises_on_unknown_key():
 
     with _pytest.raises(KeyError):
         get_fake("nonexistent_dep", "shape")
+
+
+# ---------------------------------------------------------------------------
+# Task 13 — Fixture loader + render helper
+# ---------------------------------------------------------------------------
+
+
+def test_load_fixture_reads_json(tmp_path):
+    from scripts.audit_prompts import load_fixture
+
+    fixture = tmp_path / "sample.json"
+    fixture.write_text('{"builder": "foo.bar", "args": {"x": 1}, "faked_deps": {}}')
+    loaded = load_fixture(str(fixture))
+    assert loaded.builder == "foo.bar"
+    assert loaded.args == {"x": 1}
+
+
+def test_render_invokes_builder_and_returns_string():
+    from scripts.audit_prompts import render
+
+    def _builder(x: int, y: int) -> str:
+        return f"sum={x + y}"
+
+    result = render(_builder, args={"x": 2, "y": 3}, faked_deps={})
+    assert result == "sum=5"

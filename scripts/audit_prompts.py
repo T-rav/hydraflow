@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -282,6 +284,55 @@ def score(rendered: str) -> Scorecard:
             8: score_edge_cases(rendered),
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# Fixture loader + render helper
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class LoadedFixture:
+    builder: str
+    args: dict
+    faked_deps: dict
+
+
+def load_fixture(path: str) -> LoadedFixture:
+    data = json.loads(Path(path).read_text())
+    return LoadedFixture(
+        builder=data["builder"],
+        args=data.get("args", {}),
+        faked_deps=data.get("faked_deps", {}),
+    )
+
+
+def render(builder_callable, *, args: dict, faked_deps: dict) -> str:
+    """Call the builder with args + resolved fakes; return the rendered string.
+
+    Builders that return a tuple (e.g. ``_build_prompt_with_stats`` returns
+    ``(prompt, stats)``) are unwrapped to the first element. Multi-turn builders
+    returning a list of ``{role, content}`` messages are serialized with a
+    sentinel separator (``===SYSTEM===`` / ``===USER===``).
+    """
+    # Lazy import so the helper is usable even if the fakes module is not installed.
+    from tests.fixtures.prompts.fakes import get_fake  # noqa: PLC0415
+
+    resolved = dict(args)
+    for dep_name, shape in faked_deps.items():
+        resolved[dep_name] = get_fake(dep_name, shape)
+
+    result = builder_callable(**resolved)
+    if isinstance(result, tuple):
+        result = result[0]
+    if isinstance(result, list):
+        parts = []
+        for msg in result:
+            role = msg.get("role", "user").upper()
+            parts.append(f"==={role}===")
+            parts.append(msg.get("content", ""))
+        return "\n".join(parts)
+    return str(result)
 
 
 def main() -> None:
