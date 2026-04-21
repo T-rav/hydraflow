@@ -8,9 +8,21 @@ import inspect
 import json
 import os
 import re
+import sys
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# Allow direct invocation (`python scripts/audit_prompts.py`) from the repo root:
+# render() imports `tests.fixtures.prompts.fakes`, which requires the project
+# root on sys.path. Under pytest this is automatic; under bare invocation it's not.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+# Also add the `src/` directory so builder imports like `import triage` resolve.
+_SRC_DIR = _REPO_ROOT / "src"
+if _SRC_DIR.is_dir() and str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
 
 
 @dataclass(frozen=True)

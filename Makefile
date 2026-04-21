@@ -510,3 +510,7 @@ docker-test: docker-build
 	@echo "$(BLUE)Running agent image smoke test...$(RESET)"
 	docker run --rm $(DOCKER_IMAGE) bash /opt/hydra/docker-smoke-test.sh
 	@echo "$(GREEN)Smoke test passed$(RESET)"
+
+.PHONY: audit-prompts
+audit-prompts: ## Render all prompt fixtures, score against the rubric, regenerate the prompt-audit report.
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/audit_prompts.py
