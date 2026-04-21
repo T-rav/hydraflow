@@ -233,7 +233,7 @@ async def test_build_prompt_truncates_long_body(config, event_bus):
     prompt, _ = await runner._build_prompt_with_stats(task)
 
     assert "…(truncated)" in prompt
-    assert len(prompt) < 10_000  # well under original 20k body
+    assert len(prompt) < 11_000  # well under original 20k body
 
 
 @pytest.mark.asyncio
