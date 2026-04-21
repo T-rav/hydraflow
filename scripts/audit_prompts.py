@@ -7,6 +7,7 @@ import importlib
 import inspect
 import json
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -655,6 +656,170 @@ def render_target(target: AuditTarget) -> str:
     else:
         raise ValueError(f"unsupported qualname depth: {target.builder_qualname!r}")
     return render(callable_obj, args=fixture.args, faked_deps=fixture.faked_deps)
+
+
+# ---------------------------------------------------------------------------
+# Report generation
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class AuditResult:
+    target: AuditTarget
+    rendered: str
+    scorecard: Scorecard
+
+
+_CATEGORY_ORDER = ["Triage", "Plan", "Implement", "Review", "HITL", "Adjacent"]
+_SEVERITY_ORDER = ["High", "Medium", "Low", "Unscored"]
+
+
+def _excerpt(rendered: str, limit: int = 500) -> str:
+    ex = rendered[:limit].rstrip()
+    return ex + ("…" if len(rendered) > limit else "")
+
+
+def _fail_reason_note(criterion: int) -> str:
+    return {
+        1: "request buried — model may misidentify task intent",
+        6: "long context placed after the request — degrades recall in long prompts",
+    }.get(criterion, "")
+
+
+def write_markdown(
+    results: list[AuditResult],
+    out_path: Path,
+    rubric_stub: Path,
+    handoff_stub: Path,
+) -> None:
+    sev_counter = Counter(severity_for(r.scorecard) for r in results)
+    total_fails: Counter[int] = Counter()
+    for r in results:
+        for k, v in r.scorecard.scores.items():
+            if v == "Fail":
+                total_fails[k] += 1
+    top_fail_ids = [c for c, _ in total_fails.most_common(3)]
+
+    lines: list[str] = []
+    lines.append("# Prompt Audit — 2026-04-20")
+    lines.append("")
+
+    # Section 1: Summary
+    lines.append("## Summary")
+    lines.append("")
+    lines.append(f"- Prompts audited: {len(results)}")
+    for sev in _SEVERITY_ORDER:
+        lines.append(f"- {sev}: {sev_counter.get(sev, 0)}")
+    lines.append(f"- Most common Fails by criterion: {top_fail_ids}")
+    lines.append("")
+
+    # Section 2: Rubric reference (static stub)
+    if rubric_stub.exists():
+        lines.append(rubric_stub.read_text().strip())
+        lines.append("")
+
+    # Section 3: Inventory table
+    lines.append("## Inventory")
+    lines.append("")
+    lines.append("| Prompt | Category | File:Line | Severity | Fails | Partials |")
+    lines.append("|---|---|---|---|---|---|")
+    ordered = sorted(
+        results,
+        key=lambda r: (
+            _SEVERITY_ORDER.index(severity_for(r.scorecard)),
+            r.target.category,
+            r.target.name,
+        ),
+    )
+    for r in ordered:
+        sev = severity_for(r.scorecard)
+        fails = (
+            ",".join(str(k) for k, v in r.scorecard.scores.items() if v == "Fail")
+            or "—"
+        )
+        partials = (
+            ",".join(str(k) for k, v in r.scorecard.scores.items() if v == "Partial")
+            or "—"
+        )
+        lines.append(
+            f"| `{r.target.name}` | {r.target.category} | {r.target.call_site} | "
+            f"{sev} | {fails} | {partials} |"
+        )
+    lines.append("")
+
+    # Section 4: Per-category scorecards
+    for category in _CATEGORY_ORDER:
+        cat_results = [r for r in results if r.target.category == category]
+        if not cat_results:
+            continue
+        lines.append(f"## {category}")
+        lines.append("")
+        for r in cat_results:
+            sev = severity_for(r.scorecard)
+            scores_str = " · ".join(
+                f"#{k} {v}" for k, v in sorted(r.scorecard.scores.items())
+            )
+            lines.append(f"### {r.target.name}")
+            lines.append(f"{r.target.call_site} · Severity: **{sev}**")
+            lines.append("")
+            lines.append(f"Scores: {scores_str}")
+            lines.append("")
+            fails = [k for k, v in r.scorecard.scores.items() if v == "Fail"]
+            if fails:
+                lines.append("Findings:")
+                for k in fails:
+                    note = _fail_reason_note(k)
+                    suffix = f" — {note}" if note else ""
+                    lines.append(f"- #{k} failed{suffix}")
+                lines.append("")
+            lines.append("Excerpt (first 500 chars):")
+            lines.append("")
+            lines.append("```")
+            lines.append(_excerpt(r.rendered))
+            lines.append("```")
+            lines.append("")
+            lines.append(
+                f"Full rendered: "
+                f"[`tests/fixtures/prompts/rendered/{r.target.name}.txt`]"
+                f"(../tests/fixtures/prompts/rendered/{r.target.name}.txt)"
+            )
+            lines.append("")
+
+    # Section 5: Prioritized fix list
+    lines.append("## Prioritized fix list")
+    lines.append("")
+    for sev in ["High", "Medium", "Low"]:
+        grouped = [r for r in results if severity_for(r.scorecard) == sev]
+        if not grouped:
+            continue
+        grouped.sort(
+            key=lambda r: (
+                _CATEGORY_ORDER.index(r.target.category)
+                if r.target.category in _CATEGORY_ORDER
+                else 99,
+                r.target.name,
+            )
+        )
+        lines.append(f"### {sev}")
+        lines.append("")
+        for r in grouped:
+            fails = [k for k, v in r.scorecard.scores.items() if v == "Fail"]
+            note = ""
+            if sev == "High":
+                top_note = next(
+                    (_fail_reason_note(k) for k in fails if _fail_reason_note(k)), ""
+                )
+                if top_note:
+                    note = f" — {top_note}"
+            lines.append(f"- `{r.target.name}` ({r.target.category}){note}")
+        lines.append("")
+
+    # Section 6: Handoff (static stub)
+    if handoff_stub.exists():
+        lines.append(handoff_stub.read_text().strip())
+        lines.append("")
+
+    out_path.write_text("\n".join(lines))
 
 
 def main() -> None:

@@ -523,3 +523,86 @@ def test_adjacent_fixtures_render_cleanly():
     for target in targets:
         rendered = render_target(target)
         assert rendered, f"rendered output is empty for {target.name}"
+
+
+# ---------------------------------------------------------------------------
+# Task 21 — write_markdown
+# ---------------------------------------------------------------------------
+
+
+def test_write_markdown_includes_all_six_sections(tmp_path):
+    from scripts.audit_prompts import (
+        AuditResult,
+        AuditTarget,
+        Scorecard,
+        write_markdown,
+    )
+
+    results = [
+        AuditResult(
+            target=AuditTarget("x", "m.f", "p.json", "Triage", "src/f.py:1"),
+            rendered="Classify. <issue>hi</issue><plan>p</plan><diff>d</diff> Return only JSON.",
+            scorecard=Scorecard(
+                scores={
+                    1: "Pass",
+                    2: "Partial",
+                    3: "Pass",
+                    4: "N/A",
+                    5: "Pass",
+                    6: "N/A",
+                    7: "Pass",
+                    8: "Fail",
+                }
+            ),
+        ),
+    ]
+    out = tmp_path / "report.md"
+    rubric = tmp_path / "rubric.md"
+    handoff = tmp_path / "handoff.md"
+    rubric.write_text("## Rubric reference\n(static)\n")
+    handoff.write_text("## Handoff to sub-projects\n(static)\n")
+    write_markdown(results, out, rubric, handoff)
+    content = out.read_text()
+    assert "## Summary" in content
+    assert "## Rubric reference" in content
+    assert "| Prompt |" in content
+    assert "### x" in content
+    assert "## Prioritized fix list" in content
+    assert "## Handoff to sub-projects" in content
+    # Handoff must be after Prioritized fix list
+    assert content.rfind("## Handoff to sub-projects") > content.rfind(
+        "## Prioritized fix list"
+    )
+
+
+def test_write_markdown_groups_scorecards_by_category_order(tmp_path):
+    from scripts.audit_prompts import (
+        AuditResult,
+        AuditTarget,
+        Scorecard,
+        write_markdown,
+    )
+
+    results = [
+        AuditResult(
+            target=AuditTarget("a", "m.f", "p.json", "Triage", "s:1"),
+            rendered="Classify.",
+            scorecard=Scorecard(scores=dict.fromkeys(range(1, 9), "Pass")),
+        ),
+        AuditResult(
+            target=AuditTarget("b", "m.f", "p.json", "Review", "s:1"),
+            rendered="Review.",
+            scorecard=Scorecard(scores=dict.fromkeys(range(1, 9), "Pass")),
+        ),
+    ]
+    out = tmp_path / "report.md"
+    rubric = tmp_path / "rubric.md"
+    handoff = tmp_path / "handoff.md"
+    rubric.write_text("")
+    handoff.write_text("")
+    write_markdown(results, out, rubric, handoff)
+    content = out.read_text()
+    triage_idx = content.find("## Triage")
+    review_idx = content.find("## Review")
+    assert triage_idx != -1 and review_idx != -1
+    assert triage_idx < review_idx  # _CATEGORY_ORDER: Triage before Review
