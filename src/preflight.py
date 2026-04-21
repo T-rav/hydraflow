@@ -236,12 +236,12 @@ def _check_plugins(  # noqa: PLR0911 — linear gate checks, each with its own r
     - Everything present → PASS.
     """
     from plugin_skill_registry import (
-        _DEFAULT_CACHE_ROOT,  # noqa: PLC0415 — private but already imported elsewhere
+        DEFAULT_CACHE_ROOT,  # noqa: PLC0415
         discover_plugin_skills,  # noqa: PLC0415
         parse_plugin_spec,  # noqa: PLC0415
     )
 
-    root = cache_root or _DEFAULT_CACHE_ROOT
+    root = cache_root or DEFAULT_CACHE_ROOT
     langs = detected_languages or set()
 
     if root.exists() and not root.is_dir():
@@ -288,15 +288,22 @@ def _check_plugins(  # noqa: PLR0911 — linear gate checks, each with its own r
     still_missing = [(n, m) for n, m in tier1_specs if not _plugin_exists(root, n)]
     if still_missing:
         pretty = ", ".join(f"{n}@{m}" for n, m in still_missing)
-        errors_block = (
-            "\n".join(f"  {e}" for e in install_errors) or "  (auto-install disabled)"
-        )
+        if config.auto_install_plugins:
+            header = f"Plugin install failed for: {pretty}"
+            errors_block = (
+                "\n".join(f"  {e}" for e in install_errors)
+                or "  (no install errors captured)"
+            )
+            middle = f"Last errors:\n{errors_block}\n"
+        else:
+            header = f"Required plugins missing: {pretty}"
+            middle = "Auto-install disabled (auto_install_plugins=False).\n"
         return CheckResult(
             "plugins",
             CheckStatus.FAIL,
             (
-                f"Plugin install failed for: {pretty}\n"
-                f"Last errors:\n{errors_block}\n"
+                f"{header}\n"
+                f"{middle}"
                 "Manual fix:\n"
                 "  make install-plugins          # preferred — reads config, installs all missing\n"
                 "  # or per-plugin:\n"
@@ -306,11 +313,15 @@ def _check_plugins(  # noqa: PLR0911 — linear gate checks, each with its own r
             ),
         )
 
-    # Tier-2 install (best effort).
+    # Tier-2 install (best effort). Capture per-plugin errors so the WARN
+    # message can report WHY an install failed, not just that it's missing.
+    tier2_install_errors: dict[str, str] = {}  # plugin_name → detail
     if config.auto_install_plugins:
         for _, name, marketplace in tier2_specs:
             if not _plugin_exists(root, name):
-                _install_plugin(name, marketplace)  # errors recorded in WARN below
+                ok, detail = _install_plugin(name, marketplace)
+                if not ok:
+                    tier2_install_errors[name] = detail
 
     missing_tier2 = [
         (lang, n) for lang, n, _ in tier2_specs if not _plugin_exists(root, n)
@@ -326,11 +337,17 @@ def _check_plugins(  # noqa: PLR0911 — linear gate checks, each with its own r
         )
 
     if missing_tier2:
-        formatted = ", ".join(f"{n} (for {lang})" for lang, n in missing_tier2)
+        parts: list[str] = []
+        for lang, name in missing_tier2:
+            detail = tier2_install_errors.get(name)
+            if detail:
+                parts.append(f"{name} (for {lang}: {detail})")
+            else:
+                parts.append(f"{name} (for {lang})")
         return CheckResult(
             "plugins",
             CheckStatus.WARN,
-            f"Language-conditional plugins missing: {formatted}",
+            f"Language-conditional plugins missing: {', '.join(parts)}",
         )
 
     return CheckResult(

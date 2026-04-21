@@ -11,6 +11,7 @@ import pytest
 from config import HydraFlowConfig
 from plugin_skill_registry import clear_plugin_skill_cache
 from preflight import CheckStatus, _check_plugins
+from tests.conftest import write_plugin_skill as _write_skill
 
 
 @pytest.fixture(autouse=True)
@@ -18,16 +19,6 @@ def _clear_caches():
     clear_plugin_skill_cache()
     yield
     clear_plugin_skill_cache()
-
-
-def _write_fake_skill(
-    cache_root: Path, marketplace: str, plugin: str, skill: str
-) -> None:
-    skill_dir = cache_root / marketplace / plugin / "1.0.0" / "skills" / skill
-    skill_dir.mkdir(parents=True, exist_ok=True)
-    (skill_dir / "SKILL.md").write_text(
-        f"---\nname: {skill}\ndescription: test skill\n---\nbody\n"
-    )
 
 
 def test_auto_install_runs_claude_for_missing_plugin(tmp_path: Path):
@@ -46,7 +37,7 @@ def test_auto_install_runs_claude_for_missing_plugin(tmp_path: Path):
             "--scope",
             "user",
         ]
-        _write_fake_skill(tmp_path, "claude-plugins-official", "superpowers", "tdd")
+        _write_skill(tmp_path, "claude-plugins-official", "superpowers", "tdd")
         return subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
 
     with patch("preflight.subprocess.run", side_effect=fake_run) as mock_run:
@@ -131,7 +122,7 @@ def test_explicit_marketplace_in_spec(tmp_path: Path):
             "--scope",
             "user",
         ]
-        _write_fake_skill(tmp_path, "custom-marketplace", "foo", "bar")
+        _write_skill(tmp_path, "custom-marketplace", "foo", "bar")
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
 
     with patch("preflight.subprocess.run", side_effect=fake_run):

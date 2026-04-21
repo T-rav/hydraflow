@@ -163,7 +163,7 @@ class TestRunPreflightChecksWiring:
     ) -> None:
         """run_preflight_checks invokes _check_plugins with the shared default cache root.
 
-        Isolated by monkeypatching plugin_skill_registry._DEFAULT_CACHE_ROOT so the
+        Isolated by monkeypatching plugin_skill_registry.DEFAULT_CACHE_ROOT so the
         test does not depend on the developer's real ~/.claude/plugins/cache.
         """
         import plugin_skill_registry
@@ -172,7 +172,7 @@ class TestRunPreflightChecksWiring:
         cache_root = tmp_path / "cache"
         cache_root.mkdir()
         _make_plugin(cache_root, "superpowers")
-        monkeypatch.setattr(plugin_skill_registry, "_DEFAULT_CACHE_ROOT", cache_root)
+        monkeypatch.setattr(plugin_skill_registry, "DEFAULT_CACHE_ROOT", cache_root)
 
         config = HydraFlowConfig(
             required_plugins=["superpowers"],

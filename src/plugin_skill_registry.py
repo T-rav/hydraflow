@@ -17,7 +17,7 @@ from pathlib import Path
 
 logger = logging.getLogger("hydraflow.plugin_skill_registry")
 
-_DEFAULT_CACHE_ROOT = Path.home() / ".claude" / "plugins" / "cache"
+DEFAULT_CACHE_ROOT = Path.home() / ".claude" / "plugins" / "cache"
 
 # Meta-skills that route to other skills — excluded from factory prompts
 # because the factory advertises skills directly.
@@ -77,7 +77,7 @@ def discover_plugin_skills(
     frontmatter are skipped with a warning. The ``using-superpowers``
     meta-skill is always excluded.
     """
-    root = cache_root or _DEFAULT_CACHE_ROOT
+    root = cache_root or DEFAULT_CACHE_ROOT
     key = (frozenset(plugins), root)
     cached = _skill_cache.get(key)
     if cached is not None:
