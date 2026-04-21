@@ -19,7 +19,14 @@ def _make_skills() -> list[PluginSkill]:
     ]
 
 
-def test_phase_names_are_frozen():
+def test_phase_names_locks_the_six_factory_phases():
+    """Locks PHASE_NAMES at exactly the six factory phases.
+
+    Adding a phase is a deliberate change that must update PHASE_NAMES,
+    the default ``phase_skills`` config in ``src/config.py``, and this
+    test together — breaking one and not the others should fail loudly.
+    """
+    assert isinstance(PHASE_NAMES, frozenset)
     assert (
         frozenset({"triage", "discover", "shape", "planner", "agent", "reviewer"})
         == PHASE_NAMES
@@ -65,6 +72,16 @@ def test_empty_whitelist_returns_empty_list():
 def test_missing_phase_key_returns_empty_list():
     # Phase is valid but config omits it → empty, don't crash.
     out = skills_for_phase("agent", _make_skills(), {})
+    assert out == []
+
+
+def test_empty_discovered_with_non_empty_whitelist_returns_empty():
+    # Nothing discovered → even a well-populated whitelist yields nothing.
+    out = skills_for_phase(
+        "agent",
+        [],
+        {"agent": ["superpowers:test-driven-development"]},
+    )
     assert out == []
 
 
