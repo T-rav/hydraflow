@@ -96,4 +96,59 @@ SEED_RULES: list[Rule] = [
             "optional objects'."
         ),
     ),
+    Rule(
+        id="private-symbol-cross-module",
+        tool=ANY_TOOL,
+        # Pyright's "\"_name\" is not accessed" warning fires both for
+        # genuinely unused locals AND for private-by-convention names that
+        # are only consumed by other modules. The fix differs:
+        #   - cross-module consumer → promote to public (no underscore)
+        #   - genuinely unused → rename to bare ``_``
+        trigger=ErrorPattern(r'"_\w+" is not accessed|reportPrivateUsage'),
+        hint=(
+            "Pyright flagged a `_`-prefixed name as unaccessed or privately "
+            "imported. If the name is consumed from another module, promote "
+            "it to public (drop the leading underscore). If it's a truly "
+            "unused loop/positional variable, rename to bare `_`. "
+            "See docs/agents/avoided-patterns.md — 'Underscore-prefixed "
+            "names imported across modules' and '`_name` for unused loop "
+            "variables'."
+        ),
+    ),
+    Rule(
+        id="logger-format-typeerror",
+        tool=ANY_TOOL,
+        # Happens when logger.error(value) is called with a value that
+        # contains `%s`, `%d`, or `{...}` — the logging machinery treats
+        # the value as a format string and the arg count mismatches.
+        trigger=ErrorPattern(
+            r"TypeError: not enough arguments for format string"
+            r"|TypeError: not all arguments converted during string formatting"
+        ),
+        hint=(
+            "This TypeError usually means a logger call passed a variable "
+            "as the format string (e.g. `logger.error(msg)` instead of "
+            '`logger.error("%s", msg)`). Pass a literal format string '
+            "first, the values after. "
+            "See docs/agents/avoided-patterns.md — '`logger.error(value)` "
+            "without a format string'."
+        ),
+    ),
+    Rule(
+        id="dockerfile-python-constant-drift",
+        tool=ANY_TOOL,
+        # Dockerfiles frequently mirror Python constants (baked-in plugin
+        # dirs, tool paths, etc.). Changing one without updating the other
+        # creates silent drift.
+        trigger=FileChanged("Dockerfile*"),
+        hint=(
+            "You modified a Dockerfile. If this Dockerfile bakes in paths, "
+            "plugin lists, or tool locations that Python code references, "
+            "check whether a parallel Python constant needs updating — or "
+            "better, replace the constant with a runtime scan of the "
+            "authoritative source. "
+            "See docs/agents/avoided-patterns.md — 'Hardcoded path lists "
+            "that duplicate filesystem state'."
+        ),
+    ),
 ]
