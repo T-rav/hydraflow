@@ -36,7 +36,7 @@ def test_auto_install_runs_claude_for_missing_plugin(tmp_path: Path):
         auto_install_plugins=True,
     )
 
-    def fake_run(argv, **kwargs):
+    def fake_run(argv, **_kwargs):
         # Simulate install by populating the cache, then return success.
         assert argv == [
             "claude",
@@ -62,7 +62,7 @@ def test_auto_install_failure_falls_through_to_rich_fail(tmp_path: Path):
         auto_install_plugins=True,
     )
 
-    def fake_run(argv, **kwargs):
+    def fake_run(argv, **_kwargs):
         # Install "succeeds" but plugin still isn't in the cache.
         return subprocess.CompletedProcess(argv, 1, stdout="", stderr="boom")
 
@@ -122,7 +122,7 @@ def test_explicit_marketplace_in_spec(tmp_path: Path):
         auto_install_plugins=True,
     )
 
-    def fake_run(argv, **kwargs):
+    def fake_run(argv, **_kwargs):
         assert argv == [
             "claude",
             "plugin",

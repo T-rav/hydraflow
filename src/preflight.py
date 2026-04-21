@@ -308,12 +308,12 @@ def _check_plugins(  # noqa: PLR0911 — linear gate checks, each with its own r
 
     # Tier-2 install (best effort).
     if config.auto_install_plugins:
-        for _lang, name, marketplace in tier2_specs:
+        for _, name, marketplace in tier2_specs:
             if not _plugin_exists(root, name):
                 _install_plugin(name, marketplace)  # errors recorded in WARN below
 
     missing_tier2 = [
-        (lang, n) for lang, n, _m in tier2_specs if not _plugin_exists(root, n)
+        (lang, n) for lang, n, _ in tier2_specs if not _plugin_exists(root, n)
     ]
 
     all_plugin_names = [n for n, _ in tier1_specs] + [n for _, n, _ in tier2_specs]
