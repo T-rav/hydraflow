@@ -56,6 +56,50 @@ def score_leads_with_request(rendered: str) -> str:
     return "Fail"
 
 
+# ---------------------------------------------------------------------------
+# Rubric #2 — specific
+# ---------------------------------------------------------------------------
+
+OUTPUT_ARTIFACT_NOUNS = (
+    r"\bJSON\b",
+    r"\bobject\b",
+    r"\blist\b",
+    r"\bclassification\b",
+    r"\blabel\b",
+    r"\bplan\b",
+    r"\breview\b",
+    r"\bpatch\b",
+    r"\bdiff\b",
+    r"\bsummary\b",
+)
+SCHEMA_CUES = (r"fields:", r"keys:", r"schema", r"`[a-z_][a-z0-9_]*`")
+SUCCESS_CRITERIA_CUES = (
+    r"\bmust\b",
+    r"\bshould\b",
+    r"requirements",
+    r"the output must",
+)
+
+
+def _any_hit(patterns: tuple[str, ...], text: str) -> bool:
+    return any(re.search(p, text, re.IGNORECASE) for p in patterns)
+
+
+def score_specific(rendered: str) -> str:
+    hits = sum(
+        [
+            _any_hit(OUTPUT_ARTIFACT_NOUNS, rendered),
+            _any_hit(SCHEMA_CUES, rendered),
+            _any_hit(SUCCESS_CRITERIA_CUES, rendered),
+        ]
+    )
+    if hits == 3:
+        return "Pass"
+    if hits == 2:
+        return "Partial"
+    return "Fail"
+
+
 def main() -> None:
     raise NotImplementedError("wired up in later tasks")
 

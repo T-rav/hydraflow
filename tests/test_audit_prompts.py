@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from scripts.audit_prompts import AuditTarget, score_leads_with_request
+from scripts.audit_prompts import (
+    AuditTarget,
+    score_leads_with_request,
+    score_specific,
+)
+
+# ---------------------------------------------------------------------------
+# Task 2 fixtures
+# ---------------------------------------------------------------------------
 
 IMPERATIVE_PROMPT = "Classify this issue into one of three categories: ..."
 DELAYED_PROMPT = (
@@ -11,6 +19,18 @@ DELAYED_PROMPT = (
 BURIED_PROMPT = (
     "Background context. Lots of reading. Many sentences. And finally: classify."
 )
+
+# ---------------------------------------------------------------------------
+# Task 3 fixtures
+# ---------------------------------------------------------------------------
+
+SPECIFIC_PROMPT = """Produce a JSON object with fields `ready`, `reasons`, `clarity_score`.
+The output must have valid JSON. Requirements: all fields must be present."""
+VAGUE_PROMPT = "Think about the issue. Give me your thoughts."
+
+# ---------------------------------------------------------------------------
+# Task 1 — AuditTarget scaffold
+# ---------------------------------------------------------------------------
 
 
 def test_audit_target_carries_metadata():
@@ -26,6 +46,11 @@ def test_audit_target_carries_metadata():
     assert target.call_site == "src/triage.py:194"
 
 
+# ---------------------------------------------------------------------------
+# Task 2 — Rubric #1: leads with the request
+# ---------------------------------------------------------------------------
+
+
 def test_score_leads_with_request_pass_when_first_sentence_has_imperative():
     assert score_leads_with_request(IMPERATIVE_PROMPT) == "Pass"
 
@@ -36,3 +61,21 @@ def test_score_leads_with_request_partial_when_imperative_in_sentence_two_or_thr
 
 def test_score_leads_with_request_fail_when_imperative_buried_beyond_sentence_three():
     assert score_leads_with_request(BURIED_PROMPT) == "Fail"
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — Rubric #2: specific
+# ---------------------------------------------------------------------------
+
+
+def test_score_specific_pass_when_all_three_cues_present():
+    assert score_specific(SPECIFIC_PROMPT) == "Pass"
+
+
+def test_score_specific_fail_when_no_cues():
+    assert score_specific(VAGUE_PROMPT) == "Fail"
+
+
+def test_score_specific_partial_when_two_cues():
+    prompt = "Produce a JSON object. All fields must be present."
+    assert score_specific(prompt) == "Partial"
