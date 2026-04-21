@@ -60,43 +60,19 @@ def install(interceptor: PromptInterceptor) -> None:
     base_runner.stream_claude_process = recording_stub  # type: ignore[assignment]
 
 
-def main() -> None:  # pragma: no cover — driver is exercised manually
-    import asyncio
-
-    from config import HydraFlowConfig  # noqa: PLC0415
-    from events import EventBus  # noqa: PLC0415
-    from models import Task  # noqa: PLC0415
-    from state import StateTracker  # noqa: PLC0415
-    from triage import TriageRunner  # noqa: PLC0415
-
-    interceptor = PromptInterceptor()
-    install(interceptor)
-
-    config = HydraFlowConfig(dry_run=False)
-    event_bus = EventBus()
-    state = StateTracker(path=Path("/tmp/_prompt_audit_canary_state.json"))
-
-    # TriageRunner signature may require more args — adapt if needed.
-    runner = TriageRunner(config=config, event_bus=event_bus, state=state)
-
-    canary_issue = Task(
-        id=99999,
-        title="[canary] audit probe: retry transient S3 upload failures",
-        body=(
-            "Intermittent 503s from S3 during upload cause job failures. "
-            "Expected: retry up to 3 times with exponential backoff. "
-            "Observed: first failure kills the job. Affected: src/upload.py."
-        ),
-        tags=["bug"],
-        comments=[],
-    )
-
-    asyncio.run(runner.evaluate(canary_issue))
-
-    out = Path("tests/fixtures/prompts/canary-trace.jsonl")
-    interceptor.dump(out)
-    print(f"wrote {len(interceptor.entries)} entries to {out}")
-
-
-if __name__ == "__main__":
-    main()
+# NOTE: an end-to-end driver (instantiate BaseRunner+StateTracker+EventBus, run
+# TriageRunner.evaluate on a synthetic issue) was deliberately omitted from this
+# sub-project. `StateTracker` and the runner graph have enough wiring that
+# standing them up safely in <5 minutes wasn't feasible, and Task 25 of the plan
+# (see docs/superpowers/plans/2026-04-20-prompt-audit.md) used a simpler fallback
+# path — directly invoking ``render_target`` on a registry entry and feeding the
+# result through this interceptor's ``record()`` to produce the canary trace
+# artifact at tests/fixtures/prompts/canary-trace.jsonl.
+#
+# Sub-project 2 (eval gate) is the right home for a full end-to-end canary: it
+# will need a real canary repo and a wired-up factory anyway. At that point,
+# revisit this file and add an end-to-end driver that uses ``install()`` to
+# patch ``stream_claude_process`` before driving ``TriageRunner.evaluate(...)``
+# — just make sure to match the real ``BaseRunner.__init__`` signature
+# (``config``, ``event_bus``, ``runner`` + kwargs ``hindsight``, ``credentials``,
+# ``wiki_store``) rather than the aspirational shape that was here before.
