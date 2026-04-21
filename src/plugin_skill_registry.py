@@ -28,6 +28,10 @@ _KEY_PREFIX_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$")
 
 DEFAULT_MARKETPLACE = "claude-plugins-official"
 
+PHASE_NAMES: frozenset[str] = frozenset(
+    {"triage", "discover", "shape", "planner", "agent", "reviewer"}
+)
+
 
 def parse_plugin_spec(spec: str) -> tuple[str, str]:
     """Parse a plugin spec into ``(name, marketplace)``.
@@ -187,6 +191,27 @@ _skill_cache: dict[tuple[frozenset[str], Path], tuple[PluginSkill, ...]] = {}
 def clear_plugin_skill_cache() -> None:
     """Clear the in-memory discovery cache. Intended for tests."""
     _skill_cache.clear()
+
+
+def skills_for_phase(
+    phase: str,
+    discovered: list[PluginSkill],
+    phase_skills: dict[str, list[str]],
+) -> list[PluginSkill]:
+    """Return the subset of ``discovered`` whitelisted for ``phase``.
+
+    Order follows the whitelist's declaration order. Qualified names
+    ``<plugin>:<skill>`` not present in ``discovered`` are silently
+    omitted (allows disabling a plugin without synchronous config edits).
+    Raises :class:`ValueError` if ``phase`` is not a known factory phase.
+    """
+    if phase not in PHASE_NAMES:
+        raise ValueError(
+            f"unknown phase {phase!r}; expected one of {sorted(PHASE_NAMES)}"
+        )
+    allowed = phase_skills.get(phase, [])
+    by_qualified = {s.qualified_name: s for s in discovered}
+    return [by_qualified[q] for q in allowed if q in by_qualified]
 
 
 def format_plugin_skills_for_prompt(skills: list[PluginSkill]) -> str:
