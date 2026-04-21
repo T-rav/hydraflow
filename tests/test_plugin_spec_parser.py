@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from plugin_skill_registry import parse_plugin_spec
-
-DEFAULT_MARKETPLACE = "claude-plugins-official"
+from plugin_skill_registry import DEFAULT_MARKETPLACE, parse_plugin_spec
 
 
 def test_bare_name_gets_default_marketplace():
