@@ -1,0 +1,10 @@
+{
+  "builder": "conflict_prompt.build_conflict_prompt",
+  "args": {
+    "issue_url": "https://github.com/owner/repo/issues/42",
+    "pr_url": "https://github.com/owner/repo/pull/99",
+    "last_error": null,
+    "attempt": 1
+  },
+  "faked_deps": {}
+}

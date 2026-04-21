@@ -1,0 +1,9 @@
+{
+  "builder": "adr_reviewer.ADRCouncilReviewer._build_orchestrator_prompt",
+  "args": {
+    "adr_content": "# ADR-0099: Use boto3 built-in retry config for S3 uploads\n\n## Status\nProposed\n\n## Context\nTransient S3 503 errors cause upload jobs to fail immediately. We need retry logic.\n\n## Decision\nUse boto3's built-in retry configuration (`retries={'max_attempts': 3, 'mode': 'exponential'}`) instead of implementing manual retry loops.\n\n## Consequences\n- Retry behaviour is consistent with AWS SDK best practices\n- No third-party dependencies added\n- Application code stays simpler",
+    "index_context": "ADR-0001: Five concurrent async loops\nADR-0002: Labels as state machine\nADR-0003: Git worktrees for isolation\nADR-0021: Persistence architecture and data layout",
+    "duplicate_context": "No duplicate ADRs detected."
+  },
+  "faked_deps": {}
+}

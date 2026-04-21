@@ -1,0 +1,18 @@
+{
+  "builder": "expert_council.ExpertCouncil._build_vote_prompt",
+  "args": {
+    "task": {
+      "id": 42,
+      "title": "Add S3 upload retry logic",
+      "body": "The upload handler should retry transient S3 failures up to 3 times with exponential backoff.",
+      "tags": ["feature"],
+      "comments": []
+    },
+    "expert": {
+      "name": "Architect",
+      "perspective": "You focus on long-term maintainability, clean abstractions, and consistency with existing patterns."
+    },
+    "directions_text": "A: Use boto3 built-in retry config\nB: Implement manual retry loop in application code\nC: Use a third-party retry library (tenacity)"
+  },
+  "faked_deps": {}
+}
