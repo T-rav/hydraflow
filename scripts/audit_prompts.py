@@ -139,6 +139,111 @@ def score_examples(rendered: str) -> str:
     return "Pass" if _any_hit(_EXAMPLE_PRESENT, rendered) else "Fail"
 
 
+# ---------------------------------------------------------------------------
+# Rubric #5 — output contract explicit
+# ---------------------------------------------------------------------------
+
+_OUTPUT_CONTRACT_CUES = (
+    r"respond with",
+    r"do not",
+    r"no prose",
+    r"no markdown",
+    r"no apolog",
+    r"output format",
+    r"return only",
+    r"the output must",
+)
+
+
+def score_output_contract(rendered: str) -> str:
+    return "Pass" if _any_hit(_OUTPUT_CONTRACT_CUES, rendered) else "Fail"
+
+
+# ---------------------------------------------------------------------------
+# Rubric #6 — placement of long context
+# ---------------------------------------------------------------------------
+
+LONG_CONTEXT_THRESHOLD = 10_000
+
+
+def _largest_tagged_block_end(rendered: str) -> int:
+    best_end = -1
+    best_len = -1
+    for match in _TAG_PAIR.finditer(rendered):
+        if match.group(1).lower() in _EXCLUDED_TAGS:
+            continue
+        length = match.end() - match.start()
+        if length > best_len:
+            best_len = length
+            best_end = match.end()
+    return best_end
+
+
+def _last_imperative_offset(rendered: str) -> int:
+    verbs = "|".join(sorted(IMPERATIVE_VERBS))
+    last = -1
+    for match in re.finditer(rf"\b({verbs})\b", rendered, re.IGNORECASE):
+        last = match.start()
+    return last
+
+
+def score_long_context_placement(rendered: str) -> str:
+    if len(rendered) < LONG_CONTEXT_THRESHOLD:
+        return "N/A"
+    block_end = _largest_tagged_block_end(rendered)
+    last_imp = _last_imperative_offset(rendered)
+    if block_end == -1 or last_imp == -1:
+        return "Fail"
+    return "Pass" if block_end < last_imp else "Fail"
+
+
+# ---------------------------------------------------------------------------
+# Rubric #7 — chain-of-thought scaffolded where decisions are made
+# ---------------------------------------------------------------------------
+
+_DECISION_VERBS = frozenset(
+    {
+        "classify",
+        "decide",
+        "verdict",
+        "approve",
+        "reject",
+        "score",
+        "rank",
+        "choose",
+        "determine",
+        "evaluate",
+    }
+)
+_COT_CUES = (r"<thinking>", r"<scratchpad>", r"think step by step", r"reason first")
+
+
+def score_cot(rendered: str) -> str:
+    words = set(re.findall(r"[A-Za-z]+", rendered.lower()))
+    applicable = bool(words & _DECISION_VERBS)
+    if not applicable:
+        return "N/A"
+    return "Pass" if _any_hit(_COT_CUES, rendered) else "Fail"
+
+
+# ---------------------------------------------------------------------------
+# Rubric #8 — edge cases named
+# ---------------------------------------------------------------------------
+
+_EDGE_CASE_CUES = (
+    r"if (empty|missing|truncated|unclear|no \w+)",
+    r"when the \w+ (is not|cannot|fails)",
+    r"\botherwise,",
+    r"in case of",
+    r"\bfallback\b",
+    r"do not assume",
+)
+
+
+def score_edge_cases(rendered: str) -> str:
+    return "Pass" if _any_hit(_EDGE_CASE_CUES, rendered) else "Fail"
+
+
 def main() -> None:
     raise NotImplementedError("wired up in later tasks")
 

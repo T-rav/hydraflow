@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from scripts.audit_prompts import (
     AuditTarget,
+    score_cot,
+    score_edge_cases,
     score_examples,
     score_leads_with_request,
+    score_long_context_placement,
+    score_output_contract,
     score_specific,
     score_xml_tags,
 )
@@ -130,3 +134,90 @@ def test_score_examples_pass_when_applicable_and_example_header_present():
 def test_score_examples_fail_when_applicable_but_no_example():
     prompt = "Produce a JSON object with fields `ready` and `reasons`."
     assert score_examples(prompt) == "Fail"
+
+
+# ---------------------------------------------------------------------------
+# Task 6 — Rubric #5: output contract
+# ---------------------------------------------------------------------------
+
+
+def test_score_output_contract_pass_on_respond_with():
+    assert score_output_contract("Respond with a single JSON object.") == "Pass"
+
+
+def test_score_output_contract_pass_on_do_not():
+    assert score_output_contract("Do not include any prose.") == "Pass"
+
+
+def test_score_output_contract_pass_on_return_only():
+    assert score_output_contract("Return only the JSON, nothing else.") == "Pass"
+
+
+def test_score_output_contract_fail_when_no_cues():
+    assert score_output_contract("Think carefully. Give your best answer.") == "Fail"
+
+
+# ---------------------------------------------------------------------------
+# Task 7 — Rubric #6: placement of long context
+# ---------------------------------------------------------------------------
+
+
+def test_score_long_context_placement_na_below_threshold():
+    prompt = "Classify.\n<issue>small body</issue>\nReturn JSON."
+    assert score_long_context_placement(prompt) == "N/A"
+
+
+def test_score_long_context_placement_pass_when_content_before_final_imperative():
+    body = "x" * 11000
+    prompt = f"<issue>{body}</issue>\n\nClassify the issue above and return JSON."
+    assert score_long_context_placement(prompt) == "Pass"
+
+
+def test_score_long_context_placement_fail_when_content_after_final_imperative():
+    body = "x" * 11000
+    prompt = f"Classify the issue and return JSON.\n\n<issue>{body}</issue>"
+    assert score_long_context_placement(prompt) == "Fail"
+
+
+# ---------------------------------------------------------------------------
+# Task 8 — Rubric #7: CoT scaffolded where decisions are made
+# ---------------------------------------------------------------------------
+
+
+def test_score_cot_na_when_no_decision_verb():
+    assert score_cot("Summarize the issue in one sentence.") == "N/A"
+
+
+def test_score_cot_pass_when_decision_and_thinking_present():
+    prompt = "Classify the issue. <thinking>reason step by step</thinking>"
+    assert score_cot(prompt) == "Pass"
+
+
+def test_score_cot_pass_when_think_step_by_step_phrase_present():
+    prompt = "Decide whether to approve. Think step by step before answering."
+    assert score_cot(prompt) == "Pass"
+
+
+def test_score_cot_fail_when_decision_without_scaffold():
+    assert score_cot("Classify the issue into one of three categories.") == "Fail"
+
+
+# ---------------------------------------------------------------------------
+# Task 9 — Rubric #8: edge cases named
+# ---------------------------------------------------------------------------
+
+
+def test_score_edge_cases_pass_when_if_empty_present():
+    assert score_edge_cases("Classify. If empty, return 'unknown'.") == "Pass"
+
+
+def test_score_edge_cases_pass_when_otherwise_present():
+    assert score_edge_cases("Prefer X; otherwise, Y.") == "Pass"
+
+
+def test_score_edge_cases_pass_when_fallback_present():
+    assert score_edge_cases("Use A as fallback when B is unavailable.") == "Pass"
+
+
+def test_score_edge_cases_fail_when_no_cues():
+    assert score_edge_cases("Classify the issue and return JSON.") == "Fail"
