@@ -1,0 +1,55 @@
+You are running the Diff Sanity Check skill for issue #42: Add S3 upload retry logic.
+
+Review the git diff below and check for the following problems:
+
+1. **Accidental deletions** — unrelated code removed that should not have been
+2. **Leftover debug code** — print(), console.log(), debugger, breakpoint(), commented-out code
+3. **Missing imports** — new symbols referenced but not imported; removed code with stale imports
+4. **Scope creep** — files changed that are unrelated to the issue
+5. **Hardcoded secrets or credentials** — API keys, tokens, passwords in the diff
+6. **Broken string literals** — unclosed quotes, malformed f-strings
+7. **Obvious logic errors** — inverted conditions, off-by-one, unreachable code after return
+
+## Diff
+
+```diff
+diff --git a/src/upload.py b/src/upload.py
+index abc1234..def5678 100644
+--- a/src/upload.py
++++ b/src/upload.py
+@@ -1,8 +1,20 @@
+ import boto3
++import time
+ 
+ def upload_file(bucket, key, data):
+-    client = boto3.client('s3')
+-    client.put_object(Bucket=bucket, Key=key, Body=data)
++    client = boto3.client('s3')
++    for attempt in range(3):
++        try:
++            client.put_object(Bucket=bucket, Key=key, Body=data)
++            return
++        except client.exceptions.ServiceUnavailable:
++            if attempt < 2:
++                time.sleep(2 ** attempt)
++    raise RuntimeError('Upload failed after 3 retries')
+
+```
+
+## Instructions
+
+- List each problem found with file path and line reference.
+- If no problems are found, report OK.
+- Do NOT modify any files. This is a read-only review.
+
+## Required Output
+
+If all checks pass:
+DIFF_SANITY_RESULT: OK
+SUMMARY: No issues found
+
+If problems are found:
+DIFF_SANITY_RESULT: RETRY
+SUMMARY: <comma-separated list of problem categories found>
+FINDINGS:
+- <file:line — description>

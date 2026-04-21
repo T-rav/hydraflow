@@ -1,0 +1,13 @@
+{
+  "builder": "spec_match.build_requirements_gap_prompt",
+  "args": {
+    "issue": {
+      "id": 42,
+      "title": "Add S3 upload retry logic",
+      "body": "The upload handler should retry transient S3 failures up to 3 times with exponential backoff. Use boto3 retry configuration. Log each retry attempt.",
+      "tags": ["feature"],
+      "comments": []
+    }
+  },
+  "faked_deps": {}
+}

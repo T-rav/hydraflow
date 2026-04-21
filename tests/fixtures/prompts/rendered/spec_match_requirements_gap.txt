@@ -1,0 +1,18 @@
+
+## Requirements Gap Detection
+
+As you implement, you may discover that the specification is incomplete —
+a needed API isn't mentioned, a dependency wasn't considered, or a user
+flow wasn't specified. When this happens:
+
+1. STILL implement what you can with reasonable assumptions
+2. Flag the gap using these markers:
+
+REQUIREMENTS_GAP_START
+- gap: <what's missing from the spec>
+  impact: <how this affects the implementation>
+  assumption: <what you assumed to proceed>
+REQUIREMENTS_GAP_END
+
+Only flag genuine gaps — things the spec SHOULD have covered but didn't.
+Do not flag normal implementation details that don't need spec coverage.

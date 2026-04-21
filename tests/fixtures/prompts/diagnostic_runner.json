@@ -1,0 +1,20 @@
+{
+  "builder": "diagnostic_runner._build_diagnosis_prompt",
+  "args": {
+    "issue_number": 42,
+    "issue_title": "Retry transient S3 upload failures",
+    "issue_body": "The upload handler does not retry on transient S3 503 errors. Each failure kills the job immediately instead of retrying with exponential backoff.",
+    "context": {
+      "cause": "CI test failures: upload_handler tests failed after 3 implementation attempts",
+      "origin_phase": "implement",
+      "ci_logs": "FAILED tests/test_upload.py::test_upload_retries_on_503\nAssertionError: expected 3 retry attempts, got 0",
+      "review_comments": [
+        "Missing retry logic in upload_file()",
+        "No exponential backoff implemented"
+      ],
+      "pr_diff": "diff --git a/src/upload.py b/src/upload.py\n@@ -1,5 +1,5 @@\n-def upload_file(bucket, key, data):\n+def upload_file(bucket, key, data, retries=0):\n     client = boto3.client('s3')\n     client.put_object(Bucket=bucket, Key=key, Body=data)\n",
+      "previous_attempts": []
+    }
+  },
+  "faked_deps": {}
+}
