@@ -153,6 +153,63 @@ async def test_judge_adr_draft_missing_from_tribal_fails_gate_2(compiler, tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_open_adr_draft_issue_creates_labeled_issue(tmp_path):
+    """If draft_ok is True, opens a GitHub issue with adr-draft label."""
+    from unittest.mock import AsyncMock
+
+    from adr_draft_opener import open_adr_draft_issue
+    from wiki_compiler import ADRDraftDecision
+
+    suggestion = {
+        "title": "Always use Pydantic",
+        "context": "C",
+        "decision": "D",
+        "consequences": "Q",
+        "evidence_issues": [42, 99],
+        "evidence_wiki_entries": ["01HQ0000000000000000000000"],
+    }
+    decision = ADRDraftDecision(
+        two_plus_issues=True,
+        in_tribal=True,
+        architectural=True,
+        load_bearing=True,
+        draft_ok=True,
+    )
+    gh = AsyncMock()
+    gh.create_issue = AsyncMock(return_value={"number": 4242})
+
+    issue_number = await open_adr_draft_issue(
+        suggestion=suggestion,
+        decision=decision,
+        gh_client=gh,
+    )
+    assert issue_number == 4242
+    gh.create_issue.assert_called_once()
+    call = gh.create_issue.call_args.kwargs
+    assert "Always use Pydantic" in call["title"]
+    assert "adr-draft" in call["labels"]
+    assert "#42" in call["body"] and "#99" in call["body"]
+
+
+@pytest.mark.asyncio
+async def test_open_adr_draft_issue_returns_none_when_decision_not_ok():
+    from unittest.mock import AsyncMock
+
+    from adr_draft_opener import open_adr_draft_issue
+    from wiki_compiler import ADRDraftDecision
+
+    gh = AsyncMock()
+    decision = ADRDraftDecision(draft_ok=False)
+    result = await open_adr_draft_issue(
+        suggestion={"title": "x"},
+        decision=decision,
+        gh_client=gh,
+    )
+    assert result is None
+    gh.create_issue.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_judge_adr_draft_llm_says_not_architectural(compiler, tmp_path):
     from repo_wiki import WikiEntry
     from tribal_wiki import TribalWikiStore

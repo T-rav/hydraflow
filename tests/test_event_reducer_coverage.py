@@ -62,6 +62,8 @@ SKIP_LIST: set[str] = {
     # Tribal promotion events are consumed server-side for audit; no
     # dashboard reducer case.
     "tribal_promotion",
+    # ADR-draft issue-creation events are consumed server-side.
+    "adr_draft_opened",
 }
 
 
