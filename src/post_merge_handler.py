@@ -12,6 +12,7 @@ from acceptance_criteria import AcceptanceCriteriaGenerator
 from config import HydraFlowConfig
 from epic import EpicCompletionChecker
 from events import EventBus, EventType, HydraFlowEvent
+from knowledge_metrics import metrics as _metrics
 
 if TYPE_CHECKING:
     from epic import EpicManager
@@ -85,6 +86,7 @@ async def _bridge_reflections_to_wiki(
                 event_bus=event_bus,
             )
         clear_reflections(config, issue_number)
+        _metrics.increment("reflections_bridged")
     except Exception:  # noqa: BLE001
         logger.warning(
             "reflection bridge failed for issue #%d; log kept for retry",
