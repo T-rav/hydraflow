@@ -109,3 +109,51 @@ def test_render_titles_only_excludes_summaries_and_superseded():
 
 def test_render_titles_only_empty_input_returns_empty():
     assert render_titles_only([]) == ""
+
+
+def test_cache_returns_same_result_on_repeat_call(tmp_path):
+    from adr_index import ADRIndex
+
+    _write_adr(tmp_path, 1, "A", "Accepted", "a.")
+    index = ADRIndex(tmp_path)
+    first = index.adrs()
+    second = index.adrs()
+    assert first is second  # cached reference (no re-scan)
+
+
+def test_cache_refreshes_when_file_changes(tmp_path):
+    import os
+    import time
+
+    from adr_index import ADRIndex
+
+    _write_adr(tmp_path, 1, "A", "Accepted", "a.")
+    index = ADRIndex(tmp_path)
+    first = index.adrs()
+    assert first[0].title == "A"
+
+    # Wait for mtime resolution, then rewrite with a new title
+    time.sleep(1.1)
+    target = next(tmp_path.iterdir())
+    target.write_text(
+        "# ADR-0001: Renamed\n\n**Status:** Accepted\n**Date:** 2026-01-01\n\n"
+        "## Context\n\nupdated.\n"
+    )
+    os.utime(target, None)
+
+    second = index.adrs()
+    assert second is not first
+    assert second[0].title == "Renamed"
+
+
+def test_cache_handles_directory_creation_after_instantiation(tmp_path):
+    from adr_index import ADRIndex
+
+    missing = tmp_path / "later"
+    index = ADRIndex(missing)
+    assert index.adrs() == []
+
+    missing.mkdir()
+    _write_adr(missing, 1, "A", "Accepted", "a.")
+    refreshed = index.adrs()
+    assert len(refreshed) == 1

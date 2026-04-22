@@ -154,3 +154,32 @@ def render_titles_only(adrs: list[ADR]) -> str:
     for a in visible:
         lines.append(f"- ADR-{a.number:04d} {a.title}")
     return "\n".join(lines)
+
+
+class ADRIndex:
+    """Mtime-based cache over the ADR directory.
+
+    Scans lazily on first ``adrs()`` call. Re-scans only when the directory
+    or any ADR file's mtime has changed. Cheap for hot callers.
+    """
+
+    def __init__(self, adr_dir: Path) -> None:
+        self._adr_dir = adr_dir
+        self._cached: list[ADR] | None = None
+        self._fingerprint: tuple[float, ...] = ()
+
+    def adrs(self) -> list[ADR]:
+        fingerprint = self._compute_fingerprint()
+        if self._cached is None or fingerprint != self._fingerprint:
+            self._cached = scan_adr_directory(self._adr_dir)
+            self._fingerprint = fingerprint
+        return self._cached
+
+    def _compute_fingerprint(self) -> tuple[float, ...]:
+        if not self._adr_dir.exists():
+            return ()
+        mtimes: list[float] = [self._adr_dir.stat().st_mtime]
+        for p in self._adr_dir.iterdir():
+            if p.is_file() and p.suffix == ".md":
+                mtimes.append(p.stat().st_mtime)
+        return tuple(sorted(mtimes))
