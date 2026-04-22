@@ -349,7 +349,7 @@ class RepoWikiLoop(BaseBackgroundLoop):
                     per_repo=self._wiki_store,
                     tribal=tribal_store,
                     compiler=self._wiki_compiler,
-                    event_bus=getattr(self._deps, "event_bus", None),
+                    event_bus=getattr(self, "_bus", None),
                 )
             except Exception:  # noqa: BLE001
                 logger.warning("generalization pass failed", exc_info=True)
