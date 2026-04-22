@@ -17,7 +17,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -208,7 +208,7 @@ def parse_adr_draft_suggestion(transcript: str) -> dict | None:
         return None
 
     tail = transcript[header.end() :]
-    fields: dict[str, str | list] = {
+    fields: dict[str, Any] = {
         "title": "",
         "context": "",
         "decision": "",
