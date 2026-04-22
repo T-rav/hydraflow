@@ -370,6 +370,38 @@ class WikiCompiler:
         )
         return len(compiled)
 
+    async def detect_contradictions(
+        self,
+        *,
+        new_entry: WikiEntry,
+        siblings: list[WikiEntry],
+        repo: str,
+    ) -> ContradictionCheck:
+        """Ask the LLM which siblings (if any) the new entry contradicts.
+
+        ``siblings`` must already be filtered to ``current`` entries on the
+        same topic. Returns an empty ContradictionCheck on LLM failure or if
+        siblings is empty — never raises.
+        """
+        if not siblings:
+            return ContradictionCheck()
+
+        siblings_text = "\n\n".join(
+            f"id: {s.id}\ntitle: {s.title}\ncontent:\n{s.content}" for s in siblings
+        )
+        prompt = _CONTRADICTION_PROMPT.format(
+            topic=new_entry.topic or "unknown",
+            repo=repo,
+            new_title=new_entry.title,
+            new_content=new_entry.content,
+            siblings_text=siblings_text,
+        )
+
+        raw = await self._call_model(prompt)
+        if raw is None:
+            return ContradictionCheck()
+        return self._parse_contradiction_output(raw)
+
     async def synthesize_ingest(
         self,
         repo: str,
