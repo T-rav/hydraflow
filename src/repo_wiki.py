@@ -21,9 +21,9 @@ import logging
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from ulid import ULID
 
 if TYPE_CHECKING:
@@ -468,30 +468,37 @@ class WikiEntry(BaseModel):
     )
     title: str = Field(description="Short summary of the insight")
     content: str = Field(description="Full explanation")
-    topic: str | None = Field(
-        default=None,
-        description="Which topic page this entry lives under (architecture/patterns/gotchas/testing/dependencies/harness)",
-    )
+    topic: str | None = Field(default=None)
     source_type: str = Field(
-        description="Where the knowledge came from: plan, implement, review, hitl, reflection, librarian, manual"
+        description="plan|implement|review|hitl|reflection|librarian|manual"
     )
-    source_issue: int | None = Field(
-        default=None, description="GitHub issue number, if applicable"
-    )
-    source_repo: str | None = Field(
+    source_issue: int | None = Field(default=None)
+    source_repo: str | None = Field(default=None)
+    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+    valid_from: str | None = Field(
         default=None,
-        description="owner/repo slug, or 'global' for tribal entries",
+        description="ISO8601; defaults to created_at if unset",
     )
-    created_at: str = Field(
-        default_factory=lambda: datetime.now(UTC).isoformat(),
+    valid_to: str | None = Field(
+        default=None,
+        description="ISO8601 absolute date OR null=indefinite. Durations resolved at ingest.",
     )
-    updated_at: str = Field(
-        default_factory=lambda: datetime.now(UTC).isoformat(),
+    superseded_by: str | None = Field(
+        default=None, description="id of newer entry that replaces this one"
     )
+    superseded_reason: str | None = Field(default=None)
+    confidence: Literal["high", "medium", "low"] = Field(default="medium")
     stale: bool = Field(
         default=False,
-        description="Flagged as potentially outdated (legacy; see superseded_by)",
+        description="Legacy marker; see superseded_by for canonical staleness",
     )
+
+    @model_validator(mode="after")
+    def _default_valid_from(self) -> WikiEntry:
+        if self.valid_from is None:
+            self.valid_from = self.created_at
+        return self
 
 
 class WikiIndex(BaseModel):

@@ -527,3 +527,53 @@ class TestListReposLayoutCompat:
 
         store = RepoWikiStore(wiki_root)
         assert store.list_repos() == []
+
+
+def test_wiki_entry_temporal_defaults():
+    e = WikiEntry(title="t", content="c", source_type="plan")
+    assert e.valid_from == e.created_at
+    assert e.valid_to is None
+    assert e.superseded_by is None
+    assert e.superseded_reason is None
+    assert e.confidence == "medium"
+
+
+def test_wiki_entry_temporal_explicit_values():
+    e = WikiEntry(
+        title="t",
+        content="c",
+        source_type="plan",
+        valid_from="2026-01-01T00:00:00+00:00",
+        valid_to="2027-01-01T00:00:00+00:00",
+        superseded_by="01HQ0000000000000000000000",
+        superseded_reason="replaced by X",
+        confidence="high",
+    )
+    assert e.valid_to == "2027-01-01T00:00:00+00:00"
+    assert e.superseded_by == "01HQ0000000000000000000000"
+    assert e.confidence == "high"
+
+
+def test_wiki_entry_confidence_rejects_invalid():
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        WikiEntry(title="t", content="c", source_type="plan", confidence="maybe")
+
+
+def test_wiki_entry_backward_compat_loads_old_shape():
+    # Simulate loading an entry missing temporal fields (old on-disk format)
+    e = WikiEntry.model_validate(
+        {
+            "title": "legacy",
+            "content": "c",
+            "source_type": "plan",
+            "created_at": "2025-06-01T00:00:00+00:00",
+            "updated_at": "2025-06-01T00:00:00+00:00",
+            "stale": False,
+        }
+    )
+    assert e.valid_from == e.created_at  # defaulted from created_at
+    assert e.valid_to is None
+    assert e.superseded_by is None
+    assert e.confidence == "medium"
