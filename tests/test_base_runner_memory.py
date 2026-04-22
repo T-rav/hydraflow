@@ -74,3 +74,71 @@ async def test_harness_insights_recalled(base_runner):
 
     assert "Known Pipeline Patterns" in memory_section
     assert "CI timeout" in memory_section
+
+
+# ---------------------------------------------------------------------------
+# ADR index injection (Task 3.4)
+# ---------------------------------------------------------------------------
+
+
+def test_inject_adr_index_full_for_plan_phase(tmp_path):
+    """Plan-phase injection contains the full ADR index with summaries."""
+    from adr_index import ADRIndex
+
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    (adr_dir / "0001-foo.md").write_text(
+        "# ADR-0001: Foo\n\n**Status:** Accepted\n\n## Context\n\nbar.\n"
+    )
+
+    runner = BaseRunner.__new__(BaseRunner)
+    runner._adr_index = ADRIndex(adr_dir)
+    runner._phase_name = "plan"  # type: ignore[misc]
+
+    section = runner._inject_adr_index()
+    assert "ADR-0001 Foo" in section
+    assert "bar." in section
+
+
+def test_inject_adr_index_titles_only_for_implement_phase(tmp_path):
+    from adr_index import ADRIndex
+
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    (adr_dir / "0001-foo.md").write_text(
+        "# ADR-0001: Foo\n\n**Status:** Accepted\n\n## Context\n\nbar.\n"
+    )
+
+    runner = BaseRunner.__new__(BaseRunner)
+    runner._adr_index = ADRIndex(adr_dir)
+    runner._phase_name = "implement"  # type: ignore[misc]
+
+    section = runner._inject_adr_index()
+    assert "ADR-0001 Foo" in section
+    assert "bar." not in section
+
+
+def test_inject_adr_index_empty_dir_returns_empty_string(tmp_path):
+    from adr_index import ADRIndex
+
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    runner = BaseRunner.__new__(BaseRunner)
+    runner._adr_index = ADRIndex(adr_dir)
+    runner._phase_name = "plan"  # type: ignore[misc]
+    assert runner._inject_adr_index() == ""
+
+
+def test_inject_adr_index_unknown_phase_returns_empty(tmp_path):
+    """Default phase (e.g. HITL) returns empty — no ADR injection."""
+    from adr_index import ADRIndex
+
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    (adr_dir / "0001-foo.md").write_text(
+        "# ADR-0001: Foo\n\n**Status:** Accepted\n\n## Context\n\nbar.\n"
+    )
+    runner = BaseRunner.__new__(BaseRunner)
+    runner._adr_index = ADRIndex(adr_dir)
+    runner._phase_name = "unknown"  # type: ignore[misc]
+    assert runner._inject_adr_index() == ""

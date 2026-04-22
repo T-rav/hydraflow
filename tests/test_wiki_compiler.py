@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from repo_wiki import RepoWikiStore, WikiEntry
-from wiki_compiler import WikiCompiler
+from wiki_compiler import ContradictionCheck, WikiCompiler
 
 
 @pytest.fixture
@@ -223,3 +223,109 @@ class TestSynthesizeIngest:
 
         entries = await compiler.synthesize_ingest(REPO, 1, "plan", "x" * 200)
         assert entries == []
+
+
+# ---------------------------------------------------------------------------
+# Contradiction output parser
+# ---------------------------------------------------------------------------
+
+
+def test_parse_contradiction_output_valid():
+    raw = '{"contradicts":[{"id":"01HQ0000000000000000000000","reason":"replaced"}]}'
+    result = WikiCompiler._parse_contradiction_output(raw)
+    assert isinstance(result, ContradictionCheck)
+    assert len(result.contradicts) == 1
+    assert result.contradicts[0].id == "01HQ0000000000000000000000"
+    assert result.contradicts[0].reason == "replaced"
+
+
+def test_parse_contradiction_output_empty_list():
+    raw = '{"contradicts":[]}'
+    result = WikiCompiler._parse_contradiction_output(raw)
+    assert result.contradicts == []
+
+
+def test_parse_contradiction_output_with_markdown_fence():
+    raw = '```json\n{"contradicts":[]}\n```'
+    result = WikiCompiler._parse_contradiction_output(raw)
+    assert result.contradicts == []
+
+
+def test_parse_contradiction_output_invalid_json_returns_empty():
+    raw = "not json"
+    result = WikiCompiler._parse_contradiction_output(raw)
+    assert result.contradicts == []
+
+
+def test_parse_contradiction_output_missing_key_returns_empty():
+    raw = '{"other":"shape"}'
+    result = WikiCompiler._parse_contradiction_output(raw)
+    assert result.contradicts == []
+
+
+class TestDetectContradictions:
+    @pytest.mark.asyncio
+    async def test_flags_contradicting_sibling(self, compiler: WikiCompiler) -> None:
+        sibling = WikiEntry(
+            id="01HQ0000000000000000000000",
+            title="Use X",
+            content="Always use X.",
+            source_type="plan",
+            topic="patterns",
+        )
+        new = WikiEntry(
+            id="01HQ1111111111111111111111",
+            title="Never use X",
+            content="Never use X, prefer Y.",
+            source_type="plan",
+            topic="patterns",
+        )
+        raw_output = (
+            '{"contradicts":[{"id":"01HQ0000000000000000000000",'
+            '"reason":"new entry reverses guidance"}]}'
+        )
+        compiler._call_model = AsyncMock(return_value=raw_output)
+
+        result = await compiler.detect_contradictions(
+            new_entry=new, siblings=[sibling], repo="acme/widget"
+        )
+        assert len(result.contradicts) == 1
+        assert result.contradicts[0].id == "01HQ0000000000000000000000"
+
+    @pytest.mark.asyncio
+    async def test_empty_siblings_skips_llm(self, compiler: WikiCompiler) -> None:
+        compiler._call_model = AsyncMock()
+        new = WikiEntry(
+            id="01HQ0000000000000000000000",
+            title="x",
+            content="x",
+            source_type="plan",
+            topic="patterns",
+        )
+        result = await compiler.detect_contradictions(
+            new_entry=new, siblings=[], repo="acme/widget"
+        )
+        assert result.contradicts == []
+        compiler._call_model.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_llm_failure_returns_empty(self, compiler: WikiCompiler) -> None:
+        compiler._call_model = AsyncMock(return_value=None)
+        sibling = WikiEntry(
+            id="01HQ0000000000000000000000",
+            title="x",
+            content="x",
+            source_type="plan",
+            topic="patterns",
+        )
+        new = WikiEntry(
+            id="01HQ1111111111111111111111",
+            title="y",
+            content="y",
+            source_type="plan",
+            topic="patterns",
+        )
+        result = await compiler.detect_contradictions(
+            new_entry=new, siblings=[sibling], repo="acme/widget"
+        )
+        assert result.contradicts == []

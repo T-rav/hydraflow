@@ -8,15 +8,33 @@ output and produces ``WikiEntry`` objects for the store.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pydantic import BaseModel
+
+from events import EventType, HydraFlowEvent
 from repo_wiki import WikiEntry
+from staleness import evaluate as evaluate_staleness
 
 if TYPE_CHECKING:
+    from events import EventBus
     from repo_wiki import RepoWikiStore
+    from wiki_compiler import WikiCompiler
 
 logger = logging.getLogger("hydraflow.repo_wiki_ingest")
+
+
+# ---------------------------------------------------------------------------
+# Result model for ingest_phase_output
+# ---------------------------------------------------------------------------
+
+
+class IngestWithContradictionsResult(BaseModel):
+    entries_added: int = 0
+    entries_updated: int = 0
+    contradictions_marked: int = 0
 
 
 def ingest_from_plan(
@@ -220,3 +238,96 @@ def _extract_sections(text: str) -> dict[str, str]:
         sections[current_heading] = "\n".join(current_lines).strip()
 
     return sections
+
+
+# ---------------------------------------------------------------------------
+# Async helper: ingest with contradiction detection
+# ---------------------------------------------------------------------------
+
+
+async def ingest_phase_output(
+    *,
+    store: RepoWikiStore,
+    repo: str,
+    entries: list[WikiEntry],
+    compiler: WikiCompiler,
+    event_bus: EventBus | None = None,
+) -> IngestWithContradictionsResult:
+    """Ingest entries and run contradiction detection on each.
+
+    Contradicted siblings have their ``superseded_by``/``superseded_reason``
+    set via :meth:`RepoWikiStore.mark_superseded`. Entries are never deleted.
+
+    When ``event_bus`` is provided, a ``WIKI_SUPERSEDES`` event is published
+    for every contradiction marked. Publish failures are swallowed — wiki
+    events are non-critical.
+    """
+    ingest_result = store.ingest(repo, entries)
+    result = IngestWithContradictionsResult(
+        entries_added=ingest_result.entries_added,
+        entries_updated=ingest_result.entries_updated,
+    )
+
+    now = datetime.now(UTC)
+    for new_entry in entries:
+        if new_entry.topic is None:
+            continue
+        topic_path = store._repo_dir(repo) / f"{new_entry.topic}.md"
+        if not topic_path.exists():
+            continue
+        all_entries = store._load_topic_entries(topic_path)
+        siblings = [
+            e
+            for e in all_entries
+            if e.id != new_entry.id and evaluate_staleness(e, now=now) == "current"
+        ]
+        if not siblings:
+            continue
+
+        check = await compiler.detect_contradictions(
+            new_entry=new_entry,
+            siblings=siblings,
+            repo=repo,
+        )
+        for flagged in check.contradicts:
+            if store.mark_superseded(
+                repo,
+                entry_id=flagged.id,
+                superseded_by=new_entry.id,
+                reason=flagged.reason,
+            ):
+                result.contradictions_marked += 1
+                if event_bus is not None:
+                    await _emit_wiki_supersedes(
+                        event_bus=event_bus,
+                        repo=repo,
+                        superseded_id=flagged.id,
+                        superseded_by=new_entry.id,
+                        reason=flagged.reason,
+                    )
+
+    return result
+
+
+async def _emit_wiki_supersedes(
+    *,
+    event_bus: EventBus,
+    repo: str,
+    superseded_id: str,
+    superseded_by: str,
+    reason: str,
+) -> None:
+    """Publish a WIKI_SUPERSEDES event. Swallows errors."""
+    event = HydraFlowEvent(
+        type=EventType.WIKI_SUPERSEDES,
+        data={
+            "repo": repo,
+            "superseded_id": superseded_id,
+            "superseded_by": superseded_by,
+            "reason": reason,
+        },
+    )
+    try:
+        await event_bus.publish(event)
+    except Exception:  # noqa: BLE001
+        logger.debug("wiki event publish failed; continuing")

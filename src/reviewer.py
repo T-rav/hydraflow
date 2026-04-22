@@ -6,6 +6,7 @@ import logging
 import re
 import time
 from pathlib import Path
+from typing import ClassVar
 
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
@@ -54,6 +55,7 @@ class ReviewRunner(BaseRunner):
     """
 
     _log = logger
+    _phase_name: ClassVar[str] = "review"
 
     @staticmethod
     def _format_code_scanning_alerts(

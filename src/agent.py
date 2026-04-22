@@ -7,7 +7,7 @@ import logging
 import re
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
@@ -55,6 +55,7 @@ class AgentRunner(BaseRunner):
     """
 
     _log = logger
+    _phase_name: ClassVar[str] = "implement"
 
     _SELF_CHECK_CHECKLIST = """
 ## Self-Check Before Committing

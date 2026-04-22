@@ -9,6 +9,11 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
+from adr_index import (  # noqa: F401 — used in _inject_adr_index
+    ADRIndex,
+    render_full,
+    render_titles_only,
+)
 from agent_cli import build_agent_command
 from config import Credentials, HydraFlowConfig
 from events import EventBus
@@ -39,6 +44,7 @@ class BaseRunner:
     """
 
     _log: ClassVar[logging.Logger]
+    _phase_name: ClassVar[str] = "unknown"
 
     def __init__(
         self,
@@ -69,6 +75,9 @@ class BaseRunner:
         self._trace_subprocess_counter: int = 0
         self._credentials = credentials or Credentials()
         self._wiki_store = wiki_store
+        # ADR runtime index — injected into plan/implement/review prompts.
+        # Relative path from the worktree cwd. None-safe at read time.
+        self._adr_index: ADRIndex | None = ADRIndex(Path("docs/adr"))
 
     @property
     def active_count(self) -> int:
@@ -469,6 +478,11 @@ class BaseRunner:
         if wiki_section:
             memory_section += wiki_section
 
+        # Append ADR index (load-bearing architectural decisions)
+        adr_section = self._inject_adr_index()
+        if adr_section:
+            memory_section += adr_section
+
         self._last_context_stats = {
             "cache_hits": 0,
             "cache_misses": 0,
@@ -480,6 +494,7 @@ class BaseRunner:
                 + len(harness_insights_raw)
             ),
             "context_chars_after": len(memory_section),
+            "adr_chars": len(adr_section),
             "dedup_items_removed": dedup_items_removed,
             "dedup_chars_saved": dedup_chars_saved,
         }
@@ -512,6 +527,40 @@ class BaseRunner:
         if wiki_section:
             return f"\n\n{wiki_section}"
         return ""
+
+    #: Prompt-size budget for the rendered ADR index section. If render_full
+    #: exceeds this, we fall back to the titles-only view (which is bounded by
+    #: ADR count, not summary length). Prevents large ADR corpora from
+    #: dominating the plan prompt.
+    _MAX_ADR_SECTION_CHARS: ClassVar[int] = 4000
+
+    def _inject_adr_index(self) -> str:
+        """Inject the ADR index into the current phase's prompt.
+
+        Plan phase: full index (with summaries) — or titles-only if the full
+        view would exceed ``_MAX_ADR_SECTION_CHARS``.
+        Implement/review: titles-only (prompt-size conscious; excludes Superseded).
+        Other phases: empty.
+        """
+        adr_index = getattr(self, "_adr_index", None)
+        if adr_index is None:
+            return ""
+
+        adrs = adr_index.adrs()
+        if not adrs:
+            return ""
+
+        phase = self._phase_name
+        if phase == "plan":
+            body = render_full(adrs)
+            if len(body) > self._MAX_ADR_SECTION_CHARS:
+                body = render_titles_only(adrs)
+        elif phase in ("implement", "review"):
+            body = render_titles_only(adrs)
+        else:
+            return ""
+
+        return f"\n\n{body}" if body else ""
 
     def _consume_context_stats(self) -> dict[str, int]:
         stats = dict(self._last_context_stats)
