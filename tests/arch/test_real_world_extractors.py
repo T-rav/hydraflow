@@ -13,12 +13,11 @@ See ``tests/arch/fixtures/real_world/ATTRIBUTION.md`` for repo provenance,
 commit SHAs, and per-language extractor findings/limitations.
 
 Known limitations:
-- Go: the ``import_declaration`` query only fires on single-line ``import "pkg"``
-  statements; grouped ``import (...)`` blocks use an intermediate
-  ``import_spec_list`` node that the query does not traverse. Fixtures must use
-  single-line imports to exercise cross-package resolution.
 - JavaScript: CommonJS ``require(...)`` is not captured — only ESM ``import``.
   No repo under test relies on CJS for internal deps.
+- Swift: not supported; the bundled ``tree_sitter_languages`` does not include
+  a Swift grammar. Adding one requires a separate ``tree-sitter-swift`` dep
+  and is tracked as a follow-up.
 """
 
 from __future__ import annotations
@@ -92,10 +91,11 @@ CASES: list[tuple[str, str, int, set[tuple[str, str]], set[tuple[str, str]]]] = 
         },
     ),
     # --- Go: synthesized two-package groupcache-inspired example ---
-    # ``cache`` package imports ``lru`` package via single-line import statement.
-    # The directory-unit extractor maps each package dir to a node; the stems map
-    # includes f.parent.name so "lru" resolves to the lru/ directory node.
-    # NOTE: grouped import blocks are NOT captured (see module docstring).
+    # ``cache`` package imports ``lru`` package via a grouped ``import (...)``
+    # block. The directory-unit extractor maps each package dir to a node; the
+    # stems map includes f.parent.name so "lru" resolves to the lru/ directory
+    # node. The query matches ``import_spec`` at any depth so both grouped and
+    # single-line imports are captured.
     (
         "go",
         "go_multi",

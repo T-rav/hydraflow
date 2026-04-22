@@ -2,8 +2,11 @@
 // Structure inspired by golang/groupcache.
 package cache
 
-import "sync"
-import "github.com/example/groupcache/lru"
+import (
+	"sync"
+
+	"github.com/example/groupcache/lru"
+)
 
 // Stats holds cache statistics.
 type Stats struct {

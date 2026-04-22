@@ -78,7 +78,10 @@ SUPPORTED: dict[str, dict[str, Any]] = {
     "go": {
         "ext": (".go",),
         "unit": "directory",
-        "query": "(import_declaration (import_spec path: (interpreted_string_literal) @src))",
+        # Match `import_spec` at any depth so grouped `import (...)` blocks
+        # (which wrap specs in an `import_spec_list`) and single-line
+        # `import "pkg"` statements are both captured.
+        "query": "(import_spec path: (interpreted_string_literal) @src)",
         "capture": "src",
     },
     "java": {

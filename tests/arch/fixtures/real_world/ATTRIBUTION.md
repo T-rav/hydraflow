@@ -70,10 +70,10 @@ upstream project is vendored alongside the source files.
 - **Extractor finding:** 2 directory nodes (`lru`, `cache`), 1 cross-package
   edge `(cache, lru)`. The `stems` map is populated with `f.parent.name` for
   directory-unit languages; `"lru"` maps to `lru/lru.go`, so the import's last
-  path segment resolves correctly. **Known limitation:** The tree-sitter query
-  `(import_declaration (import_spec path: ...))` does NOT match grouped
-  `import (...)` blocks — only single-line `import "pkg"` statements. The
-  fixture uses single-line imports exclusively to work around this.
+  path segment resolves correctly. The Go query matches `import_spec` at any
+  depth so grouped `import (...)` blocks and single-line `import "pkg"` are
+  both captured — the fixture uses a grouped block to exercise the common
+  idiomatic form.
 
 ---
 
