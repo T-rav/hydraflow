@@ -8,4 +8,5 @@ NOT_IMPLEMENTED findings — by design, to keep ADR-0044 and the audit in lockst
 from . import (
     p1_docs,  # noqa: F401
     p2_architecture,  # noqa: F401
+    p3_testing,  # noqa: F401
 )
