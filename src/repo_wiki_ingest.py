@@ -262,6 +262,12 @@ async def ingest_phase_output(
     for every contradiction marked. Publish failures are swallowed — wiki
     events are non-critical.
     """
+    ids = [e.id for e in entries]
+    if len(set(ids)) != len(ids):
+        duplicates = [i for i in set(ids) if ids.count(i) > 1]
+        raise ValueError(
+            f"ingest_phase_output entries must have unique ids; duplicate: {duplicates!r}"
+        )
     ingest_result = store.ingest(repo, entries)
     result = IngestWithContradictionsResult(
         entries_added=ingest_result.entries_added,

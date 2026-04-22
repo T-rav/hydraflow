@@ -319,3 +319,34 @@ async def test_ingest_phase_output_emits_wiki_supersedes_event(tmp_path):
     assert event.data["superseded_id"] == entry_a.id
     assert event.data["superseded_by"] == entry_b.id
     assert event.data["reason"] == "reverses"
+
+
+async def test_ingest_phase_output_rejects_duplicate_ids(tmp_path):
+    from unittest.mock import AsyncMock
+
+    from repo_wiki import RepoWikiStore, WikiEntry
+    from repo_wiki_ingest import ingest_phase_output
+
+    store = RepoWikiStore(tmp_path / "wiki")
+    dup = WikiEntry(
+        id="01HQ0000000000000000000000",
+        title="x",
+        content="y",
+        source_type="plan",
+        topic="patterns",
+    )
+    dup2 = WikiEntry(
+        id="01HQ0000000000000000000000",  # same id — invalid
+        title="z",
+        content="w",
+        source_type="plan",
+        topic="patterns",
+    )
+    compiler = AsyncMock()
+    with pytest.raises(ValueError, match="duplicate"):
+        await ingest_phase_output(
+            store=store,
+            repo="acme/widget",
+            entries=[dup, dup2],
+            compiler=compiler,
+        )
