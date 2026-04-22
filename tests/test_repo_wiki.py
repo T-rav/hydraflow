@@ -700,3 +700,46 @@ def test_active_lint_flags_old_entries_in_result_but_keeps_them(store):
     result = store.active_lint(REPO, closed_issues=set())
     # New semantics: report flagged count, do not prune
     assert getattr(result, "review_candidates_flagged", 0) >= 1
+
+
+def test_loads_pre_phase1_wiki_on_disk(tmp_path):
+    """Wikis written before Phase 1 lack temporal fields. They must still load."""
+    from repo_wiki import RepoWikiStore
+
+    root = tmp_path / "repo_wiki"
+    repo_dir = root / "legacy" / "repo"
+    repo_dir.mkdir(parents=True)
+
+    # Minimal pre-Phase-1 on-disk layout: index.json + one topic page.
+    (repo_dir / "index.json").write_text(
+        '{"repo_slug":"legacy/repo","topics":{"patterns":["old"]},'
+        '"total_entries":1,"last_updated":"2025-06-01T00:00:00+00:00",'
+        '"last_lint":null}'
+    )
+    # Topic page uses the current ```json:entry``` code-block format but with
+    # old-style JSON that lacks Phase-1 temporal fields (valid_from, valid_to,
+    # superseded_by, superseded_reason, confidence, id, topic, source_repo).
+    (repo_dir / "patterns.md").write_text(
+        "# Patterns\n\n"
+        "## old\n\n"
+        "x\n\n"
+        "```json:entry\n"
+        '{"title":"old","content":"x","source_type":"plan",'
+        '"source_issue":null,"created_at":"2025-06-01T00:00:00+00:00",'
+        '"updated_at":"2025-06-01T00:00:00+00:00","stale":false}\n'
+        "```\n"
+    )
+
+    store = RepoWikiStore(root)
+    # Should not raise — legacy entries gain defaulted temporal fields.
+    entries = store._load_topic_entries(repo_dir / "patterns.md")
+    assert len(entries) == 1
+    assert entries[0].title == "old"
+    assert entries[0].valid_from == entries[0].created_at
+    assert entries[0].valid_to is None
+    assert entries[0].superseded_by is None
+    assert entries[0].confidence == "medium"
+
+    # Query must work and return the entry (it's current).
+    out = store.query("legacy/repo", topics=["patterns"])
+    assert "old" in out
