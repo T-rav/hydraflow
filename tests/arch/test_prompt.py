@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from arch.prompt import render_adr_section
-
 from arch.models import AdrSummary
+from arch.prompt import render_adr_section
 
 
 def _adr(n: str, title: str, one_line: str = "one line.") -> AdrSummary:
