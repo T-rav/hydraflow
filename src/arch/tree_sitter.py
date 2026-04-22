@@ -16,7 +16,7 @@ from arch.models import ImportGraph, ModuleUnit
 # call the C-level tree_sitter_<lang>() functions.  This avoids the broken
 # tree_sitter_languages.get_language() / get_parser() shim which was compiled
 # for tree-sitter <0.22 and fails with tree-sitter 0.25's new Language.__init__.
-_TSL_SO = list(pathlib.Path(tree_sitter_languages.__path__[0]).glob("*.so"))[0]
+_TSL_SO = next(pathlib.Path(next(iter(tree_sitter_languages.__path__))).glob("*.so"))
 _TSL_LIB = ctypes.cdll.LoadLibrary(str(_TSL_SO))
 
 
@@ -133,7 +133,7 @@ def tree_sitter_extractor(language: str) -> Callable[[str], ImportGraph]:
                 rel_src if unit == "file" else f.parent.relative_to(root).as_posix()
             )
             cursor = QueryCursor(query)
-            for _pat_idx, captures in cursor.matches(tree.root_node):
+            for _, captures in cursor.matches(tree.root_node):
                 key = cap_name if cap_name is not None else next(iter(captures), None)
                 if key is None:
                     continue
