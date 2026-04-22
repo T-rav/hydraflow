@@ -42,7 +42,7 @@ def _spec(
         source="src",
         what="what",
         remediation="fix it",
-        principle=check_id.split(".")[0],
+        principle=check_id.split(".", 1)[0],
     )
 
 

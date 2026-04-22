@@ -17,10 +17,10 @@ FAIL has almost nothing to anchor a plan against.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class Mode(str, Enum):
+class Mode(StrEnum):
     GREENFIELD = "greenfield"
     INCREMENTAL = "incremental"
 

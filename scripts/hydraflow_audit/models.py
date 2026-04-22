@@ -8,17 +8,17 @@ execution environment handed to each check function.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
 
-class Severity(str, Enum):
+class Severity(StrEnum):
     STRUCTURAL = "STRUCTURAL"
     BEHAVIORAL = "BEHAVIORAL"
     CULTURAL = "CULTURAL"
 
 
-class Status(str, Enum):
+class Status(StrEnum):
     PASS = "PASS"
     WARN = "WARN"
     FAIL = "FAIL"
