@@ -45,8 +45,15 @@ SUPPORTED: dict[str, dict[str, Any]] = {
     "python": {
         "ext": (".py",),
         "unit": "file",
-        "query": "(import_statement) @i (import_from_statement) @i",
-        "capture": None,  # whole-node capture; extract module string in Python
+        # Capture the module name of `import X` / `from X import ...`. For
+        # relative imports (from .foo import bar) module_name is a
+        # relative_import node whose text is ".foo"; for absolute it's a
+        # dotted_name like "foo.bar". `_resolve_relative` handles both.
+        "query": (
+            "(import_statement name: (dotted_name) @src) "
+            "(import_from_statement module_name: _ @src)"
+        ),
+        "capture": "src",
     },
     "typescript": {
         "ext": (".ts", ".tsx"),
@@ -75,8 +82,14 @@ SUPPORTED: dict[str, dict[str, Any]] = {
     "rust": {
         "ext": (".rs",),
         "unit": "file",
-        "query": "(use_declaration) @i",
-        "capture": None,
+        # `mod foo;` expresses a crate-internal module relation (foo.rs or
+        # foo/mod.rs). `use foo::bar::Baz;` references a path; the argument
+        # text is "foo::bar::Baz" and we fall back to the last segment as a
+        # stem match.
+        "query": (
+            "(use_declaration argument: (_) @src) (mod_item name: (identifier) @src)"
+        ),
+        "capture": "src",
     },
     "ruby": {
         "ext": (".rb",),
@@ -152,9 +165,9 @@ def tree_sitter_extractor(language: str) -> Callable[[str], ImportGraph]:
                         "utf-8", errors="ignore"
                     )
                     spec = _strip_quotes(text)
-                    target = _resolve_relative(f.parent, spec, exts, root) or stems.get(
-                        spec.split("/")[-1].split(".")[0]
-                    )
+                    target = _resolve_relative(
+                        f.parent, spec, exts, root, language
+                    ) or stems.get(_stem_key(spec, language))
                     if target is None:
                         continue
                     resolved = target if unit == "file" else str(Path(target).parent)
@@ -173,10 +186,29 @@ def _strip_quotes(s: str) -> str:
 
 
 def _resolve_relative(
+    base: Path, spec: str, exts: tuple[str, ...], root: Path, language: str
+) -> str | None:
+    """Resolve a relative import spec to a repo-relative file path.
+
+    Two relative-import styles are handled:
+
+    * ES-module style (``./foo``, ``../bar``) used by TS/JS and Ruby
+      ``require_relative``.
+    * Python style (``.foo``, ``..foo.bar``, bare ``.``) where leading dots
+      express package level rather than path segments.
+    """
+    if not spec:
+        return None
+    if spec.startswith("./") or spec.startswith("../"):
+        return _resolve_es_relative(base, spec, exts, root)
+    if language == "python" and spec.startswith("."):
+        return _resolve_python_relative(base, spec, exts, root)
+    return None
+
+
+def _resolve_es_relative(
     base: Path, spec: str, exts: tuple[str, ...], root: Path
 ) -> str | None:
-    if not spec.startswith("."):
-        return None
     candidate = (base / spec).resolve()
     for ext in exts:
         p = candidate.with_suffix(ext)
@@ -193,3 +225,54 @@ def _resolve_relative(
             except ValueError:
                 return None
     return None
+
+
+def _resolve_python_relative(
+    base: Path, spec: str, exts: tuple[str, ...], root: Path
+) -> str | None:
+    """Resolve a Python relative import like ``.foo`` or ``..foo.bar``.
+
+    Leading dots express package level: one dot = current package, two = parent,
+    and so on. The first dotted segment after the dots is the target module.
+    """
+    dots = 0
+    while dots < len(spec) and spec[dots] == ".":
+        dots += 1
+    remainder = spec[dots:]
+    if not remainder:
+        return None  # bare "from . import X" — we have no X to resolve
+    target_dir = base
+    for _ in range(dots - 1):
+        target_dir = target_dir.parent
+    first_segment = remainder.split(".")[0]
+    for ext in exts:
+        p = target_dir / (first_segment + ext)
+        if p.is_file():
+            try:
+                return p.relative_to(root).as_posix()
+            except ValueError:
+                return None
+    pkg_dir = target_dir / first_segment
+    if pkg_dir.is_dir():
+        for ext in exts:
+            init = pkg_dir / f"__init__{ext}"
+            if init.is_file():
+                try:
+                    return init.relative_to(root).as_posix()
+                except ValueError:
+                    return None
+    return None
+
+
+def _stem_key(spec: str, language: str) -> str:
+    """Derive the basename stem used as a fallback key in the ``stems`` map.
+
+    Most languages use ``/`` path separators (``./foo/bar`` → ``bar``). Java
+    uses ``.`` as a scope separator (``com.example.Bar`` → ``Bar``). Rust uses
+    ``::`` (``core::hint`` → ``hint``).
+    """
+    if language == "java":
+        return spec.rsplit(".", 1)[-1]
+    if language == "rust":
+        return spec.rsplit("::", 1)[-1]
+    return spec.split("/")[-1].split(".")[0]

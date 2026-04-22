@@ -15,14 +15,10 @@ upstream project is vendored alongside the source files.
 - **License:** MIT
 - **Files vendored:** `src/dotenv/__init__.py`, `src/dotenv/main.py`,
   `src/dotenv/parser.py`, `src/dotenv/variables.py`, `LICENSE`
-- **Extractor finding:** The Python extractor captures the full
-  `import_from_statement` node text (e.g., `"from .main import foo"`). Because
-  this text doesn't start with `.`, `_resolve_relative` returns `None`, and the
-  fallback `stems.get(spec.split("/")[-1].split(".")[0])` receives `"from "` (with
-  a trailing space), which never matches a file stem. As a result, **all relative
-  imports produce zero edges**. This is a known limitation of the current Python
-  extractor — the node capture should extract only the module path token, not the
-  entire statement. Filed as a follow-up.
+- **Extractor finding:** Works correctly for relative imports. The query
+  captures the `module_name` child of `import_from_statement`, and the
+  Python-specific branch of `_resolve_relative` handles leading-dot package
+  levels (`.main` → sibling `main.py`). 4 nodes, 3 internal edges.
 
 ---
 
@@ -86,13 +82,10 @@ upstream project is vendored alongside the source files.
   clear cross-file imports was found. `vavr`, `Optional`, and similar projects all
   exceed 20 files or have complex build setups. A synthesized 3-class example gives
   reproducible, license-clean coverage.
-- **Extractor finding:** The Java extractor query `(import_declaration (scoped_identifier) @src)`
-  captures the full dotted name (e.g., `"com.example.result.Success"`). The
-  fallback `stems.get(spec.split("/")[-1].split(".")[0])` extracts `"com"` — the
-  first package segment, not the class name — so no stem match occurs. Result: 3
-  nodes, 0 edges. This is a known extractor limitation: the scoped identifier
-  should be split on `.` to get the last segment (the class name) and matched
-  against file stems. Filed as a follow-up.
+- **Extractor finding:** Works correctly. The language-specific stem key uses
+  `spec.rsplit(".", 1)[-1]` for Java, extracting the class name (e.g., `Success`)
+  from the scoped identifier `com.example.result.Success`, which matches the
+  `Success.java` stem. 3 nodes, 2 internal edges.
 
 ---
 
@@ -102,15 +95,13 @@ upstream project is vendored alongside the source files.
 - **Commit SHA:** `af77385d0daf4d0e949e81f2588be2e44f69f086`
 - **License:** MIT and Apache-2.0 (dual-licensed); MIT file vendored
 - **Files vendored:** `src/lib.rs`, `src/u128_ext.rs`, `Cargo.toml`, `LICENSE`
-- **Extractor finding:** The Rust extractor query `(use_declaration) @i` captures
-  `use` statements but NOT `mod` declarations. The relationship `lib.rs` → `u128_ext.rs`
-  is declared via `mod u128_ext;` (a `mod_item` AST node), which is not matched by
-  the query. Additionally, even if `use` statements were resolved, the text
-  `"use core::hint;"` cannot map to a file path via the current
-  `stems.get(spec.split("/")[-1].split(".")[0])` fallback since the spec contains
-  spaces and Rust module paths use `::` not `/`. Result: 2 nodes, 0 edges. The
-  extractor should add a `(mod_item name: (identifier) @src)` query to capture
-  internal module declarations. Filed as a follow-up.
+- **Extractor finding:** Works correctly for `mod foo;` crate-internal module
+  declarations. The query now captures both `use_declaration` argument nodes and
+  `mod_item` name identifiers; the stem key for Rust uses `rsplit("::", 1)[-1]`
+  so that path-style uses (`core::hint`) and bare mod names (`u128_ext`) both
+  resolve to the last segment. 2 nodes, 1 internal edge (`lib.rs` → `u128_ext.rs`
+  via `mod u128_ext;`). External-crate `use` paths like `core::hint` correctly
+  produce no edges because there's no matching file stem in the repo.
 
 ---
 

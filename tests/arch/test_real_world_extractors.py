@@ -12,15 +12,12 @@ Each test case runs the extractor for one language against a small (~20 file,
 See ``tests/arch/fixtures/real_world/ATTRIBUTION.md`` for repo provenance,
 commit SHAs, and per-language extractor findings/limitations.
 
-Known limitations surfaced by these tests (do NOT fix here; follow-up issues):
-- Python: relative imports produce zero edges (extractor captures full statement
-  text; ``_resolve_relative`` never fires on ``"from .foo import bar"``).
-- Go: single-package repos map all files to one directory node; stdlib-only
-  imports leave zero edges.
-- Java: scoped-identifier resolution extracts first package segment (``"com"``)
-  rather than class name; zero edges result.
-- Rust: ``mod foo;`` is a ``mod_item`` not a ``use_declaration``; the module-
-  declaration relationship is invisible to the current query.
+Known limitations:
+- Go: single-package repos collapse all files to one directory node; with
+  stdlib-only imports there are no internal edges to detect. This is the shape
+  of the go-multierror fixture, not a bug in the extractor.
+- JavaScript: CommonJS ``require(...)`` is not captured — only ESM ``import``.
+  No repo under test relies on CJS for internal deps.
 """
 
 from __future__ import annotations
@@ -48,13 +45,16 @@ REAL_WORLD = Path(__file__).parent / "fixtures" / "real_world"
 
 CASES: list[tuple[str, str, int, set[tuple[str, str]], set[tuple[str, str]]]] = [
     # --- Python: python-dotenv ---
-    # Extractor limitation: full `from .main import foo` text never resolves.
-    # Zero edges are expected; we only assert node count and absence of noise.
+    # Relative imports (`from .main import foo`) resolve to the sibling file.
     (
         "python",
         "python",
         4,
-        set(),  # see module docstring for known limitation
+        {
+            ("src/dotenv/__init__.py", "src/dotenv/main.py"),
+            ("src/dotenv/main.py", "src/dotenv/parser.py"),
+            ("src/dotenv/main.py", "src/dotenv/variables.py"),
+        },
         {
             ("src/dotenv/__init__.py", "LICENSE"),
             ("src/dotenv/main.py", "LICENSE"),
@@ -104,13 +104,22 @@ CASES: list[tuple[str, str, int, set[tuple[str, str]], set[tuple[str, str]]]] = 
         },
     ),
     # --- Java: synthesized 3-class example ---
-    # Extractor limitation: scoped identifier resolves to first package segment.
-    # Zero edges are expected.
+    # Scoped identifiers (`import com.example.result.Success`) resolve via
+    # last-segment stem lookup to the corresponding source file.
     (
         "java",
         "java",
         3,
-        set(),  # see module docstring for known limitation
+        {
+            (
+                "src/main/java/com/example/result/Result.java",
+                "src/main/java/com/example/result/Success.java",
+            ),
+            (
+                "src/main/java/com/example/result/Result.java",
+                "src/main/java/com/example/result/Failure.java",
+            ),
+        },
         {
             (
                 "src/main/java/com/example/result/Result.java",
@@ -119,12 +128,13 @@ CASES: list[tuple[str, str, int, set[tuple[str, str]], set[tuple[str, str]]]] = 
         },
     ),
     # --- Rust: itoa ---
-    # `mod u128_ext;` is a mod_item, not a use_declaration; zero edges expected.
+    # `mod u128_ext;` in lib.rs is a mod_item; the query captures its name
+    # identifier and resolves to the sibling u128_ext.rs file.
     (
         "rust",
         "rust",
         2,
-        set(),  # see module docstring for known limitation
+        {("src/lib.rs", "src/u128_ext.rs")},
         {
             ("src/lib.rs", "LICENSE"),
             ("src/lib.rs", "Cargo.toml"),
