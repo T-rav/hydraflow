@@ -65,4 +65,7 @@ async def open_adr_draft_issue(
         logger.warning("Failed to open ADR-draft issue", exc_info=True)
         return None
 
-    return int(response.get("number")) if isinstance(response, dict) else None
+    if not isinstance(response, dict):
+        return None
+    number = response.get("number")
+    return int(number) if number is not None else None
