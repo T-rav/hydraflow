@@ -59,6 +59,9 @@ SKIP_LIST: set[str] = {
     # Wiki supersedes events are consumed server-side (audit log for temporal
     # invalidation); no direct dashboard reducer case.
     "wiki_supersedes",
+    # Tribal promotion events are consumed server-side for audit; no
+    # dashboard reducer case.
+    "tribal_promotion",
 }
 
 

@@ -29,6 +29,7 @@ export const initialState = {
   hitlEscalation: null,
   humanInputRequests: {},
   backgroundWorkers: [],
+  adrDrafts: [],
   metrics: null,
   systemAlert: null,
   intents: [],
@@ -794,6 +795,20 @@ export function reducer(state, action) {
 
     case 'SET_TRACKED_REPORTS':
       return { ...state, trackedReports: action.data || [] }
+
+    case 'adr_draft_opened':
+      return {
+        ...addEvent(state, action),
+        adrDrafts: [
+          {
+            issueNumber: action.data.issue_number,
+            title: action.data.title,
+            reason: action.data.reason,
+            timestamp: action.timestamp,
+          },
+          ...(state.adrDrafts || []).slice(0, 19),
+        ],
+      }
 
     default:
       return addEvent(state, action)
