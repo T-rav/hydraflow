@@ -4,6 +4,13 @@ own codebase, matching the existing scripts/check_layer_imports.py behaviour.
 If this test starts failing, the new checker has found a real violation OR the
 rule module has fallen out of sync with the hardcoded map. Read the diff, fix
 either the rules or the code.
+
+Known limitation: python_ast_extractor resolves imports via a basename→path map
+built with `setdefault`, so when two files share a stem (e.g. `src/foo.py` and
+`tests/foo.py`), only the first one encountered becomes the resolution target.
+HydraFlow has no such collisions today, so this gate is trivially equivalent on
+this repo. A stronger gate would compare violation sets by edge, not just exit
+codes — deferred until a real collision appears.
 """
 
 from __future__ import annotations

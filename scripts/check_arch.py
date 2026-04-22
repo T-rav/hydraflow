@@ -52,10 +52,11 @@ def main(argv: list[str] | None = None) -> int:
     if proc.returncode == 2:
         return 2
     if proc.returncode == 0:
-        if "SKIPPED" not in proc.stderr:
-            print("OK: no architecture violations")
-        else:
+        skipped = any(line.startswith("SKIPPED:") for line in proc.stderr.splitlines())
+        if skipped:
             print("SKIPPED: no .hydraflow/arch_rules.py")
+        else:
+            print("OK: no architecture violations")
         return 0
 
     violations = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]

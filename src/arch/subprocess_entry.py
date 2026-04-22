@@ -42,7 +42,15 @@ def main(argv: list[str]) -> int:
         print(f"EXTRACTOR_ERROR: {e}", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
         return 2
-    violations = validate(graph, rules, repo_root=repo)
+    try:
+        violations = validate(graph, rules, repo_root=repo)
+    except Exception as e:  # noqa: BLE001
+        # Config errors (e.g. Fitness.outside_layer not in LayerMap) surface
+        # here as ValueError; treat them as rule-module errors (exit 2), not
+        # silent "violations found" (exit 1).
+        print(f"VALIDATE_ERROR: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        return 2
     for v in violations:
         print(json.dumps(asdict(v), sort_keys=True))
     return 1 if violations else 0
