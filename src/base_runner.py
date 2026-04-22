@@ -273,7 +273,13 @@ class BaseRunner:
                 log_dir,
                 exc_info=True,
             )
-        asyncio.ensure_future(self._process_transcript_for_adr_draft(transcript))
+        # Schedule ADR-draft processing if we're inside a running event loop.
+        # Called from sync test contexts there is no loop — skip gracefully.
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(self._process_transcript_for_adr_draft(transcript))
 
     async def _process_transcript_for_adr_draft(self, transcript: str) -> None:
         """Scan transcript for ADR_DRAFT_SUGGESTION and run the 4-gate pipeline.
