@@ -14,10 +14,12 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
+from events import EventType, HydraFlowEvent
 from repo_wiki import WikiEntry
 from staleness import evaluate as evaluate_staleness
 
 if TYPE_CHECKING:
+    from events import EventBus
     from repo_wiki import RepoWikiStore
     from wiki_compiler import WikiCompiler
 
@@ -249,11 +251,16 @@ async def ingest_phase_output(
     repo: str,
     entries: list[WikiEntry],
     compiler: WikiCompiler,
+    event_bus: EventBus | None = None,
 ) -> IngestWithContradictionsResult:
     """Ingest entries and run contradiction detection on each.
 
     Contradicted siblings have their ``superseded_by``/``superseded_reason``
     set via :meth:`RepoWikiStore.mark_superseded`. Entries are never deleted.
+
+    When ``event_bus`` is provided, a ``WIKI_SUPERSEDES`` event is published
+    for every contradiction marked. Publish failures are swallowed — wiki
+    events are non-critical.
     """
     ingest_result = store.ingest(repo, entries)
     result = IngestWithContradictionsResult(
@@ -290,5 +297,37 @@ async def ingest_phase_output(
                 reason=flagged.reason,
             ):
                 result.contradictions_marked += 1
+                if event_bus is not None:
+                    await _emit_wiki_supersedes(
+                        event_bus=event_bus,
+                        repo=repo,
+                        superseded_id=flagged.id,
+                        superseded_by=new_entry.id,
+                        reason=flagged.reason,
+                    )
 
     return result
+
+
+async def _emit_wiki_supersedes(
+    *,
+    event_bus: EventBus,
+    repo: str,
+    superseded_id: str,
+    superseded_by: str,
+    reason: str,
+) -> None:
+    """Publish a WIKI_SUPERSEDES event. Swallows errors."""
+    event = HydraFlowEvent(
+        type=EventType.WIKI_SUPERSEDES,
+        data={
+            "repo": repo,
+            "superseded_id": superseded_id,
+            "superseded_by": superseded_by,
+            "reason": reason,
+        },
+    )
+    try:
+        await event_bus.publish(event)
+    except Exception:  # noqa: BLE001
+        logger.debug("wiki event publish failed; continuing")
