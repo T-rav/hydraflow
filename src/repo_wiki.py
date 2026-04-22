@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, Field, model_validator
 from ulid import ULID
 
+from staleness import evaluate as evaluate_staleness
+
 if TYPE_CHECKING:
     from dedup_store import DedupStore
 
@@ -662,6 +664,12 @@ class RepoWikiStore:
             entries = self._load_topic_entries(topic_path)
             if not entries:
                 continue
+
+            # Staleness filtering — only inject current entries into prompts
+            now = datetime.now(UTC)
+            entries = [
+                e for e in entries if evaluate_staleness(e, now=now) == "current"
+            ]
 
             # Keyword filtering within topic
             if keywords:

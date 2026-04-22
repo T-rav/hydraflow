@@ -577,3 +577,60 @@ def test_wiki_entry_backward_compat_loads_old_shape():
     assert e.valid_to is None
     assert e.superseded_by is None
     assert e.confidence == "medium"
+
+
+# ---------------------------------------------------------------------------
+# Staleness filtering in query()
+# ---------------------------------------------------------------------------
+
+from datetime import UTC, datetime, timedelta
+
+
+def test_query_excludes_superseded_entries(store, tmp_path):
+    store.ingest(
+        REPO,
+        [
+            WikiEntry(
+                title="old rule", content="A", source_type="plan", topic="patterns"
+            ),
+        ],
+    )
+    # Simulate another ingest that supersedes the first (we'll wire the
+    # contradiction detector in PR 2; here we set superseded_by directly)
+    index_dir = store._repo_dir(REPO)
+    topic_path = index_dir / "patterns.md"
+    entries = store._load_topic_entries(topic_path)
+    assert len(entries) == 1
+    superseded = entries[0].model_copy(
+        update={"superseded_by": "01HQ0000000000000000000000"}
+    )
+    store._write_topic_page(topic_path, "patterns", [superseded])
+
+    out = store.query(REPO, topics=["patterns"])
+    assert "old rule" not in out
+
+
+def test_query_excludes_expired_entries(store):
+    past = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    expired = WikiEntry(
+        title="expired rule",
+        content="A",
+        source_type="plan",
+        topic="patterns",
+        valid_to=past,
+    )
+    store.ingest(REPO, [expired])
+    out = store.query(REPO, topics=["patterns"])
+    assert "expired rule" not in out
+
+
+def test_query_includes_current_entries(store):
+    current = WikiEntry(
+        title="current rule",
+        content="A",
+        source_type="plan",
+        topic="patterns",
+    )
+    store.ingest(REPO, [current])
+    out = store.query(REPO, topics=["patterns"])
+    assert "current rule" in out
