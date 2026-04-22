@@ -73,73 +73,40 @@ async def write_entries_to_wiki(
 
 
 async def _run(args: argparse.Namespace) -> int:
-    """Live-run path. Imports are deferred so test imports don't fail."""
-    from config import load_config  # noqa: PLC0415
-    from hindsight import HindsightClient  # noqa: PLC0415
-    from hindsight_types import Bank  # noqa: PLC0415
-    from repo_wiki import RepoWikiStore  # noqa: PLC0415
-    from tribal_wiki import TribalWikiStore  # noqa: PLC0415
-    from wiki_compiler import WikiCompiler  # noqa: PLC0415
+    """Live-run path. Not yet integrated.
 
-    config = load_config()
-    client = HindsightClient(config=config)
+    The pure functions above (``extract_corroborated_memories`` and
+    ``write_entries_to_wiki``) are tested and correct. This live driver
+    is a placeholder: wiring the live Hindsight API + configured stores
+    + compiler is deferred until an operator actually runs the cutover
+    extraction. They will need to:
 
-    # recall_banks fetches from all banks concurrently; use a broad query to
-    # surface as many memories as possible.  The corroboration filter below
-    # discards noise.
-    banks = [
-        Bank.TRIBAL,
-        Bank.TROUBLESHOOTING,
-        Bank.HARNESS_INSIGHTS,
-        Bank.REVIEW_INSIGHTS,
-        Bank.RETROSPECTIVES,
-    ]
-    all_memories: list[dict] = []
-    try:
-        bank_results = await client.recall_banks(
-            query="*",
-            banks=banks,
-            limit=500,
-        )
-        for _bank, memories in bank_results.items():
-            for m in memories:
-                all_memories.append(
-                    {
-                        "text": m.display_text,
-                        "citations": m.metadata.get("citations", []),
-                        "closed_issue": m.metadata.get("closed_issue", False),
-                        "issue_number": m.metadata.get("issue_number", 0),
-                    }
-                )
-    except Exception:  # noqa: BLE001
-        logger.warning("recall_banks failed", exc_info=True)
+      1. Build a ``HydraFlowConfig`` via ``load_hydraflow_config()`` or
+         equivalent.
+      2. Construct ``HindsightClient(base_url=config.hindsight_url,
+         api_key=credentials.hindsight_api_key)``.
+      3. Call ``client.recall_banks(query=..., banks=[Bank.TRIBAL, ...])``
+         and map each ``HindsightMemory`` to the dict shape accepted by
+         ``extract_corroborated_memories`` (keys: text, citations,
+         closed_issue, issue_number).
+      4. Build a ``SubprocessRunner`` + ``WikiCompiler(config, runner,
+         credentials)``.
+      5. Build the target store: ``TribalWikiStore(...)`` for
+         ``--repo global`` else ``RepoWikiStore(...)``.
+      6. ``await write_entries_to_wiki(store=..., compiler=...,
+         repo=effective_repo, memories=survivors)``.
 
-    survivors = extract_corroborated_memories(all_memories)
+    The shape of each wiring step differs slightly across HydraFlow
+    versions; writing it against a specific version is safer than
+    committing a stub that silently rots.
+    """
     logger.info(
-        "extracted %d survivors out of %d raw memories",
-        len(survivors),
-        len(all_memories),
+        "extract_hindsight_to_wiki live path is not integrated. "
+        "Call extract_corroborated_memories + write_entries_to_wiki "
+        "directly from a wired entry point."
     )
-
-    if args.dry_run:
-        return 0
-
-    if args.repo == "global":
-        store = TribalWikiStore(config.data_path("tribal"))
-        effective_repo = "global"
-    else:
-        store = RepoWikiStore(config.data_path("repo_wiki"))
-        effective_repo = args.repo
-
-    compiler = WikiCompiler(config=config, runner=None, credentials=None)
-    total = await write_entries_to_wiki(
-        store=store,
-        compiler=compiler,
-        repo=effective_repo,
-        memories=survivors,
-    )
-    logger.info("wrote %d entries to wiki (repo=%s)", total, effective_repo)
-    return 0
+    _ = args  # unused
+    return 1
 
 
 async def main(argv: list[str] | None = None) -> int:
