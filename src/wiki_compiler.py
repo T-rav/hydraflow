@@ -17,7 +17,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
 
@@ -38,6 +38,13 @@ class ContradictedEntry(BaseModel):
 
 class ContradictionCheck(BaseModel):
     contradicts: list[ContradictedEntry] = Field(default_factory=list)
+
+
+class GeneralizationCheck(BaseModel):
+    same_principle: bool = False
+    generalized_title: str = ""
+    generalized_body: str = ""
+    confidence: Literal["high", "medium", "low"] = "low"
 
 
 if TYPE_CHECKING:
@@ -116,6 +123,40 @@ Example valid outputs:
   {{"contradicts": [{{"id":"01HQ...","reason":"new entry says X, this one said not-X"}}]}}
 """
 
+_GENERALIZATION_PROMPT = """\
+You are a technical knowledge librarian comparing two wiki entries from
+different repositories, both on topic **{topic}**. Decide whether they
+encode the **same underlying principle** (not merely the same keywords).
+
+## Entry A (repo: {repo_a})
+
+title: {title_a}
+content:
+{content_a}
+
+## Entry B (repo: {repo_b})
+
+title: {title_b}
+content:
+{content_b}
+
+## Instructions
+
+Return a JSON object with these keys:
+- same_principle: bool — true only if both entries advise the same rule in
+  a way that would generalize across any Python project
+- generalized_title: str — if same_principle is true, a short neutral title
+- generalized_body: str — if same_principle is true, merged content that drops
+  repo-specific details
+- confidence: "high" | "medium" | "low" — how sure you are
+
+Return ONLY the JSON object, no other text.
+
+Example outputs:
+  {{"same_principle": false, "generalized_title": "", "generalized_body": "", "confidence": "low"}}
+  {{"same_principle": true, "generalized_title": "Pytest async mode", "generalized_body": "Configure pytest-asyncio with mode=auto.", "confidence": "high"}}
+"""
+
 _SYNTHESIZE_INGEST_PROMPT = """\
 You are a technical knowledge librarian. A {source_type} phase just completed for \
 issue #{issue_number} in repository {repo}.
@@ -181,6 +222,29 @@ class WikiCompiler:
             return ContradictionCheck.model_validate(obj)
         except Exception:  # noqa: BLE001
             return ContradictionCheck()
+
+    @staticmethod
+    def _parse_generalization_output(raw: str) -> GeneralizationCheck:
+        """Parse generalization-check LLM output. Never raises."""
+        text = raw.strip()
+        if text.startswith("```"):
+            lines = text.split("\n")
+            text = "\n".join(lines[1:-1] if lines[-1].startswith("```") else lines[1:])
+
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1:
+            return GeneralizationCheck()
+        try:
+            obj = json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            return GeneralizationCheck()
+        if not isinstance(obj, dict):
+            return GeneralizationCheck()
+        try:
+            return GeneralizationCheck.model_validate(obj)
+        except Exception:  # noqa: BLE001
+            return GeneralizationCheck()
 
     def __init__(
         self,
@@ -401,6 +465,33 @@ class WikiCompiler:
         if raw is None:
             return ContradictionCheck()
         return self._parse_contradiction_output(raw)
+
+    async def generalize_pair(
+        self,
+        *,
+        entry_a: WikiEntry,
+        entry_b: WikiEntry,
+        topic: str,
+    ) -> GeneralizationCheck:
+        """Ask the LLM whether two entries encode the same principle.
+
+        Returns an empty GeneralizationCheck on LLM failure — never raises.
+        Caller decides whether to act on ``same_principle`` given
+        ``confidence``.
+        """
+        prompt = _GENERALIZATION_PROMPT.format(
+            topic=topic,
+            repo_a=entry_a.source_repo or "unknown",
+            title_a=entry_a.title,
+            content_a=entry_a.content,
+            repo_b=entry_b.source_repo or "unknown",
+            title_b=entry_b.title,
+            content_b=entry_b.content,
+        )
+        raw = await self._call_model(prompt)
+        if raw is None:
+            return GeneralizationCheck()
+        return self._parse_generalization_output(raw)
 
     async def synthesize_ingest(
         self,
