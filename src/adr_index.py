@@ -1,0 +1,109 @@
+"""ADR runtime indexer.
+
+Parses docs/adr/*.md at runtime, renders compact summaries for prompt
+injection. Load-bearing facts — we want agents to know what's been
+decided before they plan.
+
+File format (from docs/adr/0001-five-concurrent-async-loops.md):
+
+    # ADR-0001: Five Concurrent Async Loops
+
+    **Status:** Accepted
+    **Date:** 2026-02-26
+
+    ## Context
+
+    HydraFlow must process GitHub issues through five distinct stages...
+
+Status is normalized to one of: "Accepted", "Proposed", "Superseded",
+"Deprecated". "Superseded by ADR-NNNN" populates ``superseded_by``.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from pathlib import Path
+
+_TITLE_RE = re.compile(r"^#\s*ADR-(\d{4}):\s*(.+?)\s*$", re.MULTILINE)
+_STATUS_RE = re.compile(r"\*\*Status:\*\*\s*(.+?)\s*$", re.MULTILINE)
+_CONTEXT_RE = re.compile(r"##\s+Context\s*\n\s*\n(.+?)(?=\n\s*\n|\n##\s|\Z)", re.DOTALL)
+_SUPERSEDED_RE = re.compile(r"Superseded\s+by\s+(ADR-\d{4})", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class ADR:
+    number: int
+    title: str
+    status: str  # normalized: Accepted | Proposed | Superseded | Deprecated | Unknown
+    summary: str  # first paragraph of ## Context, flattened
+    superseded_by: str | None = None
+
+
+def parse_adr_file(path: Path) -> ADR:
+    """Parse a single ADR markdown file. Never raises on malformed input."""
+    text = path.read_text()
+
+    title_match = _TITLE_RE.search(text)
+    if title_match is None:
+        # Fallback: use filename stem
+        number = _extract_number_from_filename(path)
+        title = path.stem
+    else:
+        number = int(title_match.group(1))
+        title = title_match.group(2)
+
+    status_raw = ""
+    status_match = _STATUS_RE.search(text)
+    if status_match:
+        status_raw = status_match.group(1).strip()
+
+    superseded_by = None
+    sup_match = _SUPERSEDED_RE.search(status_raw)
+    if sup_match:
+        superseded_by = sup_match.group(1)
+        status_norm = "Superseded"
+    else:
+        status_norm = _normalize_status(status_raw)
+
+    summary = ""
+    ctx_match = _CONTEXT_RE.search(text)
+    if ctx_match:
+        summary = " ".join(ctx_match.group(1).split())[:300]
+
+    return ADR(
+        number=number,
+        title=title,
+        status=status_norm,
+        summary=summary,
+        superseded_by=superseded_by,
+    )
+
+
+def scan_adr_directory(adr_dir: Path) -> list[ADR]:
+    """Parse every ADR file in the directory, sorted by number."""
+    if not adr_dir.exists() or not adr_dir.is_dir():
+        return []
+    adrs: list[ADR] = []
+    for p in adr_dir.iterdir():
+        if p.is_file() and p.suffix == ".md" and _TITLE_RE.search(p.read_text()):
+            adrs.append(parse_adr_file(p))
+    return sorted(adrs, key=lambda a: a.number)
+
+
+def _normalize_status(raw: str) -> str:
+    low = raw.lower()
+    if "accepted" in low:
+        return "Accepted"
+    if "proposed" in low or "draft" in low:
+        return "Proposed"
+    if "superseded" in low:
+        return "Superseded"
+    if "deprecated" in low:
+        return "Deprecated"
+    return "Unknown"
+
+
+def _extract_number_from_filename(path: Path) -> int:
+    m = re.match(r"(\d{4})-", path.name)
+    return int(m.group(1)) if m else 0
