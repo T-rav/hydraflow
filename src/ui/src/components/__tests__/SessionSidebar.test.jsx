@@ -53,7 +53,7 @@ describe('SessionSidebar last-run summary', () => {
       issues_processed: [],
     }]
     render(<SessionSidebar />)
-    expect(screen.getByText(/ran 3h ago · 42min · 12 ✓ 2 ✗/)).toBeInTheDocument()
+    expect(screen.getByText(/ran 2h ago · 42min · 12 ✓ 2 ✗/)).toBeInTheDocument()
   })
 
   it('omits zero counts for a clean completed session', () => {

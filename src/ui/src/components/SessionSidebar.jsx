@@ -4,19 +4,7 @@ import { theme } from '../theme'
 import { canonicalRepoSlug } from '../constants'
 import { RepoSelector } from './RepoSelector'
 import { RegisterRepoDialog } from './RegisterRepoDialog'
-import { formatDuration } from '../utils/timeFormat'
-
-function formatRelative(iso) {
-  if (!iso) return ''
-  const t = Date.parse(iso)
-  if (Number.isNaN(t)) return ''
-  const diffSec = Math.floor((Date.now() - t) / 1000)
-  if (diffSec < 30) return 'just now'
-  if (diffSec < 60) return `${diffSec}s ago`
-  if (diffSec < 3600) return `${Math.ceil(diffSec / 60)}m ago`
-  if (diffSec < 86400) return `${Math.ceil(diffSec / 3600)}h ago`
-  return `${Math.ceil(diffSec / 86400)}d ago`
-}
+import { formatRelative, formatDuration } from '../utils/timeFormat'
 
 function pickLatestSession(sessions) {
   if (!sessions || sessions.length === 0) return null
