@@ -315,7 +315,9 @@ class PostMergeHandler:
         # Normalize PR title to canonical "Fixes #N: title" before merge
         # so the merge commit and event history show a consistent format.
         try:
-            expected_title = self._prs.expected_pr_title(issue.id, issue.title)
+            from pr_manager import PRManager  # local import avoids port-circularity
+
+            expected_title = PRManager.expected_pr_title(issue.id, issue.title)
             await self._prs.update_pr_title(pr.number, expected_title)
         except Exception:
             logger.debug(
