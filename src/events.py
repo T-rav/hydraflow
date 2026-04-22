@@ -94,6 +94,7 @@ class EventType(StrEnum):
     DIAGNOSTIC_UPDATE = "diagnostic_update"
     RETROSPECTIVE_UPDATE = "retrospective_update"
     WIKI_SUPERSEDES = "wiki_supersedes"
+    TRIBAL_PROMOTION = "tribal_promotion"
 
 
 _T = TypeVar("_T")

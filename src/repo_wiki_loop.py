@@ -14,12 +14,14 @@ from typing import TYPE_CHECKING, Any
 from auto_pr import open_automated_pr_async
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import Credentials, HydraFlowConfig
+from events import EventType, HydraFlowEvent
 from repo_wiki import DEFAULT_TOPICS, RepoWikiStore, WikiEntry, active_lint_tracked
 from staleness import evaluate as evaluate_staleness
 from subprocess_util import run_subprocess
 from wiki_maint_queue import MaintenanceQueue
 
 if TYPE_CHECKING:
+    from events import EventBus
     from state import StateTracker
     from tribal_wiki import TribalWikiStore
     from wiki_compiler import WikiCompiler
@@ -41,13 +43,15 @@ async def run_generalization_pass(
     per_repo: RepoWikiStore,
     tribal: TribalWikiStore,
     compiler: WikiCompiler,
+    event_bus: EventBus | None = None,
 ) -> GeneralizationPassResult:
     """Scan per-repo wikis, promote matching principles to tribal store.
 
     For each topic, gather current entries across all repos. For any
     cross-repo pair, ask the compiler to judge; if ``same_principle`` and
     ``confidence`` is high or medium, write to tribal and mark per-repo
-    copies superseded.
+    copies superseded. Publishes a ``TRIBAL_PROMOTION`` event per
+    promotion when an ``event_bus`` is provided.
 
     Conservative by design: each pair only considered once; promotion is
     skipped if confidence is "low".
@@ -102,6 +106,21 @@ async def run_generalization_pass(
                         reason="promoted to tribal wiki",
                     )
                 result.promoted += 1
+
+                if event_bus is not None:
+                    event = HydraFlowEvent(
+                        type=EventType.TRIBAL_PROMOTION,
+                        data={
+                            "repo_a": repo_a,
+                            "repo_b": repo_b,
+                            "tribal_id": tribal_entry.id,
+                            "topic": topic,
+                        },
+                    )
+                    try:
+                        await event_bus.publish(event)
+                    except Exception:  # noqa: BLE001
+                        logger.debug("tribal promotion event publish failed")
     return result
 
 
@@ -329,6 +348,7 @@ class RepoWikiLoop(BaseBackgroundLoop):
                     per_repo=self._wiki_store,
                     tribal=self._tribal_store,
                     compiler=self._wiki_compiler,
+                    event_bus=getattr(self._deps, "event_bus", None),
                 )
             except Exception:  # noqa: BLE001
                 logger.warning("generalization pass failed", exc_info=True)
