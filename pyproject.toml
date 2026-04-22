@@ -155,15 +155,19 @@ markers = [
     "scenario_loops: scenario tests exercising background loops (Tier B)",
     "scenario_browser: scenario tests driving the real dashboard via Playwright (Tier C)",
 ]
-# ADR-0044 P5.7 calls for `error::RuntimeWarning` and
-# `error::pytest.PytestUnraisableExceptionWarning` here. Enabling them
-# currently surfaces 8 pre-existing AsyncMock coroutine leaks in
-# scenario tests — a separate cleanup. Once those are fixed the block
-# below should be enabled; `make audit` P5.7 will flip from WARN to PASS.
-# filterwarnings = [
-#     "error::RuntimeWarning",
-#     "error::pytest.PytestUnraisableExceptionWarning",
-# ]
+# ADR-0044 P5.7: async lifecycle bugs manifest as RuntimeWarning.
+# Treat them as errors so CI fails red instead of silently accumulating
+# drift. The AsyncMock-plumbing exemption below tolerates coroutines from
+# `unittest.mock.AsyncMockMixin._execute_mock_call` that leak when a bare
+# `AsyncMock()` stands in for a port with sync methods — a test-fixture
+# smell, not a production async bug. Fix those at the mock-creation site
+# (use `spec=<Protocol>` or override sync methods explicitly) to tighten
+# the bar further.
+filterwarnings = [
+    "error::RuntimeWarning",
+    "default:coroutine 'AsyncMock.*' was never awaited:RuntimeWarning",
+    "default::pytest.PytestUnraisableExceptionWarning",
+]
 
 [tool.coverage.run]
 source = ["src"]
