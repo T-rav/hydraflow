@@ -47,10 +47,20 @@ class GeneralizationCheck(BaseModel):
     confidence: Literal["high", "medium", "low"] = "low"
 
 
+class ADRDraftDecision(BaseModel):
+    two_plus_issues: bool = False
+    in_tribal: bool = False
+    architectural: bool = False
+    load_bearing: bool = False
+    draft_ok: bool = False
+    reason: str = ""
+
+
 if TYPE_CHECKING:
     from config import Credentials, HydraFlowConfig
     from execution import SubprocessRunner
     from repo_wiki import RepoWikiStore
+    from tribal_wiki import TribalWikiStore
 
 logger = logging.getLogger("hydraflow.wiki_compiler")
 
@@ -186,6 +196,30 @@ Return a JSON array of entries. Each entry must be:
 - "source_issue": {issue_number}
 
 Return ONLY the JSON array, no other text.
+"""
+
+
+_ADR_DRAFT_JUDGE_PROMPT = """\
+You are a technical knowledge librarian evaluating whether a pattern rises to
+ADR-worthy architectural status. Review the proposed ADR draft below and
+answer two questions strictly:
+
+1. **architectural**: does it change a system-level invariant (loop topology,
+   state machine, persistence layout, promotion flow, module boundary)?
+   Operational tips, style conventions, and per-phase workflows are NOT
+   architectural.
+2. **load_bearing**: if this decision were reversed tomorrow, would multiple
+   components need to change?
+
+## Proposed ADR
+
+title: {title}
+context: {context}
+decision: {decision}
+consequences: {consequences}
+
+Return ONLY a JSON object:
+  {{"architectural": <bool>, "load_bearing": <bool>, "reason": "<1 sentence>"}}
 """
 
 
@@ -564,6 +598,81 @@ class WikiCompiler:
         if raw is None:
             return GeneralizationCheck()
         return self._parse_generalization_output(raw)
+
+    async def judge_adr_draft(
+        self,
+        *,
+        suggestion: dict,
+        tribal: TribalWikiStore,
+    ) -> ADRDraftDecision:
+        """Evaluate the 4 gates for an ADR_DRAFT_SUGGESTION."""
+        decision = ADRDraftDecision()
+
+        # Gate 1 — evidence list has ≥2 distinct issues
+        issues = suggestion.get("evidence_issues", [])
+        decision.two_plus_issues = len(set(issues)) >= 2
+        if not decision.two_plus_issues:
+            decision.reason = "needs ≥2 distinct issues as evidence"
+            return decision
+
+        # Gate 2 — at least one cited wiki entry lives in tribal
+        wiki_ids = suggestion.get("evidence_wiki_entries", [])
+        if not wiki_ids:
+            decision.reason = "no tribal wiki entry cited"
+            return decision
+        from repo_wiki import DEFAULT_TOPICS  # noqa: PLC0415
+
+        tribal_ids: set[str] = set()
+        tribal_repo_dir = tribal.repo_dir()
+        for topic_name in DEFAULT_TOPICS:
+            topic_path = tribal_repo_dir / f"{topic_name}.md"
+            if topic_path.exists():
+                for entry in tribal.load_topic_entries(topic_path):
+                    tribal_ids.add(entry.id)
+        decision.in_tribal = any(wid in tribal_ids for wid in wiki_ids)
+        if not decision.in_tribal:
+            decision.reason = "referenced wiki entry not present in tribal store"
+            return decision
+
+        # Gates 3 + 4 (LLM)
+        prompt = _ADR_DRAFT_JUDGE_PROMPT.format(
+            title=suggestion.get("title", ""),
+            context=suggestion.get("context", ""),
+            decision=suggestion.get("decision", ""),
+            consequences=suggestion.get("consequences", ""),
+        )
+        raw = await self._call_model(prompt)
+        if raw is None:
+            decision.reason = "llm unavailable"
+            return decision
+        parsed = self._parse_adr_judge_output(raw)
+        decision.architectural = bool(parsed.get("architectural", False))
+        decision.load_bearing = bool(parsed.get("load_bearing", False))
+        decision.reason = str(parsed.get("reason", ""))
+
+        decision.draft_ok = (
+            decision.two_plus_issues
+            and decision.in_tribal
+            and decision.architectural
+            and decision.load_bearing
+        )
+        return decision
+
+    @staticmethod
+    def _parse_adr_judge_output(raw: str) -> dict:
+        text = raw.strip()
+        if text.startswith("```"):
+            lines = text.split("\n")
+            text = "\n".join(lines[1:-1] if lines[-1].startswith("```") else lines[1:])
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1:
+            return {}
+        try:
+            obj = json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            return {}
+        return obj if isinstance(obj, dict) else {}
 
     async def synthesize_ingest(
         self,
