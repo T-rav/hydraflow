@@ -9,4 +9,5 @@ from . import (
     p1_docs,  # noqa: F401
     p2_architecture,  # noqa: F401
     p3_testing,  # noqa: F401
+    p4_quality,  # noqa: F401
 )
