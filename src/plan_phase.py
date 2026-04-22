@@ -116,7 +116,7 @@ class PlanPhase:
         self._wiki_compiler = wiki_compiler
         self._issue_cache = issue_cache
         self._plan_reviewer = plan_reviewer
-        self._suggest_memory = MemorySuggester(config, hindsight=hindsight, judge=judge)
+        self._suggest_memory = MemorySuggester(config)
         self._escalator = PipelineEscalator(
             state,
             prs,

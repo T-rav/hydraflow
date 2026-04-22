@@ -84,7 +84,7 @@ class ImplementPhase:
         self._summarizer = transcript_summarizer
         self._active_issues: set[int] = set()
         self._active_issues_lock = asyncio.Lock()
-        self._suggest_memory = MemorySuggester(config, hindsight=hindsight, judge=judge)
+        self._suggest_memory = MemorySuggester(config)
         self._zero_diff_memory_filed: set[int] = set()
         self._precondition_gate = precondition_gate
         self._escalator = PipelineEscalator(

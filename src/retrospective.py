@@ -16,8 +16,6 @@ from models import IsoTimestamp, PlanAccuracyResult, ReviewVerdict
 if TYPE_CHECKING:
     from config import HydraFlowConfig
     from dolt_backend import DoltBackend
-    from hindsight import HindsightClient
-    from hindsight_wal import HindsightWAL
     from models import ReviewResult
     from pr_manager import PRManager
     from retrospective_queue import RetrospectiveQueue
@@ -53,9 +51,7 @@ class RetrospectiveCollector:
         state: StateTracker,
         prs: PRManager,
         *,
-        hindsight: HindsightClient | None = None,
         dolt: DoltBackend | None = None,
-        wal: HindsightWAL | None = None,
         queue: RetrospectiveQueue | None = None,
     ) -> None:
         from dedup_store import DedupStore  # noqa: PLC0415
@@ -63,9 +59,7 @@ class RetrospectiveCollector:
         self._config = config
         self._state = state
         self._prs = prs
-        self._hindsight = hindsight
         self._dolt = dolt
-        self._wal = wal
         self._queue = queue
         self._retro_path = config.data_path("memory", "retrospectives.jsonl")
         self._filed = DedupStore(
@@ -259,23 +253,6 @@ class RetrospectiveCollector:
                 exc_info=True,
             )
 
-        if self._hindsight is not None:
-            from hindsight import Bank, schedule_retain  # noqa: PLC0415
-
-            content = (
-                f"Issue #{entry.issue_number} PR #{entry.pr_number}: "
-                f"plan_accuracy={entry.plan_accuracy_pct}%, "
-                f"quality_fixes={entry.quality_fix_rounds}, "
-                f"review={entry.review_verdict}"
-            )
-            schedule_retain(
-                self._hindsight,
-                Bank.RETROSPECTIVES,
-                content,
-                context=f"retrospective for issue #{entry.issue_number}",
-                wal=self._wal,
-            )
-
     def _load_recent(self, n: int) -> list[RetrospectiveEntry]:
         """Load the last *n* entries from the retrospective log."""
         if not self._retro_path.exists():
@@ -401,7 +378,6 @@ class RetrospectiveCollector:
             "retrospective",
             clean_title,
             self._config,
-            hindsight=self._hindsight,
         )
 
     def _load_filed_patterns(self) -> set[str]:

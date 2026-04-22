@@ -133,7 +133,9 @@ class PRUnsticker:
         self._troubleshooting_store = troubleshooting_store
         self._store = store
         self._credentials = credentials or _Credentials()
-        self._suggest_memory = MemorySuggester(config, hindsight=hindsight, judge=judge)
+        self._suggest_memory = MemorySuggester(
+            config,
+        )
 
     async def unstick(self, hitl_items: list[HITLItem]) -> UnstickResult:
         """Process HITL items and return stats.

@@ -354,12 +354,7 @@ class HydraFlowOrchestrator:
                 task.cancel()
                 logger.debug("Cancelled loop task %r", name)
 
-        # Close the Hindsight HTTP client if present
-        from hindsight import HindsightClient
-
-        hs = getattr(self._svc, "hindsight", None)
-        if isinstance(hs, HindsightClient):
-            await hs.close()
+        # Hindsight HTTP client removed in Phase 3 cutover — no close needed.
 
         await self._publish_status()
 
@@ -909,18 +904,8 @@ class HydraFlowOrchestrator:
             ("retrospective", self._svc.retrospective_loop.run),
         ]
 
-        # Optional: WAL replay loop for Hindsight crash recovery
-        if self._svc.hindsight and self._svc.hindsight_wal:
-            from hindsight_wal import run_wal_replay_loop  # noqa: PLC0415
-
-            wal = self._svc.hindsight_wal
-            client = self._svc.hindsight
-            stop = self._stop_event
-
-            async def _wal_replay() -> None:
-                await run_wal_replay_loop(wal, client, stop)
-
-            loop_factories.append(("wal_replay", _wal_replay))
+        # Hindsight WAL replay loop removed in Phase 3 cutover — the wiki
+        # pipeline doesn't need a replay loop.
         self._state_restorer.prune_stale_disabled_workers(
             {n for n, _ in loop_factories}
         )

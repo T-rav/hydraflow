@@ -6,18 +6,12 @@ import asyncio
 import logging
 from collections.abc import AsyncGenerator, Callable, Coroutine, Generator
 from contextlib import asynccontextmanager, contextmanager
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import Any, TypeVar
 
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
-
-if TYPE_CHECKING:
-    from hindsight import HindsightClient
-    from memory_judge import MemoryJudge  # noqa: TCH004
-
 from exception_classify import is_likely_bug, reraise_on_credit_or_bug  # noqa: F401
 from harness_insights import FailureCategory, FailureRecord, HarnessInsightStore
-from memory import file_memory_suggestion
 from models import EscalationContext, PipelineStage, PRInfo, ReviewUpdatePayload, Task
 from ports import IssueStorePort, PRPort
 from state import StateTracker
@@ -226,14 +220,91 @@ async def park_issue(
     await prs.post_comment(issue_number, note)
 
 
+def parse_memory_suggestion(transcript: str) -> dict[str, str] | None:
+    """Parse a MEMORY_SUGGESTION block in tribal format.
+
+    Returns a dict with ``principle``, ``rationale``, ``failure_mode``,
+    and ``scope`` keys, or ``None`` if the block is missing or any
+    required field is empty.
+    """
+    import re as _re  # noqa: PLC0415
+
+    pattern = r"MEMORY_SUGGESTION_START\s*\n(.*?)\nMEMORY_SUGGESTION_END"
+    match = _re.search(pattern, transcript, _re.DOTALL)
+    if not match:
+        return None
+
+    block = match.group(1)
+    fields = ("principle", "rationale", "failure_mode", "scope")
+    result: dict[str, str] = dict.fromkeys(fields, "")
+
+    for line in block.splitlines():
+        stripped = line.strip()
+        for key in fields:
+            prefix = f"{key}:"
+            if stripped.startswith(prefix):
+                result[key] = stripped[len(prefix) :].strip()
+                break
+
+    if not all(result[k] for k in fields):
+        return None
+    return result
+
+
+async def file_memory_suggestion(
+    transcript: str,
+    source: str,
+    reference: str,
+    config: HydraFlowConfig,
+) -> None:
+    """Parse and store a tribal-memory suggestion from an agent transcript.
+
+    Writes to local JSONL storage (items.jsonl). No Hindsight writes.
+    """
+    from datetime import UTC, datetime  # noqa: PLC0415
+
+    parsed = parse_memory_suggestion(transcript)
+    if not parsed:
+        return
+
+    from models import TribalMemory  # noqa: PLC0415
+
+    def _next_item_id() -> str:
+        import uuid as _uuid  # noqa: PLC0415
+
+        return f"mem-{_uuid.uuid4().hex[:8]}"
+
+    try:
+        mem = TribalMemory(
+            principle=parsed["principle"],
+            rationale=parsed["rationale"],
+            failure_mode=parsed["failure_mode"],
+            scope=parsed["scope"],
+            id=_next_item_id(),
+            source=source,
+            created_at=datetime.now(UTC).isoformat(),
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("Tribal memory failed schema validation: %s", reference)
+        return
+
+    try:
+        items_path = config.data_path("memory", "items.jsonl")
+        items_path.parent.mkdir(parents=True, exist_ok=True)
+        with items_path.open("a") as f:
+            f.write(mem.model_dump_json() + "\n")
+    except OSError:
+        logger.warning("Failed to write tribal memory to JSONL", exc_info=True)
+        return
+
+    logger.info("Stored tribal memory %s scope=%s", mem.id, mem.scope)
+
+
 async def safe_file_memory_suggestion(
     transcript: str,
     source: str,
     reference: str,
     config: HydraFlowConfig,
-    *,
-    hindsight: HindsightClient | None = None,
-    judge: MemoryJudge | None = None,
 ) -> None:
     """File a memory suggestion, swallowing and logging exceptions."""
     try:
@@ -242,8 +313,6 @@ async def safe_file_memory_suggestion(
             source,
             reference,
             config,
-            hindsight=hindsight,
-            judge=judge,
         )
     except Exception:
         logger.exception(
@@ -390,22 +459,14 @@ class MemorySuggester:
 
     Usage::
 
-        suggest = MemorySuggester(config, hindsight=hindsight_client, judge=judge)
+        suggest = MemorySuggester(config)
         await suggest(transcript, "planner", f"issue #{issue.id}")
     """
 
-    __slots__ = ("_config", "_hindsight", "_judge")
+    __slots__ = ("_config",)
 
-    def __init__(
-        self,
-        config: HydraFlowConfig,
-        *,
-        hindsight: HindsightClient | None = None,
-        judge: MemoryJudge | None = None,
-    ) -> None:
+    def __init__(self, config: HydraFlowConfig) -> None:
         self._config = config
-        self._hindsight = hindsight
-        self._judge = judge
 
     async def __call__(self, transcript: str, source: str, reference: str) -> None:
         await safe_file_memory_suggestion(
@@ -413,8 +474,6 @@ class MemorySuggester:
             source,
             reference,
             self._config,
-            hindsight=self._hindsight,
-            judge=self._judge,
         )
 
 

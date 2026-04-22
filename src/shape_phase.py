@@ -84,7 +84,9 @@ class ShapePhase:
         self._runner = shape_runner
         self._whatsapp = whatsapp_bridge
         self._council: ExpertCouncil | None = None
-        self._suggest_memory = MemorySuggester(config, hindsight=hindsight, judge=judge)
+        self._suggest_memory = MemorySuggester(
+            config,
+        )
 
     async def shape_issues(self) -> bool:
         """Process shape-labeled issues. Returns True if work was done."""

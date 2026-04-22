@@ -204,7 +204,7 @@ class ReviewPhase:
         self._stop_event = stop_event
         self._store = store
         self._bus = event_bus or EventBus()
-        self._suggest_memory = MemorySuggester(config, hindsight=hindsight, judge=judge)
+        self._suggest_memory = MemorySuggester(config)
         self._summarizer = transcript_summarizer
         self._wiki_store = wiki_store
         self._wiki_compiler = wiki_compiler
@@ -215,7 +215,10 @@ class ReviewPhase:
         else:
             from review_insights import ReviewInsightStore  # noqa: PLC0415
 
-            self._insights = ReviewInsightStore(config.memory_dir, dolt=dolt, wal=wal)
+            self._insights = ReviewInsightStore(
+                config.memory_dir,
+                dolt=dolt,
+            )
         self._wal = wal
         self._active_issues_cb = active_issues_cb
         self._active_issues: set[int] = set()
@@ -1948,7 +1951,6 @@ class ReviewPhase:
                         "verdict": str(result.verdict),
                         "source": "review_rejection",
                     },
-                    wal=self._wal,
                 )
 
             # Enqueue pattern analysis for the retrospective loop

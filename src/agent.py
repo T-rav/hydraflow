@@ -151,13 +151,13 @@ Run through this checklist before your final commit:
             config,
             event_bus,
             runner,
-            hindsight=hindsight,
             credentials=credentials,
             wiki_store=wiki_store,
             tribal_wiki_store=tribal_wiki_store,
         )
         self._insights = ReviewInsightStore(
-            config.memory_dir, hindsight=hindsight, dolt=dolt, wal=wal
+            config.memory_dir,
+            dolt=dolt,
         )
         from context_cache import ContextSectionCache
 

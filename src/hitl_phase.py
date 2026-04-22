@@ -63,7 +63,7 @@ class HITLPhase:
         self._bus = event_bus
         self._stop_event = stop_event
         self._active_issues_cb = active_issues_cb
-        self._suggest_memory = MemorySuggester(config, hindsight=hindsight, judge=judge)
+        self._suggest_memory = MemorySuggester(config)
         # HITL corrections: {issue_number: correction_text}
         self._hitl_corrections: dict[int, str] = {}
         # In-memory tracking of active HITL issues
