@@ -29,9 +29,17 @@ _TSL_SO = next(pathlib.Path(next(iter(tree_sitter_languages.__path__))).glob("*.
 _TSL_LIB = ctypes.cdll.LoadLibrary(str(_TSL_SO))
 
 
+# Some languages are exposed by tree_sitter_languages under a symbol name that
+# doesn't match the user-facing language key (e.g., C# ships as `c_sharp`).
+_SYMBOL_OVERRIDES: dict[str, str] = {
+    "csharp": "c_sharp",
+}
+
+
 def _load_language(name: str) -> Any:
     """Return a tree_sitter.Language for *name* using the bundled .so."""
-    fn = getattr(_TSL_LIB, f"tree_sitter_{name}", None)
+    symbol = _SYMBOL_OVERRIDES.get(name, name)
+    fn = getattr(_TSL_LIB, f"tree_sitter_{symbol}", None)
     if fn is None:
         raise ValueError(f"unsupported language {name!r}: symbol not found in .so")
     fn.restype = ctypes.c_void_p
@@ -97,6 +105,24 @@ SUPPORTED: dict[str, dict[str, Any]] = {
         "query": '(call method: (identifier) @m (#match? @m "require|require_relative") arguments: (argument_list (string) @src))',
         "capture": "src",
     },
+    "csharp": {
+        "ext": (".cs",),
+        "unit": "file",
+        "query": "(using_directive (qualified_name) @src)",
+        "capture": "src",
+    },
+    "kotlin": {
+        "ext": (".kt", ".kts"),
+        "unit": "file",
+        "query": "(import_header (identifier) @src)",
+        "capture": "src",
+    },
+    "php": {
+        "ext": (".php",),
+        "unit": "file",
+        "query": "(namespace_use_declaration (namespace_use_clause (qualified_name) @src))",
+        "capture": "src",
+    },
 }
 
 SKIP_DIRS = {
@@ -146,6 +172,13 @@ def tree_sitter_extractor(language: str) -> Callable[[str], ImportGraph]:
                 rel if unit == "file" else f.parent.relative_to(root).as_posix()
             )
             stems.setdefault(f.stem, rel)
+            # Directory-unit languages (Go) resolve imports by last path
+            # segment, which usually matches a package-directory basename
+            # rather than a file stem. Populate those keys too; after the
+            # lookup, `target` still points at a file inside the package
+            # and `.parent` yields the directory node we want.
+            if unit == "directory":
+                stems.setdefault(f.parent.name, rel)
 
         for f in files:
             src_bytes = f.read_bytes()
@@ -267,12 +300,18 @@ def _resolve_python_relative(
 def _stem_key(spec: str, language: str) -> str:
     """Derive the basename stem used as a fallback key in the ``stems`` map.
 
-    Most languages use ``/`` path separators (``./foo/bar`` → ``bar``). Java
-    uses ``.`` as a scope separator (``com.example.Bar`` → ``Bar``). Rust uses
-    ``::`` (``core::hint`` → ``hint``).
+    Languages differ in how a module path is separated:
+
+    * ``/`` for ES-module and Go imports (``./foo/bar`` → ``bar``).
+    * ``.`` for Java / Kotlin / C# scoped identifiers
+      (``com.example.Bar`` → ``Bar``).
+    * ``::`` for Rust paths (``core::hint`` → ``hint``).
+    * ``\\`` for PHP namespaces (``App\\Models\\User`` → ``User``).
     """
-    if language == "java":
+    if language in ("java", "kotlin", "csharp"):
         return spec.rsplit(".", 1)[-1]
     if language == "rust":
         return spec.rsplit("::", 1)[-1]
+    if language == "php":
+        return spec.rsplit("\\", 1)[-1]
     return spec.split("/")[-1].split(".")[0]

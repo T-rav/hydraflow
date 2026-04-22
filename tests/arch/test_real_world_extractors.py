@@ -13,9 +13,10 @@ See ``tests/arch/fixtures/real_world/ATTRIBUTION.md`` for repo provenance,
 commit SHAs, and per-language extractor findings/limitations.
 
 Known limitations:
-- Go: single-package repos collapse all files to one directory node; with
-  stdlib-only imports there are no internal edges to detect. This is the shape
-  of the go-multierror fixture, not a bug in the extractor.
+- Go: the ``import_declaration`` query only fires on single-line ``import "pkg"``
+  statements; grouped ``import (...)`` blocks use an intermediate
+  ``import_spec_list`` node that the query does not traverse. Fixtures must use
+  single-line imports to exercise cross-package resolution.
 - JavaScript: CommonJS ``require(...)`` is not captured — only ESM ``import``.
   No repo under test relies on CJS for internal deps.
 """
@@ -90,17 +91,20 @@ CASES: list[tuple[str, str, int, set[tuple[str, str]], set[tuple[str, str]]]] = 
             ("lib/arguments/command.js", "LICENSE"),
         },
     ),
-    # --- Go: go-multierror ---
-    # Single-package repo; all files collapse to directory node ".".
-    # All imports are stdlib; zero internal edges are expected.
+    # --- Go: synthesized two-package groupcache-inspired example ---
+    # ``cache`` package imports ``lru`` package via single-line import statement.
+    # The directory-unit extractor maps each package dir to a node; the stems map
+    # includes f.parent.name so "lru" resolves to the lru/ directory node.
+    # NOTE: grouped import blocks are NOT captured (see module docstring).
     (
         "go",
-        "go",
-        1,
-        set(),  # see module docstring for known limitation
+        "go_multi",
+        2,
+        {("cache", "lru")},
         {
-            (".", "LICENSE"),
-            (".", "go.mod"),
+            ("cache", "LICENSE"),
+            ("lru", "LICENSE"),
+            ("cache", "go.mod"),
         },
     ),
     # --- Java: synthesized 3-class example ---
@@ -153,6 +157,91 @@ CASES: list[tuple[str, str, int, set[tuple[str, str]], set[tuple[str, str]]]] = 
         {
             ("lib/rake.rb", "LICENSE"),
             ("lib/rake/version.rb", "LICENSE"),
+        },
+    ),
+    # --- C#: synthesized 4-class result-type example ---
+    # `using Example.Result.Success;` → stem "Success" → Success.cs.
+    # The query captures the qualified_name child of using_directive; the stem
+    # key uses rsplit(".", 1)[-1] to extract the class name.
+    (
+        "csharp",
+        "csharp",
+        4,
+        {
+            (
+                "src/Result/ResultFactory.cs",
+                "src/Result/Success.cs",
+            ),
+            (
+                "src/Result/ResultFactory.cs",
+                "src/Result/Failure.cs",
+            ),
+            (
+                "src/Result/Success.cs",
+                "src/Result/IResult.cs",
+            ),
+        },
+        {
+            ("src/Result/ResultFactory.cs", "LICENSE"),
+            ("src/Result/Success.cs", "LICENSE"),
+        },
+    ),
+    # --- Kotlin: synthesized 4-class result-type example ---
+    # `import com.example.result.Success` → stem "Success" → Success.kt.
+    # The identifier node inside import_header holds the full dotted path;
+    # rsplit(".", 1)[-1] extracts the class name for stem lookup.
+    (
+        "kotlin",
+        "kotlin",
+        4,
+        {
+            (
+                "src/main/kotlin/com/example/result/ResultFactory.kt",
+                "src/main/kotlin/com/example/result/Success.kt",
+            ),
+            (
+                "src/main/kotlin/com/example/result/ResultFactory.kt",
+                "src/main/kotlin/com/example/result/Failure.kt",
+            ),
+            (
+                "src/main/kotlin/com/example/result/Success.kt",
+                "src/main/kotlin/com/example/result/IResult.kt",
+            ),
+        },
+        {
+            (
+                "src/main/kotlin/com/example/result/ResultFactory.kt",
+                "LICENSE",
+            ),
+        },
+    ),
+    # --- PHP: synthesized 4-class result-type example ---
+    # `use Example\Result\Success;` → stem "Success" → Success.php.
+    # The qualified_name child of namespace_use_clause holds the backslash-
+    # separated path; rsplit("\\", 1)[-1] extracts the class name.
+    # Bare class names (e.g. `use DateTime;`) produce a `name` node, not a
+    # qualified_name, so they are correctly excluded.
+    (
+        "php",
+        "php",
+        4,
+        {
+            (
+                "src/Result/ResultFactory.php",
+                "src/Result/Success.php",
+            ),
+            (
+                "src/Result/ResultFactory.php",
+                "src/Result/Failure.php",
+            ),
+            (
+                "src/Result/Success.php",
+                "src/Result/IResult.php",
+            ),
+        },
+        {
+            ("src/Result/ResultFactory.php", "LICENSE"),
+            ("src/Result/Success.php", "LICENSE"),
         },
     ),
 ]

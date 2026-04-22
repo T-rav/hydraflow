@@ -53,19 +53,27 @@ upstream project is vendored alongside the source files.
 
 ---
 
-## Go — hashicorp/go-multierror
+## Go — synthesized two-package example (inspired by golang/groupcache)
 
-- **Repo:** https://github.com/hashicorp/go-multierror
-- **Commit SHA:** `6d4d48630db25c3c83fa83ecd41dd8438b82963c`
-- **License:** MPL-2.0
-- **Files vendored:** `multierror.go`, `append.go`, `flatten.go`, `format.go`,
-  `prefix.go`, `sort.go`, `group.go`, `go.mod`, `LICENSE`
-- **Extractor finding:** Go module unit is `directory`. All 7 `.go` files live in
-  the repository root, so all resolve to the single node `"."`. All imports are
-  standard-library (`errors`, `fmt`, `sort`) — none resolve to internal paths.
-  Result: 1 node (`"."`), 0 edges. This is correct behaviour for a single-package
-  library with no sub-packages and only external/stdlib imports. **Zero internal
-  edges is expected** for this fixture.
+- **Repo:** N/A — synthesized
+- **License:** Apache-2.0 (fixture-local; matches golang/groupcache license)
+- **Inspiration:** `golang/groupcache` (https://github.com/golang/groupcache,
+  Apache-2.0), which has a separate `lru/` sub-package imported by the root
+  `groupcache` package. The fixture mimics that two-package structure but is
+  not a copy of any upstream file.
+- **Files vendored:** `lru/lru.go`, `cache/cache.go`, `go.mod`, `LICENSE`
+- **Why replaced:** The previous fixture (`hashicorp/go-multierror`) was a
+  single-package repo where all files collapse to the `"."` directory node
+  with stdlib-only imports, producing zero internal edges. The new fixture
+  has two packages (`lru/` and `cache/`) where `cache` imports `lru` via a
+  single-line `import "github.com/example/groupcache/lru"` statement.
+- **Extractor finding:** 2 directory nodes (`lru`, `cache`), 1 cross-package
+  edge `(cache, lru)`. The `stems` map is populated with `f.parent.name` for
+  directory-unit languages; `"lru"` maps to `lru/lru.go`, so the import's last
+  path segment resolves correctly. **Known limitation:** The tree-sitter query
+  `(import_declaration (import_spec path: ...))` does NOT match grouped
+  `import (...)` blocks — only single-line `import "pkg"` statements. The
+  fixture uses single-line imports exclusively to work around this.
 
 ---
 
@@ -120,3 +128,66 @@ upstream project is vendored alongside the source files.
   6 edges. Stem-based resolution (e.g., `require_relative "rake/version"` → stem
   `"version"` → `lib/rake/version.rb`) works when only one file has that stem.
   No false edges observed.
+
+---
+
+## C# — synthesized 4-class result-type example
+
+- **Repo:** N/A — synthesized
+- **License:** MIT (fixture-local)
+- **Inspiration:** Functional result-type pattern common in .NET libraries (e.g.,
+  `ardalis/Result`, `altmann/FluentResults`). Not copied from any upstream file.
+- **Files vendored:** `src/Result/IResult.cs`, `src/Result/Success.cs`,
+  `src/Result/Failure.cs`, `src/Result/ResultFactory.cs`, `LICENSE`
+- **Why synthesized:** Tiny MIT/Apache C# libraries with 3–5 files and clear
+  inter-file `using` dependencies are rare; most real projects use namespace-level
+  `using` that does not resolve to individual file stems. A synthesized example
+  uses `using Example.Result.Success;` (class name as last segment) so the
+  extractor's stem key `rsplit(".", 1)[-1]` = `"Success"` matches `Success.cs`.
+- **Extractor finding:** Works correctly. The query `(using_directive
+  (qualified_name) @src)` captures the full qualified name; stem extraction yields
+  the class name which matches the corresponding `.cs` file. 4 nodes, 5 internal
+  edges. `using Example.Result.IResult;` in both `Success.cs` and `Failure.cs`
+  resolves to `IResult.cs`; `ResultFactory.cs` has edges to all three peers.
+
+---
+
+## Kotlin — synthesized 4-class result-type example
+
+- **Repo:** N/A — synthesized
+- **License:** MIT (fixture-local)
+- **Inspiration:** Functional result-type pattern common in Kotlin (e.g.,
+  `michaelbull/kotlin-result`, Apache-2.0). Not copied from any upstream file.
+- **Files vendored:**
+  `src/main/kotlin/com/example/result/IResult.kt`,
+  `src/main/kotlin/com/example/result/Success.kt`,
+  `src/main/kotlin/com/example/result/Failure.kt`,
+  `src/main/kotlin/com/example/result/ResultFactory.kt`, `LICENSE`
+- **Why synthesized:** Small Kotlin libraries with explicit same-package `import`
+  statements between files are uncommon (same-package symbols are auto-available),
+  but including `import com.example.result.Success` in companion files is valid
+  and exercises the extractor's stem lookup. The fixture explicitly imports each
+  class to produce measurable edges.
+- **Extractor finding:** Works correctly. The query `(import_header (identifier)
+  @src)` captures the full dotted path; `rsplit(".", 1)[-1]` extracts the class
+  name which matches the `.kt` file stem. 4 nodes, 5 internal edges.
+
+---
+
+## PHP — synthesized 4-class result-type example
+
+- **Repo:** N/A — synthesized
+- **License:** MIT (fixture-local)
+- **Inspiration:** PSR-style result-type pattern common in PHP libraries (e.g.,
+  `league/result-type`, MIT). Not copied from any upstream file.
+- **Files vendored:** `src/Result/IResult.php`, `src/Result/Success.php`,
+  `src/Result/Failure.php`, `src/Result/ResultFactory.php`, `LICENSE`
+- **Why synthesized:** Most real PHP libraries either use autoloading without
+  explicit `use` statements, or are too large. A synthesized example provides
+  clean `use Example\Result\Success;` statements whose backslash-separated last
+  segment matches the `.php` file stem.
+- **Extractor finding:** Works correctly. The query captures `qualified_name`
+  inside `namespace_use_clause`; `rsplit("\\\\", 1)[-1]` extracts the class name.
+  Bare class names like `use DateTime;` produce a `name` node (not
+  `qualified_name`) and are correctly not captured, avoiding false external edges.
+  4 nodes, 5 internal edges.
