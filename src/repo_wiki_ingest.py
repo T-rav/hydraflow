@@ -272,10 +272,10 @@ async def ingest_phase_output(
     for new_entry in entries:
         if new_entry.topic is None:
             continue
-        topic_path = store._repo_dir(repo) / f"{new_entry.topic}.md"
+        topic_path = store.repo_dir(repo) / f"{new_entry.topic}.md"
         if not topic_path.exists():
             continue
-        all_entries = store._load_topic_entries(topic_path)
+        all_entries = store.load_topic_entries(topic_path)
         siblings = [
             e
             for e in all_entries
