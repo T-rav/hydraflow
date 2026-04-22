@@ -15,4 +15,5 @@ from . import (
     p7_observability,  # noqa: F401
     p8_superpowers,  # noqa: F401
     p9_persistence,  # noqa: F401
+    p10_tdd,  # noqa: F401
 )
