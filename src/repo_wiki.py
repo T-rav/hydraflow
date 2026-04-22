@@ -468,12 +468,20 @@ class WikiEntry(BaseModel):
     )
     title: str = Field(description="Short summary of the insight")
     content: str = Field(description="Full explanation")
-    topic: str | None = Field(default=None)
+    topic: str | None = Field(
+        default=None,
+        description="Which topic page this entry lives under (architecture/patterns/gotchas/testing/dependencies/harness)",
+    )
     source_type: str = Field(
         description="plan|implement|review|hitl|reflection|librarian|manual"
     )
-    source_issue: int | None = Field(default=None)
-    source_repo: str | None = Field(default=None)
+    source_issue: int | None = Field(
+        default=None, description="GitHub issue number, if applicable"
+    )
+    source_repo: str | None = Field(
+        default=None,
+        description="owner/repo slug, or 'global' for tribal entries",
+    )
     created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
     valid_from: str | None = Field(
