@@ -260,6 +260,19 @@ layer-check:
 	@cd $(HYDRAFLOW_DIR) && $(UV) python scripts/check_layer_imports.py
 	@echo "$(GREEN)Layer check passed$(RESET)"
 
+# --------------------------------------------------------------------------
+# Principles audit (ADR-0044). Targets `.` by default; override with DIR=.
+#   make audit                         # audit this repo
+#   make audit DIR=../other-repo       # audit a sibling project
+#   make audit-json                    # JSON only, no terminal summary
+# --------------------------------------------------------------------------
+
+audit:
+	@cd $(HYDRAFLOW_DIR) && $(UV) python -m scripts.hydraflow_audit $(or $(DIR),.)
+
+audit-json:
+	@cd $(HYDRAFLOW_DIR) && $(UV) python -m scripts.hydraflow_audit $(or $(DIR),.) --json
+
 quality: deps
 	@echo "$(BLUE)Running quality checks in parallel...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && ( \
