@@ -33,6 +33,7 @@ from epic_monitor_loop import EpicMonitorLoop
 from epic_sweeper_loop import EpicSweeperLoop
 from events import EventBus
 from execution import SubprocessRunner
+from fake_coverage_auditor_loop import FakeCoverageAuditorLoop
 from flake_tracker_loop import FlakeTrackerLoop
 from github_cache_loop import GitHubCacheLoop, GitHubDataCache
 from harness_insights import HarnessInsightStore
@@ -175,6 +176,7 @@ class ServiceRegistry:
     principles_audit_loop: PrinciplesAuditLoop
     flake_tracker_loop: FlakeTrackerLoop
     skill_prompt_eval_loop: SkillPromptEvalLoop
+    fake_coverage_auditor_loop: FakeCoverageAuditorLoop
 
     # Optional integrations
     hindsight: HindsightClient | None = None
@@ -854,6 +856,17 @@ def build_services(
         dedup=skill_prompt_eval_dedup,
         deps=loop_deps,
     )
+    fake_coverage_auditor_dedup = DedupStore(
+        "fake_coverage_auditor",
+        config.data_root / "dedup" / "fake_coverage_auditor.json",
+    )
+    fake_coverage_auditor_loop = FakeCoverageAuditorLoop(  # noqa: F841
+        config=config,
+        state=state,
+        pr_manager=prs,
+        dedup=fake_coverage_auditor_dedup,
+        deps=loop_deps,
+    )
 
     return ServiceRegistry(
         workspaces=workspaces,
@@ -917,4 +930,5 @@ def build_services(
         principles_audit_loop=principles_audit_loop,
         flake_tracker_loop=flake_tracker_loop,
         skill_prompt_eval_loop=skill_prompt_eval_loop,
+        fake_coverage_auditor_loop=fake_coverage_auditor_loop,
     )
