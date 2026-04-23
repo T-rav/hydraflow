@@ -522,16 +522,45 @@ def _build_staging_bisect(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     The loop shells out to ``git bisect`` / ``gh api`` / ``gh pr create`` /
     ``gh issue create`` which cannot run inside a scenario. Tests may
     monkey-patch ``asyncio.create_subprocess_exec`` at the module level
-    (the pattern in ``test_staging_bisect_loop.py``) or pre-seed a
-    ``staging_bisect_state`` override.
+    (the pattern in ``test_staging_bisect_loop.py``) or pre-seed port keys
+    which this builder monkey-patches onto the instance:
+
+    * ``staging_bisect_state`` — pre-built StateTracker mock (defaults
+      to a MagicMock with ``get_last_rc_red_sha`` returning ``""``)
+    * ``staging_bisect_run_probe`` → ``_run_bisect_probe``
+      (async callable ``(rc_sha) -> (passed, combined_output)``)
+    * ``staging_bisect_run_pipeline`` → ``_run_full_bisect_pipeline``
+      (async callable ``(red_sha, probe_output) -> dict``)
     """
     from staging_bisect_loop import StagingBisectLoop  # noqa: PLC0415
 
-    state = ports.get("staging_bisect_state") or MagicMock()
-    ports["staging_bisect_state"] = state
+    state = ports.get("staging_bisect_state")
+    if state is None:
+        state = MagicMock()
+        state.get_last_rc_red_sha.return_value = ""
+        state.get_last_green_rc_sha.return_value = ""
+        state.increment_flake_reruns_total.return_value = None
+        ports["staging_bisect_state"] = state
+
     prs = ports.get("pr_manager") or ports["github"]
 
-    return StagingBisectLoop(config=config, prs=prs, state=state, deps=deps)
+    # Scenario configs default ``staging_enabled=False``; unconditionally
+    # enable it for scenario tests so the loop's ladder actually runs.
+    # Tests that want the disabled-short-circuit path can assert on the
+    # default HydraFlowConfig directly rather than via MockWorld.
+    if not getattr(config, "staging_enabled", False):
+        object.__setattr__(config, "staging_enabled", True)
+
+    loop = StagingBisectLoop(config=config, prs=prs, state=state, deps=deps)
+
+    run_probe = ports.get("staging_bisect_run_probe")
+    if run_probe is not None:
+        loop._run_bisect_probe = run_probe  # type: ignore[method-assign]
+    run_pipeline = ports.get("staging_bisect_run_pipeline")
+    if run_pipeline is not None:
+        loop._run_full_bisect_pipeline = run_pipeline  # type: ignore[method-assign]
+
+    return loop
 
 
 def _build_trust_fleet_sanity(ports: dict[str, Any], config: Any, deps: Any) -> Any:

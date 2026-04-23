@@ -140,3 +140,28 @@ jobs:
           name: playwright-trace
           path: tests/scenarios/browser/_artifacts/
           retention-days: 14
+
+  trust:
+    # Adversarial skill corpus (spec §4.1). Runs in fixture mode — no
+    # ANTHROPIC_API_KEY required. Live mode (HYDRAFLOW_TRUST_ADVERSARIAL_LIVE=1)
+    # is gated on a separate workflow once the secret is provisioned.
+    name: Trust Gate (adversarial corpus, fixture mode)
+    needs: gate
+    if: needs.gate.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.pr_ref }}
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: uv sync --all-extras
+      - name: Trust suite (make trust)
+        run: make trust
