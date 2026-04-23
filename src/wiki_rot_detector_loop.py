@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from models import WorkCycleResult
@@ -315,11 +315,113 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         )
 
     async def _reconcile_closed_escalations(self) -> None:
-        """Task 6."""
-        return None
+        """Poll closed ``wiki-rot-stuck`` escalations and clear the
+        matching dedup key + attempt counter.  Called at the top of
+        every tick; close-to-clear latency is bounded by the loop
+        interval (spec §3.2).
+        """
+        try:
+            closed = await self._gh_closed_escalations()
+        except Exception:  # noqa: BLE001
+            logger.debug("reconcile: gh list failed", exc_info=True)
+            return
+
+        if not closed:
+            return
+
+        current = self._dedup.get()
+        to_clear: set[str] = set()
+        for issue in closed:
+            subject = _parse_escalation_subject(
+                str(issue.get("title", "")),
+                str(issue.get("body", "")),
+            )
+            if subject is None:
+                continue
+            key = f"wiki_rot_detector:{subject}"
+            if key in current:
+                to_clear.add(key)
+            self._state.clear_wiki_rot_attempts(subject)
+
+        if to_clear:
+            remaining = current - to_clear
+            self._dedup.set_all(remaining)
+
+    async def _gh_closed_escalations(self) -> list[dict[str, Any]]:
+        """Return the list of closed ``hitl-escalation`` +
+        ``wiki-rot-stuck`` issues authored by this bot.
+
+        Shells out to ``gh issue list`` to avoid a PRManager dependency
+        on a rarely-used endpoint.  JSON parse / non-zero exit → empty
+        list (tolerant — reconciliation is best-effort).
+        """
+        import asyncio  # noqa: PLC0415
+        import json  # noqa: PLC0415
+        import subprocess  # noqa: PLC0415
+
+        cmd = [
+            "gh",
+            "issue",
+            "list",
+            "--state",
+            "closed",
+            "--label",
+            "hitl-escalation",
+            "--label",
+            "wiki-rot-stuck",
+            "--author",
+            "@me",
+            "--json",
+            "number,title,body",
+            "--limit",
+            "50",
+        ]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+        except (OSError, FileNotFoundError):
+            return []
+        if proc.returncode != 0:
+            return []
+        try:
+            data = json.loads(stdout or b"[]")
+        except json.JSONDecodeError:
+            return []
+        return data if isinstance(data, list) else []
 
 
 # -- module helpers --------------------------------------------------------
+
+
+def _parse_escalation_subject(title: str, body: str) -> str | None:
+    """Extract ``{slug}:{cite}`` from an escalation issue.
+
+    Title format: ``Wiki rot stuck: {slug} cites missing {cite}``.
+    ``{slug}`` is parsed directly from the title (everything between
+    ``stuck: `` and `` cites missing ``); falls back to a ``Repo: `` line
+    in the body on malformed titles.
+    """
+    prefix = "Wiki rot stuck: "
+    anchor = " cites missing "
+    if not title.startswith(prefix) or anchor not in title:
+        return None
+    slug_plus_tail = title[len(prefix) :]
+    slug, _, cite = slug_plus_tail.partition(anchor)
+    slug = slug.strip()
+    cite = cite.strip()
+    if not slug or not cite:
+        # Fallback: ``Repo: `slug`` in body.
+        for line in body.splitlines():
+            if line.strip().startswith("- Repo:") or line.strip().startswith("Repo:"):
+                slug = line.split("`")[1] if "`" in line else slug
+                break
+    if not slug or not cite:
+        return None
+    return f"{slug}:{cite}"
 
 
 def _first_heading(text: str) -> str | None:

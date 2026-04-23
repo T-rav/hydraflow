@@ -162,3 +162,53 @@ async def test_tick_repo_escalates_on_third_attempt(
     assert len(calls) == 2
     labels_escalate = calls[-1].args[2]
     assert set(labels_escalate) == {"hitl-escalation", "wiki-rot-stuck"}
+
+
+async def test_reconcile_clears_dedup_and_attempts(
+    tmp_path: Path,
+    loop_env,
+    monkeypatch,
+) -> None:
+    cfg, state, pr, dedup, wiki_store = loop_env
+    slug = "hydra/hydraflow"
+    dedup.get.return_value = {
+        f"wiki_rot_detector:{slug}:src/foo.py:bar",
+        f"wiki_rot_detector:{slug}:src/foo.py:other",  # unrelated, stays
+    }
+    closed_payload = [
+        {
+            "number": 901,
+            "title": f"Wiki rot stuck: {slug} cites missing src/foo.py:bar",
+            "body": f"Repo: `{slug}`",
+        },
+    ]
+
+    async def fake_list(*_a, **_kw):
+        return closed_payload
+
+    loop = _loop(loop_env)
+    monkeypatch.setattr(loop, "_gh_closed_escalations", fake_list)
+
+    await loop._reconcile_closed_escalations()
+
+    state.clear_wiki_rot_attempts.assert_any_call(f"{slug}:src/foo.py:bar")
+    # set_all called with the surviving key.
+    remaining_calls = [c.args[0] for c in dedup.set_all.call_args_list]
+    assert remaining_calls, "dedup.set_all not invoked"
+    assert f"wiki_rot_detector:{slug}:src/foo.py:bar" not in remaining_calls[-1]
+    assert f"wiki_rot_detector:{slug}:src/foo.py:other" in remaining_calls[-1]
+
+
+async def test_reconcile_noop_when_no_closed(loop_env, monkeypatch) -> None:
+    cfg, state, pr, dedup, wiki_store = loop_env
+
+    async def fake_list(*_a, **_kw):
+        return []
+
+    loop = _loop(loop_env)
+    monkeypatch.setattr(loop, "_gh_closed_escalations", fake_list)
+
+    await loop._reconcile_closed_escalations()
+
+    dedup.set_all.assert_not_called()
+    state.clear_wiki_rot_attempts.assert_not_called()
