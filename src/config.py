@@ -1921,11 +1921,12 @@ def _apply_profile_overrides(config: HydraFlowConfig) -> None:
             "review_tool",
             "planner_tool",
             "ac_tool",
-            "verification_judge_tool",
             "subskill_tool",
             "debug_tool",
         ):
             _apply_if_default(field, config.system_tool)
+        # verification_judge_tool intentionally omitted — it is auto-synced
+        # to review_tool inside _harmonize_tool_model_defaults.
 
     if config.system_model.strip():
         for field in (

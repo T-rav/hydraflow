@@ -1627,7 +1627,7 @@ class TestAgentToolFields:
         monkeypatch.setenv("HYDRAFLOW_TRIAGE", "codex:gpt-5-codex")
         monkeypatch.setenv("HYDRAFLOW_TRANSCRIPT_SUMMARY", "codex:gpt-5-codex")
         monkeypatch.setenv("HYDRAFLOW_AC", "codex:gpt-5-codex")
-        monkeypatch.setenv("HYDRAFLOW_VERIFICATION_JUDGE", "codex:gpt-5-codex")
+        # verification_judge has no env var — it auto-syncs to review_tool.
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             workspace_base=tmp_path / "wt",
@@ -1654,7 +1654,7 @@ class TestAgentToolFields:
         monkeypatch.setenv("HYDRAFLOW_TRIAGE", "pi:pi-model")
         monkeypatch.setenv("HYDRAFLOW_TRANSCRIPT_SUMMARY", "pi:pi-model")
         monkeypatch.setenv("HYDRAFLOW_AC", "pi:pi-model")
-        monkeypatch.setenv("HYDRAFLOW_VERIFICATION_JUDGE", "pi:pi-model")
+        # verification_judge has no env var — it auto-syncs to review_tool.
         monkeypatch.setenv("HYDRAFLOW_SYSTEM", "pi:pi-model")
         monkeypatch.setenv("HYDRAFLOW_BACKGROUND", "pi:pi-model")
         cfg = HydraFlowConfig(
