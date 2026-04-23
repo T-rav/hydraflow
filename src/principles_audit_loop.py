@@ -154,3 +154,16 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
         report = await self._run_audit(mr.slug, checkout)
         self._save_snapshot(mr.slug, report)
         return self._snapshot_from_report(report)
+
+    @staticmethod
+    def _diff_regressions(
+        last_green: dict[str, str], current: dict[str, str]
+    ) -> list[str]:
+        """Return check_ids that went PASS→FAIL vs last-green (spec §4.4)."""
+        if not last_green:
+            return []
+        return sorted(
+            cid
+            for cid, prev in last_green.items()
+            if prev == "PASS" and current.get(cid) == "FAIL"
+        )

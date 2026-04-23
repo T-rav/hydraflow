@@ -131,3 +131,22 @@ async def test_audit_managed_repo_clones_or_fetches(loop_env, tmp_path, monkeypa
     commands.clear()
     await loop._audit_managed_repo(mr)
     assert any("fetch" in c for c in commands)
+
+
+def test_diff_regressions_identifies_pass_to_fail(loop_env):
+    cfg, state, pr = loop_env
+    stop = asyncio.Event()
+    loop = PrinciplesAuditLoop(config=cfg, state=state, pr_manager=pr, deps=_deps(stop))
+    last = {"P1.1": "PASS", "P2.4": "PASS", "P8.2": "WARN"}
+    current = {"P1.1": "FAIL", "P2.4": "PASS", "P8.2": "FAIL"}
+    regressions = loop._diff_regressions(last, current)
+    # Only PASS→FAIL is a regression; WARN→FAIL is not (spec §4.4 "PASS to FAIL")
+    assert set(regressions) == {"P1.1"}
+
+
+def test_diff_regressions_no_reference_is_noop(loop_env):
+    cfg, state, pr = loop_env
+    stop = asyncio.Event()
+    loop = PrinciplesAuditLoop(config=cfg, state=state, pr_manager=pr, deps=_deps(stop))
+    # Empty last-green means "we don't know what green is yet" — no regressions.
+    assert loop._diff_regressions({}, {"P1.1": "FAIL"}) == []
