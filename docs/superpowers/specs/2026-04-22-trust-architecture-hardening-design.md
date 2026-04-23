@@ -168,11 +168,16 @@ guardrails.
 **Escalation lifecycle.** Every `hitl-escalation` issue follows one
 lifecycle: the loop files it, a human closes it (with or without a
 fix), and the associated dedup key in `src/dedup_store.py:DedupStore`
-clears on issue close (subscribe to the GitHub `issues.closed` event
-via the existing issue-watcher path, or poll closed issues on a
-cadence). Without this, a loop that escalates once stays paralyzed:
-the dedup key blocks re-fire, but the escalation has already been
-resolved. Every loop's plan must wire this lifecycle.
+clears on issue close. Mechanism: each loop polls closed
+`hitl-escalation` issues it previously filed on every tick
+(cheap — `gh issue list --state=closed --label=hitl-escalation
+--author=@me --since=<last_tick>`); on finding one, clear the
+matching dedup key. Polling cadence is the loop's normal interval —
+no separate cron. Close-to-clear latency is therefore bounded by the
+loop's interval (default 600s for most loops). Unit tests per loop
+assert the close handler clears the key. Without this lifecycle a
+loop that escalates once stays paralyzed: the dedup key blocks
+re-fire long after the escalation has been resolved.
 
 **Kill-switch contract.** Every loop this spec introduces must honor
 a `<loop_name>_enabled` config field (default `True`) that, when set
@@ -261,10 +266,13 @@ v1 ships first as an RC gate (`make trust-adversarial` → wired into
 and proposes a new case for each.
 
 **Escape-signal source (default).** `hydraflow-find` issues tagged with
-the `skill-escape` label. The label is not hard-coded: a config knob
-`corpus_learning_signal_label` (default `skill-escape`) lets operators
-flip to a different label without a code change. Alternative source
-mechanisms are listed in §9.
+the `skill-escape` label for post-impl skills; `discover-escape` for
+Discover evaluator escapes; `shape-escape` for Shape evaluator
+escapes. The loop reads all three labels and synthesizes cases for
+the appropriate skill family. Config:
+`corpus_learning_signal_labels` (default `["skill-escape",
+"discover-escape", "shape-escape"]`). Alternative source mechanisms
+listed in §9.
 
 **Per-escape workflow.**
 
@@ -762,9 +770,28 @@ onboarding.
 **Onboarding gate.** A new managed target repo is signaled by an
 entry in `src/config.py:managed_repos` (the spec picks this
 mechanism; not a label, not a separate API — one place in config,
-one source of truth). On each loop tick, `PrinciplesAuditLoop`
-compares `managed_repos` to the set it has already audited; new
-entries trigger an onboarding audit:
+one source of truth).
+
+**`managed_repos` config shape** (new field the plan creates):
+
+```python
+class ManagedRepo(BaseModel):
+    slug: str                    # "owner/repo"
+    staging_branch: str = "staging"
+    main_branch: str = "main"
+    labels_namespace: str = ""   # optional prefix, e.g. "proj-a-"
+    enabled: bool = True         # operator kill-switch per repo
+
+managed_repos: list[ManagedRepo] = Field(default_factory=list)
+```
+
+Env override `HYDRAFLOW_MANAGED_REPOS` parses JSON per existing
+`_ENV_JSON_OVERRIDES` pattern. `StateTracker` tracks
+`managed_repos_onboarding_status: dict[str, Literal["pending",
+"blocked", "ready"]]` keyed by slug. On each loop tick,
+`PrinciplesAuditLoop` compares config entries to the state map;
+entries in `pending` or missing from state trigger an onboarding
+audit:
 
 - The loop runs `make audit --json` against a shallow checkout of the
   new repo.
@@ -813,6 +840,15 @@ Failing `make audit` fails the PR. The `.hydraflow-audit-baseline`
 file anchors P10.3 to exclude historical drift; other checks are
 absolute. This gate is the machinery that enforces §11.1's "principles
 as foundation" for HydraFlow-self.
+
+**Runtime budget for the CI gate.** `make audit` must complete in
+< 30 seconds against the HydraFlow tree, otherwise adding it to every
+per-PR CI run contradicts the §3.1 "per-PR lightweight" stance. The
+plan for §4.4 includes a benchmark task measuring current runtime;
+if over budget, the fallback is moving the gate to the RC workflow
+(`rc-promotion-scenario.yml`) instead of `ci.yml`, accepting a longer
+feedback loop for principle drift. The benchmark's output is recorded
+in the PR description so the decision is visible.
 
 **Escalation.** STRUCTURAL/BEHAVIORAL regressions: after 3 repair
 attempts, label `hitl-escalation`, `principles-stuck`. CULTURAL
@@ -1208,16 +1244,26 @@ flowing. The gap is **one unified waterfall view per issue** plus
    - Cost column sortable. "Top 10 expensive issues this week" link
      drills into the waterfall.
 
-3. **Per-loop telemetry for trust loops.** Every new loop in this
-   spec (`CorpusLearningLoop`, `ContractRefreshLoop`,
+3. **Per-loop telemetry for trust loops (cross-cutting).** Every new
+   loop in this spec (`CorpusLearningLoop`, `ContractRefreshLoop`,
    `StagingBisectLoop`, `PrinciplesAuditLoop`, `FlakeTrackerLoop`,
    `SkillPromptEvalLoop`, `FakeCoverageAuditorLoop`, `RCBudgetLoop`,
-   `WikiRotDetectorLoop`) must emit telemetry to
-   `src/prompt_telemetry.py` when they call the LLM, and to
-   `src/trace_collector.py` when they run subprocesses. Loop names
-   appear as `{"kind": "loop", "loop": "<LoopClassName>"}` actions in
-   the waterfall so operators see the full cost of the trust fleet,
-   not just the pipeline.
+   `WikiRotDetectorLoop`, `TrustFleetSanityLoop`) must emit telemetry
+   to `src/prompt_telemetry.py` on every LLM call and to
+   `src/trace_collector.py` on every subprocess invocation. Loop
+   names appear as `{"kind": "loop", "loop": "<LoopClassName>"}`
+   actions in the waterfall so operators see the full cost of the
+   trust fleet, not just the pipeline.
+
+   **Implementation requirement for every loop's plan:** add a task
+   that instruments the loop's LLM/subprocess call sites with
+   telemetry emission. Suggest the plan either (a) add a mixin
+   `TelemetryEmittingLoop` extending `BaseBackgroundLoop` that wraps
+   LLM/subprocess calls uniformly, or (b) inline the emission in
+   each loop's tick. Plan picks; the shared-mixin route avoids
+   repetition but the inline route is cheaper to land. Either way
+   the telemetry must be unit-tested — a loop that silently stops
+   emitting would silently disappear from the dashboard.
 
 4. **Aggregate rollups.** Extend the existing diagnostics router with:
    - `/api/diagnostics/cost/rolling-24h` — cost burned in last 24h,
@@ -1453,12 +1499,13 @@ false-negative on the RC.
   verification against fixture repo, fuzzy-match suggestion.
 
 **Loop-wiring completeness.** `tests/test_loop_wiring_completeness.py`
-(existing) must gain entries for all nine new loops:
+(existing) must gain entries for all **ten** new loops:
 `CorpusLearningLoop`, `ContractRefreshLoop`, `StagingBisectLoop`,
 `PrinciplesAuditLoop`, `FlakeTrackerLoop`, `SkillPromptEvalLoop`,
-`FakeCoverageAuditorLoop`, `RCBudgetLoop`, `WikiRotDetectorLoop`. All
-five checkpoints per loop; missing any entry is a hard test failure
-per `docs/agents/background-loops.md`.
+`FakeCoverageAuditorLoop`, `RCBudgetLoop`, `WikiRotDetectorLoop`,
+`TrustFleetSanityLoop` (the last lives in §12.1 but is wired like
+the §4 loops). All five checkpoints per loop; missing any entry is
+a hard test failure per `docs/agents/background-loops.md`.
 
 **End-to-end per subsystem (gate-side).**
 
@@ -1474,13 +1521,26 @@ per `docs/agents/background-loops.md`.
   asserting the correct culprit is identified and the issue title
   matches.
 
-**MockWorld scenarios (loop-side) — required.** Each new loop
+**MockWorld scenarios (integration-side) — required.** Each new loop
 introduced by this spec (`CorpusLearningLoop`, `ContractRefreshLoop`,
 `StagingBisectLoop`, `PrinciplesAuditLoop`, `FlakeTrackerLoop`,
 `SkillPromptEvalLoop`, `FakeCoverageAuditorLoop`, `RCBudgetLoop`,
-`WikiRotDetectorLoop`) must land with a MockWorld scenario under
-`tests/scenarios/` that exercises its pipeline behavior end-to-end
-using stateful fakes. A scenario:
+`WikiRotDetectorLoop`, `TrustFleetSanityLoop`) must land with a
+MockWorld scenario under `tests/scenarios/` that exercises its
+pipeline behavior end-to-end using stateful fakes. Additionally:
+
+- §4.10 (non-loop) — MockWorld scenario that runs a vague issue
+  through Discover → Shape → Plan, asserts the evaluator RETRYs
+  caught a synthetic bad brief/proposal, and the retry produced a
+  good one. Dispatch paths (`DiscoverRunner`, `ShapeRunner`) must be
+  exercised, not just the skills.
+- §4.11 (non-loop) — MockWorld scenario that runs any issue through
+  the full pipeline, calls the waterfall endpoint, and asserts all
+  seven phases return non-zero rollups. Covers the cost-dashboard
+  integration too: assert the per-loop endpoint reports each loop
+  that ticked during the scenario.
+
+A scenario:
 
 1. Seeds `MockWorld` with the trigger state (e.g. a scripted RC-red
    for `StagingBisectLoop`, a `skill-escape`-labeled issue for
@@ -1704,32 +1764,54 @@ Per loop:
   `cassettes_refreshed` (contract), `principles_regressions`
   (audit), etc.
 
-**Trust-loop sanity caretaker.** A new tenth loop,
+**Trust-loop sanity caretaker.** A tenth loop,
 **`TrustFleetSanityLoop`** (`src/trust_fleet_sanity_loop.py`), watches
 the above metrics. Who watches the watchers — the watchers watch each
-other. On any of the following anomalies, it files a
+other. On any of the following anomalies (all thresholds config
+fields, operator-tunable, listed with defaults), it files a
 `hitl-escalation` issue with label `trust-loop-anomaly`:
 
-- A loop files > `loop_anomaly_issues_per_hour` (default 10) issues
-  in an hour.
-- A loop's `repair_failures_total` over 24h exceeds
-  `repair_successes_total` × 2 — it's churning, not fixing.
-- A loop's `ticks_errored / ticks_total` ratio exceeds 0.2 over the
-  last 24h — it's broken.
-- A loop hasn't ticked in > `loop_staleness_s` (default 2 ×
-  interval) and is `enabled` — its scheduler dropped it.
-- A loop's cost spikes > 5× its 30-day median (this reads from
-  §4.11).
+- `loop_anomaly_issues_per_hour` (default `10`) — a loop files
+  more issues than this in an hour.
+- `loop_anomaly_repair_ratio` (default `2.0`) — a loop's
+  `repair_failures_total / repair_successes_total` over 24h exceeds
+  this ratio — it's churning, not fixing.
+- `loop_anomaly_tick_error_ratio` (default `0.2`) —
+  `ticks_errored / ticks_total` over 24h exceeds this — the loop is
+  broken.
+- `loop_anomaly_staleness_multiplier` (default `2.0`) — a loop
+  hasn't ticked in more than this × its `interval` and is `enabled`
+  — its scheduler dropped it.
+- `loop_anomaly_cost_spike_ratio` (default `5.0`) — a loop's cost
+  over the current day exceeds this × its 30-day median
+  (reads from §4.11).
 
-The sanity loop itself is watched by **inverted self-check**: if
-`TrustFleetSanityLoop` stops ticking, the existing `HealthMonitor`
-(`src/health_monitor.py`) detects it and files a conventional health
-issue. This breaks the recursion at the health layer — health is the
-root of trust; without it, the operator has nothing to stand on.
+All five thresholds are `src/config.py` fields with env overrides
+following existing patterns. Operators tune them from the dashboard's
+System tab.
 
-`TrustFleetSanityLoop` follows the same five-checkpoint wiring. Add
-to `tests/test_loop_wiring_completeness.py`. Adds Loop #10 to the
-§4 subsystem count.
+**Bounds of meta-observability.** `TrustFleetSanityLoop` watches the
+nine trust loops. The existing `src/health_monitor.py:HealthMonitor`
+watches `TrustFleetSanityLoop` for dead-man-switch (stopped-ticking)
+conditions only — it does NOT detect misfire bursts. If
+`TrustFleetSanityLoop` itself develops a bug that causes it to
+escalate every loop to HITL, the operator will see the flood
+immediately in the Trust Fleet panel (§12.3) and can flip the
+`trust_fleet_sanity_enabled` kill-switch. The recursion
+intentionally terminates at human-in-the-loop at the sanity layer:
+every level of meta-observability pays an operability cost, and a
+fully-closed recursion requires infinite trust layers. We bound the
+tower at one meta-layer, rely on HealthMonitor for aliveness, and
+accept that sanity-loop misbehavior is a human-visible fire rather
+than an autonomously-caught one.
+
+`TrustFleetSanityLoop` follows the same five-checkpoint wiring. Adds
+to `tests/test_loop_wiring_completeness.py`. Counts as Loop #10 in
+the §4 subsystem family (§4.1–§4.9 are nine; `TrustFleetSanityLoop`
+is the tenth, documented here in §12.1 because it is the operability
+meta-layer, not a primary trust gate). **Implementation lands in
+Plan 5 (caretaker fleet bundle) so the shared loop-pattern work is
+consolidated.**
 
 ### 12.2 Kill-switch / pause contract
 
@@ -1776,19 +1858,20 @@ under `/api/trust/*` and `/api/diagnostics/*`. No new stores.
 Qualitative "lights-off" needs quantitative targets. Baseline-then-
 target mapping after the spec lands:
 
-**30-day targets** (measured on HydraFlow-self):
-- **Skill escape rate**: zero bugs merged to `main` that the
-  adversarial corpus *could* have caught (a post-hoc review, logged
-  in a monthly retro). The number is zero because every caught
-  escape should have gone through `CorpusLearningLoop` → new case.
+**30-day targets** (measured on HydraFlow-self, all queryable from
+`/api/trust/fleet`):
+- **Skill escape closure**: every `skill-escape` / `discover-escape`
+  / `shape-escape` issue filed in the window resulted in a
+  `CorpusLearningLoop` PR merging within 7 days. Measurable:
+  `escapes_closed_by_corpus_within_7d / escapes_total` target ≥ 95%.
 - **Fake drift**: all four adapters have a refresh PR cycle completed
   successfully at least twice — proves the `ContractRefreshLoop` is
   closing loops end-to-end.
-- **RC-red MTTR** (time from red RC detected → green RC): p50 < 2h
-  (auto-revert + retry cycle), p95 < 8h (watchdog cap). Before this
-  spec: indeterminate / manual.
-- **Principles conformance**: zero regressions on P1–P5 unfixed for
-  more than 24h.
+- **RC-red MTTR** (wall-clock from red RC detected → green RC): p50
+  < 2h (auto-revert + retry cycle), p95 < 8h (watchdog cap). Before
+  this spec: indeterminate / manual.
+- **Principles conformance**: `principles_drift_age_p95_hours` < 24h
+  — no P1–P5 regression sits open longer than a day.
 
 **90-day targets**:
 - **HITL escalation rate**: < 3 per week across the fleet. Above that
