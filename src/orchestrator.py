@@ -270,6 +270,28 @@ class HydraFlowOrchestrator:
             or self._svc.hitl_runner.active_count
         )
 
+    def _is_slug_blocked(self, slug: str) -> bool:
+        """Return True if this repo slug is blocked by onboarding gate (§4.4)."""
+        return slug in self._state.blocked_slugs()
+
+    async def _pipeline_work_wrapper(
+        self,
+        slug: str,
+        inner: Callable[[], Coroutine[Any, Any, Any]],
+    ) -> object:
+        """Skip this cycle if slug is onboarding-blocked (§4.4).
+
+        Returns ``False`` (falsy, so ``_polling_loop`` sleeps) when the slug is
+        blocked; otherwise passes through the inner callable's return value —
+        pipeline work functions have heterogeneous return types (``bool``,
+        ``int``, ``list[PlanResult]``) but ``_polling_loop`` only inspects
+        truthiness via ``bool(await work_fn())``.
+        """
+        if self._is_slug_blocked(slug):
+            logger.debug("Skipping %s — onboarding blocked", slug)
+            return False
+        return await inner()
+
     @property
     def credits_paused_until(self) -> datetime | None:
         """The UTC datetime when credit pause ends, or ``None``."""
@@ -1080,9 +1102,15 @@ class HydraFlowOrchestrator:
 
     async def _triage_loop(self) -> None:
         """Continuously poll for find-labeled issues and triage them."""
+
+        async def _work() -> object:
+            return await self._pipeline_work_wrapper(
+                self._config.repo, self._svc.triager.triage_issues
+            )
+
         await self._polling_loop(
             "triage",
-            self._svc.triager.triage_issues,
+            _work,
             self._config.poll_interval,
             enabled_name="triage",
             is_pipeline=True,
@@ -1090,9 +1118,15 @@ class HydraFlowOrchestrator:
 
     async def _discover_loop(self) -> None:
         """Continuously poll for discover-labeled issues."""
+
+        async def _work() -> object:
+            return await self._pipeline_work_wrapper(
+                self._config.repo, self._svc.discover_phase.discover_issues
+            )
+
         await self._polling_loop(
             "discover",
-            self._svc.discover_phase.discover_issues,
+            _work,
             self._config.poll_interval,
             enabled_name="discover",
             is_pipeline=True,
@@ -1100,9 +1134,15 @@ class HydraFlowOrchestrator:
 
     async def _shape_loop(self) -> None:
         """Continuously poll for shape-labeled issues awaiting direction selection."""
+
+        async def _work() -> object:
+            return await self._pipeline_work_wrapper(
+                self._config.repo, self._svc.shape_phase.shape_issues
+            )
+
         await self._polling_loop(
             "shape",
-            self._svc.shape_phase.shape_issues,
+            _work,
             self._config.poll_interval,
             enabled_name="shape",
             is_pipeline=True,
@@ -1110,9 +1150,15 @@ class HydraFlowOrchestrator:
 
     async def _plan_loop(self) -> None:
         """Continuously poll for planner-labeled issues."""
+
+        async def _work() -> object:
+            return await self._pipeline_work_wrapper(
+                self._config.repo, self._svc.planner_phase.plan_issues
+            )
+
         await self._polling_loop(
             "plan",
-            self._svc.planner_phase.plan_issues,
+            _work,
             self._config.poll_interval,
             enabled_name="plan",
             is_pipeline=True,
@@ -1120,9 +1166,15 @@ class HydraFlowOrchestrator:
 
     async def _implement_loop(self) -> None:
         """Continuously poll for ``hydraflow-ready`` issues and implement them."""
+
+        async def _work() -> object:
+            return await self._pipeline_work_wrapper(
+                self._config.repo, self._do_implement_work
+            )
+
         await self._polling_loop(
             "implement",
-            self._do_implement_work,
+            _work,
             self._config.poll_interval,
             enabled_name="implement",
             is_pipeline=True,
@@ -1130,9 +1182,15 @@ class HydraFlowOrchestrator:
 
     async def _review_loop(self) -> None:
         """Continuously consume reviewable issues from the store and review their PRs."""
+
+        async def _work() -> object:
+            return await self._pipeline_work_wrapper(
+                self._config.repo, self._do_review_work
+            )
+
         await self._polling_loop(
             "review",
-            self._do_review_work,
+            _work,
             self._config.poll_interval,
             enabled_name="review",
             is_pipeline=True,
@@ -1140,9 +1198,15 @@ class HydraFlowOrchestrator:
 
     async def _hitl_loop(self) -> None:
         """Continuously process HITL corrections submitted via the dashboard."""
+
+        async def _work() -> object:
+            return await self._pipeline_work_wrapper(
+                self._config.repo, self._hitl_ctrl.do_work
+            )
+
         await self._polling_loop(
             "hitl",
-            self._hitl_ctrl.do_work,
+            _work,
             self._config.poll_interval,
             is_pipeline=True,
         )
