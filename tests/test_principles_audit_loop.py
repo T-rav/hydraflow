@@ -193,3 +193,62 @@ async def test_cultural_escalates_after_one_attempt(loop_env):
     state.increment_drift_attempts.return_value = 1
     escalated = await loop._maybe_escalate("acme/widget", "P10.2", "CULTURAL")
     assert escalated is True
+
+
+async def test_onboarding_pending_triggers_initial_audit(loop_env, monkeypatch):
+    cfg, state, pr = loop_env
+    cfg.managed_repos = [ManagedRepo(slug="acme/widget")]
+    state.get_onboarding_status.return_value = None  # unseen → pending
+    stop = asyncio.Event()
+    loop = PrinciplesAuditLoop(config=cfg, state=state, pr_manager=pr, deps=_deps(stop))
+
+    async def fake_audit(mr):
+        # P1.1 FAIL (structural P1–P5) — must block
+        return {"P1.1": "FAIL", "P6.1": "PASS"}
+
+    async def fake_report(mr):
+        return {
+            "findings": [
+                {
+                    "check_id": "P1.1",
+                    "status": "FAIL",
+                    "severity": "STRUCTURAL",
+                    "principle": "P1",
+                    "source": "",
+                    "what": "",
+                    "remediation": "",
+                    "message": "",
+                },
+                {
+                    "check_id": "P6.1",
+                    "status": "PASS",
+                    "severity": "BEHAVIORAL",
+                    "principle": "P6",
+                    "source": "",
+                    "what": "",
+                    "remediation": "",
+                    "message": "",
+                },
+            ]
+        }
+
+    monkeypatch.setattr(loop, "_audit_managed_repo", fake_audit)
+    monkeypatch.setattr(loop, "_fetch_last_report", fake_report)
+
+    await loop._reconcile_onboarding()
+
+    state.set_onboarding_status.assert_called_with("acme/widget", "blocked")
+    pr.create_issue.assert_awaited()  # onboarding-blocked issue filed
+
+
+def test_p1_p5_fails_filter():
+    # Module-level helper check
+    from principles_audit_loop import PrinciplesAuditLoop as PAL
+
+    findings = [
+        {"check_id": "P1.1", "status": "FAIL", "principle": "P1"},
+        {"check_id": "P5.2", "status": "FAIL", "principle": "P5"},
+        {"check_id": "P6.1", "status": "FAIL", "principle": "P6"},
+        {"check_id": "P2.1", "status": "PASS", "principle": "P2"},
+    ]
+    assert PAL._p1_p5_fails(findings) == ["P1.1", "P5.2"]

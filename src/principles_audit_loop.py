@@ -239,3 +239,80 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
             if await self._maybe_escalate(slug, check_id, finding["severity"]):
                 stats["escalated"] += 1
         return stats
+
+    @staticmethod
+    def _p1_p5_fails(findings: list[dict[str, Any]]) -> list[str]:
+        """check_ids whose principle is P1–P5 and whose status is FAIL."""
+        return [
+            f["check_id"]
+            for f in findings
+            if f.get("status") == "FAIL"
+            and f.get("principle") in {"P1", "P2", "P3", "P4", "P5"}
+        ]
+
+    async def _fetch_last_report(self, mr: ManagedRepo) -> dict[str, Any]:
+        """Read the most recent saved report for this slug; re-audit if absent."""
+        base = self._config.data_root / mr.slug / "audit"
+        if not base.exists():
+            checkout = await self._refresh_checkout(mr)
+            return await self._run_audit(mr.slug, checkout)
+        latest = max(base.glob("*.json"), default=None)
+        if latest is None:
+            checkout = await self._refresh_checkout(mr)
+            return await self._run_audit(mr.slug, checkout)
+        return json.loads(latest.read_text())
+
+    async def _run_onboarding_audit(self, mr: ManagedRepo) -> None:
+        """Audit a newly-added managed repo and set its onboarding status."""
+        snapshot = await self._audit_managed_repo(mr)
+        report = await self._fetch_last_report(mr)
+        fails = self._p1_p5_fails(report.get("findings", []))
+        if fails:
+            self._state.set_onboarding_status(mr.slug, "blocked")
+            await self._file_onboarding_issue(mr, fails, report)
+        else:
+            self._state.set_onboarding_status(mr.slug, "ready")
+            self._state.set_last_green_audit(mr.slug, snapshot)
+
+    async def _file_onboarding_issue(
+        self,
+        mr: ManagedRepo,
+        fails: list[str],
+        report: dict[str, Any],
+    ) -> int:
+        findings_by_id = {f["check_id"]: f for f in report.get("findings", [])}
+        bullets = "\n".join(
+            f"- **{cid}** ({findings_by_id[cid]['severity']}): "
+            f"{findings_by_id[cid]['what']} — {findings_by_id[cid]['remediation']}"
+            for cid in fails
+        )
+        title = f"Onboarding blocked: {mr.slug} fails P1–P5"
+        body = (
+            f"Managed repo `{mr.slug}` cannot enter the HydraFlow pipeline "
+            f"until the following P1–P5 checks pass (spec §4.4):\n\n"
+            f"{bullets}\n\n"
+            f"Factory dispatch is blocked for this slug until a re-audit "
+            f"reports all P1–P5 as PASS. Run `make audit DIR=<checkout>` "
+            f"locally to reproduce."
+        )
+        return await self._pr.create_issue(
+            title,
+            body,
+            labels=["hydraflow-find", "onboarding-blocked"],
+        )
+
+    async def _reconcile_onboarding(self) -> int:
+        """For every managed_repos entry, ensure onboarding status is set."""
+        count = 0
+        for mr in self._config.managed_repos:
+            if not mr.enabled:
+                continue
+            status = self._state.get_onboarding_status(mr.slug)
+            if status is None:
+                self._state.set_onboarding_status(mr.slug, "pending")
+                await self._run_onboarding_audit(mr)
+                count += 1
+            elif status == "pending":
+                await self._run_onboarding_audit(mr)
+                count += 1
+        return count
