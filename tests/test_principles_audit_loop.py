@@ -252,3 +252,180 @@ def test_p1_p5_fails_filter():
         {"check_id": "P2.1", "status": "PASS", "principle": "P2"},
     ]
     assert PAL._p1_p5_fails(findings) == ["P1.1", "P5.2"]
+
+
+async def test_blocked_flips_to_ready_on_green(loop_env, monkeypatch):
+    cfg, state, pr = loop_env
+    cfg.managed_repos = [ManagedRepo(slug="acme/widget")]
+    state.get_onboarding_status.return_value = "blocked"
+    stop = asyncio.Event()
+    loop = PrinciplesAuditLoop(config=cfg, state=state, pr_manager=pr, deps=_deps(stop))
+
+    async def fake_audit(mr):
+        return {"P1.1": "PASS", "P5.1": "PASS"}
+
+    async def fake_report(mr):
+        return {
+            "findings": [
+                {
+                    "check_id": "P1.1",
+                    "status": "PASS",
+                    "severity": "STRUCTURAL",
+                    "principle": "P1",
+                    "source": "",
+                    "what": "",
+                    "remediation": "",
+                    "message": "",
+                },
+                {
+                    "check_id": "P5.1",
+                    "status": "PASS",
+                    "severity": "STRUCTURAL",
+                    "principle": "P5",
+                    "source": "",
+                    "what": "",
+                    "remediation": "",
+                    "message": "",
+                },
+            ]
+        }
+
+    monkeypatch.setattr(loop, "_audit_managed_repo", fake_audit)
+    monkeypatch.setattr(loop, "_fetch_last_report", fake_report)
+
+    flipped = await loop._retry_blocked()
+
+    assert flipped == 1
+    state.set_onboarding_status.assert_called_with("acme/widget", "ready")
+    state.set_last_green_audit.assert_called_with(
+        "acme/widget", {"P1.1": "PASS", "P5.1": "PASS"}
+    )
+
+
+async def test_blocked_stays_blocked_when_p1_p5_still_failing(loop_env, monkeypatch):
+    cfg, state, pr = loop_env
+    cfg.managed_repos = [ManagedRepo(slug="acme/widget")]
+    state.get_onboarding_status.return_value = "blocked"
+    stop = asyncio.Event()
+    loop = PrinciplesAuditLoop(config=cfg, state=state, pr_manager=pr, deps=_deps(stop))
+
+    async def fake_audit(mr):
+        return {"P1.1": "FAIL"}
+
+    async def fake_report(mr):
+        return {
+            "findings": [
+                {
+                    "check_id": "P1.1",
+                    "status": "FAIL",
+                    "severity": "STRUCTURAL",
+                    "principle": "P1",
+                    "source": "",
+                    "what": "",
+                    "remediation": "",
+                    "message": "",
+                },
+            ]
+        }
+
+    monkeypatch.setattr(loop, "_audit_managed_repo", fake_audit)
+    monkeypatch.setattr(loop, "_fetch_last_report", fake_report)
+
+    flipped = await loop._retry_blocked()
+
+    assert flipped == 0
+    # No ready flip; no last-green write.
+    for call in state.set_onboarding_status.call_args_list:
+        assert call.args != ("acme/widget", "ready")
+    state.set_last_green_audit.assert_not_called()
+
+
+async def test_do_work_runs_end_to_end(loop_env, monkeypatch):
+    cfg, state, pr = loop_env
+    cfg.managed_repos = []
+    stop = asyncio.Event()
+    loop = PrinciplesAuditLoop(config=cfg, state=state, pr_manager=pr, deps=_deps(stop))
+
+    self_findings = [
+        {
+            "check_id": "P1.1",
+            "status": "PASS",
+            "severity": "STRUCTURAL",
+            "principle": "P1",
+            "source": "",
+            "what": "",
+            "remediation": "",
+            "message": "",
+        },
+    ]
+
+    async def fake_run_audit(slug, root):
+        return {"summary": {}, "findings": self_findings}
+
+    monkeypatch.setattr(loop, "_run_audit", fake_run_audit)
+    state.get_last_green_audit.return_value = {}
+
+    stats = await loop._do_work()
+
+    assert stats["audited"] >= 1
+    assert stats["onboarded"] == 0
+    assert stats["ready_flips"] == 0
+    # All green on first run — last-green must be refreshed.
+    state.set_last_green_audit.assert_called_with("hydraflow-self", {"P1.1": "PASS"})
+
+
+async def test_do_work_managed_repo_regression_files_drift(loop_env, monkeypatch):
+    cfg, state, pr = loop_env
+    cfg.managed_repos = [ManagedRepo(slug="acme/widget")]
+    state.get_onboarding_status.return_value = "ready"
+    state.get_last_green_audit.side_effect = lambda slug: (
+        {"P3.1": "PASS"} if slug == "acme/widget" else {}
+    )
+    state.increment_drift_attempts.return_value = 1
+    stop = asyncio.Event()
+    loop = PrinciplesAuditLoop(config=cfg, state=state, pr_manager=pr, deps=_deps(stop))
+
+    self_findings = [
+        {
+            "check_id": "P1.1",
+            "status": "PASS",
+            "severity": "STRUCTURAL",
+            "principle": "P1",
+            "source": "",
+            "what": "",
+            "remediation": "",
+            "message": "",
+        },
+    ]
+
+    async def fake_run_audit(slug, root):
+        return {"summary": {}, "findings": self_findings}
+
+    async def fake_audit_managed(mr):
+        return {"P3.1": "FAIL"}
+
+    async def fake_fetch_last(mr):
+        return {
+            "findings": [
+                {
+                    "check_id": "P3.1",
+                    "status": "FAIL",
+                    "severity": "STRUCTURAL",
+                    "principle": "P3",
+                    "source": "",
+                    "what": "",
+                    "remediation": "",
+                    "message": "",
+                },
+            ]
+        }
+
+    monkeypatch.setattr(loop, "_run_audit", fake_run_audit)
+    monkeypatch.setattr(loop, "_audit_managed_repo", fake_audit_managed)
+    monkeypatch.setattr(loop, "_fetch_last_report", fake_fetch_last)
+
+    stats = await loop._do_work()
+
+    assert stats["audited"] == 2  # self + acme/widget
+    assert stats["regressions_filed"] == 1
+    pr.create_issue.assert_awaited()

@@ -63,7 +63,67 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
             "escalations_filed": 0,
             "ready_flips": 0,
         }
+
+        # 1) Onboarding reconcile — new or pending slugs.
+        stats["onboarded"] = await self._reconcile_onboarding()
+
+        # 2) Retry blocked — may flip to ready.
+        stats["ready_flips"] = await self._retry_blocked()
+
+        # 3) HydraFlow-self audit. Call _run_audit directly so we retain the
+        # full report for diffing without a disk round-trip.
+        self_report = await self._run_audit(_HYDRAFLOW_SELF, self._config.repo_root)
+        self._save_snapshot(_HYDRAFLOW_SELF, self_report)
+        self_snapshot = self._snapshot_from_report(self_report)
+        stats["audited"] += 1
+        self_last = self._state.get_last_green_audit(_HYDRAFLOW_SELF)
+        self_regressions = self._diff_regressions(self_last, self_snapshot)
+        if self_regressions:
+            fire = await self._fire_for_slug(
+                _HYDRAFLOW_SELF, self_regressions, self_report, self_last
+            )
+            stats["regressions_filed"] += fire["filed"]
+            stats["escalations_filed"] += fire["escalated"]
+        else:
+            # All green — update the last-green reference.
+            self._state.set_last_green_audit(_HYDRAFLOW_SELF, self_snapshot)
+
+        # 4) Managed-repo audits (only `ready` slugs — blocked handled above).
+        for mr in self._config.managed_repos:
+            if not mr.enabled:
+                continue
+            if self._state.get_onboarding_status(mr.slug) != "ready":
+                continue
+            snapshot = await self._audit_managed_repo(mr)
+            stats["audited"] += 1
+            report = await self._fetch_last_report(mr)
+            last = self._state.get_last_green_audit(mr.slug)
+            regressions = self._diff_regressions(last, snapshot)
+            if regressions:
+                fire = await self._fire_for_slug(mr.slug, regressions, report, last)
+                stats["regressions_filed"] += fire["filed"]
+                stats["escalations_filed"] += fire["escalated"]
+            else:
+                self._state.set_last_green_audit(mr.slug, snapshot)
+
         return stats
+
+    async def _retry_blocked(self) -> int:
+        """For every blocked slug, re-audit; flip to ready if P1–P5 green."""
+        flipped = 0
+        for mr in self._config.managed_repos:
+            if not mr.enabled:
+                continue
+            if self._state.get_onboarding_status(mr.slug) != "blocked":
+                continue
+            snapshot = await self._audit_managed_repo(mr)
+            report = await self._fetch_last_report(mr)
+            fails = self._p1_p5_fails(report.get("findings", []))
+            if not fails:
+                self._state.set_onboarding_status(mr.slug, "ready")
+                self._state.set_last_green_audit(mr.slug, snapshot)
+                flipped += 1
+        return flipped
 
     async def _run_audit(self, slug: str, repo_root: Path) -> dict[str, Any]:
         """Invoke ``make audit-json`` → parsed JSON report (spec §4.4)."""
