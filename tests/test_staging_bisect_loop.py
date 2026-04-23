@@ -88,3 +88,19 @@ class TestSkeleton:
     ) -> None:
         loop, _prs, _state = _make_loop(tmp_path, monkeypatch)
         assert loop._get_default_interval() == 600  # type: ignore[attr-defined]
+
+
+class TestPersistence:
+    @pytest.mark.asyncio
+    async def test_processed_sha_persists_across_restart(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, _prs, state = _make_loop(tmp_path, monkeypatch)
+        state.set_last_rc_red_sha_and_bump_cycle("abc")
+        # First run marks abc as seen
+        await loop._do_work()  # type: ignore[attr-defined]
+
+        # Simulate restart: create a fresh loop with the same data_root
+        loop2, _prs2, _state2 = _make_loop(tmp_path, monkeypatch)
+        result = await loop2._do_work()  # type: ignore[attr-defined]
+        assert result["status"] == "already_processed"

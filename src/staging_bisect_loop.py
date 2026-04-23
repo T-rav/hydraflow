@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
+from dedup_store import DedupStore
 
 if TYPE_CHECKING:
     from ports import PRPort
@@ -44,10 +45,18 @@ class StagingBisectLoop(BaseBackgroundLoop):
         super().__init__(worker_name="staging_bisect", config=config, deps=deps)
         self._prs = prs
         self._state = state
-        # In-memory high-water mark of RC-red SHAs that have already been
-        # processed (or skipped as flakes, or escalated). Persisted via
-        # DedupStore in Task 9 so a crash-restart does not re-process.
-        self._last_processed_rc_red_sha: str = ""
+        # Persisted high-water mark of RC-red SHAs that have already been
+        # processed (or skipped as flakes, or escalated). Keyed on rc_red_sha
+        # (§4.3 idempotency); survives crash-restart.
+        self._processed_dedup = DedupStore(
+            "staging_bisect_processed_rc_red",
+            config.data_root / "dedup" / "staging_bisect_processed.json",
+        )
+        # Seed from persisted store on startup; empty on first boot.
+        processed = self._processed_dedup.get()
+        self._last_processed_rc_red_sha: str = (
+            max(processed, key=len) if processed else ""
+        )
 
     def _get_default_interval(self) -> int:
         return self._config.staging_bisect_interval
@@ -63,8 +72,13 @@ class StagingBisectLoop(BaseBackgroundLoop):
         if red_sha == self._last_processed_rc_red_sha:
             return {"status": "already_processed", "sha": red_sha}
 
+        if red_sha in self._processed_dedup.get():
+            self._last_processed_rc_red_sha = red_sha
+            return {"status": "already_processed", "sha": red_sha}
+
         # Real work lands in Tasks 10–22. Skeleton just marks-as-seen so
         # the skeleton tests pass.
         logger.info("StagingBisectLoop: red SHA %s — skeleton no-op", red_sha)
+        self._processed_dedup.add(red_sha)
         self._last_processed_rc_red_sha = red_sha
         return {"status": "seen", "sha": red_sha}
