@@ -196,14 +196,23 @@ assert the close handler clears the key. Without this lifecycle a
 loop that escalates once stays paralyzed: the dedup key blocks
 re-fire long after the escalation has been resolved.
 
-**Kill-switch contract.** Every loop this spec introduces must honor
-a `<loop_name>_enabled` config field (default `True`) that, when set
-`False`, causes the loop's tick to exit immediately. Operators flip
-the switch via the System tab when a loop misbehaves. This is
+**Kill-switch contract.** Every loop this spec introduces honors the
+existing HydraFlow kill-switch pattern: `LoopDeps.enabled_cb` on
+`src/base_background_loop.py:LoopDeps` is a `Callable[[str], bool]`
+that takes the loop's `worker_name` and returns whether it is enabled
+(resolution goes through
+`src/service_registry.py:Callbacks.is_enabled` →
+`src/orchestrator.py:is_bg_worker_enabled`). When the callback
+returns `False`, the loop's tick exits with `{"status": "disabled"}`
+and emits no issues or telemetry. Operators flip the switch via the
+System tab (existing surface) when a loop misbehaves. This is
 load-bearing for operability: a loop bug that opens 100 revert PRs
 per hour must have a faster stop than "ship a fix through the
-pipeline." Matches `ADR-0044` P5 (operator control) and the existing
-`*_enabled` config pattern (see `src/config.py` for conventions).
+pipeline."
+
+The `BgWorkerManager` stores enabled-state per-loop; there is no
+`<loop_name>_enabled` config field on `HydraFlowConfig` to add per
+loop — use the existing callback, do not create parallel config.
 
 ## 4. Subsystems
 
@@ -1329,6 +1338,18 @@ flowing. The gap is **one unified waterfall view per issue** plus
    the telemetry must be unit-tested — a loop that silently stops
    emitting would silently disappear from the dashboard.
 
+   **New helper required: `trace_collector.emit_loop_subprocess_trace`.**
+   The existing `src/trace_collector.py:TraceCollector` is
+   stream-oriented for `claude -p` subprocesses; the new per-loop
+   tagging needs a thin helper `emit_loop_subprocess_trace(loop: str,
+   command: list[str], exit_code: int, duration_ms: int, ...)` that
+   writes a trace entry with the `{"kind": "loop", "loop": "<Name>"}`
+   action shape. Plan 6 (§4.11 implementation) owns this helper as
+   Task 1 — all other loop plans (Plans 1, 2, 3, 4, 5) depend on it
+   and must sequence their telemetry tasks after Plan 6's helper
+   lands. If Plan 6 slips, Plans 1–5 can stub the helper locally
+   and backfill.
+
 4. **Aggregate rollups.** Extend the existing diagnostics router with:
    - `/api/diagnostics/cost/rolling-24h` — cost burned in last 24h,
      breakdown by phase + by loop.
@@ -1977,19 +1998,24 @@ loop misbehaves. This is load-bearing for operability — a loop bug
 that creates 100 revert PRs per hour must have a faster stop than
 "ship a fix through the pipeline."
 
-Consistent naming:
-- `corpus_learning_enabled`
-- `contract_refresh_enabled`
-- `staging_bisect_enabled`
-- `principles_audit_enabled`
-- `flake_tracker_enabled`
-- `skill_prompt_eval_enabled`
-- `fake_coverage_auditor_enabled`
-- `rc_budget_enabled`
-- `wiki_rot_detector_enabled`
-- `trust_fleet_sanity_enabled`
+Each loop's `worker_name` (the string passed to `enabled_cb`) must be
+stable and match the loop-registration entries so the System tab can
+render a kill-switch per loop:
 
-Env overrides follow the existing `HYDRAFLOW_*_ENABLED` pattern.
+- `corpus_learning`
+- `contract_refresh`
+- `staging_bisect`
+- `principles_audit`
+- `flake_tracker`
+- `skill_prompt_eval`
+- `fake_coverage_auditor`
+- `rc_budget`
+- `wiki_rot_detector`
+- `trust_fleet_sanity`
+
+Operator toggles flow through the existing dashboard System tab
+(`src/dashboard_routes/_control_routes.py`) → `BgWorkerManager` →
+`Callbacks.is_enabled` → the loop's `enabled_cb`.
 
 ### 12.3 Dashboard surfaces — the operator's trust panel
 
