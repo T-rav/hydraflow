@@ -135,14 +135,19 @@ def build_lightweight_command(
         cmd.append(prompt)
         return cmd, None
 
-    # Gemini: `-p <prompt>` for small prompts, `-p -` + stdin for large ones.
-    # Mirrors claude/pi inline pattern (not the codex delegation pattern) —
-    # lightweight callers deliberately omit --output-format stream-json.
+    # Gemini: `-p <prompt>` for small prompts; for large ones, pass an
+    # empty -p flag and let the prompt flow in via stdin (gemini's docs:
+    # "Appended to input on stdin (if any)"). `-p -` would pass the
+    # literal string "-" as a prompt prefix, not "read from stdin" —
+    # that's a claude convention, not gemini's.
+    #
+    # Mirrors claude/pi inline pattern (not the codex delegation pattern)
+    # — lightweight callers deliberately omit --output-format stream-json.
     if tool == "gemini":
         prompt_bytes = prompt.encode()
         if len(prompt_bytes) > 100_000:
             return (
-                ["gemini", "-p", "-", "--model", model, "--approval-mode", "yolo"],
+                ["gemini", "-p", "", "--model", model, "--approval-mode", "yolo"],
                 prompt_bytes,
             )
         return (
