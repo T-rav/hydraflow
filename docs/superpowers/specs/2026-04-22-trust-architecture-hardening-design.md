@@ -943,7 +943,7 @@ false-negative on the RC.
 five checkpoints per loop; missing any entry is a hard test failure
 per `docs/agents/background-loops.md`.
 
-**End-to-end per subsystem.**
+**End-to-end per subsystem (gate-side).**
 
 - `tests/trust/adversarial/test_adversarial_corpus.py` runs against the
   committed seed corpus. Synthetic **good** inputs — a case deliberately
@@ -956,6 +956,39 @@ per `docs/agents/background-loops.md`.
   drives a three-commit fixture repo end-to-end through the bisect,
   asserting the correct culprit is identified and the issue title
   matches.
+
+**MockWorld scenarios (loop-side) — required.** Each new loop
+introduced by this spec (`CorpusLearningLoop`, `ContractRefreshLoop`,
+`StagingBisectLoop`, `PrinciplesAuditLoop`, `FlakeTrackerLoop`,
+`SkillPromptEvalLoop`, `FakeCoverageAuditorLoop`, `RCBudgetLoop`,
+`WikiRotDetectorLoop`) must land with a MockWorld scenario under
+`tests/scenarios/` that exercises its pipeline behavior end-to-end
+using stateful fakes. A scenario:
+
+1. Seeds `MockWorld` with the trigger state (e.g. a scripted RC-red
+   for `StagingBisectLoop`, a `skill-escape`-labeled issue for
+   `CorpusLearningLoop`, a broken cite in `repo_wiki/` for
+   `WikiRotDetectorLoop`).
+2. Advances `FakeClock` past the loop's interval.
+3. Runs the pipeline via `world.run_pipeline()` or the loop-specific
+   scenario marker (`scenario_loops` per the existing `MockWorld`
+   conventions in `tests/scenarios/conftest.py`).
+4. Asserts on the world's final state: the expected `hydraflow-find`
+   issue was filed with the right labels, the expected PR was opened
+   against `staging`, the expected scripted-CI consumption happened,
+   the retry issue was filed where applicable.
+
+**Why the split between `tests/trust/` and `tests/scenarios/`.** The
+gate harnesses in `tests/trust/` validate the real dependencies
+MockWorld relies on (real skills catch real bad diffs, fakes match
+real services). The MockWorld scenarios validate that the loops, when
+wired into the factory, drive the pipeline correctly using those
+already-validated dependencies. Running the adversarial corpus through
+`FakeLLM` would be asserting that the fake pretends to catch the bad
+diff, which defeats the gate; running `StagingBisectLoop` without
+MockWorld would miss the pipeline integration — retry issue → factory
+picks up → implement phase runs. Both layers are required; they test
+different invariants.
 
 ## 8. Dependencies / prerequisites
 
