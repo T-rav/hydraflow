@@ -62,7 +62,10 @@ new one.
 
 ## 2. Scope
 
-**In scope.**
+**In scope.** Three primary gate-side subsystems plus a six-loop
+caretaker fleet that compounds trust over time:
+
+**Primary gates (RC-boundary):**
 
 - Adversarial skill corpus at `tests/trust/adversarial/` plus a learning
   loop (`CorpusLearningLoop`) that proposes new cases from production
@@ -73,9 +76,28 @@ new one.
   `tests/trust/contracts/claude_streams/`. A `ContractRefreshLoop` that
   re-records cassettes on a weekly cadence.
 - `StagingBisectLoop` that attaches to `StagingPromotionLoop`'s RC-red
-  event (see prerequisite in §8), runs `git bisect run make scenario`
-  in a dedicated worktree, and files a `hydraflow-find` issue naming the
-  culprit commit.
+  event (see prerequisite in §8), runs the RC gate's scenario command
+  set in a dedicated worktree, attributes the culprit, opens an
+  auto-revert PR, and files a retry issue.
+
+**Caretaker fleet (autonomous loops):**
+
+- `PrinciplesAuditLoop` — **foundational** — enforces `ADR-0044`
+  principle conformance on HydraFlow-self and every managed target
+  repo; gates onboarding of the other trust subsystems on a green
+  audit. See §11.1 — everything else rests on this.
+- `FlakeTrackerLoop` — detects persistently flaky tests across RC
+  runs; repair before the flake rate bloats the bisect loop's flake
+  filter.
+- `SkillPromptEvalLoop` — runs the full adversarial corpus against
+  current skill prompts on a cadence; catches slow drift between
+  RC-time sampled runs.
+- `FakeCoverageAuditorLoop` — flags un-cassetted adapter methods so
+  the contract gate's coverage compounds rather than stagnating.
+- `RCBudgetLoop` — watches RC gate wall-clock duration; escalates
+  when it regresses against a rolling median.
+- `WikiRotDetectorLoop` — keeps per-repo wiki cites (ADR-0032) fresh
+  across every managed repo.
 
 **Out of scope — and staying out.**
 
@@ -571,6 +593,228 @@ field: `staging_bisect_interval`. The loop is event-driven, not
 polling, so the interval acts as a watchdog poll for missed events;
 default `600` seconds. No per-worker LLM model override (no LLM call).
 
+### 4.4 Principles audit + drift detector (foundational)
+
+**Purpose.** Enforce `ADR-0044` principle conformance on HydraFlow-self
+and every managed target repo. Without this, the other trust
+subsystems guard a repository shape that may not be in place — see
+§11.1. This is the caretaker the spec says is currently missing.
+
+**`PrinciplesAuditLoop`** — `src/principles_audit_loop.py`, new
+`BaseBackgroundLoop`. Weekly cadence + triggered on managed-repo
+onboarding.
+
+**On fire — per repo.**
+
+1. For HydraFlow-self, run `make audit --json` against the current
+   working tree; for each managed target repo in the factory registry,
+   refresh a shallow checkout under
+   `<data_root>/<repo_slug>/audit-checkout/` and run `make audit
+   --json` there. Save each result to
+   `<data_root>/<repo_slug>/audit/<YYYY-MM-DD>.json`.
+2. Read last-green audit snapshot from
+   `src/state/__init__.py:StateTracker`. Diff pass/fail sets at the
+   `check_id` level (P1.1, P2.4, etc.).
+3. For each check that regressed from PASS to FAIL, file a
+   `hydraflow-find` issue via `src/pr_manager.py:PRManager.create_issue`:
+   - Title: `Principles drift: {check_id} regressed in {repo_slug}`
+   - Body: the ADR-0044 row (rule, source, what, remediation), the
+     audit output snippet, the last-green snapshot date/SHA.
+   - Labels: `hydraflow-find`, `principles-drift`,
+     `check-{check_id}`.
+4. Factory picks up the issue; standard implement phase routes the
+   repair (for STRUCTURAL checks, scaffold the missing file; for
+   BEHAVIORAL, fix the failing tool or target; for CULTURAL, the plan
+   may require a human assist — CULTURAL regressions escalate after
+   1 failed attempt since they are not machine-repairable).
+5. On successful remediation + audit green, update the last-green
+   snapshot for that repo.
+
+**Onboarding gate.** When a new target repo is registered with the
+factory (plan picks the signal — new `managed_repos` config entry,
+new registration API, or a label on a `hydraflow-onboard` issue):
+
+- Before the factory installs any trust subsystem (§4.1–§4.3, §4.5–§4.9)
+  against the new repo, the loop runs `make audit --json` and reads
+  the result.
+- **P1–P5 FAILs block onboarding.** These are load-bearing
+  (documentation contract, layers, testing rings, quality gates, CI +
+  branch protection). File a `hydraflow-find` issue labeled
+  `onboarding-blocked` naming the failing checks. Factory dispatches
+  the implementer to remediate (or routes to `make init` for
+  greenfield scaffolding). The repo does not receive trust
+  subsystems until P1–P5 go green.
+- **P6–P10 FAILs warn but do not block.** P6 (loops/labels) is
+  optional for non-orchestration repos; P7–P10 are high-value but
+  not structurally required for the trust gates to function.
+
+**Escalation.** STRUCTURAL/BEHAVIORAL regressions: after 3 repair
+attempts, label `hitl-escalation`, `principles-stuck`. CULTURAL
+regressions: after 1 failed attempt, label immediately — a human must
+confirm branch protection, review settings, etc.
+
+**Five-checkpoint wiring** (same five slots as §4.1). Config interval
+field: `principles_audit_interval`, default `604800` (7 days). No LLM
+model override — the loop itself reads the audit tool's JSON; the
+dispatched implementer uses the standard model.
+
+### 4.5 Flake tracker
+
+**Purpose.** Detect persistently flaky tests before the `StagingBisectLoop`
+flake filter bloats and masks real regressions.
+
+**`FlakeTrackerLoop`** — `src/flake_tracker_loop.py`,
+`BaseBackgroundLoop`. Runs after each RC CI completion (watchdog
+cadence default `14400` = 4h, matching `rc_cadence_hours`).
+
+**On fire.**
+
+1. Query the last 20 RC workflow runs via `gh api`. For each run,
+   extract per-test pass/fail via the JUnit XML artifacts the CI
+   uploads (the plan adds artifact emission if not already present).
+2. For each test with a mixed pass/fail record inside the window,
+   increment `flake_count[test_name]` in `StateTracker`.
+3. When `flake_count[test_name] > flake_threshold` (default: 3 fails
+   in 20 runs), file a `hydraflow-find`:
+   - Title: `Flaky test: {test_name} (flake rate: {N}/20)`.
+   - Body: run URLs, stack traces per occurrence, time span.
+   - Labels: `hydraflow-find`, `flaky-test`.
+4. Factory dispatches implementer; standard repair path (fix the race,
+   add deterministic wait, or quarantine-then-remove the test).
+
+**Escalation.** After 3 repair attempts, `hitl-escalation`,
+`flaky-test-stuck`.
+
+**Five-checkpoint wiring**. Config `flake_tracker_interval` default
+`14400`, `flake_threshold` default `3`.
+
+### 4.6 Skill-prompt eval
+
+**Purpose.** Catch slow drift in post-impl skill behavior that the
+RC-time sampled adversarial corpus misses. The RC gate runs a sampled
+subset; this loop runs the full corpus against current prompts on a
+cadence.
+
+**Depends on §4.1.** The adversarial corpus must exist.
+
+**`SkillPromptEvalLoop`** — `src/skill_prompt_eval_loop.py`,
+`BaseBackgroundLoop`, weekly.
+
+**On fire.**
+
+1. Run `make trust-adversarial` over the **full** committed corpus
+   (not the RC-time sampled subset). Record pass/fail per case.
+2. Diff against the last-green eval snapshot in `StateTracker`.
+3. For each case that regressed from PASS to FAIL, file a
+   `hydraflow-find`:
+   - Title: `Skill prompt drift: {skill} missed {case_name}`.
+   - Body: case diff, expected RETRY reason, actual output, link to
+     the skill's prompt-file commit history.
+   - Labels: `hydraflow-find`, `skill-prompt-drift`.
+4. Factory dispatches implementer; standard repair path edits the
+   skill prompt or the skill's code.
+
+**Escalation.** After 3 repair attempts, `hitl-escalation`,
+`skill-prompt-stuck`.
+
+**Five-checkpoint wiring**. Config `skill_prompt_eval_interval`,
+default `604800`.
+
+### 4.7 Fake coverage auditor
+
+**Purpose.** Flag un-cassetted adapter methods so contract coverage
+compounds rather than stagnating at whatever was cassetted on day one.
+
+**Depends on §4.2.** Cassette infrastructure must exist.
+
+**`FakeCoverageAuditorLoop`** — `src/fake_coverage_auditor_loop.py`,
+`BaseBackgroundLoop`, weekly.
+
+**On fire.**
+
+1. Introspect each fake class under `tests/scenarios/fakes/` via the
+   AST (`ast.parse` on the file; read public methods — those not
+   prefixed `_`).
+2. Parse all cassettes under `tests/trust/contracts/cassettes/<adapter>/`
+   and collect the real-adapter method invoked by each (`input.command`
+   is the source of truth).
+3. Compute coverage: a fake method is covered if at least one cassette
+   exercises its real-adapter counterpart.
+4. For each uncovered method, file a `hydraflow-find`:
+   - Title: `Un-cassetted adapter method: {Fake}.{method}`.
+   - Body: method signature, suggested interaction shape for recording.
+   - Labels: `hydraflow-find`, `fake-coverage-gap`.
+5. Factory dispatches implementer; standard repair path records a new
+   cassette against the real adapter and commits it.
+
+**Escalation.** After 3 repair attempts, `hitl-escalation`,
+`fake-coverage-stuck`.
+
+**Five-checkpoint wiring**. Config `fake_coverage_auditor_interval`,
+default `604800`.
+
+### 4.8 RC wall-clock budget
+
+**Purpose.** Catch the failure mode where the RC gate silently bloats.
+A scenario suite that was 5 min in week 1 and 30 min in week 12
+degrades RC cadence and delays every release.
+
+**`RCBudgetLoop`** — `src/rc_budget_loop.py`, `BaseBackgroundLoop`.
+Runs after each RC CI completion (watchdog cadence `14400`).
+
+**On fire.**
+
+1. Read the last 30 days of RC runs via `gh api`, extract per-run
+   wall-clock duration.
+2. Compute rolling median.
+3. If current run exceeds `rc_budget_threshold_ratio * median`
+   (default `1.5`), file a `hydraflow-find`:
+   - Title: `RC gate duration regression: {current_s}s vs {median_s}s median`.
+   - Body: per-job breakdown of the slow run, top-10 slowest tests,
+     previous 5 runs for comparison.
+   - Labels: `hydraflow-find`, `rc-duration-regression`.
+4. Factory dispatches implementer; standard repair path identifies the
+   bloat source — parallelization, test split, fixture optimization.
+
+**Escalation.** After 3 repair attempts, `hitl-escalation`,
+`rc-duration-stuck`.
+
+**Five-checkpoint wiring**. Config `rc_budget_interval` default
+`14400`; `rc_budget_threshold_ratio` default `1.5`.
+
+### 4.9 Managed-repo wiki rot detector
+
+**Purpose.** Keep per-repo wiki cites (`ADR-0032`) fresh. A wiki entry
+citing `src/foo.py:some_func` that no longer exists degrades retrieval
+quality for every agent query against that repo.
+
+**`WikiRotDetectorLoop`** — `src/wiki_rot_detector_loop.py`,
+`BaseBackgroundLoop`, weekly. Runs against HydraFlow-self's `repo_wiki/`
+plus each managed repo's.
+
+**On fire — per repo.**
+
+1. Load `repo_wiki/<repo_slug>/*.md` entries via `src/repo_wiki.py:RepoWikiStore`.
+2. For each entry, extract cited `module:symbol` references (pattern:
+   `\b([a-zA-Z_/.]+\.py):([a-zA-Z_][a-zA-Z0-9_]*)`).
+3. Verify each cite against the repo's HEAD — the file exists and the
+   symbol is defined (grep for `def symbol|class symbol`).
+4. For each broken cite, file a `hydraflow-find`:
+   - Title: `Wiki rot: {wiki_entry} cites missing {module}:{symbol}`.
+   - Body: wiki entry excerpt, broken cite, suggested replacement from
+     a fuzzy match against current symbol names in that module (if
+     any).
+   - Labels: `hydraflow-find`, `wiki-rot`.
+5. Factory dispatches implementer or the existing wiki caretaker
+   (`src/repo_wiki_loop.py` if that's the right home — plan picks);
+   standard repair path updates the cite or removes the stale entry.
+
+**Escalation.** After 3 repair attempts, `hitl-escalation`,
+`wiki-rot-stuck`.
+
+**Five-checkpoint wiring**. Config `wiki_rot_detector_interval`,
+default `604800`.
+
 ## 5. Shared infrastructure
 
 **Directory tree:**
@@ -604,6 +848,16 @@ No `drills/` tree — rollback drills are out of scope (§2).
 - `make trust-contracts` — runs `pytest tests/trust/contracts/`.
 - `make trust` — runs both, in order. Used by the RC workflow and
   locally.
+- `make bisect-probe` — mirrors the RC gate's scenario command set
+  (`make scenario && make scenario-loops` today). Used by
+  `StagingBisectLoop`'s `git bisect run` so the probe and the gate
+  cannot diverge (§4.3).
+- `make audit` and `make audit-json` already exist (ADR-0044); no new
+  target needed for `PrinciplesAuditLoop`.
+
+**Loop-only caretakers** (§4.5–§4.9) are invoked through the standard
+`BaseBackgroundLoop` dispatch, not via `make` targets — they have no
+developer-facing CLI.
 
 **CI wiring.** Add a new job `trust` to
 `.github/workflows/rc-promotion-scenario.yml` that runs `make trust`.
@@ -636,6 +890,14 @@ Per §3.2, every row resolves to either **autonomous repair** or
 | `StagingBisectLoop` — watchdog timeout | No green RC within 2 cycles / 8h | Stop waiting | Yes | Yes | `hitl-escalation`, `rc-red-verify-timeout` |
 | `StagingBisectLoop` — harness failure | Bisect itself errors | Log at warning | No (unrelated to regression) | Yes | `hitl-escalation`, `bisect-harness-failure` |
 | `StagingBisectLoop` — invalid bisect range | `last_green_rc_sha` unreachable (rebase) | Skip with warning log | No | No (idempotent no-op) | — |
+| `PrinciplesAuditLoop` — STRUCTURAL/BEHAVIORAL regression | Check_id went PASS → FAIL | File `principles-drift`; factory repairs | No (weekly detector, not RC gate) | After 3 repair attempts | `hydraflow-find`, `principles-drift` → `hitl-escalation`, `principles-stuck` |
+| `PrinciplesAuditLoop` — CULTURAL regression | Check_id went PASS → FAIL on a CULTURAL row | File `principles-drift` | No | Immediately (1 failed attempt) | `hitl-escalation`, `principles-stuck`, `cultural-check` |
+| `PrinciplesAuditLoop` — onboarding | New managed repo has P1–P5 FAILs | File `onboarding-blocked`; factory scaffolds | Blocks trust-subsystem install on that repo | After 3 scaffolding attempts | `hydraflow-find`, `onboarding-blocked` → `hitl-escalation`, `onboarding-stuck` |
+| `FlakeTrackerLoop` | Test crosses flake threshold | File `flaky-test`; factory repairs | No | After 3 repair attempts | `hydraflow-find`, `flaky-test` → `hitl-escalation`, `flaky-test-stuck` |
+| `SkillPromptEvalLoop` | Corpus case regressed PASS → FAIL | File `skill-prompt-drift`; factory repairs | No | After 3 repair attempts | `hydraflow-find`, `skill-prompt-drift` → `hitl-escalation`, `skill-prompt-stuck` |
+| `FakeCoverageAuditorLoop` | Un-cassetted adapter method found | File `fake-coverage-gap`; factory records cassette | No | After 3 repair attempts | `hydraflow-find`, `fake-coverage-gap` → `hitl-escalation`, `fake-coverage-stuck` |
+| `RCBudgetLoop` | RC duration > threshold × rolling median | File `rc-duration-regression`; factory optimizes | No | After 3 repair attempts | `hydraflow-find`, `rc-duration-regression` → `hitl-escalation`, `rc-duration-stuck` |
+| `WikiRotDetectorLoop` | Broken `module:symbol` cite in wiki | File `wiki-rot`; factory fixes cite | No | After 3 repair attempts | `hydraflow-find`, `wiki-rot` → `hitl-escalation`, `wiki-rot-stuck` |
 
 ## 7. Testing — how we test the trust-hardening itself
 
@@ -657,15 +919,29 @@ false-negative on the RC.
   that fakes the bisect process; covers the idempotency path, the
   invalid-range skip, and the harness-failure path.
 - `tests/test_corpus_learning_loop.py` — escape-signal detection,
-  sub-agent dispatch (mocked), PR opening (mocked).
+  synthesis dispatch (mocked), PR opening (mocked).
 - `tests/test_contract_refresh_loop.py` — refresh-and-PR flow (mocked
   external CLIs).
+- `tests/test_principles_audit_loop.py` — audit diff (pass/fail set),
+  onboarding-gate logic, STRUCTURAL vs CULTURAL escalation paths.
+- `tests/test_flake_tracker_loop.py` — flake-count accumulation, threshold
+  breach, issue filing. Mock `gh api` run query.
+- `tests/test_skill_prompt_eval_loop.py` — corpus regression detection
+  against a fixture snapshot.
+- `tests/test_fake_coverage_auditor_loop.py` — AST introspection of
+  fake classes, cassette parsing, coverage gap computation.
+- `tests/test_rc_budget_loop.py` — rolling-median computation,
+  threshold-ratio breach, fixture of 30 mocked runs.
+- `tests/test_wiki_rot_detector_loop.py` — cite extraction via regex,
+  verification against fixture repo, fuzzy-match suggestion.
 
 **Loop-wiring completeness.** `tests/test_loop_wiring_completeness.py`
-(existing) must gain entries for `CorpusLearningLoop`,
-`ContractRefreshLoop`, and `StagingBisectLoop`. All five checkpoints
-per loop; missing any entry is a hard test failure per
-`docs/agents/background-loops.md`.
+(existing) must gain entries for all nine new loops:
+`CorpusLearningLoop`, `ContractRefreshLoop`, `StagingBisectLoop`,
+`PrinciplesAuditLoop`, `FlakeTrackerLoop`, `SkillPromptEvalLoop`,
+`FakeCoverageAuditorLoop`, `RCBudgetLoop`, `WikiRotDetectorLoop`. All
+five checkpoints per loop; missing any entry is a hard test failure
+per `docs/agents/background-loops.md`.
 
 **End-to-end per subsystem.**
 
@@ -829,46 +1105,29 @@ extension path, with principle conformance as the gate:
 | Contract tests (§4.2) | Fakes live in HydraFlow (they simulate HydraFlow's adapters), so a single contract suite covers all managed repos. One cassette set is enough | The `ContractRefreshLoop` remains a single caretaker |
 | Staging-red bisect (§4.3) | Per managed repo that adopts `ADR-0042`'s two-tier model. The loop runs N instances (one per repo with a staging branch), each bisecting that repo's own promotion | Requires per-repo `last_green_rc_sha` state keys; straightforward with current `StateTracker` repo-slug scoping (`ADR-0021` P9) |
 
-### 11.3 The caretaker fleet — what "lots of caretaking" means
+### 11.3 The caretaker fleet — compounding trust over time
 
-The three loops in this spec are a beachhead. The long-term vision is
-a caretaker fleet — each loop a bounded, auditable trust-building job
-that keeps some aspect of the system honest. Obvious next caretakers,
-out of scope for this spec but worth naming so future plans know
-where to slot in. **Priority 0 (foundational)** comes first because it
-enforces the principle conformance §11.1 says this whole initiative
-rests on:
+The nine subsystems in §4 are this spec's trust fleet. §4.1–§4.3 are
+primary RC-boundary gates; §4.4 is the foundational principles
+enforcer that everything else rests on; §4.5–§4.9 are caretakers that
+compound trust over time by watching narrower failure modes (flakes,
+prompt drift, cassette coverage, RC duration, wiki rot).
 
-- **P0 — Principles-drift detector (`PrinciplesAuditLoop`).** Runs
-  `make audit --json` on HydraFlow itself and on every managed target
-  repo on a cadence (weekly default). Compares the result to a stored
-  last-green audit snapshot per repo. Any principle that regressed
-  from PASS to FAIL files a `hydraflow-find` issue with label
-  `principles-drift` naming the specific check_id (e.g. `P5.7`),
-  citing the ADR-0044 row, pointing at the remediation column. On
-  new repo onboarding, the loop refuses to install the trust
-  subsystems on a repo whose audit has outstanding P1–P5 FAILs —
-  foundation has to be in place before the guardrails go up. This
-  caretaker closes the loop §11.1 identifies as missing today.
-- **Flake tracker** — tallies flakes across RCs, files repair issues
-  when the flake rate crosses a threshold per test.
-- **Skill-prompt eval** — periodically re-runs the full adversarial
-  corpus against current skill prompts to detect slow drift that the
-  RC gate's sampled corpus misses.
-- **Fake coverage auditor** — inspects each adapter's method surface
-  and flags un-cassetted methods.
-- **RC wall-clock budget** — tracks RC gate duration and escalates
-  when it exceeds a budget (prevents the "scenario gate silently
-  bloats to 30 min" failure mode).
-- **Managed-repo wiki rot detector** — for every managed repo, checks
-  `repo_wiki/<slug>/` entries against actual file paths and symbols
-  they cite; files repair issues for broken cites (`ADR-0032`).
+**Implementation priority.**
 
-Each of these is its own future spec. This spec scopes to the three
-subsystems that close the most load-bearing gaps first — skill
-regressions (every PR HydraFlow ships), fake drift (every scenario
-assertion), RC-red attribution (every release). **The P0 drift
-detector is the natural next plan** once this initiative lands, since
-the three subsystems' value is conditional on it. Caretakers compound;
-we start where the return on trust is highest per unit of
-implementation.
+1. **§4.4 PrinciplesAuditLoop first** — nothing else guards anything
+   without it (§11.1).
+2. **§4.1–§4.3 primary gates next** — they close the largest
+   observable gaps.
+3. **§4.5–§4.9 caretakers last** — they compound on top of the
+   primary gates' outputs (e.g., `SkillPromptEvalLoop` reuses the
+   corpus §4.1 creates; `FakeCoverageAuditorLoop` reuses the
+   cassettes §4.2 creates).
+
+**Future caretakers beyond this spec.** The nine here cover every
+failure mode this spec's authors can currently name. When new ones
+emerge — almost certainly from production incident retrospectives —
+each follows the same pattern: a `BaseBackgroundLoop` subclass,
+five-checkpoint wiring, autonomous repair via `hydraflow-find`,
+escalation on 3-attempt failure per §3.2. The pattern compounds; the
+fleet grows.
