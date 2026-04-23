@@ -55,6 +55,7 @@ from pr_manager import PRManager
 from pr_unsticker import PRUnsticker
 from pr_unsticker_loop import PRUnstickerLoop
 from precondition_gate import PreconditionGate
+from principles_audit_loop import PrinciplesAuditLoop
 from repo_wiki import RepoWikiStore
 from repo_wiki_loop import RepoWikiLoop  # noqa: TCH001
 from report_issue_loop import ReportIssueLoop
@@ -167,6 +168,7 @@ class ServiceRegistry:
     diagnostic_loop: DiagnosticLoop
     retrospective_loop: RetrospectiveLoop
     retrospective_queue: RetrospectiveQueue
+    principles_audit_loop: PrinciplesAuditLoop
 
     # Optional integrations
     hindsight: HindsightClient | None = None
@@ -812,6 +814,12 @@ def build_services(
         queue=retrospective_queue,
         prs=prs,
     )
+    principles_audit_loop = PrinciplesAuditLoop(
+        config=config,
+        state=state,
+        pr_manager=prs,
+        deps=loop_deps,
+    )
 
     return ServiceRegistry(
         workspaces=workspaces,
@@ -871,4 +879,5 @@ def build_services(
         diagnostic_loop=diagnostic_loop,
         retrospective_loop=retrospective_loop,
         retrospective_queue=retrospective_queue,
+        principles_audit_loop=principles_audit_loop,
     )
