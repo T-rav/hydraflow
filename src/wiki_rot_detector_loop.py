@@ -91,6 +91,10 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         if not self._enabled_cb(self._worker_name):
             return {"status": "disabled"}
 
+        import time  # noqa: PLC0415
+
+        t0 = time.perf_counter()
+
         await self._reconcile_closed_escalations()
 
         self_slug = self._config.repo or ""
@@ -114,12 +118,50 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
             escalated += result["escalated"]
 
         status = "fired" if filed or escalated else "noop"
+        self._emit_trace(t0, scanned=scanned, filed=filed, escalated=escalated)
         return {
             "status": status,
             "repos_scanned": scanned,
             "issues_filed": filed,
             "escalations": escalated,
         }
+
+    def _emit_trace(
+        self,
+        t0: float,
+        *,
+        scanned: int,
+        filed: int,
+        escalated: int,
+    ) -> None:
+        """Best-effort subprocess trace via lazy-imported ``trace_collector``.
+
+        Uses the module's real signature
+        ``(loop, command, exit_code, duration_ms, stderr_excerpt)``.
+        Import failure, missing attr, or an emit exception all no-op —
+        tick telemetry never fails the loop (§12.2 sibling lock).
+        """
+        import time  # noqa: PLC0415
+
+        try:
+            from trace_collector import emit_loop_subprocess_trace  # noqa: PLC0415
+        except ImportError:
+            return
+        if emit_loop_subprocess_trace is None:  # patched to None in tests
+            return
+        duration_ms = int((time.perf_counter() - t0) * 1000)
+        try:
+            emit_loop_subprocess_trace(
+                loop=self._worker_name,
+                command=["gh", "issue", "list", "--label", "wiki-rot-stuck"],
+                exit_code=0,
+                duration_ms=duration_ms,
+                stderr_excerpt=(
+                    f"scanned={scanned} filed={filed} escalated={escalated}"
+                ),
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("trace emission failed", exc_info=True)
 
     async def _tick_repo(
         self,

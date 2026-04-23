@@ -212,3 +212,78 @@ async def test_reconcile_noop_when_no_closed(loop_env, monkeypatch) -> None:
 
     dedup.set_all.assert_not_called()
     state.clear_wiki_rot_attempts.assert_not_called()
+
+
+async def test_kill_switch_short_circuits_tick(loop_env) -> None:
+    """Disabled kill-switch → no-op, no reconcile, no emission (spec §12.2)."""
+    loop = _loop(loop_env, enabled=False)
+    reconcile = AsyncMock(return_value=None)
+    loop._reconcile_closed_escalations = reconcile
+    stats = await loop._do_work()
+    assert stats == {"status": "disabled"}
+    # Reconcile must not run when disabled.
+    reconcile.assert_not_awaited()
+    _, _, pr, _, _ = loop_env
+    pr.create_issue.assert_not_awaited()
+
+
+async def test_trace_emission_lazy_import_tolerates_missing_module(
+    loop_env,
+    monkeypatch,
+) -> None:
+    """Importing ``trace_collector`` must not be required — the loop
+    runs clean even when the module is absent (spec sibling lock).
+    """
+    import sys
+
+    # Force ImportError on the emit path.
+    monkeypatch.setitem(sys.modules, "trace_collector", None)
+    loop = _loop(loop_env)
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+    stats = await loop._do_work()
+    assert stats["status"] == "noop"
+
+
+async def test_trace_emission_invoked_on_tick_end(
+    loop_env,
+    monkeypatch,
+) -> None:
+    """When ``trace_collector`` is importable, ``emit_loop_subprocess_trace``
+    is called at the end of ``_do_work`` with the real module signature
+    ``(loop, command, exit_code, duration_ms, stderr_excerpt)``.
+    """
+    import sys
+    import types
+
+    fake = types.ModuleType("trace_collector")
+    calls: list[dict] = []
+
+    def _emit(
+        loop: str,
+        command: list,
+        exit_code: int,
+        duration_ms: int,
+        stderr_excerpt: str | None = None,
+    ) -> None:
+        calls.append(
+            {
+                "loop": loop,
+                "command": command,
+                "exit_code": exit_code,
+                "duration_ms": duration_ms,
+                "stderr_excerpt": stderr_excerpt,
+            }
+        )
+
+    fake.emit_loop_subprocess_trace = _emit  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "trace_collector", fake)
+
+    loop = _loop(loop_env)
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+    stats = await loop._do_work()
+    assert stats["status"] == "noop"
+    assert len(calls) == 1, calls
+    assert calls[0]["loop"] == "wiki_rot_detector"
+    assert calls[0]["exit_code"] == 0
+    assert isinstance(calls[0]["command"], list)
+    assert isinstance(calls[0]["duration_ms"], int)
