@@ -1787,10 +1787,25 @@ EOF
 
 ---
 
-### Task 6: Add `trust` job to `rc-promotion-scenario.yml`
+### Task 6: Add `trust` job to `rc-promotion-scenario.yml` (live-LLM default)
 
 **Files:**
 - Modify: `.github/workflows/rc-promotion-scenario.yml:72-94` (insert `trust` job after `scenario`)
+
+**Why live-LLM in CI (per spec §4.1 "Harness").** The harness has two
+execution modes: fixture-replay (the default, used in the dev loop so
+`pytest` stays hermetic and free) and live skill dispatch (guarded by
+`HYDRAFLOW_TRUST_ADVERSARIAL_LIVE=1`, which invokes the real `claude`
+CLI through `src/base_runner.py`). **The RC gate must run live.**
+Fixture-replay only proves "the recorded transcripts still say what
+they used to say" — a prompt-text regression or a model-behavior
+regression is invisible because the fixture never re-queries the model.
+Live mode re-runs every case against the model the skill actually
+ships with, so a prompt that stops catching a bug fails the RC
+promotion. Spec §4.1: *"The gate must exercise the real `claude` CLI
+so prompt regressions are actually caught."* Keep fixture-replay as
+the `make trust-adversarial` default for developers; the CI job below
+opts in to live via the environment variable.
 
 - [ ] **Step 1: Append the `trust` job**
 
@@ -1798,7 +1813,7 @@ Insert a new job after the existing `scenario` job (which currently ends at line
 
 ```yaml
   trust:
-    name: Trust (adversarial corpus)
+    name: Trust (adversarial corpus, live LLM)
     needs: gate
     if: needs.gate.outputs.should_run == 'true'
     runs-on: ubuntu-latest
@@ -1816,25 +1831,43 @@ Insert a new job after the existing `scenario` job (which currently ends at line
           python-version: "3.11"
       - name: Install dependencies
         run: uv sync --all-extras
-      - name: Trust suite
+      - name: Trust suite (live skill dispatch)
+        env:
+          HYDRAFLOW_TRUST_ADVERSARIAL_LIVE: "1"
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: make trust
 ```
+
+The `HYDRAFLOW_TRUST_ADVERSARIAL_LIVE=1` env var flips the harness
+from fixture-replay (dev-loop default) to live `claude` CLI dispatch
+per §4.1. `ANTHROPIC_API_KEY` is plumbed through from the repo secret
+so `src/base_runner.py` can authenticate; absent it, live mode fails
+fast rather than silently falling back to fixtures.
 
 - [ ] **Step 2: Validate the workflow YAML parses**
 
 Run: `cd /Users/travisf/.hydraflow/worktrees/T-rav-hydraflow/trust-arch-hardening && uv run python -c "import yaml; yaml.safe_load(open('.github/workflows/rc-promotion-scenario.yml'))"`
 Expected: exits 0 with no output.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Confirm the harness honors the flag**
+
+Run: `cd /Users/travisf/.hydraflow/worktrees/T-rav-hydraflow/trust-arch-hardening && grep -n "HYDRAFLOW_TRUST_ADVERSARIAL_LIVE" tests/trust/adversarial/test_adversarial_corpus.py`
+Expected: at least one match — the env-gate branching the harness uses to pick live vs fixture mode (wired in Task 2). If zero matches, return to Task 2 and add the gate before this CI job can meaningfully set the variable.
+
+- [ ] **Step 4: Commit**
 
 ```bash
 git add .github/workflows/rc-promotion-scenario.yml
 git commit -m "$(cat <<'EOF'
-ci(trust): add `trust` job to RC promotion gate (§5 + §4.1 v1)
+ci(trust): add `trust` job to RC promotion gate — live LLM (§4.1 + §5)
 
-Runs `make trust` (adversarial corpus today; extends to contracts when
-the contracts plan lands) on every rc/* → main PR. Failing `trust`
-fails the RC promotion per ADR-0042.
+Runs `make trust` on every rc/* → main PR with
+HYDRAFLOW_TRUST_ADVERSARIAL_LIVE=1 so the adversarial corpus executes
+against the real `claude` CLI, not recorded fixtures. Fixture-replay
+stays the dev-loop default (fast, hermetic); the RC gate opts in to
+live so prompt-text or model-behavior regressions actually surface
+per spec §4.1 "Harness". Failing `trust` fails the RC promotion per
+ADR-0042.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -2955,6 +2988,333 @@ EOF
 
 ---
 
+#### Task 15f: Telemetry emission — `prompt_telemetry` + `trace_collector` for the loop
+
+**Files:**
+- Modify: `src/corpus_learning_loop.py` (inject `PromptTelemetry` + `TraceCollector` via `LoopDeps`, wrap LLM + subprocess call sites)
+- Modify: `src/service_registry.py` (pass the shared `PromptTelemetry` + a `trace_collector` factory into the loop via `LoopDeps`)
+- Modify: `tests/test_corpus_learning_loop.py` (append telemetry unit tests)
+
+**Why this task (per spec §4.11 point 3).** Every new loop must feed
+the per-issue waterfall and the per-loop cost dashboard. If the loop
+ticks without emitting telemetry it silently disappears from
+Diagnostics — operators cannot see its cost, its cadence, or its
+subprocess activity. §4.11 point 3 requires `{"kind": "loop", "loop":
+"<LoopClassName>"}` action shapes in the emitted records. Kill-switch
+respect is load-bearing: when `corpus_learning_enabled=False` the
+tick exits before any LLM or subprocess call, so **zero** telemetry
+should be emitted.
+
+- [ ] **Step 1: Append failing telemetry unit tests**
+
+Append to `tests/test_corpus_learning_loop.py`:
+
+```python
+def test_tick_emits_prompt_telemetry_with_loop_kind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every LLM dispatch in CorpusLearningLoop._do_work records a
+    prompt_telemetry entry shaped {"kind": "loop", "loop": "CorpusLearningLoop"}
+    per spec §4.11 point 3."""
+    import corpus_learning_loop as mod  # noqa: PLC0415
+    from dedup_store import DedupStore  # noqa: PLC0415
+
+    recorded: list[dict] = []
+
+    class _CaptureTelemetry:
+        def record(self, **kwargs):
+            recorded.append(kwargs)
+
+    repo_root = tmp_path / "repo"
+    (repo_root / "tests/trust/adversarial/cases").mkdir(parents=True)
+
+    escape_payload = json.dumps([{
+        "number": 5151,
+        "title": "t",
+        "body": "",
+        "labels": [{"name": "skill-escape"}, {"name": "hydraflow-find"}],
+    }])
+    monkeypatch.setattr(mod, "run_subprocess", AsyncMock(return_value=escape_payload))
+
+    agents = MagicMock()
+    agents.run_oneshot_prompt = AsyncMock(return_value=(
+        "<CASE_JSON>\n"
+        '{"case_name": "telemetry-case", "expected_catcher": "diff-sanity", '
+        '"keyword": "renamed", "plan_text": "", '
+        '"before_files": {"src/x.py": "def a():\\n    return 1\\n"}, '
+        '"after_files": {"src/x.py": "def b():\\n    return 1\\n"}, '
+        '"readme": "renamed"}\n'
+        "</CASE_JSON>\n"
+    ))
+
+    prs = MagicMock()
+    prs.create_pr = AsyncMock(return_value=7777)
+    prs.add_issue_comment = AsyncMock()
+    prs.add_labels = AsyncMock()
+
+    deps = _deps()
+    deps.prompt_telemetry = _CaptureTelemetry()
+
+    cfg = _config(tmp_path, repo_root=repo_root, staging_branch="staging")
+    loop = CorpusLearningLoop(
+        config=cfg,
+        prs=prs,
+        dedup=DedupStore("test_seen", tmp_path / "dedup.json"),
+        agents=agents,
+        deps=deps,
+    )
+    monkeypatch.setattr(loop, "_validate_case", AsyncMock(return_value=(True, "")))
+    monkeypatch.setattr(loop, "_open_case_pr", AsyncMock(return_value=7777))
+
+    asyncio.run(loop._do_work())
+
+    # Synthesis LLM call emitted exactly one telemetry record.
+    llm_records = [r for r in recorded if r.get("tool") == "corpus_learning"]
+    assert len(llm_records) == 1
+    rec = llm_records[0]
+    assert rec["source"] == "loop"
+    stats = rec.get("stats") or {}
+    assert stats.get("kind") == "loop"
+    assert stats.get("loop") == "CorpusLearningLoop"
+
+
+def test_tick_records_subprocess_trace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`gh` CLI invocations in the escape-signal reader feed a
+    TraceCollector-shaped record so subprocess cost shows up in the
+    Diagnostics waterfall."""
+    import corpus_learning_loop as mod  # noqa: PLC0415
+    from dedup_store import DedupStore  # noqa: PLC0415
+
+    trace_lines: list[str] = []
+
+    class _CaptureTrace:
+        def record(self, raw_line: str) -> None:
+            trace_lines.append(raw_line)
+
+        def finalize(self) -> None:
+            pass
+
+    repo_root = tmp_path / "repo"
+    (repo_root / "tests/trust/adversarial/cases").mkdir(parents=True)
+
+    monkeypatch.setattr(mod, "run_subprocess", AsyncMock(return_value="[]"))
+
+    deps = _deps()
+    deps.trace_collector_factory = lambda **_kw: _CaptureTrace()
+
+    cfg = _config(tmp_path, repo_root=repo_root, staging_branch="staging")
+    loop = CorpusLearningLoop(
+        config=cfg,
+        prs=MagicMock(),
+        dedup=DedupStore("test_seen", tmp_path / "dedup.json"),
+        agents=MagicMock(),
+        deps=deps,
+    )
+
+    asyncio.run(loop._do_work())
+
+    # At least one subprocess span recorded for the `gh api` query.
+    assert trace_lines, "expected a subprocess trace line for gh api invocation"
+    payloads = [json.loads(line) for line in trace_lines]
+    kinds = {p.get("kind") for p in payloads}
+    assert "loop" in kinds
+    assert any(p.get("loop") == "CorpusLearningLoop" for p in payloads)
+
+
+def test_kill_switch_disables_telemetry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When `corpus_learning_enabled=False`, the tick exits before any
+    LLM or subprocess work — zero telemetry records, zero trace spans.
+    Regression guard for the kill-switch contract in spec §3.2."""
+    import corpus_learning_loop as mod  # noqa: PLC0415
+    from dedup_store import DedupStore  # noqa: PLC0415
+
+    recorded: list[dict] = []
+    trace_lines: list[str] = []
+
+    class _CaptureTelemetry:
+        def record(self, **kwargs):
+            recorded.append(kwargs)
+
+    class _CaptureTrace:
+        def record(self, raw_line: str) -> None:
+            trace_lines.append(raw_line)
+
+        def finalize(self) -> None:
+            pass
+
+    subprocess_spy = AsyncMock(return_value="[]")
+    monkeypatch.setattr(mod, "run_subprocess", subprocess_spy)
+
+    deps = _deps()
+    deps.enabled_cb = MagicMock(return_value=False)
+    deps.prompt_telemetry = _CaptureTelemetry()
+    deps.trace_collector_factory = lambda **_kw: _CaptureTrace()
+
+    cfg = _config(tmp_path)
+    loop = CorpusLearningLoop(
+        config=cfg,
+        prs=MagicMock(),
+        dedup=DedupStore("test_seen", tmp_path / "dedup.json"),
+        agents=MagicMock(),
+        deps=deps,
+    )
+
+    asyncio.run(loop._do_work())
+
+    assert recorded == [], f"expected zero telemetry when disabled, got {recorded!r}"
+    assert trace_lines == [], f"expected zero trace spans when disabled, got {trace_lines!r}"
+    subprocess_spy.assert_not_awaited()
+```
+
+- [ ] **Step 2: Run the tests — they fail against the current loop**
+
+Run: `cd /Users/travisf/.hydraflow/worktrees/T-rav-hydraflow/trust-arch-hardening && PYTHONPATH=src uv run pytest tests/test_corpus_learning_loop.py::test_tick_emits_prompt_telemetry_with_loop_kind tests/test_corpus_learning_loop.py::test_tick_records_subprocess_trace tests/test_corpus_learning_loop.py::test_kill_switch_disables_telemetry -v`
+Expected: all three fail — `LoopDeps` does not yet carry `prompt_telemetry` / `trace_collector_factory`, and `_do_work` does not emit.
+
+- [ ] **Step 3: Extend `LoopDeps` (if not already present)**
+
+Open `src/base_background_loop.py`. If `LoopDeps` does not already carry `prompt_telemetry: PromptTelemetry | None` and `trace_collector_factory: Callable[..., TraceCollector] | None`, add them as optional fields with `None` defaults so existing loops construct unchanged. Import `PromptTelemetry` from `prompt_telemetry` and `TraceCollector` from `trace_collector` under a `TYPE_CHECKING:` block to avoid circular imports.
+
+Run: `cd /Users/travisf/.hydraflow/worktrees/T-rav-hydraflow/trust-arch-hardening && PYTHONPATH=src uv run python -c "from base_background_loop import LoopDeps; import inspect; print('prompt_telemetry' in inspect.signature(LoopDeps).parameters, 'trace_collector_factory' in inspect.signature(LoopDeps).parameters)"`
+Expected: `True True`.
+
+- [ ] **Step 4: Instrument the LLM synthesis call in `src/corpus_learning_loop.py`**
+
+Locate the `agents.run_oneshot_prompt(...)` call in `_synthesize_case` (introduced in Task 12). Wrap it:
+
+```python
+    async def _synthesize_case(self, issue: dict) -> dict | None:
+        prompt = self._build_synthesis_prompt(issue)
+        start = time.monotonic()
+        transcript = await self._agents.run_oneshot_prompt(
+            prompt=prompt,
+            model=self._config.corpus_learning_model,
+        )
+        duration = time.monotonic() - start
+        telemetry = getattr(self._deps, "prompt_telemetry", None)
+        if telemetry is not None:
+            telemetry.record(
+                source="loop",
+                tool="corpus_learning",
+                model=self._config.corpus_learning_model,
+                issue_number=issue.get("number"),
+                pr_number=None,
+                session_id=None,
+                prompt_chars=len(prompt),
+                transcript_chars=len(transcript),
+                duration_seconds=duration,
+                success=True,
+                stats={"kind": "loop", "loop": "CorpusLearningLoop"},
+            )
+        return self._parse_case_envelope(transcript)
+```
+
+- [ ] **Step 5: Instrument `gh api` subprocess calls in the escape-signal reader**
+
+In `_list_escape_issues` (Task 11), wrap every `run_subprocess(["gh", ...])` call with a `TraceCollector` scoped to this loop:
+
+```python
+    async def _list_escape_issues(self) -> list[dict]:
+        factory = getattr(self._deps, "trace_collector_factory", None)
+        collector = factory(
+            issue_number=None,
+            phase="loop.corpus_learning",
+            source="corpus_learning",
+            subprocess_idx=0,
+        ) if factory else None
+
+        cmd = [
+            "gh", "api",
+            f"repos/{self._config.repo}/issues",
+            "--jq", f'[.[] | select(.labels | map(.name) | contains(["{self._config.corpus_learning_signal_label}"]))]',
+        ]
+        start = time.monotonic()
+        raw = await run_subprocess(cmd)
+        duration_ms = int((time.monotonic() - start) * 1000)
+
+        if collector is not None:
+            # One JSON-line span per subprocess invocation, shape matches
+            # spec §4.11 point 3 (`kind=loop`, `loop=<ClassName>`).
+            collector.record(json.dumps({
+                "type": "subprocess",
+                "kind": "loop",
+                "loop": "CorpusLearningLoop",
+                "command": cmd,
+                "duration_ms": duration_ms,
+            }))
+            collector.finalize()
+
+        return json.loads(raw or "[]")
+```
+
+- [ ] **Step 6: Gate both instrumentation sites behind the kill-switch**
+
+Confirm that `BaseBackgroundLoop.run` already short-circuits on `enabled_cb()` returning False before calling `_do_work`. If so, the telemetry tests' "disabled → zero emission" assertion is satisfied for free. If the skeleton bypasses this, add an early return at the top of `_do_work`:
+
+```python
+        if not self._deps.enabled_cb():
+            return {"escape_issues_seen": 0, "cases_proposed": 0, "escalated": 0, "disabled": True}
+```
+
+Run: `cd /Users/travisf/.hydraflow/worktrees/T-rav-hydraflow/trust-arch-hardening && PYTHONPATH=src uv run python -c "from base_background_loop import BaseBackgroundLoop; import inspect; src = inspect.getsource(BaseBackgroundLoop); print('enabled_cb' in src)"`
+Expected: `True`.
+
+- [ ] **Step 7: Wire the shared `PromptTelemetry` + trace factory through `service_registry.py`**
+
+In `src/service_registry.py`, locate the `LoopDeps(...)` constructor the loops share. Plumb the already-constructed `prompt_telemetry` service and a lambda that returns a configured `TraceCollector`:
+
+```python
+    loop_deps = LoopDeps(
+        event_bus=event_bus,
+        stop_event=stop_event,
+        status_cb=worker_status_cb,
+        enabled_cb=worker_enabled_cb,
+        interval_cb=worker_interval_cb,
+        prompt_telemetry=prompt_telemetry,
+        trace_collector_factory=lambda **kw: TraceCollector(
+            config=config,
+            event_bus=event_bus,
+            run_id=int(time.time_ns()),
+            **kw,
+        ),
+    )
+```
+
+Import `TraceCollector` alongside the existing `prompt_telemetry` import near the top of the file.
+
+- [ ] **Step 8: Re-run the three telemetry tests — they pass**
+
+Run: `cd /Users/travisf/.hydraflow/worktrees/T-rav-hydraflow/trust-arch-hardening && PYTHONPATH=src uv run pytest tests/test_corpus_learning_loop.py -v`
+Expected: all tests pass, including the three added in Step 1.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add src/base_background_loop.py src/corpus_learning_loop.py src/service_registry.py tests/test_corpus_learning_loop.py
+git commit -m "$(cat <<'EOF'
+feat(corpus-learning): emit prompt + trace telemetry per §4.11 point 3
+
+LLM synthesis calls record a `prompt_telemetry` entry shaped
+{"kind": "loop", "loop": "CorpusLearningLoop"}; `gh api` subprocess
+invocations feed a scoped `TraceCollector` span. Honors the
+kill-switch contract: disabled tick emits zero records. LoopDeps
+gains optional prompt_telemetry + trace_collector_factory fields so
+existing loops construct unchanged.
+
+Unblocks the per-issue waterfall and per-loop cost dashboard endpoints
+introduced by §4.11 for the CorpusLearningLoop row.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
 ### Task 16: Integration test — end-to-end mocked escape → PR
 
 **Files:**
@@ -3104,7 +3464,280 @@ The test's failure output explicitly names the checkpoint file and the missing w
 
 ---
 
-### Task 18: Run full quality gate and open the Phase 2 PR
+### Task 18: MockWorld scenario — escape issue → case PR against `staging`
+
+**Files:**
+- Create: `tests/scenarios/test_corpus_learning_scenario.py`
+- Modify (if needed): `tests/scenarios/helpers/loop_port_seeding.py` (only if the catalog does not already know about `corpus_learning`)
+
+**Why this task (per spec §7 "MockWorld scenarios (integration-side) — required").** Unit tests exercise `CorpusLearningLoop` in isolation with mocked `gh api` and `PRManager`. The MockWorld scenario proves the loop integrates with the factory's stateful world — `FakeClock`, `FakeGitHub`, `FakeLLM`, `FakeFilesystem` — and closes the full loop: seeded escape issue → tick fires → synthesis prompt hits the scripted `FakeLLM` → case materializes on disk → PR opens against `staging` → self-validation gate runs with the real harness shim. A loop that passes unit tests but fails here has drifted from the pipeline contract; only the scenario catches that.
+
+- [ ] **Step 1: Write the failing scenario test**
+
+Create `tests/scenarios/test_corpus_learning_scenario.py`:
+
+```python
+"""Scenario L14 — CorpusLearningLoop grows the adversarial corpus from a
+skill-escape issue (§4.1 v2, §7 required scenario).
+
+Seeds MockWorld with a scripted `skill-escape`-labeled hydraflow-find
+issue that references a reverted commit. Advances FakeClock past
+`corpus_learning_interval`. Runs one tick of the pipeline. Asserts the
+world's final state carries a new PR against `staging` whose diff
+includes a new case directory under `tests/trust/adversarial/cases/`,
+that the scripted FakeLLM observed the synthesis prompt, and that the
+case passes self-validation.
+
+Then a second test flips the FakeLLM transcript to one that fails
+self-validation three times in a row and asserts the loop escalates
+per §3.2 (hitl-escalation + corpus-learning-stuck labels on the
+escape issue).
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from tests.scenarios.fakes.mock_world import MockWorld
+from tests.scenarios.helpers.loop_port_seeding import seed_ports as _seed_ports
+
+pytestmark = pytest.mark.scenario_loops
+
+
+_CASE_ENVELOPE_GOOD = (
+    "<CASE_JSON>\n"
+    "{\n"
+    '  "case_name": "synth-renamed-scenario",\n'
+    '  "expected_catcher": "diff-sanity",\n'
+    '  "keyword": "renamed",\n'
+    '  "plan_text": "",\n'
+    '  "before_files": {"src/x.py": "def foo():\\n    return 1\\n"},\n'
+    '  "after_files": {"src/x.py": "def bar():\\n    return 1\\n"},\n'
+    '  "readme": "Renamed def foo to def bar without updating callers."\n'
+    "}\n"
+    "</CASE_JSON>\n"
+)
+
+_CASE_ENVELOPE_BAD = "no markers here — synthesis failed to emit a valid envelope\n"
+
+
+class TestL14CorpusLearningScenario:
+    """L14: CorpusLearningLoop end-to-end under MockWorld."""
+
+    async def test_escape_issue_produces_case_pr_against_staging(
+        self, tmp_path: Path
+    ) -> None:
+        """Happy path: skill-escape issue + clock advance → synthesis prompt
+        fires through scripted FakeLLM → case directory materializes on
+        FakeFilesystem → PR opens against `staging` branch → self-validation
+        passes. Closes the feedback loop §4.1 v2 describes.
+        """
+        world = MockWorld(tmp_path)
+
+        # Seed the escape signal: a hydraflow-find issue labeled skill-escape
+        # whose body references the reverted commit.
+        world.github.seed_issue(
+            number=9001,
+            title="skill missed renamed symbol in PR #8800",
+            body=(
+                "PR #8800 reverted at abcdef0123 because diff-sanity let a "
+                "renamed symbol through. Reverted-commit: abcdef0123."
+            ),
+            labels=["hydraflow-find", "skill-escape"],
+            state="open",
+        )
+
+        # Script the FakeLLM: the synthesis prompt gets the good envelope.
+        world.llm.script_response(
+            match_substring="Synthesize an adversarial corpus case",
+            response=_CASE_ENVELOPE_GOOD,
+        )
+
+        # Seed the harness shim: validation gate trips the named catcher.
+        fake_harness = AsyncMock()
+        fake_harness.run_case_through_catcher = AsyncMock(
+            return_value={"result": "RETRY", "reason": "renamed symbol not updated at callsite"}
+        )
+        _seed_ports(world, corpus_learning_harness=fake_harness)
+
+        # Advance the clock past corpus_learning_interval (default 3600s).
+        world.clock.advance(seconds=3601)
+
+        # Run one pipeline tick.
+        stats = await world.run_pipeline(loops=["corpus_learning"], cycles=1)
+
+        # Assertion 1: the FakeLLM saw the synthesis prompt exactly once.
+        synthesis_calls = [
+            call for call in world.llm.calls
+            if "Synthesize an adversarial corpus case" in call.prompt
+        ]
+        assert len(synthesis_calls) == 1, (
+            f"expected one synthesis LLM call, got {len(synthesis_calls)}: "
+            f"{[c.prompt[:80] for c in world.llm.calls]}"
+        )
+
+        # Assertion 2: a PR was opened against `staging`.
+        prs_against_staging = [
+            pr for pr in world.github.prs.values() if pr.base == "staging"
+        ]
+        assert len(prs_against_staging) == 1, (
+            f"expected one PR against staging, got {len(prs_against_staging)} "
+            f"(all PRs: {list(world.github.prs.values())})"
+        )
+        pr = prs_against_staging[0]
+
+        # Assertion 3: the PR diff adds a case directory under
+        # tests/trust/adversarial/cases/.
+        added_paths = [p for p in pr.added_paths if "tests/trust/adversarial/cases/" in p]
+        assert added_paths, (
+            f"expected a new case directory in PR diff, got paths {pr.added_paths!r}"
+        )
+        case_dirs = {p.split("tests/trust/adversarial/cases/")[1].split("/")[0] for p in added_paths}
+        assert case_dirs == {"synth-renamed-scenario"}, case_dirs
+
+        # Assertion 4: self-validation passed — the harness shim was awaited
+        # with the claimed catcher and keyword.
+        fake_harness.run_case_through_catcher.assert_awaited_once()
+        (kwargs,) = [c.kwargs for c in fake_harness.run_case_through_catcher.await_args_list]
+        assert kwargs.get("expected_catcher") == "diff-sanity"
+        assert "renamed" in (kwargs.get("keyword") or "").lower()
+
+        # Assertion 5: loop stats reflect one proposed case, zero escalations.
+        result = stats["corpus_learning"]
+        assert result["escape_issues_seen"] == 1
+        assert result["cases_proposed"] == 1
+        assert result["escalated"] == 0
+
+    async def test_three_self_validation_failures_escalate(
+        self, tmp_path: Path
+    ) -> None:
+        """Escalation path: the same escape issue has 3 failed synthesis
+        attempts in a row. After the third, the loop labels it
+        `hitl-escalation` + `corpus-learning-stuck`, records the attempts in
+        the issue body, and moves on — it does not spin. Matches §3.2.
+        """
+        world = MockWorld(tmp_path)
+
+        world.github.seed_issue(
+            number=9002,
+            title="skill missed plan divergence",
+            body="PR #8801 merged despite scope_check missing an unrelated edit.",
+            labels=["hydraflow-find", "skill-escape"],
+            state="open",
+        )
+
+        # Script the FakeLLM to return bad envelopes on every call so all
+        # three synthesis attempts fail parsing.
+        world.llm.script_response(
+            match_substring="Synthesize an adversarial corpus case",
+            response=_CASE_ENVELOPE_BAD,
+            persistent=True,
+        )
+
+        fake_harness = AsyncMock()
+        _seed_ports(world, corpus_learning_harness=fake_harness)
+
+        # Three ticks, each advancing past the interval.
+        for _ in range(3):
+            world.clock.advance(seconds=3601)
+            await world.run_pipeline(loops=["corpus_learning"], cycles=1)
+
+        # Assertion 1: the issue now carries escalation labels.
+        issue = world.github.issues[9002]
+        assert "hitl-escalation" in issue.labels
+        assert "corpus-learning-stuck" in issue.labels
+
+        # Assertion 2: the issue body records three rejected attempts.
+        assert issue.body.count("rejected synthesis attempt") == 3
+
+        # Assertion 3: no PR opened against staging for this issue.
+        pr_refs = [pr for pr in world.github.prs.values() if "9002" in (pr.body or "")]
+        assert pr_refs == [], f"expected zero PRs for escalated issue, got {pr_refs!r}"
+
+        # Assertion 4: harness was never asked to validate (envelope never parsed).
+        fake_harness.run_case_through_catcher.assert_not_awaited()
+```
+
+- [ ] **Step 2: Run the scenario — it fails**
+
+Run: `cd /Users/travisf/.hydraflow/worktrees/T-rav-hydraflow/trust-arch-hardening && PYTHONPATH=src uv run pytest tests/scenarios/test_corpus_learning_scenario.py -v -m scenario_loops`
+Expected: both tests fail — the catalog does not yet know how to build a `corpus_learning` loop under MockWorld, and/or `world.llm.script_response` / `world.github.seed_issue` helpers may need shim extensions.
+
+- [ ] **Step 3: Extend the MockWorld catalog for `corpus_learning`**
+
+Open `tests/scenarios/catalog/` (or wherever loop catalogs live — discover with `ls tests/scenarios/catalog/`). Add an entry for `corpus_learning` that constructs the loop with:
+- A `PRManager` fake that writes synthesized PRs into `world.github.prs` against the `staging` branch.
+- A `DedupStore` backed by `tmp_path`.
+- An `AgentRunner` fake that routes `run_oneshot_prompt` through `world.llm.dispatch(prompt, model)` so scripted responses apply.
+- A `LoopDeps` that pulls `enabled_cb` / `interval_cb` / `status_cb` from the world's standard loop plumbing.
+- A harness port `corpus_learning_harness` that gate-3 uses for `_validate_case`'s catcher trip; the scenario seeds this via `_seed_ports`.
+
+Run: `cd /Users/travisf/.hydraflow/worktrees/T-rav-hydraflow/trust-arch-hardening && PYTHONPATH=src uv run python -c "from tests.scenarios.fakes.mock_world import MockWorld; import pathlib, tempfile; w = MockWorld(pathlib.Path(tempfile.mkdtemp())); print('corpus_learning' in w._known_loops)"`
+Expected: `True`.
+
+- [ ] **Step 4: Stub the minimum MockWorld helpers the scenario touches**
+
+Confirm the helpers the test exercises exist on the MockWorld surface. If any do not, add them as thin forwarders:
+
+- `world.github.seed_issue(number, title, body, labels, state)` — writes into `FakeGitHub.issues`.
+- `world.llm.script_response(match_substring, response, persistent=False)` — appends to `FakeLLM.scripted_responses`.
+- `world.llm.calls` — list of `(prompt, model)` records for every `dispatch` call.
+- `world.run_pipeline(loops=[...], cycles=1)` — existing on `MockWorld`; confirm with `grep`.
+- `world.clock.advance(seconds=...)` — existing on `FakeClock`.
+- `pr.added_paths` — list of new-file paths in the PR's simulated diff (add to `FakePR` if missing).
+- `pr.base` — branch the PR targets.
+
+Run: `cd /Users/travisf/.hydraflow/worktrees/T-rav-hydraflow/trust-arch-hardening && PYTHONPATH=src uv run python -c "from tests.scenarios.fakes.mock_world import MockWorld; import pathlib, tempfile; w = MockWorld(pathlib.Path(tempfile.mkdtemp())); assert hasattr(w, 'run_pipeline'); assert hasattr(w.github, 'seed_issue'); assert hasattr(w.llm, 'script_response'); print('ok')"`
+Expected: `ok`.
+
+- [ ] **Step 5: Implement the scenario-side plumbing until the tests pass**
+
+Re-run the scenario test, fix each failure in turn. The happy-path test covers five assertions; the escalation test covers four. Do not move on until both pass cleanly.
+
+Run: `cd /Users/travisf/.hydraflow/worktrees/T-rav-hydraflow/trust-arch-hardening && PYTHONPATH=src uv run pytest tests/scenarios/test_corpus_learning_scenario.py -v -m scenario_loops`
+Expected: 2 passed.
+
+- [ ] **Step 6: Run the full scenario-loops suite to prove no regression**
+
+Run: `cd /Users/travisf/.hydraflow/worktrees/T-rav-hydraflow/trust-arch-hardening && make scenario-loops`
+Expected: all pre-existing scenarios plus the new L14 pass.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add tests/scenarios/test_corpus_learning_scenario.py tests/scenarios/catalog tests/scenarios/fakes tests/scenarios/helpers
+git commit -m "$(cat <<'EOF'
+test(scenarios): L14 — CorpusLearningLoop end-to-end under MockWorld (§7)
+
+Required integration-side scenario per spec §7 "MockWorld scenarios —
+required". Seeds a skill-escape issue, advances FakeClock past
+`corpus_learning_interval`, runs one pipeline tick, and asserts:
+- the scripted FakeLLM saw the synthesis prompt exactly once
+- a PR opened against `staging` adding a case directory under
+  tests/trust/adversarial/cases/
+- self-validation tripped the named catcher with the claimed keyword
+- stats reflect cases_proposed=1, escalated=0
+
+Second test covers the §3.2 escalation path: three failed syntheses
+in a row → hitl-escalation + corpus-learning-stuck labels, issue body
+records the attempts, no PR opened.
+
+Closes the loop between the unit tests (mocked gh/PRs) and the real
+factory plumbing that only MockWorld exercises — a loop that passes
+Task 16 but fails here has drifted from the pipeline contract.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+### Task 19: Run full quality gate and open the Phase 2 PR
 
 - [ ] **Step 1: Run `make quality`**
 
@@ -3129,12 +3762,13 @@ gh pr create --base main --title "feat(corpus-learning): CorpusLearningLoop — 
 - Three-gate self-validation (AST parse → ruff lint → harness catcher-trip) rejects synthesis that can't prove the case flags what it claims
 - 3-rejection-per-escape budget → `hitl-escalation` + `corpus-learning-stuck` labels on the escape issue
 - Opens PRs against `staging` via standard `PRManager.create_pr`; auto-merge via standard reviewer + quality gates (no human approval on the happy path, §3.2)
-- Five-checkpoint wiring per `docs/agents/background-loops.md` (config, dashboard bounds, UI constants, service registry, orchestrator)
-- Unit + integration tests in `tests/test_corpus_learning_loop.py` cover construction, escape-signal reader, synthesis parsing, disk materialization, and both the happy-path and escalation branches
+- Five-checkpoint wiring per `docs/agents/background-loops.md` (config, dashboard bounds, UI constants, service registry, orchestrator) + telemetry emission per spec §4.11 point 3 (`{"kind": "loop", "loop": "CorpusLearningLoop"}` shape on every LLM + subprocess call)
+- Unit + integration tests in `tests/test_corpus_learning_loop.py` cover construction, escape-signal reader, synthesis parsing, disk materialization, telemetry emission (including kill-switch zero-emission), and both the happy-path and escalation branches
+- MockWorld scenario `tests/scenarios/test_corpus_learning_scenario.py` exercises the full pipeline end-to-end per spec §7 "MockWorld scenarios — required"
 
 ## Spec
 
-Implements §4.1 v2 of `docs/superpowers/specs/2026-04-22-trust-architecture-hardening-design.md`.
+Implements §4.1 v2, §4.11 point 3, and the §7 required MockWorld scenario of `docs/superpowers/specs/2026-04-22-trust-architecture-hardening-design.md`.
 
 ## Test plan
 
@@ -3142,6 +3776,8 @@ Implements §4.1 v2 of `docs/superpowers/specs/2026-04-22-trust-architecture-har
 - [ ] `tests/test_loop_wiring_completeness.py` green (all five checkpoints for `corpus_learning`)
 - [ ] End-to-end mocked test (`test_end_to_end_escape_to_pr`) asserts PR opens with correct labels
 - [ ] 3-rejection test (`test_end_to_end_three_rejections_escalate`) asserts hitl-escalation labeling
+- [ ] Telemetry tests (`test_tick_emits_prompt_telemetry_with_loop_kind`, `test_tick_records_subprocess_trace`, `test_kill_switch_disables_telemetry`) assert §4.11 point 3 emission + kill-switch zero-emission
+- [ ] MockWorld scenario L14 (`tests/scenarios/test_corpus_learning_scenario.py`) asserts escape issue → PR-against-staging happy path + 3-reject escalation path
 EOF
 )"
 ```
