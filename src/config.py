@@ -147,6 +147,17 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("rc_cadence_hours", "HYDRAFLOW_RC_CADENCE_HOURS", 4),
     ("staging_promotion_interval", "HYDRAFLOW_STAGING_PROMOTION_INTERVAL", 300),
     ("staging_rc_retention_days", "HYDRAFLOW_STAGING_RC_RETENTION_DAYS", 7),
+    ("staging_bisect_interval", "HYDRAFLOW_STAGING_BISECT_INTERVAL", 600),
+    (
+        "staging_bisect_runtime_cap_seconds",
+        "HYDRAFLOW_STAGING_BISECT_RUNTIME_CAP_SECONDS",
+        2700,
+    ),
+    (
+        "staging_bisect_watchdog_rc_cycles",
+        "HYDRAFLOW_STAGING_BISECT_WATCHDOG_RC_CYCLES",
+        2,
+    ),
     ("collaborator_cache_ttl", "HYDRAFLOW_COLLABORATOR_CACHE_TTL", 600),
     (
         "issue_cache_enrich_ttl_seconds",
@@ -1417,6 +1428,33 @@ class HydraFlowConfig(BaseModel):
         ge=1,
         le=90,
         description="Days to retain failed RC branches before cleanup",
+    )
+    staging_bisect_interval: int = Field(
+        default=600,
+        ge=60,
+        le=86400,
+        description=(
+            "Seconds between StagingBisectLoop ticks — a state-tracker "
+            "watchdog poll for last_rc_red_sha changes. See ADR-0042 §4.3."
+        ),
+    )
+    staging_bisect_runtime_cap_seconds: int = Field(
+        default=2700,
+        ge=300,
+        le=14400,
+        description=(
+            "Hard wall-clock cap on a single bisect run (default 45 min). "
+            "On timeout the loop files hitl-escalation bisect-timeout."
+        ),
+    )
+    staging_bisect_watchdog_rc_cycles: int = Field(
+        default=2,
+        ge=1,
+        le=10,
+        description=(
+            "Max RC cycles to wait for a green outcome after an auto-revert "
+            "before filing hitl-escalation rc-red-verify-timeout."
+        ),
     )
 
     git_user_name: str = Field(
