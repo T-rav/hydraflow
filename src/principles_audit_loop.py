@@ -11,10 +11,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import trace_collector
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from models import WorkCycleResult
 
@@ -127,21 +129,31 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
 
     async def _run_audit(self, slug: str, repo_root: Path) -> dict[str, Any]:
         """Invoke ``make audit-json`` → parsed JSON report (spec §4.4)."""
+        cmd = ["make", "audit-json", f"DIR={repo_root}"]
+        t0 = time.perf_counter()
         proc = await asyncio.create_subprocess_exec(
-            "make",
-            "audit-json",
-            f"DIR={repo_root}",
+            *cmd,
             cwd=self._config.repo_root,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await proc.communicate()
-        if proc.returncode not in (0, 1):  # audit uses 1 for "failures present"
+        duration_ms = int((time.perf_counter() - t0) * 1000)
+        exit_code = proc.returncode or 0
+        stderr_text = stderr.decode(errors="replace")
+        trace_collector.emit_loop_subprocess_trace(
+            loop="principles_audit",
+            command=cmd,
+            exit_code=exit_code,
+            duration_ms=duration_ms,
+            stderr_excerpt=stderr_text if stderr_text else None,
+        )
+        if exit_code not in (0, 1):  # audit uses 1 for "failures present"
             logger.warning(
                 "make audit-json exit=%d for %s: %s",
-                proc.returncode,
+                exit_code,
                 slug,
-                stderr.decode(errors="replace")[:400],
+                stderr_text[:400],
             )
         try:
             return json.loads(stdout.decode())
@@ -170,15 +182,26 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
 
     async def _run_git(self, *args: str, cwd: Path | None = None) -> tuple[int, str]:
         """Run a git subcommand; returns ``(exit_code, combined_output)``."""
+        cmd = ["git", *args]
+        t0 = time.perf_counter()
         proc = await asyncio.create_subprocess_exec(
-            "git",
-            *args,
+            *cmd,
             cwd=cwd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
         out, _ = await proc.communicate()
-        return proc.returncode or 0, out.decode(errors="replace")
+        duration_ms = int((time.perf_counter() - t0) * 1000)
+        exit_code = proc.returncode or 0
+        combined = out.decode(errors="replace")
+        trace_collector.emit_loop_subprocess_trace(
+            loop="principles_audit",
+            command=cmd,
+            exit_code=exit_code,
+            duration_ms=duration_ms,
+            stderr_excerpt=combined if exit_code != 0 and combined else None,
+        )
+        return exit_code, combined
 
     async def _refresh_checkout(self, mr: ManagedRepo) -> Path:
         """Shallow-clone or fetch the managed repo. Returns the checkout root."""

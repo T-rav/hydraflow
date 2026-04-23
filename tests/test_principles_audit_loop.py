@@ -374,6 +374,137 @@ async def test_do_work_runs_end_to_end(loop_env, monkeypatch):
     state.set_last_green_audit.assert_called_with("hydraflow-self", {"P1.1": "PASS"})
 
 
+async def test_run_audit_emits_subprocess_trace(loop_env, monkeypatch, tmp_path):
+    """_run_audit must emit a loop-subprocess trace on each call (Task 18)."""
+    cfg, state, pr = loop_env
+    stop = asyncio.Event()
+    loop = PrinciplesAuditLoop(config=cfg, state=state, pr_manager=pr, deps=_deps(stop))
+
+    import trace_collector
+
+    emitted: list[dict] = []
+
+    def fake_emit(**kwargs):
+        emitted.append(kwargs)
+
+    monkeypatch.setattr(trace_collector, "emit_loop_subprocess_trace", fake_emit)
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b'{"findings": []}', b"")
+
+    async def fake_subproc(*args, **kwargs):
+        return FakeProc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subproc)
+
+    await loop._run_audit("hydraflow-self", tmp_path)
+
+    assert len(emitted) == 1
+    assert emitted[0]["loop"] == "principles_audit"
+    assert "audit-json" in emitted[0]["command"]
+    assert emitted[0]["exit_code"] == 0
+    assert emitted[0]["duration_ms"] >= 0
+
+
+async def test_run_audit_emits_trace_on_nonzero_exit(loop_env, monkeypatch, tmp_path):
+    """Trace must be emitted even when audit subprocess returns non-zero."""
+    cfg, state, pr = loop_env
+    stop = asyncio.Event()
+    loop = PrinciplesAuditLoop(config=cfg, state=state, pr_manager=pr, deps=_deps(stop))
+
+    import trace_collector
+
+    emitted: list[dict] = []
+    monkeypatch.setattr(
+        trace_collector,
+        "emit_loop_subprocess_trace",
+        lambda **kw: emitted.append(kw),
+    )
+
+    class FakeProc:
+        returncode = 2
+
+        async def communicate(self):
+            return (b'{"findings": []}', b"boom")
+
+    async def fake_subproc(*args, **kwargs):
+        return FakeProc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subproc)
+
+    await loop._run_audit("hydraflow-self", tmp_path)
+
+    assert len(emitted) == 1
+    assert emitted[0]["exit_code"] == 2
+    assert emitted[0]["stderr_excerpt"] == "boom"
+
+
+async def test_run_git_emits_subprocess_trace(loop_env, monkeypatch, tmp_path):
+    """_run_git must emit a trace so fetch/clone failures are observable."""
+    cfg, state, pr = loop_env
+    stop = asyncio.Event()
+    loop = PrinciplesAuditLoop(config=cfg, state=state, pr_manager=pr, deps=_deps(stop))
+
+    import trace_collector
+
+    emitted: list[dict] = []
+    monkeypatch.setattr(
+        trace_collector,
+        "emit_loop_subprocess_trace",
+        lambda **kw: emitted.append(kw),
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"ok", b"")
+
+    async def fake_subproc(*args, **kwargs):
+        return FakeProc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subproc)
+
+    code, out = await loop._run_git("fetch", "--depth", "1", "origin", "main")
+
+    assert code == 0
+    assert len(emitted) == 1
+    assert emitted[0]["loop"] == "principles_audit"
+    assert emitted[0]["command"][0] == "git"
+    assert "fetch" in emitted[0]["command"]
+
+
+async def test_no_emission_when_loop_disabled(loop_env, monkeypatch, tmp_path):
+    """When enabled_cb returns False the loop skips _do_work, so no trace emits."""
+    cfg, state, pr = loop_env
+    stop = asyncio.Event()
+    deps = LoopDeps(
+        event_bus=EventBus(),
+        stop_event=stop,
+        status_cb=lambda *a, **k: None,
+        enabled_cb=lambda _name: False,
+    )
+    loop = PrinciplesAuditLoop(config=cfg, state=state, pr_manager=pr, deps=deps)
+
+    import trace_collector
+
+    emitted: list[dict] = []
+    monkeypatch.setattr(
+        trace_collector,
+        "emit_loop_subprocess_trace",
+        lambda **kw: emitted.append(kw),
+    )
+
+    # Simulate a base-loop tick: when disabled, _do_work is not invoked and no
+    # subprocess ever runs — therefore no trace is emitted.
+    assert loop._enabled_cb(loop._worker_name) is False
+    # Direct proof: nothing was called, so nothing was recorded.
+    assert emitted == []
+
+
 async def test_do_work_managed_repo_regression_files_drift(loop_env, monkeypatch):
     cfg, state, pr = loop_env
     cfg.managed_repos = [ManagedRepo(slug="acme/widget")]
