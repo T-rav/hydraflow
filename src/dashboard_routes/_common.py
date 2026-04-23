@@ -55,6 +55,7 @@ _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
     "staging_bisect": (60, 86400),
     "retrospective": (60, 86400),
     "principles_audit": (3600, 2_592_000),  # 1h min, 30d max
+    "flake_tracker": (3600, 2_592_000),  # 1h min, 30d max
 }
 
 # Internal pipeline labels that must not be treated as epic names in the history panel.

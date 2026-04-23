@@ -33,6 +33,7 @@ from epic_monitor_loop import EpicMonitorLoop
 from epic_sweeper_loop import EpicSweeperLoop
 from events import EventBus
 from execution import SubprocessRunner
+from flake_tracker_loop import FlakeTrackerLoop
 from github_cache_loop import GitHubCacheLoop, GitHubDataCache
 from harness_insights import HarnessInsightStore
 from health_monitor_loop import HealthMonitorLoop
@@ -171,6 +172,7 @@ class ServiceRegistry:
     retrospective_loop: RetrospectiveLoop
     retrospective_queue: RetrospectiveQueue
     principles_audit_loop: PrinciplesAuditLoop
+    flake_tracker_loop: FlakeTrackerLoop
 
     # Optional integrations
     hindsight: HindsightClient | None = None
@@ -828,6 +830,17 @@ def build_services(
         pr_manager=prs,
         deps=loop_deps,
     )
+    flake_tracker_dedup = DedupStore(
+        "flake_tracker",
+        config.data_root / "dedup" / "flake_tracker.json",
+    )
+    flake_tracker_loop = FlakeTrackerLoop(  # noqa: F841
+        config=config,
+        state=state,
+        pr_manager=prs,
+        dedup=flake_tracker_dedup,
+        deps=loop_deps,
+    )
 
     return ServiceRegistry(
         workspaces=workspaces,
@@ -889,4 +902,5 @@ def build_services(
         retrospective_loop=retrospective_loop,
         retrospective_queue=retrospective_queue,
         principles_audit_loop=principles_audit_loop,
+        flake_tracker_loop=flake_tracker_loop,
     )
