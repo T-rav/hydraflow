@@ -89,9 +89,16 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras
       - name: Scenario suite
-        run: make scenario
+        run: make scenario JUNIT_DIR=${{ github.workspace }}/junit
       - name: Scenario loops suite
-        run: make scenario-loops
+        run: make scenario-loops JUNIT_DIR=${{ github.workspace }}/junit
+      - name: Upload JUnit artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-scenario
+          path: junit/*.xml
+          retention-days: 14
 
   scenario-browser:
     name: Browser Scenarios

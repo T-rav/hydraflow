@@ -209,12 +209,16 @@ soak: deps
 
 scenario: deps
 	@echo "$(BLUE)Running scenario tests...$(RESET)"
-	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/scenarios/ -m scenario -v
+	@mkdir -p $(if $(JUNIT_DIR),$(JUNIT_DIR),.)
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/scenarios/ -m scenario -v \
+		$(if $(JUNIT_DIR),--junitxml=$(JUNIT_DIR)/junit-scenario.xml,)
 	@echo "$(GREEN)Scenario tests passed$(RESET)"
 
 scenario-loops: deps
 	@echo "$(BLUE)Running scenario loop tests...$(RESET)"
-	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/scenarios/ -m scenario_loops -v
+	@mkdir -p $(if $(JUNIT_DIR),$(JUNIT_DIR),.)
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/scenarios/ -m scenario_loops -v \
+		$(if $(JUNIT_DIR),--junitxml=$(JUNIT_DIR)/junit-scenario-loops.xml,)
 	@echo "$(GREEN)Scenario loop tests passed$(RESET)"
 
 bisect-probe: deps
