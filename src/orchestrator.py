@@ -90,6 +90,12 @@ class HydraFlowOrchestrator:
         pipeline_enabled: bool = True,
     ) -> None:
         self._config = config
+        # Register config for module-level free-function helpers (e.g.
+        # trace_collector.emit_loop_subprocess_trace, spec §4.11 point 3).
+        # The orchestrator is the single process-wide lifecycle owner.
+        from trace_collector import set_active_config  # noqa: PLC0415
+
+        set_active_config(config)
         self._bus = event_bus or EventBus()
         self._state = state or build_state_tracker(config)
         self._dashboard: object | None = None
