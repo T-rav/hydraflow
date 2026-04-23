@@ -739,6 +739,7 @@ def build_services(
         config=config,
         prs=prs,
         deps=loop_deps,
+        state=state,
     )
     stale_issue_loop = StaleIssueLoop(
         config=config,
