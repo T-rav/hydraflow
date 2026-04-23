@@ -1755,6 +1755,13 @@ class StateData(BaseModel):
         default_factory=CodeGroomingSettings
     )
     code_grooming_filed: list[str] = Field(default_factory=list)
+    # Trust fleet — caretaker loops (Plan 5)
+    flake_counts: dict[str, int] = Field(default_factory=dict)
+    flake_attempts: dict[str, int] = Field(default_factory=dict)
+    skill_prompt_last_green: dict[str, str] = Field(default_factory=dict)
+    skill_prompt_attempts: dict[str, int] = Field(default_factory=dict)
+    fake_coverage_last_known: dict[str, list[str]] = Field(default_factory=dict)
+    fake_coverage_attempts: dict[str, int] = Field(default_factory=dict)
     escalation_contexts: dict[str, dict[str, object]] = Field(default_factory=dict)
     diagnostic_attempts: dict[str, list[dict[str, object]]] = Field(
         default_factory=dict
