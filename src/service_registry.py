@@ -743,6 +743,9 @@ def build_services(
         prs=prs,
         hindsight=hindsight_client,
         retrospective_queue=retrospective_queue,
+        state=state,
+        # bg_workers is injected post-construction by the orchestrator
+        # (chicken-and-egg with BGWorkerManager); see orchestrator.py.
     )
     dependabot_merge_loop = DependabotMergeLoop(  # noqa: F841
         config=config,

@@ -19,11 +19,14 @@ from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
+from dedup_store import DedupStore
 
 if TYPE_CHECKING:
+    from bg_worker_manager import BGWorkerManager
     from hindsight import HindsightClient
     from ports import PRPort
     from retrospective_queue import RetrospectiveQueue
+    from state import StateTracker
 
 logger = logging.getLogger("hydraflow.health_monitor_loop")
 
@@ -309,6 +312,8 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         hindsight: HindsightClient | None = None,
         verification_window: int = 20,
         retrospective_queue: RetrospectiveQueue | None = None,
+        state: StateTracker | None = None,
+        bg_workers: BGWorkerManager | None = None,
     ) -> None:
         super().__init__(
             worker_name="health_monitor",
@@ -320,6 +325,21 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         self._verification_window = verification_window
         self._retrospective_queue = retrospective_queue
         self._decisions_dir: Path = config.memory_dir
+        # §12.1 dead-man-switch inputs — ``state`` is available at
+        # service-registry time; ``bg_workers`` is built after the loop
+        # registry, so orchestrator injects it via ``set_bg_workers``.
+        self._state: StateTracker | None = state
+        self._bg_workers: BGWorkerManager | None = bg_workers
+        # Dedup for the dead-man-switch so we file one sanity-loop-stalled
+        # issue per stall event, not one per health_monitor tick.
+        self._sanity_stall_dedup = DedupStore(
+            "health_monitor_sanity_stall",
+            config.data_root / "dedup" / "health_monitor_sanity_stall.json",
+        )
+
+    def set_bg_workers(self, bg_workers: BGWorkerManager) -> None:
+        """Late-binding for the post-ctor BGWorkerManager wiring."""
+        self._bg_workers = bg_workers
         self._pending: list[PendingAdjustment] = []
         self._last_log_scan: datetime | None = None
 
@@ -959,33 +979,36 @@ class HealthMonitorLoop(BaseBackgroundLoop):
 
         When the sanity loop is enabled but its heartbeat is older than
         ``_SANITY_STALL_MULTIPLIER × trust_fleet_sanity_interval``,
-        file a conventional `hydraflow-find` + `sanity-loop-stalled`
-        issue. The sanity loop watches the nine trust loops; this
+        file one `hydraflow-find` + `sanity-loop-stalled` issue per stall
+        event. The sanity loop watches the nine trust loops; this
         method watches the sanity loop. Recursion is bounded at one
         meta-layer (spec §12.1 "Bounds of meta-observability").
 
-        ``_state`` and ``_bg_workers`` are not yet wired into this loop's
-        ctor (a follow-on bead lands that); when either is missing, this
-        check is a silent no-op so production cycles do not spam
-        debug-level exceptions.
+        ``bg_workers`` is injected post-ctor by the orchestrator
+        (chicken-and-egg with BGWorkerManager); ``state`` is passed at
+        construction time. When either is missing — as happens in some
+        minimal scenario fixtures — this check is a silent no-op so
+        production cycles do not spam debug-level exceptions.
+
+        Dedup: filed issues are tracked in ``_sanity_stall_dedup``. The
+        key is cleared the next time the sanity loop ticks within the
+        threshold, so a subsequent stall files a fresh issue.
         """
-        state = getattr(self, "_state", None)
-        bg_workers = getattr(self, "_bg_workers", None)
-        prs = getattr(self, "_prs", None)
+        state = self._state
+        bg_workers = self._bg_workers
+        prs = self._prs
         if state is None or bg_workers is None or prs is None:
             return
 
-        heartbeats = state.get_worker_heartbeats()
-        hb = heartbeats.get("trust_fleet_sanity")
-        if not hb:
-            return
+        dedup_key = "health_monitor:trust_fleet_sanity:stalled"
+        filed_keys = self._sanity_stall_dedup.get()
+
+        hb = state.get_worker_heartbeats().get("trust_fleet_sanity")
         last_run_iso = hb.get("last_run") if isinstance(hb, dict) else None
-        if not last_run_iso:
-            return
         enabled = bool(
             getattr(bg_workers, "worker_enabled", {}).get("trust_fleet_sanity", True)
         )
-        if not enabled:
+        if not last_run_iso or not enabled:
             return
         try:
             last_run = datetime.fromisoformat(
@@ -1000,6 +1023,14 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             _SANITY_STALL_MULTIPLIER * self._config.trust_fleet_sanity_interval
         )
         if elapsed_s < threshold_s:
+            # Recovery — the sanity loop is ticking again. Clear the
+            # dedup so a future stall files a fresh issue.
+            if dedup_key in filed_keys:
+                self._sanity_stall_dedup.set_all(filed_keys - {dedup_key})
+            return
+        if dedup_key in filed_keys:
+            # Already filed for the current stall event; wait for recovery
+            # (or operator-close via issue_close reconcile) before refiling.
             return
 
         title = (
@@ -1033,3 +1064,5 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             body,
             ["hydraflow-find", "sanity-loop-stalled"],
         )
+        filed_keys = self._sanity_stall_dedup.get()
+        self._sanity_stall_dedup.set_all(filed_keys | {dedup_key})

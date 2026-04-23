@@ -292,8 +292,13 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
                         }
                     )
                     filed += 1
-                dedup.add(key)
-                self._dedup.set_all(dedup)
+                    # Only add to dedup AFTER the escalation fires — otherwise
+                    # raising ``_MAX_ATTEMPTS`` breaks the retry window because
+                    # every breach is added to dedup on first detection and
+                    # ``inc_trust_fleet_sanity_attempts`` never increments again
+                    # until reconcile-on-close clears the key.
+                    dedup.add(key)
+                    self._dedup.set_all(dedup)
 
         self._state.set_trust_fleet_sanity_last_run(now.isoformat())
         self._emit_trace(t0, anomalies=len(anomalies))

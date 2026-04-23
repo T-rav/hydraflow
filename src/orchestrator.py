@@ -172,10 +172,11 @@ class HydraFlowOrchestrator:
             "trust_fleet_sanity": svc.trust_fleet_sanity_loop,
         }
         self._bg_workers = BGWorkerManager(config, self._state, bg_loop_registry)
-        # TrustFleetSanityLoop needs a reference to the BGWorkerManager
-        # but cannot take one at construction time (chicken-and-egg:
-        # BGWorkerManager takes the loop registry). Inject it now.
+        # Loops that need a reference to BGWorkerManager cannot take one
+        # at construction time (chicken-and-egg: BGWorkerManager takes the
+        # loop registry). Inject it now, post-construction.
         svc.trust_fleet_sanity_loop.set_bg_workers(self._bg_workers)
+        svc.health_monitor_loop.set_bg_workers(self._bg_workers)
         self._hitl_ctrl = HITLController(svc.hitl_phase, svc.fetcher, config.hitl_label)
         self._state_restorer = StateRestorer(self._state, self._bus, self._bg_workers)
 
