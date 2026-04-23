@@ -342,6 +342,71 @@ def _build_skill_prompt_eval(ports: dict[str, Any], config: Any, deps: Any) -> A
     return loop
 
 
+def _build_rc_budget(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build RCBudgetLoop for scenarios (spec §4.8).
+
+    The loop's external surface (``_fetch_recent_runs`` / ``_fetch_job_breakdown``
+    / ``_fetch_junit_tests`` / ``_reconcile_closed_escalations``) issues ``gh``
+    subprocesses that cannot run inside a scenario. Tests may either:
+
+    * Monkey-patch ``asyncio.create_subprocess_exec`` at the module level (the
+      scenario pattern used by ``test_rc_budget_scenario.py``), **or**
+    * Pre-seed port keys which this builder monkey-patches onto the instance:
+
+      * ``rc_budget_fetch_runs`` → ``_fetch_recent_runs``
+      * ``rc_budget_fetch_jobs`` → ``_fetch_job_breakdown``
+      * ``rc_budget_fetch_junit`` → ``_fetch_junit_tests``
+      * ``rc_budget_reconcile_closed`` → ``_reconcile_closed_escalations``
+
+    ``state`` and ``dedup`` default to MagicMocks with clean-slate return
+    values; tests may override by seeding ``rc_budget_state`` /
+    ``rc_budget_dedup`` explicitly — mirrors the F7 FlakeTracker
+    (``eac5fc72``), S6 SkillPromptEval (``93ebf387``), and C6
+    FakeCoverageAuditor (``32b43ab0``) patterns.
+    """
+    from rc_budget_loop import RCBudgetLoop  # noqa: PLC0415
+
+    state = ports.get("rc_budget_state")
+    if state is None:
+        state = MagicMock()
+        state.get_rc_budget_duration_history.return_value = []
+        state.get_rc_budget_attempts.return_value = 0
+        state.inc_rc_budget_attempts.return_value = 1
+        ports["rc_budget_state"] = state
+
+    dedup = ports.get("rc_budget_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["rc_budget_dedup"] = dedup
+
+    pr_manager = ports.get("pr_manager") or ports["github"]
+
+    loop = RCBudgetLoop(
+        config=config,
+        state=state,
+        pr_manager=pr_manager,
+        dedup=dedup,
+        deps=deps,
+    )
+
+    # Rewire external I/O to seeded async callables (if provided).
+    fetch_runs = ports.get("rc_budget_fetch_runs")
+    if fetch_runs is not None:
+        loop._fetch_recent_runs = fetch_runs  # type: ignore[method-assign]
+    fetch_jobs = ports.get("rc_budget_fetch_jobs")
+    if fetch_jobs is not None:
+        loop._fetch_job_breakdown = fetch_jobs  # type: ignore[method-assign]
+    fetch_junit = ports.get("rc_budget_fetch_junit")
+    if fetch_junit is not None:
+        loop._fetch_junit_tests = fetch_junit  # type: ignore[method-assign]
+    reconcile = ports.get("rc_budget_reconcile_closed")
+    if reconcile is not None:
+        loop._reconcile_closed_escalations = reconcile  # type: ignore[method-assign]
+
+    return loop
+
+
 def _build_fake_coverage_auditor(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build FakeCoverageAuditorLoop for scenarios (spec §4.7).
 
@@ -425,6 +490,7 @@ _BUILDERS: dict[str, Any] = {
     "flake_tracker": _build_flake_tracker,
     "skill_prompt_eval": _build_skill_prompt_eval,
     "fake_coverage_auditor": _build_fake_coverage_auditor,
+    "rc_budget": _build_rc_budget,
 }
 
 
