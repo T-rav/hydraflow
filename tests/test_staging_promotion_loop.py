@@ -369,3 +369,45 @@ class TestStateWritesOnPromoted:
         assert result["status"] == "promoted"
         assert state.get_last_green_rc_sha() == "abc123deadbeef"
         assert state.get_auto_reverts_in_cycle() == 0
+
+
+class TestStateWritesOnCIFailed:
+    @pytest.mark.asyncio
+    async def test_writes_last_rc_red_sha_and_bumps_cycle(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs = _make_loop(
+            tmp_path,
+            monkeypatch,
+            open_promotion=_make_pr(number=88),
+            ci_result=(False, "pytest failed: test_foo"),
+        )
+        prs.get_pr_head_sha = AsyncMock(return_value="cafef00d")
+        state = StateTracker(state_file=tmp_path / "s.json")
+        loop._state = state  # type: ignore[attr-defined]
+
+        result = await loop._do_work()
+
+        assert result["status"] == "ci_failed"
+        assert state.get_last_rc_red_sha() == "cafef00d"
+        assert state.get_rc_cycle_id() == 1
+
+    @pytest.mark.asyncio
+    async def test_no_state_write_on_ci_pending(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs = _make_loop(
+            tmp_path,
+            monkeypatch,
+            open_promotion=_make_pr(number=89),
+            ci_result=(False, "timed out waiting for checks"),
+        )
+        prs.get_pr_head_sha = AsyncMock(return_value="never_read")
+        state = StateTracker(state_file=tmp_path / "s.json")
+        loop._state = state  # type: ignore[attr-defined]
+
+        result = await loop._do_work()
+
+        assert result["status"] == "ci_pending"
+        assert state.get_last_rc_red_sha() == ""
+        assert state.get_rc_cycle_id() == 0

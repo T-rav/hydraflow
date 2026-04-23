@@ -105,6 +105,18 @@ class StagingPromotionLoop(BaseBackgroundLoop):
             pr_number,
             issue_number,
         )
+        if self._state is not None:
+            try:
+                red_sha = await self._prs.get_pr_head_sha(pr_number)
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "Could not read head SHA for red PR #%d",
+                    pr_number,
+                    exc_info=True,
+                )
+                red_sha = ""
+            if red_sha:
+                self._state.set_last_rc_red_sha_and_bump_cycle(red_sha)
         return {
             "status": "ci_failed",
             "pr": pr_number,
