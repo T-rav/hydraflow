@@ -1610,7 +1610,7 @@ class TestAgentToolFields:
         assert cfg.implementation_tool == "claude"
         assert cfg.review_tool == "claude"
         assert cfg.planner_tool == "claude"
-        assert cfg.triage_tool == "claude"
+        assert cfg.triage_tool == "gemini"
         assert cfg.transcript_summary_tool == "claude"
         assert cfg.ac_tool == "claude"
         assert cfg.verification_judge_tool == "claude"

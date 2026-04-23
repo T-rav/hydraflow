@@ -177,3 +177,9 @@ def test_harmonize_allows_gemini_pro() -> None:
 def test_harmonize_allows_codex_gpt() -> None:
     cfg = HydraFlowConfig(implementation_tool="codex", model="gpt-5-codex")
     assert cfg.model == "gpt-5-codex"
+
+
+def test_triage_defaults_to_gemini_pro() -> None:
+    cfg = HydraFlowConfig()
+    assert cfg.triage_tool == "gemini"
+    assert cfg.triage_model == "gemini-3-pro"
