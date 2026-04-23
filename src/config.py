@@ -286,6 +286,14 @@ _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
     ("loop_anomaly_cost_spike_ratio", "HYDRAFLOW_LOOP_ANOMALY_COST_SPIKE_RATIO", 5.0),
 ]
 
+# Optional floats — `None` when env var is missing/empty/invalid.
+# Handled separately from the strictly-typed float table because pydantic's
+# `float | None` fields don't participate in the `default == current` check.
+_ENV_OPT_FLOAT_OVERRIDES: list[tuple[str, str, float | None]] = [
+    ("daily_cost_budget_usd", "HYDRAFLOW_DAILY_COST_BUDGET_USD", None),
+    ("issue_cost_alert_usd", "HYDRAFLOW_ISSUE_COST_ALERT_USD", None),
+]
+
 # Float overrides with tight [0, 1] bounds — handled separately from the
 # parametrized table because the generic test adds ``default + 1.0`` which
 # exceeds their upper bound.
@@ -906,6 +914,26 @@ class HydraFlowConfig(BaseModel):
         ge=0.0,
         le=1.0,
         description="Alert if HITL escalation rate exceeds this (0.0-1.0)",
+    )
+
+    # Cost budgets (spec §4.11 point 6). Both default to None = "disabled".
+    daily_cost_budget_usd: float | None = Field(
+        default=None,
+        ge=0.0,
+        description=(
+            "Soft daily cost budget (USD). When the last-24h machinery "
+            "cost exceeds this, ReportIssueLoop files a hydraflow-find "
+            "issue with label cost-budget-exceeded. None disables the check."
+        ),
+    )
+    issue_cost_alert_usd: float | None = Field(
+        default=None,
+        ge=0.0,
+        description=(
+            "Per-issue cost alert (USD). When a merged issue's final cost "
+            "exceeds this, PRManager.merge_pr files a hydraflow-find issue "
+            "with label issue-cost-spike. None disables the check."
+        ),
     )
 
     # Review insight aggregation
@@ -2539,6 +2567,34 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
                                 f"{env_key}={new_val} is above maximum {le}"
                             )
                     object.__setattr__(config, field, new_val)
+
+    # Optional float overrides — empty string or unset → None, parse failures
+    # log a warning and leave the value as the default. ge=0 enforced via
+    # pydantic constraint on the field itself.
+    for field, env_key, default in _ENV_OPT_FLOAT_OVERRIDES:
+        env_val = _get_env(env_key)
+        if env_val is None or env_val == "":
+            object.__setattr__(config, field, default)
+            continue
+        try:
+            parsed = float(env_val)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid %s=%r — treating as unset",
+                env_key,
+                env_val,
+            )
+            object.__setattr__(config, field, default)
+            continue
+        if parsed < 0:
+            logger.warning(
+                "%s=%s is below minimum 0; ignoring env override",
+                env_key,
+                parsed,
+            )
+            object.__setattr__(config, field, default)
+            continue
+        object.__setattr__(config, field, parsed)
 
     # Ratio float overrides ([0, 1] bounds) — parse failures are silently ignored
     # but out-of-bounds values emit a warning so operators know their config was rejected.
