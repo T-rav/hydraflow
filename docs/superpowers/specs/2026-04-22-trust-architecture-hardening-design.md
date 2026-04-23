@@ -1479,14 +1479,25 @@ No `drills/` tree — rollback drills are out of scope (§2).
 - `make audit` and `make audit-json` already exist (ADR-0044); no new
   target needed for `PrinciplesAuditLoop`.
 
-**Loop-only caretakers** (§4.5–§4.9) are invoked through the standard
-`BaseBackgroundLoop` dispatch, not via `make` targets — they have no
-developer-facing CLI.
+**Loops are invoked through `BaseBackgroundLoop` dispatch**, not via
+`make` targets — the ten new loops in this spec (§4.1–§4.9 plus
+§12.1 `TrustFleetSanityLoop`) have no developer-facing CLI. Their
+gates surface as filed `hydraflow-find` issues or, for the
+RC-boundary gates (§4.1 corpus, §4.2 replay), through `make trust`.
 
-**CI wiring.** Add a new job `trust` to
-`.github/workflows/rc-promotion-scenario.yml` that runs `make trust`.
-Failing `trust` fails the RC promotion PR; per ADR-0042 the promotion
-loop does not merge on red.
+**CI wiring — two new jobs across two workflows:**
+
+1. **`trust` job on `rc-promotion-scenario.yml`** — runs
+   `make trust` (adversarial + contracts). Failing `trust` fails the
+   RC promotion PR; per ADR-0042 the promotion loop does not merge
+   on red.
+2. **`audit` job on `ci.yml`** — runs `make audit` on every PR to
+   `staging` (see §4.4 for rationale and runtime budget). This is
+   the one gate this spec places outside the RC workflow; §3.1
+   explicitly calls out the exception.
+
+These are the only new CI jobs added. The caretaker loops run
+in-process via the existing orchestrator, not via GitHub Actions.
 
 **Issue filing.** Every subsystem in this spec files `hydraflow-find`
 issues via the existing `src/pr_manager.py:PRManager.create_issue`
