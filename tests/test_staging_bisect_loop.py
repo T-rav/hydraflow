@@ -412,3 +412,68 @@ class TestRetryIssue:
         assert "pull/900" in body
         assert "green_sha" in body
         assert "red_sha" in body
+
+
+class TestWatchdog:
+    @pytest.mark.asyncio
+    async def test_watchdog_green_outcome(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, _prs, state = _make_loop(tmp_path, monkeypatch)
+        state.increment_auto_reverts_in_cycle()  # simulate prior revert
+        loop._pending_watchdog = {  # type: ignore[attr-defined]
+            "red_sha_at_revert": "red_A",
+            "rc_cycle_at_revert": state.get_rc_cycle_id(),
+            "deadline_ts": 9_999_999_999.0,
+        }
+        # Promotion happened -> last_green_rc_sha advanced
+        state.set_last_green_rc_sha("green_B")
+        state.reset_auto_reverts_in_cycle()
+
+        result = await loop._check_pending_watchdog()  # type: ignore[attr-defined]
+
+        assert result == {"status": "watchdog_green"}
+        assert state.get_auto_reverts_successful() == 1
+        assert loop._pending_watchdog is None  # type: ignore[attr-defined]
+
+    @pytest.mark.asyncio
+    async def test_watchdog_still_red_escalates(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs, state = _make_loop(tmp_path, monkeypatch)
+        state.set_last_rc_red_sha_and_bump_cycle("red_A")
+        state.increment_auto_reverts_in_cycle()
+        prior_cycle = state.get_rc_cycle_id()
+
+        # New red arrives
+        state.set_last_rc_red_sha_and_bump_cycle("red_B")
+        prs.create_issue = AsyncMock(return_value=888)
+        loop._pending_watchdog = {  # type: ignore[attr-defined]
+            "red_sha_at_revert": "red_A",
+            "rc_cycle_at_revert": prior_cycle,
+            "deadline_ts": 9_999_999_999.0,
+        }
+
+        result = await loop._check_pending_watchdog()  # type: ignore[attr-defined]
+
+        assert result["status"] == "watchdog_still_red"
+        labels = prs.create_issue.await_args.args[2]
+        assert "rc-red-post-revert-red" in labels
+
+    @pytest.mark.asyncio
+    async def test_watchdog_timeout_escalates(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs, _state = _make_loop(tmp_path, monkeypatch)
+        prs.create_issue = AsyncMock(return_value=889)
+        loop._pending_watchdog = {  # type: ignore[attr-defined]
+            "red_sha_at_revert": "red_A",
+            "rc_cycle_at_revert": 1,
+            "deadline_ts": 0.0,  # already past
+        }
+
+        result = await loop._check_pending_watchdog()  # type: ignore[attr-defined]
+
+        assert result["status"] == "watchdog_timeout"
+        labels = prs.create_issue.await_args.args[2]
+        assert "rc-red-verify-timeout" in labels

@@ -75,6 +75,9 @@ class StagingBisectLoop(BaseBackgroundLoop):
         self._last_processed_rc_red_sha: str = (
             max(processed, key=len) if processed else ""
         )
+        # Pending watchdog state — set after an auto-revert is filed.
+        # None when no watchdog active.
+        self._pending_watchdog: dict[str, Any] | None = None
 
     def _get_default_interval(self) -> int:
         return self._config.staging_bisect_interval
@@ -533,3 +536,74 @@ class StagingBisectLoop(BaseBackgroundLoop):
         return await self._prs.create_issue(
             title, body, ["hydraflow-find", "rc-red-retry"]
         )
+
+    async def _check_pending_watchdog(self) -> dict[str, Any] | None:
+        """Resolve any pending watchdog to green / still-red / timeout.
+
+        Returns a status dict when the watchdog resolves this tick,
+        ``None`` when still waiting (no resolution yet).
+        """
+        import time  # noqa: PLC0415
+
+        wd = self._pending_watchdog
+        if wd is None:
+            return None
+
+        # Green outcome: a new green RC arrived after the revert
+        # (auto_reverts_in_cycle was reset on the promoted path — see Task 3).
+        if (
+            self._state.get_last_green_rc_sha()
+            and self._state.get_auto_reverts_in_cycle() == 0
+            and self._state.get_rc_cycle_id() >= wd["rc_cycle_at_revert"]
+        ):
+            self._state.increment_auto_reverts_successful()
+            self._pending_watchdog = None
+            logger.info("StagingBisectLoop: watchdog resolved green")
+            return {"status": "watchdog_green"}
+
+        # Still-red: a new red with a different SHA than the one we reverted
+        new_red = self._state.get_last_rc_red_sha()
+        if (
+            new_red
+            and new_red != wd["red_sha_at_revert"]
+            and self._state.get_rc_cycle_id() > wd["rc_cycle_at_revert"]
+        ):
+            issue = await self._prs.create_issue(
+                f"hitl: RC still red after auto-revert "
+                f"(cycle {self._state.get_rc_cycle_id()})",
+                (
+                    "## Post-revert verification failed\n\n"
+                    f"- Reverted in cycle {wd['rc_cycle_at_revert']} "
+                    f"(red_sha={wd['red_sha_at_revert']}).\n"
+                    f"- New red detected this cycle "
+                    f"(red_sha={new_red}).\n\n"
+                    "The revert stays in place per spec §4.3 step 8 — "
+                    "a human must disambiguate."
+                ),
+                ["hitl-escalation", "rc-red-post-revert-red"],
+            )
+            self._pending_watchdog = None
+            return {
+                "status": "watchdog_still_red",
+                "escalation_issue": issue,
+            }
+
+        # Timeout: deadline elapsed without a green or a new red
+        if time.time() >= wd["deadline_ts"]:
+            issue = await self._prs.create_issue(
+                f"hitl: RC verification timed out after auto-revert "
+                f"(cycle {wd['rc_cycle_at_revert']})",
+                (
+                    "## Watchdog timeout\n\n"
+                    "No green RC and no new red RC within the "
+                    f"{self._config.staging_bisect_watchdog_rc_cycles}-cycle "
+                    "or 8-hour window after the auto-revert.\n\n"
+                    "The RC pipeline may be stalled for unrelated reasons."
+                ),
+                ["hitl-escalation", "rc-red-verify-timeout"],
+            )
+            self._pending_watchdog = None
+            return {"status": "watchdog_timeout", "escalation_issue": issue}
+
+        # Still waiting
+        return None
