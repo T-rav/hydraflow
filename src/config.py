@@ -114,8 +114,6 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("adr_review_approval_threshold", "HYDRAFLOW_ADR_REVIEW_APPROVAL_THRESHOLD", 2),
     ("adr_review_max_rounds", "HYDRAFLOW_ADR_REVIEW_MAX_ROUNDS", 3),
     ("pr_unstick_batch_size", "HYDRAFLOW_PR_UNSTICK_BATCH_SIZE", 10),
-    ("max_subskill_attempts", "HYDRAFLOW_MAX_SUBSKILL_ATTEMPTS", 0),
-    ("max_debug_attempts", "HYDRAFLOW_MAX_DEBUG_ATTEMPTS", 1),
     ("harness_insight_window", "HYDRAFLOW_HARNESS_INSIGHT_WINDOW", 20),
     ("harness_pattern_threshold", "HYDRAFLOW_HARNESS_PATTERN_THRESHOLD", 3),
     ("max_runtime_log_chars", "HYDRAFLOW_MAX_RUNTIME_LOG_CHARS", 8_000),
@@ -174,17 +172,6 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("test_command", "HYDRAFLOW_TEST_COMMAND", "make test"),
     ("docker_image", "HYDRAFLOW_DOCKER_IMAGE", "ghcr.io/t-rav/hydraflow-agent:latest"),
     ("docker_network", "HYDRAFLOW_DOCKER_NETWORK", ""),
-    ("system_model", "HYDRAFLOW_SYSTEM_MODEL", ""),
-    ("background_model", "HYDRAFLOW_BACKGROUND_MODEL", ""),
-    ("transcript_summary_model", "HYDRAFLOW_TRANSCRIPT_SUMMARY_MODEL", "haiku"),
-    ("wiki_compilation_model", "HYDRAFLOW_WIKI_COMPILATION_MODEL", "haiku"),
-    ("triage_model", "HYDRAFLOW_TRIAGE_MODEL", "haiku"),
-    ("subskill_model", "HYDRAFLOW_SUBSKILL_MODEL", "haiku"),
-    ("debug_model", "HYDRAFLOW_DEBUG_MODEL", "opus"),
-    ("report_issue_model", "HYDRAFLOW_REPORT_ISSUE_MODEL", "opus"),
-    ("sentry_model", "HYDRAFLOW_SENTRY_MODEL", "opus"),
-    ("code_grooming_model", "HYDRAFLOW_CODE_GROOMING_MODEL", "sonnet"),
-    ("adr_review_model", "HYDRAFLOW_ADR_REVIEW_MODEL", "sonnet"),
     ("changelog_file", "HYDRAFLOW_CHANGELOG_FILE", ""),
     ("release_tag_prefix", "HYDRAFLOW_RELEASE_TAG_PREFIX", "v"),
     ("main_branch", "HYDRAFLOW_MAIN_BRANCH", "main"),
@@ -232,7 +219,6 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_TRANSCRIPT_SUMMARIZATION_ENABLED",
         True,
     ),
-    ("debug_escalation_enabled", "HYDRAFLOW_DEBUG_ESCALATION_ENABLED", True),
     ("unstick_auto_merge", "HYDRAFLOW_UNSTICK_AUTO_MERGE", True),
     ("unstick_all_causes", "HYDRAFLOW_UNSTICK_ALL_CAUSES", True),
     (
@@ -262,19 +248,6 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
 _ENV_LITERAL_OVERRIDES: list[tuple[str, str]] = [
     ("execution_mode", "HYDRAFLOW_EXECUTION_MODE"),
     ("docker_network_mode", "HYDRAFLOW_DOCKER_NETWORK_MODE"),
-    ("system_tool", "HYDRAFLOW_SYSTEM_TOOL"),
-    ("background_tool", "HYDRAFLOW_BACKGROUND_TOOL"),
-    ("implementation_tool", "HYDRAFLOW_IMPLEMENTATION_TOOL"),
-    ("review_tool", "HYDRAFLOW_REVIEW_TOOL"),
-    ("planner_tool", "HYDRAFLOW_PLANNER_TOOL"),
-    ("triage_tool", "HYDRAFLOW_TRIAGE_TOOL"),
-    ("transcript_summary_tool", "HYDRAFLOW_TRANSCRIPT_SUMMARY_TOOL"),
-    ("wiki_compilation_tool", "HYDRAFLOW_WIKI_COMPILATION_TOOL"),
-    ("ac_tool", "HYDRAFLOW_AC_TOOL"),
-    ("verification_judge_tool", "HYDRAFLOW_VERIFICATION_JUDGE_TOOL"),
-    ("subskill_tool", "HYDRAFLOW_SUBSKILL_TOOL"),
-    ("debug_tool", "HYDRAFLOW_DEBUG_TOOL"),
-    ("report_issue_tool", "HYDRAFLOW_REPORT_ISSUE_TOOL"),
     ("epic_merge_strategy", "HYDRAFLOW_EPIC_MERGE_STRATEGY"),
     ("release_version_source", "HYDRAFLOW_RELEASE_VERSION_SOURCE"),
 ]
@@ -290,26 +263,6 @@ _DEPRECATED_ENV_ALIASES: dict[str, str] = {
 # Reverse lookup: canonical key → deprecated key (built once at import time).
 _DEPRECATED_ENV_REVERSE: dict[str, str] = {
     v: k for k, v in _DEPRECATED_ENV_ALIASES.items()
-}
-
-# Label env var overrides — maps env key → (field_name, default_value)
-_ENV_LABEL_MAP: dict[str, tuple[str, list[str]]] = {
-    "HYDRAFLOW_LABEL_FIND": ("find_label", ["hydraflow-find"]),
-    "HYDRAFLOW_LABEL_DISCOVER": ("discover_label", ["hydraflow-discover"]),
-    "HYDRAFLOW_LABEL_SHAPE": ("shape_label", ["hydraflow-shape"]),
-    "HYDRAFLOW_LABEL_PLAN": ("planner_label", ["hydraflow-plan"]),
-    "HYDRAFLOW_LABEL_READY": ("ready_label", ["hydraflow-ready"]),
-    "HYDRAFLOW_LABEL_REVIEW": ("review_label", ["hydraflow-review"]),
-    "HYDRAFLOW_LABEL_HITL": ("hitl_label", ["hydraflow-hitl"]),
-    "HYDRAFLOW_LABEL_HITL_ACTIVE": ("hitl_active_label", ["hydraflow-hitl-active"]),
-    "HYDRAFLOW_LABEL_HITL_AUTOFIX": ("hitl_autofix_label", ["hydraflow-hitl-autofix"]),
-    "HYDRAFLOW_LABEL_FIXED": ("fixed_label", ["hydraflow-fixed"]),
-    "HYDRAFLOW_LABEL_DUP": ("dup_label", ["hydraflow-dup"]),
-    "HYDRAFLOW_LABEL_EPIC": ("epic_label", ["hydraflow-epic"]),
-    "HYDRAFLOW_LABEL_EPIC_CHILD": ("epic_child_label", ["hydraflow-epic-child"]),
-    "HYDRAFLOW_LABEL_VERIFY": ("verify_label", ["hydraflow-verify"]),
-    "HYDRAFLOW_LABEL_PARKED": ("parked_label", ["hydraflow-parked"]),
-    "HYDRAFLOW_LABEL_DIAGNOSE": ("diagnose_label", ["hydraflow-diagnose"]),
 }
 
 _ALLOWED_TOOLS_COMBO: set[str] = {"claude", "codex", "gemini", "pi"}
@@ -1904,18 +1857,13 @@ class HydraFlowConfig(BaseModel):
             HYDRAFLOW_GIT_USER_NAME     → git_user_name
             HYDRAFLOW_GIT_USER_EMAIL    → git_user_email
             HYDRAFLOW_MIN_PLAN_WORDS    → min_plan_words
-            HYDRAFLOW_LABEL_FIND        → find_label   (discovery stage)
-            HYDRAFLOW_LABEL_PLAN        → planner_label
-            HYDRAFLOW_LABEL_READY       → ready_label  (implement stage)
-            HYDRAFLOW_LABEL_REVIEW      → review_label
-            HYDRAFLOW_LABEL_HITL        → hitl_label
-            HYDRAFLOW_LABEL_HITL_ACTIVE  → hitl_active_label
-            HYDRAFLOW_LABEL_HITL_AUTOFIX → hitl_autofix_label
-            HYDRAFLOW_LABEL_FIXED       → fixed_label
-            HYDRAFLOW_LABEL_VERIFY      → verify_label
-            HYDRAFLOW_LABEL_DUP         → dup_label
-            HYDRAFLOW_LABEL_EPIC        → epic_label
-            HYDRAFLOW_LABEL_EPIC_CHILD  → epic_child_label
+
+        Tool/model overrides use the combo syntax (BREAKING: legacy *_TOOL/*_MODEL
+        single-field env vars are no longer supported):
+            HYDRAFLOW_TRIAGE=tool:model, HYDRAFLOW_IMPLEMENT=tool:model, etc.
+
+        Label fields (ready_label, find_label, etc.) are config-file-only;
+        HYDRAFLOW_LABEL_* env vars were removed in the Task 7 breaking change.
         """
         _resolve_base_paths(self)
         _resolve_repo_and_identity(self)
@@ -2485,20 +2433,6 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
                     msg = f"HYDRAFLOW_DOCKER_PIDS_LIMIT must be between 16 and 4096, got {pids_val}"
                     raise ValueError(msg)
                 object.__setattr__(config, "docker_pids_limit", pids_val)
-
-    # Label env var overrides (only apply when still at the default)
-    for env_key, (field_name, default_val) in _ENV_LABEL_MAP.items():
-        current = getattr(config, field_name)
-        env_val = os.environ.get(env_key)
-        if env_val is not None and current == default_val:
-            # Split on comma, ignoring empty parts; skip override if result is empty
-            labels = (
-                [part.strip() for part in env_val.split(",") if part.strip()]
-                if env_val
-                else []
-            )
-            if labels:
-                object.__setattr__(config, field_name, labels)
 
 
 def _validate_docker(config: HydraFlowConfig) -> None:

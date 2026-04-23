@@ -101,3 +101,41 @@ def test_combo_env_system_inherit() -> None:
         cfg = HydraFlowConfig()
         assert cfg.system_tool == "inherit"
         assert cfg.system_model == ""
+
+
+def test_legacy_triage_tool_env_var_is_ignored() -> None:
+    with patch.dict(os.environ, {"HYDRAFLOW_TRIAGE_TOOL": "codex"}, clear=False):
+        cfg = HydraFlowConfig()
+        assert cfg.triage_tool == HydraFlowConfig.model_fields["triage_tool"].default
+
+
+def test_legacy_model_env_var_is_ignored() -> None:
+    with patch.dict(os.environ, {"HYDRAFLOW_MODEL": "gpt-5-codex"}, clear=False):
+        cfg = HydraFlowConfig()
+        assert cfg.model == HydraFlowConfig.model_fields["model"].default
+
+
+def test_legacy_label_env_var_is_ignored() -> None:
+    with patch.dict(os.environ, {"HYDRAFLOW_LABEL_READY": "custom-ready"}, clear=False):
+        cfg = HydraFlowConfig()
+        assert cfg.ready_label == HydraFlowConfig.model_fields["ready_label"].default
+
+
+def test_legacy_max_subskill_attempts_env_var_is_ignored() -> None:
+    with patch.dict(os.environ, {"HYDRAFLOW_MAX_SUBSKILL_ATTEMPTS": "5"}, clear=False):
+        cfg = HydraFlowConfig()
+        assert (
+            cfg.max_subskill_attempts
+            == HydraFlowConfig.model_fields["max_subskill_attempts"].default
+        )
+
+
+def test_legacy_debug_escalation_env_var_is_ignored() -> None:
+    with patch.dict(
+        os.environ, {"HYDRAFLOW_DEBUG_ESCALATION_ENABLED": "false"}, clear=False
+    ):
+        cfg = HydraFlowConfig()
+        assert (
+            cfg.debug_escalation_enabled
+            == HydraFlowConfig.model_fields["debug_escalation_enabled"].default
+        )
