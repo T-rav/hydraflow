@@ -815,6 +815,97 @@ plus each managed repo's.
 **Five-checkpoint wiring**. Config `wiki_rot_detector_interval`,
 default `604800`.
 
+### 4.10 Product-phase trust (Discover / Shape)
+
+**Purpose.** Close the upstream half of the pipeline. HydraFlow routes
+vague work through **Discover** (`src/discover_phase.py`,
+`src/discover_runner.py:DiscoverRunner`) and **Shape**
+(`src/shape_phase.py`, `src/shape_runner.py:ShapeRunner`) before Plan,
+gated by `clarity_score` in `src/triage_phase.py`. Today these phases
+have no adversarial gate — a prompt regression that produces shallow
+discovery briefs or incoherent shape proposals is silently consumed by
+the downstream Plan phase and propagates into bad code. For lights-off
+autonomy, product-phase outputs must be gated the same way post-impl
+outputs are.
+
+**Depends on §4.1.** The corpus pattern (case directories, harness
+parameterization, `expected_catcher.txt`, keyword assertion) is the
+same; the evaluator skills are new.
+
+**New evaluator skills** (registered in `src/skill_registry.py` the
+same way post-impl skills are — `BUILTIN_SKILLS` list, phase-scoped):
+
+- `discover-completeness` — evaluates a Discover brief. Asserts the
+  brief has the required sections (intent, affected area, acceptance
+  criteria, open questions) and that each is non-trivial (length >
+  threshold, no placeholder tokens, acceptance criteria are concrete).
+- `shape-coherence` — evaluates a Shape proposal. Asserts options are
+  mutually exclusive (no two options overlap > threshold), each
+  option has concrete scope bounds + named trade-offs, and at least
+  one "do nothing / defer" option is present.
+
+Both are lightweight prompt+parser skills following the `BUILTIN_SKILLS`
+contract. Both return `RETRY` with a reason + keyword when the
+evaluated output fails, matching the `expected_catcher.txt`
+assertion pattern from §4.1.
+
+**Corpus extension.** The `tests/trust/adversarial/cases/` directory
+gains cases for these two skills using the existing layout:
+
+- `before/` = synthetic upstream input (issue body + any prior phase
+  output).
+- `after/` = a deliberately bad Discover brief or Shape proposal.
+- `expected_catcher.txt` = `discover-completeness` or `shape-coherence`.
+- `README.md` = bug class + keyword.
+
+v1 seed: ~8–12 cases covering at minimum:
+
+- **Discover**: brief with missing acceptance criteria; brief that
+  paraphrases the issue without new information; brief that names no
+  open questions when the input is genuinely ambiguous.
+- **Shape**: two options that overlap in scope; options without
+  trade-off disclosures; proposal that skips the do-nothing option;
+  proposal that fails to reconcile contradictions the Discover brief
+  identified.
+
+**Harness reuse.** `tests/trust/adversarial/test_adversarial_corpus.py`
+(§4.1) parameterizes over every case in `cases/` and reads the
+`expected_catcher` from `skill_registry`. The new skills register the
+same way; no harness changes needed.
+
+**CorpusLearningLoop reuse.** The v2 learning loop (§4.1) watches
+`skill-escape`-labeled issues. When an escape is a product-phase
+failure (bad Discover brief made it to Plan), the same synthesis
+pipeline generates a new `discover-completeness` or `shape-coherence`
+case. The loop is skill-agnostic — it reads the registry.
+
+**Wiring.** No new loop for §4.10. Two new entries in
+`BUILTIN_SKILLS`; extended invocation points in `DiscoverRunner` /
+`ShapeRunner` to dispatch the evaluators after their respective
+output is produced (same pattern `src/base_runner.py` uses for
+post-impl skills at the end of implement phase).
+
+**Dispatch timing.** Discover evaluates its brief before committing to
+Shape; Shape evaluates its proposal before committing to Plan. On
+RETRY, the runner loops (bounded by `max_discover_attempts` /
+`max_shape_attempts` config — new fields, default 3) before
+escalating with `hitl-escalation`, `discover-stuck` or `shape-stuck`.
+
+**Fail-mode additions to §6.**
+
+| Gate | Failure mode | Autonomous action | Blocks RC? | Escalates? | Label(s) |
+|---|---|---|---|---|---|
+| Discover evaluator | Brief fails `discover-completeness` | Runner retries | No (upstream of RC) | After 3 retries | `hitl-escalation`, `discover-stuck` |
+| Shape evaluator | Proposal fails `shape-coherence` | Runner retries | No | After 3 retries | `hitl-escalation`, `shape-stuck` |
+| Adversarial corpus (product phase) | Evaluator misses a case | Same as §4.1 | Yes | On retry exhaustion | `hydraflow-find`, `skill-regression` → `hitl-escalation`, `skill-repair-stuck` |
+
+**Why fold into this spec rather than defer.** Discover and Shape are
+the *design/product* phases of the lights-off factory. Without a
+trust gate on their outputs, the dark factory cannot autonomously
+process vague work — every bad brief would need a human to catch.
+This is the first place autonomy fails without product-phase trust.
+Same pattern, same harness, two new skills.
+
 ## 5. Shared infrastructure
 
 **Directory tree:**
