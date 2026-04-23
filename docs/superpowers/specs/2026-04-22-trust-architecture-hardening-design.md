@@ -307,14 +307,20 @@ cases for skill failures the LLM family may share. Without a cross-check
 the corpus can accumulate cases that share the originating model's
 blind spots — false trust. Mitigate with two mechanisms:
 
-1. **Cross-model validation.** Self-validation gate 3 (the
-   "actually trips the expected_catcher" check) runs the case through
-   the skill using a **different model** from the synthesizer. Config
-   fields: `corpus_learning_synthesis_model` (default `sonnet`) and
-   `corpus_learning_validation_model` (default `opus`, or any model
-   distinct from synthesis). If the same model is configured for both,
-   the validation gate logs a warning and proceeds — but the signal is
-   weaker.
+1. **Cross-model synthesis (not cross-model validation).** The
+   **synthesis** step uses a *different* model from the one the
+   production skill runs on, so the case isn't biased by the
+   production model's blind spots. Validation ALWAYS runs the skill
+   with its production configuration (whatever `BUILTIN_SKILLS`
+   actually dispatches) — otherwise we'd be verifying the case
+   against a model the skill doesn't use in practice, which makes the
+   corpus misleading. Config fields:
+   `corpus_learning_synthesis_model` (default `opus`, or any model
+   distinct from the production skill's model — read the skill
+   registry to check). If the synthesis model matches the skill's
+   production model, the loop logs a warning and proceeds with
+   reduced diversity. If `opus` is unavailable, fall back to `sonnet`
+   and emit a provenance note.
 2. **Provenance tagging + periodic sample audit.** Every auto-generated
    case has `provenance: learning-loop` recorded in its
    `README.md` front-matter. `SkillPromptEvalLoop` (§4.6) samples 10%
@@ -596,11 +602,18 @@ plan adds the emission.
    and stop. Reset the counter only when a green RC promotes.
 
 5. **Safety guardrail (per-work-item lifetime cap).** Every retry
-   issue carries a `retry_lineage_id` in its body (a UUID, or — simpler
-   — the SHA of the originally-reverted commit that started the
-   lineage). When filing a new retry issue, increment a lineage
-   counter in `StateTracker.retry_lineage_attempts[lineage_id]`. If
-   the counter would exceed `max_retry_lineage_attempts` (default
+   issue carries a `retry_lineage_id` — **always the SHA of the
+   FIRST culprit in the chain**, never rotated per cycle. A new
+   lineage_id is generated only when bisect attributes a culprit
+   whose containing PR is NOT in any existing lineage
+   (`StateTracker.retry_lineage_attempts` is keyed by lineage_id and
+   maps to a count plus the set of PR numbers in that lineage). When
+   filing a new retry issue:
+   - Look up the culprit PR number in
+     `retry_lineage_attempts`; if it belongs to an existing lineage,
+     increment that lineage's counter.
+   - Otherwise, start a new lineage rooted at this culprit's SHA.
+   If the counter would exceed `max_retry_lineage_attempts` (default
    **2**), do NOT revert and do NOT retry again — escalate:
    `hitl-escalation`, `retry-lineage-exhausted`, naming the lineage
    and linking all prior retry/revert PRs. Bounds the worst case
