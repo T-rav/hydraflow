@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -104,3 +104,35 @@ class TestPersistence:
         loop2, _prs2, _state2 = _make_loop(tmp_path, monkeypatch)
         result = await loop2._do_work()  # type: ignore[attr-defined]
         assert result["status"] == "already_processed"
+
+
+class TestFlakeFilter:
+    @pytest.mark.asyncio
+    async def test_second_probe_passes_increments_flake_counter(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, _prs, state = _make_loop(tmp_path, monkeypatch)
+        state.set_last_rc_red_sha_and_bump_cycle("red123")
+        loop._run_bisect_probe = AsyncMock(return_value=(True, ""))  # type: ignore[attr-defined]
+
+        result = await loop._do_work()  # type: ignore[attr-defined]
+
+        assert result["status"] == "flake_dismissed"
+        assert state.get_flake_reruns_total() == 1
+        loop._run_bisect_probe.assert_awaited_once_with("red123")  # type: ignore[attr-defined]
+
+    @pytest.mark.asyncio
+    async def test_second_probe_fails_proceeds_to_bisect(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, _prs, state = _make_loop(tmp_path, monkeypatch)
+        state.set_last_rc_red_sha_and_bump_cycle("red456")
+        loop._run_bisect_probe = AsyncMock(return_value=(False, "failing: test_foo"))  # type: ignore[attr-defined]
+        loop._run_full_bisect_pipeline = AsyncMock(  # type: ignore[attr-defined]
+            return_value={"status": "reverted", "pr": 99}
+        )
+
+        result = await loop._do_work()  # type: ignore[attr-defined]
+
+        assert result["status"] == "reverted"
+        assert state.get_flake_reruns_total() == 0

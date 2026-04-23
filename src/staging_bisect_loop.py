@@ -76,9 +76,55 @@ class StagingBisectLoop(BaseBackgroundLoop):
             self._last_processed_rc_red_sha = red_sha
             return {"status": "already_processed", "sha": red_sha}
 
-        # Real work lands in Tasks 10–22. Skeleton just marks-as-seen so
-        # the skeleton tests pass.
-        logger.info("StagingBisectLoop: red SHA %s — skeleton no-op", red_sha)
+        # Flake filter — second probe against the red head (spec §4.3 step 1).
+        probe_passed, probe_output = await self._run_bisect_probe(red_sha)
+        if probe_passed:
+            logger.warning(
+                "StagingBisectLoop: second probe passed for %s — dismissing as flake",
+                red_sha,
+            )
+            self._state.increment_flake_reruns_total()
+            self._processed_dedup.add(red_sha)
+            self._last_processed_rc_red_sha = red_sha
+            return {"status": "flake_dismissed", "sha": red_sha}
+
+        # Confirmed red — run the full bisect + revert + retry pipeline.
+        result = await self._run_full_bisect_pipeline(red_sha, probe_output)
         self._processed_dedup.add(red_sha)
         self._last_processed_rc_red_sha = red_sha
-        return {"status": "seen", "sha": red_sha}
+        return result
+
+    async def _run_bisect_probe(self, rc_sha: str) -> tuple[bool, str]:
+        """Run ``make bisect-probe`` once against *rc_sha*.
+
+        Returns ``(passed, combined_output)``. Task 12 replaces this with a
+        worktree-scoped invocation; for now it shells out against the
+        configured repo root.
+        """
+        from subprocess import run  # noqa: PLC0415 — lazy import
+
+        logger.info("Running bisect-probe against %s", rc_sha)
+        proc = run(
+            ["make", "bisect-probe"],
+            cwd=self._config.repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=self._config.staging_bisect_runtime_cap_seconds,
+        )
+        return proc.returncode == 0, (proc.stdout + proc.stderr)
+
+    async def _run_full_bisect_pipeline(
+        self, red_sha: str, probe_output: str
+    ) -> dict[str, Any]:
+        """Run bisect -> attribute -> guardrail -> revert -> retry -> watchdog.
+
+        Implemented across Tasks 12-20. Stub returns a placeholder so the
+        flake-filter test proves the flow routes past the filter.
+        """
+        logger.info(
+            "StagingBisectLoop: pipeline not yet wired for %s (probe_output=%d chars)",
+            red_sha,
+            len(probe_output),
+        )
+        return {"status": "pipeline_stub", "sha": red_sha}
