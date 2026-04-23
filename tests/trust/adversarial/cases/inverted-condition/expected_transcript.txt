@@ -1,0 +1,4 @@
+DIFF_SANITY_RESULT: RETRY
+SUMMARY: logic inversion in allow() — banned users now allowed
+FINDINGS:
+- src/guard.py:3 — `if not user.is_banned` inverts intended guard; should be `if user.is_banned`

@@ -1,0 +1,4 @@
+PLAN_COMPLIANCE_RESULT: RETRY
+SUMMARY: implementation diverges from plan — take() semantics changed
+FINDINGS:
+- src/range.py:2 — plan required unchanged semantics; `items[:n-1]` is a behavior change
