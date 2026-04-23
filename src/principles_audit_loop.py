@@ -8,7 +8,11 @@ subsystems take effect.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
@@ -60,3 +64,46 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
             "ready_flips": 0,
         }
         return stats
+
+    async def _run_audit(self, slug: str, repo_root: Path) -> dict[str, Any]:
+        """Invoke ``make audit-json`` → parsed JSON report (spec §4.4)."""
+        proc = await asyncio.create_subprocess_exec(
+            "make",
+            "audit-json",
+            f"DIR={repo_root}",
+            cwd=self._config.repo_root,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode not in (0, 1):  # audit uses 1 for "failures present"
+            logger.warning(
+                "make audit-json exit=%d for %s: %s",
+                proc.returncode,
+                slug,
+                stderr.decode(errors="replace")[:400],
+            )
+        try:
+            return json.loads(stdout.decode())
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"audit-json emitted non-JSON for {slug}: {exc}"
+            ) from exc
+
+    def _snapshot_from_report(self, report: dict[str, Any]) -> dict[str, str]:
+        """Collapse a full audit report down to ``{check_id: status}``."""
+        return {f["check_id"]: f["status"] for f in report.get("findings", [])}
+
+    def _save_snapshot(self, slug: str, report: dict[str, Any]) -> Path:
+        """Persist the full report to ``<data_root>/<slug>/audit/<YYYY-MM-DD>.json``."""
+        date = datetime.now(UTC).strftime("%Y-%m-%d")
+        out = self._config.data_root / slug / "audit" / f"{date}.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(report, indent=2))
+        return out
+
+    async def _audit_hydraflow_self(self) -> dict[str, str]:
+        """Audit the HydraFlow working tree and persist the dated snapshot."""
+        report = await self._run_audit(_HYDRAFLOW_SELF, self._config.repo_root)
+        self._save_snapshot(_HYDRAFLOW_SELF, report)
+        return self._snapshot_from_report(report)
