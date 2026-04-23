@@ -231,6 +231,63 @@ def _build_epic_monitor(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     return EpicMonitorLoop(config=config, epic_manager=epic_manager, deps=deps)
 
 
+def _build_flake_tracker(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build FlakeTrackerLoop for scenarios (spec §4.5).
+
+    External subprocess calls (``gh run list`` / ``gh run download``) and the
+    closed-escalation reconciliation cannot run inside a scenario. Tests
+    pre-seed three port keys which this builder monkey-patches onto the
+    instance:
+
+    * ``flake_fetch_runs`` → ``_fetch_recent_runs``
+    * ``flake_download_junit`` → ``_download_junit``
+    * ``flake_reconcile_closed`` → ``_reconcile_closed_escalations``
+
+    ``state`` and ``dedup`` default to MagicMocks that behave like a clean
+    slate (no prior flake counts, no prior dedup keys). Tests may override
+    by seeding ``flake_state`` / ``flake_dedup`` explicitly.
+    """
+    from flake_tracker_loop import FlakeTrackerLoop  # noqa: PLC0415
+
+    state = ports.get("flake_state")
+    if state is None:
+        state = MagicMock()
+        state.get_flake_counts.return_value = {}
+        state.get_flake_attempts.return_value = 0
+        state.inc_flake_attempts.return_value = 1
+        ports["flake_state"] = state
+
+    dedup = ports.get("flake_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["flake_dedup"] = dedup
+
+    pr_manager = ports.get("pr_manager") or ports["github"]
+
+    loop = FlakeTrackerLoop(
+        config=config,
+        state=state,
+        pr_manager=pr_manager,
+        dedup=dedup,
+        deps=deps,
+    )
+
+    # Rewire external I/O to seeded async callables (if provided).
+    fetch = ports.get("flake_fetch_runs")
+    if fetch is not None:
+        loop._fetch_recent_runs = fetch  # type: ignore[method-assign]
+    download = ports.get("flake_download_junit")
+    if download is not None:
+        # The real method takes one positional ``run`` arg; AsyncMock handles it.
+        loop._download_junit = download  # type: ignore[method-assign]
+    reconcile = ports.get("flake_reconcile_closed")
+    if reconcile is not None:
+        loop._reconcile_closed_escalations = reconcile  # type: ignore[method-assign]
+
+    return loop
+
+
 _BUILDERS: dict[str, Any] = {
     # phase 1
     "ci_monitor": _build_ci_monitor,
@@ -254,6 +311,8 @@ _BUILDERS: dict[str, Any] = {
     "security_patch": _build_security_patch,
     "stale_issue": _build_stale_issue,
     "epic_monitor": _build_epic_monitor,
+    # trust fleet (spec §4.5)
+    "flake_tracker": _build_flake_tracker,
 }
 
 
