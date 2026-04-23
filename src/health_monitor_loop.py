@@ -974,7 +974,7 @@ class HealthMonitorLoop(BaseBackgroundLoop):
     # Dead-man-switch for TrustFleetSanityLoop (spec §12.1)
     # ------------------------------------------------------------------
 
-    async def _check_sanity_loop_staleness(self) -> None:
+    async def _check_sanity_loop_staleness(self) -> None:  # noqa: PLR0911
         """Dead-man-switch for `TrustFleetSanityLoop` (spec §12.1).
 
         When the sanity loop is enabled but its heartbeat is older than
