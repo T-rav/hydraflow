@@ -236,6 +236,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("trust_fleet_sanity_interval", "HYDRAFLOW_TRUST_FLEET_SANITY_INTERVAL", 600),
     ("loop_anomaly_issues_per_hour", "HYDRAFLOW_LOOP_ANOMALY_ISSUES_PER_HOUR", 10),
     ("corpus_learning_interval", "HYDRAFLOW_CORPUS_LEARNING_INTERVAL", 604800),
+    ("contract_refresh_interval", "HYDRAFLOW_CONTRACT_REFRESH_INTERVAL", 604800),
 ]
 
 _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
@@ -1828,6 +1829,14 @@ class HydraFlowConfig(BaseModel):
         ge=3600,
         le=2_592_000,
         description="Seconds between CorpusLearningLoop ticks (default 7d)",
+    )
+
+    # Trust fleet — ContractRefreshLoop (spec §4.2)
+    contract_refresh_interval: int = Field(
+        default=604800,
+        ge=86400,
+        le=2_592_000,
+        description="Seconds between ContractRefreshLoop cycles (default 7 days)",
     )
 
     # Trust fleet — TrustFleetSanityLoop (spec §12.1)
