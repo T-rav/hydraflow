@@ -73,6 +73,7 @@ from security_patch_loop import SecurityPatchLoop  # noqa: TCH001
 from sentry_loop import SentryLoop  # noqa: TCH001 — used in dataclass field
 from shape_phase import ShapePhase  # noqa: TCH001
 from shape_runner import ShapeRunner
+from staging_bisect_loop import StagingBisectLoop
 from staging_promotion_loop import StagingPromotionLoop
 from stale_issue_gc_loop import StaleIssueGCLoop  # noqa: TCH001
 from stale_issue_loop import StaleIssueLoop
@@ -157,6 +158,7 @@ class ServiceRegistry:
     health_monitor_loop: HealthMonitorLoop
     dependabot_merge_loop: DependabotMergeLoop
     staging_promotion_loop: StagingPromotionLoop
+    staging_bisect_loop: StagingBisectLoop
     stale_issue_loop: StaleIssueLoop
     sentry_loop: SentryLoop
     stale_issue_gc_loop: StaleIssueGCLoop
@@ -743,6 +745,12 @@ def build_services(
         deps=loop_deps,
         state=state,
     )
+    staging_bisect_loop = StagingBisectLoop(  # noqa: F841
+        config=config,
+        prs=prs,
+        deps=loop_deps,
+        state=state,
+    )
     stale_issue_loop = StaleIssueLoop(
         config=config,
         prs=prs,
@@ -863,6 +871,7 @@ def build_services(
         health_monitor_loop=health_monitor_loop,
         dependabot_merge_loop=dependabot_merge_loop,
         staging_promotion_loop=staging_promotion_loop,
+        staging_bisect_loop=staging_bisect_loop,
         stale_issue_loop=stale_issue_loop,
         hindsight=hindsight_client,
         hindsight_wal=hindsight_wal,

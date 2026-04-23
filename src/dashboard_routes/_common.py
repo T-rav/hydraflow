@@ -52,6 +52,7 @@ _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
     "health_monitor": (60, 86400),
     "dependabot_merge": (60, 86400),
     "staging_promotion": (60, 86400),
+    "staging_bisect": (60, 86400),
     "retrospective": (60, 86400),
     "principles_audit": (3600, 2_592_000),  # 1h min, 30d max
 }
