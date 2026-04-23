@@ -30,7 +30,7 @@ def test_gemini_init_event_locks_backend() -> None:
             {
                 "type": "init",
                 "session_id": "abc",
-                "model": "gemini-2.5-pro",
+                "model": "gemini-3.1-pro-preview",
             }
         )
     )
@@ -41,7 +41,9 @@ def test_gemini_init_event_locks_backend() -> None:
 def test_gemini_result_event_captures_stats() -> None:
     parser = StreamParser()
     parser.parse(
-        json.dumps({"type": "init", "session_id": "x", "model": "gemini-2.5-pro"})
+        json.dumps(
+            {"type": "init", "session_id": "x", "model": "gemini-3.1-pro-preview"}
+        )
     )
     parser.parse(
         json.dumps(
@@ -71,7 +73,7 @@ def test_gemini_tool_use_emits_display_line() -> None:
     displays, _ = _parse_lines(
         parser,
         [
-            {"type": "init", "session_id": "x", "model": "gemini-2.5-pro"},
+            {"type": "init", "session_id": "x", "model": "gemini-3.1-pro-preview"},
             {
                 "type": "tool_use",
                 "tool_name": "run_shell_command",
@@ -88,7 +90,7 @@ def test_gemini_assistant_message_deltas_accumulate() -> None:
     displays, final = _parse_lines(
         StreamParser(),
         [
-            {"type": "init", "session_id": "y", "model": "gemini-2.5-pro"},
+            {"type": "init", "session_id": "y", "model": "gemini-3.1-pro-preview"},
             {
                 "type": "message",
                 "role": "assistant",
@@ -133,7 +135,9 @@ def test_gemini_result_does_not_collide_with_claude_result() -> None:
     # Gemini-style result (after init)
     parser_gemini = StreamParser()
     parser_gemini.parse(
-        json.dumps({"type": "init", "session_id": "x", "model": "gemini-2.5-pro"})
+        json.dumps(
+            {"type": "init", "session_id": "x", "model": "gemini-3.1-pro-preview"}
+        )
     )
     parser_gemini.parse(
         json.dumps(

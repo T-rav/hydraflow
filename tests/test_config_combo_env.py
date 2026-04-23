@@ -12,18 +12,18 @@ from config import HydraFlowConfig, _parse_combo
 
 
 def test_triage_tool_accepts_gemini() -> None:
-    cfg = HydraFlowConfig(triage_tool="gemini", triage_model="gemini-2.5-pro")
+    cfg = HydraFlowConfig(triage_tool="gemini", triage_model="gemini-3.1-pro-preview")
     assert cfg.triage_tool == "gemini"
-    assert cfg.triage_model == "gemini-2.5-pro"
+    assert cfg.triage_model == "gemini-3.1-pro-preview"
 
 
 def test_implementation_tool_accepts_gemini() -> None:
-    cfg = HydraFlowConfig(implementation_tool="gemini", model="gemini-2.5-pro")
+    cfg = HydraFlowConfig(implementation_tool="gemini", model="gemini-3.1-pro-preview")
     assert cfg.implementation_tool == "gemini"
 
 
 def test_system_tool_accepts_gemini() -> None:
-    cfg = HydraFlowConfig(system_tool="gemini", system_model="gemini-2.5-pro")
+    cfg = HydraFlowConfig(system_tool="gemini", system_model="gemini-3.1-pro-preview")
     assert cfg.system_tool == "gemini"
 
 
@@ -37,9 +37,9 @@ def test_parse_combo_basic() -> None:
 
 
 def test_parse_combo_gemini() -> None:
-    assert _parse_combo("HYDRAFLOW_TRIAGE", "gemini:gemini-2.5-pro") == (
+    assert _parse_combo("HYDRAFLOW_TRIAGE", "gemini:gemini-3.1-pro-preview") == (
         "gemini",
-        "gemini-2.5-pro",
+        "gemini-3.1-pro-preview",
     )
 
 
@@ -64,11 +64,11 @@ def test_parse_combo_empty_model_raises() -> None:
 
 def test_combo_env_sets_triage_tool_and_model() -> None:
     with patch.dict(
-        os.environ, {"HYDRAFLOW_TRIAGE": "gemini:gemini-2.5-pro"}, clear=False
+        os.environ, {"HYDRAFLOW_TRIAGE": "gemini:gemini-3.1-pro-preview"}, clear=False
     ):
         cfg = HydraFlowConfig()
         assert cfg.triage_tool == "gemini"
-        assert cfg.triage_model == "gemini-2.5-pro"
+        assert cfg.triage_model == "gemini-3.1-pro-preview"
 
 
 def test_combo_env_sets_implementation_tool_and_model() -> None:
@@ -170,8 +170,8 @@ def test_harmonize_allows_claude_opus() -> None:
 
 
 def test_harmonize_allows_gemini_pro() -> None:
-    cfg = HydraFlowConfig(implementation_tool="gemini", model="gemini-2.5-pro")
-    assert cfg.model == "gemini-2.5-pro"
+    cfg = HydraFlowConfig(implementation_tool="gemini", model="gemini-3.1-pro-preview")
+    assert cfg.model == "gemini-3.1-pro-preview"
 
 
 def test_harmonize_allows_codex_gpt() -> None:
@@ -182,4 +182,4 @@ def test_harmonize_allows_codex_gpt() -> None:
 def test_triage_defaults_to_gemini_pro() -> None:
     cfg = HydraFlowConfig()
     assert cfg.triage_tool == "gemini"
-    assert cfg.triage_model == "gemini-2.5-pro"
+    assert cfg.triage_model == "gemini-3.1-pro-preview"

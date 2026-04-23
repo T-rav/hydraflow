@@ -73,7 +73,9 @@ def test_gemini_short_delta_returns_none() -> None:
 
 def test_gemini_init_event_returns_none() -> None:
     parser = GeminiActivityParser()
-    raw = json.dumps({"type": "init", "session_id": "x", "model": "gemini-2.5-pro"})
+    raw = json.dumps(
+        {"type": "init", "session_id": "x", "model": "gemini-3.1-pro-preview"}
+    )
     assert parser.parse(raw) is None
 
 

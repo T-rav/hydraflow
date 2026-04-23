@@ -284,7 +284,7 @@ def _parse_combo(env_key: str, value: str) -> tuple[str, str]:
     if ":" not in stripped:
         msg = (
             f"{env_key}={value!r} must be 'tool:model' "
-            f"(e.g. claude:opus, gemini:gemini-2.5-pro) or 'inherit'"
+            f"(e.g. claude:opus, gemini:gemini-3.1-pro-preview) or 'inherit'"
         )
         raise ValueError(msg)
     tool, _, model = stripped.partition(":")
@@ -776,7 +776,8 @@ class HydraFlowConfig(BaseModel):
         description="CLI backend for triage agents",
     )
     triage_model: str = Field(
-        default="gemini-2.5-pro", description="Model for triage evaluation (fast/cheap)"
+        default="gemini-3.1-pro-preview",
+        description="Model for triage evaluation (fast/cheap)",
     )
     min_plan_words: int = Field(
         default=200,
