@@ -53,7 +53,7 @@ def test_route_prompt_splices_after_p_for_gemini() -> None:
         "--output-format",
         "stream-json",
         "--model",
-        "gemini-3-pro",
+        "gemini-2.5-pro",
     ]
     cmd_to_run, stdin_mode = _route_prompt_to_cmd(cmd, "do the thing")
 
@@ -83,7 +83,7 @@ class TestGeminiIntegration:
             "--output-format",
             "stream-json",
             "--model",
-            "gemini-3-pro",
+            "gemini-2.5-pro",
         ]
         prompt = "do the thing"
 
