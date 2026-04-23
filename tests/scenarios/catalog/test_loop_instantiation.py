@@ -32,6 +32,7 @@ ALL_LOOPS = (
     "security_patch",
     "stale_issue",
     "epic_monitor",
+    "wiki_rot_detector",
 )
 
 

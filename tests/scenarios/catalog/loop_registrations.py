@@ -407,6 +407,59 @@ def _build_rc_budget(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     return loop
 
 
+def _build_wiki_rot_detector(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build WikiRotDetectorLoop for scenarios (spec §4.9).
+
+    The loop's external surface — ``_gh_closed_escalations`` (``gh issue
+    list`` subprocess) and the ``RepoWikiStore`` / ``StateTracker`` /
+    ``DedupStore`` ports — cannot run live inside a scenario. Tests
+    pre-seed three port keys which this builder reads and wires into the
+    constructor:
+
+    * ``wiki_rot_state`` → ``state``
+    * ``wiki_rot_dedup`` → ``dedup``
+    * ``wiki_store`` → ``wiki_store``
+
+    All default to MagicMocks with clean-slate return values (zero
+    attempts, no prior dedup keys, no seeded repos). Tests may override
+    by seeding any of the port keys explicitly — mirrors the F7
+    FlakeTracker (``eac5fc72``), S6 SkillPromptEval (``93ebf387``), C6
+    FakeCoverageAuditor (``32b43ab0``), and rc-budget T9 (``20a4a177``)
+    patterns.
+    """
+    from wiki_rot_detector_loop import WikiRotDetectorLoop  # noqa: PLC0415
+
+    state = ports.get("wiki_rot_state")
+    if state is None:
+        state = MagicMock()
+        state.get_wiki_rot_attempts.return_value = 0
+        state.inc_wiki_rot_attempts.return_value = 1
+        ports["wiki_rot_state"] = state
+
+    dedup = ports.get("wiki_rot_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["wiki_rot_dedup"] = dedup
+
+    wiki_store = ports.get("wiki_store")
+    if wiki_store is None:
+        wiki_store = MagicMock()
+        wiki_store.list_repos.return_value = []
+        ports["wiki_store"] = wiki_store
+
+    pr_manager = ports.get("pr_manager") or ports["github"]
+
+    return WikiRotDetectorLoop(
+        config=config,
+        state=state,
+        pr_manager=pr_manager,
+        dedup=dedup,
+        wiki_store=wiki_store,
+        deps=deps,
+    )
+
+
 def _build_fake_coverage_auditor(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build FakeCoverageAuditorLoop for scenarios (spec §4.7).
 
@@ -491,6 +544,7 @@ _BUILDERS: dict[str, Any] = {
     "skill_prompt_eval": _build_skill_prompt_eval,
     "fake_coverage_auditor": _build_fake_coverage_auditor,
     "rc_budget": _build_rc_budget,
+    "wiki_rot_detector": _build_wiki_rot_detector,
 }
 
 
