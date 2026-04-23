@@ -13,11 +13,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from dolt_backend import DoltBackend
     from hindsight import HindsightClient
     from hindsight_wal import HindsightWAL
-    from issue_cache import IssueCache
     from memory_judge import MemoryJudge  # noqa: TCH004
+
+    from dolt_backend import DoltBackend
+    from issue_cache import IssueCache
     from ports import IssueStorePort, PRPort, ReviewInsightStorePort, WorkspacePort
     from precondition_gate import PreconditionGate
     from retrospective_queue import RetrospectiveQueue
@@ -1933,25 +1934,7 @@ class ReviewPhase:
             )
             self._insights.append_review(record)
 
-            # Dual-write review rejections as troubleshooting context
-            if result.verdict != ReviewVerdict.APPROVE and self._hindsight:
-                from hindsight import Bank, schedule_retain  # noqa: PLC0415
-
-                schedule_retain(
-                    self._hindsight,
-                    Bank.TROUBLESHOOTING,
-                    f"Review rejection pattern: {result.summary[:500]}",
-                    context=(
-                        f"PR #{result.pr_number} issue #{result.issue_number}"
-                        f" verdict={result.verdict}"
-                    ),
-                    metadata={
-                        "pr_number": str(result.pr_number),
-                        "issue_number": str(result.issue_number),
-                        "verdict": str(result.verdict),
-                        "source": "review_rejection",
-                    },
-                )
+            # Dual-write to Hindsight removed in Phase 3 cutover.
 
             # Enqueue pattern analysis for the retrospective loop
             if self._retrospective_queue is not None:

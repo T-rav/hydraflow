@@ -503,7 +503,6 @@ class HealthMonitorLoop(BaseBackgroundLoop):
                         "harness_insight",
                         "health_monitor",
                         self._config,
-                        hindsight=self._hindsight,
                     )
                 except Exception:  # noqa: BLE001
                     continue
