@@ -32,9 +32,7 @@ from transcript_summarizer import TranscriptSummarizer
 if TYPE_CHECKING:
     from beads_manager import BeadsManager
     from epic import EpicManager
-    from hindsight import HindsightClient
     from issue_cache import IssueCache
-    from memory_judge import MemoryJudge  # noqa: TCH004
     from plan_reviewer import PlanReviewer
     from ports import IssueStorePort, PRPort
     from wiki_compiler import WikiCompiler  # noqa: TCH004
@@ -94,8 +92,6 @@ class PlanPhase:
         beads_manager: BeadsManager | None = None,
         wiki_store: RepoWikiStore | None = None,
         wiki_compiler: WikiCompiler | None = None,
-        hindsight: HindsightClient | None = None,
-        judge: MemoryJudge | None = None,
         issue_cache: IssueCache | None = None,
         plan_reviewer: PlanReviewer | None = None,
     ) -> None:

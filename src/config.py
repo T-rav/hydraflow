@@ -186,7 +186,6 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("sentry_model", "HYDRAFLOW_SENTRY_MODEL", "opus"),
     ("code_grooming_model", "HYDRAFLOW_CODE_GROOMING_MODEL", "sonnet"),
     ("adr_review_model", "HYDRAFLOW_ADR_REVIEW_MODEL", "sonnet"),
-    ("memory_judge_model", "HYDRAFLOW_MEMORY_JUDGE_MODEL", "haiku"),
     ("changelog_file", "HYDRAFLOW_CHANGELOG_FILE", ""),
     ("release_tag_prefix", "HYDRAFLOW_RELEASE_TAG_PREFIX", "v"),
     ("main_branch", "HYDRAFLOW_MAIN_BRANCH", "main"),
@@ -1544,10 +1543,6 @@ class HydraFlowConfig(BaseModel):
     adr_review_model: str = Field(
         default="sonnet",
         description="Model for the ADR council review orchestrator",
-    )
-    memory_judge_model: str = Field(
-        default="haiku",
-        description="Model for the tribal-memory judge — kept cheap because it runs on every memory candidate.",
     )
 
     # Session retention

@@ -13,10 +13,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from hindsight import HindsightClient
-    from hindsight_wal import HindsightWAL
-    from memory_judge import MemoryJudge  # noqa: TCH004
-
     from dolt_backend import DoltBackend
     from issue_cache import IssueCache
     from ports import IssueStorePort, PRPort, ReviewInsightStorePort, WorkspacePort
@@ -184,14 +180,11 @@ class ReviewPhase:
         review_insights: ReviewInsightStorePort | None = None,
         update_bg_worker_status: StatusCallback | None = None,
         baseline_policy: BaselinePolicy | None = None,
-        hindsight: HindsightClient | None = None,
         dolt: DoltBackend | None = None,
-        wal: HindsightWAL | None = None,
         active_issues_cb: Callable[[], None] | None = None,
         transcript_summarizer: TranscriptSummarizer | None = None,
         wiki_store: RepoWikiStore | None = None,
         wiki_compiler: WikiCompiler | None = None,
-        judge: MemoryJudge | None = None,
         retrospective_queue: RetrospectiveQueue | None = None,
         precondition_gate: PreconditionGate | None = None,
         issue_cache: IssueCache | None = None,
@@ -220,14 +213,12 @@ class ReviewPhase:
                 config.memory_dir,
                 dolt=dolt,
             )
-        self._wal = wal
         self._active_issues_cb = active_issues_cb
         self._active_issues: set[int] = set()
         self._active_issues_lock = asyncio.Lock()
         self._conflict_resolver = conflict_resolver
         self._post_merge = post_merge
         self._baseline_policy = baseline_policy
-        self._hindsight = hindsight
         self._retrospective_queue = retrospective_queue
         self._precondition_gate = precondition_gate
         self._issue_cache = issue_cache
@@ -2024,18 +2015,6 @@ class ReviewPhase:
         self._state.set_hitl_origin(esc.issue_number, esc.origin_label)
         self._state.set_hitl_cause(esc.issue_number, esc.cause)
         self._state.record_hitl_escalation()
-        try:
-            from memory_scoring import MemoryScorer  # noqa: PLC0415
-
-            scorer = MemoryScorer(self._config.memory_dir)
-            scorer.record_hitl_outcome(
-                issue_id=esc.issue_number,
-                digest_hash=self._state.get_digest_hash(esc.issue_number) or "",
-                cause=esc.cause,
-                tags=list(esc.task.tags) if esc.task is not None else [],
-            )
-        except Exception:
-            logger.debug("Failed to record HITL outcome", exc_info=True)
         if esc.visual_evidence is not None:
             self._state.set_hitl_visual_evidence(esc.issue_number, esc.visual_evidence)
 

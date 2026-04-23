@@ -20,10 +20,6 @@ def __getattr__(name: str):  # noqa: PLR0911
         from tests.scenarios.fakes.fake_llm import FakeLLM
 
         return FakeLLM
-    if name == "FakeHindsight":
-        from tests.scenarios.fakes.fake_hindsight import FakeHindsight
-
-        return FakeHindsight
     if name == "FakeWorkspace":
         from tests.scenarios.fakes.fake_workspace import FakeWorkspace
 

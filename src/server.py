@@ -224,8 +224,6 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
 
     credentials = build_credentials(config)
 
-    # Hindsight client removed in Phase 3 cutover.
-    hindsight_client = None
     dashboard = HydraFlowDashboard(
         config=config,
         event_bus=bus,
@@ -236,7 +234,6 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
         remove_repo_cb=_remove_repo,
         list_repos_cb=repo_store.list,
         credentials=credentials,
-        hindsight_client=hindsight_client,
     )
     await dashboard.start()
 

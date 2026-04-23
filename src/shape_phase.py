@@ -6,11 +6,6 @@ import asyncio
 import logging
 import re
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from hindsight import HindsightClient
-    from memory_judge import MemoryJudge  # noqa: TCH004
 
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
@@ -71,8 +66,6 @@ class ShapePhase:
         stop_event: asyncio.Event,
         shape_runner: ShapeRunner | None = None,
         whatsapp_bridge: WhatsAppBridge | None = None,
-        hindsight: HindsightClient | None = None,
-        judge: MemoryJudge | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -180,19 +173,12 @@ class ShapePhase:
             conv.status = "finalizing"
 
         research_brief = self._extract_research_brief(issue)
-        learned = ""
-        if (
-            not conv.turns
-            and self._runner
-            and getattr(self._runner, "_hindsight", None)
-        ):
-            learned = await self._recall_preferences(issue)
         assert self._runner is not None  # guaranteed by caller
         result = await self._runner.run_turn(
             issue,
             conv,
             research_brief=research_brief,
-            learned_preferences=learned,
+            learned_preferences="",
         )
 
         conv.turns.append(
@@ -715,35 +701,6 @@ class ShapePhase:
         if _NEGATIVE_RE.search(response):
             return "negative"
         return "neutral"
-
-    async def _recall_preferences(self, issue: Task) -> str:
-        """Query hindsight for learned product preferences and related decisions."""
-        try:
-            from hindsight import (  # noqa: PLC0415
-                Bank,
-                format_memories_as_markdown,
-                recall_safe,
-            )
-
-            query = f"product direction preferences scope decisions for {issue.title}"
-            hindsight = getattr(self._runner, "_hindsight", None)
-            if hindsight is None:
-                return ""
-            memories = await recall_safe(hindsight, Bank.TRIBAL, query, limit=5)
-            from recall_tracker import log_recall  # noqa: PLC0415
-
-            log_recall(
-                self._config,
-                bank=str(Bank.TRIBAL),
-                query=query,
-                memories=memories,
-                source="shape_phase",
-            )
-            if memories:
-                return format_memories_as_markdown(memories)
-        except Exception:
-            logger.debug("Hindsight recall failed for shape preferences", exc_info=True)
-        return ""
 
     def _extract_research_brief(self, issue: Task) -> str:
         """Extract discovery research brief from issue comments if available."""

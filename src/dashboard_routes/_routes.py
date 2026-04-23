@@ -72,8 +72,6 @@ from timeline import TimelineBuilder
 from transcript_summarizer import TranscriptSummarizer
 
 if TYPE_CHECKING:
-    from hindsight import HindsightClient
-
     from orchestrator import HydraFlowOrchestrator
 from repo_runtime import RepoRuntime, RepoRuntimeRegistry
 from repo_store import RepoRecord, RepoStore
@@ -330,9 +328,6 @@ class RouteContext:
     list_repos_cb: Callable[[], list[RepoRecord]] | None = None
     default_repo_slug: str | None = None
     allowed_repo_roots_fn: Callable[[], tuple[str, ...]] | None = None
-
-    # Hindsight integration
-    hindsight_client: HindsightClient | None = None
 
     # HITL summary tuning
     hitl_summary_cooldown_seconds: int = 300
@@ -605,7 +600,6 @@ def create_router(
     list_repos_cb: Callable[[], list[RepoRecord]] | None = None,
     default_repo_slug: str | None = None,
     allowed_repo_roots_fn: Callable[[], tuple[str, ...]] | None = None,
-    hindsight_client: HindsightClient | None = None,
 ) -> APIRouter:
     """Create an APIRouter with all dashboard route handlers.
 
@@ -635,7 +629,6 @@ def create_router(
         list_repos_cb=list_repos_cb,
         default_repo_slug=default_repo_slug,
         allowed_repo_roots_fn=allowed_repo_roots_fn,
-        hindsight_client=hindsight_client,
     )
 
     router = APIRouter()

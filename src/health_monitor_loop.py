@@ -21,8 +21,6 @@ from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
 
 if TYPE_CHECKING:
-    from hindsight import HindsightClient
-
     from ports import PRPort
     from retrospective_queue import RetrospectiveQueue
 
@@ -302,7 +300,6 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         deps: LoopDeps,
         *,
         prs: PRPort | None = None,
-        hindsight: HindsightClient | None = None,
         verification_window: int = 20,
         retrospective_queue: RetrospectiveQueue | None = None,
     ) -> None:
@@ -312,7 +309,6 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             deps=deps,
         )
         self._prs = prs
-        self._hindsight = hindsight
         self._verification_window = verification_window
         self._retrospective_queue = retrospective_queue
         self._decisions_dir: Path = config.memory_dir
@@ -385,14 +381,8 @@ class HealthMonitorLoop(BaseBackgroundLoop):
     # ------------------------------------------------------------------
 
     def _run_knowledge_gap_count(self) -> int:
-        """Detect knowledge gaps and return the count."""
-        try:
-            from memory_scoring import detect_knowledge_gaps  # noqa: PLC0415
-
-            gaps = detect_knowledge_gaps(self._failures_path, [])
-            return len(gaps)
-        except Exception:  # noqa: BLE001
-            return 0
+        """Knowledge gap detection retired with memory_scoring in Phase 3 cutover."""
+        return 0
 
     async def _run_log_ingestion_cycle(self) -> Any | None:
         """Parse logs, detect patterns, enrich, and file novel patterns."""
