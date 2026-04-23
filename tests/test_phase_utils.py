@@ -357,8 +357,6 @@ class TestSafeFileMemorySuggestion:
                 "planner",
                 "issue #42",
                 config,
-                hindsight=None,
-                judge=None,
             )
 
     @pytest.mark.asyncio
@@ -732,8 +730,6 @@ class TestMemorySuggester:
                 "planner",
                 "issue #42",
                 config,
-                hindsight=None,
-                judge=None,
             )
 
     @pytest.mark.asyncio
