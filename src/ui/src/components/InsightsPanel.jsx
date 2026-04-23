@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { theme } from '../theme'
 import { useHydraFlow } from '../context/HydraFlowContext'
 import { HarnessInsightsPanel } from './HarnessInsightsPanel'
-import { InsightBar, StatBox, PatternCard } from './memory/shared/insightsPrimitives'
+import { InsightBar, StatBox, PatternCard } from './insightsPrimitives'
 
 const SECTIONS = [
   { key: 'harness', label: 'Failure Patterns' },

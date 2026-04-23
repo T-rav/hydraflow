@@ -32,7 +32,6 @@ from wiki_compiler import parse_adr_draft_suggestion
 
 if TYPE_CHECKING:
     from execution import SubprocessRunner
-    from hindsight import HindsightClient
     from repo_wiki import RepoWikiStore  # noqa: TCH004
     from tribal_wiki import TribalWikiStore
 
@@ -55,7 +54,6 @@ class BaseRunner:
         event_bus: EventBus,
         runner: SubprocessRunner | None = None,
         *,
-        hindsight: HindsightClient | None = None,
         credentials: Credentials | None = None,
         wiki_store: RepoWikiStore | None = None,
         tribal_wiki_store: TribalWikiStore | None = None,
@@ -66,7 +64,6 @@ class BaseRunner:
         self._runner = runner or get_default_runner()
         self._prompt_telemetry = PromptTelemetry(config)
         self._last_context_stats: dict[str, int] = {"cache_hits": 0, "cache_misses": 0}
-        self._hindsight = hindsight
         # Per-phase-run tracing state, set by phase coordinators before
         # invoking runner.run() and cleared after. None when tracing is
         # not active (e.g. dry-run, background loops).
@@ -88,11 +85,6 @@ class BaseRunner:
     def active_count(self) -> int:
         """Number of currently running subprocesses."""
         return len(self._active_procs)
-
-    @property
-    def hindsight(self) -> HindsightClient | None:
-        """Read-only access to the Hindsight client for shared prefix building."""
-        return self._hindsight
 
     @property
     def tracing_context(self) -> TracingContext | None:
@@ -333,212 +325,12 @@ class BaseRunner:
             )
 
     async def _inject_memory(self, *, query_context: str = "") -> str:
-        """Load the memory digest via Hindsight semantic recall.
+        """Build the context section from wiki and ADR index.
 
-        Returns the memory section as a string, or an empty string when
-        Hindsight is not configured or recall produces no results.
+        Returns the context section as a string, or an empty string when
+        neither wiki nor ADR index is configured.
         """
         memory_section = ""
-        memory_raw = ""
-        troubleshooting_raw = ""
-        retrospectives_raw = ""
-        review_insights_raw = ""
-        harness_insights_raw = ""
-        dedup_items_removed = 0
-        dedup_chars_saved = 0
-
-        if (
-            self._hindsight is not None
-            and query_context
-            and getattr(self._config, "hindsight_recall_enabled", True)
-        ):
-            from hindsight import Bank, format_memories_as_markdown, recall_safe
-
-            max_chars = self._config.max_memory_prompt_chars
-            banks_recalled: list[str] = []
-
-            # All banks wrapped in try/except — recall failures must never
-            # interrupt the pipeline.  Priority order determines prompt
-            # assembly; each bank is independently capped at max_chars.
-            from recall_tracker import log_recall  # noqa: PLC0415
-
-            try:
-                memories = await recall_safe(
-                    self._hindsight, Bank.TRIBAL, query_context
-                )
-                log_recall(
-                    self._config,
-                    bank=str(Bank.TRIBAL),
-                    query=query_context,
-                    memories=memories,
-                    source="base_runner",
-                )
-                memory_raw = format_memories_as_markdown(memories)
-                if memory_raw:
-                    memory_raw = memory_raw[:max_chars]
-                    banks_recalled.append("learnings")
-            except Exception:  # noqa: BLE001
-                pass  # Must not interrupt pipeline
-
-            try:
-                ts_memories = await recall_safe(
-                    self._hindsight, Bank.TROUBLESHOOTING, query_context
-                )
-                log_recall(
-                    self._config,
-                    bank=str(Bank.TROUBLESHOOTING),
-                    query=query_context,
-                    memories=ts_memories,
-                    source="base_runner",
-                )
-                troubleshooting_raw = format_memories_as_markdown(ts_memories)
-                if troubleshooting_raw:
-                    troubleshooting_raw = troubleshooting_raw[:max_chars]
-                    banks_recalled.append("troubleshooting")
-            except Exception:  # noqa: BLE001
-                pass  # Must not interrupt pipeline
-
-            try:
-                retro_memories = await recall_safe(
-                    self._hindsight, Bank.RETROSPECTIVES, query_context
-                )
-                log_recall(
-                    self._config,
-                    bank=str(Bank.RETROSPECTIVES),
-                    query=query_context,
-                    memories=retro_memories,
-                    source="base_runner",
-                )
-                retrospectives_raw = format_memories_as_markdown(retro_memories)
-                if retrospectives_raw:
-                    retrospectives_raw = retrospectives_raw[:max_chars]
-                    banks_recalled.append("retrospectives")
-            except Exception:  # noqa: BLE001
-                pass  # Must not interrupt pipeline
-
-            try:
-                ri_memories = await recall_safe(
-                    self._hindsight, Bank.REVIEW_INSIGHTS, query_context
-                )
-                log_recall(
-                    self._config,
-                    bank=str(Bank.REVIEW_INSIGHTS),
-                    query=query_context,
-                    memories=ri_memories,
-                    source="base_runner",
-                )
-                review_insights_raw = format_memories_as_markdown(ri_memories)
-                if review_insights_raw:
-                    review_insights_raw = review_insights_raw[:max_chars]
-                    banks_recalled.append("review_insights")
-            except Exception:  # noqa: BLE001
-                pass  # Must not interrupt pipeline
-
-            try:
-                hi_memories = await recall_safe(
-                    self._hindsight, Bank.HARNESS_INSIGHTS, query_context
-                )
-                log_recall(
-                    self._config,
-                    bank=str(Bank.HARNESS_INSIGHTS),
-                    query=query_context,
-                    memories=hi_memories,
-                    source="base_runner",
-                )
-                harness_insights_raw = format_memories_as_markdown(hi_memories)
-                if harness_insights_raw:
-                    harness_insights_raw = harness_insights_raw[:max_chars]
-                    banks_recalled.append("harness_insights")
-            except Exception:  # noqa: BLE001
-                pass  # Must not interrupt pipeline
-
-            # Sentry breadcrumb for memory recall observability
-            try:
-                import sentry_sdk as _sentry  # noqa: PLC0415
-
-                _sentry.add_breadcrumb(
-                    category="memory.recall",
-                    message=f"Recalled {len(banks_recalled)} memory banks",
-                    level="info",
-                    data={
-                        "banks": banks_recalled,
-                        "query_context": query_context[:100],
-                    },
-                )
-            except ImportError:
-                pass
-
-        # Deduplicate memory items across banks before assembly.
-        from prompt_dedup import PromptDeduplicator  # noqa: PLC0415
-
-        deduper = PromptDeduplicator()
-        all_raw = {
-            "memory": memory_raw,
-            "troubleshooting": troubleshooting_raw,
-            "retrospectives": retrospectives_raw,
-            "review_insights": review_insights_raw,
-            "harness_insights": harness_insights_raw,
-        }
-        all_items: list[str] = []
-        for raw in all_raw.values():
-            if raw:
-                # Split markdown list items (each starts with "- ")
-                items = [f"- {chunk}" for chunk in raw.split("\n- ") if chunk.strip()]
-                if items and items[0].startswith("- - "):
-                    items[0] = items[0][2:]  # fix double prefix on first
-                all_items.extend(items)
-
-        total_before = len(all_items)
-        deduped_items = deduper.dedup_memories(all_items)
-        dedup_items_removed = total_before - len(deduped_items)
-        dedup_chars_saved = sum(len(i) for i in all_items) - sum(
-            len(i) for i in deduped_items
-        )
-
-        # Rebuild per-bank raw strings from deduped items by re-splitting.
-        # Each bank keeps only items that survived dedup.
-        deduped_set = set(deduped_items)
-        for key, raw in all_raw.items():
-            if raw:
-                items = [f"- {chunk}" for chunk in raw.split("\n- ") if chunk.strip()]
-                if items and items[0].startswith("- - "):
-                    items[0] = items[0][2:]
-                kept = [item for item in items if item in deduped_set]
-                new_raw = "\n".join(kept)
-                if key == "memory":
-                    memory_raw = new_raw
-                elif key == "troubleshooting":
-                    troubleshooting_raw = new_raw
-                elif key == "retrospectives":
-                    retrospectives_raw = new_raw
-                elif key == "review_insights":
-                    review_insights_raw = new_raw
-                elif key == "harness_insights":
-                    harness_insights_raw = new_raw
-
-        # Assemble the memory section from all available banks.
-        # Cap the combined section at max_memory_prompt_chars.
-        combined_parts: list[str] = []
-
-        if memory_raw:
-            combined_parts.append(f"## Accumulated Learnings\n\n{memory_raw}")
-        if troubleshooting_raw:
-            combined_parts.append(
-                f"## Known Troubleshooting Patterns\n\n{troubleshooting_raw}"
-            )
-        if retrospectives_raw:
-            combined_parts.append(f"## Past Retrospectives\n\n{retrospectives_raw}")
-        if review_insights_raw:
-            combined_parts.append(f"## Common Review Patterns\n\n{review_insights_raw}")
-        if harness_insights_raw:
-            combined_parts.append(
-                f"## Known Pipeline Patterns\n\n{harness_insights_raw}"
-            )
-
-        if combined_parts:
-            combined = "\n\n".join(combined_parts)
-            combined = combined[: self._config.max_memory_prompt_chars]
-            memory_section = f"\n\n{combined}"
 
         # Append repo wiki context (Karpathy-style compiled knowledge)
         wiki_section = self._inject_repo_wiki(query_context=query_context)
@@ -553,17 +345,11 @@ class BaseRunner:
         self._last_context_stats = {
             "cache_hits": 0,
             "cache_misses": 0,
-            "context_chars_before": (
-                len(memory_raw)
-                + len(troubleshooting_raw)
-                + len(retrospectives_raw)
-                + len(review_insights_raw)
-                + len(harness_insights_raw)
-            ),
+            "context_chars_before": 0,
             "context_chars_after": len(memory_section),
             "adr_chars": len(adr_section),
-            "dedup_items_removed": dedup_items_removed,
-            "dedup_chars_saved": dedup_chars_saved,
+            "dedup_items_removed": 0,
+            "dedup_chars_saved": 0,
         }
 
         return memory_section

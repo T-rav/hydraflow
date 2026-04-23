@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { theme } from '../../../theme'
+import { theme } from '../theme'
 
 export function InsightBar({ label, count, maxCount, color }) {
   const pct = maxCount > 0 ? (count / maxCount) * 100 : 0
@@ -23,7 +23,6 @@ export function StatBox({ label, value }) {
   )
 }
 
-/** PatternCard. `title` accepts a ReactNode so consumers can embed badges. */
 export function PatternCard({ title, count, color, children }) {
   const [expanded, setExpanded] = useState(false)
   return (
@@ -44,7 +43,7 @@ export function PatternCard({ title, count, color, children }) {
         <span style={{ ...styles.patternDot, background: color || theme.orange }} />
         <span style={styles.patternTitle}>{title}</span>
         <span style={{ ...styles.patternCount, color: color || theme.orange }}>{count}x</span>
-        <span style={styles.expandIcon}>{expanded ? '\u25B4' : '\u25BE'}</span>
+        <span style={styles.expandIcon}>{expanded ? '▴' : '▾'}</span>
       </div>
       {expanded && children && (
         <div style={styles.patternBody}>{children}</div>

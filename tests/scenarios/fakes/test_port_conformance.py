@@ -11,12 +11,10 @@ from pathlib import Path
 from events import EventBus
 from tests.scenarios.fakes.fake_clock import FakeClock
 from tests.scenarios.fakes.fake_github import FakeGitHub
-from tests.scenarios.fakes.fake_hindsight import FakeHindsight
 from tests.scenarios.fakes.fake_llm import FakeLLM
 from tests.scenarios.fakes.fake_sentry import FakeSentry
 from tests.scenarios.ports import (
     ClockPort,
-    HindsightPort,
     LLMPort,
     PRPort,
     SentryPort,
@@ -29,10 +27,6 @@ def test_fake_github_satisfies_pr_port() -> None:
 
 def test_fake_llm_satisfies_llm_port() -> None:
     assert isinstance(FakeLLM(), LLMPort)
-
-
-def test_fake_hindsight_satisfies_hindsight_port() -> None:
-    assert isinstance(FakeHindsight(), HindsightPort)
 
 
 def test_fake_sentry_satisfies_sentry_port() -> None:
@@ -56,12 +50,10 @@ def test_fake_subprocess_runner_satisfies_subprocess_runner() -> None:
 def test_real_agent_runner_constructs_via_factory(tmp_path: Path) -> None:
     """Boot smoke — if this fails, AgentRunner API drifted from scenarios."""
     from tests.scenarios.fakes.fake_docker import FakeDocker
-    from tests.scenarios.fakes.fake_hindsight import FakeHindsight
     from tests.scenarios.helpers.agent_runner_factory import build_real_agent_runner
 
     runner = build_real_agent_runner(
         docker=FakeDocker(),
-        hindsight=FakeHindsight(),
         event_bus=EventBus(),
         tmp_path=tmp_path,
     )

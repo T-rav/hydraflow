@@ -625,172 +625,19 @@ async def run_clean(config: HydraFlowConfig) -> TaskResult:
 
 
 async def run_compact(config: HydraFlowConfig) -> TaskResult:
-    """Run manual memory compaction — evict stale items and flag items needing curation."""
-    import json  # noqa: PLC0415
+    """Memory compaction removed in Phase 3 cutover.
 
-    from memory_scoring import MemoryScorer  # noqa: PLC0415
-
-    log: list[str] = ["Running memory compaction..."]
-    warnings: list[str] = []
-
-    scorer = MemoryScorer(config.memory_dir)
-    all_scores = scorer.load_item_scores()
-    log.append(f"Total scored items: {len(all_scores)}")
-
-    candidates = scorer.eviction_candidates()
-    log.append(f"Eviction candidates: {len(candidates)}")
-
-    auto_evict: list[int] = []
-    needs_curation: list[int] = []
-    keep: list[int] = []
-    for item_id in candidates:
-        classification = scorer.classify_for_compaction(item_id)
-        if classification == "auto_evict":
-            auto_evict.append(item_id)
-        elif classification == "needs_curation":
-            needs_curation.append(item_id)
-        else:
-            keep.append(item_id)
-
-    log.append(
-        f"Classification: auto_evict={len(auto_evict)}, needs_curation={len(needs_curation)}, keep={len(keep)}"
-    )
-
-    if auto_evict:
-        removed = scorer.evict_items(auto_evict)
-        log.append(f"Evicted {len(removed)} items from item_scores.json: {removed}")
-
-        # Also remove evicted items from items.jsonl
-        items_path = config.memory_dir / "items.jsonl"
-        if items_path.exists():
-            evicted_set = set(removed)
-            kept_lines: list[str] = []
-            original_count = 0
-            for raw_line in items_path.read_text(encoding="utf-8").splitlines():
-                stripped = raw_line.strip()
-                if not stripped:
-                    continue
-                original_count += 1
-                try:
-                    item = json.loads(stripped)
-                    item_int_id = abs(hash(str(item.get("id", "")))) % (10**9)
-                    if item_int_id not in evicted_set:
-                        kept_lines.append(stripped)
-                except Exception:
-                    logger.warning(
-                        "Dropping malformed JSONL line during compaction: %s",
-                        stripped[:120],
-                    )
-            items_path.write_text(
-                "\n".join(kept_lines) + ("\n" if kept_lines else ""),
-                encoding="utf-8",
-            )
-            log.append(
-                f"Filtered items.jsonl: removed {original_count - len(kept_lines)} entries, {len(kept_lines)} remain"
-            )
-        else:
-            log.append("items.jsonl not found — score-only eviction performed")
-    else:
-        log.append("No items to evict.")
-
-    if needs_curation:
-        warnings.append(
-            f"{len(needs_curation)} items need manual curation: {needs_curation}"
-        )
-
-    log.append("Compaction complete.")
-    return TaskResult(success=True, log=log, warnings=warnings)
-
-
-async def run_prune_memory(
-    config: HydraFlowConfig,
-    *,
-    judge: Any | None = None,
-) -> TaskResult:
-    """Run the tribal-memory judge over items.jsonl, archive failures.
-
-    Survivors stay in items.jsonl; failures (and pre-tribal v0 items
-    with no ``principle`` field) are appended to items_archive.jsonl
-    with their judge score and reason. Returns a TaskResult with
-    counts in the log.
+    The wiki + tribal + ADR-draft pipeline handles durable knowledge now,
+    and it has its own staleness/supersedes semantics. This task remains
+    as a no-op stub so `hf compact` commands don't ERROR out in old
+    automation; operators should use the wiki maintenance queue instead.
     """
-    import json as _json  # noqa: PLC0415
-
-    from execution import get_default_runner  # noqa: PLC0415
-    from memory_judge import MemoryJudge  # noqa: PLC0415
-
-    log: list[str] = ["Running tribal-memory prune..."]
-    warnings: list[str] = []
-
-    if judge is None:
-        judge = MemoryJudge(config=config, runner=get_default_runner())
-
-    items_path = config.memory_dir / "items.jsonl"
-    archive_path = config.memory_dir / "items_archive.jsonl"
-
-    if not items_path.exists():
-        log.append("No items.jsonl found — nothing to prune.")
-        return TaskResult(success=True, log=log)
-
-    kept: list[dict[str, Any]] = []
-    archived: list[dict[str, Any]] = []
-    legacy_count = 0
-
-    # Stream-decode the file. We accept both true JSONL (one object per line,
-    # written by the new tribal pipeline) AND concatenated pretty-printed JSON
-    # objects (the legacy format that pre-tribal writers produced). raw_decode
-    # advances through the buffer one object at a time and skips intervening
-    # whitespace, so both formats parse identically.
-    text = items_path.read_text(encoding="utf-8")
-    decoder = _json.JSONDecoder()
-    pos = 0
-    while pos < len(text):
-        while pos < len(text) and text[pos] in " \t\r\n":
-            pos += 1
-        if pos >= len(text):
-            break
-        try:
-            item, end = decoder.raw_decode(text, pos)
-        except _json.JSONDecodeError:
-            warnings.append(f"Skipping malformed JSON near offset {pos}")
-            break
-        pos = end
-        if not isinstance(item, dict):
-            continue
-        # Pre-tribal items (no `principle`) go straight to archive.
-        if "principle" not in item:
-            archived.append({**item, "judge_reason": "pre-tribal schema"})
-            legacy_count += 1
-            continue
-        verdict = await judge.evaluate(
-            principle=item.get("principle", ""),
-            rationale=item.get("rationale", ""),
-            failure_mode=item.get("failure_mode", ""),
-            scope=item.get("scope", ""),
-        )
-        if verdict.accepted:
-            kept.append(item)
-        else:
-            archived.append(
-                {**item, "judge_score": verdict.score, "judge_reason": verdict.reason}
-            )
-
-    items_path.write_text(
-        "\n".join(_json.dumps(i) for i in kept) + ("\n" if kept else ""),
-        encoding="utf-8",
-    )
-    archive_path.parent.mkdir(parents=True, exist_ok=True)
-    with archive_path.open("a", encoding="utf-8") as f:
-        for item in archived:
-            f.write(_json.dumps(item) + "\n")
-
-    log.append(
-        f"Pruned: kept={len(kept)}, archived={len(archived)} "
-        f"(of which legacy_v0={legacy_count})"
-    )
-    if archived:
-        log.append(f"Archive written to {archive_path}")
-    return TaskResult(success=True, log=log, warnings=warnings)
+    log: list[str] = [
+        "run_compact is a no-op after Phase 3 cutover. "
+        "Memory scoring/eviction were removed with Hindsight; "
+        "wiki maintenance runs via repo_wiki_loop."
+    ]
+    return TaskResult(success=True, log=log, warnings=[])
 
 
 __all__ = [
@@ -799,6 +646,5 @@ __all__ = [
     "run_compact",
     "run_ensure_labels",
     "run_prep",
-    "run_prune_memory",
     "run_scaffold",
 ]

@@ -42,8 +42,6 @@ from implement_phase import ImplementPhase
 from issue_cache import IssueCache
 from issue_fetcher import GitHubTaskFetcher, IssueFetcher
 from issue_store import IssueStore
-from memory import MemorySyncWorker
-from memory_sync_loop import MemorySyncLoop
 from merge_conflict_resolver import MergeConflictResolver
 from models import StatusCallback
 from plan_phase import PlanPhase
@@ -85,9 +83,6 @@ from workspace import WorkspaceManager
 from workspace_gc_loop import WorkspaceGCLoop
 
 if TYPE_CHECKING:
-    from hindsight import HindsightClient
-    from hindsight_wal import HindsightWAL
-    from memory_judge import MemoryJudge
     from metrics_manager import MetricsManager
 
 logger = logging.getLogger("hydraflow.service_registry")
@@ -133,7 +128,6 @@ class ServiceRegistry:
     run_recorder: RunRecorder
     metrics_manager: MetricsManager
     pr_unsticker: PRUnsticker
-    memory_sync: MemorySyncWorker
     retrospective: RetrospectiveCollector
     ac_generator: AcceptanceCriteriaGenerator
     verification_judge: VerificationJudge
@@ -145,7 +139,6 @@ class ServiceRegistry:
     github_cache_loop: GitHubCacheLoop
 
     # Background loops
-    memory_sync_bg: MemorySyncLoop
     pr_unsticker_loop: PRUnstickerLoop
     report_issue_loop: ReportIssueLoop
     epic_monitor_loop: EpicMonitorLoop
@@ -169,9 +162,6 @@ class ServiceRegistry:
     retrospective_queue: RetrospectiveQueue
 
     # Optional integrations
-    hindsight: HindsightClient | None = None
-    hindsight_wal: HindsightWAL | None = None
-    memory_judge: MemoryJudge | None = None
 
 
 @dataclass(frozen=True)
@@ -232,29 +222,10 @@ def build_services(
 
     configure_gh_concurrency(config.gh_api_concurrency)
 
-    # Hindsight semantic memory (optional)
-    hindsight_client = None
-    hindsight_wal: HindsightWAL | None = None
-    if credentials.hindsight_url:
-        from hindsight import HindsightClient
-        from hindsight_wal import HindsightWAL
-
-        hindsight_client = HindsightClient(
-            credentials.hindsight_url,
-            api_key=credentials.hindsight_api_key,
-            timeout=config.hindsight_timeout,
-        )
-        hindsight_wal = HindsightWAL(config.data_path("memory", "hindsight_wal.jsonl"))
-
-    # Memory judge — LLM quality gate for tribal memory candidates
-    from execution import get_default_runner as _get_default_runner  # noqa: PLC0415
-    from memory_judge import MemoryJudge as _MemoryJudge  # noqa: PLC0415
-
-    memory_judge = _MemoryJudge(
-        config=config,
-        runner=_get_default_runner(),
-        gh_token=credentials.gh_token if credentials else "",
-    )
+    # Hindsight semantic memory and MemoryJudge — REMOVED in Phase 3 cutover.
+    # The wiki + tribal + ADR-draft pipeline is the new primary. Any
+    # historical Hindsight content that needs to be preserved should have
+    # been extracted via scripts/extract_hindsight_to_wiki.py before merge.
 
     # Dolt embedded state backend (preferred, graceful fallback)
     from dolt_backend import DoltBackend
@@ -288,9 +259,7 @@ def build_services(
         config,
         event_bus,
         runner=subprocess_runner,
-        hindsight=hindsight_client,
         dolt=dolt_backend,
-        wal=hindsight_wal,
         credentials=credentials,
         wiki_store=repo_wiki_store,
         tribal_wiki_store=tribal_wiki_store,
@@ -299,7 +268,6 @@ def build_services(
         config,
         event_bus,
         runner=subprocess_runner,
-        hindsight=hindsight_client,
         credentials=credentials,
         wiki_store=repo_wiki_store,
         tribal_wiki_store=tribal_wiki_store,
@@ -308,7 +276,6 @@ def build_services(
         config,
         event_bus,
         runner=subprocess_runner,
-        hindsight=hindsight_client,
         credentials=credentials,
         wiki_store=repo_wiki_store,
         tribal_wiki_store=tribal_wiki_store,
@@ -318,7 +285,6 @@ def build_services(
         config,
         event_bus,
         runner=subprocess_runner,
-        hindsight=hindsight_client,
         credentials=credentials,
         wiki_store=repo_wiki_store,
         tribal_wiki_store=tribal_wiki_store,
@@ -327,7 +293,6 @@ def build_services(
         config,
         event_bus,
         runner=subprocess_runner,
-        hindsight=hindsight_client,
         credentials=credentials,
         wiki_store=repo_wiki_store,
         tribal_wiki_store=tribal_wiki_store,
@@ -336,7 +301,6 @@ def build_services(
         config,
         event_bus,
         runner=subprocess_runner,
-        hindsight=hindsight_client,
         credentials=credentials,
         wiki_store=repo_wiki_store,
         tribal_wiki_store=tribal_wiki_store,
@@ -378,15 +342,13 @@ def build_services(
     # Harness insight store (shared across phases)
     harness_insights = HarnessInsightStore(
         config.data_path("memory"),
-        hindsight=hindsight_client,
         dolt=dolt_backend,
-        wal=hindsight_wal,
         sensor_enrichment_enabled=config.sensor_enrichment_enabled,
     )
 
     # Troubleshooting pattern store (CI timeout feedback loop)
     troubleshooting_store = TroubleshootingPatternStore(
-        config.data_path("memory"), hindsight=hindsight_client, wal=hindsight_wal
+        config.data_path("memory"),
     )
 
     # Epic management
@@ -443,7 +405,6 @@ def build_services(
         config=config,
         event_bus=event_bus,
         runner=subprocess_runner,
-        hindsight=hindsight_client,
         credentials=credentials,
         wiki_store=repo_wiki_store,
     )
@@ -451,7 +412,6 @@ def build_services(
         config=config,
         event_bus=event_bus,
         runner=subprocess_runner,
-        hindsight=hindsight_client,
         credentials=credentials,
         wiki_store=repo_wiki_store,
     )
@@ -497,8 +457,6 @@ def build_services(
         stop_event,
         shape_runner=shape_runner,
         whatsapp_bridge=wa_bridge,
-        hindsight=hindsight_client,
-        judge=memory_judge,
     )
     # Wire expert council for auto-decision on directions
     from expert_council import ExpertCouncil  # noqa: PLC0415
@@ -519,8 +477,6 @@ def build_services(
         beads_manager=beads_mgr,
         wiki_store=repo_wiki_store,
         wiki_compiler=wiki_compiler,
-        hindsight=hindsight_client,
-        judge=memory_judge,
         issue_cache=issue_cache,
         plan_reviewer=plan_reviewer,
     )
@@ -535,8 +491,6 @@ def build_services(
         event_bus,
         stop_event,
         active_issues_cb=active_issues_cb,
-        hindsight=hindsight_client,
-        judge=memory_judge,
     )
     run_recorder = RunRecorder(config)
     implementer = ImplementPhase(
@@ -552,8 +506,6 @@ def build_services(
         beads_manager=beads_mgr,
         active_issues_cb=active_issues_cb,
         transcript_summarizer=summarizer,
-        hindsight=hindsight_client,
-        judge=memory_judge,
         precondition_gate=precondition_gate,
     )
 
@@ -570,9 +522,7 @@ def build_services(
         event_bus=event_bus,
         state=state,
         summarizer=summarizer,
-        suggest_memory=MemorySuggester(
-            config, hindsight=hindsight_client, judge=memory_judge
-        ),
+        suggest_memory=MemorySuggester(config),
     )
     pr_unsticker = PRUnsticker(
         config,
@@ -588,18 +538,6 @@ def build_services(
         troubleshooting_store=troubleshooting_store,
         store=store,
         credentials=credentials,
-        hindsight=hindsight_client,
-        judge=memory_judge,
-    )
-    memory_sync = MemorySyncWorker(
-        config,
-        state,
-        event_bus,
-        runner=subprocess_runner,
-        prs=prs,
-        hindsight=hindsight_client,
-        dolt=dolt_backend,
-        wal=hindsight_wal,
     )
     retrospective_queue = RetrospectiveQueue(
         config.data_path("memory", "retrospective_queue.jsonl"),
@@ -608,9 +546,7 @@ def build_services(
         config,
         state,
         prs,
-        hindsight=hindsight_client,
         dolt=dolt_backend,
-        wal=hindsight_wal,
         queue=retrospective_queue,
     )
     ac_generator = AcceptanceCriteriaGenerator(
@@ -642,9 +578,7 @@ def build_services(
     # ReviewInsightStore shared between AgentRunner and ReviewPhase
     review_insights = ReviewInsightStore(
         config.memory_dir,
-        hindsight=hindsight_client,
         dolt=dolt_backend,
-        wal=hindsight_wal,
     )
     # Inject shared store into AgentRunner (replacing its self-constructed copy)
     agents._insights = review_insights
@@ -664,14 +598,11 @@ def build_services(
         review_insights=review_insights,
         update_bg_worker_status=callbacks.update_status,
         baseline_policy=baseline_policy,
-        hindsight=hindsight_client,
         dolt=dolt_backend,
-        wal=hindsight_wal,
         active_issues_cb=active_issues_cb,
         transcript_summarizer=summarizer,
         wiki_store=repo_wiki_store,
         wiki_compiler=wiki_compiler,
-        judge=memory_judge,
         retrospective_queue=retrospective_queue,
         precondition_gate=precondition_gate,
         issue_cache=issue_cache,
@@ -685,7 +616,6 @@ def build_services(
         enabled_cb=callbacks.is_enabled,
         interval_cb=callbacks.get_interval,
     )
-    memory_sync_bg = MemorySyncLoop(config, memory_sync, deps=loop_deps)
     pr_unsticker_loop = PRUnstickerLoop(config, pr_unsticker, prs, deps=loop_deps)
     report_issue_loop = ReportIssueLoop(
         config=config,
@@ -725,7 +655,6 @@ def build_services(
         config=config,
         deps=loop_deps,
         prs=prs,
-        hindsight=hindsight_client,
         retrospective_queue=retrospective_queue,
     )
     dependabot_merge_loop = DependabotMergeLoop(  # noqa: F841
@@ -837,13 +766,11 @@ def build_services(
         run_recorder=run_recorder,
         metrics_manager=metrics_manager,
         pr_unsticker=pr_unsticker,
-        memory_sync=memory_sync,
         retrospective=retrospective,
         ac_generator=ac_generator,
         verification_judge=verification_judge,
         epic_checker=epic_checker,
         epic_manager=epic_manager,
-        memory_sync_bg=memory_sync_bg,
         pr_unsticker_loop=pr_unsticker_loop,
         report_issue_loop=report_issue_loop,
         epic_monitor_loop=epic_monitor_loop,
@@ -855,9 +782,6 @@ def build_services(
         dependabot_merge_loop=dependabot_merge_loop,
         staging_promotion_loop=staging_promotion_loop,
         stale_issue_loop=stale_issue_loop,
-        hindsight=hindsight_client,
-        hindsight_wal=hindsight_wal,
-        memory_judge=memory_judge,
         github_cache=gh_cache,
         github_cache_loop=gh_cache_loop,
         sentry_loop=sentry_loop,

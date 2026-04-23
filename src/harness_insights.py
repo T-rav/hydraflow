@@ -20,8 +20,6 @@ from models import IsoTimestamp, PipelineStage
 if TYPE_CHECKING:
     from config import HydraFlowConfig
     from dolt_backend import DoltBackend
-    from hindsight import HindsightClient
-    from hindsight_wal import HindsightWAL
 
 logger = logging.getLogger("hydraflow.harness_insights")
 
@@ -146,9 +144,7 @@ class HarnessInsightStore:
         self,
         memory_dir: Path,
         *,
-        hindsight: HindsightClient | None = None,
         dolt: DoltBackend | None = None,
-        wal: HindsightWAL | None = None,
         sensor_enrichment_enabled: bool = True,
     ) -> None:
         from dedup_store import DedupStore  # noqa: PLC0415
@@ -160,9 +156,7 @@ class HarnessInsightStore:
             memory_dir / "harness_proposed.json",
             dolt=dolt,
         )
-        self._hindsight = hindsight
         self._dolt = dolt
-        self._wal = wal
         self._sensor_enrichment_enabled = sensor_enrichment_enabled
 
     def _enrich_record_hints(self, record: FailureRecord) -> None:
@@ -218,23 +212,6 @@ class HarnessInsightStore:
                 "Could not append failure to %s",
                 self._failures_path,
                 exc_info=True,
-            )
-
-        if self._hindsight is not None:
-            from hindsight import Bank, schedule_retain  # noqa: PLC0415
-
-            schedule_retain(
-                self._hindsight,
-                Bank.HARNESS_INSIGHTS,
-                record.details,
-                context=f"issue #{record.issue_number} category={record.category} stage={record.stage}",
-                metadata={
-                    "issue_number": record.issue_number,
-                    "pr_number": record.pr_number,
-                    "category": str(record.category),
-                    "subcategories": record.subcategories,
-                },
-                wal=self._wal,
             )
 
         try:

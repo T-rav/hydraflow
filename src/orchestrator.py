@@ -136,7 +136,6 @@ class HydraFlowOrchestrator:
 
         # Extracted component managers
         bg_loop_registry: dict[str, BaseBackgroundLoop] = {
-            "memory_sync": svc.memory_sync_bg,
             "pr_unsticker": svc.pr_unsticker_loop,
             "report_issue": svc.report_issue_loop,
             "epic_monitor": svc.epic_monitor_loop,
@@ -354,12 +353,7 @@ class HydraFlowOrchestrator:
                 task.cancel()
                 logger.debug("Cancelled loop task %r", name)
 
-        # Close the Hindsight HTTP client if present
-        from hindsight import HindsightClient
-
-        hs = getattr(self._svc, "hindsight", None)
-        if isinstance(hs, HindsightClient):
-            await hs.close()
+        # Hindsight HTTP client removed in Phase 3 cutover — no close needed.
 
         await self._publish_status()
 
@@ -885,7 +879,6 @@ class HydraFlowOrchestrator:
             ("implement", self._implement_loop),
             ("review", self._review_loop),
             ("hitl", self._hitl_loop),
-            ("memory_sync", self._memory_sync_loop),
             ("pr_unsticker", self._svc.pr_unsticker_loop.run),
             ("report_issue", self._svc.report_issue_loop.run),
             ("epic_monitor", self._svc.epic_monitor_loop.run),
@@ -909,18 +902,8 @@ class HydraFlowOrchestrator:
             ("retrospective", self._svc.retrospective_loop.run),
         ]
 
-        # Optional: WAL replay loop for Hindsight crash recovery
-        if self._svc.hindsight and self._svc.hindsight_wal:
-            from hindsight_wal import run_wal_replay_loop  # noqa: PLC0415
-
-            wal = self._svc.hindsight_wal
-            client = self._svc.hindsight
-            stop = self._stop_event
-
-            async def _wal_replay() -> None:
-                await run_wal_replay_loop(wal, client, stop)
-
-            loop_factories.append(("wal_replay", _wal_replay))
+        # Hindsight WAL replay loop removed in Phase 3 cutover — the wiki
+        # pipeline doesn't need a replay loop.
         self._state_restorer.prune_stale_disabled_workers(
             {n for n, _ in loop_factories}
         )
@@ -1140,10 +1123,6 @@ class HydraFlowOrchestrator:
             self._config.poll_interval,
             is_pipeline=True,
         )
-
-    async def _memory_sync_loop(self) -> None:
-        """Continuously sync memory items from local JSONL and rebuild the digest."""
-        await self._svc.memory_sync_bg.run()
 
     async def _do_implement_work(self) -> bool:
         """Work function for the implement loop."""
