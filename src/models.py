@@ -1772,6 +1772,17 @@ class StateData(BaseModel):
     auto_reverts_in_cycle: int = 0
     auto_reverts_successful: int = 0
     flake_reruns_total: int = 0
+    # PrinciplesAuditLoop state (spec §4.4).
+    # Keys are repo slugs ("owner/repo"); sentinel "hydraflow-self" = working tree.
+    managed_repos_onboarding_status: dict[
+        str, Literal["pending", "blocked", "ready"]
+    ] = Field(default_factory=dict)
+    # last_green_audit[slug] maps check_id -> status string (PASS/WARN/FAIL/NA/
+    # NOT_IMPLEMENTED). The loop diffs the current audit against this reference.
+    last_green_audit: dict[str, dict[str, str]] = Field(default_factory=dict)
+    # principles_drift_attempts[f"{slug}:{check_id}"] = attempt count.
+    # STRUCTURAL/BEHAVIORAL escalate at 3; CULTURAL at 1.
+    principles_drift_attempts: dict[str, int] = Field(default_factory=dict)
     last_updated: str | None = None
 
 
