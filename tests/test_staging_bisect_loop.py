@@ -477,3 +477,80 @@ class TestWatchdog:
         assert result["status"] == "watchdog_timeout"
         labels = prs.create_issue.await_args.args[2]
         assert "rc-red-verify-timeout" in labels
+
+
+class TestPipelineIntegration:
+    @pytest.mark.asyncio
+    async def test_confirmed_red_happy_path_revert_and_retry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs, state = _make_loop(tmp_path, monkeypatch)
+        state.set_last_green_rc_sha("green_sha")
+        state.set_last_rc_red_sha_and_bump_cycle("red_sha")
+
+        loop._run_bisect_probe = AsyncMock(return_value=(False, "test_foo failed"))  # type: ignore[attr-defined]
+        loop._run_bisect = AsyncMock(return_value="culprit_sha")  # type: ignore[attr-defined]
+        loop._attribute_culprit = AsyncMock(return_value=(321, "Feature: widgets"))  # type: ignore[attr-defined]
+        loop._create_revert_pr = AsyncMock(
+            return_value=(900, "auto-revert/pr-321-rc-123")
+        )  # type: ignore[attr-defined]
+        loop._file_retry_issue = AsyncMock(return_value=654)  # type: ignore[attr-defined]
+        prs.find_open_pr = AsyncMock()
+        prs.get_pr_head_sha = AsyncMock(return_value="red_sha")
+        prs.find_open_promotion_pr = AsyncMock(
+            return_value=MagicMock(number=77, url="https://github.com/o/r/pull/77")
+        )
+
+        result = await loop._do_work()  # type: ignore[attr-defined]
+
+        assert result["status"] == "reverted"
+        assert result["revert_pr"] == 900
+        assert result["retry_issue"] == 654
+        assert state.get_auto_reverts_in_cycle() == 1
+        assert loop._pending_watchdog is not None  # type: ignore[attr-defined]
+
+    @pytest.mark.asyncio
+    async def test_timeout_during_bisect_escalates(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from staging_bisect_loop import BisectTimeoutError
+
+        loop, prs, state = _make_loop(tmp_path, monkeypatch)
+        state.set_last_green_rc_sha("green_sha")
+        state.set_last_rc_red_sha_and_bump_cycle("red_sha")
+        loop._run_bisect_probe = AsyncMock(return_value=(False, ""))  # type: ignore[attr-defined]
+        loop._run_bisect = AsyncMock(side_effect=BisectTimeoutError("timeout"))  # type: ignore[attr-defined]
+        prs.create_issue = AsyncMock(return_value=777)
+        prs.find_open_promotion_pr = AsyncMock(
+            return_value=MagicMock(number=77, url="u")
+        )
+
+        result = await loop._do_work()  # type: ignore[attr-defined]
+
+        assert result["status"] == "bisect_timeout"
+        labels = prs.create_issue.await_args.args[2]
+        assert "bisect-timeout" in labels
+        assert "hitl-escalation" in labels
+
+
+class TestInvalidRange:
+    @pytest.mark.asyncio
+    async def test_invalid_range_logs_and_noops(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+    ) -> None:
+        from staging_bisect_loop import BisectRangeError
+
+        loop, prs, state = _make_loop(tmp_path, monkeypatch)
+        state.set_last_green_rc_sha("unreachable_sha")
+        state.set_last_rc_red_sha_and_bump_cycle("red_sha")
+        loop._run_bisect_probe = AsyncMock(return_value=(False, ""))  # type: ignore[attr-defined]
+        loop._run_bisect = AsyncMock(side_effect=BisectRangeError("bad object"))  # type: ignore[attr-defined]
+        prs.find_open_promotion_pr = AsyncMock(
+            return_value=MagicMock(number=77, url="u")
+        )
+
+        caplog.set_level("WARNING")
+        result = await loop._do_work()  # type: ignore[attr-defined]
+
+        assert result == {"status": "invalid_bisect_range", "sha": "red_sha"}
+        assert any("invalid bisect range" in rec.message for rec in caplog.records)

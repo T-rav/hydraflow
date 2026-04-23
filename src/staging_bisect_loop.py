@@ -82,9 +82,15 @@ class StagingBisectLoop(BaseBackgroundLoop):
     def _get_default_interval(self) -> int:
         return self._config.staging_bisect_interval
 
-    async def _do_work(self) -> dict[str, Any] | None:
+    async def _do_work(self) -> dict[str, Any] | None:  # noqa: PLR0911
         if not self._config.staging_enabled:
             return {"status": "staging_disabled"}
+
+        # Resolve any pending watchdog first so a green outcome clears
+        # the auto_reverts_in_cycle counter before we evaluate a new red.
+        watchdog_result = await self._check_pending_watchdog()
+        if watchdog_result is not None:
+            return watchdog_result
 
         red_sha = self._state.get_last_rc_red_sha()
         if not red_sha:
@@ -135,20 +141,174 @@ class StagingBisectLoop(BaseBackgroundLoop):
         )
         return proc.returncode == 0, (proc.stdout + proc.stderr)
 
-    async def _run_full_bisect_pipeline(
+    async def _run_full_bisect_pipeline(  # noqa: PLR0911
         self, red_sha: str, probe_output: str
     ) -> dict[str, Any]:
-        """Run bisect -> attribute -> guardrail -> revert -> retry -> watchdog.
+        """End-to-end pipeline: bisect → attribute → guardrail → revert → retry."""
+        import time  # noqa: PLC0415
 
-        Implemented across Tasks 12-20. Stub returns a placeholder so the
-        flake-filter test proves the flow routes past the filter.
-        """
-        logger.info(
-            "StagingBisectLoop: pipeline not yet wired for %s (probe_output=%d chars)",
-            red_sha,
-            len(probe_output),
+        green_sha = self._state.get_last_green_rc_sha()
+        if not green_sha:
+            logger.warning(
+                "StagingBisectLoop: no last_green_rc_sha — skipping bisect for %s",
+                red_sha,
+            )
+            return {"status": "no_green_anchor", "sha": red_sha}
+
+        # 1. Bisect
+        try:
+            culprit_sha = await self._run_bisect(green_sha, red_sha)
+        except BisectTimeoutError:
+            issue = await self._escalate_harness_failure(
+                red_sha,
+                green_sha,
+                "bisect-timeout",
+                "bisect exceeded runtime cap",
+            )
+            return {
+                "status": "bisect_timeout",
+                "escalation_issue": issue,
+            }
+        except BisectRangeError as exc:
+            logger.warning(
+                "StagingBisectLoop: invalid bisect range %s..%s — %s",
+                green_sha,
+                red_sha,
+                exc,
+            )
+            return {"status": "invalid_bisect_range", "sha": red_sha}
+        except BisectHarnessError as exc:
+            issue = await self._escalate_harness_failure(
+                red_sha,
+                green_sha,
+                "bisect-harness-failure",
+                str(exc),
+            )
+            return {
+                "status": "bisect_harness_failure",
+                "escalation_issue": issue,
+            }
+
+        # 2. Attribute
+        culprit_pr, culprit_pr_title = await self._attribute_culprit(culprit_sha)
+        bisect_log = (
+            f"green_sha={green_sha}\n"
+            f"red_sha={red_sha}\n"
+            f"first_bad={culprit_sha}\n"
+            f"probe_output:\n{probe_output[:2000]}"
         )
-        return {"status": "pipeline_stub", "sha": red_sha}
+
+        # 3. Safety guardrail
+        guard = await self._check_guardrail_and_maybe_escalate(
+            red_sha=red_sha,
+            culprit_sha=culprit_sha,
+            culprit_pr=culprit_pr,
+            bisect_log=bisect_log,
+        )
+        if guard is not None:
+            return guard
+
+        # 4. Resolve RC PR URL for revert-PR body
+        rc_pr_url = ""
+        rc_pr = await self._prs.find_open_promotion_pr()
+        if rc_pr is not None:
+            rc_pr_url = rc_pr.url
+
+        # 5. Retry issue first (so revert body can link to it)
+        failing_tests = self._parse_failing_tests(probe_output)
+        try:
+            retry_issue = await self._file_retry_issue(
+                culprit_pr=culprit_pr,
+                culprit_pr_title=culprit_pr_title,
+                culprit_sha=culprit_sha,
+                green_sha=green_sha,
+                red_sha=red_sha,
+                failing_tests=failing_tests,
+                bisect_log=bisect_log,
+                revert_pr_url="(pending)",
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "StagingBisectLoop: retry issue filing failed for %s", culprit_sha
+            )
+            retry_issue = 0
+
+        # 6. Revert PR
+        try:
+            revert_pr, _branch = await self._create_revert_pr(
+                culprit_sha=culprit_sha,
+                culprit_pr=culprit_pr,
+                failing_tests=failing_tests,
+                rc_pr_url=rc_pr_url,
+                bisect_log=bisect_log,
+                retry_issue_number=retry_issue,
+            )
+        except RevertConflictError as exc:
+            issue = await self._prs.create_issue(
+                f"hitl: git revert conflict on {culprit_sha[:12]}",
+                (
+                    "## Revert conflict\n\n"
+                    f"`git revert` produced merge conflicts while attempting "
+                    f"to revert `{culprit_sha}` (PR #{culprit_pr}).\n\n"
+                    "Per spec §4.3, auto-resolution is not attempted — "
+                    "subsequent PRs likely depend on the culprit.\n\n"
+                    f"```\n{exc}\n```"
+                ),
+                ["hitl-escalation", "revert-conflict"],
+            )
+            return {"status": "revert_conflict", "escalation_issue": issue}
+
+        # 7. Bump counters + schedule watchdog
+        self._state.increment_auto_reverts_in_cycle()
+        watchdog_wall_seconds = 8 * 3600  # spec §4.3 step 8
+        self._pending_watchdog = {
+            "red_sha_at_revert": red_sha,
+            "rc_cycle_at_revert": self._state.get_rc_cycle_id(),
+            "deadline_ts": time.time() + watchdog_wall_seconds,
+        }
+
+        return {
+            "status": "reverted",
+            "revert_pr": revert_pr,
+            "retry_issue": retry_issue,
+            "culprit_sha": culprit_sha,
+            "culprit_pr": culprit_pr,
+        }
+
+    async def _escalate_harness_failure(
+        self,
+        red_sha: str,
+        green_sha: str,
+        label: str,
+        detail: str,
+    ) -> int:
+        """Common escalation for bisect-harness-class failures."""
+        title = f"hitl: StagingBisectLoop {label} ({red_sha[:12]})"
+        body = (
+            "## Bisect harness failure\n\n"
+            f"- Range: `{green_sha}` → `{red_sha}`\n"
+            f"- Failure class: `{label}`\n\n"
+            f"```\n{detail[:3000]}\n```"
+        )
+        return await self._prs.create_issue(title, body, ["hitl-escalation", label])
+
+    def _parse_failing_tests(self, probe_output: str) -> str:
+        """Heuristic extraction of failing test identifiers from probe output."""
+        import re  # noqa: PLC0415
+
+        names = re.findall(
+            r"(?:FAILED|failed)\s+(\S+::[A-Za-z0-9_:.\[\]-]+)", probe_output
+        )
+        if not names:
+            return "(see bisect log)"
+        # Dedupe preserving order
+        seen: set[str] = set()
+        unique: list[str] = []
+        for n in names:
+            if n not in seen:
+                seen.add(n)
+                unique.append(n)
+        return ", ".join(unique[:10])
 
     async def _setup_worktree(self, rc_sha: str) -> Path:
         """Create a dedicated worktree at ``<data_root>/<repo_slug>/bisect/<rc_ref>/``."""
