@@ -56,6 +56,11 @@ _HITL_HIGH = 0.4
 _AVG_SCORE_LOW = 0.4
 _STALE_COUNT_HIGH = 5
 
+# HealthMonitor dead-man-switch for TrustFleetSanityLoop (spec §12.1).
+# Files a `hydraflow-find` + `sanity-loop-stalled` issue when the sanity
+# loop's heartbeat is older than this multiple of its configured interval.
+_SANITY_STALL_MULTIPLIER = 3
+
 # ---------------------------------------------------------------------------
 # Trend metrics
 # ---------------------------------------------------------------------------
@@ -335,6 +340,12 @@ class HealthMonitorLoop(BaseBackgroundLoop):
 
     async def _do_work(self) -> dict[str, Any] | None:
         """Execute one health-monitor cycle."""
+        # Dead-man-switch: detect a stalled TrustFleetSanityLoop (spec §12.1).
+        try:
+            await self._check_sanity_loop_staleness()
+        except Exception:  # noqa: BLE001
+            logger.debug("sanity-loop stall check failed", exc_info=True)
+
         metrics = compute_trend_metrics(
             self._outcomes_path, self._scores_path, self._failures_path
         )
@@ -938,3 +949,87 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             pass
         except Exception:  # noqa: BLE001
             logger.debug("Sentry metric emission failed", exc_info=True)
+
+    # ------------------------------------------------------------------
+    # Dead-man-switch for TrustFleetSanityLoop (spec §12.1)
+    # ------------------------------------------------------------------
+
+    async def _check_sanity_loop_staleness(self) -> None:
+        """Dead-man-switch for `TrustFleetSanityLoop` (spec §12.1).
+
+        When the sanity loop is enabled but its heartbeat is older than
+        ``_SANITY_STALL_MULTIPLIER × trust_fleet_sanity_interval``,
+        file a conventional `hydraflow-find` + `sanity-loop-stalled`
+        issue. The sanity loop watches the nine trust loops; this
+        method watches the sanity loop. Recursion is bounded at one
+        meta-layer (spec §12.1 "Bounds of meta-observability").
+
+        ``_state`` and ``_bg_workers`` are not yet wired into this loop's
+        ctor (a follow-on bead lands that); when either is missing, this
+        check is a silent no-op so production cycles do not spam
+        debug-level exceptions.
+        """
+        state = getattr(self, "_state", None)
+        bg_workers = getattr(self, "_bg_workers", None)
+        prs = getattr(self, "_prs", None)
+        if state is None or bg_workers is None or prs is None:
+            return
+
+        heartbeats = state.get_worker_heartbeats()
+        hb = heartbeats.get("trust_fleet_sanity")
+        if not hb:
+            return
+        last_run_iso = hb.get("last_run") if isinstance(hb, dict) else None
+        if not last_run_iso:
+            return
+        enabled = bool(
+            getattr(bg_workers, "worker_enabled", {}).get("trust_fleet_sanity", True)
+        )
+        if not enabled:
+            return
+        try:
+            last_run = datetime.fromisoformat(
+                last_run_iso.replace("Z", "+00:00"),
+            )
+        except ValueError:
+            return
+        if last_run.tzinfo is None:
+            last_run = last_run.replace(tzinfo=UTC)
+        elapsed_s = (datetime.now(UTC) - last_run).total_seconds()
+        threshold_s = (
+            _SANITY_STALL_MULTIPLIER * self._config.trust_fleet_sanity_interval
+        )
+        if elapsed_s < threshold_s:
+            return
+
+        title = (
+            f"sanity-loop-stalled: trust_fleet_sanity silent for "
+            f"{int(elapsed_s)}s (threshold {int(threshold_s)}s)"
+        )
+        body = (
+            f"## TrustFleetSanityLoop dead-man-switch tripped\n\n"
+            f"The meta-observability loop has not ticked in "
+            f"`{int(elapsed_s)}s`, exceeding "
+            f"`{_SANITY_STALL_MULTIPLIER} × "
+            f"trust_fleet_sanity_interval` = `{int(threshold_s)}s` "
+            f"(spec §12.1).\n\n"
+            f"- Last heartbeat: `{last_run_iso}`\n"
+            f"- Interval: "
+            f"`{self._config.trust_fleet_sanity_interval}s`\n"
+            f"- Enabled: `True`\n\n"
+            f"### Operator playbook\n"
+            f"1. Check orchestrator logs for the `trust_fleet_sanity` "
+            f"loop task (look for uncaught exceptions on the run task).\n"
+            f"2. Restart the orchestrator (`systemctl restart hydraflow` "
+            f"or equivalent).\n"
+            f"3. If the loop continues to stall, flip its "
+            f"kill-switch in the **System** tab and file a HydraFlow "
+            f"bug report.\n\n"
+            f"_Auto-filed by HydraFlow `health_monitor` "
+            f"(spec §12.1 dead-man-switch)._"
+        )
+        await prs.create_issue(
+            title,
+            body,
+            ["hydraflow-find", "sanity-loop-stalled"],
+        )
