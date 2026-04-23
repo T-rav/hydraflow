@@ -87,7 +87,9 @@ new one.
 - **Visual regression on the dashboard UI.** Out of scope for this
   initiative.
 
-## 3. Trust-model constraint
+## 3. Constraints
+
+### 3.1 Trust-model constraint (CI placement)
 
 Per-PR CI stays lightweight. New trust gates land on
 `.github/workflows/rc-promotion-scenario.yml`, **not**
@@ -106,6 +108,40 @@ existing misplacements get cleaned up first.
 Per `ADR-0044` P5 (CI and branch protection), CI and local gates must not
 diverge. `make trust` runs locally and in `rc-promotion-scenario.yml` with
 the same exit codes.
+
+### 3.2 Autonomy stance (load-bearing)
+
+Every loop in this initiative terminates in one of two outcomes: **a fix
+lands automatically**, or **the system escalates to a human**. There is
+no "waits for human review" default on the happy path.
+
+- **Happy path = no humans.** Self-validation, agent review, quality
+  gates, and auto-merge run in sequence. A human sees results through
+  the normal factory channels (dashboard, merged PR list) — not through
+  an inbox of pending approvals.
+- **Failure path = escalation, not pause.** When a loop cannot close its
+  own workflow within a bounded retry budget (default 3 attempts per
+  cycle), it files a `hitl-escalation` issue labeled with the failure
+  class. The loop records the escalation and moves on — it does not
+  spin waiting.
+- **"Fire" criteria for HITL.** Only true safety trips pull a human in:
+  - A guardrail breached (e.g., a second auto-revert in one RC cycle —
+    see §4.3).
+  - Self-validation fails unrecoverably (e.g., a synthesized corpus
+    case won't even parse).
+  - A primary repair attempt created a *new* red the loop cannot
+    resolve.
+- **Review is not bypassed — humans are.** Refresh-loop PRs,
+  corpus-learning PRs, and auto-revert PRs all flow through the
+  standard agent-reviewer + quality-gate path. `src/reviewer.py`
+  enforces rigor; `make quality` enforces correctness; auto-merge
+  happens only on green. This stance skips *human approval*, not
+  *review itself*.
+
+This stance overrides individual subsystem descriptions. If §4.1–§4.3
+appear to describe a human gate anywhere on the happy path, that is a
+drafting bug — treat §3.2 as authoritative and auto-merge with
+guardrails.
 
 ## 4. Subsystems
 
@@ -190,11 +226,29 @@ the `skill-escape` label. Alternative sources are listed in §9.
 2. Dispatch a sub-agent prompt that synthesizes a minimal
    `before/after` pair reproducing the class of bug, picks the
    `expected_catcher`, and drafts the `README.md`.
-3. Write a new case directory under `tests/trust/adversarial/cases/`
-   and open a PR adding it.
-4. PR is reviewed and merged by a human — loop does **not** auto-merge.
-   An un-reviewed auto-added case would expand the gate without scrutiny
-   and erode trust in the corpus itself.
+3. **Self-validation gate.** Before opening a PR, the loop verifies:
+   1. The synthesized `before/` + `after/` parses (Python syntax, no
+      import errors).
+   2. Lint passes on the synthesized files (`make lint-check` scoped
+      to the new case directory).
+   3. The named `expected_catcher` skill **actually returns RETRY** on
+      the synthesized diff with the claimed keyword. A case the loop
+      cannot prove flags the right thing is rejected as a
+      self-validation failure — the loop does not propose cases it
+      cannot stand behind.
+4. **Open PR and auto-merge per §3.2.** Cases that pass
+   self-validation flow through the standard agent-reviewer +
+   quality-gate + auto-merge path. No human approval on the happy
+   path.
+5. **Escalation.** Self-validation failure 3× on the same escape
+   issue → label it `hitl-escalation`, `corpus-learning-stuck`,
+   record the three rejected attempts in the issue body, move on.
+
+Rationale for auto-merge: a new corpus case is a new test, not a
+production-code change. The self-validation gate proves the case
+actually catches what it claims to catch; `make quality` enforces the
+usual quality bar. The risk profile is low; holding these PRs for
+human review contradicts §3.2.
 
 **Five-checkpoint wiring** per `docs/agents/background-loops.md`:
 
@@ -318,20 +372,55 @@ diff exactly. Instead:
 | `FakeDocker` | `docker run` | A pinned trivial image (e.g. `alpine:3.19`). |
 | `FakeLLM` | `claude` CLI streaming mode | Short prompts; samples committed as `.jsonl`. |
 
-#### `ContractRefreshLoop`
+#### `ContractRefreshLoop` — full caretaker (refresh + auto-repair)
 
 `src/contract_refresh_loop.py`, a new `BaseBackgroundLoop`, weekly
-cadence.
+cadence. Per §3.2, the loop is autonomous end-to-end: it detects drift,
+repairs both sides of the contract (cassettes and fakes), and merges
+the fix. Humans enter only on escalation.
 
-- Re-records every cassette and stream sample against live services.
-- Commits updates on a branch (`contract-refresh/YYYY-MM-DD`).
-- Opens a PR for human review; does **not** auto-merge. Cassettes are
-  the contract; rotating them silently would defeat the point.
+**On fire (weekly).**
+
+1. Re-record every cassette and stream sample against live services.
+2. Diff new recordings against committed cassettes. **No diff →
+   no-op**, return.
+3. **Diff detected.** Commit refreshed cassettes to a branch
+   `contract-refresh/YYYY-MM-DD` and open a PR against `staging`.
+4. Run contract replay tests against the new cassettes:
+   - **Replay passes** → fakes still speak the dialect. This is a
+     "cassette-only drift" refresh. PR flows through standard
+     agent-reviewer + quality-gate + auto-merge per §3.2.
+   - **Replay fails** → a fake diverged. The loop files a companion
+     `hydraflow-find` issue with label `fake-drift` naming which
+     adapter, which method, which field moved. The factory picks up
+     the issue and routes it through the standard implement phase
+     (`src/implement_phase.py`); the implementer agent edits
+     `tests/scenarios/fakes/fake_*.py` to match the new cassette,
+     re-runs contract tests, and lands a fix PR on `staging` that
+     auto-merges on green.
+5. **Stream-protocol drift.** If `src/stream_parser.py` errors on a
+   newly-recorded `claude` stream sample, file a `hydraflow-find`
+   with label `stream-protocol-drift`; the factory routes the repair
+   through the standard implement phase against
+   `src/stream_parser.py` itself.
+6. **Escalation.** If the implementer loop fails to close a
+   `fake-drift` or `stream-protocol-drift` issue after 3 attempts
+   (`src/config.py:max_attempts` applies), the issue gets labeled
+   `hitl-escalation`, `fake-repair-stuck` (or `stream-parser-stuck`)
+   and the `ContractRefreshLoop` stops opening new refresh PRs for
+   that adapter until the escalation closes.
+
+**Rationale for auto-repair both sides.** A passing cassette with a
+divergent fake is still a red gate — the scenario ring would silently
+trust a wrong fake. The loop's responsibility is the full contract
+(real output ↔ cassette ↔ fake output); it must close drift on
+whichever side broke. Test-infrastructure code (fakes) is lower risk
+than production code and fits the §3.2 happy path.
 
 **Five-checkpoint wiring** (same five slots as §4.1). Config interval
 field: `contract_refresh_interval`, default `604800` seconds (7 days).
-No per-worker LLM model override — the refresh loop does not call the
-LLM beyond recording streams.
+No per-worker LLM model override — the loop itself does not call the
+LLM; the dispatched implementer uses the standard implementer model.
 
 **Why commit cassettes to the repo.** Cassettes are small (< 10 KB
 each); no secrets (everything records against disposable test repos and
@@ -341,10 +430,13 @@ history in git" stance (`ADR-0044` P1 Documentation Contract — the
 wiki/ADR spine as the source of truth for knowledge, and git as the
 audit log).
 
-### 4.3 Staging-red attribution bisect
+### 4.3 Staging-red attribution + auto-revert
 
-**Purpose.** Close the attribution gap between "RC is red" and "here is
-the culprit PR" so the operator sees a commit, not a bisect assignment.
+**Purpose.** Close the full loop from "RC is red" to "green RC with the
+culprit reverted and a retry issue filed" — without pulling a human in
+on the happy path. Per §3.2, the loop reverts the bad commit, routes
+the original work back through the factory as a retry, and only pulls a
+human in when a safety guardrail trips.
 
 **`StagingBisectLoop`** — `src/staging_bisect_loop.py`, a new
 `BaseBackgroundLoop`.
@@ -357,43 +449,101 @@ plan adds the emission.
 
 **On fire.**
 
-1. Read `last_green_rc_sha` from `src/state_tracker.py:StateTracker`
-   (the plan specifies which key — `staging_promotion_loop` tracker or a
-   sibling). Read `current_red_rc_sha` from the RC PR's head.
-2. In a dedicated worktree under
-   `<data_root>/<repo_slug>/bisect/<rc_ref>/` (`ADR-0021` P9
-   persistence):
+1. **Flake filter.** Before bisecting, re-run `make scenario` once
+   against the RC PR's head. If the second run passes, the red was a
+   flake; log at `warning`, increment a `flake_reruns_total` counter
+   in state, and exit. No bisect, no revert.
+2. **Bisect.** Read `last_green_rc_sha` from
+   `src/state_tracker.py:StateTracker` (written by
+   `StagingPromotionLoop` on each successful promotion — see §8).
+   Read `current_red_rc_sha` from the RC PR's head. In a dedicated
+   worktree under `<data_root>/<repo_slug>/bisect/<rc_ref>/`
+   (`ADR-0021` P9 persistence):
    - `git bisect start <current_red_rc_sha> <last_green_rc_sha>`
    - `git bisect run make scenario`
-3. Parse bisect output. First-bad commit = the culprit.
-4. File a `hydraflow-find` issue via
-   `src/pr_manager.py:PRManager.create_issue`:
-   - Title: `RC-red attribution: PR #{N} introduced scenario regression`
-     (where `N` is the PR number containing the culprit commit, resolved
-     by `gh api repos/.../commits/<sha>/pulls`).
-   - Body: culprit SHA, failing scenario test names (parsed from
-     `make scenario` output), the RC PR URL, a `git show <sha> --stat`
-     summary, and the bisect log.
-   - Labels: `hydraflow-find`, `rc-red-attribution`.
-5. Clean up the bisect worktree (`git worktree remove --force`).
+3. **Attribution.** Parse bisect output. First-bad commit = the
+   culprit. Resolve the containing PR via
+   `gh api repos/.../commits/<sha>/pulls`; call the PR number `N`.
+4. **Safety guardrail.** `StateTracker` tracks `rc_cycle_id` and
+   `auto_reverts_in_cycle` (count). If `auto_reverts_in_cycle > 0`,
+   **do not revert again.** A second red after a first revert means
+   either the bisect was wrong or the damage is broader than one PR —
+   escalate: file `hitl-escalation`, `rc-red-bisect-exhausted` with
+   both bisect logs and stop. Reset the counter only when a green RC
+   promotes.
+5. **Revert PR.** Create branch
+   `auto-revert/pr-{N}-rc-{YYYYMMDDHHMM}` off `staging`. Run
+   `git revert <culprit_sha>` for a single commit, or
+   `git revert -m 1 <merge_sha>` for a merge commit. Push. Open PR
+   against `staging` via `src/pr_manager.py:PRManager`:
+   - Title: `Auto-revert: PR #{N} — RC-red attribution on <test_name>`
+   - Body: culprit SHA, failing scenario test names, RC PR URL,
+     `git show <sha> --stat`, bisect log, link to the retry issue
+     (step 6).
+   - Labels: `hydraflow-find`, `auto-revert`, `rc-red-attribution`.
+6. **Retry issue.** Simultaneously file a new `hydraflow-find` issue
+   via `src/pr_manager.py:PRManager.create_issue`:
+   - Title: `Retry: <original PR title>`
+   - Body: link to the reverted PR, full bisect log, failing test
+     names, time bounds (start SHA → end SHA → duration).
+   - Labels: `hydraflow-find`, `rc-red-retry`. The standard pipeline
+     picks up `hydraflow-find` issues; the factory re-does the work.
+7. **Auto-merge path (per §3.2).** The revert PR flows through the
+   standard agent-reviewer + quality-gate + auto-merge path. The
+   retry issue flows through the standard implement/review pipeline.
+   No human approval on either happy path.
+8. **Outcome verification.** After the revert merges, the next
+   `StagingPromotionLoop` cycle creates a fresh RC. The loop waits
+   (bounded watchdog: default 2 RC cycles or 8 hours, whichever is
+   shorter) for the RC to go green.
+   - **Green:** log at `info`, increment
+     `StateTracker.auto_reverts_successful`, reset
+     `auto_reverts_in_cycle`, close the loop cleanly.
+   - **Still red:** escalate `hitl-escalation`,
+     `rc-red-post-revert-red` with both the original bisect log and
+     the new RC's failure output. The revert stays in place (it
+     eliminated one red; pulling it out blindly could introduce
+     another).
+   - **Watchdog timeout:** escalate
+     `hitl-escalation`, `rc-red-verify-timeout` — RC pipeline may be
+     stalled for unrelated reasons; the human can disambiguate.
+9. **Cleanup.** `git worktree remove --force` on the bisect worktree
+   regardless of outcome.
 
-**Idempotency.** Use `src/dedup_store.py:DedupStore` keyed by
+**Revert edge cases.**
+
+- **Merge conflicts on revert.** `git revert` exit non-zero with
+  conflicts → abandon immediately, do not attempt auto-resolution.
+  Escalate `hitl-escalation`, `revert-conflict` with the conflicting
+  paths. Conflicts mean subsequent PRs depend on the culprit; fixing
+  requires judgment the loop does not have.
+- **Merge commits (squash vs merge commits).** `staging` uses merge
+  commits per `ADR-0042` merge-strategy decision. Use
+  `git revert -m 1 <merge_sha>` by default. Single-commit PRs
+  (uncommon on `staging`) use `git revert <sha>`.
+- **Dependent PRs already landed on top.** The revert may break
+  follow-up work. Acceptable trade-off: the follow-up can retry via
+  its own issue. The revert is the cheapest safe undo; broader
+  dependency surgery is a human decision.
+
+**Idempotency.** `src/dedup_store.py:DedupStore` keyed by
 `(rc_pr_number, current_red_rc_sha)` — a re-fire for the same RC does
-not double-file. If the repo has advanced past the bisect range (e.g.
-the `last_green_rc_sha` no longer exists because of a rebase), skip
-with a warning log — idempotent no-op, do not fail the loop.
+not double-bisect or double-revert. If the repo has advanced past the
+bisect range (e.g. `last_green_rc_sha` no longer reachable due to a
+rebase), skip with a warning log — idempotent no-op, do not fail the
+loop.
 
 **Error handling.** Bisect harness failures (bisect itself errors,
 `make scenario` errors for a reason unrelated to the regression) log at
-`warning` per `ADR-0044` P7 Sentry rules and file a `hydraflow-find`
-with label `bisect-harness-failure`. This keeps genuine scenario
-regressions distinguishable from harness bugs in the issue tracker.
+`warning` per `ADR-0044` P7 Sentry rules and file a
+`hitl-escalation` with label `bisect-harness-failure`. These are
+infrastructure bugs, not scenario regressions, and the loop cannot
+self-heal them.
 
 **Five-checkpoint wiring** (same five slots as §4.1). Config interval
 field: `staging_bisect_interval`. The loop is event-driven, not
-polling, so the interval acts as a watchdog poll to detect missed
-events; default `600` seconds. No per-worker LLM model override (no
-LLM call).
+polling, so the interval acts as a watchdog poll for missed events;
+default `600` seconds. No per-worker LLM model override (no LLM call).
 
 ## 5. Shared infrastructure
 
@@ -441,15 +591,25 @@ reinvent issue filing; do not introduce a parallel dedup layer —
 
 ## 6. Error handling & fail-mode table
 
-| Gate | Failure mode | Blocks RC? | Files issue? | Label |
-|---|---|---|---|---|
-| `adversarial` corpus | A skill fails to flag a case | Yes | Only on CI-red retry exhaustion (standard path) | `hydraflow-find`, `skill-regression` |
-| `contracts` replay | Fake output diverges from cassette | Yes | Yes (on CI-red retry exhaustion) | `hydraflow-find`, `fake-drift` |
-| `contracts` freshness (refresh loop) | Real adapter output diverges from cassette | No | Yes | `hydraflow-find`, `cassette-drift` |
-| `contracts` freshness (stream parser) | Parser errors on a fresh Claude stream | No | Yes | `hydraflow-find`, `stream-protocol-drift` |
-| `StagingBisectLoop` | Bisect succeeds, culprit found | N/A (after the fact) | Yes | `hydraflow-find`, `rc-red-attribution` |
-| `StagingBisectLoop` | Bisect harness itself errors | N/A | Yes | `hydraflow-find`, `bisect-harness-failure` |
-| `StagingBisectLoop` | Bisect range invalid (repo moved on) | N/A | No — warning log only | — |
+Per §3.2, every row resolves to either **autonomous repair** or
+**HITL escalation**; "waits for human review" is not a state.
+
+| Gate | Failure mode | Autonomous action | Blocks RC until fix? | Escalates? | Label(s) |
+|---|---|---|---|---|---|
+| `adversarial` corpus (RC gate) | Skill fails to flag a case | Standard CI-red retry; factory dispatches implementer against the failing skill | Yes | On retry exhaustion | `hydraflow-find`, `skill-regression` → `hitl-escalation`, `skill-repair-stuck` |
+| `CorpusLearningLoop` | Synthesized case self-validation fails | Retry per escape issue | No | After 3× on same escape | `hitl-escalation`, `corpus-learning-stuck` |
+| `contracts` replay (RC gate) | Fake output diverges from cassette | File `fake-drift`; factory dispatches implementer against `tests/scenarios/fakes/` | Yes | After 3 repair attempts | `hydraflow-find`, `fake-drift` → `hitl-escalation`, `fake-repair-stuck` |
+| `ContractRefreshLoop` — cassette-only drift | Real output changed, fakes still green | Refresh PR auto-merges via standard reviewer + quality gates | No | Only if agent reviewer rejects the refresh PR 3× | — / `hitl-escalation`, `contract-refresh-stuck` |
+| `ContractRefreshLoop` — cassette + fake drift | Real output changed, fakes broke | Refresh PR lands cassettes; companion `fake-drift` issue routes repair through implement phase | No (the drift itself is a warning signal; repair closes the loop) | After 3 implementer attempts | `hydraflow-find`, `fake-drift` → `hitl-escalation`, `fake-repair-stuck` |
+| `ContractRefreshLoop` — stream-parser drift | Parser errors on fresh Claude stream | File `stream-protocol-drift`; factory repairs `src/stream_parser.py` | No | After 3 repair attempts | `hydraflow-find`, `stream-protocol-drift` → `hitl-escalation`, `stream-parser-stuck` |
+| `StagingBisectLoop` — flake filter | Second `make scenario` passes | Log and exit; increment `flake_reruns_total` | No | No | — |
+| `StagingBisectLoop` — confirmed red | Bisect identifies culprit | Auto-revert PR + retry issue; both auto-merge through standard gates | Yes (until revert merges) | No | `hydraflow-find`, `auto-revert`, `rc-red-attribution`, `rc-red-retry` |
+| `StagingBisectLoop` — second revert needed | `auto_reverts_in_cycle > 0` | Stop reverting | Yes | Yes | `hitl-escalation`, `rc-red-bisect-exhausted` |
+| `StagingBisectLoop` — revert conflict | `git revert` fails with conflicts | Abandon revert | Yes | Yes | `hitl-escalation`, `revert-conflict` |
+| `StagingBisectLoop` — post-revert still red | New RC red after revert landed | Stop reverting; leave revert in place | Yes | Yes | `hitl-escalation`, `rc-red-post-revert-red` |
+| `StagingBisectLoop` — watchdog timeout | No green RC within 2 cycles / 8h | Stop waiting | Yes | Yes | `hitl-escalation`, `rc-red-verify-timeout` |
+| `StagingBisectLoop` — harness failure | Bisect itself errors | Log at warning | No (unrelated to regression) | Yes | `hitl-escalation`, `bisect-harness-failure` |
+| `StagingBisectLoop` — invalid bisect range | `last_green_rc_sha` unreachable (rebase) | Skip with warning log | No | No (idempotent no-op) | — |
 
 ## 7. Testing — how we test the trust-hardening itself
 
