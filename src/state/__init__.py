@@ -36,6 +36,7 @@ from ._hitl import HITLStateMixin
 from ._issue import IssueStateMixin
 from ._lifetime import LifetimeStatsMixin
 from ._principles_audit import PrinciplesAuditStateMixin
+from ._rc_budget import RCBudgetStateMixin
 from ._report import ReportStateMixin
 from ._review import ReviewStateMixin
 from ._route_back import RouteBackStateMixin
@@ -82,6 +83,7 @@ class StateTracker(
     FlakeTrackerStateMixin,
     SkillPromptEvalStateMixin,
     FakeCoverageStateMixin,
+    RCBudgetStateMixin,
 ):
     """JSON-file backed state for crash recovery.
 
