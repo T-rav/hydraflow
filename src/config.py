@@ -230,6 +230,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         604800,
     ),
     ("rc_budget_interval", "HYDRAFLOW_RC_BUDGET_INTERVAL", 14400),
+    ("wiki_rot_detector_interval", "HYDRAFLOW_WIKI_ROT_DETECTOR_INTERVAL", 604800),
 ]
 
 _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
@@ -1758,6 +1759,14 @@ class HydraFlowConfig(BaseModel):
             "Multiplier vs. max(recent 5 excl. current); "
             "current_s >= ratio * recent_max fires."
         ),
+    )
+
+    # Trust fleet — WikiRotDetectorLoop (spec §4.9)
+    wiki_rot_detector_interval: int = Field(
+        default=604800,
+        ge=86400,
+        le=2_592_000,
+        description="Seconds between WikiRotDetectorLoop ticks (default 7d)",
     )
 
     # Managed repos + principles audit (spec §4.4)
