@@ -59,6 +59,7 @@ def _route_prompt_to_cmd(cmd: list[str], prompt: str) -> tuple[list[str], int]:
     use_codex_exec = len(cmd) >= 2 and cmd[0] == "codex" and cmd[1] == "exec"
     use_pi_print = cmd and cmd[0] == "pi" and ("-p" in cmd or "--print" in cmd)
     use_claude_print = cmd and cmd[0] == "claude" and "-p" in cmd
+    # Gemini CLI only supports -p (no --print alias).
     use_gemini_print = cmd and cmd[0] == "gemini" and "-p" in cmd
     use_prompt_arg = (
         use_codex_exec or use_pi_print or use_claude_print or use_gemini_print
