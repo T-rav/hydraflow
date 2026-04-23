@@ -121,6 +121,8 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("max_scope_check_attempts", "HYDRAFLOW_MAX_SCOPE_CHECK_ATTEMPTS", 1),
     ("max_test_adequacy_attempts", "HYDRAFLOW_MAX_TEST_ADEQUACY_ATTEMPTS", 1),
     ("max_plan_compliance_attempts", "HYDRAFLOW_MAX_PLAN_COMPLIANCE_ATTEMPTS", 1),
+    ("max_discover_attempts", "HYDRAFLOW_MAX_DISCOVER_ATTEMPTS", 3),
+    ("max_shape_attempts", "HYDRAFLOW_MAX_SHAPE_ATTEMPTS", 3),
     ("max_review_fix_attempts", "HYDRAFLOW_MAX_REVIEW_FIX_ATTEMPTS", 2),
     ("min_review_findings", "HYDRAFLOW_MIN_REVIEW_FINDINGS", 3),
     ("max_issue_body_chars", "HYDRAFLOW_MAX_ISSUE_BODY_CHARS", 10_000),
@@ -233,6 +235,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("wiki_rot_detector_interval", "HYDRAFLOW_WIKI_ROT_DETECTOR_INTERVAL", 604800),
     ("trust_fleet_sanity_interval", "HYDRAFLOW_TRUST_FLEET_SANITY_INTERVAL", 600),
     ("loop_anomaly_issues_per_hour", "HYDRAFLOW_LOOP_ANOMALY_ISSUES_PER_HOUR", 10),
+    ("corpus_learning_interval", "HYDRAFLOW_CORPUS_LEARNING_INTERVAL", 604800),
 ]
 
 _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
@@ -579,6 +582,18 @@ class HydraFlowConfig(BaseModel):
         ge=0,
         le=3,
         description="Max plan compliance check passes (0 = disabled)",
+    )
+    max_discover_attempts: int = Field(
+        default=3,
+        ge=0,
+        le=5,
+        description="Max Discover-brief evaluator retries before HITL escalation (0 = disabled)",
+    )
+    max_shape_attempts: int = Field(
+        default=3,
+        ge=0,
+        le=5,
+        description="Max Shape-proposal evaluator retries before HITL escalation (0 = disabled)",
     )
     max_review_fix_attempts: int = Field(
         default=2,
@@ -1777,6 +1792,14 @@ class HydraFlowConfig(BaseModel):
         ge=86400,
         le=2_592_000,
         description="Seconds between WikiRotDetectorLoop ticks (default 7d)",
+    )
+
+    # Trust fleet — CorpusLearningLoop (spec §4.1 v2)
+    corpus_learning_interval: int = Field(
+        default=604800,
+        ge=3600,
+        le=2_592_000,
+        description="Seconds between CorpusLearningLoop ticks (default 7d)",
     )
 
     # Trust fleet — TrustFleetSanityLoop (spec §12.1)
