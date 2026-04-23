@@ -20,14 +20,24 @@ by Plan 6b (§4.11 factory-cost work).
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import re
+import time
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from models import WorkCycleResult
-from trust_fleet_anomaly_detectors import TRUST_LOOP_WORKERS
+from trust_fleet_anomaly_detectors import (
+    TRUST_LOOP_WORKERS,
+    detect_cost_spike,
+    detect_issues_per_hour,
+    detect_repair_ratio,
+    detect_staleness,
+    detect_tick_error_ratio,
+)
 
 if TYPE_CHECKING:
     from bg_worker_manager import BGWorkerManager
@@ -168,16 +178,234 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
         return self._config.trust_fleet_sanity_interval
 
     async def _do_work(self) -> WorkCycleResult:
-        """Skeleton — Task 5 replaces with the full tick."""
+        """Task 6: scan trust loops, file one-attempt escalations on breaches."""
         if not self._enabled_cb(self._worker_name):
             return {"status": "disabled"}
+        t0 = time.perf_counter()
         await self._reconcile_closed_escalations()
-        # Skeleton returns without running detectors (Task 5 fills this in).
-        return {"status": "ok", "anomalies": 0}
+
+        now = datetime.now(UTC)
+        window_metrics = await self._collect_window_metrics()
+        heartbeats = self._state.get_worker_heartbeats() or {}
+        enabled_map = dict(getattr(self._bg_workers, "worker_enabled", {}) or {})
+        cost_reader = self._load_cost_reader()
+
+        dedup = set(self._dedup.get() or set())
+        filed = 0
+        anomalies: list[dict[str, Any]] = []
+
+        cfg = self._config
+        # Scan the union of known trust loops + any workers seen in
+        # event metrics or heartbeats — a loop with events but not in
+        # the hardcoded tuple (e.g. ci_monitor while rolling out) is
+        # still worth flagging. Iteration order is stable for tests.
+        seen_workers: list[str] = []
+        seen_set: set[str] = set()
+        for name in (
+            *TRUST_LOOP_WORKERS,
+            *sorted(window_metrics.keys()),
+            *sorted(heartbeats.keys()),
+        ):
+            if name in seen_set:
+                continue
+            seen_set.add(name)
+            seen_workers.append(name)
+
+        for worker in seen_workers:
+            metrics = window_metrics.get(worker, _empty_metrics_bucket())
+            per_worker_breaches: list[tuple[str, dict[str, Any]]] = []
+
+            breached, details = detect_issues_per_hour(
+                worker,
+                metrics,
+                threshold=cfg.loop_anomaly_issues_per_hour,
+            )
+            if breached:
+                per_worker_breaches.append(("issues_per_hour", details))
+
+            breached, details = detect_repair_ratio(
+                worker,
+                metrics,
+                threshold=cfg.loop_anomaly_repair_ratio,
+            )
+            if breached:
+                per_worker_breaches.append(("repair_ratio", details))
+
+            breached, details = detect_tick_error_ratio(
+                worker,
+                metrics,
+                threshold=cfg.loop_anomaly_tick_error_ratio,
+            )
+            if breached:
+                per_worker_breaches.append(("tick_error_ratio", details))
+
+            hb = heartbeats.get(worker) or {}
+            last_run_iso = hb.get("last_run") if isinstance(hb, dict) else None
+            interval_s = int(
+                self._bg_workers.get_interval(worker)
+                if hasattr(self._bg_workers, "get_interval")
+                else 86400
+            )
+            is_enabled = bool(enabled_map.get(worker, True))
+            breached, details = detect_staleness(
+                worker,
+                last_run_iso=last_run_iso,
+                interval_s=interval_s,
+                multiplier=cfg.loop_anomaly_staleness_multiplier,
+                is_enabled=is_enabled,
+                now=now,
+            )
+            if breached:
+                per_worker_breaches.append(("staleness", details))
+
+            breached, details = detect_cost_spike(
+                worker,
+                reader=cost_reader,
+                threshold=cfg.loop_anomaly_cost_spike_ratio,
+            )
+            if breached:
+                per_worker_breaches.append(("cost_spike", details))
+
+            for kind, det in per_worker_breaches:
+                key = f"trust_fleet_sanity:{kind}:{worker}"
+                if key in dedup:
+                    continue
+                attempts = self._state.inc_trust_fleet_sanity_attempts(
+                    f"{kind}:{worker}",
+                )
+                if attempts >= _MAX_ATTEMPTS:
+                    issue_no = await self._file_anomaly(worker, kind, det)
+                    anomalies.append(
+                        {
+                            "worker": worker,
+                            "kind": kind,
+                            "issue_number": issue_no,
+                            "details": det,
+                        }
+                    )
+                    filed += 1
+                dedup.add(key)
+                self._dedup.set_all(dedup)
+
+        self._state.set_trust_fleet_sanity_last_run(now.isoformat())
+        self._emit_trace(t0, anomalies=len(anomalies))
+        return {
+            "status": "ok",
+            "anomalies": len(anomalies),
+            "workers_scanned": len(seen_workers),
+            "filed": filed,
+        }
+
+    async def _file_anomaly(
+        self,
+        worker: str,
+        kind: str,
+        details: dict[str, Any],
+    ) -> int:
+        title = f"HITL: trust-loop anomaly — {worker} {kind}"
+        detail_lines = "\n".join(
+            f"- `{k}`: `{v}`" for k, v in sorted(details.items()) if k not in {"worker"}
+        )
+        body = (
+            f"## Trust-loop anomaly (`{kind}`) — `{worker}`\n\n"
+            f"`TrustFleetSanityLoop` detected `{kind}` threshold breach for "
+            f"the `{worker}` loop. Per spec §12.1 the anomaly is the "
+            f"escalation — one-attempt, no retry budget.\n\n"
+            f"### Detector output\n{detail_lines}\n\n"
+            f"### Operator playbook\n"
+            f"1. Flip `{worker}`'s kill-switch in the **System** tab if the "
+            f"loop is actively misbehaving (spec §12.2).\n"
+            f"2. Investigate via the **Diagnostics → Trust Fleet** sub-tab "
+            f"(spec §12.3) — click the loop for recent runs + job breakdowns.\n"
+            f"3. Close this issue once resolved. Closing clears "
+            f"`trust_fleet_sanity:{kind}:{worker}` from the dedup set so the "
+            f"detector is free to re-fire on the next drift (spec §3.2).\n\n"
+            f"_Auto-filed by HydraFlow `trust_fleet_sanity` (spec §12.1)._"
+        )
+        return await self._pr.create_issue(
+            title,
+            body,
+            ["hitl-escalation", "trust-loop-anomaly"],
+        )
 
     async def _reconcile_closed_escalations(self) -> None:
-        """Task 5."""
-        return None
+        """Clear dedup keys for escalations whose HITL issue is now closed.
+
+        Polls ``gh issue list`` for closed ``hitl-escalation`` +
+        ``trust-loop-anomaly`` issues authored by the bot; for each
+        match in the current dedup set, drop the key and zero the
+        per-anomaly attempt counter so the detector is free to re-fire
+        on the next drift (spec §3.2).
+        """
+        cmd = [
+            "gh",
+            "issue",
+            "list",
+            "--repo",
+            self._config.repo,
+            "--state",
+            "closed",
+            "--label",
+            "hitl-escalation",
+            "--label",
+            "trust-loop-anomaly",
+            "--author",
+            "@me",
+            "--limit",
+            "200",
+            "--json",
+            "title",
+        ]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+        except Exception:  # noqa: BLE001
+            logger.debug("gh issue list failed", exc_info=True)
+            return
+        if proc.returncode != 0:
+            return
+        try:
+            closed = json.loads(stdout.decode() or "[]")
+        except json.JSONDecodeError:
+            return
+        current = self._dedup.get() or set()
+        keep = set(current)
+        any_change = False
+        for issue in closed:
+            title = str(issue.get("title", ""))
+            m = _TITLE_RE.search(title)
+            if not m:
+                continue
+            worker = m.group("worker")
+            kind = m.group("kind")
+            key = f"trust_fleet_sanity:{kind}:{worker}"
+            if key in keep:
+                keep.discard(key)
+                self._state.clear_trust_fleet_sanity_attempts(f"{kind}:{worker}")
+                any_change = True
+        if any_change:
+            self._dedup.set_all(keep)
+
+    def _emit_trace(self, t0: float, *, anomalies: int) -> None:
+        try:
+            from trace_collector import emit_loop_subprocess_trace  # noqa: PLC0415
+        except ImportError:
+            return
+        try:
+            duration_ms = int((time.perf_counter() - t0) * 1000)
+            emit_loop_subprocess_trace(
+                loop=self._worker_name,
+                command=["trust_fleet_sanity", "tick"],
+                exit_code=0,
+                duration_ms=duration_ms,
+                stderr_excerpt=f"anomalies={anomalies}",
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("trace emission failed", exc_info=True)
 
     # ------------------------------------------------------------------
     # Task 4 — metrics readers
@@ -267,7 +495,7 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
             import trust_fleet_cost_reader as module  # noqa: PLC0415
         except ImportError:
             logger.info(
-                "trust_fleet_cost_reader unavailable — cost-spike detector disabled"
+                "trust_fleet_cost_reader unavailable — cost-spike detector disabled",
             )
             return None
         if module is None:

@@ -159,3 +159,120 @@ def test_lazy_cost_reader_tolerates_missing_module(loop_env, monkeypatch) -> Non
     monkeypatch.setitem(sys.modules, "trust_fleet_cost_reader", None)
     reader = loop._load_cost_reader()
     assert reader is None
+
+
+# ---------------------------------------------------------------------------
+# Task 6 — filing + 1-attempt escalation + close-reconcile
+# ---------------------------------------------------------------------------
+
+
+async def test_do_work_files_escalation_on_issues_per_hour_breach(loop_env) -> None:
+    cfg, state, bg_workers, pr, dedup, bus = loop_env
+
+    async def fake_load(since):  # noqa: ARG001
+        return [
+            _make_status_event("ci_monitor", "ok", ago_s=600, filed=20),
+        ]
+
+    bus.load_events_since = fake_load  # type: ignore[method-assign]
+    loop = _loop(loop_env)
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+    loop._load_cost_reader = MagicMock(return_value=None)
+    stats = await loop._do_work()
+    assert stats["anomalies"] >= 1
+    assert pr.create_issue.await_count >= 1
+    title = pr.create_issue.await_args.args[0]
+    assert "trust-loop anomaly" in title
+    assert "ci_monitor" in title
+    assert "issues_per_hour" in title
+    labels = pr.create_issue.await_args.args[2]
+    assert "hitl-escalation" in labels
+    assert "trust-loop-anomaly" in labels
+
+
+async def test_do_work_skips_filing_when_dedup_key_present(loop_env) -> None:
+    cfg, state, bg_workers, pr, dedup, bus = loop_env
+    dedup.get.return_value = {"trust_fleet_sanity:issues_per_hour:ci_monitor"}
+
+    async def fake_load(since):  # noqa: ARG001
+        return [_make_status_event("ci_monitor", "ok", ago_s=600, filed=20)]
+
+    bus.load_events_since = fake_load  # type: ignore[method-assign]
+    loop = _loop(loop_env)
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+    loop._load_cost_reader = MagicMock(return_value=None)
+    stats = await loop._do_work()
+    assert stats["anomalies"] == 0
+    pr.create_issue.assert_not_awaited()
+
+
+async def test_do_work_staleness_detector_uses_bg_worker_state(loop_env) -> None:
+    cfg, state, bg_workers, pr, dedup, bus = loop_env
+    old = (datetime.now(UTC) - timedelta(seconds=99_999)).isoformat()
+    state.get_worker_heartbeats.return_value = {
+        "rc_budget": {"status": "ok", "last_run": old, "details": {}},
+    }
+    bg_workers.worker_enabled = {"rc_budget": True}
+    bg_workers.get_interval.return_value = 600
+
+    async def fake_load(since):  # noqa: ARG001
+        return []
+
+    bus.load_events_since = fake_load  # type: ignore[method-assign]
+    loop = _loop(loop_env)
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+    loop._load_cost_reader = MagicMock(return_value=None)
+    stats = await loop._do_work()
+    assert stats["anomalies"] >= 1
+    title = pr.create_issue.await_args.args[0]
+    assert "rc_budget" in title
+    assert "staleness" in title
+
+
+async def test_do_work_cost_spike_skipped_when_reader_absent(loop_env) -> None:
+    """Cost-reader-absent = no breach, no escalation, no crash."""
+    cfg, state, bg_workers, pr, dedup, bus = loop_env
+
+    async def fake_load(since):  # noqa: ARG001
+        return []  # no tick events anywhere
+
+    bus.load_events_since = fake_load  # type: ignore[method-assign]
+    loop = _loop(loop_env)
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+    loop._load_cost_reader = MagicMock(return_value=None)
+    stats = await loop._do_work()
+    assert stats["anomalies"] == 0
+    pr.create_issue.assert_not_awaited()
+
+
+async def test_reconcile_closed_escalations_clears_dedup(loop_env, monkeypatch) -> None:
+    cfg, state, bg_workers, pr, dedup, bus = loop_env
+    dedup.get.return_value = {
+        "trust_fleet_sanity:issues_per_hour:ci_monitor",
+        "trust_fleet_sanity:staleness:rc_budget",
+    }
+    loop = _loop(loop_env)
+
+    class _P:
+        returncode = 0
+
+        async def communicate(self):
+            # Only the ci_monitor escalation was closed.
+            return (
+                b'[{"title": "HITL: trust-loop anomaly \xe2\x80\x94 '
+                b'ci_monitor issues_per_hour"}]',
+                b"",
+            )
+
+    async def fake_subproc(*args, **kwargs):
+        return _P()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subproc)
+    await loop._reconcile_closed_escalations()
+    dedup.set_all.assert_called_once()
+    remaining = dedup.set_all.call_args.args[0]
+    assert "trust_fleet_sanity:issues_per_hour:ci_monitor" not in remaining
+    assert "trust_fleet_sanity:staleness:rc_budget" in remaining
+    state.clear_trust_fleet_sanity_attempts.assert_called_once_with(
+        "issues_per_hour:ci_monitor"
+    )
