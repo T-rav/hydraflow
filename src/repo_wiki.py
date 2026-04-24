@@ -277,6 +277,7 @@ def _load_tracked_active_entries(topic_dir: Path) -> list[dict[str, Any]]:
                 "source_issue": fields.get("source_issue", ""),
                 "source_phase": fields.get("source_phase", ""),
                 "created_at": fields.get("created_at", ""),
+                "corroborations": fields.get("corroborations", "1"),
                 "path": str(path),
             }
         )
@@ -315,6 +316,7 @@ def _write_tracked_synthesis_entry(
         "source_phase: synthesis",
         f"created_at: {now}",
         "status: active",
+        f"corroborations: {entry.corroborations}",
     ]
     if supersedes:
         lines.append("supersedes: " + ",".join(supersedes))
@@ -357,6 +359,38 @@ def _mark_tracked_entry_superseded(entry_path: Path, *, superseded_by: str) -> N
         logger.warning(
             "mark_tracked_entry_superseded: failed to rewrite %s", entry_path
         )
+
+
+def increment_corroboration(entry_path: Path, *, by: int = 1) -> None:
+    """Atomically bump the ``corroborations`` counter in a tracked-layout
+    entry file. No-op when the file is missing or has no frontmatter
+    block. A missing ``corroborations`` field is treated as 1 and then
+    incremented.
+    """
+    from file_util import atomic_write  # noqa: PLC0415
+
+    if by < 1:
+        return
+    try:
+        text = entry_path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    fields, _block, body = _split_tracked_entry(text)
+    if not fields:
+        return
+    current_raw = fields.get("corroborations", "1")
+    try:
+        current = max(1, int(str(current_raw).strip()))
+    except (TypeError, ValueError):
+        current = 1
+    fields["corroborations"] = str(current + by)
+    rebuilt = (
+        "---\n" + "\n".join(f"{k}: {v}" for k, v in fields.items()) + "\n---\n" + body
+    )
+    try:
+        atomic_write(entry_path, rebuilt)
+    except OSError:
+        logger.warning("increment_corroboration: failed to rewrite %s", entry_path)
 
 
 def active_lint_tracked(
@@ -506,12 +540,64 @@ class WikiEntry(BaseModel):
         default=False,
         description="Legacy marker; see superseded_by for canonical staleness",
     )
+    corroborations: int = Field(
+        default=1,
+        ge=1,
+        description=(
+            "How many independent sources have re-asserted this principle. "
+            "Entries loaded without this field default to 1. Incremented by "
+            "the ingest-path dedup/corroboration logic in wiki_compiler."
+        ),
+    )
 
     @model_validator(mode="after")
     def _default_valid_from(self) -> WikiEntry:
         if self.valid_from is None:
             self.valid_from = self.created_at
         return self
+
+
+def annotate_entries_with_temporal_tags(
+    entries: list[WikiEntry],
+    *,
+    now: datetime,
+) -> list[tuple[WikiEntry, str]]:
+    """Tag each entry with a short human-readable stability string.
+
+    Tags:
+    - ``"recently added"`` — age < 30 days
+    - ``"stable for N months"`` — 30 days ≤ age < 365 days
+    - ``"stable for N year(s)"`` — age ≥ 365 days
+    - ``"age unknown"`` — ``created_at`` unparseable
+
+    When ``corroborations`` > 1, a ``(+N)`` suffix is appended so the
+    planner/reviewer can see how independently-re-discovered the claim
+    is at a glance. Pure function — no I/O, no LLM calls, safe to run
+    on every wiki read.
+    """
+    annotated: list[tuple[WikiEntry, str]] = []
+    for entry in entries:
+        try:
+            created = datetime.fromisoformat(entry.created_at)
+        except (TypeError, ValueError):
+            annotated.append((entry, "age unknown"))
+            continue
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=UTC)
+        age_days = (now - created).days
+        if age_days < 30:
+            base = "recently added"
+        elif age_days < 365:
+            months = max(1, age_days // 30)
+            base = f"stable for {months} months"
+        else:
+            years = age_days // 365
+            suffix = "year" if years == 1 else "years"
+            base = f"stable for {years} {suffix}"
+        if entry.corroborations > 1:
+            base = f"{base} (+{entry.corroborations})"
+        annotated.append((entry, base))
+    return annotated
 
 
 class WikiIndex(BaseModel):
@@ -724,6 +810,37 @@ class RepoWikiStore:
 
         result = "\n".join(parts)
         return result[:max_chars]
+
+    def query_with_tags(
+        self,
+        repo_slug: str,
+        keywords: list[str] | None = None,
+        topics: list[str] | None = None,
+        max_chars: int = 15_000,
+    ) -> tuple[str, dict[str, str]]:
+        """Like ``query`` but also returns a ``{title: temporal_tag}``
+        map for the tracked-layout entries.
+
+        Callers that want tagged output inline can weave the tags in at
+        render time (see ``BaseRunner._inject_repo_wiki``). Returns an
+        empty tag map when the store has no tracked_root or the repo
+        has no tracked entries.
+        """
+        markdown = self.query(
+            repo_slug, keywords=keywords, topics=topics, max_chars=max_chars
+        )
+        tags: dict[str, str] = {}
+        if self._tracked_root is None:
+            return markdown, tags
+        now = datetime.now(UTC)
+        for topic in self._list_tracked_topics(repo_slug):
+            topic_dir = self._tracked_topic_dir(repo_slug, topic)
+            if topic_dir is None or not topic_dir.is_dir():
+                continue
+            entries = self._load_tracked_topic_entries(topic_dir)
+            for entry, tag in annotate_entries_with_temporal_tags(entries, now=now):
+                tags[entry.title] = tag
+        return markdown, tags
 
     def lint(self, repo_slug: str) -> LintResult:
         """Run a health check on the wiki for the given repo.
@@ -1012,6 +1129,7 @@ class RepoWikiStore:
                 f"source_phase: {source_phase}",
                 f"created_at: {entry.created_at}",
                 f"status: {status}",
+                f"corroborations: {entry.corroborations}",
                 "---",
                 "",
                 f"# {entry.title}",
@@ -1197,28 +1315,45 @@ class RepoWikiStore:
         are returned; ``stale`` / ``superseded`` entries are filtered out since
         callers use this for prompt injection.
         """
-        entries: list[WikiEntry] = []
+        return [
+            entry for entry, _ in self._load_tracked_topic_entries_with_paths(topic_dir)
+        ]
+
+    def _load_tracked_topic_entries_with_paths(
+        self, topic_dir: Path
+    ) -> list[tuple[WikiEntry, Path]]:
+        """Like ``_load_tracked_topic_entries`` but preserves each entry's
+        source file path. Used by the ingest-time corroboration hook:
+        ``CorroborationDecision.canonical_path`` is populated from these
+        tuples so the caller can atomically bump the counter without a
+        second directory walk.
+        """
+        pairs: list[tuple[WikiEntry, Path]] = []
         for raw in _load_tracked_active_entries(topic_dir):
             try:
-                entries.append(
-                    WikiEntry(
-                        id=raw.get("id") or "",
-                        title=raw.get("title") or "(untitled)",
-                        content=raw.get("body") or "",
-                        topic=topic_dir.name,
-                        source_type=raw.get("source_phase") or "unknown",
-                        source_issue=(
-                            int(raw["source_issue"])
-                            if raw.get("source_issue")
-                            else None
-                        ),
-                        created_at=raw.get("created_at")
-                        or datetime.now(UTC).isoformat(),
-                    )
+                corroborations_raw = raw.get("corroborations", "1")
+                try:
+                    corroborations = max(1, int(str(corroborations_raw).strip()))
+                except (TypeError, ValueError):
+                    corroborations = 1
+                entry = WikiEntry(
+                    id=raw.get("id") or "",
+                    title=raw.get("title") or "(untitled)",
+                    content=raw.get("body") or "",
+                    topic=topic_dir.name,
+                    source_type=raw.get("source_phase") or "unknown",
+                    source_issue=(
+                        int(raw["source_issue"]) if raw.get("source_issue") else None
+                    ),
+                    created_at=raw.get("created_at") or datetime.now(UTC).isoformat(),
+                    corroborations=corroborations,
                 )
+                path_raw = raw.get("path")
+                path = Path(path_raw) if path_raw else topic_dir / "unknown.md"
+                pairs.append((entry, path))
             except (ValueError, TypeError):
                 logger.warning("Skipping malformed tracked entry under %s", topic_dir)
-        return entries
+        return pairs
 
     def _load_topic_entries(self, topic_path: Path) -> list[WikiEntry]:
         """Parse a topic markdown file back into entries.

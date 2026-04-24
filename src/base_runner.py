@@ -36,6 +36,23 @@ if TYPE_CHECKING:
     from tribal_wiki import TribalWikiStore
 
 
+def _weave_temporal_tags(markdown: str, tags: dict[str, str]) -> str:
+    """Insert temporal tags as italic lines after matching ``### <title>``
+    headings in the rendered wiki markdown. No-op on empty tags or empty
+    markdown so callers can pass through unconditionally.
+    """
+    if not tags or not markdown:
+        return markdown
+    out: list[str] = []
+    for line in markdown.splitlines():
+        out.append(line)
+        if line.startswith("### "):
+            title = line[4:].strip()
+            if title in tags:
+                out.append(f"*({tags[title]})*")
+    return "\n".join(out)
+
+
 class BaseRunner:
     """Shared base for ``AgentRunner``, ``PlannerRunner``, ``ReviewRunner``, and ``HITLRunner``.
 
@@ -372,11 +389,20 @@ class BaseRunner:
             if query_context
             else None
         )
-        per_repo_section = self._wiki_store.query(
-            repo,
-            keywords=keywords,
-            max_chars=self._config.max_repo_wiki_chars,
-        )
+        tags: dict[str, str] = {}
+        if hasattr(self._wiki_store, "query_with_tags"):
+            per_repo_section, tags = self._wiki_store.query_with_tags(
+                repo,
+                keywords=keywords,
+                max_chars=self._config.max_repo_wiki_chars,
+            )
+        else:
+            per_repo_section = self._wiki_store.query(
+                repo,
+                keywords=keywords,
+                max_chars=self._config.max_repo_wiki_chars,
+            )
+        per_repo_section = _weave_temporal_tags(per_repo_section, tags)
 
         tribal = getattr(self, "_tribal_wiki_store", None)
         tribal_section = ""
