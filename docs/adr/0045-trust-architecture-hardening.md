@@ -81,3 +81,16 @@ The plan files under `docs/superpowers/plans/2026-04-22-*.md` are the authoritat
 - `tests/scenarios/test_*_scenario.py` — one MockWorld scenario per trust loop.
 - `make trust` (fixture mode, RC CI gate) — runs adversarial corpus + contract tests on every RC promotion PR.
 - `HealthMonitorLoop._check_sanity_loop_staleness` + `TrustFleetSanityLoop` — runtime dead-man-switch enforcement of the dark-factory property.
+
+## Source-file citations
+
+The following files carry this ADR's decisions and must be kept in sync with any supersession:
+
+- `src/config.py` — loop interval fields, anomaly thresholds, budget-alert configs.
+- `src/models.py` — `StateData` fields for every new loop (attempts counters, last-green markers, dedup surfaces).
+- `src/orchestrator.py` — `bg_loop_registry` entries for all 10 loops + `set_bg_workers` post-ctor injection calls.
+- `src/service_registry.py` — dataclass fields + `build_services` instantiation for each loop.
+- `src/pr_manager.py` — per-issue cost-alert hook (§4.11).
+- `src/trust_fleet_sanity_loop.py` — meta-observability implementation (§12.1).
+- `src/health_monitor_loop.py` — dead-man-switch for the meta-observer.
+- `src/corpus_learning_loop.py`, `src/contract_refresh_loop.py`, `src/staging_bisect_loop.py`, `src/principles_audit_loop.py`, `src/flake_tracker_loop.py`, `src/skill_prompt_eval_loop.py`, `src/fake_coverage_auditor_loop.py`, `src/rc_budget_loop.py`, `src/wiki_rot_detector_loop.py` — the nine watched trust loops.

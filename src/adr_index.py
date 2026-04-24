@@ -29,10 +29,13 @@ _TITLE_RE = re.compile(r"^#\s*ADR-(\d{4}):\s*(.+?)\s*$", re.MULTILINE)
 _STATUS_RE = re.compile(r"\*\*Status:\*\*\s*(.+?)\s*$", re.MULTILINE)
 _CONTEXT_RE = re.compile(r"##\s+Context\s*\n\s*\n(.+?)(?=\n\s*\n|\n##\s|\Z)", re.DOTALL)
 _SUPERSEDED_RE = re.compile(r"Superseded\s+by\s+(ADR-\d{4})", re.IGNORECASE)
-# Matches `src/some/path.py:Symbol` citations — shared with
-# adr_pre_validator._SOURCE_SYMBOL_RE. Used for ADR↔source-file inverse
-# indexing so the CI gate can flag PRs touching files cited in Accepted ADRs.
-_SOURCE_FILE_CITATION_RE = re.compile(r"`(src/[^`:\s]+\.py):[A-Za-z_]\w*`")
+# Matches `src/some/path.py` or `src/some/path.py:Symbol` citations.
+# Shared with adr_pre_validator._SOURCE_SYMBOL_RE. Used for
+# ADR↔source-file inverse indexing so the CI gate can flag PRs
+# touching files cited in Accepted ADRs. The ``:Symbol`` tail is
+# optional so umbrella ADRs that cite files in prose (without a
+# specific symbol) also satisfy the gate.
+_SOURCE_FILE_CITATION_RE = re.compile(r"`(src/[^`:\s]+\.py)(?::[A-Za-z_]\w*)?`")
 
 
 @dataclass(frozen=True)
