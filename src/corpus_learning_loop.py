@@ -395,13 +395,23 @@ class CorpusLearningLoop(BaseBackgroundLoop):
                 failing_gate="expected_catcher_trips",
             )
 
-        # Gate (c): no *other* catcher trips on the same transcript.
+        # Gate (c): shallow marker-collision check. For each other skill
+        # we run its parser against the transcript that was built for the
+        # EXPECTED catcher (above). If a foreign parser's own RETRY marker
+        # happens to appear in that transcript text (e.g. the case's
+        # keyword collides with another skill's lexicon), the foreign
+        # parser returns ``passed=False`` and we flag the case as
+        # ambiguous. This is intentionally a lexical collision check, not
+        # a semantic equivalence — running each foreign parser against a
+        # transcript tailored to IT would vacuously trip every parser
+        # since _fixture_transcript_for writes each skill's marker
+        # verbatim. See review finding #1 (commit 1d245c8f review).
         also_tripped: list[str] = []
         for skill in BUILTIN_SKILLS:
             if skill.name == case.expected_catcher:
                 continue
             other_passed, _other_summary, _other_findings = skill.result_parser(
-                transcript
+                transcript,
             )
             if not other_passed:
                 also_tripped.append(skill.name)

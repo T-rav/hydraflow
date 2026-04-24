@@ -74,6 +74,10 @@ logger = logging.getLogger("hydraflow.contract_refresh_loop")
 # place. Matches ``docs/superpowers/plans/2026-04-22-fake-contract-tests.md``
 # Task 0.
 _SANDBOX_GITHUB_REPO = "T-rav-Hydra-Ops/hydraflow-contracts-sandbox"
+
+# Hard cap on the replay-gate subprocess — defends the async event loop
+# when a recorder hangs on network I/O or a zombie subprocess.
+_REPLAY_GATE_TIMEOUT_SECONDS = 300
 # Fixture git sandbox seeded by Task 0 (relative to ``repo_root``).
 _GIT_SANDBOX_RELPATH = "tests/trust/contracts/fixtures/git_sandbox"
 
@@ -291,14 +295,47 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         complexity for no real benefit. Task 20's telemetry instrumentation
         will push this through ``asyncio.to_thread`` if/when the base
         loop's timing budget becomes load-bearing.
+
+        Hard timeout defends the orchestrator: a hung recording cassette
+        (network call inside a recorder, zombie subprocess, etc.) must
+        not stall the entire async event loop indefinitely. On
+        ``TimeoutExpired`` we synthesize a non-zero CompletedProcess so
+        the caller routes the timeout through the fake-drift companion
+        path.
         """
-        return subprocess.run(
-            ["make", "trust-contracts"],
-            cwd=str(self._config.repo_root),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        try:
+            return subprocess.run(  # noqa: S603
+                ["make", "trust-contracts"],
+                cwd=str(self._config.repo_root),
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=_REPLAY_GATE_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as exc:
+            logger.warning(
+                "Replay gate timed out after %ss; treating as failure",
+                _REPLAY_GATE_TIMEOUT_SECONDS,
+            )
+            stdout_txt = (
+                exc.stdout.decode()
+                if isinstance(exc.stdout, bytes)
+                else (exc.stdout or "")
+            )
+            stderr_txt = (
+                exc.stderr.decode()
+                if isinstance(exc.stderr, bytes)
+                else (exc.stderr or "")
+            )
+            return subprocess.CompletedProcess(
+                args=list(exc.cmd)
+                if isinstance(exc.cmd, list | tuple)
+                else [str(exc.cmd)],
+                returncode=124,  # standard bash convention for timeouts
+                stdout=stdout_txt,
+                stderr=stderr_txt
+                + f"\n[replay-gate-timeout {_REPLAY_GATE_TIMEOUT_SECONDS}s]",
+            )
 
     async def _file_fake_drift_issue(
         self,
@@ -379,10 +416,13 @@ class ContractRefreshLoop(BaseBackgroundLoop):
 
         written = self._stage_drifted_cassettes(fleet.reports)
         pr_url = await self._open_refresh_pr(written, fleet)
-        # Record dedup key regardless of PR outcome so we don't re-file on
-        # the next tick; a transient PR-creation failure will surface via
-        # the standard logging path, not by reissuing the same work.
-        self._dedup.add(dedup_key)
+        # Only record the dedup key after a successful PR open. A
+        # transient failure (branch conflict, ``gh`` auth, push rejection)
+        # must not be hidden by dedup — the next tick retries. Without
+        # this guard the primary checkout stays dirty with uncommitted
+        # cassette writes while dedup blocks re-filing — silent stuck.
+        if pr_url is not None:
+            self._dedup.add(dedup_key)
 
         # Task 16 — replay gate. Only filed as fake-drift when the replay
         # suite fails after the refresh PR has been opened.
