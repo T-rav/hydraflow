@@ -136,6 +136,67 @@ class TestWriteEntry:
         assert len(loaded) == 1
         assert loaded[0].corroborations == 7
 
+    def test_increment_corroboration_bumps_counter_atomically(
+        self, tmp_path: Path
+    ) -> None:
+        """increment_corroboration must bump the counter in frontmatter
+        and leave the body untouched."""
+        from repo_wiki import increment_corroboration
+
+        entry_path = tmp_path / "0001-issue-1-x.md"
+        entry_path.write_text(
+            "---\n"
+            "id: 0001\n"
+            "topic: patterns\n"
+            "source_issue: 1\n"
+            "source_phase: review\n"
+            "created_at: 2026-01-01T00:00:00+00:00\n"
+            "status: active\n"
+            "corroborations: 3\n"
+            "---\n"
+            "# Title\n\nBody with important details.\n",
+            encoding="utf-8",
+        )
+
+        increment_corroboration(entry_path, by=2)
+
+        text = entry_path.read_text(encoding="utf-8")
+        assert "corroborations: 5" in text
+        assert "Body with important details." in text
+
+    def test_increment_corroboration_defaults_to_one_when_field_missing(
+        self, tmp_path: Path
+    ) -> None:
+        """Missing field → treated as 1, bumped to 1+by."""
+        from repo_wiki import increment_corroboration
+
+        entry_path = tmp_path / "0001-issue-1-x.md"
+        entry_path.write_text(
+            "---\n"
+            "id: 0001\n"
+            "topic: patterns\n"
+            "source_issue: 1\n"
+            "source_phase: review\n"
+            "created_at: 2026-01-01T00:00:00+00:00\n"
+            "status: active\n"
+            "---\n"
+            "# Title\n\nBody.\n",
+            encoding="utf-8",
+        )
+
+        increment_corroboration(entry_path, by=1)
+
+        text = entry_path.read_text(encoding="utf-8")
+        assert "corroborations: 2" in text
+
+    def test_increment_corroboration_noop_on_nonexistent_file(
+        self, tmp_path: Path
+    ) -> None:
+        """Missing file → silent no-op, never raises."""
+        from repo_wiki import increment_corroboration
+
+        increment_corroboration(tmp_path / "does-not-exist.md", by=1)
+
     def test_corroborations_defaults_to_one_when_field_missing_from_frontmatter(
         self, store: RepoWikiStore, tmp_path: Path
     ) -> None:

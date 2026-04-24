@@ -361,6 +361,38 @@ def _mark_tracked_entry_superseded(entry_path: Path, *, superseded_by: str) -> N
         )
 
 
+def increment_corroboration(entry_path: Path, *, by: int = 1) -> None:
+    """Atomically bump the ``corroborations`` counter in a tracked-layout
+    entry file. No-op when the file is missing or has no frontmatter
+    block. A missing ``corroborations`` field is treated as 1 and then
+    incremented.
+    """
+    from file_util import atomic_write  # noqa: PLC0415
+
+    if by < 1:
+        return
+    try:
+        text = entry_path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    fields, _block, body = _split_tracked_entry(text)
+    if not fields:
+        return
+    current_raw = fields.get("corroborations", "1")
+    try:
+        current = max(1, int(str(current_raw).strip()))
+    except (TypeError, ValueError):
+        current = 1
+    fields["corroborations"] = str(current + by)
+    rebuilt = (
+        "---\n" + "\n".join(f"{k}: {v}" for k, v in fields.items()) + "\n---\n" + body
+    )
+    try:
+        atomic_write(entry_path, rebuilt)
+    except OSError:
+        logger.warning("increment_corroboration: failed to rewrite %s", entry_path)
+
+
 def active_lint_tracked(
     tracked_root: Path,
     repo_slug: str,
