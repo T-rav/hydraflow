@@ -32,11 +32,13 @@ the canonical payload entirely — these are audit-trail fields, not
 contract fields, so changing them must never fire a refresh PR.
 
 Claude streams are JSONL, not YAML, and do not go through the
-``Cassette`` schema. They are compared as raw bytes — the stream
-protocol is stable enough that the Python JSON library's ordering
-preserves byte equality between two recordings of the same prompt, and
-any real drift (new block type, renamed field) is exactly what we want
-Task 17 to escalate.
+``Cassette`` schema. Each line is parsed as JSON, recursively stripped
+of volatile identifiers (``session_id``, ``timestamp``, ``id``,
+``parent_tool_use_id``, ``uuid``, ``created_at``), and the canonical
+list is serialized with ``sort_keys=True`` for compare (Task 17). This
+way two recordings of the same prompt with different session IDs do
+*not* fire drift, but a protocol bump that renames a load-bearing key
+or changes the event sequence does.
 
 Spec: ``docs/superpowers/specs/2026-04-22-trust-architecture-hardening-design.md``
 §4.2 "ContractRefreshLoop — full caretaker".
@@ -157,14 +159,83 @@ def _canonical_yaml(path: Path) -> bytes:
     return _canonical_payload(load_cassette(path))
 
 
-def _canonical_jsonl(path: Path) -> bytes:
-    """Raw bytes for a JSONL stream — no schema, no normalizers.
+# Fields that vary per invocation and carry no semantic contract — dropped
+# before comparing two claude stream samples. Byte-wise compare was too
+# brittle once a protocol version touches any of these (Task 17).
+_CLAUDE_VOLATILE_FIELDS: frozenset[str] = frozenset(
+    {
+        "session_id",
+        "timestamp",
+        "id",
+        "parent_tool_use_id",
+        "uuid",
+        "created_at",
+    }
+)
 
-    Claude stream samples are stable enough byte-for-byte that we do not
-    need a normalizer layer here. If that changes, Task 17's
-    stream-protocol-drift path is the right place to add one.
+
+def _strip_volatile(obj: Any) -> Any:
+    """Recursively drop ``_CLAUDE_VOLATILE_FIELDS`` keys from a JSON value.
+
+    Claude stream events nest under ``message.content[*]`` and a few other
+    places where a volatile identifier can live. Walking the tree means a
+    protocol change that moves ``id`` down one level still gets stripped.
     """
-    return path.read_bytes()
+    if isinstance(obj, dict):
+        return {
+            k: _strip_volatile(v)
+            for k, v in obj.items()
+            if k not in _CLAUDE_VOLATILE_FIELDS
+        }
+    if isinstance(obj, list):
+        return [_strip_volatile(v) for v in obj]
+    return obj
+
+
+def _normalize_claude_stream(lines: list[str]) -> list[dict[str, Any]]:
+    """Parse a claude JSONL stream into a canonical list of events.
+
+    Each line is a standalone JSON object. Blank / whitespace-only lines
+    and malformed JSON are silently dropped — the stream-json recorder
+    can emit a trailing blank line and a mid-flight truncation is noise,
+    not signal. Surviving events have every key in
+    :data:`_CLAUDE_VOLATILE_FIELDS` recursively stripped so two runs of
+    the same prompt produce the same canonical list.
+
+    The diff layer compares these canonical lists instead of raw bytes
+    (spec §4.2 Task 17), so a protocol bump that renames a load-bearing
+    field still fires drift but a fresh ``session_id`` alone does not.
+    """
+    out: list[dict[str, Any]] = []
+    for raw in lines:
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        try:
+            event = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        out.append(_strip_volatile(event))
+    return out
+
+
+def _canonical_jsonl(path: Path) -> bytes:
+    """Canonical representation of a claude JSONL stream (Task 17).
+
+    Parses every line through :func:`_normalize_claude_stream` and
+    re-serializes the resulting list with ``sort_keys=True`` so dict-key
+    reordering between runs cannot introduce phantom drift. Falls back
+    to raw bytes when the file is not valid UTF-8 — a corrupt recording
+    will legitimately flag as drift that way.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return path.read_bytes()
+    normalized = _normalize_claude_stream(text.splitlines())
+    return json.dumps(normalized, sort_keys=True).encode("utf-8")
 
 
 def _canonicalize(adapter: str, path: Path) -> bytes:

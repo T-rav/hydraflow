@@ -356,6 +356,157 @@ def test_adapter_drift_claude_new_and_deleted(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Task 17 — claude stream-protocol normalization
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_claude_stream_drops_volatile_fields() -> None:
+    """Volatile fields (timestamps, session_ids, message ids) must be stripped.
+
+    Two claude stream JSONL runs of the same prompt will differ only in
+    volatile identifiers — a session_id that regenerates per invocation,
+    a timestamp that bumps to ``now``, and per-message ``id`` values. The
+    normalizer removes those so the canonical list is stable.
+    """
+    from contract_diff import _normalize_claude_stream
+
+    lines = [
+        (
+            '{"type": "session", "session_id": "sess_abc", '
+            '"timestamp": "2026-04-23T10:00:00Z"}'
+        ),
+        (
+            '{"type": "assistant", "id": "msg_001", '
+            '"timestamp": "2026-04-23T10:00:01Z", '
+            '"message": {"content": "hello"}}'
+        ),
+        '{"type": "result", "result": "ok"}',
+    ]
+    normalized = _normalize_claude_stream(lines)
+
+    # Same length (no lines dropped — we only strip volatile fields).
+    assert len(normalized) == 3
+    # No volatile keys survive.
+    for event in normalized:
+        assert "session_id" not in event
+        assert "timestamp" not in event
+        assert "id" not in event
+    # Load-bearing fields kept.
+    assert normalized[0]["type"] == "session"
+    assert normalized[1]["type"] == "assistant"
+    assert normalized[1]["message"] == {"content": "hello"}
+    assert normalized[2] == {"type": "result", "result": "ok"}
+
+
+def test_normalize_claude_stream_skips_blank_and_non_json_lines() -> None:
+    """Blank lines and malformed JSON must not crash normalization.
+
+    A stream-json recorder can emit a trailing blank line; a mid-flight
+    truncation can leave a partial JSON object. Drop those silently —
+    the diff layer only cares about intact events.
+    """
+    from contract_diff import _normalize_claude_stream
+
+    lines = [
+        '{"type": "session", "session_id": "s"}',
+        "",
+        "   ",
+        "not-json-at-all",
+        '{"type": "result", "result": "ok"}',
+    ]
+    normalized = _normalize_claude_stream(lines)
+
+    assert [e["type"] for e in normalized] == ["session", "result"]
+
+
+def test_adapter_drift_claude_no_drift_when_only_volatile_differs(
+    tmp_path: Path,
+) -> None:
+    """Two claude runs that differ only in volatile fields → no drift.
+
+    Without Task 17 normalization, this would fire drift every tick
+    because ``session_id`` + timestamps regenerate per invocation.
+    """
+    rec = _write_jsonl(
+        tmp_path / "rec/stream_001.jsonl",
+        [
+            (
+                '{"type": "session", "session_id": "sess_FRESH", '
+                '"timestamp": "2026-04-23T10:00:00Z"}'
+            ),
+            '{"type": "result", "result": "ok"}',
+        ],
+    )
+    com = _write_jsonl(
+        tmp_path / "com/stream_001.jsonl",
+        [
+            (
+                '{"type": "session", "session_id": "sess_STALE", '
+                '"timestamp": "2026-04-20T09:00:00Z"}'
+            ),
+            '{"type": "result", "result": "ok"}',
+        ],
+    )
+
+    assert detect_adapter_drift("claude", [rec], [com]) is None
+
+
+def test_adapter_drift_claude_flags_semantic_drift(tmp_path: Path) -> None:
+    """A non-volatile field change (e.g. ``type`` or ``result``) → drift.
+
+    The normalizer only strips volatile metadata. Any load-bearing field
+    change (result value, event type, tool name) must still fire drift.
+    """
+    rec = _write_jsonl(
+        tmp_path / "rec/stream_001.jsonl",
+        [
+            (
+                '{"type": "session", "session_id": "sess_FRESH", '
+                '"timestamp": "2026-04-23T10:00:00Z"}'
+            ),
+            '{"type": "result", "result": "DIFFERENT"}',
+        ],
+    )
+    com = _write_jsonl(
+        tmp_path / "com/stream_001.jsonl",
+        [
+            (
+                '{"type": "session", "session_id": "sess_STALE", '
+                '"timestamp": "2026-04-20T09:00:00Z"}'
+            ),
+            '{"type": "result", "result": "ok"}',
+        ],
+    )
+
+    report = detect_adapter_drift("claude", [rec], [com])
+
+    assert report is not None
+    assert report.drifted_cassettes == [rec]
+
+
+def test_adapter_drift_claude_flags_renamed_key_as_drift(tmp_path: Path) -> None:
+    """Protocol bump renames a key → canonical dicts differ → drift fires.
+
+    This is exactly the case the plan's Task 17 preamble calls out —
+    byte-wise compare would catch this but so would the normalized
+    dict compare; we verify the normalized path still catches it.
+    """
+    rec = _write_jsonl(
+        tmp_path / "rec/stream_001.jsonl",
+        ['{"type": "tool_use", "tool_name": "Bash"}'],
+    )
+    com = _write_jsonl(
+        tmp_path / "com/stream_001.jsonl",
+        ['{"type": "tool_use", "name": "Bash"}'],
+    )
+
+    report = detect_adapter_drift("claude", [rec], [com])
+
+    assert report is not None
+    assert report.drifted_cassettes == [rec]
+
+
+# ---------------------------------------------------------------------------
 # detect_fleet_drift
 # ---------------------------------------------------------------------------
 
