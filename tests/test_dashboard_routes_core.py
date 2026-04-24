@@ -61,7 +61,6 @@ class TestCreateRouter:
             "/api/report",
             "/api/review-insights",
             "/api/retrospectives",
-            "/api/memories",
             "/api/sessions",
             "/api/sessions/{session_id}",
             "/api/request-changes",

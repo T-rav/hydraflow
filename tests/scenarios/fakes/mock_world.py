@@ -23,7 +23,6 @@ from tests.scenarios.fakes.fake_docker import FakeDocker
 from tests.scenarios.fakes.fake_fs import FakeFS
 from tests.scenarios.fakes.fake_git import FakeGit
 from tests.scenarios.fakes.fake_github import FakeGitHub
-from tests.scenarios.fakes.fake_hindsight import FakeHindsight
 from tests.scenarios.fakes.fake_http import FakeHTTP
 from tests.scenarios.fakes.fake_llm import FakeLLM
 from tests.scenarios.fakes.fake_sentry import FakeSentry
@@ -217,21 +216,23 @@ class MockWorld:
         use_real_agent_runner: bool = False,
         clock_start: float | str | None = None,
         wiki_store: Any = None,
+        wiki_compiler: Any = None,
         beads_manager: Any = None,
     ) -> None:
         self._tmp_path = tmp_path
         self._use_real_agent = use_real_agent_runner
         self._wiki_store = wiki_store
+        self._wiki_compiler = wiki_compiler
         self._beads_manager = beads_manager
         self._harness = PipelineHarness(
             tmp_path,
             config=config,
             wiki_store=wiki_store,
+            wiki_compiler=wiki_compiler,
             beads_manager=beads_manager,
         )
         self._llm = FakeLLM()
         self._github = FakeGitHub()
-        self._hindsight = FakeHindsight()
         self._sentry = FakeSentry()
         self._workspace = FakeWorkspace(tmp_path / "worktrees")
         self._clock = FakeClock(start=time.time())
@@ -257,7 +258,6 @@ class MockWorld:
             self._harness.set_agents(
                 build_real_agent_runner(
                     docker=self._docker,
-                    hindsight=self._hindsight,
                     event_bus=self._harness.bus,
                     tmp_path=self._tmp_path,
                 )
@@ -389,9 +389,7 @@ class MockWorld:
     def fail_service(
         self, name: str, _error: type[Exception] = ConnectionError
     ) -> MockWorld:
-        if name == "hindsight":
-            self._hindsight.set_failing(True)
-        elif name == "docker":
+        if name == "docker":
             self._docker.fail_next(kind="exit_nonzero")
         elif name == "github":
             self._github.set_rate_limit_mode(remaining=0)
@@ -401,9 +399,7 @@ class MockWorld:
         return self
 
     def heal_service(self, name: str) -> MockWorld:
-        if name == "hindsight":
-            self._hindsight.set_failing(False)
-        elif name == "github":
+        if name == "github":
             self._github.clear_rate_limit()
         elif name == "docker":
             self._docker.clear_fault()
@@ -417,10 +413,6 @@ class MockWorld:
     @property
     def github(self) -> FakeGitHub:
         return self._github
-
-    @property
-    def hindsight(self) -> FakeHindsight:
-        return self._hindsight
 
     @property
     def sentry(self) -> FakeSentry:
@@ -624,7 +616,6 @@ class MockWorld:
             self._loop_ports: dict[str, Any] = {
                 "github": self._github,
                 "workspace": self._workspace,
-                "hindsight": self._hindsight,
                 "sentry": self._sentry,
                 "clock": self._clock,
             }
@@ -691,7 +682,6 @@ class MockWorld:
             event_bus=bus,
             state=state,
             orchestrator=orchestrator,
-            hindsight_client=self._hindsight,
         )
         await dashboard.start()
 

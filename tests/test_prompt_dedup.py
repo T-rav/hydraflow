@@ -181,21 +181,10 @@ def test_split_paragraphs_empty():
 # ------------------------------------------------------------------
 
 
-def test_base_runner_inject_calls_dedup(monkeypatch):
-    """BaseRunner._inject_memory uses PromptDeduplicator.
-
-    The base runner deduplicates memory items across Hindsight banks.
-    """
-    # Read the source to confirm PromptDeduplicator is used in
-    # _inject_memory — a structural assertion that the
-    # dedup integration point exists and hasn't drifted.
-    import inspect
-
-    import base_runner as br_mod
-
-    source = inspect.getsource(br_mod.BaseRunner._inject_memory)
-    assert "PromptDeduplicator" in source
-    assert "dedup_memories" in source
+# test_base_runner_inject_calls_dedup removed in Phase 3 cutover — Hindsight
+# banks are gone, so _inject_memory no longer deduplicates across them. The
+# dedup module itself is still used for cross-section dedup in agent prompts
+# (see test_agent_prompt_uses_section_dedup below).
 
 
 def test_agent_prompt_uses_section_dedup(monkeypatch):

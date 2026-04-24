@@ -72,7 +72,6 @@ from timeline import TimelineBuilder
 from transcript_summarizer import TranscriptSummarizer
 
 if TYPE_CHECKING:
-    from hindsight import HindsightClient
     from orchestrator import HydraFlowOrchestrator
 from repo_runtime import RepoRuntime, RepoRuntimeRegistry
 from repo_store import RepoRecord, RepoStore
@@ -329,9 +328,6 @@ class RouteContext:
     list_repos_cb: Callable[[], list[RepoRecord]] | None = None
     default_repo_slug: str | None = None
     allowed_repo_roots_fn: Callable[[], tuple[str, ...]] | None = None
-
-    # Hindsight integration
-    hindsight_client: HindsightClient | None = None
 
     # HITL summary tuning
     hitl_summary_cooldown_seconds: int = 300
@@ -604,7 +600,6 @@ def create_router(
     list_repos_cb: Callable[[], list[RepoRecord]] | None = None,
     default_repo_slug: str | None = None,
     allowed_repo_roots_fn: Callable[[], tuple[str, ...]] | None = None,
-    hindsight_client: HindsightClient | None = None,
 ) -> APIRouter:
     """Create an APIRouter with all dashboard route handlers.
 
@@ -634,7 +629,6 @@ def create_router(
         list_repos_cb=list_repos_cb,
         default_repo_slug=default_repo_slug,
         allowed_repo_roots_fn=allowed_repo_roots_fn,
-        hindsight_client=hindsight_client,
     )
 
     router = APIRouter()
@@ -1255,10 +1249,6 @@ def create_router(
                 "port": config.dashboard_port,
                 "public": dashboard_public,
             },
-            "hindsight": {
-                "status": "ok" if _creds.hindsight_url else "disabled",
-                "configured": bool(_creds.hindsight_url),
-            },
             "github_cache": github_cache_health,
             "queue_depths": queue_depths,
         }
@@ -1281,46 +1271,6 @@ def create_router(
             "checks": checks,
         }
         return JSONResponse(payload)
-
-    @router.get("/api/hindsight/health")
-    async def hindsight_health() -> JSONResponse:
-        """Check Hindsight server connectivity."""
-        if ctx.hindsight_client is None:
-            return JSONResponse(
-                {"status": "disabled", "reachable": False, "url": ""},
-            )
-        try:
-            reachable = await ctx.hindsight_client.health_check()
-        except Exception:  # noqa: BLE001
-            reachable = False
-        return JSONResponse(
-            {
-                "status": "ok" if reachable else "unreachable",
-                "reachable": reachable,
-                "url": _creds.hindsight_url,
-            },
-        )
-
-    @router.post("/api/hindsight/audit")
-    async def hindsight_audit() -> JSONResponse:
-        """Run a memory quality audit across all Hindsight banks."""
-        if ctx.hindsight_client is None:
-            return JSONResponse({"status": "disabled", "results": []})
-        from memory_audit import MemoryAuditor  # noqa: PLC0415
-
-        auditor = MemoryAuditor(ctx.hindsight_client, config)
-        results = await auditor.audit_all()
-        return JSONResponse({"status": "ok", "results": results})
-
-    @router.get("/api/hindsight/banks")
-    async def hindsight_banks() -> JSONResponse:
-        """List Hindsight memory banks with stats."""
-        if not _creds.hindsight_url:
-            return JSONResponse({"status": "disabled", "banks": []})
-        from hindsight import Bank  # noqa: PLC0415
-
-        banks = [{"id": str(b), "name": b.name} for b in Bank]
-        return JSONResponse({"status": "ok", "banks": banks})
 
     @router.get("/", response_class=HTMLResponse)
     async def index() -> HTMLResponse:
@@ -1522,10 +1472,7 @@ def create_router(
 
     _register_hitl(router, ctx)
 
-    # --- Memory context routes (extracted to _memory_routes.py) ---
-    from dashboard_routes._memory_routes import register as _register_memory
-
-    _register_memory(router, ctx)
+    # Memory context routes removed in Phase 3 cutover — wiki routes replace them.
 
     # --- Control routes (extracted to _control_routes.py) ---
     from dashboard_routes._control_routes import register as _register_control
@@ -1790,27 +1737,6 @@ def create_router(
                 since=since_dt.isoformat() if since_dt else None,
                 until=until_dt.isoformat() if until_dt else None,
             ).model_dump()
-        )
-
-    @router.get("/api/memories")
-    async def get_memories() -> JSONResponse:
-        """Return memory items from local JSONL event log."""
-        import json as _json  # noqa: PLC0415
-
-        items_jsonl = config.data_path("memory", "items.jsonl")
-
-        items: list[dict[str, object]] = []
-        if items_jsonl.exists():
-            with contextlib.suppress(OSError):
-                for line in items_jsonl.read_text().splitlines():
-                    with contextlib.suppress(_json.JSONDecodeError):
-                        items.append(_json.loads(line))
-
-        return JSONResponse(
-            {
-                "total_items": len(items),
-                "items": items[-50:],
-            }
         )
 
     @router.get("/api/troubleshooting")

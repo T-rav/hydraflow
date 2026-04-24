@@ -75,58 +75,6 @@ class TestL9ADRReviewerLoop:
 
 
 # ---------------------------------------------------------------------------
-# L10: Memory Sync loop reconciles drift via delegate
-# ---------------------------------------------------------------------------
-
-
-class TestL10MemorySyncLoop:
-    """L10: memory_sync_loop calls sync() then publish_sync_event() on its delegate."""
-
-    async def test_memory_sync_loop_calls_sync_and_publish(self, tmp_path) -> None:
-        """MemorySyncLoop._do_work calls sync(), then publish_sync_event(result).
-
-        Both methods are async on the real MemorySyncWorker.  We inject an
-        AsyncMock so the awaits succeed, and assert both calls happened with
-        the expected arguments.  The stats dict is a copy of the sync result.
-        """
-        world = MockWorld(tmp_path)
-
-        sync_result = {"item_count": 42, "compacted": True, "evicted": 3}
-        fake_memory_sync = AsyncMock()
-        fake_memory_sync.sync.return_value = sync_result
-        fake_memory_sync.publish_sync_event.return_value = None
-        _seed_ports(world, memory_sync=fake_memory_sync)
-
-        stats = await world.run_with_loops(["memory_sync"], cycles=1)
-
-        assert stats["memory_sync"] is not None
-        assert stats["memory_sync"]["item_count"] == 42
-        assert stats["memory_sync"]["compacted"] is True
-        fake_memory_sync.sync.assert_called_once()
-        fake_memory_sync.publish_sync_event.assert_called_once_with(sync_result)
-
-    async def test_memory_sync_loop_stats_is_copy_of_result(self, tmp_path) -> None:
-        """Stats dict returned by the loop is a fresh copy of the sync result.
-
-        The loop does ``return dict(result)`` so mutating stats should not
-        affect the original dict held by the mock.
-        """
-        world = MockWorld(tmp_path)
-
-        sync_result = {"item_count": 5, "compacted": False}
-        fake_memory_sync = AsyncMock()
-        fake_memory_sync.sync.return_value = sync_result
-        fake_memory_sync.publish_sync_event.return_value = None
-        _seed_ports(world, memory_sync=fake_memory_sync)
-
-        stats = await world.run_with_loops(["memory_sync"], cycles=1)
-
-        # Mutating the returned stats must not affect the original
-        stats["memory_sync"]["item_count"] = 999
-        assert sync_result["item_count"] == 5
-
-
-# ---------------------------------------------------------------------------
 # L11: Retrospective loop processes queue items
 # ---------------------------------------------------------------------------
 

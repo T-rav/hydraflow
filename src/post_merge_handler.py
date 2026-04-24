@@ -6,6 +6,7 @@ import logging
 import re
 from collections.abc import Coroutine
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from acceptance_criteria import AcceptanceCriteriaGenerator
@@ -38,6 +39,7 @@ from models import (
 )
 from prompt_telemetry import PromptTelemetry
 from reflections import clear_reflections, read_reflections
+from repo_wiki import _load_tracked_active_entries
 from repo_wiki_ingest import entries_from_reflections_log, ingest_phase_output
 from retrospective import RetrospectiveCollector
 from state import StateTracker
@@ -50,6 +52,41 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hydraflow.post_merge_handler")
 
 _T = TypeVar("_T")
+
+
+async def _compile_tracked_topics_for_merge(
+    *,
+    tracked_root: Path,
+    repo_slug: str,
+    compiler: WikiCompiler | None,
+) -> None:
+    """Run WikiCompiler.compile_topic_tracked for every tracked topic
+    that has ≥2 active entries.
+
+    Runs inline on the post-merge hook chain so the next issue sees a
+    deduplicated wiki instead of waiting for the RepoWikiLoop interval
+    tick. Side effects are file mutations in ``{tracked_root}/{repo}/
+    {topic}/``; those become uncommitted diffs that the existing
+    ``RepoWikiLoop._maybe_open_maintenance_pr`` tick rolls up into a
+    ``chore(wiki): maintenance`` PR.
+
+    No-op when compiler is None, repo_slug is unset (unresolved config),
+    tracked_root is missing, or no topic has enough entries to merit
+    a compile pass.
+    """
+    if compiler is None or not repo_slug:
+        return
+    repo_dir = tracked_root / repo_slug
+    if not repo_dir.is_dir():
+        return
+    for topic_dir in sorted(p for p in repo_dir.iterdir() if p.is_dir()):
+        if len(_load_tracked_active_entries(topic_dir)) < 2:
+            continue
+        await compiler.compile_topic_tracked(
+            tracked_root=tracked_root,
+            repo=repo_slug,
+            topic=topic_dir.name,
+        )
 
 
 async def _bridge_reflections_to_wiki(
@@ -342,25 +379,6 @@ class PostMergeHandler:
 
         if success:
             result.merged = True
-            try:
-                from memory_scoring import MemoryScorer  # noqa: PLC0415
-
-                scorer = MemoryScorer(self._config.memory_dir)
-                _meta = self._state.get_worker_result_meta(pr.issue_number)
-                scorer.record_merge_outcome(
-                    issue_id=pr.issue_number,
-                    digest_hash=self._state.get_digest_hash(pr.issue_number) or "",
-                    quality_fix_attempts=_meta.get("quality_fix_attempts", 0)
-                    if _meta
-                    else 0,
-                    review_attempts=_meta.get("pre_quality_review_attempts", 0)
-                    if _meta
-                    else 0,
-                    tags=list(issue.tags) if issue else [],
-                    issue_title=issue.title if issue else "",
-                )
-            except Exception:
-                logger.debug("Failed to record merge outcome", exc_info=True)
             if self._store is not None:
                 self._store.mark_merged(pr.issue_number)
             # Compute merge duration before consolidated state update
@@ -582,6 +600,19 @@ class PostMergeHandler:
                     store=self._wiki_store,
                     compiler=self._wiki_compiler,
                     event_bus=self._event_bus,
+                ),
+                pr.issue_number,
+            )
+            # P5: compile the tracked wiki inline so the next issue
+            # sees a deduplicated view instead of waiting for the
+            # RepoWikiLoop interval. File mutations roll into the
+            # existing chore(wiki) maintenance PR flow.
+            await self._safe_hook(
+                "wiki compile on merge",
+                _compile_tracked_topics_for_merge(
+                    tracked_root=(self._config.repo_root / self._config.repo_wiki_path),
+                    repo_slug=self._config.repo or "",
+                    compiler=self._wiki_compiler,
                 ),
                 pr.issue_number,
             )

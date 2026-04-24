@@ -40,8 +40,6 @@ from task_source import TaskTransitioner
 from transcript_summarizer import TranscriptSummarizer
 
 if TYPE_CHECKING:
-    from hindsight import HindsightClient
-    from memory_judge import MemoryJudge  # noqa: TCH004
     from ports import IssueStorePort, PRPort, WorkspacePort
     from precondition_gate import PreconditionGate
 
@@ -65,8 +63,6 @@ class ImplementPhase:
         beads_manager: BeadsManager | None = None,
         active_issues_cb: Callable[[], None] | None = None,
         transcript_summarizer: TranscriptSummarizer | None = None,
-        hindsight: HindsightClient | None = None,
-        judge: MemoryJudge | None = None,
         precondition_gate: PreconditionGate | None = None,
     ) -> None:
         self._config = config
@@ -84,7 +80,7 @@ class ImplementPhase:
         self._summarizer = transcript_summarizer
         self._active_issues: set[int] = set()
         self._active_issues_lock = asyncio.Lock()
-        self._suggest_memory = MemorySuggester(config, hindsight=hindsight, judge=judge)
+        self._suggest_memory = MemorySuggester(config)
         self._zero_diff_memory_filed: set[int] = set()
         self._precondition_gate = precondition_gate
         self._escalator = PipelineEscalator(
@@ -334,7 +330,6 @@ class ImplementPhase:
                         mode="json",
                         exclude={
                             "gh_token",
-                            "hindsight_api_key",
                             "sentry_auth_token",
                             "whatsapp_token",
                             "whatsapp_phone_id",
@@ -434,19 +429,6 @@ class ImplementPhase:
         )
         await self._escalate_capped_issue(issue, attempts, last_error)
         self._state.mark_issue(issue.id, "failed")
-        try:
-            from memory_scoring import MemoryScorer  # noqa: PLC0415
-
-            scorer = MemoryScorer(self._config.memory_dir)
-            scorer.record_failure_outcome(
-                issue_id=issue.id,
-                digest_hash=self._state.get_digest_hash(issue.id) or "",
-                failure_category="max_attempts_exceeded",
-                summary=f"Max attempts exceeded: {issue.title[:80]}",
-                tags=list(issue.tags),
-            )
-        except Exception:
-            logger.debug("Failed to record max-attempts outcome", exc_info=True)
         return WorkerResult(
             issue_number=issue.id,
             branch=branch,

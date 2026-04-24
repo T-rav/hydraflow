@@ -12,15 +12,10 @@ import logging
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
 from models import IsoTimestamp
-
-if TYPE_CHECKING:
-    from hindsight import HindsightClient
-    from hindsight_wal import HindsightWAL
 
 logger = logging.getLogger("hydraflow.troubleshooting_store")
 
@@ -61,14 +56,9 @@ class TroubleshootingPatternStore:
     def __init__(
         self,
         memory_dir: Path,
-        *,
-        hindsight: HindsightClient | None = None,
-        wal: HindsightWAL | None = None,
     ) -> None:
         self._memory_dir = memory_dir
         self._path = memory_dir / "troubleshooting_patterns.jsonl"
-        self._hindsight = hindsight
-        self._wal = wal
 
     def append_pattern(self, pattern: TroubleshootingPattern) -> None:
         """Append or merge *pattern* into the store.
@@ -114,24 +104,6 @@ class TroubleshootingPatternStore:
             )
         except ImportError:
             pass
-
-        if self._hindsight is not None:
-            from hindsight import Bank, schedule_retain  # noqa: PLC0415
-
-            content = f"{pattern.pattern_name}: {pattern.description}\nFix: {pattern.fix_strategy}"
-            schedule_retain(
-                self._hindsight,
-                Bank.TROUBLESHOOTING,
-                content,
-                context=f"language={pattern.language} frequency={pattern.frequency}",
-                metadata={
-                    "language": pattern.language,
-                    "pattern_name": pattern.pattern_name,
-                    "frequency": pattern.frequency,
-                    "source_issues": pattern.source_issues,
-                },
-                wal=self._wal,
-            )
 
     def load_patterns(
         self, *, language: str | None = None, limit: int | None = 10

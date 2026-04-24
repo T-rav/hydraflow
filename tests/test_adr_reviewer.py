@@ -1448,6 +1448,11 @@ class TestExecuteOrchestrator:
         config = ConfigFactory.create(
             repo_root=tmp_path / "repo",
             background_tool="codex",
+            background_model="gpt-5-codex",
+            # ConfigFactory passes adr_review_model explicitly (default "sonnet"),
+            # which blocks the background_model cascade. Override to keep the
+            # (tool, model) pair coherent under the strict harmonize guard.
+            adr_review_model="gpt-5-codex",
         )
         from events import EventBus
 

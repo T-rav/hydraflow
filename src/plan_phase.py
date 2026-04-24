@@ -32,9 +32,7 @@ from transcript_summarizer import TranscriptSummarizer
 if TYPE_CHECKING:
     from beads_manager import BeadsManager
     from epic import EpicManager
-    from hindsight import HindsightClient
     from issue_cache import IssueCache
-    from memory_judge import MemoryJudge  # noqa: TCH004
     from plan_reviewer import PlanReviewer
     from ports import IssueStorePort, PRPort
     from wiki_compiler import WikiCompiler  # noqa: TCH004
@@ -94,8 +92,6 @@ class PlanPhase:
         beads_manager: BeadsManager | None = None,
         wiki_store: RepoWikiStore | None = None,
         wiki_compiler: WikiCompiler | None = None,
-        hindsight: HindsightClient | None = None,
-        judge: MemoryJudge | None = None,
         issue_cache: IssueCache | None = None,
         plan_reviewer: PlanReviewer | None = None,
     ) -> None:
@@ -116,7 +112,7 @@ class PlanPhase:
         self._wiki_compiler = wiki_compiler
         self._issue_cache = issue_cache
         self._plan_reviewer = plan_reviewer
-        self._suggest_memory = MemorySuggester(config, hindsight=hindsight, judge=judge)
+        self._suggest_memory = MemorySuggester(config)
         self._escalator = PipelineEscalator(
             state,
             prs,
@@ -479,7 +475,10 @@ class PlanPhase:
             )
             return None, None
         tracked_root = worktree_path / self._config.repo_wiki_path
-        return RepoWikiStore(tracked_root), worktree_path
+        return (
+            RepoWikiStore(wiki_root=tracked_root, tracked_root=tracked_root),
+            worktree_path,
+        )
 
     def _wiki_commit_compiler_entries(
         self,

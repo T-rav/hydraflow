@@ -102,9 +102,9 @@ docker-ensure:
 EXECUTION_MODE ?= $(or $(HYDRAFLOW_EXECUTION_MODE),host)
 
 ifeq ($(EXECUTION_MODE),docker)
-run: check-node-ui docker-ensure hindsight
+run: check-node-ui docker-ensure
 else
-run: check-node-ui hindsight
+run: check-node-ui
 endif
 	@mkdir -p $(LOG_DIR)
 	@echo "$(BLUE)Starting HydraFlow — backend :$(PORT) + frontend :5556$(RESET)"
@@ -278,11 +278,6 @@ security: deps
 	@cd $(HYDRAFLOW_DIR) && $(UV) bandit -c pyproject.toml -r . --severity-level medium
 	@echo "$(GREEN)Security scan passed$(RESET)"
 
-layer-check:
-	@echo "$(BLUE)Checking layer import direction...$(RESET)"
-	@cd $(HYDRAFLOW_DIR) && $(UV) python scripts/check_layer_imports.py
-	@echo "$(GREEN)Layer check passed$(RESET)"
-
 # --------------------------------------------------------------------------
 # Principles audit (ADR-0044). Targets `.` by default; override with DIR=.
 #   make audit                         # audit this repo
@@ -311,6 +306,7 @@ init:
 		$(if $(PRINCIPLE),--principle $(PRINCIPLE)) \
 		$(ARGS)
 
+
 quality: deps
 	@echo "$(BLUE)Running quality checks in parallel...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && ( \
@@ -318,7 +314,6 @@ quality: deps
 		$(UV) pyright && echo "[typecheck OK]" & \
 		$(UV) bandit -c pyproject.toml -r . --severity-level medium && echo "[security OK]" & \
 		PYTHONPATH=src $(UV) pytest tests/ && echo "[tests OK]" & \
-		$(UV) python scripts/check_layer_imports.py && echo "[layer-check OK]" & \
 		wait_result=0; \
 		for job in $$(jobs -p); do wait $$job || wait_result=1; done; \
 		exit $$wait_result; \
@@ -542,16 +537,6 @@ ui-clean:
 	@echo "$(YELLOW)Cleaning dashboard build artifacts...$(RESET)"
 	@rm -rf $(HYDRAFLOW_DIR)src/ui/dist $(HYDRAFLOW_DIR)src/ui/node_modules
 	@echo "$(GREEN)Dashboard cleaned$(RESET)"
-
-hindsight:
-	@echo "$(BLUE)Starting Hindsight semantic memory server...$(RESET)"
-	docker compose up -d hindsight
-	@echo "$(GREEN)Hindsight running — API: http://localhost:8888  UI: http://localhost:9999$(RESET)"
-
-hindsight-stop:
-	@echo "$(BLUE)Stopping Hindsight...$(RESET)"
-	docker compose down hindsight
-	@echo "$(GREEN)Hindsight stopped$(RESET)"
 
 docker-build:
 	@echo "$(BLUE)Building Hydra agent Docker image...$(RESET)"

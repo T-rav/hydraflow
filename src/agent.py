@@ -39,8 +39,6 @@ if TYPE_CHECKING:
     from config import Credentials, HydraFlowConfig
     from dolt_backend import DoltBackend
     from execution import SubprocessRunner
-    from hindsight import HindsightClient
-    from hindsight_wal import HindsightWAL
     from repo_wiki import RepoWikiStore
     from tracing_context import TracingContext
     from tribal_wiki import TribalWikiStore
@@ -140,9 +138,7 @@ Run through this checklist before your final commit:
         event_bus: EventBus,
         runner: SubprocessRunner | None = None,
         *,
-        hindsight: HindsightClient | None = None,
         dolt: DoltBackend | None = None,
-        wal: HindsightWAL | None = None,
         credentials: Credentials | None = None,
         wiki_store: RepoWikiStore | None = None,
         tribal_wiki_store: TribalWikiStore | None = None,
@@ -151,13 +147,13 @@ Run through this checklist before your final commit:
             config,
             event_bus,
             runner,
-            hindsight=hindsight,
             credentials=credentials,
             wiki_store=wiki_store,
             tribal_wiki_store=tribal_wiki_store,
         )
         self._insights = ReviewInsightStore(
-            config.memory_dir, hindsight=hindsight, dolt=dolt, wal=wal
+            config.memory_dir,
+            dolt=dolt,
         )
         from context_cache import ContextSectionCache
 

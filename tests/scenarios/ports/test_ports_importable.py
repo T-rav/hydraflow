@@ -6,13 +6,12 @@ import pytest
 
 from tests.scenarios.ports import (
     ClockPort,
-    HindsightPort,
     LLMPort,
     SentryPort,
 )
 
 
-@pytest.mark.parametrize("port", [ClockPort, HindsightPort, LLMPort, SentryPort])
+@pytest.mark.parametrize("port", [ClockPort, LLMPort, SentryPort])
 def test_port_is_runtime_checkable(port: type) -> None:
     # runtime_checkable decorator sets this dunder
     assert getattr(port, "_is_runtime_protocol", False), (

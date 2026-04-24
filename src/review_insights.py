@@ -14,8 +14,6 @@ from models import IsoTimestamp, ReviewVerdict
 
 if TYPE_CHECKING:
     from dolt_backend import DoltBackend
-    from hindsight import HindsightClient
-    from hindsight_wal import HindsightWAL
     from ports import ReviewInsightStorePort  # noqa: TCH004
 
 logger = logging.getLogger("hydraflow.review_insights")
@@ -212,9 +210,7 @@ class ReviewInsightStore:
         self,
         memory_dir: Path,
         *,
-        hindsight: HindsightClient | None = None,
         dolt: DoltBackend | None = None,
-        wal: HindsightWAL | None = None,
     ) -> None:
         self._memory_dir = memory_dir
         self._reviews_path = memory_dir / "reviews.jsonl"
@@ -223,9 +219,7 @@ class ReviewInsightStore:
             memory_dir / "proposed_categories.json",
             dolt=dolt,
         )
-        self._hindsight = hindsight
         self._dolt = dolt
-        self._wal = wal
 
     def append_review(self, record: ReviewRecord) -> None:
         """Append *record* as a JSON line to ``reviews.jsonl``."""
@@ -238,23 +232,6 @@ class ReviewInsightStore:
                 "Could not append review to %s",
                 self._reviews_path,
                 exc_info=True,
-            )
-
-        if self._hindsight is not None:
-            from hindsight import Bank, schedule_retain  # noqa: PLC0415
-
-            schedule_retain(
-                self._hindsight,
-                Bank.REVIEW_INSIGHTS,
-                record.summary,
-                context=f"PR #{record.pr_number} issue #{record.issue_number} verdict={record.verdict}",
-                metadata={
-                    "pr_number": record.pr_number,
-                    "issue_number": record.issue_number,
-                    "verdict": str(record.verdict),
-                    "categories": record.categories,
-                },
-                wal=self._wal,
             )
 
         try:

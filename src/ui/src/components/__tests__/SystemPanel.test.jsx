@@ -83,27 +83,7 @@ describe('SystemPanel', () => {
       expect(metricsPanel.style.overflowY).toBe('auto')
     })
 
-    it('mounts MemoryExplorer when Memory sub-tab is selected', () => {
-      mockUseHydraFlow.mockReturnValue(defaultMockContext({
-        memories: { total_items: 0 },
-        retrospectives: { total_entries: 0 },
-        reviewInsights: { total_reviews: 0 },
-        troubleshooting: { total_patterns: 0 },
-        harnessInsights: null,
-      }))
-      const originalFetch = global.fetch
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({ banks: [] }),
-      })
-      try {
-        render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
-        fireEvent.click(screen.getByText('Memory'))
-        expect(screen.getByTestId('memory-explorer')).toBeInTheDocument()
-      } finally {
-        global.fetch = originalFetch
-      }
-    })
+    // MemoryExplorer tab removed in Phase 3 cutover — wiki is the new primary.
   })
 
   describe('Background Workers', () => {
@@ -388,14 +368,14 @@ describe('SystemPanel', () => {
   })
 
   describe('Sub-tab Navigation', () => {
-    it('shows Workers, Pipeline, Metrics, Insights, Memory, Diagnostics, and Livestream sub-tab labels', () => {
+    it('shows Workers, Pipeline, Metrics, Insights, Diagnostics, and Livestream sub-tab labels', () => {
       render(<SystemPanel backgroundWorkers={[]} />)
       expect(screen.getByText('Workers')).toBeInTheDocument()
       expect(screen.getByText('Pipeline')).toBeInTheDocument()
       expect(screen.getByText('Metrics')).toBeInTheDocument()
       expect(screen.queryByText('Processes')).not.toBeInTheDocument()
       expect(screen.getByText('Insights')).toBeInTheDocument()
-      expect(screen.getByText('Memory')).toBeInTheDocument()
+      expect(screen.queryByText('Memory')).not.toBeInTheDocument()
       expect(screen.getByText('Diagnostics')).toBeInTheDocument()
       expect(screen.getByText('Livestream')).toBeInTheDocument()
       expect(screen.queryByText('Event Log')).not.toBeInTheDocument()

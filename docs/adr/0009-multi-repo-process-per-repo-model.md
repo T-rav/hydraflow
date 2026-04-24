@@ -1,6 +1,7 @@
 # ADR-0009: Multi-Repo Process-Per-Repo Model
 
 **Status:** Accepted
+**Enforced by:** (process)
 **Date:** 2026-02-28
 
 ## Context
