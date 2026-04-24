@@ -121,6 +121,7 @@ class TestInitialization:
             "trust_fleet_sanity_last_run",
             "trust_fleet_sanity_last_seen_counts",
             "wiki_rot_attempts",
+            "contract_refresh_attempts",
         }
         assert set(d.keys()) == expected_keys
 
