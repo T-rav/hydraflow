@@ -1,6 +1,6 @@
 """CorpusLearningLoop — grow the adversarial corpus from escape signals (§4.1 v2).
 
-Phase 2 Tasks 11–14 are wired in:
+Phase 2 Tasks 11–15 are wired in:
 
 - **Task 11** (reader): the loop queries
   ``PRManager.list_issues_by_label`` for open issues tagged with the
@@ -32,7 +32,17 @@ Phase 2 Tasks 11–14 are wired in:
 - **Task 14** (wiring): :meth:`CorpusLearningLoop._do_work` ticks through
   the escape signals, synthesizes + validates each, and returns a
   status dict with ``escape_issues_seen``, ``cases_synthesized``, and
-  ``cases_validated``. Filing the actual PR is Task 15's scope.
+  ``cases_validated``.
+
+- **Task 15** (materialize + PR): validated cases are written to
+  ``tests/trust/adversarial/cases/<slug>/`` (via
+  :meth:`CorpusLearningLoop._materialize_case_on_disk`) and filed as
+  PRs (via :meth:`CorpusLearningLoop._open_pr_for_case`, which
+  delegates to :func:`auto_pr.open_automated_pr_async`). A
+  :class:`dedup_store.DedupStore` keyed on
+  ``corpus_learning:<issue_number>:<slug>`` prevents re-filing the
+  same case on subsequent ticks. The final status dict gains a
+  ``cases_filed`` counter.
 
 Kill-switch: :meth:`LoopDeps.enabled_cb` with ``worker_name="corpus_learning"``
 — **no ``corpus_learning_enabled`` config field** (spec §12.2).
@@ -45,8 +55,10 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+from auto_pr import open_automated_pr_async
 from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
 from models import WorkCycleResult  # noqa: TCH001
 from skill_registry import BUILTIN_SKILLS, AgentSkill
@@ -93,6 +105,16 @@ _CATCHER_MARKERS: dict[str, str] = {
 #: when combined with the cases-root prefix.
 _SLUG_MAX_LEN = 64
 
+#: Relative (to ``repo_root``) root for all materialized cases. Kept as a
+#: module constant so Task 16's integration test and Task 18's MockWorld
+#: scenario reference the same single source of truth.
+_CASES_ROOT = Path("tests") / "trust" / "adversarial" / "cases"
+
+#: Labels applied to every PR the loop opens. ``hydraflow-agent`` is the
+#: generic auto-opened-PR tag the promotion flow already recognizes;
+#: ``corpus-learning`` lets operators filter this loop's traffic.
+_CASE_PR_LABELS: tuple[str, ...] = ("hydraflow-agent", "corpus-learning")
+
 
 @dataclass(frozen=True, slots=True)
 class EscapeSignal:
@@ -138,9 +160,9 @@ class SynthesizedCase:
         <plan text — scope-check/plan-compliance only>
         ```
 
-    Task 15 materializes the spec onto disk (under
-    ``tests/trust/adversarial/cases/<slug>/``); Task 14 only validates
-    it in memory.
+    Task 15's :meth:`CorpusLearningLoop._materialize_case_on_disk`
+    writes this spec out under
+    ``tests/trust/adversarial/cases/<slug>/``.
     """
 
     issue_number: int
@@ -175,15 +197,11 @@ class ValidationResult:
 class CorpusLearningLoop(BaseBackgroundLoop):
     """Grows ``tests/trust/adversarial/cases/`` from production escape signals.
 
-    Current state (Tasks 11–14): reads escape signals, synthesizes
-    in-memory case specs, and self-validates them with three gates.
-    Filing the case as a PR (Task 15), five-checkpoint status wiring
-    (Task 15), and the release-gating scenario (Task 18) are all
-    downstream.
-
-    On three self-validation failures for the same issue the loop will
-    (Task 15) label it ``hitl-escalation`` + ``corpus-learning-stuck``
-    and move on.
+    Current state (Tasks 11–15): reads escape signals, synthesizes
+    in-memory case specs, self-validates them with three gates,
+    materializes the survivors to disk, and files them as PRs against
+    the configured base branch.  Five-checkpoint status wiring is Task
+    15's other half; the release-gating scenario is Task 18.
     """
 
     def __init__(
@@ -417,7 +435,132 @@ class CorpusLearningLoop(BaseBackgroundLoop):
         )
 
     # ------------------------------------------------------------------
-    # Task 14 — tick
+    # Task 15 — materialize + PR
+    # ------------------------------------------------------------------
+
+    def _materialize_case_on_disk(
+        self, case: SynthesizedCase, repo_root: Path
+    ) -> list[Path]:
+        """Write a :class:`SynthesizedCase` out under ``tests/trust/adversarial/cases/<slug>/``.
+
+        Layout mirrors the existing authored cases: every entry in
+        ``case.before_files`` lands under ``before/<rel>`` and every
+        entry in ``case.after_files`` lands under ``after/<rel>``; the
+        expected catcher name lives in ``expected_catcher.txt`` and the
+        human-readable repro description lives in ``README.md``.
+
+        The keyword convention — the harness reads ``_read_keyword``
+        from README.md — is preserved by prepending a ``Keyword:`` line
+        so the harness's ``_read_keyword`` helper finds it there.
+
+        Returns the list of absolute paths actually written so the
+        caller can pass them straight to
+        :func:`auto_pr.open_automated_pr_async` without a second
+        `os.walk`.
+        """
+        case_dir = repo_root / _CASES_ROOT / case.slug
+        written: list[Path] = []
+
+        for rel_path, content in case.before_files.items():
+            target = case_dir / "before" / rel_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content)
+            written.append(target)
+
+        for rel_path, content in case.after_files.items():
+            target = case_dir / "after" / rel_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content)
+            written.append(target)
+
+        catcher_path = case_dir / "expected_catcher.txt"
+        catcher_path.parent.mkdir(parents=True, exist_ok=True)
+        catcher_path.write_text(case.expected_catcher + "\n")
+        written.append(catcher_path)
+
+        readme_lines = [
+            f"# {case.slug}",
+            "",
+            f"Keyword: {case.keyword}",
+            "",
+            f"Expected-Catcher: {case.expected_catcher}",
+            "",
+            f"Synthesized from escape issue #{case.issue_number}.",
+            "",
+        ]
+        if case.readme:
+            readme_lines.append(case.readme)
+            readme_lines.append("")
+        if case.plan_text:
+            readme_lines.extend(["## Plan", "", case.plan_text, ""])
+        readme_path = case_dir / "README.md"
+        readme_path.write_text("\n".join(readme_lines))
+        written.append(readme_path)
+
+        return written
+
+    async def _open_pr_for_case(
+        self,
+        case: SynthesizedCase,
+        paths: list[Path],
+        *,
+        title: str,
+        body: str,
+    ) -> int | None:
+        """File a PR for ``case`` via :func:`auto_pr.open_automated_pr_async`.
+
+        Returns the parsed PR number on success, or ``None`` when the
+        case has already been filed (dedup hit) or
+        ``open_automated_pr_async`` reported a non-``opened`` status.
+        The dedup key is ``corpus_learning:<issue_number>:<slug>`` —
+        encoded with both components so that a retitled issue (new
+        slug) and a re-filing of the original escape (same slug) are
+        handled distinctly.
+
+        Only records the dedup entry on a successful filing; a transient
+        ``gh``/``git`` failure leaves the set untouched so the next tick
+        retries instead of silently dropping the case.
+        """
+        dedup_key = f"corpus_learning:{case.issue_number}:{case.slug}"
+        if dedup_key in self._dedup.get():
+            logger.info(
+                "corpus-learning: skipping already-filed case %s (#%d)",
+                case.slug,
+                case.issue_number,
+            )
+            return None
+
+        branch = f"hydraflow/corpus-learning/issue-{case.issue_number}-{case.slug}"
+        result = await open_automated_pr_async(
+            repo_root=self._config.repo_root,
+            branch=branch,
+            files=paths,
+            pr_title=title,
+            pr_body=body,
+            base=self._config.base_branch(),
+            auto_merge=False,
+            labels=list(_CASE_PR_LABELS),
+            gh_token="",
+            raise_on_failure=False,
+            commit_author_name=self._config.git_user_name,
+            commit_author_email=self._config.git_user_email,
+        )
+
+        if getattr(result, "status", None) != "opened":
+            logger.warning(
+                "corpus-learning: PR open failed for #%d (%s): status=%r error=%r",
+                case.issue_number,
+                case.slug,
+                getattr(result, "status", None),
+                getattr(result, "error", None),
+            )
+            return None
+
+        self._dedup.add(dedup_key)
+        return _parse_pr_number(getattr(result, "pr_url", None)) or case.issue_number
+
+    # ------------------------------------------------------------------
+    # Task 14+15 — tick
     # ------------------------------------------------------------------
 
     async def _do_work(self) -> WorkCycleResult:
@@ -425,9 +568,10 @@ class CorpusLearningLoop(BaseBackgroundLoop):
 
         When the kill-switch is off, short-circuits with
         ``{"status": "disabled"}``. Otherwise fetches escape signals,
-        synthesizes + validates each, and reports
-        ``{escape_issues_seen, cases_synthesized, cases_validated}``.
-        PR filing + dedup persistence land in Task 15.
+        synthesizes + validates each, then materializes survivors to
+        disk and files one PR per validated case. Returns a status dict
+        with ``escape_issues_seen``, ``cases_synthesized``,
+        ``cases_validated``, and ``cases_filed``.
         """
         if not self._enabled_cb(self._worker_name):
             return {"status": "disabled"}
@@ -442,6 +586,7 @@ class CorpusLearningLoop(BaseBackgroundLoop):
 
         cases_synthesized = 0
         cases_validated = 0
+        cases_filed = 0
         validated_cases: list[SynthesizedCase] = []
         for signal in signals:
             case = self._synthesize_case(signal)
@@ -460,15 +605,23 @@ class CorpusLearningLoop(BaseBackgroundLoop):
                     result.reason,
                 )
 
-        # ``validated_cases`` is kept as a local for now; Task 15 will
-        # feed it into the PR-opening path.
-        _ = validated_cases
+        repo_root = Path(self._config.repo_root)
+        for case in validated_cases:
+            paths = self._materialize_case_on_disk(case, repo_root)
+            title = f"test(trust): corpus-learning case for escape #{case.issue_number}"
+            body = _build_pr_body(case)
+            pr_number = await self._open_pr_for_case(
+                case, paths, title=title, body=body
+            )
+            if pr_number is not None:
+                cases_filed += 1
 
         return {
             "status": "noop",
             "escape_issues_seen": len(signals),
             "cases_synthesized": cases_synthesized,
             "cases_validated": cases_validated,
+            "cases_filed": cases_filed,
         }
 
 
@@ -618,3 +771,39 @@ def _skill_by_name(name: str) -> AgentSkill | None:
         if skill.name == name:
             return skill
     return None
+
+
+_PR_URL_TAIL_RE = re.compile(r"/pull/(?P<num>\d+)")
+
+
+def _parse_pr_number(pr_url: str | None) -> int | None:
+    """Extract the PR number from a ``gh pr create`` URL, or ``None``.
+
+    ``gh`` prints URLs like ``https://github.com/org/repo/pull/123``.
+    We also accept the shorter ``org/repo/pull/123`` form test stubs
+    sometimes emit, which the regex handles uniformly.
+    """
+    if not pr_url:
+        return None
+    match = _PR_URL_TAIL_RE.search(pr_url)
+    if match is None:
+        return None
+    try:
+        return int(match.group("num"))
+    except ValueError:
+        return None
+
+
+def _build_pr_body(case: SynthesizedCase) -> str:
+    """Compose the PR body for a synthesized corpus case."""
+    lines = [
+        f"Synthesized adversarial corpus case for escape issue #{case.issue_number}.",
+        "",
+        f"**Catcher:** `{case.expected_catcher}`",
+        f"**Keyword:** `{case.keyword}`",
+        "",
+    ]
+    if case.readme:
+        lines.extend(["## Reasoning", "", case.readme, ""])
+    lines.append(f"Closes #{case.issue_number}")
+    return "\n".join(lines)

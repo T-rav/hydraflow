@@ -30,6 +30,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from base_background_loop import LoopDeps
 from config import HydraFlowConfig
 from corpus_learning_loop import (
@@ -41,6 +43,30 @@ from corpus_learning_loop import (
     ValidationResult,
 )
 from events import EventBus
+
+
+@pytest.fixture(autouse=True)
+def _stub_open_automated_pr_async(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[dict[str, object]]:
+    """Neutralize PR-open side effects in Task 14/15 ``_do_work`` tests.
+
+    Without this, older tests that feed a validatable signal would reach
+    :func:`auto_pr.open_automated_pr_async` and try to ``git worktree
+    add`` against the real repo. Tests that want to observe PR-open
+    arguments monkeypatch the hook explicitly (overriding this stub);
+    the rest get a silent no-op that returns ``status="no-diff"``.
+    """
+    calls: list[dict[str, object]] = []
+
+    async def fake(**kwargs: object) -> object:
+        calls.append(kwargs)
+        return _AutoPrResultStub(status="no-diff", pr_url=None)
+
+    import corpus_learning_loop as mod
+
+    monkeypatch.setattr(mod, "open_automated_pr_async", fake)  # type: ignore[attr-defined]
+    return calls
 
 
 def _deps(stop: asyncio.Event, *, enabled: bool = True) -> LoopDeps:
@@ -57,19 +83,24 @@ def _loop(
     *,
     enabled: bool = True,
     prs: object | None = None,
+    dedup: object | None = None,
     **config_overrides: object,
 ) -> CorpusLearningLoop:
+    # Default ``repo_root`` to tmp_path so Task 15's materialization
+    # stays inside the test sandbox. Callers can override by passing
+    # ``repo_root=...`` in config_overrides.
+    config_overrides.setdefault("repo_root", tmp_path)
     cfg = HydraFlowConfig(
         data_root=tmp_path,
         repo="hydra/hydraflow",
         **config_overrides,
     )
     pr_manager = prs if prs is not None else AsyncMock()
-    dedup = MagicMock()
+    dedup_store = dedup if dedup is not None else MagicMock()
     return CorpusLearningLoop(
         config=cfg,
         prs=pr_manager,
-        dedup=dedup,
+        dedup=dedup_store,
         deps=_deps(asyncio.Event(), enabled=enabled),
     )
 
@@ -689,3 +720,330 @@ def test_do_work_counts_validation_failures_separately(tmp_path: Path) -> None:
     assert result.get("escape_issues_seen") == 1
     assert result.get("cases_synthesized") == 1
     assert result.get("cases_validated") == 0
+
+
+# ---------------------------------------------------------------------------
+# Task 15 — materialize validated cases and file them as PRs
+# ---------------------------------------------------------------------------
+
+
+def _valid_case(
+    *,
+    issue_number: int = 909,
+    slug: str = "diff-sanity-missed-renamed-callsite",
+    catcher: str = "diff-sanity",
+    keyword: str = "renamed",
+    readme: str = "Symbol rename leaves callsite stale.",
+    plan_text: str = "",
+    before_files: dict[str, str] | None = None,
+    after_files: dict[str, str] | None = None,
+) -> SynthesizedCase:
+    return SynthesizedCase(
+        issue_number=issue_number,
+        slug=slug,
+        expected_catcher=catcher,
+        keyword=keyword,
+        before_files=before_files
+        or {"src/foo.py": "def compute_total():\n    return 1\n"},
+        after_files=after_files or {"src/foo.py": "def compute_sum():\n    return 1\n"},
+        readme=readme,
+        plan_text=plan_text,
+    )
+
+
+def test_materialize_case_on_disk_writes_expected_shapes(tmp_path: Path) -> None:
+    # Task 15 materialization: before/, after/, expected_catcher.txt, README.md
+    # all land under tests/trust/adversarial/cases/<slug>/ rooted at repo_root,
+    # and the returned path list mirrors what was written.
+    loop = _loop(tmp_path)
+    case = _valid_case()
+
+    paths = loop._materialize_case_on_disk(case, tmp_path)
+
+    case_dir = tmp_path / "tests" / "trust" / "adversarial" / "cases" / case.slug
+    before_path = case_dir / "before" / "src" / "foo.py"
+    after_path = case_dir / "after" / "src" / "foo.py"
+    catcher_path = case_dir / "expected_catcher.txt"
+    readme_path = case_dir / "README.md"
+
+    assert before_path.exists()
+    assert after_path.exists()
+    assert catcher_path.exists()
+    assert readme_path.exists()
+
+    assert before_path.read_text() == "def compute_total():\n    return 1\n"
+    assert after_path.read_text() == "def compute_sum():\n    return 1\n"
+    assert catcher_path.read_text().strip() == "diff-sanity"
+    readme = readme_path.read_text()
+    assert "Symbol rename" in readme
+    # Keyword convention: README.md is how the harness reads the keyword.
+    assert "renamed" in readme
+
+    written = {p.resolve() for p in paths}
+    expected = {
+        before_path.resolve(),
+        after_path.resolve(),
+        catcher_path.resolve(),
+        readme_path.resolve(),
+    }
+    assert written == expected
+
+
+def test_materialize_case_on_disk_handles_multiple_files(tmp_path: Path) -> None:
+    # Cases with several touched files must all round-trip.
+    loop = _loop(tmp_path)
+    case = _valid_case(
+        before_files={
+            "src/a.py": "a_before\n",
+            "src/sub/b.py": "b_before\n",
+        },
+        after_files={
+            "src/a.py": "a_after\n",
+            "src/sub/b.py": "b_after\n",
+        },
+    )
+
+    paths = loop._materialize_case_on_disk(case, tmp_path)
+
+    case_dir = tmp_path / "tests" / "trust" / "adversarial" / "cases" / case.slug
+    assert (case_dir / "before" / "src" / "a.py").read_text() == "a_before\n"
+    assert (case_dir / "before" / "src" / "sub" / "b.py").read_text() == "b_before\n"
+    assert (case_dir / "after" / "src" / "a.py").read_text() == "a_after\n"
+    assert (case_dir / "after" / "src" / "sub" / "b.py").read_text() == "b_after\n"
+    # Four files + catcher + README.
+    assert len(paths) == 6
+
+
+def test_open_pr_for_case_calls_open_automated_pr_async(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    # `_open_pr_for_case` must delegate to auto_pr.open_automated_pr_async
+    # with a branch derived from the slug, the supplied files, and the
+    # supplied title/body. Returns the parsed PR number from the URL.
+    loop = _loop(tmp_path, dedup=_InMemoryDedup())
+    case = _valid_case(issue_number=42, slug="my-slug")
+    paths = [tmp_path / "x"]
+
+    captured: dict[str, object] = {}
+
+    async def fake_open(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return _AutoPrResultStub(
+            status="opened",
+            pr_url="https://github.com/hydra/hydraflow/pull/777",
+        )
+
+    import corpus_learning_loop as mod
+
+    monkeypatch.setattr(mod, "open_automated_pr_async", fake_open)  # type: ignore[attr-defined]
+
+    pr_number = asyncio.run(loop._open_pr_for_case(case, paths, title="tt", body="bb"))
+
+    assert pr_number == 777
+    assert captured["pr_title"] == "tt"
+    assert captured["pr_body"] == "bb"
+    assert captured["files"] == paths
+    assert captured["base"] == loop._config.base_branch()
+    # Branch is derived from the case slug + issue number for traceability.
+    assert "my-slug" in str(captured["branch"])
+    assert "42" in str(captured["branch"])
+    labels = captured["labels"]
+    assert isinstance(labels, list)
+    assert "corpus-learning" in labels
+
+
+def test_open_pr_for_case_dedup_suppresses_refile(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    # Dedup key format is `corpus_learning:<issue_number>:<slug>`. When it's
+    # already present in the DedupStore the helper must skip the PR call
+    # entirely and return None.
+    dedup = _InMemoryDedup()
+    dedup.add("corpus_learning:42:my-slug")
+    loop = _loop(tmp_path, dedup=dedup)
+    case = _valid_case(issue_number=42, slug="my-slug")
+
+    calls: list[dict[str, object]] = []
+
+    async def fake_open(**kwargs: object) -> object:
+        calls.append(kwargs)
+        return _AutoPrResultStub(
+            status="opened",
+            pr_url="https://github.com/x/y/pull/1",
+        )
+
+    import corpus_learning_loop as mod
+
+    monkeypatch.setattr(mod, "open_automated_pr_async", fake_open)  # type: ignore[attr-defined]
+
+    result = asyncio.run(
+        loop._open_pr_for_case(case, [tmp_path / "f"], title="t", body="b")
+    )
+
+    assert result is None
+    assert calls == []
+
+
+def test_open_pr_for_case_records_dedup_after_success(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    dedup = _InMemoryDedup()
+    loop = _loop(tmp_path, dedup=dedup)
+    case = _valid_case(issue_number=13, slug="slug-x")
+
+    async def fake_open(**kwargs: object) -> object:
+        return _AutoPrResultStub(
+            status="opened",
+            pr_url="https://github.com/x/y/pull/99",
+        )
+
+    import corpus_learning_loop as mod
+
+    monkeypatch.setattr(mod, "open_automated_pr_async", fake_open)  # type: ignore[attr-defined]
+
+    asyncio.run(loop._open_pr_for_case(case, [tmp_path / "f"], title="t", body="b"))
+
+    assert "corpus_learning:13:slug-x" in dedup.get()
+
+
+def test_open_pr_for_case_returns_none_when_pr_open_fails(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    # `AutoPrResult(status="failed", ...)` must surface as None so the
+    # caller counts it as "not filed" without adding to the dedup store
+    # (so the next tick retries rather than silently dropping the case).
+    dedup = _InMemoryDedup()
+    loop = _loop(tmp_path, dedup=dedup)
+    case = _valid_case(issue_number=55, slug="slug-f")
+
+    async def fake_open(**kwargs: object) -> object:
+        return _AutoPrResultStub(status="failed", pr_url=None, error="boom")
+
+    import corpus_learning_loop as mod
+
+    monkeypatch.setattr(mod, "open_automated_pr_async", fake_open)  # type: ignore[attr-defined]
+
+    result = asyncio.run(
+        loop._open_pr_for_case(case, [tmp_path / "f"], title="t", body="b")
+    )
+
+    assert result is None
+    # Failed filings must not pollute dedup — next tick should try again.
+    assert "corpus_learning:55:slug-f" not in dedup.get()
+
+
+def test_do_work_files_validated_cases_and_reports_count(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    # End-to-end wiring: a parseable + validatable signal must walk all
+    # three Task 15 steps (materialize, PR-open, dedup) and surface
+    # `cases_filed=1` in the status dict alongside the earlier counters.
+    dedup = _InMemoryDedup()
+    prs = AsyncMock()
+    prs.list_issues_by_label = AsyncMock(
+        return_value=[
+            {
+                "number": 909,
+                "title": "diff-sanity missed renamed symbol",
+                "body": _well_formed_signal_body(),
+                "updated_at": _iso_now_offset(-1),
+            },
+        ]
+    )
+
+    open_calls: list[dict[str, object]] = []
+
+    async def fake_open(**kwargs: object) -> object:
+        open_calls.append(kwargs)
+        return _AutoPrResultStub(
+            status="opened",
+            pr_url="https://github.com/x/y/pull/321",
+        )
+
+    import corpus_learning_loop as mod
+
+    monkeypatch.setattr(mod, "open_automated_pr_async", fake_open)  # type: ignore[attr-defined]
+
+    loop = _loop(tmp_path, prs=prs, dedup=dedup, repo_root=tmp_path)
+    result = asyncio.run(loop._do_work())
+
+    assert result.get("escape_issues_seen") == 1
+    assert result.get("cases_synthesized") == 1
+    assert result.get("cases_validated") == 1
+    assert result.get("cases_filed") == 1
+    # Materialized files landed under repo_root / tests/trust/adversarial/…
+    case_dir = (
+        tmp_path
+        / "tests"
+        / "trust"
+        / "adversarial"
+        / "cases"
+        / "diff-sanity-missed-renamed-symbol"
+    )
+    assert case_dir.exists()
+    assert open_calls, "expected one open_automated_pr_async call"
+
+
+def test_do_work_skips_cases_already_in_dedup(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    # Second tick for the same escape must not re-file — cases_validated
+    # still counts the pre-filter synthesis, cases_filed stays at 0.
+    dedup = _InMemoryDedup()
+    dedup.add("corpus_learning:909:diff-sanity-missed-renamed-symbol")
+    prs = AsyncMock()
+    prs.list_issues_by_label = AsyncMock(
+        return_value=[
+            {
+                "number": 909,
+                "title": "diff-sanity missed renamed symbol",
+                "body": _well_formed_signal_body(),
+                "updated_at": _iso_now_offset(-1),
+            },
+        ]
+    )
+
+    open_calls: list[dict[str, object]] = []
+
+    async def fake_open(**kwargs: object) -> object:
+        open_calls.append(kwargs)
+        return _AutoPrResultStub(status="opened", pr_url="x/y/pull/1")
+
+    import corpus_learning_loop as mod
+
+    monkeypatch.setattr(mod, "open_automated_pr_async", fake_open)  # type: ignore[attr-defined]
+
+    loop = _loop(tmp_path, prs=prs, dedup=dedup)
+    result = asyncio.run(loop._do_work())
+
+    assert result.get("cases_filed") == 0
+    assert open_calls == []
+
+
+class _InMemoryDedup:
+    """Minimal DedupStore stand-in for Task 15 tests."""
+
+    def __init__(self) -> None:
+        self._values: set[str] = set()
+
+    def get(self) -> set[str]:
+        return set(self._values)
+
+    def add(self, value: str) -> None:
+        self._values.add(value)
+
+
+class _AutoPrResultStub:
+    """Duck-typed stand-in for :class:`auto_pr.AutoPrResult`."""
+
+    def __init__(
+        self,
+        *,
+        status: str,
+        pr_url: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        self.status = status
+        self.pr_url = pr_url
+        self.branch = "test-branch"
+        self.error = error
