@@ -513,3 +513,199 @@ def test_review_phase_commit_with_corroborate_decision_bumps_canonical(
 
     canonical_text = canonical_path.read_text(encoding="utf-8")
     assert "corroborations: 2" in canonical_text
+
+
+# ----------------------------------------------------------------------
+# Gap-filling tests flagged during self-review:
+#   1) per-topic candidate isolation
+#   2) mixed batch (some corroborate, some write)
+#   3) fresh topic (no existing entries)
+# ----------------------------------------------------------------------
+
+
+def _topical_entry(title: str, *, topic_hint: str) -> WikiEntry:
+    """Build a WikiEntry whose content deterministically routes to a
+    chosen topic under ``classify_topic``. Uses single-topic keywords
+    from ``_TOPIC_KEYWORDS`` so classification is stable without needing
+    to stub the classifier."""
+    keyword = {
+        "patterns": "convention",
+        "gotchas": "pitfall",
+        "testing": "pytest fixture",
+    }[topic_hint]
+    return WikiEntry(
+        title=title,
+        content=f"This is a {keyword} worth recording.",
+        source_type="review",
+        source_issue=1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_precompute_only_passes_candidates_from_the_new_entrys_topic(
+    tmp_path: Path,
+) -> None:
+    """Per-topic isolation: an entry classified as ``patterns`` must
+    only be compared against existing ``patterns`` entries — never
+    against entries in ``gotchas`` or other topics."""
+    from plan_phase import PlanPhase
+
+    _worktree, store = _git_seeded_tracked_store(tmp_path)
+    # Seed one entry in each of two topics.
+    store.write_entry(
+        "o/r",
+        _topical_entry("Patterns seed", topic_hint="patterns"),
+        topic="patterns",
+    )
+    store.write_entry(
+        "o/r",
+        _topical_entry("Gotchas seed", topic_hint="gotchas"),
+        topic="gotchas",
+    )
+
+    seen_existing_titles: list[list[str]] = []
+    compiler = MagicMock()
+
+    async def fake_dedup(
+        *, repo_slug, entry, existing_entries, topic, min_confidence="medium"
+    ):
+        seen_existing_titles.append([e.title for e, _ in existing_entries])
+        return CorroborationDecision()
+
+    compiler.dedup_or_corroborate = fake_dedup
+    phase = PlanPhase.__new__(PlanPhase)
+    phase._wiki_compiler = compiler
+
+    new_entry = _topical_entry("new patterns entry", topic_hint="patterns")
+    await phase._precompute_corroboration(
+        tracked_store=store,
+        repo="o/r",
+        entries=[new_entry],
+    )
+
+    assert len(seen_existing_titles) == 1
+    titles = seen_existing_titles[0]
+    assert "Patterns seed" in titles
+    assert "Gotchas seed" not in titles, (
+        "precompute leaked cross-topic candidates into the dedup comparison"
+    )
+
+
+def test_commit_with_mixed_batch_bumps_some_and_writes_others(
+    tmp_path: Path,
+) -> None:
+    """Mixed batch: three entries, two corroborate against two different
+    canonicals, one writes normally. All three outcomes must materialise
+    correctly in a single commit — append_log count must reflect the
+    one actual write, not the batch size."""
+    from plan_phase import PlanPhase
+
+    worktree, store = _git_seeded_tracked_store(tmp_path)
+    # Seed two different canonicals in patterns.
+    canonical_a = _entry("Canonical A")
+    canonical_b = _entry("Canonical B")
+    path_a = store.write_entry("o/r", canonical_a, topic="patterns")
+    path_b = store.write_entry("o/r", canonical_b, topic="patterns")
+    subprocess.run(
+        ["git", "add", "repo_wiki"], cwd=worktree, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=worktree,
+        check=True,
+        capture_output=True,
+    )
+
+    phase_config = MagicMock()
+    phase_config.repo_wiki_path = "repo_wiki"
+    phase = PlanPhase.__new__(PlanPhase)
+    phase._config = phase_config
+
+    entries = [
+        _entry("re-discovery of A"),
+        _entry("genuinely new insight"),
+        _entry("re-discovery of B"),
+    ]
+    decisions = [
+        CorroborationDecision(
+            should_corroborate=True,
+            canonical_title=canonical_a.title,
+            canonical_id=canonical_a.id,
+            canonical_path=path_a,
+        ),
+        CorroborationDecision(),  # no match → writes
+        CorroborationDecision(
+            should_corroborate=True,
+            canonical_title=canonical_b.title,
+            canonical_id=canonical_b.id,
+            canonical_path=path_b,
+        ),
+    ]
+
+    topic_dir = path_a.parent
+    files_before = {p.name for p in topic_dir.glob("*.md")}
+
+    phase._wiki_commit_compiler_entries(
+        tracked_store=store,
+        worktree_path=worktree,
+        repo="o/r",
+        issue_number=55,
+        phase="plan",
+        entries=entries,
+        decisions=decisions,
+    )
+
+    # Both canonicals bumped exactly once.
+    assert "corroborations: 2" in path_a.read_text(encoding="utf-8")
+    assert "corroborations: 2" in path_b.read_text(encoding="utf-8")
+
+    # Exactly one new file landed — the middle entry.
+    files_after = {p.name for p in topic_dir.glob("*.md")}
+    new_files = files_after - files_before
+    assert len(new_files) == 1, (
+        f"expected exactly one new file for the write, got {new_files}"
+    )
+    new_text = (topic_dir / next(iter(new_files))).read_text(encoding="utf-8")
+    assert "# genuinely new insight" in new_text
+
+
+@pytest.mark.asyncio
+async def test_precompute_on_fresh_topic_passes_empty_candidates(
+    tmp_path: Path,
+) -> None:
+    """Fresh topic: ingesting into a topic with no existing entries must
+    still call the compiler (so a single existing entry in another topic
+    doesn't silently skip dedup) and pass an empty candidate list."""
+    from plan_phase import PlanPhase
+
+    _worktree, store = _git_seeded_tracked_store(tmp_path)
+    # Seed an unrelated topic so the repo has SOME tracked entries but
+    # the target topic dir is empty.
+    store.write_entry(
+        "o/r",
+        _topical_entry("elsewhere", topic_hint="gotchas"),
+        topic="gotchas",
+    )
+
+    recorded: list[int] = []
+    compiler = MagicMock()
+
+    async def fake_dedup(
+        *, repo_slug, entry, existing_entries, topic, min_confidence="medium"
+    ):
+        recorded.append(len(existing_entries))
+        return CorroborationDecision()
+
+    compiler.dedup_or_corroborate = fake_dedup
+    phase = PlanPhase.__new__(PlanPhase)
+    phase._wiki_compiler = compiler
+
+    new_entry = _topical_entry("first patterns entry", topic_hint="patterns")
+    decisions = await phase._precompute_corroboration(
+        tracked_store=store,
+        repo="o/r",
+        entries=[new_entry],
+    )
+
+    assert recorded == [0]
+    assert decisions[0].should_corroborate is False
