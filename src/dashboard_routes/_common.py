@@ -52,7 +52,17 @@ _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
     "health_monitor": (60, 86400),
     "dependabot_merge": (60, 86400),
     "staging_promotion": (60, 86400),
+    "staging_bisect": (60, 86400),
     "retrospective": (60, 86400),
+    "principles_audit": (3600, 2_592_000),  # 1h min, 30d max
+    "flake_tracker": (3600, 2_592_000),  # 1h min, 30d max
+    "skill_prompt_eval": (86400, 2_592_000),  # 1d min, 30d max
+    "fake_coverage_auditor": (86400, 2_592_000),  # 1d min, 30d max
+    "rc_budget": (3600, 604800),  # 1h min, 7d max
+    "wiki_rot_detector": (86400, 2_592_000),  # 1d min, 30d max
+    "trust_fleet_sanity": (60, 3600),  # 1m min, 1h max
+    "contract_refresh": (86400, 2_592_000),  # 1d min, 30d max
+    "corpus_learning": (3600, 2_592_000),  # 1h min, 30d max
 }
 
 # Internal pipeline labels that must not be treated as epic names in the history panel.

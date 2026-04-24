@@ -21,6 +21,8 @@ from caching_issue_store import CachingIssueStore
 from ci_monitor_loop import CIMonitorLoop  # noqa: TCH001
 from code_grooming_loop import CodeGroomingLoop  # noqa: TCH001
 from config import Credentials, HydraFlowConfig
+from contract_refresh_loop import ContractRefreshLoop
+from corpus_learning_loop import CorpusLearningLoop
 from crate_manager import CrateManager
 from dependabot_merge_loop import DependabotMergeLoop
 from diagnostic_loop import DiagnosticLoop  # noqa: TCH001
@@ -33,6 +35,8 @@ from epic_monitor_loop import EpicMonitorLoop
 from epic_sweeper_loop import EpicSweeperLoop
 from events import EventBus
 from execution import SubprocessRunner
+from fake_coverage_auditor_loop import FakeCoverageAuditorLoop
+from flake_tracker_loop import FlakeTrackerLoop
 from github_cache_loop import GitHubCacheLoop, GitHubDataCache
 from harness_insights import HarnessInsightStore
 from health_monitor_loop import HealthMonitorLoop
@@ -53,6 +57,8 @@ from pr_manager import PRManager
 from pr_unsticker import PRUnsticker
 from pr_unsticker_loop import PRUnstickerLoop
 from precondition_gate import PreconditionGate
+from principles_audit_loop import PrinciplesAuditLoop
+from rc_budget_loop import RCBudgetLoop
 from repo_wiki import RepoWikiStore
 from repo_wiki_loop import RepoWikiLoop  # noqa: TCH001
 from report_issue_loop import ReportIssueLoop
@@ -70,6 +76,8 @@ from security_patch_loop import SecurityPatchLoop  # noqa: TCH001
 from sentry_loop import SentryLoop  # noqa: TCH001 — used in dataclass field
 from shape_phase import ShapePhase  # noqa: TCH001
 from shape_runner import ShapeRunner
+from skill_prompt_eval_loop import SkillPromptEvalLoop
+from staging_bisect_loop import StagingBisectLoop
 from staging_promotion_loop import StagingPromotionLoop
 from stale_issue_gc_loop import StaleIssueGCLoop  # noqa: TCH001
 from stale_issue_loop import StaleIssueLoop
@@ -78,7 +86,9 @@ from transcript_summarizer import TranscriptSummarizer
 from triage import TriageRunner
 from triage_phase import TriagePhase
 from troubleshooting_store import TroubleshootingPatternStore
+from trust_fleet_sanity_loop import TrustFleetSanityLoop
 from verification_judge import VerificationJudge
+from wiki_rot_detector_loop import WikiRotDetectorLoop
 from workspace import WorkspaceManager
 from workspace_gc_loop import WorkspaceGCLoop
 
@@ -149,6 +159,7 @@ class ServiceRegistry:
     health_monitor_loop: HealthMonitorLoop
     dependabot_merge_loop: DependabotMergeLoop
     staging_promotion_loop: StagingPromotionLoop
+    staging_bisect_loop: StagingBisectLoop
     stale_issue_loop: StaleIssueLoop
     sentry_loop: SentryLoop
     stale_issue_gc_loop: StaleIssueGCLoop
@@ -160,6 +171,15 @@ class ServiceRegistry:
     diagnostic_loop: DiagnosticLoop
     retrospective_loop: RetrospectiveLoop
     retrospective_queue: RetrospectiveQueue
+    principles_audit_loop: PrinciplesAuditLoop
+    flake_tracker_loop: FlakeTrackerLoop
+    skill_prompt_eval_loop: SkillPromptEvalLoop
+    fake_coverage_auditor_loop: FakeCoverageAuditorLoop
+    rc_budget_loop: RCBudgetLoop
+    wiki_rot_detector_loop: WikiRotDetectorLoop
+    trust_fleet_sanity_loop: TrustFleetSanityLoop
+    contract_refresh_loop: ContractRefreshLoop
+    corpus_learning_loop: CorpusLearningLoop
 
     # Optional integrations
 
@@ -660,6 +680,9 @@ def build_services(
         deps=loop_deps,
         prs=prs,
         retrospective_queue=retrospective_queue,
+        state=state,
+        # bg_workers is injected post-construction by the orchestrator
+        # (chicken-and-egg with BGWorkerManager); see orchestrator.py.
     )
     dependabot_merge_loop = DependabotMergeLoop(  # noqa: F841
         config=config,
@@ -672,6 +695,13 @@ def build_services(
         config=config,
         prs=prs,
         deps=loop_deps,
+        state=state,
+    )
+    staging_bisect_loop = StagingBisectLoop(  # noqa: F841
+        config=config,
+        prs=prs,
+        deps=loop_deps,
+        state=state,
     )
     stale_issue_loop = StaleIssueLoop(
         config=config,
@@ -744,6 +774,104 @@ def build_services(
         queue=retrospective_queue,
         prs=prs,
     )
+    principles_audit_loop = PrinciplesAuditLoop(
+        config=config,
+        state=state,
+        pr_manager=prs,
+        deps=loop_deps,
+    )
+    flake_tracker_dedup = DedupStore(
+        "flake_tracker",
+        config.data_root / "dedup" / "flake_tracker.json",
+    )
+    flake_tracker_loop = FlakeTrackerLoop(  # noqa: F841
+        config=config,
+        state=state,
+        pr_manager=prs,
+        dedup=flake_tracker_dedup,
+        deps=loop_deps,
+    )
+    skill_prompt_eval_dedup = DedupStore(
+        "skill_prompt_eval",
+        config.data_root / "dedup" / "skill_prompt_eval.json",
+    )
+    skill_prompt_eval_loop = SkillPromptEvalLoop(  # noqa: F841
+        config=config,
+        state=state,
+        pr_manager=prs,
+        dedup=skill_prompt_eval_dedup,
+        deps=loop_deps,
+    )
+    fake_coverage_auditor_dedup = DedupStore(
+        "fake_coverage_auditor",
+        config.data_root / "dedup" / "fake_coverage_auditor.json",
+    )
+    fake_coverage_auditor_loop = FakeCoverageAuditorLoop(  # noqa: F841
+        config=config,
+        state=state,
+        pr_manager=prs,
+        dedup=fake_coverage_auditor_dedup,
+        deps=loop_deps,
+    )
+
+    rc_budget_dedup = DedupStore(
+        "rc_budget",
+        config.data_root / "dedup" / "rc_budget.json",
+    )
+    rc_budget_loop = RCBudgetLoop(  # noqa: F841
+        config=config,
+        state=state,
+        pr_manager=prs,
+        dedup=rc_budget_dedup,
+        deps=loop_deps,
+    )
+
+    wiki_rot_dedup = DedupStore(
+        "wiki_rot_detector",
+        config.data_root / "dedup" / "wiki_rot_detector.json",
+    )
+    wiki_rot_detector_loop = WikiRotDetectorLoop(  # noqa: F841
+        config=config,
+        state=state,
+        pr_manager=prs,
+        dedup=wiki_rot_dedup,
+        wiki_store=repo_wiki_store,
+        deps=loop_deps,
+    )
+
+    trust_fleet_sanity_dedup = DedupStore(
+        "trust_fleet_sanity",
+        config.data_root / "dedup" / "trust_fleet_sanity.json",
+    )
+    trust_fleet_sanity_loop = TrustFleetSanityLoop(  # noqa: F841
+        config=config,
+        state=state,
+        pr_manager=prs,
+        dedup=trust_fleet_sanity_dedup,
+        event_bus=event_bus,
+        deps=loop_deps,
+        # bg_workers is injected post-construction by the orchestrator
+        # (BGWorkerManager takes the loop registry, so it must be built
+        # after all loops).
+    )
+
+    contract_refresh_loop = ContractRefreshLoop(  # noqa: F841
+        config=config,
+        deps=loop_deps,
+        prs=prs,
+        state=state,
+    )
+
+    corpus_learning_dedup = DedupStore(
+        "corpus_learning",
+        config.data_root / "dedup" / "corpus_learning.json",
+    )
+    corpus_learning_loop = CorpusLearningLoop(  # noqa: F841
+        config=config,
+        prs=prs,
+        dedup=corpus_learning_dedup,
+        deps=loop_deps,
+    )
 
     return ServiceRegistry(
         workspaces=workspaces,
@@ -785,6 +913,7 @@ def build_services(
         health_monitor_loop=health_monitor_loop,
         dependabot_merge_loop=dependabot_merge_loop,
         staging_promotion_loop=staging_promotion_loop,
+        staging_bisect_loop=staging_bisect_loop,
         stale_issue_loop=stale_issue_loop,
         github_cache=gh_cache,
         github_cache_loop=gh_cache_loop,
@@ -798,4 +927,13 @@ def build_services(
         diagnostic_loop=diagnostic_loop,
         retrospective_loop=retrospective_loop,
         retrospective_queue=retrospective_queue,
+        principles_audit_loop=principles_audit_loop,
+        flake_tracker_loop=flake_tracker_loop,
+        skill_prompt_eval_loop=skill_prompt_eval_loop,
+        fake_coverage_auditor_loop=fake_coverage_auditor_loop,
+        rc_budget_loop=rc_budget_loop,
+        wiki_rot_detector_loop=wiki_rot_detector_loop,
+        trust_fleet_sanity_loop=trust_fleet_sanity_loop,
+        contract_refresh_loop=contract_refresh_loop,
+        corpus_learning_loop=corpus_learning_loop,
     )

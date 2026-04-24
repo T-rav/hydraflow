@@ -1,0 +1,18 @@
+adapter: github
+interaction: pr_create
+recorded_at: "2026-04-22T14:07:03Z"
+recorder_sha: "729304f1"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: create_pr
+  args:
+    - "42"
+    - "contract-branch"
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: "https://github.com/test-org/test-repo/pull/101\n"
+  stderr: ""
+normalizers:
+  - pr_number

@@ -1,0 +1,4 @@
+DIFF_SANITY_RESULT: RETRY
+SUMMARY: hardcoded secret in source
+FINDINGS:
+- src/client.py:5 — `sk-live-...` looks like an API key; move to env var / secret store

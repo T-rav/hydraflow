@@ -357,3 +357,100 @@ class TraceCollector:
         out_path.write_text(trace.model_dump_json(indent=2), encoding="utf-8")
 
         return trace
+
+
+# ---------------------------------------------------------------------------
+# Loop-subprocess trace helper (spec §4.11 point 3)
+# ---------------------------------------------------------------------------
+#
+# Loops (CorpusLearningLoop, ContractRefreshLoop, StagingBisectLoop,
+# PrinciplesAuditLoop, FlakeTrackerLoop, SkillPromptEvalLoop,
+# FakeCoverageAuditorLoop, RCBudgetLoop, WikiRotDetectorLoop,
+# TrustFleetSanityLoop) run outside the `claude -p` stream, so they cannot
+# use the class-based `TraceCollector`. This free function writes a
+# self-contained loop-kind trace file to `<data_root>/traces/_loops/<slug>/`.
+# Every loop plan lazy-imports it via `try/except ImportError` so a missing
+# helper degrades gracefully; once this module lands, those imports resolve.
+
+import re  # noqa: E402 — intentionally near helpers to survive ruff unused-import sweeps
+import threading  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+_STDERR_TRUNC_CAP = 2048
+_CONFIG_LOCK = threading.Lock()
+# Single-slot mutable container so we can rebind without `global` (PLW0603).
+# Index 0 holds the active HydraFlowConfig (or None). Access through
+# set_active_config / _current_config, which take _CONFIG_LOCK.
+_ACTIVE_CONFIG_SLOT: list[HydraFlowConfig | None] = [None]
+
+
+def set_active_config(config: HydraFlowConfig | None) -> None:
+    """Register the process-wide active config for free-function helpers.
+
+    Called once during orchestrator startup. Free-function helpers like
+    ``emit_loop_subprocess_trace`` read it to resolve ``data_root`` without
+    threading a config through every loop subprocess call.
+    """
+    with _CONFIG_LOCK:
+        _ACTIVE_CONFIG_SLOT[0] = config
+
+
+def _current_config() -> HydraFlowConfig | None:
+    with _CONFIG_LOCK:
+        return _ACTIVE_CONFIG_SLOT[0]
+
+
+def _slug_for_loop(loop: str) -> str:
+    slug = re.sub(r"[^a-z0-9]", "_", (loop or "").lower()).strip("_")
+    return slug or "unknown"
+
+
+def _loop_trace_dir(loop: str) -> Path:
+    cfg = _current_config()
+    if cfg is None:
+        raise RuntimeError("No active HydraFlowConfig registered")
+    return Path(cfg.data_root) / "traces" / "_loops" / _slug_for_loop(loop)
+
+
+def emit_loop_subprocess_trace(
+    loop: str,
+    command: list[str],
+    exit_code: int,
+    duration_ms: int,
+    stderr_excerpt: str | None = None,
+) -> None:
+    """Emit a per-loop subprocess trace file.
+
+    Writes ``{"kind": "loop", "loop": "<name>", "command": [...], "exit_code":
+    N, "duration_ms": N, "stderr": "..."}`` to ``<data_root>/traces/_loops/
+    <slug>/run-<iso>.json``. Stderr is tail-truncated to 2048 chars.
+
+    Never raises. A broken filesystem, missing config, or any other error
+    is logged at WARNING and swallowed — a loop tick must survive this.
+    """
+    try:
+        cfg = _current_config()
+        if cfg is None:
+            logger.debug("emit_loop_subprocess_trace: no active config; skipping")
+            return
+
+        stderr = stderr_excerpt[-_STDERR_TRUNC_CAP:] if stderr_excerpt else None
+        started_at = datetime.now(UTC).isoformat()
+        slug_ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+
+        payload = {
+            "kind": "loop",
+            "loop": loop,
+            "command": list(command),
+            "exit_code": int(exit_code),
+            "duration_ms": int(duration_ms),
+            "stderr": stderr,
+            "started_at": started_at,
+        }
+
+        out_dir = _loop_trace_dir(loop)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"run-{slug_ts}.json"
+        out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except Exception:
+        logger.warning("emit_loop_subprocess_trace failed", exc_info=True)

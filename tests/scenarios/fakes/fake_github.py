@@ -185,6 +185,8 @@ class FakeGitHub:
         stage_label_map = {
             "find": "hydraflow-find",
             "triage": "hydraflow-triage",
+            "discover": "hydraflow-discover",
+            "shape": "hydraflow-shape",
             "plan": "hydraflow-plan",
             "ready": "hydraflow-ready",
             "review": "hydraflow-review",

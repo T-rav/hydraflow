@@ -61,6 +61,43 @@ class Credentials(BaseModel):
     )
 
 
+class ManagedRepo(BaseModel):
+    """A GitHub repo under HydraFlow factory management.
+
+    Source of truth for which repos the orchestrator dispatches
+    pipelines against and which repos ``PrinciplesAuditLoop`` audits
+    for drift + onboarding. See spec §4.4.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    slug: str = Field(description="GitHub slug 'owner/repo'")
+    staging_branch: str = "staging"
+    main_branch: str = "main"
+    labels_namespace: str = ""
+    enabled: bool = Field(
+        default=True,
+        description="Operator kill-switch per repo; disabled repos are skipped",
+    )
+
+    @field_validator("slug")
+    @classmethod
+    def _validate_slug(cls, v: str) -> str:
+        parts = v.split("/")
+        if len(parts) != 2 or not all(parts):
+            raise ValueError(f"invalid slug {v!r}; expected 'owner/repo'")
+        if not re.fullmatch(r"[\w.-]+/[\w.-]+", v):
+            raise ValueError(f"invalid slug {v!r}; expected 'owner/repo'")
+        return v
+
+    @field_validator("staging_branch", "main_branch")
+    @classmethod
+    def _validate_branch(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("branch name must be non-empty")
+        return v
+
+
 # Data-driven env-var override tables.
 # Each tuple: (field_name, env_var_key, default_value)
 _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
@@ -75,6 +112,8 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("max_scope_check_attempts", "HYDRAFLOW_MAX_SCOPE_CHECK_ATTEMPTS", 1),
     ("max_test_adequacy_attempts", "HYDRAFLOW_MAX_TEST_ADEQUACY_ATTEMPTS", 1),
     ("max_plan_compliance_attempts", "HYDRAFLOW_MAX_PLAN_COMPLIANCE_ATTEMPTS", 1),
+    ("max_discover_attempts", "HYDRAFLOW_MAX_DISCOVER_ATTEMPTS", 3),
+    ("max_shape_attempts", "HYDRAFLOW_MAX_SHAPE_ATTEMPTS", 3),
     ("max_review_fix_attempts", "HYDRAFLOW_MAX_REVIEW_FIX_ATTEMPTS", 2),
     ("min_review_findings", "HYDRAFLOW_MIN_REVIEW_FINDINGS", 3),
     ("max_issue_body_chars", "HYDRAFLOW_MAX_ISSUE_BODY_CHARS", 10_000),
@@ -101,6 +140,17 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("rc_cadence_hours", "HYDRAFLOW_RC_CADENCE_HOURS", 4),
     ("staging_promotion_interval", "HYDRAFLOW_STAGING_PROMOTION_INTERVAL", 300),
     ("staging_rc_retention_days", "HYDRAFLOW_STAGING_RC_RETENTION_DAYS", 7),
+    ("staging_bisect_interval", "HYDRAFLOW_STAGING_BISECT_INTERVAL", 600),
+    (
+        "staging_bisect_runtime_cap_seconds",
+        "HYDRAFLOW_STAGING_BISECT_RUNTIME_CAP_SECONDS",
+        2700,
+    ),
+    (
+        "staging_bisect_watchdog_rc_cycles",
+        "HYDRAFLOW_STAGING_BISECT_WATCHDOG_RC_CYCLES",
+        2,
+    ),
     ("collaborator_cache_ttl", "HYDRAFLOW_COLLABORATOR_CACHE_TTL", 600),
     (
         "issue_cache_enrich_ttl_seconds",
@@ -160,6 +210,22 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("max_repo_wiki_chars", "HYDRAFLOW_MAX_REPO_WIKI_CHARS", 15_000),
     ("diagnostic_interval", "HYDRAFLOW_DIAGNOSTIC_INTERVAL", 30),
     ("retrospective_interval", "HYDRAFLOW_RETROSPECTIVE_INTERVAL", 1800),
+    ("principles_audit_interval", "HYDRAFLOW_PRINCIPLES_AUDIT_INTERVAL", 604800),
+    ("flake_tracker_interval", "HYDRAFLOW_FLAKE_TRACKER_INTERVAL", 14400),
+    ("flake_threshold", "HYDRAFLOW_FLAKE_THRESHOLD", 3),
+    ("skill_prompt_eval_interval", "HYDRAFLOW_SKILL_PROMPT_EVAL_INTERVAL", 604800),
+    (
+        "fake_coverage_auditor_interval",
+        "HYDRAFLOW_FAKE_COVERAGE_AUDITOR_INTERVAL",
+        604800,
+    ),
+    ("rc_budget_interval", "HYDRAFLOW_RC_BUDGET_INTERVAL", 14400),
+    ("wiki_rot_detector_interval", "HYDRAFLOW_WIKI_ROT_DETECTOR_INTERVAL", 604800),
+    ("trust_fleet_sanity_interval", "HYDRAFLOW_TRUST_FLEET_SANITY_INTERVAL", 600),
+    ("loop_anomaly_issues_per_hour", "HYDRAFLOW_LOOP_ANOMALY_ISSUES_PER_HOUR", 10),
+    ("corpus_learning_interval", "HYDRAFLOW_CORPUS_LEARNING_INTERVAL", 604800),
+    ("contract_refresh_interval", "HYDRAFLOW_CONTRACT_REFRESH_INTERVAL", 604800),
+    ("max_fake_repair_attempts", "HYDRAFLOW_MAX_FAKE_REPAIR_ATTEMPTS", 3),
 ]
 
 _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
@@ -187,6 +253,23 @@ _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
     ("docker_cpu_limit", "HYDRAFLOW_DOCKER_CPU_LIMIT", 2.0),
     ("docker_spawn_delay", "HYDRAFLOW_DOCKER_SPAWN_DELAY", 2.0),
     ("visual_retry_delay", "HYDRAFLOW_VISUAL_RETRY_DELAY", 2.0),
+    ("rc_budget_threshold_ratio", "HYDRAFLOW_RC_BUDGET_THRESHOLD_RATIO", 1.5),
+    ("rc_budget_spike_ratio", "HYDRAFLOW_RC_BUDGET_SPIKE_RATIO", 2.0),
+    ("loop_anomaly_repair_ratio", "HYDRAFLOW_LOOP_ANOMALY_REPAIR_RATIO", 2.0),
+    (
+        "loop_anomaly_staleness_multiplier",
+        "HYDRAFLOW_LOOP_ANOMALY_STALENESS_MULTIPLIER",
+        2.0,
+    ),
+    ("loop_anomaly_cost_spike_ratio", "HYDRAFLOW_LOOP_ANOMALY_COST_SPIKE_RATIO", 5.0),
+]
+
+# Optional floats — `None` when env var is missing/empty/invalid.
+# Handled separately from the strictly-typed float table because pydantic's
+# `float | None` fields don't participate in the `default == current` check.
+_ENV_OPT_FLOAT_OVERRIDES: list[tuple[str, str, float | None]] = [
+    ("daily_cost_budget_usd", "HYDRAFLOW_DAILY_COST_BUDGET_USD", None),
+    ("issue_cost_alert_usd", "HYDRAFLOW_ISSUE_COST_ALERT_USD", None),
 ]
 
 # Float overrides with tight [0, 1] bounds — handled separately from the
@@ -195,6 +278,7 @@ _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
 _ENV_FLOAT_RATIO_OVERRIDES: list[tuple[str, str, float]] = [
     ("visual_warn_threshold", "HYDRAFLOW_VISUAL_WARN_THRESHOLD", 0.05),
     ("visual_fail_threshold", "HYDRAFLOW_VISUAL_FAIL_THRESHOLD", 0.15),
+    ("loop_anomaly_tick_error_ratio", "HYDRAFLOW_LOOP_ANOMALY_TICK_ERROR_RATIO", 0.2),
 ]
 
 _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
@@ -503,6 +587,18 @@ class HydraFlowConfig(BaseModel):
         ge=0,
         le=3,
         description="Max plan compliance check passes (0 = disabled)",
+    )
+    max_discover_attempts: int = Field(
+        default=3,
+        ge=0,
+        le=5,
+        description="Max Discover-brief evaluator retries before HITL escalation (0 = disabled)",
+    )
+    max_shape_attempts: int = Field(
+        default=3,
+        ge=0,
+        le=5,
+        description="Max Shape-proposal evaluator retries before HITL escalation (0 = disabled)",
     )
     max_review_fix_attempts: int = Field(
         default=2,
@@ -816,6 +912,26 @@ class HydraFlowConfig(BaseModel):
         ge=0.0,
         le=1.0,
         description="Alert if HITL escalation rate exceeds this (0.0-1.0)",
+    )
+
+    # Cost budgets (spec §4.11 point 6). Both default to None = "disabled".
+    daily_cost_budget_usd: float | None = Field(
+        default=None,
+        ge=0.0,
+        description=(
+            "Soft daily cost budget (USD). When the last-24h machinery "
+            "cost exceeds this, ReportIssueLoop files a hydraflow-find "
+            "issue with label cost-budget-exceeded. None disables the check."
+        ),
+    )
+    issue_cost_alert_usd: float | None = Field(
+        default=None,
+        ge=0.0,
+        description=(
+            "Per-issue cost alert (USD). When a merged issue's final cost "
+            "exceeds this, PRManager.merge_pr files a hydraflow-find issue "
+            "with label issue-cost-spike. None disables the check."
+        ),
     )
 
     # Review insight aggregation
@@ -1368,6 +1484,33 @@ class HydraFlowConfig(BaseModel):
         le=90,
         description="Days to retain failed RC branches before cleanup",
     )
+    staging_bisect_interval: int = Field(
+        default=600,
+        ge=60,
+        le=86400,
+        description=(
+            "Seconds between StagingBisectLoop ticks — a state-tracker "
+            "watchdog poll for last_rc_red_sha changes. See ADR-0042 §4.3."
+        ),
+    )
+    staging_bisect_runtime_cap_seconds: int = Field(
+        default=2700,
+        ge=300,
+        le=14400,
+        description=(
+            "Hard wall-clock cap on a single bisect run (default 45 min). "
+            "On timeout the loop files hitl-escalation bisect-timeout."
+        ),
+    )
+    staging_bisect_watchdog_rc_cycles: int = Field(
+        default=2,
+        ge=1,
+        le=10,
+        description=(
+            "Max RC cycles to wait for a green outcome after an auto-revert "
+            "before filing hitl-escalation rc-red-verify-timeout."
+        ),
+    )
 
     git_user_name: str = Field(
         default="",
@@ -1633,6 +1776,161 @@ class HydraFlowConfig(BaseModel):
         ge=60,
         le=86400,
         description="Poll interval in seconds for retrospective analysis loop",
+    )
+
+    # Trust fleet — FlakeTrackerLoop (spec §4.5)
+    flake_tracker_interval: int = Field(
+        default=14400,
+        ge=3600,
+        le=2_592_000,
+        description="Seconds between FlakeTrackerLoop ticks (default 4h)",
+    )
+    flake_threshold: int = Field(
+        default=3,
+        ge=2,
+        le=20,
+        description="Flake count in last 20 runs that triggers an issue (>=)",
+    )
+
+    # Trust fleet — SkillPromptEvalLoop (spec §4.6)
+    skill_prompt_eval_interval: int = Field(
+        default=604800,
+        ge=86400,
+        le=2_592_000,
+        description="Seconds between SkillPromptEvalLoop ticks (default 7d)",
+    )
+
+    # Trust fleet — FakeCoverageAuditorLoop (spec §4.7)
+    fake_coverage_auditor_interval: int = Field(
+        default=604800,
+        ge=86400,
+        le=2_592_000,
+        description="Seconds between FakeCoverageAuditorLoop ticks (default 7d)",
+    )
+
+    # Trust fleet — RCBudgetLoop (spec §4.8)
+    rc_budget_interval: int = Field(
+        default=14400,
+        ge=3600,
+        le=604800,
+        description="Seconds between RCBudgetLoop ticks (default 4h)",
+    )
+    rc_budget_threshold_ratio: float = Field(
+        default=1.5,
+        ge=1.0,
+        le=5.0,
+        description=(
+            "Multiplier vs. 30-day rolling median; current_s >= ratio * median_s fires."
+        ),
+    )
+    rc_budget_spike_ratio: float = Field(
+        default=2.0,
+        ge=1.0,
+        le=10.0,
+        description=(
+            "Multiplier vs. max(recent 5 excl. current); "
+            "current_s >= ratio * recent_max fires."
+        ),
+    )
+
+    # Trust fleet — WikiRotDetectorLoop (spec §4.9)
+    wiki_rot_detector_interval: int = Field(
+        default=604800,
+        ge=86400,
+        le=2_592_000,
+        description="Seconds between WikiRotDetectorLoop ticks (default 7d)",
+    )
+
+    # Trust fleet — CorpusLearningLoop (spec §4.1 v2)
+    corpus_learning_interval: int = Field(
+        default=604800,
+        ge=3600,
+        le=2_592_000,
+        description="Seconds between CorpusLearningLoop ticks (default 7d)",
+    )
+
+    # Trust fleet — ContractRefreshLoop (spec §4.2)
+    contract_refresh_interval: int = Field(
+        default=604800,
+        ge=86400,
+        le=2_592_000,
+        description="Seconds between ContractRefreshLoop cycles (default 7 days)",
+    )
+    max_fake_repair_attempts: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description=(
+            "Max per-adapter consecutive drift ticks before ContractRefreshLoop "
+            "escalates a fake-drift issue to hitl-escalation (spec §4.2 Task 18)."
+        ),
+    )
+
+    # Trust fleet — TrustFleetSanityLoop (spec §12.1)
+    trust_fleet_sanity_interval: int = Field(
+        default=600,
+        ge=60,
+        le=3600,
+        description="Seconds between TrustFleetSanityLoop ticks (default 10m)",
+    )
+    loop_anomaly_issues_per_hour: int = Field(
+        default=10,
+        ge=1,
+        le=1000,
+        description=(
+            "TrustFleetSanityLoop: files an escalation when any watched loop "
+            "exceeds this many issues/hour (spec §12.1)."
+        ),
+    )
+    loop_anomaly_repair_ratio: float = Field(
+        default=2.0,
+        ge=0.1,
+        le=100.0,
+        description=(
+            "TrustFleetSanityLoop: `repair_failures_total / repair_successes_total` "
+            "over 24h breach threshold (spec §12.1)."
+        ),
+    )
+    loop_anomaly_tick_error_ratio: float = Field(
+        default=0.2,
+        ge=0.01,
+        le=1.0,
+        description=(
+            "TrustFleetSanityLoop: `ticks_errored / ticks_total` over 24h "
+            "breach threshold (spec §12.1)."
+        ),
+    )
+    loop_anomaly_staleness_multiplier: float = Field(
+        default=2.0,
+        ge=1.0,
+        le=100.0,
+        description=(
+            "TrustFleetSanityLoop: staleness breach when an enabled loop has not "
+            "ticked in > this × its interval (spec §12.1)."
+        ),
+    )
+    loop_anomaly_cost_spike_ratio: float = Field(
+        default=5.0,
+        ge=1.0,
+        le=100.0,
+        description=(
+            "TrustFleetSanityLoop: current-day cost breach when > this × "
+            "30-day median (spec §12.1; reads §4.11 cost endpoint, tolerates absence)."
+        ),
+    )
+
+    # Managed repos + principles audit (spec §4.4)
+    managed_repos: list[ManagedRepo] = Field(
+        default_factory=list,
+        description="Repos under HydraFlow factory management (spec §4.4)",
+    )
+    principles_audit_interval: int = Field(
+        default=604800,
+        ge=60,
+        description=(
+            "Seconds between PrinciplesAuditLoop ticks. "
+            "Default 604800 = 7 days (spec §4.4)."
+        ),
     )
 
     # Credit pause
@@ -2386,6 +2684,34 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
                             )
                     object.__setattr__(config, field, new_val)
 
+    # Optional float overrides — empty string or unset → None, parse failures
+    # log a warning and leave the value as the default. ge=0 enforced via
+    # pydantic constraint on the field itself.
+    for field, env_key, default in _ENV_OPT_FLOAT_OVERRIDES:
+        env_val = _get_env(env_key)
+        if env_val is None or env_val == "":
+            object.__setattr__(config, field, default)
+            continue
+        try:
+            parsed = float(env_val)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid %s=%r — treating as unset",
+                env_key,
+                env_val,
+            )
+            object.__setattr__(config, field, default)
+            continue
+        if parsed < 0:
+            logger.warning(
+                "%s=%s is below minimum 0; ignoring env override",
+                env_key,
+                parsed,
+            )
+            object.__setattr__(config, field, default)
+            continue
+        object.__setattr__(config, field, parsed)
+
     # Ratio float overrides ([0, 1] bounds) — parse failures are silently ignored
     # but out-of-bounds values emit a warning so operators know their config was rejected.
     for field, env_key, default in _ENV_FLOAT_RATIO_OVERRIDES:
@@ -2564,6 +2890,20 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
                     msg = f"HYDRAFLOW_DOCKER_PIDS_LIMIT must be between 16 and 4096, got {pids_val}"
                     raise ValueError(msg)
                 object.__setattr__(config, "docker_pids_limit", pids_val)
+
+    # JSON-shaped overrides (spec §4.4 — managed repos)
+    mr_raw = _get_env("HYDRAFLOW_MANAGED_REPOS")
+    if mr_raw:
+        try:
+            decoded = json.loads(mr_raw)
+            if isinstance(decoded, list):
+                object.__setattr__(
+                    config,
+                    "managed_repos",
+                    [ManagedRepo(**item) for item in decoded],
+                )
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            logger.warning("Ignoring malformed HYDRAFLOW_MANAGED_REPOS: %s", exc)
 
 
 def _validate_docker(config: HydraFlowConfig) -> None:

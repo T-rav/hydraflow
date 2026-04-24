@@ -234,6 +234,19 @@ class TestServiceRegistryWiring:
         for label, getter in self._STATE_TARGETS:
             assert getter(registry) is state, f"{label} is not sharing StateTracker"
 
+    def test_staging_promotion_loop_receives_state(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """StagingPromotionLoop must receive the shared StateTracker so it can
+        persist last_green_rc_sha / last_rc_red_sha on promotion outcomes
+        (bisect plan Task 5)."""
+        registry, _, state, _ = self._build_registry(config)
+
+        assert registry.staging_promotion_loop._state is state, (
+            "staging_promotion_loop is not wired to the shared StateTracker; "
+            "promotion/ci_failed paths cannot record RC attribution"
+        )
+
     def test_phases_share_stop_event(self, config: HydraFlowConfig) -> None:
         registry, _, _, stop_event = self._build_registry(config)
 

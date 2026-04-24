@@ -90,6 +90,12 @@ class HydraFlowOrchestrator:
         pipeline_enabled: bool = True,
     ) -> None:
         self._config = config
+        # Register config for module-level free-function helpers (e.g.
+        # trace_collector.emit_loop_subprocess_trace, spec §4.11 point 3).
+        # The orchestrator is the single process-wide lifecycle owner.
+        from trace_collector import set_active_config  # noqa: PLC0415
+
+        set_active_config(config)
         self._bus = event_bus or EventBus()
         self._state = state or build_state_tracker(config)
         self._dashboard: object | None = None
@@ -146,6 +152,7 @@ class HydraFlowOrchestrator:
             "health_monitor": svc.health_monitor_loop,
             "dependabot_merge": svc.dependabot_merge_loop,
             "staging_promotion": svc.staging_promotion_loop,
+            "staging_bisect": svc.staging_bisect_loop,
             "stale_issue": svc.stale_issue_loop,
             "sentry_ingest": svc.sentry_loop,
             "stale_issue_gc": svc.stale_issue_gc_loop,
@@ -155,8 +162,22 @@ class HydraFlowOrchestrator:
             "repo_wiki": svc.repo_wiki_loop,
             "diagnostic": svc.diagnostic_loop,
             "retrospective": svc.retrospective_loop,
+            "principles_audit": svc.principles_audit_loop,
+            "flake_tracker": svc.flake_tracker_loop,
+            "skill_prompt_eval": svc.skill_prompt_eval_loop,
+            "fake_coverage_auditor": svc.fake_coverage_auditor_loop,
+            "rc_budget": svc.rc_budget_loop,
+            "wiki_rot_detector": svc.wiki_rot_detector_loop,
+            "trust_fleet_sanity": svc.trust_fleet_sanity_loop,
+            "contract_refresh": svc.contract_refresh_loop,
+            "corpus_learning": svc.corpus_learning_loop,
         }
         self._bg_workers = BGWorkerManager(config, self._state, bg_loop_registry)
+        # Loops that need a reference to BGWorkerManager cannot take one
+        # at construction time (chicken-and-egg: BGWorkerManager takes the
+        # loop registry). Inject it now, post-construction.
+        svc.trust_fleet_sanity_loop.set_bg_workers(self._bg_workers)
+        svc.health_monitor_loop.set_bg_workers(self._bg_workers)
         self._hitl_ctrl = HITLController(svc.hitl_phase, svc.fetcher, config.hitl_label)
         self._state_restorer = StateRestorer(self._state, self._bus, self._bg_workers)
 
@@ -262,6 +283,28 @@ class HydraFlowOrchestrator:
             or self._svc.reviewers.active_count
             or self._svc.hitl_runner.active_count
         )
+
+    def _is_slug_blocked(self, slug: str) -> bool:
+        """Return True if this repo slug is blocked by onboarding gate (§4.4)."""
+        return slug in self._state.blocked_slugs()
+
+    async def _pipeline_work_wrapper(
+        self,
+        slug: str,
+        inner: Callable[[], Coroutine[Any, Any, Any]],
+    ) -> object:
+        """Skip this cycle if slug is onboarding-blocked (§4.4).
+
+        Returns ``False`` (falsy, so ``_polling_loop`` sleeps) when the slug is
+        blocked; otherwise passes through the inner callable's return value —
+        pipeline work functions have heterogeneous return types (``bool``,
+        ``int``, ``list[PlanResult]``) but ``_polling_loop`` only inspects
+        truthiness via ``bool(await work_fn())``.
+        """
+        if self._is_slug_blocked(slug):
+            logger.debug("Skipping %s — onboarding blocked", slug)
+            return False
+        return await inner()
 
     @property
     def credits_paused_until(self) -> datetime | None:
@@ -889,6 +932,7 @@ class HydraFlowOrchestrator:
             ("health_monitor", self._svc.health_monitor_loop.run),
             ("dependabot_merge", self._svc.dependabot_merge_loop.run),
             ("staging_promotion", self._svc.staging_promotion_loop.run),
+            ("staging_bisect", self._svc.staging_bisect_loop.run),
             ("stale_issue", self._svc.stale_issue_loop.run),
             ("sentry_ingest", self._svc.sentry_loop.run),
             ("github_cache", self._svc.github_cache_loop.run),
@@ -900,6 +944,15 @@ class HydraFlowOrchestrator:
             ("security_patch", self._svc.security_patch_loop.run),
             ("stale_issue_gc", self._svc.stale_issue_gc_loop.run),
             ("retrospective", self._svc.retrospective_loop.run),
+            ("principles_audit", self._svc.principles_audit_loop.run),
+            ("flake_tracker", self._svc.flake_tracker_loop.run),
+            ("skill_prompt_eval", self._svc.skill_prompt_eval_loop.run),
+            ("fake_coverage_auditor", self._svc.fake_coverage_auditor_loop.run),
+            ("rc_budget", self._svc.rc_budget_loop.run),
+            ("wiki_rot_detector", self._svc.wiki_rot_detector_loop.run),
+            ("trust_fleet_sanity", self._svc.trust_fleet_sanity_loop.run),
+            ("contract_refresh", self._svc.contract_refresh_loop.run),
+            ("corpus_learning", self._svc.corpus_learning_loop.run),
         ]
 
         # Hindsight WAL replay loop removed in Phase 3 cutover — the wiki
@@ -1057,9 +1110,15 @@ class HydraFlowOrchestrator:
 
     async def _triage_loop(self) -> None:
         """Continuously poll for find-labeled issues and triage them."""
+
+        async def _work() -> object:
+            return await self._pipeline_work_wrapper(
+                self._config.repo, self._svc.triager.triage_issues
+            )
+
         await self._polling_loop(
             "triage",
-            self._svc.triager.triage_issues,
+            _work,
             self._config.poll_interval,
             enabled_name="triage",
             is_pipeline=True,
@@ -1067,9 +1126,15 @@ class HydraFlowOrchestrator:
 
     async def _discover_loop(self) -> None:
         """Continuously poll for discover-labeled issues."""
+
+        async def _work() -> object:
+            return await self._pipeline_work_wrapper(
+                self._config.repo, self._svc.discover_phase.discover_issues
+            )
+
         await self._polling_loop(
             "discover",
-            self._svc.discover_phase.discover_issues,
+            _work,
             self._config.poll_interval,
             enabled_name="discover",
             is_pipeline=True,
@@ -1077,9 +1142,15 @@ class HydraFlowOrchestrator:
 
     async def _shape_loop(self) -> None:
         """Continuously poll for shape-labeled issues awaiting direction selection."""
+
+        async def _work() -> object:
+            return await self._pipeline_work_wrapper(
+                self._config.repo, self._svc.shape_phase.shape_issues
+            )
+
         await self._polling_loop(
             "shape",
-            self._svc.shape_phase.shape_issues,
+            _work,
             self._config.poll_interval,
             enabled_name="shape",
             is_pipeline=True,
@@ -1087,9 +1158,15 @@ class HydraFlowOrchestrator:
 
     async def _plan_loop(self) -> None:
         """Continuously poll for planner-labeled issues."""
+
+        async def _work() -> object:
+            return await self._pipeline_work_wrapper(
+                self._config.repo, self._svc.planner_phase.plan_issues
+            )
+
         await self._polling_loop(
             "plan",
-            self._svc.planner_phase.plan_issues,
+            _work,
             self._config.poll_interval,
             enabled_name="plan",
             is_pipeline=True,
@@ -1097,9 +1174,15 @@ class HydraFlowOrchestrator:
 
     async def _implement_loop(self) -> None:
         """Continuously poll for ``hydraflow-ready`` issues and implement them."""
+
+        async def _work() -> object:
+            return await self._pipeline_work_wrapper(
+                self._config.repo, self._do_implement_work
+            )
+
         await self._polling_loop(
             "implement",
-            self._do_implement_work,
+            _work,
             self._config.poll_interval,
             enabled_name="implement",
             is_pipeline=True,
@@ -1107,9 +1190,15 @@ class HydraFlowOrchestrator:
 
     async def _review_loop(self) -> None:
         """Continuously consume reviewable issues from the store and review their PRs."""
+
+        async def _work() -> object:
+            return await self._pipeline_work_wrapper(
+                self._config.repo, self._do_review_work
+            )
+
         await self._polling_loop(
             "review",
-            self._do_review_work,
+            _work,
             self._config.poll_interval,
             enabled_name="review",
             is_pipeline=True,
@@ -1117,9 +1206,15 @@ class HydraFlowOrchestrator:
 
     async def _hitl_loop(self) -> None:
         """Continuously process HITL corrections submitted via the dashboard."""
+
+        async def _work() -> object:
+            return await self._pipeline_work_wrapper(
+                self._config.repo, self._hitl_ctrl.do_work
+            )
+
         await self._polling_loop(
             "hitl",
-            self._hitl_ctrl.do_work,
+            _work,
             self._config.poll_interval,
             is_pipeline=True,
         )

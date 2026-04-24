@@ -11,6 +11,7 @@ All endpoints accept a ``range`` query parameter (``24h``/``7d``/``30d``/
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -20,6 +21,14 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Query
 
+from dashboard_routes._cost_rollups import (
+    _parse_range,
+    build_by_loop,
+    build_per_loop_cost,
+    build_rolling_24h,
+    build_top_issues,
+)
+from dashboard_routes._waterfall_builder import build_waterfall
 from factory_metrics import (
     aggregate_top_skills,
     aggregate_top_subagents,
@@ -32,6 +41,8 @@ from factory_metrics import (
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
+    from events import EventBus
+    from issue_fetcher import IssueFetcher
 
 logger = logging.getLogger("hydraflow.dashboard.diagnostics")
 
@@ -126,11 +137,70 @@ def _load_json_file(path) -> dict[str, Any] | None:
     return None
 
 
+def _event_bus_for_rollup(config: HydraFlowConfig) -> EventBus | None:
+    """Return an ``EventBus`` wired to the on-disk event log.
+
+    Extracted so tests can monkeypatch a mock. Production path constructs
+    a read-only bus against the config's event log; returns ``None`` if
+    the log is unavailable so the caller falls back to trace-only rollups.
+    """
+    # Lazy import — ``events`` imports are heavy (async pubsub machinery).
+    from events import EventBus, EventLog  # noqa: PLC0415
+
+    try:
+        log_path = getattr(config, "event_log_path", None)
+        if log_path is None:
+            return None
+        log = EventLog(Path(log_path))
+        return EventBus(max_history=0, event_log=log)
+    except Exception:  # noqa: BLE001
+        logger.warning("_event_bus_for_rollup: construction failed", exc_info=True)
+        return None
+
+
+def _build_issue_fetcher(config: HydraFlowConfig) -> IssueFetcher:
+    """Construct an IssueFetcher for the waterfall endpoint.
+
+    Split out so tests can monkeypatch a mock in place without standing
+    up the full ServiceRegistry. The production path constructs a real
+    IssueFetcher with the runtime credentials object.
+    """
+    # Lazy import — issue_fetcher pulls in async/subprocess machinery we
+    # don't want eager-loaded at dashboard import time.
+    from config import build_credentials  # noqa: PLC0415
+    from issue_fetcher import IssueFetcher  # noqa: PLC0415
+
+    credentials = build_credentials(config)
+    return IssueFetcher(config, credentials)
+
+
+def _issue_meta_from_github_issue(issue_number: int, gh_issue: Any) -> dict[str, Any]:
+    """Convert a GitHubIssue model (or None) into the waterfall issue_meta shape."""
+    if gh_issue is None:
+        return {
+            "number": issue_number,
+            "title": "(unknown)",
+            "labels": [],
+            "first_seen": None,
+            "merged_at": None,
+        }
+    return {
+        "number": int(getattr(gh_issue, "number", issue_number)),
+        "title": str(getattr(gh_issue, "title", "")),
+        "labels": [str(lbl) for lbl in (getattr(gh_issue, "labels", []) or [])],
+        "first_seen": str(getattr(gh_issue, "created_at", "") or "") or None,
+        # merged_at is not on GitHubIssue; when available via issue_outcomes
+        # the caller can hydrate it, but for v1 the spec treats None as fine.
+        "merged_at": None,
+    }
+
+
 def build_diagnostics_router(config: HydraFlowConfig) -> APIRouter:
     """Build the ``/api/diagnostics`` router.
 
-    The returned router exposes nine GET endpoints that read from the
-    factory metrics JSONL store and the per-run trace artifact directory.
+    The returned router exposes GET endpoints that read from the factory
+    metrics JSONL store, the per-run trace artifact directory, and the
+    shared cost-rollup aggregator.
     """
 
     router = APIRouter(prefix="/api/diagnostics", tags=["diagnostics"])
@@ -191,6 +261,22 @@ def build_diagnostics_router(config: HydraFlowConfig) -> APIRouter:
         rows = issues_table(events)
         return _sort_issues(rows, sort)
 
+    @router.get("/issue/{issue}/waterfall")
+    def issue_waterfall(issue: int) -> dict[str, Any]:
+        """Return the per-issue cost/phase waterfall (spec §4.11 point 1)."""
+        fetcher = _build_issue_fetcher(config)
+        try:
+            gh_issue = asyncio.run(fetcher.fetch_issue_by_number(issue))
+        except Exception:
+            logger.warning(
+                "waterfall: fetch_issue_by_number failed for #%d",
+                issue,
+                exc_info=True,
+            )
+            gh_issue = None
+        issue_meta = _issue_meta_from_github_issue(issue, gh_issue)
+        return build_waterfall(config, issue=issue, issue_meta=issue_meta)
+
     @router.get("/issue/{issue}/{phase}")
     def issue_phase(issue: int, phase: str) -> list[dict[str, Any]]:
         if not _PHASE_PATTERN.fullmatch(phase):
@@ -234,5 +320,51 @@ def build_diagnostics_router(config: HydraFlowConfig) -> APIRouter:
     def cache(range: str = Query("7d")) -> list[dict[str, Any]]:
         events = _load(range)
         return _cache_hit_rate_buckets(events)
+
+    # --- Cost-rollup endpoints (§4.11 points 4–5) ---------------------------
+
+    @router.get("/cost/rolling-24h")
+    def cost_rolling_24h() -> dict[str, Any]:
+        """Total cost burned in the last 24h, grouped by phase and loop (§4.11 point 4)."""
+        return build_rolling_24h(config)
+
+    @router.get("/cost/top-issues")
+    def cost_top_issues(
+        range: str = Query("7d"),
+        limit: int = Query(10, ge=1, le=100),
+    ) -> list[dict[str, Any]]:
+        """Most expensive issues in the window (§4.11 point 4)."""
+        try:
+            window = _parse_range(range)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        now = datetime.now(UTC)
+        return build_top_issues(config, since=now - window, until=now, limit=limit)
+
+    @router.get("/cost/by-loop")
+    def cost_by_loop_route(range: str = Query("7d")) -> list[dict[str, Any]]:
+        """Per-loop tick and wall-clock share over the range (§4.11 point 4)."""
+        try:
+            window = _parse_range(range)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        now = datetime.now(UTC)
+        return build_by_loop(config, since=now - window, until=now)
+
+    @router.get("/loops/cost")
+    def loops_cost(range: str = Query("7d")) -> list[dict[str, Any]]:
+        """Per-loop machinery-level cost dashboard (§4.11 point 5)."""
+        try:
+            window = _parse_range(range)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        now = datetime.now(UTC)
+        event_bus = _event_bus_for_rollup(config)
+        return build_per_loop_cost(
+            config,
+            since=now - window,
+            until=now,
+            event_bus=event_bus,
+        )
 
     return router

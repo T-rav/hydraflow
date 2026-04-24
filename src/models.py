@@ -1755,6 +1755,26 @@ class StateData(BaseModel):
         default_factory=CodeGroomingSettings
     )
     code_grooming_filed: list[str] = Field(default_factory=list)
+    # Trust fleet — RCBudgetLoop (spec §4.8)
+    rc_budget_duration_history: list[dict[str, Any]] = Field(default_factory=list)
+    rc_budget_attempts: dict[str, int] = Field(default_factory=dict)
+    # Trust fleet — WikiRotDetectorLoop (spec §4.9)
+    wiki_rot_attempts: dict[str, int] = Field(default_factory=dict)
+    # Trust fleet — ContractRefreshLoop (spec §4.2 Task 18)
+    contract_refresh_attempts: dict[str, int] = Field(default_factory=dict)
+    # Trust fleet — TrustFleetSanityLoop (spec §12.1)
+    trust_fleet_sanity_attempts: dict[str, int] = Field(default_factory=dict)
+    trust_fleet_sanity_last_run: str | None = None
+    trust_fleet_sanity_last_seen_counts: dict[str, dict[str, int | str]] = Field(
+        default_factory=dict,
+    )
+    # Trust fleet — caretaker loops (Plan 5)
+    flake_counts: dict[str, int] = Field(default_factory=dict)
+    flake_attempts: dict[str, int] = Field(default_factory=dict)
+    skill_prompt_last_green: dict[str, str] = Field(default_factory=dict)
+    skill_prompt_attempts: dict[str, int] = Field(default_factory=dict)
+    fake_coverage_last_known: dict[str, list[str]] = Field(default_factory=dict)
+    fake_coverage_attempts: dict[str, int] = Field(default_factory=dict)
     escalation_contexts: dict[str, dict[str, object]] = Field(default_factory=dict)
     diagnostic_attempts: dict[str, list[dict[str, object]]] = Field(
         default_factory=dict
@@ -1764,6 +1784,25 @@ class StateData(BaseModel):
     trace_runs: dict[str, dict[str, object]] = Field(
         default_factory=lambda: {"active": {}, "next_run_id": {}}
     )
+    # StagingBisectLoop state (spec §4.3 + §8). Written by StagingPromotionLoop
+    # on each promotion outcome; polled + mutated by StagingBisectLoop.
+    last_green_rc_sha: str = ""
+    last_rc_red_sha: str = ""
+    rc_cycle_id: int = 0
+    auto_reverts_in_cycle: int = 0
+    auto_reverts_successful: int = 0
+    flake_reruns_total: int = 0
+    # PrinciplesAuditLoop state (spec §4.4).
+    # Keys are repo slugs ("owner/repo"); sentinel "hydraflow-self" = working tree.
+    managed_repos_onboarding_status: dict[
+        str, Literal["pending", "blocked", "ready"]
+    ] = Field(default_factory=dict)
+    # last_green_audit[slug] maps check_id -> status string (PASS/WARN/FAIL/NA/
+    # NOT_IMPLEMENTED). The loop diffs the current audit against this reference.
+    last_green_audit: dict[str, dict[str, str]] = Field(default_factory=dict)
+    # principles_drift_attempts[f"{slug}:{check_id}"] = attempt count.
+    # STRUCTURAL/BEHAVIORAL escalate at 3; CULTURAL at 1.
+    principles_drift_attempts: dict[str, int] = Field(default_factory=dict)
     last_updated: str | None = None
 
 

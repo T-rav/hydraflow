@@ -27,12 +27,17 @@ if TYPE_CHECKING:
 
 from ._ci_monitor import CIMonitorStateMixin
 from ._code_grooming import CodeGroomingStateMixin
+from ._contract_refresh import ContractRefreshStateMixin
 from ._dependabot_merge import DependabotMergeStateMixin
 from ._diagnostic import DiagnosticStateMixin
 from ._epic import EpicStateMixin
+from ._fake_coverage import FakeCoverageStateMixin
+from ._flake_tracker import FlakeTrackerStateMixin
 from ._hitl import HITLStateMixin
 from ._issue import IssueStateMixin
 from ._lifetime import LifetimeStatsMixin
+from ._principles_audit import PrinciplesAuditStateMixin
+from ._rc_budget import RCBudgetStateMixin
 from ._report import ReportStateMixin
 from ._review import ReviewStateMixin
 from ._route_back import RouteBackStateMixin
@@ -40,8 +45,12 @@ from ._security_patch import SecurityPatchStateMixin
 from ._sentry import SentryStateMixin
 from ._session import SessionStateMixin
 from ._shape import ShapeStateMixin
+from ._skill_prompt_eval import SkillPromptEvalStateMixin
+from ._staging_bisect import StagingBisectStateMixin
 from ._stale_issue import StaleIssueStateMixin
 from ._trace_runs import TraceRunsMixin
+from ._trust_fleet_sanity import TrustFleetSanityStateMixin
+from ._wiki_rot_detector import WikiRotDetectorStateMixin
 from ._worker import WorkerStateMixin
 from ._workspace import WorkspaceStateMixin
 
@@ -62,16 +71,25 @@ class StateTracker(
     LifetimeStatsMixin,
     SessionStateMixin,
     WorkerStateMixin,
+    PrinciplesAuditStateMixin,
     ReportStateMixin,
     ShapeStateMixin,
     DependabotMergeStateMixin,
     StaleIssueStateMixin,
+    StagingBisectStateMixin,
     SecurityPatchStateMixin,
     CIMonitorStateMixin,
     CodeGroomingStateMixin,
     DiagnosticStateMixin,
     SentryStateMixin,
     TraceRunsMixin,
+    FlakeTrackerStateMixin,
+    SkillPromptEvalStateMixin,
+    FakeCoverageStateMixin,
+    RCBudgetStateMixin,
+    WikiRotDetectorStateMixin,
+    TrustFleetSanityStateMixin,
+    ContractRefreshStateMixin,
 ):
     """JSON-file backed state for crash recovery.
 

@@ -249,7 +249,7 @@ export const WORKER_PRESETS = {
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'pr_unsticker', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_sweeper', 'dependabot_merge', 'staging_promotion', 'stale_issue', 'security_patch', 'ci_monitor', 'code_grooming', 'sentry_ingest', 'retrospective'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'pr_unsticker', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_sweeper', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'code_grooming', 'sentry_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning'])
 
 /**
  * Default intervals (in seconds) for system workers.
@@ -266,11 +266,21 @@ export const SYSTEM_WORKER_INTERVALS = {
   epic_sweeper: 3600,
   dependabot_merge: 3600,
   staging_promotion: 300,
+  staging_bisect: 600,
   stale_issue: 86400,
   security_patch: 21600,
   ci_monitor: 1800,
   code_grooming: 86400,
   retrospective: 1800,
+  principles_audit: 604800,
+  flake_tracker: 14400,
+  skill_prompt_eval: 604800,
+  fake_coverage_auditor: 604800,
+  rc_budget: 14400,
+  wiki_rot_detector: 604800,
+  trust_fleet_sanity: 600,
+  contract_refresh: 604800,
+  corpus_learning: 604800,
 }
 
 /**
@@ -301,6 +311,7 @@ export const BACKGROUND_WORKERS = [
   { key: 'epic_sweeper',    label: 'Epic Sweeper',    description: 'Periodically sweeps open epics and auto-closes those with all sub-issues resolved.', color: theme.purple, system: true, group: 'operations', tags: ['lifecycle'] },
   { key: 'dependabot_merge', label: 'Dependabot Merge', description: 'Auto-merges dependency update PRs from configured bots after CI passes.', color: theme.green, group: 'repo_health', tags: ['security'] },
   { key: 'staging_promotion', label: 'Staging Promotion', description: 'Cuts release-candidate snapshots from staging and auto-promotes them to main on green CI. See ADR-0042.', color: theme.accent, group: 'operations', tags: ['release'] },
+  { key: 'staging_bisect', label: 'Staging Bisect', description: 'Bisects the culprit PR on RC-red, files auto-revert + retry issue, watchdogs the next RC. See ADR-0042 §4.3.', color: theme.red, group: 'operations', tags: ['release', 'recovery'] },
   { key: 'health_monitor', label: 'Health Monitor', description: 'Analyzes pipeline trends, auto-tunes parameters, detects knowledge gaps, and ingests log patterns.', color: theme.green, system: true, group: 'operations', tags: ['monitoring'] },
   { key: 'stale_issue', label: 'Stale Issue Cleanup', description: 'Auto-closes issues with no activity after configurable period.', color: theme.orange, group: 'repo_health', tags: ['hygiene'] },
   { key: 'sentry_ingest', label: 'Sentry Ingest', description: 'Polls Sentry for unresolved errors and files them as GitHub issues for the pipeline.', color: theme.red, group: 'intake', tags: ['errors'] },
@@ -310,6 +321,15 @@ export const BACKGROUND_WORKERS = [
   { key: 'code_grooming', label: 'Code Grooming', description: 'Runs periodic audit scans and files issues for critical findings.', color: theme.accent, group: 'repo_health', tags: ['quality'] },
   { key: 'repo_wiki', label: 'Repo Wiki', description: 'Lints and maintains per-repo knowledge wikis compiled from plan/implement/review cycles.', color: theme.purple, group: 'learning', tags: ['knowledge'] },
   { key: 'diagnostic', label: 'Diagnostic Agent', description: 'Analyzes escalated issues, classifies severity, and attempts targeted fixes before HITL.', color: theme.blue, system: true, group: 'operations', tags: ['recovery'] },
+  { key: 'principles_audit', label: 'Principles Audit', description: 'Weekly audit of managed repos and HydraFlow-self against ADR-0044 principles. Gates onboarding and detects drift regressions.', color: theme.purple, group: 'learning', tags: ['insights'] },
+  { key: 'flake_tracker', label: 'Flake Tracker', description: 'Detects persistently flaky tests across the last 20 RC runs and files fix-or-quarantine issues.', color: theme.yellow, group: 'repo_health', tags: ['quality'] },
+  { key: 'skill_prompt_eval', label: 'Skill Prompt Eval', description: 'Runs the full adversarial skill corpus weekly and files drift + weak-case issues.', color: theme.blue, group: 'learning', tags: ['quality'] },
+  { key: 'fake_coverage_auditor', label: 'Fake Coverage Auditor', description: 'Flags un-cassetted fake adapter methods and un-exercised test helpers.', color: theme.accent, group: 'learning', tags: ['quality'] },
+  { key: 'rc_budget', label: 'RC Budget', description: 'Detects RC CI wall-clock bloat via rolling-median + spike-vs-recent-max signals; files hydraflow-find issues.', color: theme.orange, group: 'repo_health', tags: ['quality'] },
+  { key: 'wiki_rot_detector', label: 'Wiki Rot Detector', description: 'Weekly scan of per-repo wikis for broken code cites (file:symbol, dotted src.paths); files hydraflow-find issues with fuzzy-match suggestions.', color: theme.purple, group: 'learning', tags: ['knowledge'] },
+  { key: 'trust_fleet_sanity', label: 'Trust Fleet Sanity', description: 'Meta-observability — watches the nine trust loops for issue-storms, repair-failure ratios, tick-error ratios, staleness, and cost spikes; files one-attempt escalations. See spec §12.1.', color: theme.red, system: true, group: 'operations', tags: ['monitoring'] },
+  { key: 'contract_refresh', label: 'Contract Refresh', description: 'Weekly refresh of fake-adapter cassettes with autonomous repair dispatch; records live adapters, diffs against committed cassettes, opens auto-merge refresh PRs, and files fake-drift companion issues when replay fails. See spec §4.2.', color: theme.accent, group: 'learning', tags: ['quality'] },
+  { key: 'corpus_learning', label: 'Corpus Learning', description: 'Grows the adversarial skill corpus from production escape signals; synthesizes + self-validates before/after cases and files PRs under tests/trust/adversarial/cases/. See spec §4.1 v2.', color: theme.purple, group: 'learning', tags: ['insights'] },
 ]
 
 /**

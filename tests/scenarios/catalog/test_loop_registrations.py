@@ -31,6 +31,20 @@ ALL_LOOPS = (
     "security_patch",
     "stale_issue",
     "epic_monitor",
+    "wiki_rot_detector",
+    # trust-arch caretaker fleet (§4.4–§4.8)
+    "principles_audit",
+    "flake_tracker",
+    "skill_prompt_eval",
+    "fake_coverage_auditor",
+    "rc_budget",
+    # trust-arch meta + attribution (§4.3 + §12.1)
+    "staging_bisect",
+    "trust_fleet_sanity",
+    # trust-arch contract refresh (§4.2)
+    "contract_refresh",
+    # trust-arch corpus learning (§4.1 v2)
+    "corpus_learning",
 )
 
 

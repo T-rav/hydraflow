@@ -1,0 +1,2 @@
+DIFF_SANITY_RESULT: OK
+SUMMARY: test-only addition

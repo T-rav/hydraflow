@@ -17,6 +17,7 @@ from config import HydraFlowConfig
 from events import EventBus
 from models import PRInfo
 from staging_promotion_loop import StagingPromotionLoop
+from state import StateTracker
 
 
 def _make_cfg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> HydraFlowConfig:
@@ -342,3 +343,71 @@ class TestRetentionSweep:
         loop._record_last_rc(datetime.now(UTC))
         await loop._do_work()
         assert loop._sweep_path().exists()
+
+
+class TestStateWritesOnPromoted:
+    @pytest.mark.asyncio
+    async def test_writes_last_green_rc_sha_on_promoted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs = _make_loop(
+            tmp_path,
+            monkeypatch,
+            open_promotion=_make_pr(number=77),
+            ci_result=(True, "ok"),
+            merge_result=True,
+        )
+        prs.get_pr_head_sha = AsyncMock(return_value="abc123deadbeef")
+        state = StateTracker(state_file=tmp_path / "s.json")
+        loop._state = state  # type: ignore[attr-defined]
+        # seed a stale counter so reset is observable
+        state.increment_auto_reverts_in_cycle()
+        assert state.get_auto_reverts_in_cycle() == 1
+
+        result = await loop._do_work()
+
+        assert result["status"] == "promoted"
+        assert state.get_last_green_rc_sha() == "abc123deadbeef"
+        assert state.get_auto_reverts_in_cycle() == 0
+
+
+class TestStateWritesOnCIFailed:
+    @pytest.mark.asyncio
+    async def test_writes_last_rc_red_sha_and_bumps_cycle(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs = _make_loop(
+            tmp_path,
+            monkeypatch,
+            open_promotion=_make_pr(number=88),
+            ci_result=(False, "pytest failed: test_foo"),
+        )
+        prs.get_pr_head_sha = AsyncMock(return_value="cafef00d")
+        state = StateTracker(state_file=tmp_path / "s.json")
+        loop._state = state  # type: ignore[attr-defined]
+
+        result = await loop._do_work()
+
+        assert result["status"] == "ci_failed"
+        assert state.get_last_rc_red_sha() == "cafef00d"
+        assert state.get_rc_cycle_id() == 1
+
+    @pytest.mark.asyncio
+    async def test_no_state_write_on_ci_pending(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs = _make_loop(
+            tmp_path,
+            monkeypatch,
+            open_promotion=_make_pr(number=89),
+            ci_result=(False, "timed out waiting for checks"),
+        )
+        prs.get_pr_head_sha = AsyncMock(return_value="never_read")
+        state = StateTracker(state_file=tmp_path / "s.json")
+        loop._state = state  # type: ignore[attr-defined]
+
+        result = await loop._do_work()
+
+        assert result["status"] == "ci_pending"
+        assert state.get_last_rc_red_sha() == ""
+        assert state.get_rc_cycle_id() == 0

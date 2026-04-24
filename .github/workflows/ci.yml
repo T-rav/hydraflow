@@ -187,6 +187,35 @@ jobs:
       - name: Run regression tests
         run: PYTHONPATH=src uv run pytest tests/regressions/ -q
 
+  audit:
+    name: Principles Audit
+    needs: changes
+    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve origin HEAD
+        # actions/checkout leaves refs/remotes/origin/HEAD unset on PR
+        # checkouts (which are a merge commit, not a fetched branch).
+        # P5.5 (branch-protection probe) needs origin/HEAD to detect the
+        # default branch, so fetch main explicitly and point HEAD at it.
+        run: |
+          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: uv sync --all-extras
+      - name: Run principles audit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: make audit
+
   ui-build:
     name: Dashboard Build
     needs: changes

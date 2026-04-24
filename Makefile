@@ -36,7 +36,7 @@ RESET := \033[0m
 DOCKER_IMAGE ?= ghcr.io/t-rav/hydraflow-agent:latest
 DOCKER_BASE_IMAGE ?= ghcr.io/t-rav/hydraflow-agent-base:latest
 
-.PHONY: help run dev dry-run clean clean-assets compact coverage cover smoke test test-fast test-cov lint lint-check lint-fix typecheck security quality quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels prep scaffold hot docker-build docker-ensure docker-test deps integration soak screenshot screenshot-update check-node-ui
+.PHONY: help run dev dry-run clean clean-assets compact coverage cover smoke test test-fast test-cov lint lint-check lint-fix typecheck security quality quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels prep scaffold hot docker-build docker-ensure docker-test deps integration soak screenshot screenshot-update check-node-ui trust trust-adversarial
 
 check-node-ui:
 	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh --version >/dev/null
@@ -209,13 +209,23 @@ soak: deps
 
 scenario: deps
 	@echo "$(BLUE)Running scenario tests...$(RESET)"
-	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/scenarios/ -m scenario -v
+	@mkdir -p $(if $(JUNIT_DIR),$(JUNIT_DIR),.)
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/scenarios/ -m scenario -v \
+		$(if $(JUNIT_DIR),--junitxml=$(JUNIT_DIR)/junit-scenario.xml,)
 	@echo "$(GREEN)Scenario tests passed$(RESET)"
 
 scenario-loops: deps
 	@echo "$(BLUE)Running scenario loop tests...$(RESET)"
-	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/scenarios/ -m scenario_loops -v
+	@mkdir -p $(if $(JUNIT_DIR),$(JUNIT_DIR),.)
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/scenarios/ -m scenario_loops -v \
+		$(if $(JUNIT_DIR),--junitxml=$(JUNIT_DIR)/junit-scenario-loops.xml,)
 	@echo "$(GREEN)Scenario loop tests passed$(RESET)"
+
+bisect-probe: deps
+	@echo "$(BLUE)Running bisect probe (mirrors rc-promotion-scenario.yml)...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && $(MAKE) scenario
+	@cd $(HYDRAFLOW_DIR) && $(MAKE) scenario-loops
+	@echo "$(GREEN)Bisect probe passed$(RESET)"
 
 scenario-browser: deps
 	@echo "$(BLUE)Running browser scenario tests...$(RESET)"
@@ -223,6 +233,19 @@ scenario-browser: deps
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python -m playwright install --with-deps chromium
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/scenarios/browser/ -m scenario_browser --reruns=1 -v
 	@echo "$(GREEN)Browser scenario tests passed$(RESET)"
+
+trust-adversarial: deps
+	@echo "$(BLUE)Running adversarial skill corpus...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/trust/adversarial/ -v
+	@echo "$(GREEN)Adversarial corpus passed$(RESET)"
+
+trust-contracts: deps
+	@echo "$(BLUE)Running fake contract tests...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/trust/contracts/ -v
+	@echo "$(GREEN)Contract tests passed$(RESET)"
+
+trust: trust-adversarial trust-contracts
+	@echo "$(GREEN)Trust suite passed$(RESET)"
 
 test-fast: deps
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ -x --tb=short

@@ -12,7 +12,7 @@ from skill_registry import (
 
 class TestAgentSkill:
     def test_builtin_skills_count(self):
-        assert len(BUILTIN_SKILLS) == 4
+        assert len(BUILTIN_SKILLS) == 6
 
     def test_diff_sanity_skill(self):
         skill = BUILTIN_SKILLS[0]
@@ -61,7 +61,7 @@ class TestGetSkills:
     def test_modifying_copy_doesnt_affect_builtin(self):
         skills = get_skills()
         skills.clear()
-        assert len(BUILTIN_SKILLS) == 4
+        assert len(BUILTIN_SKILLS) == 6
 
 
 class TestFormatSkillsForPrompt:

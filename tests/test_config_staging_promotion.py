@@ -110,3 +110,27 @@ class TestStagingPromotionConfig:
         monkeypatch.setenv("HYDRAFLOW_STAGING_ENABLED", "false")
         cfg = _make_cfg(tmp_path)
         assert cfg.base_branch() == "main"
+
+    def test_staging_bisect_config_defaults(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HYDRAFLOW_STAGING_BISECT_INTERVAL", raising=False)
+        monkeypatch.delenv(
+            "HYDRAFLOW_STAGING_BISECT_RUNTIME_CAP_SECONDS", raising=False
+        )
+        monkeypatch.delenv("HYDRAFLOW_STAGING_BISECT_WATCHDOG_RC_CYCLES", raising=False)
+        cfg = _make_cfg(tmp_path)
+        assert cfg.staging_bisect_interval == 600
+        assert cfg.staging_bisect_runtime_cap_seconds == 2700
+        assert cfg.staging_bisect_watchdog_rc_cycles == 2
+
+    def test_staging_bisect_env_override(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HYDRAFLOW_STAGING_BISECT_INTERVAL", "300")
+        monkeypatch.setenv("HYDRAFLOW_STAGING_BISECT_RUNTIME_CAP_SECONDS", "600")
+        monkeypatch.setenv("HYDRAFLOW_STAGING_BISECT_WATCHDOG_RC_CYCLES", "4")
+        cfg = _make_cfg(tmp_path)
+        assert cfg.staging_bisect_interval == 300
+        assert cfg.staging_bisect_runtime_cap_seconds == 600
+        assert cfg.staging_bisect_watchdog_rc_cycles == 4

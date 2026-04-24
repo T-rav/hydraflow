@@ -19,8 +19,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from diff_sanity import build_diff_sanity_prompt, parse_diff_sanity_result
+from discover_completeness import (
+    build_discover_completeness_prompt,
+    parse_discover_completeness_result,
+)
 from plan_compliance import build_plan_compliance_prompt, parse_plan_compliance_result
 from scope_check import build_scope_check_prompt, parse_scope_check_result
+from shape_coherence import (
+    build_shape_coherence_prompt,
+    parse_shape_coherence_result,
+)
 from test_adequacy import build_test_adequacy_prompt, parse_test_adequacy_result
 
 
@@ -90,6 +98,22 @@ BUILTIN_SKILLS: list[AgentSkill] = [
         blocking=False,
         prompt_builder=build_test_adequacy_prompt,
         result_parser=parse_test_adequacy_result,
+    ),
+    AgentSkill(
+        name="discover-completeness",
+        purpose="Evaluate a Discover brief against the five-criterion rubric (structure, non-trivial content, no paraphrase-only, concrete acceptance criteria, open questions when ambiguous)",
+        config_key="max_discover_attempts",
+        blocking=True,
+        prompt_builder=build_discover_completeness_prompt,
+        result_parser=parse_discover_completeness_result,
+    ),
+    AgentSkill(
+        name="shape-coherence",
+        purpose="Evaluate a Shape proposal against the five-criterion rubric (≥2 options, do-nothing option, mutually exclusive scope, trade-offs named, reconciles Discover ambiguities)",
+        config_key="max_shape_attempts",
+        blocking=True,
+        prompt_builder=build_shape_coherence_prompt,
+        result_parser=parse_shape_coherence_result,
     ),
 ]
 
