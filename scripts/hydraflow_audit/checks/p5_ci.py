@@ -102,11 +102,19 @@ def _branch_protection_cultural(ctx: CheckContext) -> Finding:  # noqa: PLR0911 
         detail = (result.stderr or "").strip()
         # A 404 on the classic endpoint just means no classic rule is set;
         # GitHub's newer Rulesets system lives at a different path. Query it
-        # before concluding the branch is unprotected. Anything else (auth,
-        # rate-limit, network) is an audit-infrastructure issue we can't
-        # diagnose, so fall through to WARN.
+        # before concluding the branch is unprotected.
         if "HTTP 404" in detail or "Branch not protected" in detail:
             return _branch_protection_from_rulesets(ctx.root, remote_slug, main_branch)
+        # 403 means the token lacks the `administration` scope (the default
+        # GITHUB_TOKEN in CI). This is an infra limit, not a governance
+        # violation — report NA so the audit doesn't fail for it.
+        if "HTTP 403" in detail or "Resource not accessible" in detail:
+            return finding(
+                "P5.5",
+                Status.NA,
+                "gh token lacks administration scope (CI default) — "
+                "confirm branch protection in GitHub repo settings",
+            )
         last = detail.splitlines()[-1:] or ["unknown error"]
         return _branch_protection_warn(
             f"`gh api` could not verify protection ({last[0]}) — confirm in GitHub settings"
