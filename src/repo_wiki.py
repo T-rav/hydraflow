@@ -557,6 +557,49 @@ class WikiEntry(BaseModel):
         return self
 
 
+def annotate_entries_with_temporal_tags(
+    entries: list[WikiEntry],
+    *,
+    now: datetime,
+) -> list[tuple[WikiEntry, str]]:
+    """Tag each entry with a short human-readable stability string.
+
+    Tags:
+    - ``"recently added"`` — age < 30 days
+    - ``"stable for N months"`` — 30 days ≤ age < 365 days
+    - ``"stable for N year(s)"`` — age ≥ 365 days
+    - ``"age unknown"`` — ``created_at`` unparseable
+
+    When ``corroborations`` > 1, a ``(+N)`` suffix is appended so the
+    planner/reviewer can see how independently-re-discovered the claim
+    is at a glance. Pure function — no I/O, no LLM calls, safe to run
+    on every wiki read.
+    """
+    annotated: list[tuple[WikiEntry, str]] = []
+    for entry in entries:
+        try:
+            created = datetime.fromisoformat(entry.created_at)
+        except (TypeError, ValueError):
+            annotated.append((entry, "age unknown"))
+            continue
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=UTC)
+        age_days = (now - created).days
+        if age_days < 30:
+            base = "recently added"
+        elif age_days < 365:
+            months = max(1, age_days // 30)
+            base = f"stable for {months} months"
+        else:
+            years = age_days // 365
+            suffix = "year" if years == 1 else "years"
+            base = f"stable for {years} {suffix}"
+        if entry.corroborations > 1:
+            base = f"{base} (+{entry.corroborations})"
+        annotated.append((entry, base))
+    return annotated
+
+
 class WikiIndex(BaseModel):
     """Master index for a repo wiki — stored as index.json for programmatic access."""
 
