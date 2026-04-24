@@ -196,10 +196,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Resolve origin HEAD
-        # actions/checkout leaves refs/remotes/origin/HEAD unset on shallow
-        # checkouts; P5.5 (branch-protection probe) needs it to detect the
-        # default branch, so populate it explicitly.
-        run: git remote set-head origin --auto
+        # actions/checkout leaves refs/remotes/origin/HEAD unset on PR
+        # checkouts (which are a merge commit, not a fetched branch).
+        # P5.5 (branch-protection probe) needs origin/HEAD to detect the
+        # default branch, so fetch main explicitly and point HEAD at it.
+        run: |
+          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
