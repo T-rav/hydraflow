@@ -101,3 +101,65 @@ def test_malformed_created_at_tags_as_age_unknown() -> None:
     [(_e, tag)] = annotate_entries_with_temporal_tags([e], now=datetime.now(UTC))
 
     assert tag == "age unknown"
+
+
+# ----------------------------------------------------------------------
+# Integration — query_with_tags returns a title → tag map alongside
+# the markdown so callers can weave tags into the injected prompt.
+# ----------------------------------------------------------------------
+
+import subprocess  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+import pytest  # noqa: E402
+
+from repo_wiki import RepoWikiStore  # noqa: E402
+
+
+@pytest.fixture
+def tracked_store(tmp_path: Path) -> RepoWikiStore:
+    root = tmp_path / "tracked"
+    root.mkdir()
+    subprocess.run(
+        ["git", "init", "-b", "main"], cwd=tmp_path, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=tmp_path,
+        check=True,
+    )
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
+    (tmp_path / "seed").write_text("x")
+    subprocess.run(
+        ["git", "add", "seed"], cwd=tmp_path, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True
+    )
+    return RepoWikiStore(wiki_root=root, tracked_root=root)
+
+
+def test_query_with_tags_returns_title_to_tag_map_for_corroborated_entry(
+    tracked_store: RepoWikiStore,
+) -> None:
+    """query_with_tags must emit the markdown body and a
+    ``title → stability-tag`` dict so ``_inject_repo_wiki`` can weave
+    tags inline."""
+    old_date = (datetime.now(UTC) - timedelta(days=200)).isoformat()
+    entry = WikiEntry(
+        title="Always use factories",
+        content="Details about factories.",
+        source_type="review",
+        source_issue=1,
+        created_at=old_date,
+        corroborations=4,
+    )
+    tracked_store.write_entry("o/r", entry, topic="patterns")
+
+    markdown, tags = tracked_store.query_with_tags("o/r")
+
+    assert "Always use factories" in markdown
+    tag = tags.get("Always use factories")
+    assert tag is not None
+    assert "stable for" in tag
+    assert "+4" in tag

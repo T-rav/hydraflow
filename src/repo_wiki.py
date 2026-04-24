@@ -811,6 +811,37 @@ class RepoWikiStore:
         result = "\n".join(parts)
         return result[:max_chars]
 
+    def query_with_tags(
+        self,
+        repo_slug: str,
+        keywords: list[str] | None = None,
+        topics: list[str] | None = None,
+        max_chars: int = 15_000,
+    ) -> tuple[str, dict[str, str]]:
+        """Like ``query`` but also returns a ``{title: temporal_tag}``
+        map for the tracked-layout entries.
+
+        Callers that want tagged output inline can weave the tags in at
+        render time (see ``BaseRunner._inject_repo_wiki``). Returns an
+        empty tag map when the store has no tracked_root or the repo
+        has no tracked entries.
+        """
+        markdown = self.query(
+            repo_slug, keywords=keywords, topics=topics, max_chars=max_chars
+        )
+        tags: dict[str, str] = {}
+        if self._tracked_root is None:
+            return markdown, tags
+        now = datetime.now(UTC)
+        for topic in self._list_tracked_topics(repo_slug):
+            topic_dir = self._tracked_topic_dir(repo_slug, topic)
+            if topic_dir is None or not topic_dir.is_dir():
+                continue
+            entries = self._load_tracked_topic_entries(topic_dir)
+            for entry, tag in annotate_entries_with_temporal_tags(entries, now=now):
+                tags[entry.title] = tag
+        return markdown, tags
+
     def lint(self, repo_slug: str) -> LintResult:
         """Run a health check on the wiki for the given repo.
 
