@@ -1,7 +1,7 @@
 """Unit tests for src/contract_refresh_loop.py (§4.2 Phase 2).
 
 Covers the Task 11/12 skeleton surface plus the Task 15/16 PR-filing +
-replay-gate wiring:
+replay-gate wiring, plus the Task 20 per-loop telemetry emission:
 
 - construction (worker_name wired, deps stored)
 - ``_get_default_interval`` reads ``config.contract_refresh_interval``
@@ -13,9 +13,11 @@ replay-gate wiring:
 - Task 16: after the refresh PR opens, re-runs ``make trust-contracts``
   via subprocess. Replay failure → ``hydraflow-find`` + ``fake-drift``
   issue via ``PRManager.create_issue``. Replay pass → no companion issue.
-
-Tasks 17+ (stream-protocol drift, escalation tracker, wiring, telemetry)
-remain out of scope for this PR and are not exercised here.
+- Task 20: each recorder subprocess + the replay gate emits one
+  ``trace_collector.emit_loop_subprocess_trace`` call with the
+  expected ``loop=contract_refresh`` / ``command`` / ``exit_code`` /
+  ``duration_ms`` shape so deploy-time fleet observability catches
+  slow/broken recorders without cracking open the refresh loop.
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ import asyncio
 import subprocess
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -45,11 +47,34 @@ def _deps(stop: asyncio.Event, *, enabled: bool = True) -> LoopDeps:
     )
 
 
+class _FakeState:
+    """Minimal in-memory stand-in for ``StateTracker`` contract-refresh surface.
+
+    Task 18 added three mixin methods; using a real ``StateTracker``
+    here would pull in the filesystem and all other mixins for tests
+    that only care about a single ``dict[str, int]``.
+    """
+
+    def __init__(self) -> None:
+        self._attempts: dict[str, int] = {}
+
+    def get_contract_refresh_attempts(self, adapter: str) -> int:
+        return int(self._attempts.get(adapter, 0))
+
+    def inc_contract_refresh_attempts(self, adapter: str) -> int:
+        self._attempts[adapter] = self._attempts.get(adapter, 0) + 1
+        return self._attempts[adapter]
+
+    def clear_contract_refresh_attempts(self, adapter: str) -> None:
+        self._attempts.pop(adapter, None)
+
+
 def _loop(
     tmp_path: Path,
     *,
     enabled: bool = True,
     prs: Any | None = None,
+    state: Any | None = None,
     **config_overrides: object,
 ) -> ContractRefreshLoop:
     cfg = HydraFlowConfig(
@@ -60,11 +85,11 @@ def _loop(
     )
     (tmp_path / "repo").mkdir(parents=True, exist_ok=True)
     pr_manager = prs if prs is not None else AsyncMock()
-    state = MagicMock()
+    state_obj = state if state is not None else _FakeState()
     return ContractRefreshLoop(
         config=cfg,
         prs=pr_manager,
-        state=state,
+        state=state_obj,
         deps=_deps(asyncio.Event(), enabled=enabled),
     )
 
@@ -363,3 +388,414 @@ async def test_do_work_replay_gate_passes_no_companion_issue(
     await loop._do_work()
 
     prs.create_issue.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Task 20: per-loop telemetry emission
+# ---------------------------------------------------------------------------
+
+
+def _patch_emit_trace(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Patch ``trace_collector.emit_loop_subprocess_trace`` and capture calls.
+
+    Returns a list the tests can inspect after ``_do_work`` completes.
+    """
+    import trace_collector  # noqa: PLC0415
+
+    emitted: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        trace_collector,
+        "emit_loop_subprocess_trace",
+        lambda **kwargs: emitted.append(kwargs),
+    )
+    return emitted
+
+
+@pytest.mark.asyncio
+async def test_do_work_emits_telemetry_for_each_recorder_and_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each recorder subprocess + the replay gate emits one trace call.
+
+    With the happy path — all four recorders returning, drift detected,
+    PR opened, replay gate green — we expect five
+    ``emit_loop_subprocess_trace`` invocations: one per adapter
+    recorder plus one for ``make trust-contracts``. The ``auto_pr``
+    seam is mocked at the module level so its own git/gh subprocesses
+    do not run (and thus emit nothing from this loop's perspective).
+    """
+    _stub_recording(monkeypatch)
+    recorded_git = _seed_recorded_cassette(tmp_path / "rec" / "git", "git", "commit")
+    monkeypatch.setattr(crl_module, "record_git", lambda *_a, **_k: [recorded_git])
+
+    drifted_report = crl_module.AdapterDriftReport(
+        adapter="git",
+        drifted_cassettes=[recorded_git],
+        new_cassettes=[],
+        deleted_cassettes=[],
+    )
+    fleet = crl_module.FleetDriftReport(reports=[drifted_report], has_drift=True)
+    monkeypatch.setattr(crl_module, "detect_fleet_drift", lambda *_a, **_k: fleet)
+
+    fake = _FakeAutoPR()
+    monkeypatch.setattr(crl_module, "open_automated_pr_async", fake)
+    _stub_make_trust_contracts_ok(monkeypatch)
+
+    emitted = _patch_emit_trace(monkeypatch)
+
+    loop = _loop(tmp_path)
+    await loop._do_work()
+
+    # Four recorder calls + one replay gate = five traces.
+    assert len(emitted) == 5, emitted
+
+    # Every trace is tagged as the contract_refresh loop.
+    assert all(e["loop"] == "contract_refresh" for e in emitted), emitted
+    # Every trace carries a duration and an integer exit code.
+    for entry in emitted:
+        assert isinstance(entry["command"], list)
+        assert isinstance(entry["exit_code"], int)
+        assert isinstance(entry["duration_ms"], int)
+        assert entry["duration_ms"] >= 0
+
+    # The per-recorder traces are labeled with the adapter name so
+    # deploy-time triage can filter by `command` without parsing.
+    recorder_commands = [e["command"] for e in emitted[:4]]
+    joined = [" ".join(c) for c in recorder_commands]
+    assert any("record_github" in s for s in joined), joined
+    assert any("record_git" in s for s in joined), joined
+    assert any("record_docker" in s for s in joined), joined
+    assert any("record_claude_stream" in s for s in joined), joined
+
+    # The replay-gate trace is the final entry.
+    replay = emitted[-1]
+    assert replay["command"] == ["make", "trust-contracts"]
+    assert replay["exit_code"] == 0
+
+
+@pytest.mark.asyncio
+async def test_replay_gate_failure_trace_carries_exit_code_and_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Replay-gate failure still emits a trace, with non-zero exit_code + stderr.
+
+    The companion-issue code path must not swallow the trace — a loud
+    stderr on a broken replay is the operator's only on-call clue.
+    """
+    _stub_recording(monkeypatch)
+    recorded_git = _seed_recorded_cassette(tmp_path / "rec" / "git", "git", "commit")
+    monkeypatch.setattr(crl_module, "record_git", lambda *_a, **_k: [recorded_git])
+    drifted_report = crl_module.AdapterDriftReport(
+        adapter="git",
+        drifted_cassettes=[recorded_git],
+        new_cassettes=[],
+        deleted_cassettes=[],
+    )
+    fleet = crl_module.FleetDriftReport(reports=[drifted_report], has_drift=True)
+    monkeypatch.setattr(crl_module, "detect_fleet_drift", lambda *_a, **_k: fleet)
+
+    fake = _FakeAutoPR()
+    monkeypatch.setattr(crl_module, "open_automated_pr_async", fake)
+    _stub_make_trust_contracts_fail(monkeypatch)
+
+    emitted = _patch_emit_trace(monkeypatch)
+
+    prs = AsyncMock()
+    prs.create_issue = AsyncMock(return_value=101)
+    loop = _loop(tmp_path, prs=prs)
+    await loop._do_work()
+
+    replay_entries = [e for e in emitted if e["command"] == ["make", "trust-contracts"]]
+    assert len(replay_entries) == 1, emitted
+    replay = replay_entries[0]
+    assert replay["exit_code"] == 2
+    assert replay["stderr_excerpt"] is not None
+    assert "replay mismatch" in replay["stderr_excerpt"]
+
+
+@pytest.mark.asyncio
+async def test_no_trace_emission_when_kill_switch_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Kill-switch short-circuits _do_work; no traces may be emitted."""
+    _stub_recording(monkeypatch)
+    emitted = _patch_emit_trace(monkeypatch)
+
+    loop = _loop(tmp_path, enabled=False)
+    await loop._do_work()
+
+    assert emitted == []
+
+
+# ---------------------------------------------------------------------------
+# Task 18: per-adapter 3-attempt escalation tracker
+# ---------------------------------------------------------------------------
+
+
+def _drift_fleet_for(adapter: str, recorded: Path) -> crl_module.FleetDriftReport:
+    """Build a FleetDriftReport that flags *adapter* drift on *recorded*."""
+    report = crl_module.AdapterDriftReport(
+        adapter=adapter,
+        drifted_cassettes=[recorded],
+        new_cassettes=[],
+        deleted_cassettes=[],
+    )
+    return crl_module.FleetDriftReport(reports=[report], has_drift=True)
+
+
+@pytest.mark.asyncio
+async def test_drift_detection_increments_per_adapter_attempts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each drifted-adapter tick increments its own counter.
+
+    The counter is load-bearing for the escalation threshold — we must
+    increment exactly once per adapter per drift tick, regardless of
+    how many cassettes inside that adapter drifted.
+    """
+    _stub_recording(monkeypatch)
+    rec = _seed_recorded_cassette(tmp_path / "rec" / "git", "git", "commit")
+    monkeypatch.setattr(crl_module, "record_git", lambda *_a, **_k: [rec])
+    monkeypatch.setattr(
+        crl_module,
+        "detect_fleet_drift",
+        lambda *_a, **_k: _drift_fleet_for("git", rec),
+    )
+    monkeypatch.setattr(crl_module, "open_automated_pr_async", _FakeAutoPR())
+    _stub_make_trust_contracts_ok(monkeypatch)
+
+    state = _FakeState()
+    loop = _loop(tmp_path, state=state)
+    await loop._do_work()
+
+    assert state.get_contract_refresh_attempts("git") == 1
+    # Other adapters unaffected.
+    assert state.get_contract_refresh_attempts("github") == 0
+    assert state.get_contract_refresh_attempts("docker") == 0
+    assert state.get_contract_refresh_attempts("claude") == 0
+
+
+@pytest.mark.asyncio
+async def test_drift_free_tick_clears_adapter_attempts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When an adapter goes drift-free, its counter resets.
+
+    Without this, a transient hiccup that clears before the 3rd tick
+    would permanently push that adapter closer to escalation on the
+    next unrelated drift.
+    """
+    _stub_recording(monkeypatch)
+    monkeypatch.setattr(
+        crl_module,
+        "detect_fleet_drift",
+        lambda *_a, **_k: crl_module.FleetDriftReport(reports=[], has_drift=False),
+    )
+
+    state = _FakeState()
+    # Simulate prior drift that left attempts at 2 for git.
+    state.inc_contract_refresh_attempts("git")
+    state.inc_contract_refresh_attempts("git")
+    assert state.get_contract_refresh_attempts("git") == 2
+
+    loop = _loop(tmp_path, state=state)
+    await loop._do_work()
+
+    assert state.get_contract_refresh_attempts("git") == 0
+
+
+@pytest.mark.asyncio
+async def test_drift_clears_attempts_for_adapters_not_in_this_tick(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An adapter with stale attempts that is not in this tick's drift resets.
+
+    The reset is per-adapter, not global, so a persistent docker drift
+    does not keep a git counter alive.
+    """
+    _stub_recording(monkeypatch)
+    rec = _seed_recorded_cassette(tmp_path / "rec" / "docker", "docker", "run")
+    monkeypatch.setattr(crl_module, "record_docker", lambda *_a, **_k: [rec])
+    monkeypatch.setattr(
+        crl_module,
+        "detect_fleet_drift",
+        lambda *_a, **_k: _drift_fleet_for("docker", rec),
+    )
+    monkeypatch.setattr(crl_module, "open_automated_pr_async", _FakeAutoPR())
+    _stub_make_trust_contracts_ok(monkeypatch)
+
+    state = _FakeState()
+    state.inc_contract_refresh_attempts("git")  # stale, not in this tick's drift
+    state.inc_contract_refresh_attempts("docker")
+    loop = _loop(tmp_path, state=state)
+    await loop._do_work()
+
+    # git was not in the drift report → cleared.
+    assert state.get_contract_refresh_attempts("git") == 0
+    # docker drifted again → incremented.
+    assert state.get_contract_refresh_attempts("docker") == 2
+
+
+@pytest.mark.asyncio
+async def test_third_attempt_files_escalation_issue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """3rd consecutive drift tick for one adapter → hitl-escalation issue.
+
+    Labels: ``hitl-escalation`` + ``fake-drift-stuck`` + ``adapter-<name>``.
+    The issue body names the stuck adapter so the HITL operator can jump
+    straight to it.
+    """
+    _stub_recording(monkeypatch)
+    rec = _seed_recorded_cassette(tmp_path / "rec" / "git", "git", "commit")
+    monkeypatch.setattr(crl_module, "record_git", lambda *_a, **_k: [rec])
+    monkeypatch.setattr(
+        crl_module,
+        "detect_fleet_drift",
+        lambda *_a, **_k: _drift_fleet_for("git", rec),
+    )
+    monkeypatch.setattr(crl_module, "open_automated_pr_async", _FakeAutoPR())
+    _stub_make_trust_contracts_ok(monkeypatch)
+
+    state = _FakeState()
+    # Simulate 2 prior drift ticks — this will be attempt #3.
+    state.inc_contract_refresh_attempts("git")
+    state.inc_contract_refresh_attempts("git")
+
+    prs = AsyncMock()
+    prs.create_issue = AsyncMock(return_value=555)
+    loop = _loop(tmp_path, prs=prs, state=state)
+
+    await loop._do_work()
+
+    # The escalation issue was filed.
+    assert prs.create_issue.await_count >= 1
+    # Find the hitl-escalation call (there may be another for fake-drift).
+    escalation_calls = [
+        call
+        for call in prs.create_issue.await_args_list
+        if "hitl-escalation" in (call.kwargs.get("labels") or [])
+    ]
+    assert len(escalation_calls) == 1, prs.create_issue.await_args_list
+    kwargs = escalation_calls[0].kwargs
+    assert "fake-drift-stuck" in kwargs["labels"]
+    assert "adapter-git" in kwargs["labels"]
+    assert "git" in kwargs["title"].lower() or "git" in kwargs["body"].lower()
+
+
+@pytest.mark.asyncio
+async def test_escalation_is_deduped_across_ticks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same stuck adapter on a 4th tick → no second escalation issue.
+
+    The dedup store keyed on adapter name prevents refiling once the
+    HITL issue is already open.
+    """
+    _stub_recording(monkeypatch)
+    rec = _seed_recorded_cassette(tmp_path / "rec" / "git", "git", "commit")
+    monkeypatch.setattr(crl_module, "record_git", lambda *_a, **_k: [rec])
+    monkeypatch.setattr(
+        crl_module,
+        "detect_fleet_drift",
+        lambda *_a, **_k: _drift_fleet_for("git", rec),
+    )
+    monkeypatch.setattr(crl_module, "open_automated_pr_async", _FakeAutoPR())
+    _stub_make_trust_contracts_ok(monkeypatch)
+
+    state = _FakeState()
+    state.inc_contract_refresh_attempts("git")
+    state.inc_contract_refresh_attempts("git")
+
+    prs = AsyncMock()
+    prs.create_issue = AsyncMock(return_value=555)
+    loop = _loop(tmp_path, prs=prs, state=state)
+
+    # Tick 3: escalation filed.
+    await loop._do_work()
+    first_escalations = [
+        c
+        for c in prs.create_issue.await_args_list
+        if "hitl-escalation" in (c.kwargs.get("labels") or [])
+    ]
+    assert len(first_escalations) == 1
+
+    # Tick 4: same adapter still stuck → dedup hit → no new escalation.
+    await loop._do_work()
+    all_escalations = [
+        c
+        for c in prs.create_issue.await_args_list
+        if "hitl-escalation" in (c.kwargs.get("labels") or [])
+    ]
+    assert len(all_escalations) == 1, all_escalations
+
+
+@pytest.mark.asyncio
+async def test_escalation_resets_after_clean_tick(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Clean tick → attempts cleared → escalation dedup also cleared.
+
+    After a human fixes the drift and the adapter goes clean, a fresh
+    drift some weeks later must file a NEW escalation — not silently
+    suppress it because of a dedup entry from the last stuck run.
+    """
+    _stub_recording(monkeypatch)
+    rec = _seed_recorded_cassette(tmp_path / "rec" / "git", "git", "commit")
+    monkeypatch.setattr(crl_module, "record_git", lambda *_a, **_k: [rec])
+    monkeypatch.setattr(crl_module, "open_automated_pr_async", _FakeAutoPR())
+    _stub_make_trust_contracts_ok(monkeypatch)
+
+    state = _FakeState()
+    state.inc_contract_refresh_attempts("git")
+    state.inc_contract_refresh_attempts("git")
+
+    prs = AsyncMock()
+    prs.create_issue = AsyncMock(return_value=555)
+    loop = _loop(tmp_path, prs=prs, state=state)
+
+    # Tick 3: drift + escalation.
+    monkeypatch.setattr(
+        crl_module,
+        "detect_fleet_drift",
+        lambda *_a, **_k: _drift_fleet_for("git", rec),
+    )
+    await loop._do_work()
+    assert state.get_contract_refresh_attempts("git") == 3
+
+    # Tick 4: clean — attempts cleared AND escalation dedup cleared.
+    monkeypatch.setattr(
+        crl_module,
+        "detect_fleet_drift",
+        lambda *_a, **_k: crl_module.FleetDriftReport(reports=[], has_drift=False),
+    )
+    await loop._do_work()
+    assert state.get_contract_refresh_attempts("git") == 0
+
+    # Tick 5: drift returns — pre-seed attempts to 2 so this tick is #3
+    # and verify a NEW escalation fires (dedup was cleared on clean tick).
+    state.inc_contract_refresh_attempts("git")
+    state.inc_contract_refresh_attempts("git")
+    monkeypatch.setattr(
+        crl_module,
+        "detect_fleet_drift",
+        lambda *_a, **_k: _drift_fleet_for("git", rec),
+    )
+    pre_count = len(
+        [
+            c
+            for c in prs.create_issue.await_args_list
+            if "hitl-escalation" in (c.kwargs.get("labels") or [])
+        ]
+    )
+    await loop._do_work()
+    post_count = len(
+        [
+            c
+            for c in prs.create_issue.await_args_list
+            if "hitl-escalation" in (c.kwargs.get("labels") or [])
+        ]
+    )
+    assert post_count == pre_count + 1, (
+        "Escalation should re-fire after an adapter goes clean then drifts again"
+    )
