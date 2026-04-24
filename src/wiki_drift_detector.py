@@ -23,19 +23,28 @@ from pathlib import Path
 
 logger = logging.getLogger("hydraflow.wiki_drift_detector")
 
-# Same shape as src/adr_index.py:_SOURCE_FILE_CITATION_RE — matches
-# `src/some/path.py:Symbol` citations inside backticks.
-_SOURCE_FILE_CITATION_RE = re.compile(r"`(src/[^`:\s]+\.py):[A-Za-z_]\w*`")
+# Matches `src/some/path.py:Symbol` citations inside backticks and
+# captures (file, symbol). Shares shape with
+# src/adr_index.py:_SOURCE_FILE_CITATION_RE.
+_SOURCE_PAIR_CITATION_RE = re.compile(r"`(src/[^`:\s]+\.py):([A-Za-z_]\w*)`")
 
 
 @dataclass(frozen=True)
 class DriftFinding:
-    """One drifted wiki entry with the cited files that no longer exist."""
+    """One drifted wiki entry.
+
+    ``missing_files`` lists cited ``src/...py`` files that no longer
+    exist under ``repo_root``.  ``missing_symbols`` lists
+    ``src/path.py:Symbol`` citations where the file exists but the
+    symbol (``class Symbol`` / ``def Symbol`` / ``async def Symbol``)
+    is not defined in it.
+    """
 
     entry_path: Path
     entry_id: str
     topic: str
     missing_files: frozenset[str]
+    missing_symbols: frozenset[str] = frozenset()
 
 
 @dataclass
@@ -77,6 +86,37 @@ def _entry_body(text: str) -> str:
     return text[end + len("\n---\n") :]
 
 
+def _file_defines_symbol(file_path: Path, symbol: str) -> bool:
+    """Grep *file_path* for a top-level or indented definition of *symbol*.
+
+    Matches ``class Symbol`` / ``def Symbol`` / ``async def Symbol``
+    with optional leading whitespace (so methods inside classes count)
+    followed by ``(``, ``:``, ``[``, or whitespace — whatever Python
+    syntax permits. Module-level assignments (constants / aliases) are
+    caught by the trailing ``=`` / ``:`` alternative.
+
+    False positives on comments/strings would be rare and one-directional
+    (under-flagging drift rather than over-flagging), so we keep it
+    regex-simple rather than AST-parsing.
+    """
+    try:
+        text = file_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    pattern = re.compile(
+        rf"^\s*(?:class|def|async\s+def)\s+{re.escape(symbol)}\b",
+        re.MULTILINE,
+    )
+    if pattern.search(text):
+        return True
+    # Module-level constants/aliases: `FOO = ...` or `FOO: Type = ...`.
+    assign_pattern = re.compile(
+        rf"^{re.escape(symbol)}\s*(?::\s*[^=\n]+)?\s*=",
+        re.MULTILINE,
+    )
+    return bool(assign_pattern.search(text))
+
+
 def detect_drift(
     *,
     tracked_root: Path,
@@ -112,12 +152,21 @@ def detect_drift(
                 continue
 
             body = _entry_body(text)
-            cited = set(_SOURCE_FILE_CITATION_RE.findall(body))
-            if not cited:
+            pairs = set(_SOURCE_PAIR_CITATION_RE.findall(body))
+            if not pairs:
                 continue
 
-            missing = {c for c in cited if not (repo_root / c).is_file()}
-            if not missing:
+            missing_files: set[str] = set()
+            missing_symbols: set[str] = set()
+            for file_ref, symbol in pairs:
+                file_path = repo_root / file_ref
+                if not file_path.is_file():
+                    missing_files.add(file_ref)
+                    continue
+                if not _file_defines_symbol(file_path, symbol):
+                    missing_symbols.add(f"{file_ref}:{symbol}")
+
+            if not missing_files and not missing_symbols:
                 continue
 
             result.findings.append(
@@ -125,7 +174,8 @@ def detect_drift(
                     entry_path=entry_path,
                     entry_id=fields.get("id", ""),
                     topic=topic_dir.name,
-                    missing_files=frozenset(missing),
+                    missing_files=frozenset(missing_files),
+                    missing_symbols=frozenset(missing_symbols),
                 )
             )
 
@@ -156,7 +206,8 @@ def apply_drift_markers(findings: list[DriftFinding]) -> int:
         if not fields or fields.get("status", "active") != "active":
             continue
         body = _entry_body(text)
-        reason = "drift_detected: " + ",".join(sorted(finding.missing_files))
+        parts = sorted(finding.missing_files) + sorted(finding.missing_symbols)
+        reason = "drift_detected: " + ",".join(parts)
         fields["status"] = "stale"
         fields["stale_reason"] = reason
         rebuilt = (
