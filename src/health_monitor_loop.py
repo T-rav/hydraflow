@@ -63,6 +63,12 @@ _STALE_COUNT_HIGH = 5
 # loop's heartbeat is older than this multiple of its configured interval.
 _SANITY_STALL_MULTIPLIER = 3
 
+# Files the same stall when the sanity loop has ticked but reported zero
+# workers_scanned for this many consecutive ticks (G5 — activity-based
+# health). Catches silent no-op bugs where heartbeat is fresh but the
+# loop did no real work.
+_SANITY_NOOP_STREAK_THRESHOLD = 3
+
 # ---------------------------------------------------------------------------
 # Trend metrics
 # ---------------------------------------------------------------------------
@@ -333,6 +339,13 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             "health_monitor_sanity_stall",
             config.data_root / "dedup" / "health_monitor_sanity_stall.json",
         )
+        # Activity-based health (G5): a sanity loop that ticks but never
+        # scans any workers (e.g. silently no-oping) updates its heartbeat
+        # without doing real work; the heartbeat-only check would never
+        # fire. Track consecutive ticks where workers_scanned == 0 — when
+        # it crosses _SANITY_NOOP_STREAK_THRESHOLD we file the same stall
+        # escalation as a missed heartbeat.
+        self._sanity_noop_streak: int = 0
         self._pending: list[PendingAdjustment] = []
         self._last_log_scan: datetime | None = None
 
@@ -1015,32 +1028,71 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         threshold_s = (
             _SANITY_STALL_MULTIPLIER * self._config.trust_fleet_sanity_interval
         )
+        # Activity-based health (G5): track no-op streak. A sanity loop
+        # that ticks but reports zero workers_scanned has fresh heartbeat
+        # but isn't doing real work — catch that here.
+        details = hb.get("details") if isinstance(hb, dict) else None
+        workers_scanned = (
+            int(details.get("workers_scanned", 0)) if isinstance(details, dict) else 0
+        )
+        noop_tripped = False
         if elapsed_s < threshold_s:
-            # Recovery — the sanity loop is ticking again. Clear the
-            # dedup so a future stall files a fresh issue.
-            if dedup_key in filed_keys:
-                self._sanity_stall_dedup.set_all(filed_keys - {dedup_key})
-            return
+            # Heartbeat is fresh. Check the no-op streak.
+            if workers_scanned == 0:
+                self._sanity_noop_streak += 1
+            else:
+                self._sanity_noop_streak = 0
+            if self._sanity_noop_streak >= _SANITY_NOOP_STREAK_THRESHOLD:
+                noop_tripped = True
+            else:
+                # Recovery — sanity loop ticking with real work. Clear
+                # dedup so a future stall files a fresh issue.
+                if dedup_key in filed_keys:
+                    self._sanity_stall_dedup.set_all(filed_keys - {dedup_key})
+                return
+        else:
+            # Stale-heartbeat path — counter remains as last seen; no-op
+            # streak may or may not be set, but we file the stale-stall
+            # variant of the issue regardless.
+            self._sanity_noop_streak = 0
+        # Heartbeat-stale or no-op-streak path: file (or dedup-skip).
         if dedup_key in filed_keys:
             # Already filed for the current stall event; wait for recovery
             # (or operator-close via issue_close reconcile) before refiling.
             return
 
-        title = (
-            f"sanity-loop-stalled: trust_fleet_sanity silent for "
-            f"{int(elapsed_s)}s (threshold {int(threshold_s)}s)"
-        )
+        if noop_tripped:
+            title = (
+                f"sanity-loop-stalled: trust_fleet_sanity ticked but did no "
+                f"work for {self._sanity_noop_streak} consecutive cycles"
+            )
+            cause_summary = (
+                f"The meta-observability loop has updated its heartbeat but "
+                f"reported `workers_scanned: 0` for "
+                f"`{self._sanity_noop_streak}` consecutive ticks "
+                f"(threshold `{_SANITY_NOOP_STREAK_THRESHOLD}`) — "
+                f"silent no-op (spec §12.1 + audit G5)."
+            )
+        else:
+            title = (
+                f"sanity-loop-stalled: trust_fleet_sanity silent for "
+                f"{int(elapsed_s)}s (threshold {int(threshold_s)}s)"
+            )
+            cause_summary = (
+                f"The meta-observability loop has not ticked in "
+                f"`{int(elapsed_s)}s`, exceeding "
+                f"`{_SANITY_STALL_MULTIPLIER} × "
+                f"trust_fleet_sanity_interval` = "
+                f"`{int(threshold_s)}s` (spec §12.1)."
+            )
         body = (
             f"## TrustFleetSanityLoop dead-man-switch tripped\n\n"
-            f"The meta-observability loop has not ticked in "
-            f"`{int(elapsed_s)}s`, exceeding "
-            f"`{_SANITY_STALL_MULTIPLIER} × "
-            f"trust_fleet_sanity_interval` = `{int(threshold_s)}s` "
-            f"(spec §12.1).\n\n"
+            f"{cause_summary}\n\n"
             f"- Last heartbeat: `{last_run_iso}`\n"
             f"- Interval: "
             f"`{self._config.trust_fleet_sanity_interval}s`\n"
-            f"- Enabled: `True`\n\n"
+            f"- Enabled: `True`\n"
+            f"- Workers scanned (last tick): `{workers_scanned}`\n\n"
             f"### Operator playbook\n"
             f"1. Check orchestrator logs for the `trust_fleet_sanity` "
             f"loop task (look for uncaught exceptions on the run task).\n"
