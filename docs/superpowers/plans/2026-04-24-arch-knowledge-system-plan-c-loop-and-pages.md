@@ -747,12 +747,14 @@ class DiagramLoop(BaseBackgroundLoop):
     async def _do_work(self) -> WorkCycleResult:
         # Kill-switch (ADR-0049). Belt and suspenders — enabled_cb usually
         # handles this upstream of _do_work, but we re-check to be defensive.
+        # NOTE: WorkCycleResult is a type alias `dict[str, Any] | None`, not
+        # a constructable class. Return plain dicts.
         if os.environ.get(_KILL_SWITCH_ENV) == "1":
-            return WorkCycleResult(stats={"skipped": "kill_switch"})
+            return {"skipped": "kill_switch"}
 
         drift = await asyncio.to_thread(self._regen_and_detect_drift)
         if not drift.has_drift:
-            return WorkCycleResult(stats={"drift": False})
+            return {"drift": False}
 
         # Open or update the regen PR (Task 11).
         pr_url = await self._open_or_update_regen_pr(drift.changed_files)
@@ -760,11 +762,11 @@ class DiagramLoop(BaseBackgroundLoop):
         # Coverage check; if unassigned items, open a separate issue (Task 12).
         await self._ensure_coverage_issue()
 
-        return WorkCycleResult(stats={
+        return {
             "drift": True,
             "changed_files": len(drift.changed_files),
             "pr_url": pr_url,
-        })
+        }
 
     def _regen_and_detect_drift(self) -> _DriftResult:
         out_dir = self._repo_root / "docs/arch/generated"
@@ -779,7 +781,7 @@ class DiagramLoop(BaseBackgroundLoop):
         )
         if res.returncode != 0:
             return _DriftResult(has_drift=False, changed_files=[])
-        lines = [l for l in res.stdout.splitlines() if l.strip()]
+        lines = [line for line in res.stdout.splitlines() if line.strip()]
         return _DriftResult(has_drift=bool(lines), changed_files=lines)
 
     async def _open_or_update_regen_pr(self, changed_files: list[str]) -> str | None:
@@ -817,7 +819,9 @@ Plan B already pre-assigned `DiagramLoop` to the `arch_knowledge` functional are
 
 - [ ] **Step 1: Add the build function**
 
-In `tests/scenarios/catalog/loop_registrations.py`, append a `_build_diagram_loop` function and register it:
+`register_loop` in `tests/scenarios/catalog/loop_catalog.py` is a **decorator factory** — `register_loop(name)` returns a decorator that takes a builder and registers it. It does NOT accept a `builder=` kwarg. The existing pattern uses a `_BUILDERS` dict consumed by `ensure_registered()`.
+
+In `tests/scenarios/catalog/loop_registrations.py`, append a `_build_diagram_loop` function and add it to the `_BUILDERS` dict (or apply the decorator):
 
 ```python
 def _build_diagram_loop(ports: dict[str, Any], config: Any, deps: Any) -> Any:
@@ -828,12 +832,13 @@ def _build_diagram_loop(ports: dict[str, Any], config: Any, deps: Any) -> Any:
         pr_manager=ports["github"],
         deps=deps,
     )
-
-
-register_loop(name="diagram_loop", builder=_build_diagram_loop)
 ```
 
-(Place this alongside the other loop registrations; mirror the existing call shape.)
+Then either:
+- **(preferred — matches the established `_BUILDERS` pattern):** add `"diagram_loop": _build_diagram_loop,` to the `_BUILDERS` dict that `ensure_registered()` iterates over, OR
+- **(decorator form):** wrap the function with `@register_loop("diagram_loop")` directly above the `def`.
+
+Inspect the existing file to confirm which pattern is in use; both work.
 
 - [ ] **Step 2: Run the catalog instantiation tests**
 
@@ -910,6 +915,16 @@ git commit -m "feat(loop): wire DiagramLoop into five-checkpoint orchestration"
 - Modify: `tests/test_diagram_loop.py`
 
 Implement `_open_or_update_regen_pr`. Per spec §4.4 (review-fix): lookup uses **title-prefix match** + `hydraflow-ready` label, not date-stamped title.
+
+**API note:** `PRPort` (verified in `src/ports.py`) provides:
+- `create_pr(...)` — open a new PR
+- `find_open_pr_for_branch(branch_name)` → `PRInfo | None`
+- `find_existing_issue(title)` → `int` — used for issue dedup (Task 12)
+- `create_issue(...)` — open a new issue
+
+PRPort does NOT have `list_pull_requests`, `update_pull_request`, or `list_issues`. The plan's earlier method names were placeholders. Implement idempotence by **fixing the loop's branch name** (e.g. `arch-regen-auto`) and using `find_open_pr_for_branch` for the lookup. If the branch already has an open PR, force-push the regen commits and update the PR title (via `gh pr edit` or by extending PRPort with a small `update_pr_title` method — pick whichever fits the codebase shortest path; document which in the commit).
+
+The bulk of HydraFlow's caretaker loops use `auto_pr.open_automated_pr_async` (see `src/repo_wiki_loop.py:14`). That helper handles branch creation, force-push, and PR opening idempotently. **Strongly prefer wiring through `open_automated_pr_async`** rather than reinventing PR plumbing — it's the established caretaker pattern.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1018,7 +1033,7 @@ def _build_pr_body(self, changed_files: list[str]) -> str:
         f"**Changed files** ({len(changed_files)}):",
         "",
     ]
-    lines.extend(f"- `{l}`" for l in changed_files[:30])
+    lines.extend(f"- `{path}`" for path in changed_files[:30])
     if len(changed_files) > 30:
         lines.append(f"- _(...and {len(changed_files) - 30} more)_")
     lines.extend([
@@ -1125,7 +1140,7 @@ async def _unassigned_items(self) -> dict[str, list[str]]:
         assigned_loops.update(area.loops)
         assigned_ports.update(area.ports)
 
-    discovered_loops = {l.name for l in extract_loops(src_dir)}
+    discovered_loops = {loop.name for loop in extract_loops(src_dir)}
     discovered_ports = {p.name for p in extract_ports(src_dir=src_dir, fakes_dir=fakes_dir)}
     return {
         "loops": sorted(discovered_loops - assigned_loops),
@@ -1137,11 +1152,14 @@ async def _ensure_coverage_issue(self) -> None:
     items = await self._unassigned_items()
     if not items["loops"] and not items["ports"]:
         return
-    # Don't dup-open: search existing issues
-    existing = await self._pr_manager.list_issues(state="open")
-    for iss in existing:
-        if iss.get("title", "").startswith("chore(arch): unassigned functional area"):
-            return  # already open — leave it
+    # Don't dup-open: PRPort.find_existing_issue returns the issue number
+    # (or 0 / -1 / None depending on the implementation — check the actual
+    # signature in src/ports.py and src/pr_manager.py before relying on the
+    # truthiness check below).
+    title = "chore(arch): unassigned functional area"
+    existing_number = await self._pr_manager.find_existing_issue(title)
+    if existing_number:
+        return  # already open — leave it
     body_lines = [
         "DiagramLoop detected loops or ports in `src/` that aren't assigned ",
         "to a functional area in `docs/arch/functional_areas.yml`.",
@@ -1211,6 +1229,7 @@ def loop_deps() -> LoopDeps:
         status_cb=MagicMock(),
         enabled_cb=MagicMock(return_value=True),
         sleep_fn=AsyncMock(),
+        interval_cb=MagicMock(return_value=14400),
     )
 
 
@@ -1223,7 +1242,7 @@ async def test_kill_switch_skips_work(loop_deps, monkeypatch):
     monkeypatch.setenv("HYDRAFLOW_DISABLE_DIAGRAM_LOOP", "1")
     with patch("diagram_loop.arch_emit") as mock_emit:
         result = await loop._do_work()
-    assert result.stats.get("skipped") == "kill_switch"
+    assert result == {"skipped": "kill_switch"}
     mock_emit.assert_not_called()
     pr_manager.create_pull_request.assert_not_awaited()
 
@@ -1243,7 +1262,7 @@ async def test_kill_switch_unset_runs_normally(loop_deps, monkeypatch):
         from diagram_loop import _DriftResult
         mock_regen.return_value = _DriftResult(has_drift=False, changed_files=[])
         result = await loop._do_work()
-    assert result.stats.get("drift") is False
+    assert result == {"drift": False}
 ```
 
 - [ ] **Step 2: Run tests**
@@ -1332,7 +1351,14 @@ async def test_diagram_loop_opens_regen_pr_on_drift(tmp_path: Path):
     assert "SparkleLoop" in iss["body"]
 ```
 
-**Note on `world.seed_arch_knowledge_baseline()` and `world.tick("diagram_loop")`:** these are MockWorld helpers that may not exist yet. If they don't, the implementer writes them as part of this task — they're test infrastructure, not production code. The seed helper writes a minimal `src/`, `tests/scenarios/fakes/`, `docs/adr/`, and `docs/arch/functional_areas.yml`. The tick helper looks up the registered builder for `diagram_loop` (Task 9), instantiates it, and calls `await loop._do_work()`.
+**Confirmed missing as of Plan A merge:** the four helpers below do NOT exist on `MockWorld` / `FakeGitHub` and must be implemented as part of this task. Treat the implementation as **Task 14a**, sequenced before Task 14's scenario assertions:
+
+- `MockWorld.seed_arch_knowledge_baseline()` — write a minimal `src/` (≥5 loops + 1 port), `tests/scenarios/fakes/`, `docs/adr/`, and `docs/arch/functional_areas.yml` to `world.repo_root`. Run `python -m arch.runner --emit` once to populate the baseline.
+- `MockWorld.tick(loop_name: str)` — look up the registered builder for `loop_name` from `LoopCatalog`, instantiate the loop with the world's stub ports/config/deps, and call `await loop._do_work()`.
+- `FakeGitHub.last_opened_pull_request()` → `dict | None` — return the most-recently-opened PR (test seam for asserting on PR creation).
+- `FakeGitHub.last_opened_issue()` → `dict | None` — same shape for issues.
+
+Estimate: 30–60 minutes of test-infrastructure code. Pattern-match similar `seed_*` and accessor helpers that exist for other loops (e.g., grep `tests/scenarios/fakes/mock_world.py` for `seed_` to find the convention).
 
 - [ ] **Step 3: Run the scenario**
 

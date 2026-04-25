@@ -464,8 +464,8 @@ from arch.extractors.loops import extract_loops
 from arch.extractors.ports import extract_ports
 
 fa = load_functional_areas(Path('docs/arch/functional_areas.yml'))
-loops = {l.name for l in extract_loops(Path('src'))}
-ports = {p.name for p in extract_ports(src_dir=Path('src'), fakes_dir=Path('tests/scenarios/fakes'))}
+loops = {loop.name for loop in extract_loops(Path('src'))}
+ports = {port.name for port in extract_ports(src_dir=Path('src'), fakes_dir=Path('tests/scenarios/fakes'))}
 
 assigned_loops = set()
 assigned_ports = set()
@@ -682,8 +682,8 @@ def render_functional_areas(
     loops: list[LoopInfo],
     ports: list[PortInfo],
 ) -> str:
-    loop_index = {l.name: l for l in loops}
-    port_index = {p.name: p for p in ports}
+    loop_index = {loop.name: loop for loop in loops}
+    port_index = {port.name: port for port in ports}
     known_loops = set(loop_index)
     known_ports = set(port_index)
 
@@ -742,7 +742,7 @@ def test_every_loop_is_assigned_to_an_area(real_repo_root: Path):
     for area in fa.areas.values():
         assigned.update(area.loops)
 
-    discovered = {l.name for l in extract_loops(real_repo_root / "src")}
+    discovered = {loop.name for loop in extract_loops(real_repo_root / "src")}
     missing = discovered - assigned
     if missing:
         pytest.fail(
@@ -762,7 +762,7 @@ def test_every_port_is_assigned_to_an_area(real_repo_root: Path):
     for area in fa.areas.values():
         assigned.update(area.ports)
 
-    discovered = {p.name for p in extract_ports(
+    discovered = {port.name for port in extract_ports(
         src_dir=real_repo_root / "src",
         fakes_dir=real_repo_root / "tests/scenarios/fakes",
     )}
@@ -787,8 +787,8 @@ def test_no_phantom_assignments(real_repo_root: Path):
         pytest.skip("docs/arch/functional_areas.yml not yet authored")
 
     fa = load_functional_areas(yaml_path)
-    discovered_loops = {l.name for l in extract_loops(real_repo_root / "src")}
-    discovered_ports = {p.name for p in extract_ports(
+    discovered_loops = {loop.name for loop in extract_loops(real_repo_root / "src")}
+    discovered_ports = {port.name for port in extract_ports(
         src_dir=real_repo_root / "src",
         fakes_dir=real_repo_root / "tests/scenarios/fakes",
     )}
@@ -864,7 +864,7 @@ def test_emit_writes_all_nine_artifacts(populated_repo: Path):
     expected = {"loops.md", "ports.md", "labels.md", "modules.md",
                 "events.md", "adr_xref.md", "mockworld.md", "changelog.md",
                 "functional_areas.md"}
-    assert {p.name for p in out.iterdir() if p.suffix == ".md"} == expected
+    assert {port.name for port in out.iterdir() if p.suffix == ".md"} == expected
     assert (out.parent / ".meta.json").exists()
 ```
 
@@ -1168,20 +1168,29 @@ Note the existing structure (Status, Date, Enforced by, Context, Decision, Conse
 
 - [ ] **Step 2: Edit it**
 
-The amendment shape:
+The test at `tests/architecture/test_loop_count_matches_adr0001.py` passes if EITHER:
+- the literal substring `see \`docs/arch/generated/loops.md\`` (with backticks, no link form) appears, OR
+- both `Background` and `historical` appear as literal words in the body.
 
-1. Add a `Status` line note: `(amended 2026-04-24)` after the original status.
-2. Add a "Background" section near the top (after the original Context) containing the historical "five" claim verbatim, with an introductory line: *"This ADR was originally written when HydraFlow had five concurrent async loops. The decision below is preserved as historical context."*
-3. Replace the "Decision" section's count phrasing with: *"HydraFlow runs N concurrent background loops, where N is the live count emitted by [`docs/arch/generated/loops.md`](../arch/generated/loops.md). The five-loop pattern in the original Context section was the v1 shape; the architecture has since evolved to include caretaker loops (ADR-0029) and the trust fleet (ADR-0045)."*
-4. Update the `Enforced by:` line to `tests/architecture/test_loop_count_matches_adr0001.py`.
+The amendment must hit ONE of these conditions verbatim. Use the "Background"+"historical" path (more durable):
+
+1. Add a `Status` line note: `(amended 2026-04-25)` after the original status.
+2. Insert a new section titled `## Background` immediately after the existing `## Context`. Body must contain the literal word `historical` — recommended text:
+
+   > This ADR was originally written when HydraFlow had five concurrent async loops. The decision below is preserved as **historical** context; the live system now runs ~30 loops including the caretaker fleet (ADR-0029) and the trust fleet (ADR-0045). The current count is reflected in the live registry at `docs/arch/generated/loops.md`.
+
+   Confirm both `Background` and `historical` appear as exact substrings.
+3. Update the `Enforced by:` line to `tests/architecture/test_loop_count_matches_adr0001.py`.
 
 Run the resulting file through `pytest`:
 
 ```bash
-pytest tests/architecture/test_loop_count_matches_adr0001.py -v
+.venv/bin/pytest tests/architecture/test_loop_count_matches_adr0001.py -v
 ```
 
-If this still XFAILs, the amendment text doesn't match either of the test's pass conditions — re-read the test and adjust the wording until it passes (you may need to literally include `see docs/arch/generated/loops.md` per the test's exact match, or use the word "historical" in a "Background" section).
+The test still has `@pytest.mark.xfail` from Plan A — it should now XPASS (xfail-strict=False so XPASS is allowed). Task 13 then removes the xfail marker.
+
+**Do NOT use a Markdown link `[\`docs/arch/generated/loops.md\`](...)` form for the substring path.** The link form does NOT contain the literal `see \`docs/arch/generated/loops.md\`` substring (extra brackets break the match). Stick to the Background+historical path.
 
 - [ ] **Step 3: Commit**
 
