@@ -75,16 +75,36 @@ async def test_tally_flakes_counts_mixed_results(loop_env) -> None:
     loop = FlakeTrackerLoop(
         config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
     )
-    # Three runs: alpha always passes, bravo fails twice, charlie fails once.
+    # Spec §4.5 step 2: only tests with a *mixed pass/fail record* count
+    # as flaky. Always-pass = healthy; always-fail = broken, not flaky.
     runs = [
-        {"tests.scenarios.test_alpha": "pass", "tests.scenarios.test_bravo": "fail"},
-        {"tests.scenarios.test_alpha": "pass", "tests.scenarios.test_bravo": "fail"},
-        {"tests.scenarios.test_alpha": "pass", "tests.scenarios.test_charlie": "fail"},
+        {
+            "tests.scenarios.test_alpha": "pass",
+            "tests.scenarios.test_bravo": "fail",
+            "tests.scenarios.test_delta": "fail",
+        },
+        {
+            "tests.scenarios.test_alpha": "pass",
+            "tests.scenarios.test_bravo": "fail",
+            "tests.scenarios.test_delta": "fail",
+        },
+        {
+            "tests.scenarios.test_alpha": "pass",
+            "tests.scenarios.test_bravo": "pass",
+            "tests.scenarios.test_charlie": "fail",
+            "tests.scenarios.test_delta": "fail",
+        },
+        {
+            "tests.scenarios.test_alpha": "pass",
+            "tests.scenarios.test_charlie": "pass",
+            "tests.scenarios.test_delta": "fail",
+        },
     ]
     counts = loop._tally_flakes(runs)
     assert counts["tests.scenarios.test_bravo"] == 2
     assert counts["tests.scenarios.test_charlie"] == 1
-    assert "tests.scenarios.test_alpha" not in counts  # no failures recorded
+    assert "tests.scenarios.test_alpha" not in counts  # no failures
+    assert "tests.scenarios.test_delta" not in counts  # always-fail = broken
 
 
 async def test_do_work_files_issue_when_threshold_hit(loop_env, monkeypatch) -> None:
@@ -132,11 +152,17 @@ async def test_escalation_fires_after_three_attempts(loop_env, monkeypatch) -> N
     )
 
     async def fake_fetch():
-        return [{"databaseId": 0, "url": "u"}]
+        # Two runs so test_bad has a mixed pass/fail record (spec §4.5).
+        return [{"databaseId": 0, "url": "u"}, {"databaseId": 1, "url": "v"}]
+
+    call = {"n": 0}
 
     async def fake_dl(_):
+        call["n"] += 1
+        # First run: test_bad fails. Second run: test_bad passes. Mixed
+        # record → counts as flaky per spec.
         return {
-            "tests.scenarios.test_bad": "fail",
+            "tests.scenarios.test_bad": "fail" if call["n"] == 1 else "pass",
             "tests.scenarios.test_other": "pass",
         }
 

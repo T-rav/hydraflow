@@ -847,6 +847,7 @@ def build_services(
         prs=prs,
         dedup=corpus_learning_dedup,
         deps=loop_deps,
+        state=state,
     )
 
     return ServiceRegistry(

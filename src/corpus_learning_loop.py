@@ -50,9 +50,12 @@ Kill-switch: :meth:`LoopDeps.enabled_cb` with ``worker_name="corpus_learning"``
 
 from __future__ import annotations
 
+import asyncio
 import difflib
+import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -67,6 +70,7 @@ if TYPE_CHECKING:
     from config import HydraFlowConfig
     from dedup_store import DedupStore
     from pr_manager import PRManager
+    from state import StateTracker
 
 logger = logging.getLogger("hydraflow.corpus_learning_loop")
 
@@ -91,6 +95,16 @@ DEFAULT_ESCAPE_SIGNAL_LABELS: tuple[str, ...] = (
 #: ``updated_at`` is older than this are dropped from the reader so the
 #: synthesizer focuses on live regressions, not archived noise.
 DEFAULT_LOOKBACK_DAYS = 30
+
+#: Spec §4.1 v2 step 5: 3 consecutive self-validation failures on the
+#: same escape issue trigger a `corpus-learning-stuck` escalation.
+_CORPUS_STUCK_ATTEMPTS = 3
+
+#: Parses ``Corpus learning stuck on escape #1234: …`` titles for
+#: reconcile-on-close (spec §3.2 lifecycle).
+_STUCK_TITLE_RE = re.compile(
+    r"^Corpus learning stuck on escape #(?P<num>\d+):", re.MULTILINE
+)
 
 #: Catchers the synthesizer is allowed to target. Mirrors the
 #: post-implementation skills the harness fixture builder knows how to
@@ -221,6 +235,7 @@ class CorpusLearningLoop(BaseBackgroundLoop):
         prs: PRManager,
         dedup: DedupStore,
         deps: LoopDeps,
+        state: StateTracker | None = None,
     ) -> None:
         super().__init__(
             worker_name="corpus_learning",
@@ -230,6 +245,36 @@ class CorpusLearningLoop(BaseBackgroundLoop):
         )
         self._prs = prs
         self._dedup = dedup
+        self._state = state
+        # G17: warn at construction time if the synthesis model overlaps the
+        # production skill model. Spec §4.1 v2 (cross-model synthesis): "If
+        # the synthesis model matches the skill's production model, the loop
+        # logs a warning and proceeds with reduced diversity." Today's
+        # synthesis path is template-driven (parses structured markdown from
+        # the escape issue), so the warning is forward-compatible insurance:
+        # whenever a future plan upgrades synthesis to an LLM call, this
+        # guard already catches the overlap. Spec is explicit that the same
+        # model would mean the corpus inherits the production model's blind
+        # spots — false trust.
+        self._warn_on_synthesis_model_overlap()
+
+    def _warn_on_synthesis_model_overlap(self) -> None:
+        """Log a warning if `corpus_learning_synthesis_model` matches the
+        production post-impl skill model. See spec §4.1 v2."""
+        synthesis_model = getattr(
+            self._config, "corpus_learning_synthesis_model", "opus"
+        )
+        production_model = getattr(
+            self._config, "background_default_model", ""
+        ) or getattr(self._config, "model", "")
+        if synthesis_model and production_model and synthesis_model == production_model:
+            logger.warning(
+                "corpus-learning: synthesis model %r matches production "
+                "skill model — corpus may inherit production blind spots. "
+                "Set HYDRAFLOW_CORPUS_LEARNING_SYNTHESIS_MODEL to a "
+                "different model to restore cross-model diversity (spec §4.1).",
+                synthesis_model,
+            )
 
     def _get_default_interval(self) -> int:
         return self._config.corpus_learning_interval
@@ -434,6 +479,69 @@ class CorpusLearningLoop(BaseBackgroundLoop):
 
         return ValidationResult(ok=True)
 
+    async def _record_validation_failure(
+        self, signal: EscapeSignal, result: ValidationResult
+    ) -> bool:
+        """Increment the per-issue validation-failure counter.
+
+        Spec §4.1 v2 step 5: 3 consecutive failures on the same escape
+        issue → file ``hitl-escalation`` + ``corpus-learning-stuck``,
+        record the rejection reason, move on. Returns ``True`` when an
+        escalation issue was filed in this call.
+
+        State is optional in tests — if ``self._state`` is ``None`` (a
+        partial test fixture), the function logs and returns False
+        without escalating. Production always wires state.
+        """
+        if self._state is None or not hasattr(
+            self._state, "increment_corpus_validation_attempts"
+        ):
+            return False
+
+        attempts = self._state.increment_corpus_validation_attempts(signal.issue_number)
+        if attempts < _CORPUS_STUCK_ATTEMPTS:
+            return False
+        # Already at threshold — only file once. Beyond threshold the
+        # counter will keep climbing and we never refile until the
+        # operator closes the escalation (which clears via reconcile).
+        if attempts > _CORPUS_STUCK_ATTEMPTS:
+            return False
+
+        title = (
+            f"Corpus learning stuck on escape #{signal.issue_number}: "
+            f"{signal.title or '(no title)'}"
+        )
+        body = (
+            f"## Self-validation failed {attempts} times\n\n"
+            f"`CorpusLearningLoop` could not validate a synthesized case "
+            f"for escape issue #{signal.issue_number} after "
+            f"{attempts} consecutive ticks. Latest rejection:\n\n"
+            f"- Gate: `{result.failing_gate}`\n"
+            f"- Reason: {result.reason}\n\n"
+            f"The synthesizer is template-driven (parses structured "
+            f"markdown from the escape body); a persistent failure means "
+            f"the escape issue's `Expected-Catcher`, `Keyword`, or "
+            f"before/after fenced blocks aren't producing a case the "
+            f"validator accepts.\n\n"
+            f"_Closing this issue clears the attempt counter (§3.2 "
+            f"lifecycle); the loop will retry on the next tick._"
+        )
+        try:
+            await self._prs.create_issue(
+                title,
+                body,
+                ["hitl-escalation", "corpus-learning-stuck"],
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "corpus-learning: failed to file `corpus-learning-stuck` "
+                "escalation for #%d",
+                signal.issue_number,
+                exc_info=True,
+            )
+            return False
+        return True
+
     def _fixture_transcript_for(self, case: SynthesizedCase, skill_name: str) -> str:
         """Build the deterministic RETRY transcript for ``skill_name``.
 
@@ -551,6 +659,11 @@ class CorpusLearningLoop(BaseBackgroundLoop):
             return None
 
         branch = f"hydraflow/corpus-learning/issue-{case.issue_number}-{case.slug}"
+        # T2 (audit pass-5): emit a fleet trace for the PR-open
+        # subprocess fan-out (auto_pr shells out gh + git multiple times).
+        # Spec §4.11 mandates emit_loop_subprocess_trace on every
+        # subprocess invocation across all 10 trust loops.
+        t0 = time.perf_counter()
         result = await open_automated_pr_async(
             repo_root=self._config.repo_root,
             branch=branch,
@@ -558,13 +671,20 @@ class CorpusLearningLoop(BaseBackgroundLoop):
             pr_title=title,
             pr_body=body,
             base=self._config.base_branch(),
-            auto_merge=False,
+            # Spec §4.1 v2: "Rationale for auto-merge: a new corpus
+            # case is a new test, not a production-code change. The
+            # self-validation gate proves the case actually catches
+            # what it claims to catch; `make quality` enforces the
+            # usual quality bar. Holding these PRs for human review
+            # contradicts §3.2." Auto-merge through the standard gate.
+            auto_merge=True,
             labels=list(_CASE_PR_LABELS),
             gh_token="",
             raise_on_failure=False,
             commit_author_name=self._config.git_user_name,
             commit_author_email=self._config.git_user_email,
         )
+        self._emit_pr_trace(t0, branch, getattr(result, "status", None))
 
         if getattr(result, "status", None) != "opened":
             logger.warning(
@@ -578,6 +698,77 @@ class CorpusLearningLoop(BaseBackgroundLoop):
 
         self._dedup.add(dedup_key)
         return _parse_pr_number(getattr(result, "pr_url", None)) or case.issue_number
+
+    def _emit_pr_trace(self, t0: float, branch: str, status: str | None) -> None:
+        """Spec §4.11: emit a fleet trace per subprocess invocation.
+
+        ``open_automated_pr_async`` shells out to ``git`` and ``gh``
+        multiple times under the hood; we record one synthetic trace
+        per logical PR-open call so deploy-time observability surfaces
+        slow/broken PR opens without cracking open the loop.
+        """
+        try:
+            from trace_collector import (  # noqa: PLC0415
+                emit_loop_subprocess_trace,
+            )
+        except ImportError:
+            return
+        emit_loop_subprocess_trace(
+            loop=self._worker_name,
+            command=["auto_pr.open_automated_pr_async", branch],
+            exit_code=0 if status == "opened" else 1,
+            duration_ms=int((time.perf_counter() - t0) * 1000),
+            stderr_excerpt=f"status={status}" if status else None,
+        )
+
+    async def _reconcile_closed_corpus_escalations(self) -> None:
+        """Clear `corpus_learning_validation_attempts` for every closed
+        ``corpus-learning-stuck`` issue.
+
+        Spec §3.2 lifecycle: an operator closing the escalation issue
+        must clear the per-issue counter so the loop will retry on the
+        next tick. Best-effort — gh-list failures or parse errors log
+        and return; reconciliation is bounded by the loop interval.
+        """
+        if self._state is None or not hasattr(
+            self._state, "reset_corpus_validation_attempts"
+        ):
+            return
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "gh",
+                "issue",
+                "list",
+                "--repo",
+                self._config.repo,
+                "--state",
+                "closed",
+                "--label",
+                "corpus-learning-stuck",
+                "--json",
+                "title",
+                "--limit",
+                "100",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            out, _ = await proc.communicate()
+            if proc.returncode != 0:
+                return
+            issues = json.loads(out or b"[]")
+        except Exception:  # noqa: BLE001
+            logger.debug("corpus-learning reconcile: skipped", exc_info=True)
+            return
+        for issue in issues:
+            title = str(issue.get("title", ""))
+            m = _STUCK_TITLE_RE.match(title)
+            if m is None:
+                continue
+            try:
+                issue_number = int(m.group("num"))
+            except ValueError:
+                continue
+            self._state.reset_corpus_validation_attempts(issue_number)
 
     # ------------------------------------------------------------------
     # Task 14+15 — tick
@@ -595,6 +786,11 @@ class CorpusLearningLoop(BaseBackgroundLoop):
         """
         if not self._enabled_cb(self._worker_name):
             return {"status": "disabled"}
+
+        # Reconcile closed `corpus-learning-stuck` escalations so the
+        # operator's "close issue → clear counter" lifecycle (spec §3.2)
+        # actually works. Best-effort; errors don't block the tick.
+        await self._reconcile_closed_corpus_escalations()
 
         # Tolerate PR-query failures — a broken ``gh`` in the env must
         # not propagate as an AuthenticationError that pauses the whole
@@ -638,6 +834,7 @@ class CorpusLearningLoop(BaseBackgroundLoop):
         cases_synthesized = 0
         cases_validated = 0
         cases_filed = 0
+        cases_escalated = 0
         validated_cases: list[SynthesizedCase] = []
         for signal in signals:
             case = self._synthesize_case(signal)
@@ -648,7 +845,19 @@ class CorpusLearningLoop(BaseBackgroundLoop):
             if result.ok:
                 cases_validated += 1
                 validated_cases.append(case)
+                # Reset the per-issue counter on a successful validation
+                # so a future regression on the same escape can re-escalate.
+                if self._state is not None and hasattr(
+                    self._state, "reset_corpus_validation_attempts"
+                ):
+                    self._state.reset_corpus_validation_attempts(signal.issue_number)
             else:
+                # Spec §4.1 v2 step 5: 3× validation failures on the same
+                # escape issue → file `hitl-escalation` + `corpus-learning-stuck`,
+                # naming the rejection reason. Counter clears on issue close.
+                escalated = await self._record_validation_failure(signal, result)
+                if escalated:
+                    cases_escalated += 1
                 logger.info(
                     "corpus-learning: #%d validation rejected at gate %s: %s",
                     signal.issue_number,

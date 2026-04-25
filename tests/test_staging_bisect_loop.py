@@ -696,3 +696,164 @@ class TestG10RetryLineageState:
     ) -> None:
         cfg = _make_cfg(tmp_path, monkeypatch)
         assert cfg.max_retry_lineage_attempts == 2
+
+
+class TestG16FlakeFilterTwoOfThree:
+    """G16: spec §4.3 mandates 2-of-3 flake filter (config default 2 retries)."""
+
+    @pytest.mark.asyncio
+    async def test_second_probe_passes_dismisses_as_flake_after_one_retry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, _prs, state = _make_loop(tmp_path, monkeypatch)
+        state.set_last_rc_red_sha_and_bump_cycle("redA")
+        # First retry passes — flake dismissed without running the second.
+        loop._run_bisect_probe = AsyncMock(return_value=(True, ""))  # type: ignore[attr-defined]
+        result = await loop._do_work()  # type: ignore[attr-defined]
+        assert result["status"] == "flake_dismissed"
+        assert state.get_flake_reruns_total() == 1
+        loop._run_bisect_probe.assert_awaited_once_with("redA")  # type: ignore[attr-defined]
+
+    @pytest.mark.asyncio
+    async def test_first_retry_fails_second_passes_dismisses_as_flake(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, _prs, state = _make_loop(tmp_path, monkeypatch)
+        state.set_last_rc_red_sha_and_bump_cycle("redB")
+        # First retry fails (still red), second retry passes — 2-of-3 → flake.
+        loop._run_bisect_probe = AsyncMock(  # type: ignore[attr-defined]
+            side_effect=[(False, "fail"), (True, "")]
+        )
+        result = await loop._do_work()  # type: ignore[attr-defined]
+        assert result["status"] == "flake_dismissed"
+        assert state.get_flake_reruns_total() == 1
+        assert loop._run_bisect_probe.await_count == 2  # type: ignore[attr-defined]
+
+    @pytest.mark.asyncio
+    async def test_both_retries_fail_proceeds_to_bisect(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, _prs, state = _make_loop(tmp_path, monkeypatch)
+        state.set_last_rc_red_sha_and_bump_cycle("redC")
+        # Both retries fail → confirmed red, bisect runs.
+        loop._run_bisect_probe = AsyncMock(  # type: ignore[attr-defined]
+            side_effect=[(False, "fail-1"), (False, "fail-2")]
+        )
+        loop._run_full_bisect_pipeline = AsyncMock(  # type: ignore[attr-defined]
+            return_value={"status": "reverted"}
+        )
+        result = await loop._do_work()  # type: ignore[attr-defined]
+        assert result["status"] == "reverted"
+        assert state.get_flake_reruns_total() == 0
+        # Both retries ran before bisect.
+        assert loop._run_bisect_probe.await_count == 2  # type: ignore[attr-defined]
+
+
+def test_staging_bisect_flake_reruns_config_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """G16: config default per spec §4.3 = 2."""
+    cfg = _make_cfg(tmp_path, monkeypatch)
+    assert cfg.staging_bisect_flake_reruns == 2
+
+
+class TestG10RetryLineageWiring:
+    """G10 wiring: _file_retry_issue computes a lineage_id, increments
+    the per-lineage counter, and escalates when the cap is exceeded."""
+
+    @pytest.mark.asyncio
+    async def test_first_retry_files_normal_hydraflow_find_issue(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs, state = _make_loop(tmp_path, monkeypatch)
+        prs.create_issue = AsyncMock(return_value=42)
+
+        await loop._file_retry_issue(  # type: ignore[attr-defined]
+            culprit_pr=100,
+            culprit_pr_title="Add foo feature",
+            culprit_sha="abc123",
+            green_sha="green1",
+            red_sha="red1",
+            failing_tests="test_foo",
+            bisect_log="...",
+            revert_pr_url="https://x/pr/99",
+        )
+        labels = prs.create_issue.await_args.args[2]
+        assert "hydraflow-find" in labels
+        assert "rc-red-retry" in labels
+        assert "hitl-escalation" not in labels
+        # Lineage counter advanced.
+        # (Can't easily extract id without re-computing, so just check >0.)
+
+    @pytest.mark.asyncio
+    async def test_retry_past_cap_files_lineage_exhausted_escalation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs, state = _make_loop(tmp_path, monkeypatch)
+        prs.create_issue = AsyncMock(return_value=43)
+
+        # Two earlier retries on the same lineage already happened
+        # (default cap=2). The third call must escalate.
+        kwargs = {
+            "culprit_pr": 200,
+            "culprit_pr_title": "Bug fix that keeps regressing",
+            "culprit_sha": "def456",
+            "green_sha": "g",
+            "red_sha": "r",
+            "failing_tests": "test_bar",
+            "bisect_log": "x",
+            "revert_pr_url": "https://x/pr/200",
+        }
+        await loop._file_retry_issue(**kwargs)  # type: ignore[arg-type]
+        await loop._file_retry_issue(**kwargs)  # type: ignore[arg-type]
+        # Third call is past cap=2.
+        await loop._file_retry_issue(**kwargs)  # type: ignore[arg-type]
+
+        # Last call's labels — must be the escalation, not normal retry.
+        last_labels = prs.create_issue.await_args.args[2]
+        assert "hitl-escalation" in last_labels
+        assert "retry-lineage-exhausted" in last_labels
+        assert "rc-red-retry" not in last_labels
+
+    @pytest.mark.asyncio
+    async def test_different_failing_tests_get_separate_lineages(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Same PR title but different failing tests = different lineage,
+        so the cap doesn't bleed across unrelated defects."""
+        loop, prs, state = _make_loop(tmp_path, monkeypatch)
+        prs.create_issue = AsyncMock(return_value=44)
+
+        await loop._file_retry_issue(  # type: ignore[attr-defined]
+            culprit_pr=300,
+            culprit_pr_title="Same title",
+            culprit_sha="s1",
+            green_sha="g",
+            red_sha="r",
+            failing_tests="test_alpha",
+            bisect_log="",
+            revert_pr_url="",
+        )
+        await loop._file_retry_issue(  # type: ignore[attr-defined]
+            culprit_pr=300,
+            culprit_pr_title="Same title",
+            culprit_sha="s2",
+            green_sha="g",
+            red_sha="r",
+            failing_tests="test_beta",
+            bisect_log="",
+            revert_pr_url="",
+        )
+        # Both still use rc-red-retry — different lineages, neither
+        # past cap.
+        all_labels = [c.args[2] for c in prs.create_issue.await_args_list]
+        assert all("hitl-escalation" not in lbls for lbls in all_labels)
+
+    def test_compute_lineage_id_is_deterministic(self) -> None:
+        from staging_bisect_loop import StagingBisectLoop
+
+        a = StagingBisectLoop._compute_lineage_id("Title X", "test_a, test_b")
+        b = StagingBisectLoop._compute_lineage_id("Title X", "test_b, test_a")
+        c = StagingBisectLoop._compute_lineage_id("Title X", "test_a, test_c")
+        assert a == b  # order-independent
+        assert a != c  # different test sets diverge

@@ -42,7 +42,6 @@ dedup JSON round-trip is a few bytes on tmpfs.
 from __future__ import annotations
 
 import asyncio
-import subprocess
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
@@ -224,27 +223,41 @@ def _stub_recorders_only_git(
 def _patch_subprocess_run(
     monkeypatch: pytest.MonkeyPatch, *, returncode: int, stderr: str = ""
 ) -> list[list[str]]:
-    """Patch ``subprocess.run`` used by ``_run_replay_gate``.
+    """Patch the replay-gate subprocess used by ``_run_replay_gate``.
+
+    G14: ``_run_replay_gate`` is now async (``asyncio.create_subprocess_exec``).
+    The stub returns a fake process whose ``communicate()`` resolves
+    to canned bytes and whose ``returncode`` reads as configured.
 
     Returns a mutable list the tests can inspect after ``_do_work``
-    completes. Every ``subprocess.run`` call goes through this stub —
-    in practice the only caller inside ``_do_work`` is the replay
-    gate, so the list contains exactly that one argv.
+    completes. Every replay-gate call goes through this stub.
     """
     calls: list[list[str]] = []
+    stdout_bytes = b"OK\n" if returncode == 0 else b"FAILED\n"
+    stderr_bytes = stderr.encode()
 
-    def _fake_run(
-        argv: list[str], *_a: Any, **_k: Any
-    ) -> subprocess.CompletedProcess[str]:
+    class _FakeProc:
+        def __init__(self) -> None:
+            self.returncode = returncode
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return stdout_bytes, stderr_bytes
+
+        async def wait(self) -> int:
+            return returncode
+
+        def kill(self) -> None:
+            pass
+
+    async def _fake_create_subprocess_exec(*argv: str, **_kwargs: Any) -> _FakeProc:
         calls.append(list(argv))
-        return subprocess.CompletedProcess(
-            args=argv,
-            returncode=returncode,
-            stdout="OK\n" if returncode == 0 else "FAILED\n",
-            stderr=stderr,
-        )
+        return _FakeProc()
 
-    monkeypatch.setattr(crl_module.subprocess, "run", _fake_run)
+    monkeypatch.setattr(
+        crl_module.asyncio,
+        "create_subprocess_exec",
+        _fake_create_subprocess_exec,
+    )
     return calls
 
 

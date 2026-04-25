@@ -123,20 +123,35 @@ class StagingBisectLoop(BaseBackgroundLoop):
             self._last_processed_rc_red_sha = red_sha
             return {"status": "already_processed", "sha": red_sha}
 
-        # Flake filter — second probe against the red head (spec §4.3 step 1).
-        probe_passed, probe_output = await self._run_bisect_probe(red_sha)
-        if probe_passed:
-            logger.warning(
-                "StagingBisectLoop: second probe passed for %s — dismissing as flake",
-                red_sha,
-            )
-            self._state.increment_flake_reruns_total()
-            self._processed_dedup.add(red_sha)
-            self._last_processed_rc_red_sha = red_sha
-            return {"status": "flake_dismissed", "sha": red_sha}
+        # Flake filter — 2-of-3 logic per spec §4.3 step 1 (line 614):
+        # "re-run the RC gate's scenario suite against the RC PR's head
+        # up to two additional times. Apply 2-out-of-3 logic: if either
+        # retry passes and the original failed, treat as flake. If both
+        # retries also fail, the red is confirmed and bisect proceeds.
+        # Single-retry flake filters miscall ~50% of flakes as real
+        # regressions and over-trigger auto-revert; 2-of-3 is the
+        # minimum defensible bar." (G16 in audit pass 2.)
+        retries = self._config.staging_bisect_flake_reruns
+        last_probe_output = ""
+        for attempt in range(retries):
+            probe_passed, probe_output = await self._run_bisect_probe(red_sha)
+            last_probe_output = probe_output
+            if probe_passed:
+                logger.warning(
+                    "StagingBisectLoop: probe %d/%d passed for %s — "
+                    "dismissing as flake (2-of-3 logic)",
+                    attempt + 1,
+                    retries,
+                    red_sha,
+                )
+                self._state.increment_flake_reruns_total()
+                self._processed_dedup.add(red_sha)
+                self._last_processed_rc_red_sha = red_sha
+                return {"status": "flake_dismissed", "sha": red_sha}
 
-        # Confirmed red — run the full bisect + revert + retry pipeline.
-        result = await self._run_full_bisect_pipeline(red_sha, probe_output)
+        # All retries also failed — confirmed red. Run the full
+        # bisect + revert + retry pipeline.
+        result = await self._run_full_bisect_pipeline(red_sha, last_probe_output)
         self._processed_dedup.add(red_sha)
         self._last_processed_rc_red_sha = red_sha
         return result
@@ -148,12 +163,17 @@ class StagingBisectLoop(BaseBackgroundLoop):
         worktree-scoped invocation; for now it shells out against the
         configured repo root.
         """
+        import time  # noqa: PLC0415
+
         logger.info("Running bisect-probe against %s", rc_sha)
         timeout_s = self._config.staging_bisect_runtime_cap_seconds
+        cmd = ["make", "bisect-probe"]
+        t0 = time.perf_counter()
+        exit_code: int | None = None
+        stderr_excerpt: str | None = None
         try:
             proc = await asyncio.create_subprocess_exec(
-                "make",
-                "bisect-probe",
+                *cmd,
                 cwd=str(self._config.repo_root),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -165,13 +185,48 @@ class StagingBisectLoop(BaseBackgroundLoop):
             except TimeoutError:
                 proc.kill()
                 await proc.wait()
+                exit_code = 124  # bash convention
+                stderr_excerpt = f"timeout after {timeout_s}s"
+                self._emit_trace(t0, cmd, exit_code, stderr_excerpt)
                 return False, f"bisect-probe timed out after {timeout_s}s"
         except OSError as exc:
+            self._emit_trace(t0, cmd, -1, f"exec failed: {exc}")
             return False, f"bisect-probe exec failed: {exc}"
         combined = (stdout_b or b"").decode(errors="replace") + (
             stderr_b or b""
         ).decode(errors="replace")
-        return proc.returncode == 0, combined
+        exit_code = proc.returncode if proc.returncode is not None else -1
+        self._emit_trace(
+            t0,
+            cmd,
+            exit_code,
+            (stderr_b or b"").decode(errors="replace").strip()[:200] or None,
+        )
+        return exit_code == 0, combined
+
+    def _emit_trace(
+        self,
+        t0: float,
+        cmd: list[str],
+        exit_code: int,
+        stderr_excerpt: str | None,
+    ) -> None:
+        """Spec §4.11: every subprocess call must emit a fleet trace."""
+        import time  # noqa: PLC0415
+
+        try:
+            from trace_collector import (  # noqa: PLC0415
+                emit_loop_subprocess_trace,
+            )
+        except ImportError:
+            return
+        emit_loop_subprocess_trace(
+            loop=self._worker_name,
+            command=cmd,
+            exit_code=exit_code,
+            duration_ms=int((time.perf_counter() - t0) * 1000),
+            stderr_excerpt=stderr_excerpt,
+        )
 
     async def _run_full_bisect_pipeline(  # noqa: PLR0911
         self, red_sha: str, probe_output: str
@@ -781,7 +836,52 @@ class StagingBisectLoop(BaseBackgroundLoop):
         bisect_log: str,
         revert_pr_url: str,
     ) -> int:
-        """File a ``hydraflow-find`` retry issue and return its number."""
+        """File a retry issue, OR a `retry-lineage-exhausted` escalation
+        when this work item's lineage has been retried too many times.
+
+        Spec §4.3 (lines 645–659): the ``lineage_id`` is the SHA of the
+        FIRST culprit in the chain. When a new culprit is bisected, the
+        loop looks up its PR number in existing lineages — if any
+        lineage already contains this PR, the lineage is reused; else a
+        new lineage rooted at this culprit's SHA starts. Past the cap,
+        files `hitl-escalation` + `retry-lineage-exhausted`.
+        """
+        # Spec line 647: lineage_id = first culprit's SHA. If this PR
+        # number is already in some lineage's chain, reuse it; else
+        # this culprit is the first of a new lineage.
+        existing = self._state.find_lineage_for_pr(culprit_pr) if culprit_pr else None
+        lineage_id = existing or culprit_sha
+        attempts = self._state.increment_retry_lineage_attempts(
+            lineage_id, pr_number=culprit_pr
+        )
+        cap = self._config.max_retry_lineage_attempts
+        if attempts > cap:
+            title = (
+                f"Retry lineage exhausted: {culprit_pr_title or f'PR #{culprit_pr}'}"
+            )
+            body = (
+                f"## Lineage exhausted\n\n"
+                f"This work item's lineage `{lineage_id}` has hit "
+                f"`{attempts}` retry attempts (cap "
+                f"`max_retry_lineage_attempts={cap}`).\n\n"
+                f"- Original PR: #{culprit_pr} (`{culprit_sha}`)\n"
+                f"- Last reverted PR: {revert_pr_url}\n"
+                f"- Failing tests (this attempt): {failing_tests}\n\n"
+                "The factory has tried the bisect → revert → retry "
+                "loop more times than the spec's safety bound allows. "
+                "The defect is likely intrinsic to the work item "
+                "rather than the commit; a human needs to look.\n\n"
+                "Closing this issue clears the lineage counter "
+                "(spec §3.2 lifecycle).\n\n"
+                "### Last bisect log\n\n"
+                f"```\n{bisect_log[:5000]}\n```"
+            )
+            return await self._prs.create_issue(
+                title,
+                body,
+                ["hitl-escalation", "retry-lineage-exhausted"],
+            )
+
         title = f"Retry: {culprit_pr_title or f'PR #{culprit_pr}'}"
         body = (
             "## Retry request\n\n"
@@ -790,6 +890,7 @@ class StagingBisectLoop(BaseBackgroundLoop):
             f"({green_sha[:12]}..{red_sha[:12]}).\n\n"
             f"- Reverted PR: {revert_pr_url}\n"
             f"- Failing tests: {failing_tests}\n"
+            f"- Lineage: `{lineage_id}` (attempt {attempts}/{cap})\n"
             f"- Time bounds: `{green_sha}` (last green) → `{red_sha}` (red)\n\n"
             "### Bisect log\n\n"
             f"```\n{bisect_log[:5000]}\n```\n\n"
@@ -799,6 +900,25 @@ class StagingBisectLoop(BaseBackgroundLoop):
         return await self._prs.create_issue(
             title, body, ["hydraflow-find", "rc-red-retry"]
         )
+
+    @staticmethod
+    def _compute_lineage_id(culprit_pr_title: str, failing_tests: str) -> str:
+        """Stable hash of culprit-PR title + failing-test set.
+
+        Two retries of the same defect (same PR title family + same
+        tests fail) collapse to the same lineage; a different defect
+        on the same PR title gets a different lineage because its
+        failing-test set differs. 12-char hex prefix is enough — collisions
+        across the lifetime of a single repo are vanishingly unlikely.
+        """
+        import hashlib  # noqa: PLC0415
+
+        # Normalize tests: strip + sort + dedup so order doesn't matter.
+        tests_set = sorted(
+            set(filter(None, (s.strip() for s in failing_tests.split(","))))
+        )
+        material = f"{culprit_pr_title.strip()}|{','.join(tests_set)}"
+        return hashlib.blake2s(material.encode(), digest_size=6).hexdigest()
 
     async def _check_pending_watchdog(self) -> dict[str, Any] | None:
         """Resolve any pending watchdog to green / still-red / timeout.

@@ -142,6 +142,9 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
                     exc_info=True,
                 )
 
+        # Status key for fleet dashboard / event log consistency (audit
+        # pass-5 finding I1 — every other trust loop returns one).
+        stats["status"] = "ok" if stats["audited"] else "noop"
         return stats
 
     async def _retry_blocked(self) -> int:
