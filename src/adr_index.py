@@ -22,20 +22,24 @@ Status is normalized to one of: "Accepted", "Proposed", "Superseded",
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 _TITLE_RE = re.compile(r"^#\s*ADR-(\d{4}):\s*(.+?)\s*$", re.MULTILINE)
 _STATUS_RE = re.compile(r"\*\*Status:\*\*\s*(.+?)\s*$", re.MULTILINE)
 _CONTEXT_RE = re.compile(r"##\s+Context\s*\n\s*\n(.+?)(?=\n\s*\n|\n##\s|\Z)", re.DOTALL)
 _SUPERSEDED_RE = re.compile(r"Superseded\s+by\s+(ADR-\d{4})", re.IGNORECASE)
-# Matches `src/some/path.py` or `src/some/path.py:Symbol` citations.
+# Matches `src/some/path.py` or `src/some/path.py:Symbol[.attr...]` citations.
 # Shared with adr_pre_validator._SOURCE_SYMBOL_RE. Used for
 # ADR↔source-file inverse indexing so the CI gate can flag PRs
 # touching files cited in Accepted ADRs. The ``:Symbol`` tail is
 # optional so umbrella ADRs that cite files in prose (without a
-# specific symbol) also satisfy the gate.
-_SOURCE_FILE_CITATION_RE = re.compile(r"`(src/[^`:\s]+\.py)(?::[A-Za-z_]\w*)?`")
+# specific symbol) also satisfy the gate. Dotted symbols like
+# ``Class.method`` round-trip intact so the gate can match method-level
+# citations against AST-extracted method names.
+_SOURCE_FILE_CITATION_RE = re.compile(
+    r"`(src/[^`:\s]+\.py)(?::([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*))?`"
+)
 
 
 @dataclass(frozen=True)
@@ -48,6 +52,13 @@ class ADR:
     source_files: frozenset[str] = frozenset()
     """Set of `src/...` paths cited anywhere in the ADR body — used by
     the P2 CI gate to flag PRs touching files under Accepted ADRs."""
+    source_symbols: dict[str, frozenset[str]] = field(default_factory=dict)
+    """Per-cited-file set of qualified symbols (``Class``, ``func``, or
+    ``Class.method``).  An *empty* frozenset for a file means at least
+    one bare ``src/foo.py`` citation exists — the gate then fires on any
+    change to that file (backwards-compatible with pre-symbol citations).
+    A non-empty frozenset means *only* changes to those symbols fire the
+    gate."""
 
 
 def parse_adr_file(path: Path) -> ADR:
@@ -81,7 +92,20 @@ def parse_adr_file(path: Path) -> ADR:
     if ctx_match:
         summary = " ".join(ctx_match.group(1).split())[:300]
 
-    source_files = frozenset(_SOURCE_FILE_CITATION_RE.findall(text))
+    source_symbols: dict[str, set[str]] = {}
+    bare_files: set[str] = set()
+    for file_path, symbol in _SOURCE_FILE_CITATION_RE.findall(text):
+        if symbol:
+            source_symbols.setdefault(file_path, set()).add(symbol)
+        else:
+            bare_files.add(file_path)
+            source_symbols.setdefault(file_path, set())
+    # A bare citation collapses any symbol-qualified citations for the
+    # same file: the gate fires on any change.
+    for f in bare_files:
+        source_symbols[f] = set()
+    source_files = frozenset(source_symbols.keys())
+    source_symbols_frozen = {f: frozenset(s) for f, s in source_symbols.items()}
 
     return ADR(
         number=number,
@@ -90,6 +114,7 @@ def parse_adr_file(path: Path) -> ADR:
         summary=summary,
         superseded_by=superseded_by,
         source_files=source_files,
+        source_symbols=source_symbols_frozen,
     )
 
 
