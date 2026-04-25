@@ -313,7 +313,7 @@ def test_output_is_sorted_by_name(fixture_src_tree):
         "src/zebra_loop.py": "from base_background_loop import BaseBackgroundLoop\nclass ZebraLoop(BaseBackgroundLoop): pass",
         "src/alpha_loop.py": "from base_background_loop import BaseBackgroundLoop\nclass AlphaLoop(BaseBackgroundLoop): pass",
     })
-    names = [l.name for l in extract_loops(root / "src")]
+    names = [loop.name for loop in extract_loops(root / "src")]
     assert names == ["AlphaLoop", "ZebraLoop"]
 ```
 
@@ -422,7 +422,7 @@ def extract_loops(src_dir: Path) -> list[LoopInfo]:
                 kill_switch_var=_kill_switch(node),
                 adr_refs=_adr_refs(node),
             ))
-    out.sort(key=lambda l: l.name)
+    out.sort(key=lambda loop: loop.name)
     return out
 ```
 
@@ -1498,7 +1498,7 @@ def _row(l: LoopInfo) -> str:
 
 
 def render_loop_registry(loops: list[LoopInfo]) -> str:
-    sorted_loops = sorted(loops, key=lambda l: l.name)
+    sorted_loops = sorted(loops, key=lambda loop: loop.name)
     rows = "\n".join(_row(l) for l in sorted_loops)
     return _HEADER + _PREAMBLE + _TABLE_HEAD + rows + "\n" + _FOOTER
 ```
