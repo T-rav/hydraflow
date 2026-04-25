@@ -63,6 +63,7 @@ _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
     "trust_fleet_sanity": (60, 3600),  # 1m min, 1h max
     "contract_refresh": (86400, 2_592_000),  # 1d min, 30d max
     "corpus_learning": (3600, 2_592_000),  # 1h min, 30d max
+    "auto_agent_preflight": (60, 600),  # 1m min, 10m max (ADR-0049)
 }
 
 # Internal pipeline labels that must not be treated as epic names in the history panel.
