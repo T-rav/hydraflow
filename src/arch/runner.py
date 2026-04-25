@@ -210,6 +210,28 @@ def check(*, repo_root: Path, generated_dir: Path) -> int:
                     print(line)
                 if len(diff_lines) > 80:
                     print(f"... ({len(diff_lines) - 80} more diff lines truncated)")
+                # When the drift is in modules.md, dump the inventory of .py
+                # files under src/ that import `state` — the drift is +1 weight
+                # on the src→src.state edge and we need to know which extra
+                # file CI sees.
+                if name == "modules.md":
+                    src_dir = Path(repo_root) / "src"
+                    print("[arch-check-debug] flat src/*.py files importing state:")
+                    importers = []
+                    for py in sorted(src_dir.glob("*.py")):
+                        try:
+                            text = py.read_text()
+                        except OSError:
+                            continue
+                        if (
+                            "from state " in text
+                            or "\nimport state\n" in text
+                            or text.startswith("import state\n")
+                        ):
+                            importers.append(py.name)
+                    print(f"[arch-check-debug]   total: {len(importers)}")
+                    for n in importers:
+                        print(f"[arch-check-debug]   {n}")
                 return 1
     return 0
 
