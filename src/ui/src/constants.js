@@ -280,7 +280,7 @@ export const SYSTEM_WORKER_INTERVALS = {
   wiki_rot_detector: 604800,
   trust_fleet_sanity: 600,
   contract_refresh: 604800,
-  corpus_learning: 604800,
+  corpus_learning: 3600,
 }
 
 /**

@@ -223,7 +223,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("wiki_rot_detector_interval", "HYDRAFLOW_WIKI_ROT_DETECTOR_INTERVAL", 604800),
     ("trust_fleet_sanity_interval", "HYDRAFLOW_TRUST_FLEET_SANITY_INTERVAL", 600),
     ("loop_anomaly_issues_per_hour", "HYDRAFLOW_LOOP_ANOMALY_ISSUES_PER_HOUR", 10),
-    ("corpus_learning_interval", "HYDRAFLOW_CORPUS_LEARNING_INTERVAL", 604800),
+    ("corpus_learning_interval", "HYDRAFLOW_CORPUS_LEARNING_INTERVAL", 3600),
     ("contract_refresh_interval", "HYDRAFLOW_CONTRACT_REFRESH_INTERVAL", 604800),
     ("max_fake_repair_attempts", "HYDRAFLOW_MAX_FAKE_REPAIR_ATTEMPTS", 3),
 ]
@@ -1503,17 +1503,17 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     max_retry_lineage_attempts: int = Field(
-        default=3,
+        default=2,
         ge=1,
         le=20,
         description=(
-            "Per-lineage cap (spec §4.3 lines 645–659). The bisect loop "
-            "tracks retry attempts per `lineage_id` (hash of culprit-PR "
-            "title + impacted-test set). When the count exceeds this cap, "
-            "the loop stops retrying that lineage and files an "
-            "`rc-red-lineage-exhausted` escalation. Bounds infinite churn "
-            "when the same root-cause keeps re-appearing on different "
-            "commits."
+            "Per-lineage cap (spec §4.3 lines 645–659; default 2). The "
+            "bisect loop tracks retry attempts per `lineage_id` (hash of "
+            "culprit-PR title + impacted-test set). When the count exceeds "
+            "this cap, the loop stops retrying that lineage and files a "
+            "`retry-lineage-exhausted` escalation. The default bounds the "
+            "spec's worst-case sequence: original → revert → retry → red "
+            "→ human."
         ),
     )
     staging_bisect_watchdog_rc_cycles: int = Field(
@@ -1869,10 +1869,14 @@ class HydraFlowConfig(BaseModel):
 
     # Trust fleet — CorpusLearningLoop (spec §4.1 v2)
     corpus_learning_interval: int = Field(
-        default=604800,
+        default=3600,
         ge=3600,
         le=2_592_000,
-        description="Seconds between CorpusLearningLoop ticks (default 7d)",
+        description=(
+            "Seconds between CorpusLearningLoop ticks (default 1h, "
+            "spec §4.1: the loop is reactive on new escape issues, so "
+            "frequent ticks pick them up quickly)"
+        ),
     )
     corpus_learning_signal_labels: tuple[str, ...] = Field(
         default=("skill-escape", "discover-escape", "shape-escape"),

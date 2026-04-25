@@ -111,9 +111,10 @@ def test_loop_constructs_with_expected_worker_name(tmp_path: Path) -> None:
 
 
 def test_default_interval_reads_from_config(tmp_path: Path) -> None:
-    # Default from the ``corpus_learning_interval`` Field (weekly cadence).
+    # Default from the ``corpus_learning_interval`` Field (hourly per
+    # spec §4.1 — the loop is reactive on escape-signal issues).
     loop = _loop(tmp_path)
-    assert loop._get_default_interval() == 604800
+    assert loop._get_default_interval() == 3600
 
 
 def test_default_interval_reflects_config_override(tmp_path: Path) -> None:

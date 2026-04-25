@@ -695,4 +695,4 @@ class TestG10RetryLineageState:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         cfg = _make_cfg(tmp_path, monkeypatch)
-        assert cfg.max_retry_lineage_attempts == 3
+        assert cfg.max_retry_lineage_attempts == 2
