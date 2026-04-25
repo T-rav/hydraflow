@@ -40,6 +40,7 @@ def hm_env(tmp_path: Path):
         "hm_sanity_stall_test",
         tmp_path / "dedup" / "hm_sanity_stall_test.json",
     )
+    hm._sanity_noop_streak = 0
     return hm, state, bg_workers, prs
 
 
@@ -129,3 +130,67 @@ async def test_recovery_clears_dedup_so_new_stall_files(hm_env) -> None:
     }
     await hm._check_sanity_loop_staleness()
     assert prs.create_issue.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_noop_streak_fires_when_heartbeat_fresh_but_workers_scanned_zero(
+    hm_env,
+) -> None:
+    """G5: heartbeat is fresh but the loop is silently no-oping —
+    workers_scanned == 0 across consecutive ticks must trip the
+    activity-based dead-man-switch."""
+    hm, state, _bg_workers, prs = hm_env
+    recent = (datetime.now(UTC) - timedelta(seconds=120)).isoformat()
+    # workers_scanned is 0 — sanity loop ran but did nothing.
+    state.get_worker_heartbeats.return_value = {
+        "trust_fleet_sanity": {
+            "status": "ok",
+            "last_run": recent,
+            "details": {"workers_scanned": 0},
+        },
+    }
+
+    # First two calls: streak grows but stays under threshold (3).
+    await hm._check_sanity_loop_staleness()
+    prs.create_issue.assert_not_awaited()
+    assert hm._sanity_noop_streak == 1
+
+    await hm._check_sanity_loop_staleness()
+    prs.create_issue.assert_not_awaited()
+    assert hm._sanity_noop_streak == 2
+
+    # Third call: streak hits threshold, escalation files.
+    await hm._check_sanity_loop_staleness()
+    assert hm._sanity_noop_streak == 3
+    prs.create_issue.assert_awaited_once()
+    title = prs.create_issue.await_args.args[0]
+    assert "ticked but did no work" in title
+
+
+@pytest.mark.asyncio
+async def test_noop_streak_resets_on_real_work(hm_env) -> None:
+    """A non-zero workers_scanned tick clears the streak."""
+    hm, state, _bg_workers, prs = hm_env
+    recent = (datetime.now(UTC) - timedelta(seconds=120)).isoformat()
+    state.get_worker_heartbeats.return_value = {
+        "trust_fleet_sanity": {
+            "status": "ok",
+            "last_run": recent,
+            "details": {"workers_scanned": 0},
+        },
+    }
+    await hm._check_sanity_loop_staleness()
+    await hm._check_sanity_loop_staleness()
+    assert hm._sanity_noop_streak == 2
+
+    # Real work happens — streak resets.
+    state.get_worker_heartbeats.return_value = {
+        "trust_fleet_sanity": {
+            "status": "ok",
+            "last_run": recent,
+            "details": {"workers_scanned": 9},
+        },
+    }
+    await hm._check_sanity_loop_staleness()
+    assert hm._sanity_noop_streak == 0
+    prs.create_issue.assert_not_awaited()
