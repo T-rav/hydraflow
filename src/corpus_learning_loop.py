@@ -67,6 +67,7 @@ if TYPE_CHECKING:
     from config import HydraFlowConfig
     from dedup_store import DedupStore
     from pr_manager import PRManager
+    from state import StateTracker
 
 logger = logging.getLogger("hydraflow.corpus_learning_loop")
 
@@ -91,6 +92,10 @@ DEFAULT_ESCAPE_SIGNAL_LABELS: tuple[str, ...] = (
 #: ``updated_at`` is older than this are dropped from the reader so the
 #: synthesizer focuses on live regressions, not archived noise.
 DEFAULT_LOOKBACK_DAYS = 30
+
+#: Spec §4.1 v2 step 5: 3 consecutive self-validation failures on the
+#: same escape issue trigger a `corpus-learning-stuck` escalation.
+_CORPUS_STUCK_ATTEMPTS = 3
 
 #: Catchers the synthesizer is allowed to target. Mirrors the
 #: post-implementation skills the harness fixture builder knows how to
@@ -221,6 +226,7 @@ class CorpusLearningLoop(BaseBackgroundLoop):
         prs: PRManager,
         dedup: DedupStore,
         deps: LoopDeps,
+        state: StateTracker | None = None,
     ) -> None:
         super().__init__(
             worker_name="corpus_learning",
@@ -230,6 +236,7 @@ class CorpusLearningLoop(BaseBackgroundLoop):
         )
         self._prs = prs
         self._dedup = dedup
+        self._state = state
         # G17: warn at construction time if the synthesis model overlaps the
         # production skill model. Spec §4.1 v2 (cross-model synthesis): "If
         # the synthesis model matches the skill's production model, the loop
@@ -463,6 +470,69 @@ class CorpusLearningLoop(BaseBackgroundLoop):
 
         return ValidationResult(ok=True)
 
+    async def _record_validation_failure(
+        self, signal: EscapeSignal, result: ValidationResult
+    ) -> bool:
+        """Increment the per-issue validation-failure counter.
+
+        Spec §4.1 v2 step 5: 3 consecutive failures on the same escape
+        issue → file ``hitl-escalation`` + ``corpus-learning-stuck``,
+        record the rejection reason, move on. Returns ``True`` when an
+        escalation issue was filed in this call.
+
+        State is optional in tests — if ``self._state`` is ``None`` (a
+        partial test fixture), the function logs and returns False
+        without escalating. Production always wires state.
+        """
+        if self._state is None or not hasattr(
+            self._state, "increment_corpus_validation_attempts"
+        ):
+            return False
+
+        attempts = self._state.increment_corpus_validation_attempts(signal.issue_number)
+        if attempts < _CORPUS_STUCK_ATTEMPTS:
+            return False
+        # Already at threshold — only file once. Beyond threshold the
+        # counter will keep climbing and we never refile until the
+        # operator closes the escalation (which clears via reconcile).
+        if attempts > _CORPUS_STUCK_ATTEMPTS:
+            return False
+
+        title = (
+            f"Corpus learning stuck on escape #{signal.issue_number}: "
+            f"{signal.title or '(no title)'}"
+        )
+        body = (
+            f"## Self-validation failed {attempts} times\n\n"
+            f"`CorpusLearningLoop` could not validate a synthesized case "
+            f"for escape issue #{signal.issue_number} after "
+            f"{attempts} consecutive ticks. Latest rejection:\n\n"
+            f"- Gate: `{result.failing_gate}`\n"
+            f"- Reason: {result.reason}\n\n"
+            f"The synthesizer is template-driven (parses structured "
+            f"markdown from the escape body); a persistent failure means "
+            f"the escape issue's `Expected-Catcher`, `Keyword`, or "
+            f"before/after fenced blocks aren't producing a case the "
+            f"validator accepts.\n\n"
+            f"_Closing this issue clears the attempt counter (§3.2 "
+            f"lifecycle); the loop will retry on the next tick._"
+        )
+        try:
+            await self._prs.create_issue(
+                title,
+                body,
+                ["hitl-escalation", "corpus-learning-stuck"],
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "corpus-learning: failed to file `corpus-learning-stuck` "
+                "escalation for #%d",
+                signal.issue_number,
+                exc_info=True,
+            )
+            return False
+        return True
+
     def _fixture_transcript_for(self, case: SynthesizedCase, skill_name: str) -> str:
         """Build the deterministic RETRY transcript for ``skill_name``.
 
@@ -673,6 +743,7 @@ class CorpusLearningLoop(BaseBackgroundLoop):
         cases_synthesized = 0
         cases_validated = 0
         cases_filed = 0
+        cases_escalated = 0
         validated_cases: list[SynthesizedCase] = []
         for signal in signals:
             case = self._synthesize_case(signal)
@@ -683,7 +754,19 @@ class CorpusLearningLoop(BaseBackgroundLoop):
             if result.ok:
                 cases_validated += 1
                 validated_cases.append(case)
+                # Reset the per-issue counter on a successful validation
+                # so a future regression on the same escape can re-escalate.
+                if self._state is not None and hasattr(
+                    self._state, "reset_corpus_validation_attempts"
+                ):
+                    self._state.reset_corpus_validation_attempts(signal.issue_number)
             else:
+                # Spec §4.1 v2 step 5: 3× validation failures on the same
+                # escape issue → file `hitl-escalation` + `corpus-learning-stuck`,
+                # naming the rejection reason. Counter clears on issue close.
+                escalated = await self._record_validation_failure(signal, result)
+                if escalated:
+                    cases_escalated += 1
                 logger.info(
                     "corpus-learning: #%d validation rejected at gate %s: %s",
                     signal.issue_number,

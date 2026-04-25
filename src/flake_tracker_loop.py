@@ -155,19 +155,29 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
             return combined
 
     def _tally_flakes(self, runs: list[dict[str, str]]) -> dict[str, int]:
-        """Count fails per test across runs.
+        """Count fails per test, restricted to tests with a mixed
+        pass/fail record across the window (spec §4.5 step 2).
 
+        A test that fails in every run is *broken*, not flaky; the spec
+        says only mixed-record tests count toward the flake threshold.
         Returns ``{test_id: fail_count}`` for every test that failed at
-        least once. Threshold filtering happens in ``_do_work`` against
-        ``config.flake_threshold``; a test that passes every run has a
-        fail count of zero and is omitted here.
+        least once AND passed at least once in the window.
         """
         fail_counts: dict[str, int] = {}
+        pass_counts: dict[str, int] = {}
         for run in runs:
             for test_id, result in run.items():
                 if result == "fail":
                     fail_counts[test_id] = fail_counts.get(test_id, 0) + 1
-        return fail_counts
+                elif result == "pass":
+                    pass_counts[test_id] = pass_counts.get(test_id, 0) + 1
+        # Restrict to mixed pass/fail: failure counter only kept when the
+        # same test also passed at least once in the window.
+        return {
+            test_id: count
+            for test_id, count in fail_counts.items()
+            if pass_counts.get(test_id, 0) >= 1
+        }
 
     async def _file_flake_issue(
         self, test_id: str, flake_count: int, runs: list[dict[str, Any]]

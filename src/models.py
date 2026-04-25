@@ -1811,6 +1811,10 @@ class StateData(BaseModel):
     # principles_drift_attempts[f"{slug}:{check_id}"] = attempt count.
     # STRUCTURAL/BEHAVIORAL escalate at 3; CULTURAL at 1.
     principles_drift_attempts: dict[str, int] = Field(default_factory=dict)
+    # CorpusLearningLoop self-validation attempts per escape-issue number
+    # (spec §4.1 v2 step 5). At 3 consecutive failures on the same escape
+    # issue the loop files `hitl-escalation` + `corpus-learning-stuck`.
+    corpus_learning_validation_attempts: dict[str, int] = Field(default_factory=dict)
     last_updated: str | None = None
 
 

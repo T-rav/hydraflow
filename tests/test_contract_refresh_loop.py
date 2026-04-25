@@ -661,7 +661,7 @@ async def test_third_attempt_files_escalation_issue(
 ) -> None:
     """3rd consecutive drift tick for one adapter → hitl-escalation issue.
 
-    Labels: ``hitl-escalation`` + ``fake-drift-stuck`` + ``adapter-<name>``.
+    Labels: ``hitl-escalation`` + ``fake-repair-stuck`` + ``adapter-<name>``.
     The issue body names the stuck adapter so the HITL operator can jump
     straight to it.
     """
@@ -697,7 +697,7 @@ async def test_third_attempt_files_escalation_issue(
     ]
     assert len(escalation_calls) == 1, prs.create_issue.await_args_list
     kwargs = escalation_calls[0].kwargs
-    assert "fake-drift-stuck" in kwargs["labels"]
+    assert "fake-repair-stuck" in kwargs["labels"]
     assert "adapter-git" in kwargs["labels"]
     assert "git" in kwargs["title"].lower() or "git" in kwargs["body"].lower()
 

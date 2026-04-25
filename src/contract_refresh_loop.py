@@ -511,14 +511,14 @@ class ContractRefreshLoop(BaseBackgroundLoop):
             self._escalation_dedup.set_all(new_escalation_dedup)
 
     async def _file_escalation_issue(self, adapter: str, attempts: int) -> int:
-        """File a ``hitl-escalation`` + ``fake-drift-stuck`` issue for *adapter*.
+        """File a ``hitl-escalation`` + ``fake-repair-stuck`` issue for *adapter*.
 
         Fires when an adapter's consecutive-drift counter reaches
         ``config.max_fake_repair_attempts``. The HITL operator uses the
         adapter name in the label + title to jump straight to the stuck
         fake.
         """
-        labels = ["hitl-escalation", "fake-drift-stuck", f"adapter-{adapter}"]
+        labels = ["hitl-escalation", "fake-repair-stuck", f"adapter-{adapter}"]
         title = (
             f"Contract refresh stuck: {adapter} has drifted "
             f"{attempts} consecutive ticks"
