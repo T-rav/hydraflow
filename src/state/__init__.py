@@ -22,6 +22,7 @@ from pydantic import ValidationError
 from file_util import atomic_write, rotate_backups
 from models import IssueOutcomeType, StateData, ThresholdProposal
 
+from ._auto_agent import AutoAgentStateMixin
 from ._ci_monitor import CIMonitorStateMixin
 from ._code_grooming import CodeGroomingStateMixin
 from ._contract_refresh import ContractRefreshStateMixin
@@ -89,6 +90,7 @@ class StateTracker(
     WikiRotDetectorStateMixin,
     TrustFleetSanityStateMixin,
     ContractRefreshStateMixin,
+    AutoAgentStateMixin,
 ):
     """JSON-file backed state for crash recovery.
 
