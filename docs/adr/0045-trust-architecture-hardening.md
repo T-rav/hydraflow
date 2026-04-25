@@ -89,7 +89,7 @@ The following files carry this ADR's decisions and must be kept in sync with any
 - `src/config.py` — loop interval fields, anomaly thresholds, budget-alert configs.
 - `src/models.py` — `StateData` fields for every new loop (attempts counters, last-green markers, dedup surfaces).
 - `src/orchestrator.py` — `bg_loop_registry` entries for all 10 loops + `set_bg_workers` post-ctor injection calls.
-- `src/service_registry.py` — dataclass fields + `build_services` instantiation for each loop.
+- `src/service_registry.py:build_services`, `src/service_registry.py:ServiceRegistry` — dataclass fields + `build_services` instantiation for each loop.
 - `src/pr_manager.py` — per-issue cost-alert hook (§4.11).
 - `src/trust_fleet_sanity_loop.py` — meta-observability implementation (§12.1).
 - `src/health_monitor_loop.py` — dead-man-switch for the meta-observer.

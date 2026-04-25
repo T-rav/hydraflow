@@ -70,8 +70,8 @@ by whether review feedback is present.
 ### Scope boundaries
 
 - The retry recovery changes are scoped to the implement phase
-  (`src/implement_phase.py`) and its interaction with `StateTracker`
-  (`src/state.py`) and `AgentRunner` (`src/agent.py`).
+  (`src/implement_phase.py`) and its interaction with
+  `src/state.py:StateTracker` and `src/agent.py:AgentRunner`.
 - The review phase's own retry/escalation logic remains unchanged.
 - The `max_issue_attempts` cap continues to serve as the upper bound for all
   retry paths, preventing infinite retry loops.
@@ -126,4 +126,4 @@ by whether review feedback is present.
 
 - Source memory: [#2258 — Implementation retry recovery architecture](https://github.com/T-rav/hydra/issues/2258)
 - Implementing issue: [#2264](https://github.com/T-rav/hydra/issues/2264)
-- Key files: `src/implement_phase.py`, `src/state.py`, `src/agent.py`
+- Key files: `src/implement_phase.py`, `src/state.py:StateTracker`, `src/agent.py:AgentRunner`

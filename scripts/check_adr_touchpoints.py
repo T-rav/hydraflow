@@ -24,6 +24,7 @@ Usage (local):
 from __future__ import annotations
 
 import argparse
+import ast
 import re
 import subprocess
 import sys
@@ -47,6 +48,75 @@ def _changed_files(base: str, head: str) -> list[str]:
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
+def _file_at_rev(rev: str, path: str) -> str:
+    """Return the contents of *path* at *rev*, or empty string if absent."""
+    result = subprocess.run(
+        ["git", "show", f"{rev}:{path}"],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=REPO_ROOT,
+    )
+    return result.stdout if result.returncode == 0 else ""
+
+
+def _file_symbols(source: str) -> dict[str, str] | None:
+    """Return ``{qualified_name: source_text}`` for top-level + method
+    symbols.  Returns ``None`` if *source* is not parseable Python — the
+    caller should treat that as 'unknown, fire conservatively'."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+    out: dict[str, str] = {}
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            out[node.name] = ast.unparse(node)
+        elif isinstance(node, ast.ClassDef):
+            out[node.name] = ast.unparse(node)
+            for child in node.body:
+                if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                    out[f"{node.name}.{child.name}"] = ast.unparse(child)
+    return out
+
+
+def _changed_symbols_in_file(before: str, after: str) -> set[str] | None:
+    """Return the set of qualified symbols that differ between *before*
+    and *after*.
+
+    Returns ``None`` if either side fails to parse — callers must treat
+    ``None`` as 'unknown' and fire the gate conservatively.  An empty
+    set means 'no symbol-level changes' (e.g. only imports / module
+    docstring / module-level constants changed)."""
+    before_syms = _file_symbols(before)
+    after_syms = _file_symbols(after)
+    if before_syms is None or after_syms is None:
+        return None
+    changed: set[str] = set()
+    for name, src in after_syms.items():
+        if before_syms.get(name) != src:
+            changed.add(name)
+    for name in before_syms:
+        if name not in after_syms:
+            changed.add(name)
+    return changed
+
+
+def _changed_symbols_per_file(
+    base: str, head: str, files: list[str]
+) -> dict[str, set[str] | None]:
+    """For each ``src/*.py`` file, return the set of changed symbols
+    (or ``None`` if either revision can't be parsed)."""
+    result: dict[str, set[str] | None] = {}
+    for path in files:
+        if not path.startswith("src/") or not path.endswith(".py"):
+            continue
+        before = _file_at_rev(base, path)
+        after = _file_at_rev(head, path)
+        result[path] = _changed_symbols_in_file(before, after)
+    return result
+
+
 _ADR_FILENAME_RE = re.compile(r"docs/adr/(\d{4})-[^/]+\.md$")
 
 
@@ -60,24 +130,63 @@ def _touched_adr_numbers(changed: list[str]) -> set[int]:
     return numbers
 
 
+def _adr_fires_for_file(
+    adr: ADR, file_path: str, changed_symbols: set[str] | None
+) -> bool:
+    """Decide whether *adr* should still fire for *file_path*.
+
+    - Bare citation (empty symbol set) → fires on any change.
+    - Symbol citation + ``changed_symbols is None`` → fires (unparseable diff).
+    - Symbol citation + intersection with changed symbols → fires.
+    - Symbol citation + no intersection → skipped.
+    """
+    cited_symbols = adr.source_symbols.get(file_path, frozenset())
+    if not cited_symbols:
+        # Bare citation — backwards-compatible "any change fires"
+        return True
+    if changed_symbols is None:
+        # Unknown — be conservative
+        return True
+    for cited in cited_symbols:
+        if cited in changed_symbols:
+            return True
+        # Class-level citation also fires on any of its method changes
+        method_prefix = cited + "."
+        if any(c.startswith(method_prefix) for c in changed_symbols):
+            return True
+    return False
+
+
 def evaluate_gate(
     changed: list[str],
     hits: dict[str, list[ADR]],
+    changed_symbols: dict[str, set[str] | None] | None = None,
 ) -> tuple[bool, dict[str, list[ADR]]]:
     """Pure decision function: does the diff clear the ADR gate?
 
-    Returns ``(passed, unresolved_hits)``. A hit is **resolved** when at
-    least one of the ADRs citing that file is also updated in the diff.
-    The gate passes only when *every* hit is resolved — touching an
-    unrelated ADR no longer clears a gate fired by a different ADR.
+    Returns ``(passed, unresolved_hits)``. A hit is **resolved** either
+    by (1) updating one of the citing ADRs in the same diff, or (2) the
+    diff not actually changing any of the symbols the ADR cites
+    (symbol-level precision).  When *changed_symbols* is omitted, the
+    gate falls back to the original file-level behavior — touching the
+    file at all counts as a change.
     """
     if not hits:
         return True, {}
     touched_adrs = _touched_adr_numbers(changed)
     unresolved: dict[str, list[ADR]] = {}
     for path, adrs in hits.items():
-        if not any(a.number in touched_adrs for a in adrs):
-            unresolved[path] = adrs
+        if any(a.number in touched_adrs for a in adrs):
+            continue  # ADR updated in same PR — resolved
+        symbols = changed_symbols.get(path) if changed_symbols is not None else None
+        # When changed_symbols was supplied for this file, filter ADRs
+        # whose cited symbols are unchanged.
+        if changed_symbols is not None:
+            still_firing = [a for a in adrs if _adr_fires_for_file(a, path, symbols)]
+        else:
+            still_firing = list(adrs)
+        if still_firing:
+            unresolved[path] = still_firing
     return (not unresolved), unresolved
 
 
@@ -120,7 +229,8 @@ def main() -> int:
     if not hits:
         return 0
 
-    passed, unresolved = evaluate_gate(changed, hits)
+    changed_symbols = _changed_symbols_per_file(args.base, args.head, changed)
+    passed, unresolved = evaluate_gate(changed, hits, changed_symbols)
     if passed:
         print("Every touchpoint has a corresponding ADR update in this PR.")
         return 0
