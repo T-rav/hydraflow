@@ -83,6 +83,9 @@ class SentryLoop(BaseBackgroundLoop):
             self._dedup.add(sentry_id)
 
     async def _do_work(self) -> dict[str, Any] | None:
+        if not self._enabled_cb(self._worker_name):
+            return {"status": "disabled"}
+
         if not self._credentials.sentry_auth_token or not self._config.sentry_org:
             return {"skipped": True, "reason": "no credentials"}
 

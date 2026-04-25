@@ -30,6 +30,8 @@ class EpicMonitorLoop(BaseBackgroundLoop):
         return self._config.epic_monitor_interval
 
     async def _do_work(self) -> dict[str, Any] | None:
+        if not self._enabled_cb(self._worker_name):
+            return {"status": "disabled"}
         stale = await self._epic_manager.check_stale_epics()
         await self._epic_manager.refresh_cache()
         all_progress = self._epic_manager.get_all_progress()

@@ -29,4 +29,6 @@ class ADRReviewerLoop(BaseBackgroundLoop):
 
     async def _do_work(self) -> dict[str, Any] | None:
         """Review proposed ADRs via the council process."""
+        if not self._enabled_cb(self._worker_name):
+            return {"status": "disabled"}
         return await self._adr_reviewer.review_proposed_adrs()

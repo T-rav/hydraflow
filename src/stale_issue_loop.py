@@ -37,6 +37,8 @@ class StaleIssueLoop(BaseBackgroundLoop):
 
     async def _do_work(self) -> dict[str, Any] | None:
         """Scan for stale issues and close them."""
+        if not self._enabled_cb(self._worker_name):
+            return {"status": "disabled"}
         settings = self._state.get_stale_issue_settings()
         already_closed = self._state.get_stale_issue_closed()
 
