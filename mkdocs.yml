@@ -78,6 +78,7 @@ nav:
   - Home: index.md
   - System Map:
     - Overview: arch/generated/functional_areas.md
+    - Trust Fleet: arch/trust_fleet.md
   - Generated:
     - Loop Registry: arch/generated/loops.md
     - Port Map: arch/generated/ports.md
