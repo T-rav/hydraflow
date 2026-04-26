@@ -25,4 +25,4 @@ graph LR
     src_preflight -- "1" --> src_sentry
 ```
 
-_Regenerated from commit `e8cf734` on 2026-04-26 16:39 UTC. Source last changed at `e8cf734`. Status: 🟢 fresh._
+_Regenerated from commit `ff75db0` on 2026-04-26 17:31 UTC. Source last changed at `ff75db0`. Status: 🟢 fresh._
