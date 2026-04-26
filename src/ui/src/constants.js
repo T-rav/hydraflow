@@ -344,4 +344,5 @@ export const WORKER_GROUPS = [
   { key: 'learning',    label: 'Learning & Insights',  color: theme.purple, tags: ['insights', 'observability', 'knowledge'] },
   { key: 'operations',  label: 'Operations',           color: theme.orange, tags: ['infra', 'recovery', 'monitoring', 'lifecycle'] },
   { key: 'intake',      label: 'Intake',               color: theme.cyan,   tags: ['issues', 'errors', 'review', 'memory'] },
+  { key: 'autonomy',    label: 'Autonomy',             color: theme.purple, tags: ['hitl', 'autonomy'] },
 ]
