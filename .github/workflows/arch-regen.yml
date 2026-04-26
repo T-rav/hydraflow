@@ -15,14 +15,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - uses: astral-sh/setup-uv@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Install
-        run: pip install -e '.[dev,test]'
+        run: uv sync --all-extras
       - name: Validate functional_areas.yml
-        run: make arch-validate
+        run: uv run python -c "from arch._functional_areas_schema import load_functional_areas; from pathlib import Path; load_functional_areas(Path('docs/arch/functional_areas.yml')); print('functional_areas.yml: schema OK')"
       - name: Drift check
-        run: PYTHONPATH=src python -m arch.runner --check --repo-root .
+        run: uv run python -m arch.runner --check --repo-root .
       - name: Architecture tests
-        run: PYTHONPATH=src pytest tests/architecture -x --tb=short
+        run: uv run pytest tests/architecture -x --tb=short

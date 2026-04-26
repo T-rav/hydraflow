@@ -9,10 +9,10 @@
 </p>
 
 <p align="center">
-  <a href="https://t-rav-hydra-ops.github.io/hydraflow/"><img src="https://img.shields.io/badge/arch-knowledge-blueviolet" alt="Architecture Knowledge"></a>
+  <a href="https://t-rav.github.io/hydraflow/"><img src="https://img.shields.io/badge/arch-knowledge-blueviolet" alt="Architecture Knowledge"></a>
 </p>
 
-📖 **[HydraFlow Architecture site](https://t-rav-hydra-ops.github.io/hydraflow/)** — auto-generated, refreshed every 4h by the DiagramLoop and on every PR by the arch-regen CI guard.
+📖 **[HydraFlow Architecture site](https://t-rav.github.io/hydraflow/)** — auto-generated, refreshed every 4h by the DiagramLoop and on every PR by the arch-regen CI guard.
 
 Log an issue. Agents handle the rest - triaging, planning, implementing, reviewing, and merging every change.
 
