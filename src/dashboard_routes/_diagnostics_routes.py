@@ -367,4 +367,42 @@ def build_diagnostics_router(config: HydraFlowConfig) -> APIRouter:
             event_bus=event_bus,
         )
 
+    @router.get("/auto-agent")
+    def auto_agent_stats() -> dict[str, Any]:
+        """Auto-agent dashboard payload (spec §6.2)."""
+        from preflight.audit import PreflightAuditStore  # noqa: PLC0415
+
+        audit = PreflightAuditStore(config.data_root)
+        today = audit.query_24h()
+        week = audit.query_7d()
+        top = audit.top_spend(n=5)
+        return {
+            "today": _stats_payload(today),
+            "last_7d": _stats_payload(week),
+            "top_spend": [
+                {
+                    "issue": e.issue,
+                    "sub_label": e.sub_label,
+                    "cost_usd": e.cost_usd,
+                    "wall_clock_s": e.wall_clock_s,
+                    "status": e.status,
+                    "ts": e.ts,
+                }
+                for e in top
+            ],
+        }
+
     return router
+
+
+def _stats_payload(stats: Any) -> dict[str, Any]:
+    return {
+        "spend_usd": stats.spend_usd,
+        "attempts": stats.attempts,
+        "resolved": stats.resolved,
+        "resolution_rate": stats.resolution_rate,
+        "p50_cost_usd": stats.p50_cost_usd,
+        "p95_cost_usd": stats.p95_cost_usd,
+        "p50_wall_clock_s": stats.p50_wall_clock_s,
+        "p95_wall_clock_s": stats.p95_wall_clock_s,
+    }
