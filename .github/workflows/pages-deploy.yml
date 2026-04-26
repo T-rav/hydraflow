@@ -24,15 +24,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - uses: astral-sh/setup-uv@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Install
-        run: pip install -e '.[dev,docs]'
+        run: uv sync --all-extras
       - name: Idempotent regen
-        run: PYTHONPATH=src python -m arch.runner --emit --repo-root .
+        run: uv run python -m arch.runner --emit --repo-root .
       - name: Build site
-        run: mkdocs build --strict
+        run: uv run mkdocs build --strict
       - uses: actions/upload-pages-artifact@v3
         with:
           path: ./site
