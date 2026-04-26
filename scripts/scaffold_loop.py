@@ -78,7 +78,10 @@ def _names(snake: str) -> dict[str, str]:
 
 def _render_templates(names: dict[str, str], description: str) -> dict[Path, str]:
     """Return {target_path: rendered_content} for all template-emitted files."""
-    env = jinja2.Environment(
+    # autoescape=False is intentional: this is a code-generation tool
+    # rendering Python source, not HTML — autoescape would mangle the
+    # output. The B701 bandit warning doesn't apply.
+    env = jinja2.Environment(  # nosec B701
         loader=jinja2.FileSystemLoader(TEMPLATES_DIR),
         keep_trailing_newline=True,
     )
