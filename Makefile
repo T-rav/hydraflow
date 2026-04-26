@@ -556,7 +556,7 @@ docker-test: docker-build
 audit-prompts: ## Render all prompt fixtures, score against the rubric, regenerate the prompt-audit report.
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/audit_prompts.py
 
-.PHONY: arch-regen arch-check arch-serve
+.PHONY: arch-regen arch-check arch-serve arch-validate
 
 ## arch-regen — regenerate docs/arch/generated/ from source
 arch-regen:
@@ -567,6 +567,10 @@ arch-regen:
 ## arch-check — dry-run regen; fail if generated/ is stale
 arch-check:
 	@$(UV) python -m arch.runner --check --repo-root $(HYDRAFLOW_DIR)
+
+## arch-validate — Pydantic-validate docs/arch/functional_areas.yml schema
+arch-validate:
+	@$(UV) python -c "from arch._functional_areas_schema import load_functional_areas; from pathlib import Path; load_functional_areas(Path('docs/arch/functional_areas.yml')); print('functional_areas.yml: schema OK')"
 
 ## arch-serve — placeholder; Plan C wires this to mkdocs serve
 arch-serve:
