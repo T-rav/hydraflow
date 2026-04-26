@@ -71,8 +71,15 @@ async def query_sentry_by_title(
         except ValueError as exc:
             logger.warning("Sentry reverse-lookup parse error: %s", exc)
             return []
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Sentry reverse-lookup unexpected error: %s", exc)
+            return []
 
-        return [_parse(item) for item in payload[:limit]]
+        try:
+            return [_parse(item) for item in payload[:limit]]
+        except (AttributeError, TypeError, ValueError, KeyError) as exc:
+            logger.warning("Sentry reverse-lookup item-parse error: %s", exc)
+            return []
     finally:
         if own_client:
             await cli.aclose()

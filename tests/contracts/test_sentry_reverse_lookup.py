@@ -81,3 +81,59 @@ async def test_returns_empty_on_http_error() -> None:
 async def test_returns_empty_when_no_creds() -> None:
     out = await query_sentry_by_title("x", auth_token="", org="myorg")
     assert out == []
+
+
+@pytest.mark.asyncio
+async def test_injected_client_not_closed() -> None:
+    """When caller injects a client, query_sentry_by_title MUST NOT close it."""
+    mock_response = AsyncMock()
+    mock_response.status_code = 200
+    mock_response.json = lambda: []
+    mock_response.raise_for_status = lambda: None
+
+    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_client.aclose = AsyncMock()
+
+    await query_sentry_by_title("x", auth_token="t", org="o", client=mock_client)
+    mock_client.aclose.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_owned_client_path_runs_through() -> None:
+    """When no client is injected, the owned-client path runs and the function still returns []
+    on the resulting (real) HTTP failure. This exercises the own_client=True branch including
+    the finally aclose path; we don't actually hit the network because we patch the constructor.
+    """
+    from unittest.mock import patch
+
+    fake_client = AsyncMock()
+    fake_client.get = AsyncMock(side_effect=Exception("simulated network failure"))
+    fake_client.aclose = AsyncMock()
+
+    with patch("sentry.reverse_lookup.httpx.AsyncClient", return_value=fake_client):
+        out = await query_sentry_by_title("x", auth_token="t", org="o")
+    assert out == []
+    fake_client.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_malformed_payload_returns_empty() -> None:
+    """A Sentry response with non-numeric count or non-dict metadata MUST return []."""
+    mock_response = AsyncMock()
+    mock_response.status_code = 200
+    mock_response.raise_for_status = lambda: None
+    mock_response.json = lambda: [
+        {
+            "id": "1",
+            "title": "x",
+            "count": "not-a-number",  # would raise ValueError in _parse
+            "metadata": None,  # would raise AttributeError on .get
+        }
+    ]
+
+    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client.get = AsyncMock(return_value=mock_response)
+
+    out = await query_sentry_by_title("x", auth_token="t", org="o", client=mock_client)
+    assert out == []
