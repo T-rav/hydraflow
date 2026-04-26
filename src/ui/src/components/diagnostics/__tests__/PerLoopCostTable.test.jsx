@@ -1,5 +1,5 @@
 import { render, screen, fireEvent } from '@testing-library/react'
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { PerLoopCostTable } from '../PerLoopCostTable'
 
 // Sanity-check render tests for the §4.11p2 Task 12 per-loop table.
@@ -111,5 +111,12 @@ describe('PerLoopCostTable model_breakdown expansion', () => {
     delete legacyRow.model_breakdown
     render(<PerLoopCostTable rows={[legacyRow]} />)
     expect(screen.queryByTestId('expand-toggle-implementer')).not.toBeInTheDocument()
+  })
+
+  it('expand toggle does not trigger onRowClick', () => {
+    const onRowClick = vi.fn()
+    render(<PerLoopCostTable rows={rowsWithBreakdown} onRowClick={onRowClick} />)
+    fireEvent.click(screen.getByTestId('expand-toggle-implementer'))
+    expect(onRowClick).not.toHaveBeenCalled()
   })
 })
