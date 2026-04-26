@@ -5,8 +5,6 @@ sequence, applies PreflightDecision to the result, records audit + spend.
 
 Layered kill-switch (ADR-0049): in-body enabled_cb gate at top of _do_work.
 Sequential single-issue-per-tick. Daily-budget gate. Sub-label deny-list.
-
-Pipeline (poll → context → agent → decision → audit) lands in Task 11.
 """
 
 from __future__ import annotations
@@ -28,10 +26,10 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         self,
         *,
         config: HydraFlowConfig,
-        state: Any,  # StateTracker
-        pr_manager: Any,  # PRPort
+        state: Any,
+        pr_manager: Any,
         wiki_store: Any | None,
-        audit_store: Any,  # PreflightAuditStore
+        audit_store: Any,
         deps: LoopDeps,
     ) -> None:
         super().__init__(
@@ -53,7 +51,6 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         if not self._enabled_cb(self._worker_name):
             return {"status": "disabled"}
 
-        # Daily-budget gate (None = unlimited).
         cap = self._config.auto_agent_daily_budget_usd
         if cap is not None:
             today = datetime.now(UTC).date().isoformat()
@@ -61,5 +58,164 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
             if spend >= cap:
                 return {"status": "budget_exceeded", "spend_usd": spend, "cap_usd": cap}
 
-        # Pipeline lands in Task 11.
-        return {"status": "ok", "issues_processed": 0}
+        # Poll for hitl-escalation issues that don't already have human-required.
+        issues = await self._poll_eligible_issues()
+        if not issues:
+            return {"status": "ok", "issues_processed": 0}
+
+        # Sequential single-issue-per-tick.
+        issue = issues[0]
+        result = await self._process_one(issue)
+        return {
+            "status": "ok",
+            "issues_processed": 1,
+            "result_status": result.get("status"),
+        }
+
+    async def _poll_eligible_issues(self) -> list[dict[str, Any]]:
+        """Return open hitl-escalation issues lacking human-required."""
+        try:
+            raw = await self._prs.list_issues_by_label("hitl-escalation")
+        except Exception as exc:
+            logger.warning("Eligible-issue poll failed: %s", exc)
+            return []
+        return [
+            issue
+            for issue in raw
+            if "human-required"
+            not in {lbl.get("name", "") for lbl in issue.get("labels", [])}
+        ]
+
+    async def _process_one(self, issue: dict[str, Any]) -> dict[str, Any]:
+        """Run one full pre-flight attempt for a single issue."""
+        from preflight.agent import PreflightAgentDeps, hash_prompt, run_preflight
+        from preflight.audit import PreflightAuditEntry
+        from preflight.context import gather_context
+        from preflight.decision import apply_decision
+
+        issue_number = int(issue.get("number", 0))
+        issue_body = str(issue.get("body", "") or "")
+        labels = {lbl.get("name", "") for lbl in issue.get("labels", [])}
+        sub_labels = labels - {"hitl-escalation"}
+        sub_label = next(iter(sub_labels), "_default")
+
+        # Sub-label deny-list.
+        if sub_label in self._config.auto_agent_skip_sublabels:
+            await self._prs.add_labels(issue_number, ["human-required"])
+            self._audit_store.append(_skip_audit(issue_number, sub_label, "deny_list"))
+            return {"status": "skipped_deny_list"}
+
+        # Attempt-cap check.
+        attempts = self._state.get_auto_agent_attempts(issue_number)
+        if attempts >= self._config.auto_agent_max_attempts:
+            await self._prs.add_labels(
+                issue_number, ["human-required", "auto-agent-exhausted"]
+            )
+            return {"status": "skipped_exhausted"}
+
+        # Gather context.
+        ctx = await gather_context(
+            issue_number=issue_number,
+            issue_body=issue_body,
+            sub_label=sub_label,
+            pr_port=self._prs,
+            wiki_store=self._wiki_store,
+            state=self._state,
+            audit_store=self._audit_store,
+            repo_slug="",
+        )
+
+        # Bump attempts atomically before spawning.
+        attempt_n = self._state.bump_auto_agent_attempts(issue_number)
+
+        # Spawn agent.
+        spawn_fn = self._build_spawn_fn(issue_number)
+        deps = PreflightAgentDeps(
+            persona=self._config.auto_agent_persona,
+            cost_cap_usd=self._config.auto_agent_cost_cap_usd,
+            wall_clock_cap_s=self._config.auto_agent_wall_clock_cap_s,
+            spawn_fn=spawn_fn,
+        )
+        worktree_path = await self._resolve_worktree(issue_number)
+        result = await run_preflight(
+            context=ctx,
+            repo_slug="",
+            worktree_path=worktree_path,
+            deps=deps,
+        )
+
+        # Apply decision.
+        await apply_decision(
+            issue_number=issue_number,
+            sub_label=sub_label,
+            result=result,
+            pr_port=self._prs,
+            state=self._state,
+            max_attempts=self._config.auto_agent_max_attempts,
+        )
+
+        # Append audit.
+        self._audit_store.append(
+            PreflightAuditEntry(
+                ts=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                issue=issue_number,
+                sub_label=sub_label,
+                attempt_n=attempt_n,
+                prompt_hash=hash_prompt(""),  # populated by spawn_fn in real impl
+                cost_usd=result.cost_usd,
+                wall_clock_s=result.wall_clock_s,
+                tokens=result.tokens,
+                status=result.status,
+                pr_url=result.pr_url,
+                diagnosis=result.diagnosis,
+                llm_summary=result.diagnosis[:500],
+            )
+        )
+
+        # Update daily spend cache.
+        today = datetime.now(UTC).date().isoformat()
+        self._state.add_auto_agent_daily_spend(today, result.cost_usd)
+
+        return {"status": result.status, "issue": issue_number}
+
+    def _build_spawn_fn(self, issue_number: int):
+        """Returns the actual subprocess-spawning callable. Replaced in tests.
+
+        In production: spawns AutoAgentRunner subprocess (HITLRunner-style).
+        Placeholder until full HITLRunner integration is wired.
+        """
+        from preflight.agent import PreflightSpawn
+
+        async def _placeholder(prompt: str, worktree_path: str) -> PreflightSpawn:
+            return PreflightSpawn(
+                process=None,
+                output_text="<status>needs_human</status><diagnosis>not yet wired</diagnosis>",
+                cost_usd=0.0,
+                tokens=0,
+                crashed=False,
+            )
+
+        return _placeholder
+
+    async def _resolve_worktree(self, issue_number: int) -> str:
+        """Return worktree path for the issue, or main repo as fallback."""
+        return str(self._config.repo_root)
+
+
+def _skip_audit(issue: int, sub_label: str, reason: str):
+    from preflight.audit import PreflightAuditEntry
+
+    return PreflightAuditEntry(
+        ts=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        issue=issue,
+        sub_label=sub_label,
+        attempt_n=0,
+        prompt_hash="",
+        cost_usd=0.0,
+        wall_clock_s=0.0,
+        tokens=0,
+        status="skipped",
+        pr_url=None,
+        diagnosis=f"skipped: {reason}",
+        llm_summary=f"skipped: {reason}",
+    )

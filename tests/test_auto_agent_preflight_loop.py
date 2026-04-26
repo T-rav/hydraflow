@@ -65,3 +65,74 @@ async def test_no_cap_passes_gate(tmp_path: Path) -> None:
     state.get_auto_agent_daily_spend = MagicMock(return_value=999.0)
     result = await loop._do_work()
     assert result["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_no_eligible_issues(tmp_path: Path) -> None:
+    loop, _ = _make_loop(tmp_path)
+    loop._prs.list_issues_by_label = AsyncMock(return_value=[])
+    result = await loop._do_work()
+    assert result == {"status": "ok", "issues_processed": 0}
+
+
+@pytest.mark.asyncio
+async def test_skips_human_required_already_set(tmp_path: Path) -> None:
+    loop, _ = _make_loop(tmp_path)
+    loop._prs.list_issues_by_label = AsyncMock(
+        return_value=[
+            {
+                "number": 1,
+                "body": "x",
+                "labels": [
+                    {"name": "hitl-escalation"},
+                    {"name": "human-required"},
+                ],
+            },
+        ]
+    )
+    eligible = await loop._poll_eligible_issues()
+    assert eligible == []
+
+
+@pytest.mark.asyncio
+async def test_deny_list_bypasses_agent(tmp_path: Path) -> None:
+    loop, state = _make_loop(tmp_path)
+    state.get_auto_agent_attempts = MagicMock(return_value=0)
+    loop._prs.list_issues_by_label = AsyncMock(
+        return_value=[
+            {
+                "number": 1,
+                "body": "x",
+                "labels": [
+                    {"name": "hitl-escalation"},
+                    {"name": "principles-stuck"},
+                ],
+            },
+        ]
+    )
+    result = await loop._do_work()
+    loop._prs.add_labels.assert_awaited_with(1, ["human-required"])
+    assert result["result_status"] == "skipped_deny_list"
+
+
+@pytest.mark.asyncio
+async def test_attempt_cap_marks_exhausted(tmp_path: Path) -> None:
+    loop, state = _make_loop(tmp_path)
+    state.get_auto_agent_attempts = MagicMock(return_value=3)
+    loop._prs.list_issues_by_label = AsyncMock(
+        return_value=[
+            {
+                "number": 1,
+                "body": "x",
+                "labels": [
+                    {"name": "hitl-escalation"},
+                    {"name": "flaky-test-stuck"},
+                ],
+            },
+        ]
+    )
+    result = await loop._do_work()
+    loop._prs.add_labels.assert_awaited_with(
+        1, ["human-required", "auto-agent-exhausted"]
+    )
+    assert result["result_status"] == "skipped_exhausted"
