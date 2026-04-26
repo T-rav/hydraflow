@@ -58,6 +58,10 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
             if spend >= cap:
                 return {"status": "budget_exceeded", "spend_usd": spend, "cap_usd": cap}
 
+        cleared = await self._reconcile_closed_issues()
+        if cleared:
+            logger.info("Auto-agent reconciled %d closed issues", cleared)
+
         # Poll for hitl-escalation issues that don't already have human-required.
         issues = await self._poll_eligible_issues()
         if not issues:
@@ -71,6 +75,28 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
             "issues_processed": 1,
             "result_status": result.get("status"),
         }
+
+    async def _reconcile_closed_issues(self) -> int:
+        """Clear auto_agent_attempts for issues that have been closed.
+
+        Polls the last 200 closed issues with hitl-escalation label and drops
+        attempt counts so a re-open starts fresh.
+        """
+        try:
+            closed = await self._prs.list_closed_issues_by_label(
+                "hitl-escalation",
+                limit=200,
+            )
+        except Exception as exc:
+            logger.warning("Auto-agent close-reconciliation poll failed: %s", exc)
+            return 0
+        cleared = 0
+        for issue in closed:
+            issue_number = int(issue.get("number", 0))
+            if self._state.get_auto_agent_attempts(issue_number) > 0:
+                self._state.clear_auto_agent_attempts(issue_number)
+                cleared += 1
+        return cleared
 
     async def _poll_eligible_issues(self) -> list[dict[str, Any]]:
         """Return open hitl-escalation issues lacking human-required."""

@@ -15,7 +15,9 @@ def _make_loop(tmp_path: Path, *, enabled: bool = True, **config_overrides):
     deps = make_bg_loop_deps(tmp_path, enabled=enabled, **config_overrides)
     state = MagicMock()
     state.get_auto_agent_daily_spend = MagicMock(return_value=0.0)
+    state.get_auto_agent_attempts = MagicMock(return_value=0)
     pr = AsyncMock()
+    pr.list_closed_issues_by_label = AsyncMock(return_value=[])
     audit = MagicMock()
     loop = AutoAgentPreflightLoop(
         config=deps.config,

@@ -298,6 +298,12 @@ class PRPort(Protocol):
         """Return open issues with the given label as a list of typed dicts."""
         ...
 
+    async def list_closed_issues_by_label(
+        self, label: str, limit: int = 100
+    ) -> list[GitHubIssueSummary]:
+        """Return closed issues with the given label as a list of typed dicts."""
+        ...
+
     async def get_issue_state(self, issue_number: int) -> str:
         """Return the resolved state of a GitHub issue (``'COMPLETED'``, ``'OPEN'``, etc.)."""
         ...

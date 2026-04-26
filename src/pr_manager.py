@@ -1162,6 +1162,37 @@ class PRManager:
             for item in items
         ]
 
+    async def list_closed_issues_by_label(
+        self, label: str, limit: int = 100
+    ) -> list[GitHubIssueSummary]:
+        """Return closed issues with the given label as a list of dicts."""
+        self._assert_repo()
+        output = await self._run_gh(
+            "gh",
+            "issue",
+            "list",
+            "--repo",
+            self._repo,
+            "--label",
+            label,
+            "--state",
+            "closed",
+            "--json",
+            "number,title,body,updatedAt",
+            "--limit",
+            str(limit),
+        )
+        items = json.loads(output)
+        return [
+            {
+                "number": item.get("number", 0),
+                "title": item.get("title", ""),
+                "body": item.get("body", ""),
+                "updated_at": item.get("updatedAt", ""),
+            }
+            for item in items
+        ]
+
     async def get_issue_updated_at(self, issue_number: int) -> str:
         """Return the updated_at timestamp for an issue as ISO string."""
         self._assert_repo()
