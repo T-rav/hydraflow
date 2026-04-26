@@ -231,6 +231,7 @@ jolly-sea-65a9/
 # Claude Code
 .claude/plans/
 .claude/state/
+.claude/worktrees/
 
 .pre
 src/ui/src/test/shims/generated/

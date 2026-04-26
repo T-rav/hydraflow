@@ -6,26 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W17
 
-- `74df6ee` — feat(arch): initial baseline emit of docs/arch/generated/ *(2026-04-25)*
-- `2b2c7a9` — test(arch): drift guards (label-match, loop-count, curated) *(2026-04-25)*
-- `61ba889` — feat(arch): freshness badge logic with bootstrap state *(2026-04-25)*
-- `94ad9c7` — feat(arch): runner CLI (--emit, --check) with .meta.json *(2026-04-25)*
-- `1d5cf3a` — feat(arch): changelog generator + CommitInfo model *(2026-04-25)*
-- `2711266` — feat(arch): MockWorld map generator (table + Mermaid wiring) *(2026-04-25)*
-- `6e7a9ed` — feat(arch): ADR cross-reference generator (forward + reverse) *(2026-04-25)*
-- `138a379` — feat(arch): event bus topology generator *(2026-04-25)*
-- `b66a010` — feat(arch): module graph generator (Mermaid weighted edges) *(2026-04-25)*
-- `355dbe2` — feat(arch): label state machine generator *(2026-04-25)*
-- `0b34fef` — feat(arch): port map generator (Mermaid + per-port detail) *(2026-04-25)*
-- `b2f5452` — feat(arch): loop registry generator *(2026-04-25)*
-- `c4059d4` — feat(arch): MockWorld extractor (fakes + scenario uses) *(2026-04-25)*
-- `f635fda` — feat(arch): ADR cross-reference extractor (forward index) *(2026-04-25)*
-- `903791c` — feat(arch): events extractor (publish/subscribe topology) *(2026-04-25)*
-- `8973214` — feat(arch): module graph extractor (package-level) *(2026-04-25)*
-- `33d57a8` — feat(arch): labels extractor (literal TRANSITIONS form) *(2026-04-25)*
-- `8ee8dac` — feat(arch): ports extractor (Protocol-based, adapter+fake matching) *(2026-04-25)*
-- `8ee0088` — feat(arch): loops extractor (AST-based, no class introspection) *(2026-04-25)*
-- `7d09363` — feat(arch): scaffold src/arch and tests/architecture packages *(2026-04-25)*
+- `a131eb6` — feat(arch): functional_areas generator + runner wiring + coverage test *(2026-04-25)*
+- `bc19af6` — feat(arch): functional areas schema + curated YAML *(2026-04-25)*
+- `bee256f` — feat(arch): Architecture Knowledge System v1 — spec + 3 plans + Plan A runner (#8432) (#8432) *(2026-04-25)*
+- `87da6ef` — feat(adr-gate): symbol-level precision so unrelated edits stop tripping it (#8428) (#8428) *(2026-04-24)*
 - `ed4a4c0` — fix(staging-bisect): close 2 dark-factory gaps (G3+G7) (#8420) (#8420) *(2026-04-24)*
 - `a5f32b6` — chore: remove Dolt state backend, files-only persistence (#8419) (#8419) *(2026-04-24)*
 - `9ee5fe8` — docs: consolidate per-repo wiki at docs/wiki/ (#8418) (#8418) *(2026-04-24)*
@@ -151,4 +135,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `a92a97a` on 2026-04-25 23:21 UTC. Source last changed at `a92a97a`._
+_Regenerated from commit `3a98038` on 2026-04-26 00:34 UTC. Source last changed at `3a98038`._
