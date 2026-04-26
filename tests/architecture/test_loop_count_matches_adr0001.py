@@ -1,8 +1,9 @@
 """Drift guard: ADR-0001's "five concurrent" framing vs the live loop count.
 
-Marked xfail until Plan B amends ADR-0001 to either reference the live
-loop registry (docs/arch/generated/loops.md) or historicize the original
-"five" claim. Once the amendment lands, remove the xfail decorator.
+Plan B amended ADR-0001 with a Background section that historicizes the
+five-concurrent framing. The xfail decorator was removed once the
+amendment landed; this test now actively guards against future drift
+(e.g., if someone reverts the amendment).
 """
 
 from pathlib import Path
@@ -12,10 +13,6 @@ import pytest
 from arch.extractors.loops import extract_loops
 
 
-@pytest.mark.xfail(
-    reason="ADR-0001 is amended in Plan B; remove this xfail once the amendment lands.",
-    strict=False,
-)
 def test_loop_count_matches_adr0001(real_repo_root: Path):
     adr = (real_repo_root / "docs/adr/0001-five-concurrent-async-loops.md").read_text()
     if "see `docs/arch/generated/loops.md`" in adr:
