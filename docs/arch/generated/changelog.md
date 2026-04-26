@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W17
 
+- `0b82773` — docs(wiki): promote loop-wiring guide to 8 checkpoints *(2026-04-26)*
+- `0701d8d` — docs(arch): regenerate after PricingRefreshLoop addition *(2026-04-26)*
 - `932e12e` — fix(arch): assign PricingRefreshLoop to caretaking functional area *(2026-04-26)*
 - `6cd7920` — docs(wiki): dark-factory engineering — distill lessons from auto-agent journey (#8443) (#8443) *(2026-04-26)*
 - `717e68f` — feat(auto-agent): wire real Claude Code subprocess (closes ADR-0050 partial landing) (#8439) (#8439) *(2026-04-26)*
@@ -143,4 +145,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `932e12e` on 2026-04-26 22:16 UTC. Source last changed at `932e12e`. Status: 🟢 fresh._
+_Regenerated from commit `0b82773` on 2026-04-26 22:23 UTC. Source last changed at `0b82773`. Status: 🟢 fresh._
