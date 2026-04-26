@@ -1,0 +1,6 @@
+{
+  "output_text": "<status>resolved</status><pr_url>https://github.com/x/y/pull/9011</pr_url><diagnosis>Resolved conflict by applying revert diff with updated context lines; conflict was trivial import order change.</diagnosis>",
+  "cost_usd": 1.0,
+  "tokens": 8200,
+  "crashed": false
+}

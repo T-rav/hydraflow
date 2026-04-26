@@ -1,0 +1,6 @@
+{
+  "number": 9060,
+  "title": "[RC] Build duration regressed 4x after PR #8950; budget exceeded",
+  "body": "RC-budget-loop reports test suite duration jumped from 45s to 190s after PR #8950. Automated profiling inconclusive — regression spans multiple test modules. Blocking review needed before next release.",
+  "labels": [{"name": "hitl-escalation"}, {"name": "rc-duration-stuck"}]
+}

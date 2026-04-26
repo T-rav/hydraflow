@@ -42,7 +42,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, runtime_checkable
+from typing import TYPE_CHECKING, Any, runtime_checkable
 
 from typing_extensions import Protocol
 
@@ -199,6 +199,14 @@ class PRPort(Protocol):
         """Post *body* as a comment on issue *issue_number*."""
         ...
 
+    async def list_issue_comments(self, issue_number: int) -> list[dict[str, Any]]:
+        """List recent comments on *issue_number* (newest last).
+
+        Returns dicts with at minimum ``user.login``, ``body``, ``created_at``
+        keys (matches ``gh issue view --json comments`` shape).
+        """
+        ...
+
     async def submit_review(
         self,
         pr_number: int,
@@ -296,6 +304,12 @@ class PRPort(Protocol):
 
     async def list_issues_by_label(self, label: str) -> list[GitHubIssueSummary]:
         """Return open issues with the given label as a list of typed dicts."""
+        ...
+
+    async def list_closed_issues_by_label(
+        self, label: str, limit: int = 100
+    ) -> list[GitHubIssueSummary]:
+        """Return closed issues with the given label as a list of typed dicts."""
         ...
 
     async def get_issue_state(self, issue_number: int) -> str:

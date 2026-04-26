@@ -8,6 +8,7 @@ import { IssueTable } from './IssueTable'
 import { DrillDownPane } from './DrillDownPane'
 import { FactoryHealthSection } from './FactoryHealthSection'
 import { FactoryCostTab } from './FactoryCostTab'
+import { AutoAgentStats } from './AutoAgentStats'
 
 export function DiagnosticsTab() {
   const [range, setRange] = useState('7d')
@@ -142,6 +143,8 @@ export function DiagnosticsTab() {
           <CacheHitChart data={cache} />
 
           <FactoryHealthSection />
+
+          <AutoAgentStats />
 
           <IssueTable rows={issues} onRowClick={handleRowClick} />
 

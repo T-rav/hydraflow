@@ -1,0 +1,6 @@
+{
+  "number": 9001,
+  "title": "[Flake] flake-tracker: test_async_handler exhausted attempts",
+  "body": "Flake-tracker has retried 5 attempts on tests/test_handlers.py::test_async_handler with no success. Recent flakes: 4/10 in last 24h.",
+  "labels": [{"name": "hitl-escalation"}, {"name": "flaky-test-stuck"}]
+}

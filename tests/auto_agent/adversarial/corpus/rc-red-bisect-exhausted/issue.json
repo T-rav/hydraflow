@@ -1,0 +1,6 @@
+{
+  "number": 9020,
+  "title": "[RC] Bisect exhausted: CI red on staging after 8 bisect iterations",
+  "body": "Staging CI has been red for 3 days. Bisect tried 8 iterations narrowing to two equally-blamed commits; cannot determine root cause automatically.",
+  "labels": [{"name": "hitl-escalation"}, {"name": "rc-red-bisect-exhausted"}]
+}

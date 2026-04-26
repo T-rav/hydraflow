@@ -211,6 +211,8 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("diagnostic_interval", "HYDRAFLOW_DIAGNOSTIC_INTERVAL", 30),
     ("retrospective_interval", "HYDRAFLOW_RETROSPECTIVE_INTERVAL", 1800),
     ("principles_audit_interval", "HYDRAFLOW_PRINCIPLES_AUDIT_INTERVAL", 604800),
+    ("auto_agent_preflight_interval", "HYDRAFLOW_AUTO_AGENT_PREFLIGHT_INTERVAL", 120),
+    ("auto_agent_max_attempts", "HYDRAFLOW_AUTO_AGENT_MAX_ATTEMPTS", 3),
     ("flake_tracker_interval", "HYDRAFLOW_FLAKE_TRACKER_INTERVAL", 14400),
     ("flake_threshold", "HYDRAFLOW_FLAKE_THRESHOLD", 3),
     ("skill_prompt_eval_interval", "HYDRAFLOW_SKILL_PROMPT_EVAL_INTERVAL", 604800),
@@ -268,6 +270,8 @@ _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
 # Handled separately from the strictly-typed float table because pydantic's
 # `float | None` fields don't participate in the `default == current` check.
 _ENV_OPT_FLOAT_OVERRIDES: list[tuple[str, str, float | None]] = [
+    ("auto_agent_cost_cap_usd", "HYDRAFLOW_AUTO_AGENT_COST_CAP_USD", None),
+    ("auto_agent_daily_budget_usd", "HYDRAFLOW_AUTO_AGENT_DAILY_BUDGET_USD", None),
     ("daily_cost_budget_usd", "HYDRAFLOW_DAILY_COST_BUDGET_USD", None),
     ("issue_cost_alert_usd", "HYDRAFLOW_ISSUE_COST_ALERT_USD", None),
 ]
@@ -323,6 +327,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("screenshot_gist_public", "HYDRAFLOW_SCREENSHOT_GIST_PUBLIC", False),
     ("skip_preflight", "HYDRAFLOW_SKIP_PREFLIGHT", False),
     ("whatsapp_enabled", "HYDRAFLOW_WHATSAPP_ENABLED", False),
+    ("auto_agent_preflight_enabled", "HYDRAFLOW_AUTO_AGENT_PREFLIGHT_ENABLED", True),
     ("staging_enabled", "HYDRAFLOW_STAGING_ENABLED", False),
 ]
 
@@ -2012,6 +2017,54 @@ class HydraFlowConfig(BaseModel):
             "Seconds between PrinciplesAuditLoop ticks. "
             "Default 604800 = 7 days (spec §4.4)."
         ),
+    )
+
+    # Auto-agent pre-flight loop (ADR-0049, spec §5.1)
+    auto_agent_preflight_enabled: bool = Field(
+        default=True,
+        description="UI kill-switch for AutoAgentPreflightLoop (ADR-0049).",
+    )
+    auto_agent_preflight_interval: int = Field(
+        default=120,
+        ge=60,
+        le=600,
+        description="Seconds between AutoAgentPreflightLoop cycles (default 120).",
+    )
+    auto_agent_persona: str = Field(
+        default=(
+            "the lead engineer for this project — pragmatic, prefers small fixes, "
+            "leaves regression tests, doesn't over-engineer. When in doubt about "
+            "scope, do less."
+        ),
+        description="Persona substituted into the auto-agent shared prompt envelope.",
+    )
+    auto_agent_max_attempts: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Per-issue attempt cap before auto-agent-exhausted (default 3).",
+    )
+    auto_agent_skip_sublabels: list[str] = Field(
+        default_factory=lambda: ["principles-stuck", "cultural-check"],
+        description=(
+            "Sub-labels that bypass auto-agent pre-flight entirely. Default = the "
+            "principles-audit recursion guard."
+        ),
+    )
+    auto_agent_cost_cap_usd: float | None = Field(
+        default=None,
+        description=(
+            "Per-attempt cost cap in USD. None = unlimited (observability-first; "
+            "operator can set when needed)."
+        ),
+    )
+    auto_agent_wall_clock_cap_s: int | None = Field(
+        default=None,
+        description="Per-attempt wall-clock cap in seconds. None = unlimited.",
+    )
+    auto_agent_daily_budget_usd: float | None = Field(
+        default=None,
+        description="Per-day total spend budget in USD. None = unlimited.",
     )
 
     # Credit pause

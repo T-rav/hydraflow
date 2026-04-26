@@ -1,0 +1,6 @@
+{
+  "output_text": "<status>needs_human</status><diagnosis>Bisect ambiguous: both candidate commits touch shared integration layer; cannot isolate blame without runtime profiling. Human review required.</diagnosis>",
+  "cost_usd": 0.8,
+  "tokens": 6000,
+  "crashed": false
+}

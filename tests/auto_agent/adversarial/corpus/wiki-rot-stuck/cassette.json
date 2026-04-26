@@ -1,0 +1,6 @@
+{
+  "output_text": "<status>resolved</status><pr_url>https://github.com/x/y/pull/9051</pr_url><diagnosis>Rewrote stale StateTracker entry in architecture.md: removed reference to 'pending_issues', updated field list to match current StateData schema.</diagnosis>",
+  "cost_usd": 0.7,
+  "tokens": 5500,
+  "crashed": false
+}

@@ -125,6 +125,9 @@ class TestInitialization:
             "trust_fleet_sanity_last_seen_counts",
             "wiki_rot_attempts",
             "contract_refresh_attempts",
+            # Auto-Agent — AutoAgentPreflightLoop (spec §3.6)
+            "auto_agent_attempts",
+            "auto_agent_daily_spend",
         }
         assert set(d.keys()) == expected_keys
 

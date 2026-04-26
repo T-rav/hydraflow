@@ -1,0 +1,6 @@
+{
+  "number": 9040,
+  "title": "[Fake] Missing fake response for WorkspacePort.clone — coverage gap",
+  "body": "FakeCoverageAuditor found WorkspacePort.clone has no corresponding fake implementation. 2 tests call the real method in CI, causing intermittent network failures.",
+  "labels": [{"name": "hitl-escalation"}, {"name": "fake-coverage-stuck"}]
+}

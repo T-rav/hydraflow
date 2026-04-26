@@ -555,6 +555,48 @@ def _build_staging_bisect(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     return loop
 
 
+def _build_auto_agent_preflight(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build AutoAgentPreflightLoop for scenarios (spec §1–§11).
+
+    Tests typically seed a FakeGitHub via the ``github`` port and may pre-seed
+    ``auto_agent_audit_store`` to inspect appended entries. The loop's
+    spawn_fn is a placeholder that returns a needs_human PreflightSpawn — the
+    full subprocess wiring lives in production deps; tests can monkeypatch
+    ``loop._build_spawn_fn`` to inject a cassette spawn for end-to-end coverage.
+
+    State defaults to a MagicMock with the auto_agent_* accessors stubbed; tests
+    can override via the ``auto_agent_state`` port to use a real StateTracker.
+    """
+    from unittest.mock import MagicMock  # noqa: PLC0415
+
+    from auto_agent_preflight_loop import AutoAgentPreflightLoop  # noqa: PLC0415
+    from preflight.audit import PreflightAuditStore  # noqa: PLC0415
+
+    pr_manager = ports.get("pr_manager") or ports["github"]
+    audit_store = ports.get("auto_agent_audit_store") or PreflightAuditStore(
+        config.data_root,
+    )
+    ports.setdefault("auto_agent_audit_store", audit_store)
+
+    state = ports.get("auto_agent_state")
+    if state is None:
+        state = MagicMock()
+        state.get_auto_agent_attempts.return_value = 0
+        state.bump_auto_agent_attempts.return_value = 1
+        state.get_auto_agent_daily_spend.return_value = 0.0
+        state.get_escalation_context.return_value = None
+        ports["auto_agent_state"] = state
+
+    return AutoAgentPreflightLoop(
+        config=config,
+        state=state,
+        pr_manager=pr_manager,
+        wiki_store=ports.get("repo_wiki_store"),
+        audit_store=audit_store,
+        deps=deps,
+    )
+
+
 def _build_corpus_learning(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build CorpusLearningLoop for scenarios (spec §4.1 v2).
 
@@ -859,6 +901,8 @@ _BUILDERS: dict[str, Any] = {
     "principles_audit": _build_principles_audit,
     # architecture knowledge system (Plan C — DiagramLoop L24)
     "diagram_loop": _build_diagram_loop,
+    # auto-agent (spec §1–§11; ADR-0050)
+    "auto_agent_preflight": _build_auto_agent_preflight,
 }
 
 

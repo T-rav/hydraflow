@@ -36,7 +36,7 @@ RESET := \033[0m
 DOCKER_IMAGE ?= ghcr.io/t-rav/hydraflow-agent:latest
 DOCKER_BASE_IMAGE ?= ghcr.io/t-rav/hydraflow-agent-base:latest
 
-.PHONY: help run dev dry-run clean clean-assets compact coverage cover smoke test test-fast test-cov lint lint-check lint-fix typecheck security quality quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels prep scaffold hot docker-build docker-ensure docker-test deps integration soak screenshot screenshot-update check-node-ui trust trust-adversarial
+.PHONY: help run dev dry-run clean clean-assets compact coverage cover smoke test test-fast test-cov lint lint-check lint-fix typecheck security quality quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels prep scaffold hot docker-build docker-ensure docker-test deps integration soak screenshot screenshot-update check-node-ui trust trust-adversarial auto-agent-adversarial
 
 check-node-ui:
 	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh --version >/dev/null
@@ -246,6 +246,11 @@ trust-contracts: deps
 
 trust: trust-adversarial trust-contracts
 	@echo "$(GREEN)Trust suite passed$(RESET)"
+
+auto-agent-adversarial: deps
+	@echo "$(BLUE)Running auto-agent adversarial corpus...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/auto_agent/adversarial/ -v
+	@echo "$(GREEN)Auto-agent adversarial corpus passed$(RESET)"
 
 test-fast: deps
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ -x --tb=short
