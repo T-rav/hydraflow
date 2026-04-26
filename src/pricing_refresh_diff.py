@@ -47,3 +47,29 @@ def filter_anthropic_entries(
             continue
         out[normalize_litellm_key(key)] = entry
     return out
+
+
+def map_litellm_to_local_costs(upstream: dict[str, Any]) -> dict[str, float]:
+    """Map LiteLLM per-token costs to our per-million-tokens shape.
+
+    Required upstream keys: ``input_cost_per_token``, ``output_cost_per_token``.
+    Cache fields (``cache_creation_input_token_cost``, ``cache_read_input_token_cost``)
+    default to 0 when absent. All output values rounded to 6 decimals.
+
+    Raises:
+        KeyError: a required field is missing.
+    """
+    return {
+        "input_cost_per_million": round(
+            float(upstream["input_cost_per_token"]) * 1e6, 6
+        ),
+        "output_cost_per_million": round(
+            float(upstream["output_cost_per_token"]) * 1e6, 6
+        ),
+        "cache_write_cost_per_million": round(
+            float(upstream.get("cache_creation_input_token_cost", 0.0)) * 1e6, 6
+        ),
+        "cache_read_cost_per_million": round(
+            float(upstream.get("cache_read_input_token_cost", 0.0)) * 1e6, 6
+        ),
+    }
