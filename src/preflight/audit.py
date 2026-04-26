@@ -7,6 +7,8 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from file_util import append_jsonl, file_lock
+
 
 @dataclass(frozen=True)
 class PreflightAuditEntry:
@@ -44,8 +46,8 @@ class PreflightAuditStore:
         self._path.parent.mkdir(parents=True, exist_ok=True)
 
     def append(self, entry: PreflightAuditEntry) -> None:
-        with self._path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(asdict(entry)) + "\n")
+        with file_lock(Path(str(self._path) + ".lock")):
+            append_jsonl(self._path, json.dumps(asdict(entry)))
 
     def _read_all(self) -> list[PreflightAuditEntry]:
         if not self._path.exists():

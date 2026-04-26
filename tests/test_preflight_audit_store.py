@@ -83,3 +83,28 @@ def test_empty_window(tmp_path: Path) -> None:
     stats = store.query_24h()
     assert stats.attempts == 0
     assert stats.resolution_rate == 0.0
+
+
+def test_top_spend_with_since_filter(tmp_path: Path) -> None:
+    store = PreflightAuditStore(tmp_path)
+    old = (datetime.now(UTC) - timedelta(hours=48)).isoformat().replace("+00:00", "Z")
+    fresh = (datetime.now(UTC) - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+    store.append(_entry(ts=old, cost=100.0))  # expensive but old
+    store.append(_entry(ts=fresh, cost=5.0))  # cheap but fresh
+    top = store.top_spend(n=5, since=datetime.now(UTC) - timedelta(hours=24))
+    assert len(top) == 1
+    assert top[0].cost_usd == 5.0
+
+
+def test_query_7d(tmp_path: Path) -> None:
+    store = PreflightAuditStore(tmp_path)
+    six_days = (
+        (datetime.now(UTC) - timedelta(days=6)).isoformat().replace("+00:00", "Z")
+    )
+    eight_days = (
+        (datetime.now(UTC) - timedelta(days=8)).isoformat().replace("+00:00", "Z")
+    )
+    store.append(_entry(ts=six_days))  # inside 7d window
+    store.append(_entry(ts=eight_days))  # outside 7d window
+    stats = store.query_7d()
+    assert stats.attempts == 1
