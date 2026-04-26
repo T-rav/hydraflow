@@ -116,6 +116,37 @@ async def test_cost_cap_returns_cost_exceeded() -> None:
     assert out.status == "cost_exceeded"
 
 
+@pytest.mark.asyncio
+async def test_wall_clock_cap_returns_timeout() -> None:
+    """Spec §5.1: wall-clock cap fires when subprocess wall time exceeds the cap."""
+    import asyncio
+
+    async def slow_spawn(*, prompt: str, worktree_path: str) -> PreflightSpawn:
+        await asyncio.sleep(0.05)  # exceed the 0.01s cap below
+        return PreflightSpawn(
+            process=None,
+            output_text="<status>resolved</status><diagnosis>x</diagnosis>",
+            cost_usd=1.0,
+            tokens=1000,
+            crashed=False,
+        )
+
+    deps = PreflightAgentDeps(
+        persona="x",
+        cost_cap_usd=None,
+        wall_clock_cap_s=0,  # any nonzero wall time exceeds 0
+        spawn_fn=slow_spawn,
+    )
+    out = await run_preflight(
+        context=_ctx(),
+        repo_slug="x/y",
+        worktree_path="/tmp",
+        deps=deps,
+    )
+    assert out.status == "timeout"
+    assert "Wall-clock cap" in out.diagnosis
+
+
 def test_hash_prompt_stable() -> None:
     assert hash_prompt("abc") == hash_prompt("abc")
     assert hash_prompt("abc") != hash_prompt("def")
