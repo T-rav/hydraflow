@@ -1,7 +1,9 @@
 """PreflightDecision — pure label-state mapping for AutoAgentPreflightLoop.
 
 Spec §2.2, §2.3, §7. Translates a PreflightResult into label operations
-applied via PRPort. Idempotent: re-runs on the same input are no-ops.
+applied via PRPort. Label operations are idempotent (GitHub dedup); comment
+deduplication is the caller's responsibility — re-running apply_decision
+on the same input WILL post a duplicate comment.
 """
 
 from __future__ import annotations
@@ -66,7 +68,9 @@ async def apply_decision(
     if remove:
         await pr_port.remove_labels(issue_number, remove)
 
-    comment = _format_comment(sub_label, result, current_attempts, exhausted)
+    comment = _format_comment(
+        sub_label, result, current_attempts, exhausted, max_attempts
+    )
     if comment:
         await pr_port.add_comment(issue_number, comment)
 
@@ -84,6 +88,7 @@ def _format_comment(
     result: PreflightResult,
     attempts: int,
     exhausted: bool,
+    max_attempts: int,
 ) -> str:
     if result.status == "resolved":
         pr_link = f" PR: {result.pr_url}" if result.pr_url else ""
@@ -94,7 +99,7 @@ def _format_comment(
             f"{result.diagnosis}"
         )
     suffix = (
-        " — **3 attempts exhausted, no further auto-agent retries**"
+        f" — **{max_attempts} attempts exhausted, no further auto-agent retries**"
         if exhausted
         else ""
     )

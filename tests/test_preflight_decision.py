@@ -36,6 +36,7 @@ async def test_resolved_removes_hitl_escalation() -> None:
     pr.remove_labels.assert_awaited_with(42, ["hitl-escalation"])
     pr.add_comment.assert_awaited()
     assert out["status"] == "resolved"
+    pr.add_labels.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -117,3 +118,35 @@ async def test_cost_exceeded_pairs_correctly() -> None:
         max_attempts=3,
     )
     pr.add_labels.assert_awaited_with(42, ["human-required", "cost-exceeded"])
+
+
+@pytest.mark.asyncio
+async def test_pr_failed_pairs_correctly() -> None:
+    pr = AsyncMock()
+    state = MagicMock()
+    state.get_auto_agent_attempts = MagicMock(return_value=1)
+    await apply_decision(
+        issue_number=42,
+        sub_label="x",
+        result=_result("pr_failed"),
+        pr_port=pr,
+        state=state,
+        max_attempts=3,
+    )
+    pr.add_labels.assert_awaited_with(42, ["human-required", "auto-agent-pr-failed"])
+
+
+@pytest.mark.asyncio
+async def test_timeout_pairs_correctly() -> None:
+    pr = AsyncMock()
+    state = MagicMock()
+    state.get_auto_agent_attempts = MagicMock(return_value=1)
+    await apply_decision(
+        issue_number=42,
+        sub_label="x",
+        result=_result("timeout"),
+        pr_port=pr,
+        state=state,
+        max_attempts=3,
+    )
+    pr.add_labels.assert_awaited_with(42, ["human-required", "timeout"])
