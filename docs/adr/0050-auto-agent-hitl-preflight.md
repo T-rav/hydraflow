@@ -93,14 +93,19 @@ tile + `/api/diagnostics/auto-agent` endpoint surface the relevant data.
 
 The following files carry this ADR's decisions and must be kept in sync with any supersession:
 
-- `src/models.py` — `StateData` fields for `auto_agent_attempts`, `auto_agent_outcomes`, `AutoAgentStateMixin`.
-- `src/config.py` — `auto_agent_max_attempts`, `auto_agent_deny_list`, `auto_agent_daily_budget_usd`, `auto_agent_max_wall_clock_minutes` fields.
-- `src/preflight_audit_store.py` — `PreflightAuditStore` JSONL persistence + sentry reverse-lookup.
-- `src/auto_agent_runner.py` — `AutoAgentRunner` subprocess wrapper, `PreflightContext`, `PreflightDecision`.
-- `src/auto_agent_preflight_loop.py` — `AutoAgentPreflightLoop._do_work` pipeline.
-- `src/prompts/auto_agent/` — shared envelope (`_envelope.md`) + 9 sub-label prompt files.
-- `src/dashboard_routes/diagnostics_routes.py` — `/api/diagnostics/auto-agent` endpoint.
-- `src/ui/src/AutoAgentStats.jsx` — System tab tile.
-- `tests/test_auto_agent_preflight_loop.py` — unit tests.
-- `tests/scenarios/test_auto_agent_preflight_scenario.py` — full-loop MockWorld scenario.
-- `tests/evals/auto_agent_preflight/` — adversarial corpus + eval harness.
+- `src/models.py` — `StateData` fields `auto_agent_attempts: dict[str, int]` and `auto_agent_daily_spend: dict[str, float]`.
+- `src/state/_auto_agent.py` — `AutoAgentStateMixin` (attempts get/bump/clear + daily-spend get/add).
+- `src/config.py` — `auto_agent_preflight_enabled`, `auto_agent_preflight_interval`, `auto_agent_persona`, `auto_agent_max_attempts`, `auto_agent_skip_sublabels`, `auto_agent_cost_cap_usd`, `auto_agent_wall_clock_cap_s`, `auto_agent_daily_budget_usd` fields + matching env-overrides.
+- `src/preflight/audit.py` — `PreflightAuditStore` durable JSONL persistence (file_lock + fsync) + 24h/7d aggregates + top-spend.
+- `src/preflight/context.py` — `PreflightContext` dataclass + `gather_context()` (handles `escalation_context=None`).
+- `src/preflight/decision.py` — `PreflightResult` + `apply_decision()` pure label state machine for all 6 statuses.
+- `src/preflight/agent.py` — `PreflightAgent` + `run_preflight` + cost/wall-clock cap watchers.
+- `src/preflight/runner.py` — prompt rendering helpers + `parse_agent_response`.
+- `src/sentry/reverse_lookup.py` — `query_sentry_by_title()` (never-raises).
+- `src/auto_agent_preflight_loop.py` — `AutoAgentPreflightLoop._do_work` pipeline + reconcile-on-close.
+- `prompts/auto_agent/` — shared envelope (`_envelope.md`) + `_default.md` + 9 sub-label prompt files.
+- `src/dashboard_routes/_diagnostics_routes.py` — `/api/diagnostics/auto-agent` endpoint.
+- `src/ui/src/components/diagnostics/AutoAgentStats.jsx` — System tab tile.
+- `tests/test_auto_agent_preflight_loop.py` + `tests/test_auto_agent_close_reconciliation.py` + `tests/test_auto_agent_loop_wiring.py` — unit + wiring tests.
+- `tests/scenarios/test_auto_agent_preflight.py` — full-loop scenario tests.
+- `tests/auto_agent/adversarial/test_corpus.py` + `tests/auto_agent/adversarial/corpus/` — 9-entry adversarial corpus + harness (run via `make auto-agent-adversarial`).

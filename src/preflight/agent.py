@@ -120,9 +120,15 @@ async def run_preflight(
     parsed = parse_agent_response(spawn.output_text)
     raw_status: str = parsed["status"] or "needs_human"
     status = raw_status if raw_status in {"resolved", "needs_human"} else "needs_human"
+    pr_url = parsed["pr_url"]
+    # Agent claimed "resolved" but produced no PR — that's a PR-creation failure
+    # (spec §2.2: pr_failed status). Demote so the loop applies the right label
+    # set instead of treating the missing PR as a successful resolve.
+    if status == "resolved" and not pr_url:
+        status = "pr_failed"
     return PreflightResult(
         status=status,
-        pr_url=parsed["pr_url"],
+        pr_url=pr_url,
         diagnosis=parsed["diagnosis"] or "",
         cost_usd=spawn.cost_usd,
         wall_clock_s=wall_s,

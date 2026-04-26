@@ -96,7 +96,7 @@ async def test_subprocess_fatal(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_resolved_without_pr_url_still_resolves(tmp_path: Path) -> None:
+async def test_resolved_without_pr_url_demotes_to_pr_failed(tmp_path: Path) -> None:
     loop, _state, pr, _audit = _make_loop(tmp_path)
     pr.list_issues_by_label = AsyncMock(
         return_value=[
@@ -112,7 +112,11 @@ async def test_resolved_without_pr_url_still_resolves(tmp_path: Path) -> None:
     )
     _stub_spawn(loop, "<status>resolved</status><diagnosis>fixed</diagnosis>")
     result = await loop._do_work()
-    assert result["result_status"] == "resolved"
+    # Spec §2.2: agent claimed `resolved` but produced no PR — the loop demotes
+    # this to `pr_failed` so a human picks up the cleanup. The diagnosis is
+    # still preserved in the audit + comment.
+    assert result["result_status"] == "pr_failed"
+    pr.add_labels.assert_awaited_with(1, ["human-required", "auto-agent-pr-failed"])
 
 
 @pytest.mark.asyncio
