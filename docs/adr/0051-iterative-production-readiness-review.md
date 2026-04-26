@@ -5,7 +5,7 @@
 - **Supersedes:** none
 - **Superseded by:** none
 - **Related:** [ADR-0044](0044-hydraflow-principles.md) (TDD as default workflow), [ADR-0049](0049-trust-loop-kill-switch-convention.md) (kill-switch convention), [ADR-0050](0050-auto-agent-hitl-preflight.md) (auto-agent HITL pre-flight). See also `docs/wiki/dark-factory.md` (lessons inventory).
-- **Enforced by:** `superpowers:subagent-driven-development` workflow (per-task reviews), this ADR (process documentation), `superpowers:code-reviewer` skill (the fresh-eyes reviewer).
+- **Enforced by:** `superpowers:subagent-driven-development` workflow (per-task reviews), this ADR (process documentation), `superpowers:requesting-code-review` (which dispatches the `code-reviewer` agent) skill (the fresh-eyes reviewer).
 
 ## Context
 
@@ -17,7 +17,7 @@ We need to codify the "iterate fresh-eyes review until convergence" pattern as t
 
 For substantial features (new caretaker loop, new runner, spec → multi-task implementation), after the implementation passes its per-task reviews, run **fresh-eyes review iterations** until convergence.
 
-- Each iteration uses `superpowers:code-reviewer` (or equivalent reviewer with no conversation context) on the cumulative diff against `main`.
+- Each iteration uses `superpowers:requesting-code-review` (which dispatches the `code-reviewer` agent) (or equivalent reviewer with no conversation context) on the cumulative diff against `main`.
 - The reviewer reads the spec + the diff + the live codebase and reports Critical / Important / Minor findings.
 - After fixes, the next iteration repeats.
 - **Convergence = next pass finds nothing material** (Critical = 0, Important ≤ 1, all explained as deliberate).
@@ -65,5 +65,5 @@ Plan for **3 iterations** before merge. Empirical convergence point on recent fe
 
 - `docs/wiki/dark-factory.md` §3 — the convergence loop documentation.
 - `docs/adr/0050-auto-agent-hitl-preflight.md` — the recent feature whose review iterations validated this ADR.
-- `superpowers:code-reviewer` (Claude Code skill) — the reviewer this ADR refers to.
+- `superpowers:requesting-code-review` (which dispatches the `code-reviewer` agent) (Claude Code skill) — the reviewer this ADR refers to.
 - `superpowers:subagent-driven-development` (Claude Code skill) — the per-task review workflow during implementation.
