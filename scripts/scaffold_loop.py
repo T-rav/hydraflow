@@ -99,9 +99,204 @@ def _render_templates(names: dict[str, str], description: str) -> dict[Path, str
 def _compute_patches(names: dict[str, str], description: str) -> list[tuple[Path, str]]:
     """Compute (target_path, new_content) for each five-checkpoint file.
 
-    STUB — full implementation lands in T3.3.
+    Each patch is a string substitution against a stable marker.
+    Markers identified by reading existing wired loops (auto_agent_preflight
+    and diagram_loop are the latest reference loops with all 9 sites wired).
     """
-    return []
+    snake = names["snake"]
+    pascal = names["pascal"]
+    upper = names["upper"]
+    name_title = names["name_title"]
+    patches: list[tuple[Path, str]] = []
+
+    # 1. src/models.py — append two StateData fields before the trust-fleet block.
+    models_path = REPO_ROOT / "src/models.py"
+    models_text = models_path.read_text()
+    new_fields = (
+        f"    # {pascal}Loop state\n"
+        f"    {snake}_attempts: dict[str, int] = Field(default_factory=dict)\n"
+    )
+    marker = "    flake_attempts: dict[str, int]"
+    if marker in models_text:
+        new_models = models_text.replace(marker, new_fields + marker)
+        patches.append((models_path, new_models))
+
+    # 2. src/state/__init__.py — import + MRO append.
+    state_init_path = REPO_ROOT / "src/state/__init__.py"
+    state_text = state_init_path.read_text()
+    import_line = f"from ._{snake} import {pascal}StateMixin\n"
+    if "from ._auto_agent import AutoAgentStateMixin\n" in state_text:
+        state_text = state_text.replace(
+            "from ._auto_agent import AutoAgentStateMixin\n",
+            f"from ._auto_agent import AutoAgentStateMixin\n{import_line}",
+        )
+    if "    AutoAgentStateMixin," in state_text:
+        state_text = state_text.replace(
+            "    AutoAgentStateMixin,",
+            f"    AutoAgentStateMixin,\n    {pascal}StateMixin,",
+        )
+    patches.append((state_init_path, state_text))
+
+    # 3. src/config.py — env override + HydraFlowConfig fields.
+    config_path = REPO_ROOT / "src/config.py"
+    config_text = config_path.read_text()
+    env_row = f'    ("{snake}_interval", "HYDRAFLOW_{upper}_INTERVAL", 3600),\n'
+    if '    ("auto_agent_preflight_interval",' in config_text:
+        config_text = config_text.replace(
+            '    ("auto_agent_preflight_interval",',
+            env_row + '    ("auto_agent_preflight_interval",',
+        )
+    fields_block = f"""    {snake}_enabled: bool = Field(
+        default=True,
+        description="UI kill-switch for {pascal}Loop (ADR-0049).",
+    )
+    {snake}_interval: int = Field(
+        default=3600,
+        ge=60,
+        le=86400,
+        description="Seconds between {pascal}Loop cycles (default 1h).",
+    )
+"""
+    if "    auto_agent_preflight_enabled: bool = Field(" in config_text:
+        config_text = config_text.replace(
+            "    auto_agent_preflight_enabled: bool = Field(",
+            fields_block + "    auto_agent_preflight_enabled: bool = Field(",
+        )
+    patches.append((config_path, config_text))
+
+    # 4. src/service_registry.py — import + dataclass field + construction + kwarg.
+    sr_path = REPO_ROOT / "src/service_registry.py"
+    sr_text = sr_path.read_text()
+    if "from auto_agent_preflight_loop import AutoAgentPreflightLoop\n" in sr_text:
+        sr_text = sr_text.replace(
+            "from auto_agent_preflight_loop import AutoAgentPreflightLoop\n",
+            f"from auto_agent_preflight_loop import AutoAgentPreflightLoop\n"
+            f"from {snake}_loop import {pascal}Loop\n",
+        )
+    if "    auto_agent_preflight_loop: AutoAgentPreflightLoop\n" in sr_text:
+        sr_text = sr_text.replace(
+            "    auto_agent_preflight_loop: AutoAgentPreflightLoop\n",
+            f"    auto_agent_preflight_loop: AutoAgentPreflightLoop\n"
+            f"    {snake}_loop: {pascal}Loop\n",
+        )
+    construction = (
+        f"    {snake}_loop = {pascal}Loop(  # noqa: F841\n"
+        f"        config=config,\n"
+        f"        state=state,\n"
+        f"        deps=loop_deps,\n"
+        f"    )\n\n"
+    )
+    if "    auto_agent_audit_store = PreflightAuditStore" in sr_text:
+        sr_text = sr_text.replace(
+            "    auto_agent_audit_store = PreflightAuditStore",
+            construction + "    auto_agent_audit_store = PreflightAuditStore",
+        )
+    if "        auto_agent_preflight_loop=auto_agent_preflight_loop,\n" in sr_text:
+        sr_text = sr_text.replace(
+            "        auto_agent_preflight_loop=auto_agent_preflight_loop,\n",
+            f"        auto_agent_preflight_loop=auto_agent_preflight_loop,\n"
+            f"        {snake}_loop={snake}_loop,\n",
+        )
+    patches.append((sr_path, sr_text))
+
+    # 5. src/orchestrator.py — bg_loop_registry + loop_factories.
+    orch_path = REPO_ROOT / "src/orchestrator.py"
+    orch_text = orch_path.read_text()
+    if (
+        '            "auto_agent_preflight": svc.auto_agent_preflight_loop,'
+        in orch_text
+    ):
+        orch_text = orch_text.replace(
+            '            "auto_agent_preflight": svc.auto_agent_preflight_loop,',
+            f'            "auto_agent_preflight": svc.auto_agent_preflight_loop,\n'
+            f'            "{snake}": svc.{snake}_loop,',
+        )
+    if (
+        '            ("auto_agent_preflight", self._svc.auto_agent_preflight_loop.run),'
+        in orch_text
+    ):
+        orch_text = orch_text.replace(
+            '            ("auto_agent_preflight", self._svc.auto_agent_preflight_loop.run),',
+            f'            ("auto_agent_preflight", self._svc.auto_agent_preflight_loop.run),\n'
+            f'            ("{snake}", self._svc.{snake}_loop.run),',
+        )
+    patches.append((orch_path, orch_text))
+
+    # 6. src/ui/src/constants.js — three sites.
+    # NOTE: diagram_loop is the last entry in all three constants.js sites.
+    consts_path = REPO_ROOT / "src/ui/src/constants.js"
+    consts_text = consts_path.read_text()
+    # 6a. EDITABLE_INTERVAL_WORKERS Set — append before closing bracket.
+    if "'diagram_loop'])" in consts_text:
+        consts_text = consts_text.replace(
+            "'diagram_loop'])",
+            f"'diagram_loop', '{snake}'])",
+        )
+    # 6b. SYSTEM_WORKER_INTERVALS map — diagram_loop is the last entry.
+    if "  diagram_loop: 14400,\n}" in consts_text:
+        consts_text = consts_text.replace(
+            "  diagram_loop: 14400,\n}",
+            f"  diagram_loop: 14400,\n  {snake}: 3600,\n}}",
+        )
+    # 6c. BACKGROUND_WORKERS metadata array — append after diagram_loop entry.
+    if "  { key: 'diagram_loop'," in consts_text:
+        new_bw_entry = (
+            f"  {{ key: '{snake}', label: '{name_title}', description: "
+            f"'{description}', color: theme.purple, group: 'autonomy', "
+            f"tags: ['scaffold'] }},\n"
+        )
+        consts_text = consts_text.replace(
+            "  { key: 'diagram_loop',",
+            new_bw_entry + "  { key: 'diagram_loop',",
+        )
+    patches.append((consts_path, consts_text))
+
+    # 7. src/dashboard_routes/_common.py — _INTERVAL_BOUNDS.
+    common_path = REPO_ROOT / "src/dashboard_routes/_common.py"
+    common_text = common_path.read_text()
+    if '"auto_agent_preflight": (60, 600),' in common_text:
+        common_text = common_text.replace(
+            '"auto_agent_preflight": (60, 600),',
+            f'"auto_agent_preflight": (60, 600),\n    "{snake}": (60, 86400),',
+        )
+    patches.append((common_path, common_text))
+
+    # 8. tests/scenarios/catalog/loop_registrations.py — _build_NAME + _BUILDERS.
+    cat_path = REPO_ROOT / "tests/scenarios/catalog/loop_registrations.py"
+    cat_text = cat_path.read_text()
+    builder = (
+        f"def _build_{snake}(ports: dict[str, Any], config: Any, deps: Any) -> Any:\n"
+        f'    """Build {pascal}Loop for scenarios."""\n'
+        f"    from {snake}_loop import {pascal}Loop  # noqa: PLC0415\n"
+        f'    state = ports.get("{snake}_state") or MagicMock()\n'
+        f'    ports.setdefault("{snake}_state", state)\n'
+        f"    return {pascal}Loop(config=config, state=state, deps=deps)\n"
+        f"\n\n"
+    )
+    if "def _build_auto_agent_preflight(" in cat_text:
+        cat_text = cat_text.replace(
+            "def _build_auto_agent_preflight(",
+            builder + "def _build_auto_agent_preflight(",
+        )
+    if '    "auto_agent_preflight": _build_auto_agent_preflight,' in cat_text:
+        cat_text = cat_text.replace(
+            '    "auto_agent_preflight": _build_auto_agent_preflight,',
+            f'    "auto_agent_preflight": _build_auto_agent_preflight,\n'
+            f'    "{snake}": _build_{snake},',
+        )
+    patches.append((cat_path, cat_text))
+
+    # 9. docs/arch/functional_areas.yml — append to the autonomy area's loops list.
+    fa_path = REPO_ROOT / "docs/arch/functional_areas.yml"
+    fa_text = fa_path.read_text()
+    if "      - AutoAgentPreflightLoop\n" in fa_text:
+        fa_text = fa_text.replace(
+            "      - AutoAgentPreflightLoop\n",
+            f"      - AutoAgentPreflightLoop\n      - {pascal}Loop\n",
+        )
+    patches.append((fa_path, fa_text))
+
+    return patches
 
 
 def _print_planned_edits(
