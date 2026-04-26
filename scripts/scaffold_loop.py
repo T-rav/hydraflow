@@ -16,12 +16,16 @@ will be PascalCase ("BlargMonitorLoop").
 Default behavior: dry-run. Prints unified summary of all planned edits and
 asks `Apply? [y/N]`. Use `--apply` to skip the prompt (for CI).
 
-The script (when fully implemented across T3.2 + T3.3 + T3.4):
+The script:
 1. Refuses to run on a dirty working tree.
 2. Renders three new files from scripts/scaffold_templates/.
-3. Patches the five-checkpoint files (models.py, state/__init__.py,
-   config.py, service_registry.py, orchestrator.py, ui constants,
-   _common.py, scenario catalog, functional_areas.yml).
+3. Patches the ten wiring sites (models.py, state/__init__.py, config.py,
+   service_registry.py, orchestrator.py, ui constants, _common.py,
+   scenario catalog, functional_areas.yml, tests/helpers.py). The spec's
+   "five-checkpoint" terminology refers to the original wiring categories;
+   tests/helpers.py was added during implementation as the 10th site after
+   the canary smoke test surfaced that ConfigFactory + make_bg_loop_deps
+   need the new {snake}_interval kwarg for generated tests to pass.
 4. File-level tempdir transaction: writes everything to a tmpdir,
    validates the result imports, bulk-copies to working tree on success.
 5. Runs `make arch-regen` after apply.
@@ -351,9 +355,9 @@ def _print_planned_edits(
     for path, content in rendered.items():
         rel = path.relative_to(REPO_ROOT)
         print(f"  CREATE {rel} ({len(content)} chars)")
-    print("\n=== Five-checkpoint patches ===")
+    print(f"\n=== Wiring patches ({len(patches)} sites) ===")
     if not patches:
-        print("  (T3.3 patcher not yet implemented)")
+        print("  (no patches)")
     for path, _ in patches:
         rel = path.relative_to(REPO_ROOT)
         print(f"  PATCH  {rel}")
@@ -427,8 +431,14 @@ def _apply_atomic(rendered: dict[Path, str], patches: list[tuple[Path, str]]) ->
             )
             sys.exit(3)
 
-        # Bulk-copy back. New files + patches.
-        for target in {**rendered, **dict(patches)}:
+        # Bulk-copy back. New files + patches. Iterate the patches LIST
+        # (not dict) so a future patcher that hits the same target file
+        # twice doesn't silently lose the first edit via dict-key collision.
+        for target in rendered:
+            tmp_source = tmp_repo / target.relative_to(REPO_ROOT)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(tmp_source, target)
+        for target, _ in patches:
             tmp_source = tmp_repo / target.relative_to(REPO_ROOT)
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(tmp_source, target)
