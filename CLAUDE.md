@@ -11,7 +11,7 @@ This file is a table of contents. Operational knowledge lives in the wiki at [`d
 - **Always run `make quality`** before declaring work complete. Look up "Quality" in [`docs/wiki/patterns.md`](docs/wiki/patterns.md).
 - **Always write unit tests before committing.** See [`docs/wiki/testing.md`](docs/wiki/testing.md).
 - **Always read [`docs/wiki/gotchas.md`](docs/wiki/gotchas.md)** before editing Pydantic models, test imports, or mocks — recurring mistakes live there.
-- **Look at the [System Map](https://t-rav-hydra-ops.github.io/hydraflow/system-map/) before exploring code blind.** The Functional Area Map shows what every loop and Port belongs to; click through to ADRs from there.
+- **Look at the [System Map](https://t-rav.github.io/hydraflow/system-map/) before exploring code blind.** The Functional Area Map shows what every loop and Port belongs to; click through to ADRs from there.
 
 ## Knowledge Lookup
 
@@ -21,7 +21,7 @@ Before exploring the codebase from scratch, consult existing structured knowledg
 |--------|------|--------------|
 | Architecture Decision Records | [`docs/adr/README.md`](docs/adr/README.md) | 50+ ADRs indexed by status. Load-bearing examples: [0001](docs/adr/0001-five-concurrent-async-loops.md) async loops · [0002](docs/adr/0002-labels-as-state-machine.md) label state machine · [0003](docs/adr/0003-git-worktrees-for-isolation.md) worktrees · [0021](docs/adr/0021-persistence-architecture-and-data-layout.md) persistence · [0029](docs/adr/0029-caretaker-loop-pattern.md) caretaker loops · [0032](docs/adr/0032-per-repo-wiki-knowledge-base.md) repo wiki · [0045](docs/adr/0045-trust-architecture-hardening.md) trust fleet |
 | Repo wiki (Karpathy pattern) | [`docs/wiki/`](docs/wiki/index.md) | 240+ entries: architecture, patterns, gotchas, testing, dependencies. Each entry has human-readable prose + a `json:entry` machine block. The `RepoWikiLoop` keeps it fresh from live pipeline events. |
-| System topology (live) | [`docs/arch/generated/`](docs/arch/generated/) + [Pages site](https://t-rav-hydra-ops.github.io/hydraflow/) | Auto-regenerated Markdown+Mermaid: loop registry, port map, label state machine, module graph, event bus, ADR cross-reference, MockWorld map, functional area map. Refreshed every PR by `arch-regen.yml` and every 4h by `DiagramLoop` (L24, ADR-0029). Hand-curated narrative lives in ADRs and the wiki. |
+| System topology (live) | [`docs/arch/generated/`](docs/arch/generated/) + [Pages site](https://t-rav.github.io/hydraflow/) | Auto-regenerated Markdown+Mermaid: loop registry, port map, label state machine, module graph, event bus, ADR cross-reference, MockWorld map, functional area map. Refreshed every PR by `arch-regen.yml` and every 4h by `DiagramLoop` (L24, ADR-0029). Hand-curated narrative lives in ADRs and the wiki. |
 | Active design specs/plans | [`docs/superpowers/`](docs/superpowers/) | Working specs + implementation plans for in-flight features (PR-tied; not knowledge) |
 
 When you find a gap in the ADRs or wiki that would have helped you, file a `hydraflow-find` issue so the next run has better context.

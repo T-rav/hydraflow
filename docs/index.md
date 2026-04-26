@@ -31,4 +31,4 @@ Every generated page footer shows its freshness state: 🟢 fresh,
 - [Changelog](arch/generated/changelog.md) — what's moved in the last
   90 days.
 - [About this site](about.md) — how it's built, how to contribute.
-- [Source on GitHub](https://github.com/T-rav-Hydra-Ops/hydraflow)
+- [Source on GitHub](https://github.com/T-rav/hydraflow)

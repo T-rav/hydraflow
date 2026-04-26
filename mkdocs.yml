@@ -1,9 +1,9 @@
 # mkdocs.yml — Plan C Task 2
 site_name: HydraFlow Architecture
 site_description: Self-documenting architecture knowledge for HydraFlow
-site_url: https://t-rav-hydra-ops.github.io/hydraflow/
-repo_url: https://github.com/T-rav-Hydra-Ops/hydraflow
-repo_name: T-rav-Hydra-Ops/hydraflow
+site_url: https://t-rav.github.io/hydraflow/
+repo_url: https://github.com/T-rav/hydraflow
+repo_name: T-rav/hydraflow
 edit_uri: edit/main/docs/
 
 docs_dir: docs
@@ -101,4 +101,4 @@ nav:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/T-rav-Hydra-Ops/hydraflow
+      link: https://github.com/T-rav/hydraflow
