@@ -57,7 +57,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0047 | `src.contract_diff`, `src.contract_recording`, `src.contract_refresh_loop` |
 | ADR-0048 | `src.staging_bisect_loop` |
 | ADR-0049 | `src.base_background_loop`, `src.bg_worker_manager` |
-| ADR-0050 | `src.auto_agent_preflight_loop`, `src.config`, `src.dashboard_routes._diagnostics_routes`, `src.models`, `src.preflight.agent`, `src.preflight.audit`, `src.preflight.context`, `src.preflight.decision`, `src.preflight.runner`, `src.sentry.reverse_lookup`, `src.state._auto_agent` |
+| ADR-0050 | `src.auto_agent_preflight_loop`, `src.config`, `src.dashboard_routes._diagnostics_routes`, `src.models`, `src.preflight.agent`, `src.preflight.audit`, `src.preflight.auto_agent_runner`, `src.preflight.context`, `src.preflight.decision`, `src.preflight.runner`, `src.sentry.reverse_lookup`, `src.state._auto_agent` |
 
 ## Module → ADRs
 
@@ -114,6 +114,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.preflight` | ADR-0043 |
 | `src.preflight.agent` | ADR-0050 |
 | `src.preflight.audit` | ADR-0050 |
+| `src.preflight.auto_agent_runner` | ADR-0050 |
 | `src.preflight.context` | ADR-0050 |
 | `src.preflight.decision` | ADR-0050 |
 | `src.preflight.runner` | ADR-0050 |
@@ -146,4 +147,4 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.wiki_rot_detector_loop` | ADR-0045 |
 | `src.worktree` | ADR-0003, ADR-0009, ADR-0010 |
 
-_Regenerated from commit `acc497e` on 2026-04-26 17:10 UTC. Source last changed at `acc497e`. Status: 🟢 fresh._
+_Regenerated from commit `67079aa` on 2026-04-26 16:20 UTC. Source last changed at `67079aa`. Status: 🟢 fresh._

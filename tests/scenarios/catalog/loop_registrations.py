@@ -594,6 +594,7 @@ def _build_auto_agent_preflight(ports: dict[str, Any], config: Any, deps: Any) -
         wiki_store=ports.get("repo_wiki_store"),
         audit_store=audit_store,
         deps=deps,
+        workspaces=ports.get("workspaces"),
     )
 
 
