@@ -868,6 +868,7 @@ def build_services(
         wiki_store=repo_wiki_store,
         audit_store=auto_agent_audit_store,
         deps=loop_deps,
+        workspaces=workspaces,
     )
 
     return ServiceRegistry(

@@ -76,18 +76,20 @@ tile + `/api/diagnostics/auto-agent` endpoint surface the relevant data.
 - Runaway cost. Mitigations: caps wired into code paths (default off);
   audit + dashboard surface unusual spend immediately.
 
-**Partial landing — production HITLRunner spawn deferred:**
-The first PR landing this ADR ships the full pipeline (poll → context →
-agent → decision → audit), the prompt envelope + 9 sub-label playbooks,
-the dashboard + /api/diagnostics/auto-agent endpoint, and the adversarial
-corpus harness — but `_build_spawn_fn` in `src/auto_agent_preflight_loop.py`
-is a placeholder that always returns `needs_human` with $0 cost. The
-production wiring (HITLRunner subclass that actually spawns Claude Code in
-the issue's worktree) is the next PR. While the placeholder is in effect,
-every escalation will surface to `human-required` immediately — operationally
-identical to the pre-auto-agent behavior, just with one extra cycle of
-latency. The dashboard's `resolution_rate=0` and `spend_usd=$0` will signal
-the placeholder is still in place.
+**Production subprocess wiring — landed in follow-up PR:**
+The initial PR landing this ADR shipped the full pipeline scaffolding
+(poll → context → agent → decision → audit), the prompt envelope + 9
+sub-label playbooks, the dashboard + `/api/diagnostics/auto-agent`
+endpoint, and the adversarial corpus harness — but `_build_spawn_fn`
+was a placeholder. The follow-up PR replaced that placeholder with
+`AutoAgentRunner` (`src/preflight/auto_agent_runner.py`), which spawns
+the real Claude Code subprocess via `stream_claude_process`,
+captures cost via `prompt_telemetry`, applies the spec §5.2 tool
+restrictions (`--disallowedTools=WebFetch` at the CLI; path-level
+restrictions enforced post-hoc by the principles audit), and resolves
+to per-issue worktrees via the injected `WorkspacePort`. The dashboard
+will now show real spend and resolution rate as escalations flow
+through the loop.
 
 ## Alternatives Considered
 
@@ -114,11 +116,12 @@ The following files carry this ADR's decisions and must be kept in sync with any
 - `src/preflight/decision.py` — `PreflightResult` + `apply_decision()` pure label state machine for all 6 statuses.
 - `src/preflight/agent.py` — `PreflightAgent` + `run_preflight` + cost/wall-clock cap watchers.
 - `src/preflight/runner.py` — prompt rendering helpers + `parse_agent_response`.
+- `src/preflight/auto_agent_runner.py` — `AutoAgentRunner` real Claude Code subprocess spawn (production `_build_spawn_fn`) + per-attempt telemetry to `inferences.jsonl` + cost estimate via `model_pricing`.
 - `src/sentry/reverse_lookup.py` — `query_sentry_by_title()` (never-raises).
 - `src/auto_agent_preflight_loop.py` — `AutoAgentPreflightLoop._do_work` pipeline + reconcile-on-close.
 - `prompts/auto_agent/` — shared envelope (`_envelope.md`) + `_default.md` + 9 sub-label prompt files.
 - `src/dashboard_routes/_diagnostics_routes.py` — `/api/diagnostics/auto-agent` endpoint.
 - `src/ui/src/components/diagnostics/AutoAgentStats.jsx` — System tab tile.
-- `tests/test_auto_agent_preflight_loop.py` + `tests/test_auto_agent_close_reconciliation.py` + `tests/test_auto_agent_loop_wiring.py` — unit + wiring tests.
+- `tests/test_auto_agent_preflight_loop.py` + `tests/test_auto_agent_close_reconciliation.py` + `tests/test_auto_agent_loop_wiring.py` + `tests/test_preflight_auto_agent_runner.py` — unit + wiring + runner tests.
 - `tests/scenarios/test_auto_agent_preflight.py` — full-loop scenario tests.
 - `tests/auto_agent/adversarial/test_corpus.py` + `tests/auto_agent/adversarial/corpus/` — 9-entry adversarial corpus + harness (run via `make auto-agent-adversarial`).

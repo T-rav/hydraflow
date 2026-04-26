@@ -150,3 +150,94 @@ async def test_attempt_cap_marks_exhausted(tmp_path: Path) -> None:
         1, ["human-required", "auto-agent-exhausted"]
     )
     assert result["result_status"] == "skipped_exhausted"
+
+
+@pytest.mark.asyncio
+async def test_resolve_worktree_no_workspaces_falls_back_to_repo_root(
+    tmp_path: Path,
+) -> None:
+    """Without an injected WorkspacePort, _resolve_worktree returns repo_root."""
+    loop, _ = _make_loop(tmp_path)
+    assert loop._workspaces is None
+    out = await loop._resolve_worktree(42)
+    assert out == str(loop._config.repo_root)
+
+
+@pytest.mark.asyncio
+async def test_resolve_worktree_uses_existing_path(tmp_path: Path) -> None:
+    """If the conventional worktree path already exists, return it without
+    calling workspaces.create (mirrors diagnostic_loop pattern)."""
+    deps = make_bg_loop_deps(tmp_path)
+    workspaces = AsyncMock()
+    # Pre-create the conventional path so .exists() returns True.
+    wt_path = deps.config.workspace_path_for_issue(42)
+    wt_path.mkdir(parents=True, exist_ok=True)
+
+    state = MagicMock()
+    state.get_auto_agent_daily_spend = MagicMock(return_value=0.0)
+    audit = MagicMock()
+    loop = AutoAgentPreflightLoop(
+        config=deps.config,
+        state=state,
+        pr_manager=AsyncMock(),
+        wiki_store=None,
+        audit_store=audit,
+        deps=deps.loop_deps,
+        workspaces=workspaces,
+    )
+    out = await loop._resolve_worktree(42)
+    assert out == str(wt_path)
+    workspaces.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolve_worktree_creates_when_missing(tmp_path: Path) -> None:
+    """When the worktree path is absent and a WorkspacePort is wired, the
+    loop calls workspaces.create with the auto-agent branch convention."""
+    deps = make_bg_loop_deps(tmp_path)
+    workspaces = AsyncMock()
+    created_path = tmp_path / "new-worktree"
+    created_path.mkdir()
+    workspaces.create = AsyncMock(return_value=created_path)
+
+    state = MagicMock()
+    state.get_auto_agent_daily_spend = MagicMock(return_value=0.0)
+    audit = MagicMock()
+    loop = AutoAgentPreflightLoop(
+        config=deps.config,
+        state=state,
+        pr_manager=AsyncMock(),
+        wiki_store=None,
+        audit_store=audit,
+        deps=deps.loop_deps,
+        workspaces=workspaces,
+    )
+    out = await loop._resolve_worktree(99)
+    assert out == str(created_path)
+    workspaces.create.assert_awaited_with(99, "agent/auto-agent-99")
+
+
+@pytest.mark.asyncio
+async def test_resolve_worktree_falls_back_on_create_failure(
+    tmp_path: Path,
+) -> None:
+    """workspaces.create() failure (e.g., concurrent worktree, branch
+    collision) gracefully degrades to repo_root rather than crashing the loop."""
+    deps = make_bg_loop_deps(tmp_path)
+    workspaces = AsyncMock()
+    workspaces.create = AsyncMock(side_effect=RuntimeError("worktree busy"))
+
+    state = MagicMock()
+    state.get_auto_agent_daily_spend = MagicMock(return_value=0.0)
+    audit = MagicMock()
+    loop = AutoAgentPreflightLoop(
+        config=deps.config,
+        state=state,
+        pr_manager=AsyncMock(),
+        wiki_store=None,
+        audit_store=audit,
+        deps=deps.loop_deps,
+        workspaces=workspaces,
+    )
+    out = await loop._resolve_worktree(99)
+    assert out == str(deps.config.repo_root)

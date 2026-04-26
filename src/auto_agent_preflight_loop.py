@@ -31,6 +31,7 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         wiki_store: Any | None,
         audit_store: Any,
         deps: LoopDeps,
+        workspaces: Any | None = None,
     ) -> None:
         super().__init__(
             worker_name="auto_agent_preflight",
@@ -42,6 +43,7 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         self._prs = pr_manager
         self._wiki_store = wiki_store
         self._audit_store = audit_store
+        self._workspaces = workspaces
 
     def _get_default_interval(self) -> int:
         return self._config.auto_agent_preflight_interval
@@ -215,51 +217,56 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         return {"status": result.status, "issue": issue_number}
 
     def _build_spawn_fn(self, issue_number: int):
-        """Returns the actual subprocess-spawning callable. Replaced in tests.
+        """Returns the spawn callable that runs the auto-agent subprocess.
 
-        **PARTIAL LANDING — placeholder, not the production HITLRunner spawn.**
-
-        In production this should subclass HITLRunner (per ADR-0050) and spawn
-        a Claude Code subprocess with the auto-agent prompt envelope + tool
-        restrictions. Wiring that subprocess is deferred to a follow-up PR
-        (tracked under ADR-0050 §Consequences). Until then, every pre-flight
-        attempt returns `needs_human` with $0 cost — which is observable on the
-        dashboard (resolution_rate stays at 0 and spend_usd stays at $0) so
-        operators can see the placeholder is in effect.
-
-        Tests monkeypatch this to inject a cassette `PreflightSpawn` so the
-        full pipeline can be exercised end-to-end without a real subprocess.
+        Each call constructs a fresh `AutoAgentRunner` (lifetime bounded by
+        the single attempt) so the runner's internal subprocess set doesn't
+        leak across attempts. Tests monkeypatch this method to inject a
+        cassette `PreflightSpawn` and skip the real subprocess.
         """
         from preflight.agent import PreflightSpawn
+        from preflight.auto_agent_runner import AutoAgentRunner
 
-        async def _placeholder(prompt: str, worktree_path: str) -> PreflightSpawn:
-            # See class docstring above — when dashboard shows zero spend +
-            # zero resolved, the production wiring is still pending.
-            return PreflightSpawn(
-                process=None,
-                output_text=(
-                    "<status>needs_human</status>"
-                    "<diagnosis>auto-agent spawn_fn is a placeholder; "
-                    "production HITLRunner integration pending (ADR-0050 §Consequences)."
-                    "</diagnosis>"
-                ),
-                cost_usd=0.0,
-                tokens=0,
-                crashed=False,
+        runner = AutoAgentRunner(config=self._config, event_bus=self._bus)
+
+        async def _spawn(prompt: str, worktree_path: str) -> PreflightSpawn:
+            return await runner.run(
+                prompt=prompt,
+                worktree_path=worktree_path,
+                issue_number=issue_number,
             )
 
-        return _placeholder
+        return _spawn
 
     async def _resolve_worktree(self, issue_number: int) -> str:
-        """Return worktree path for the issue.
+        """Return the path to the per-issue worktree.
 
-        Currently returns the main repo root as a placeholder. Once
-        `_build_spawn_fn` is upgraded to the real HITLRunner integration
-        (see ADR-0050 §Partial landing), this should resolve to the
-        per-issue worktree managed by `WorkspacePort` so the agent operates
-        on the issue's own branch instead of main.
+        Mirrors the diagnostic-loop pattern: use the conventional
+        `workspace_path_for_issue` and create on demand if a `WorkspacePort`
+        was injected and the path doesn't exist. Falls back to `repo_root`
+        when no port is wired (test fixtures, dry-run mode).
         """
-        return str(self._config.repo_root)
+        if self._workspaces is None:
+            return str(self._config.repo_root)
+        wt_path = self._config.workspace_path_for_issue(issue_number)
+        if wt_path.exists():
+            return str(wt_path)
+        branch = f"agent/auto-agent-{issue_number}"
+        try:
+            created = await self._workspaces.create(issue_number, branch)
+            return str(created)
+        except Exception as exc:
+            # Workspace creation can fail (concurrent worktree, branch
+            # collision, disk pressure). Degrade to repo_root so the
+            # agent still gets a valid cwd; the agent itself can handle
+            # the lack of a per-issue branch by reporting needs_human.
+            logger.warning(
+                "auto-agent worktree creation failed for #%d: %s — "
+                "falling back to repo_root",
+                issue_number,
+                exc,
+            )
+            return str(self._config.repo_root)
 
 
 def _skip_audit(issue: int, sub_label: str, reason: str):
