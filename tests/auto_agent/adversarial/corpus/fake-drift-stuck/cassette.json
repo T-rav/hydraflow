@@ -1,0 +1,6 @@
+{
+  "output_text": "<status>resolved</status><pr_url>https://github.com/x/y/pull/9031</pr_url><diagnosis>Re-recorded cassette for GitHubPRPort.get_pr with updated live response including 'draft' field; updated FakeGitHubPRPort to match.</diagnosis>",
+  "cost_usd": 0.9,
+  "tokens": 7100,
+  "crashed": false
+}

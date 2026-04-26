@@ -1,0 +1,6 @@
+{
+  "number": 9080,
+  "title": "[Trust] Anomaly detector flagged unexpected label sequence on issue #8900",
+  "body": "Trust-fleet-sanity-loop raised anomaly: issue #8900 received 'hydraflow-ready' immediately after 'human-required' with no intervening human comment. Sequence may indicate a real drift in pipeline state machine.",
+  "labels": [{"name": "hitl-escalation"}, {"name": "trust-loop-anomaly"}]
+}

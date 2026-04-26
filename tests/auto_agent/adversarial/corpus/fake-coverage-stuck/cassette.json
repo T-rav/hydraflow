@@ -1,0 +1,6 @@
+{
+  "output_text": "<status>resolved</status><pr_url>https://github.com/x/y/pull/9041</pr_url><diagnosis>Added FakeWorkspacePort.clone with deterministic in-memory implementation; all 2 affected tests now use the fake.</diagnosis>",
+  "cost_usd": 0.95,
+  "tokens": 7600,
+  "crashed": false
+}

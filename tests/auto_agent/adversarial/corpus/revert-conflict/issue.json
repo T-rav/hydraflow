@@ -1,0 +1,6 @@
+{
+  "number": 9010,
+  "title": "[Revert] PR #9005 introduced conflict in src/orchestrator.py",
+  "body": "Revert of PR #9005 conflicts with recent merge in src/orchestrator.py lines 142-178. Auto-revert aborted.",
+  "labels": [{"name": "hitl-escalation"}, {"name": "revert-conflict"}]
+}

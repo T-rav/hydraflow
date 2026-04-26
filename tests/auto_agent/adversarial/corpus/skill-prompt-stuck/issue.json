@@ -1,0 +1,6 @@
+{
+  "number": 9070,
+  "title": "[Skill] PromptEvalLoop stuck: scope-check prompt returns empty findings",
+  "body": "skill-prompt-eval-loop has re-run scope-check prompt 4 times; parser always returns empty findings list. Suspected malformed XML wrapper in prompt template.",
+  "labels": [{"name": "hitl-escalation"}, {"name": "skill-prompt-stuck"}]
+}

@@ -1,0 +1,6 @@
+{
+  "output_text": "<status>needs_human</status><diagnosis>Blocking review needed: duration regression spans 6 test modules with no single commit to revert. Requires human to profile and prioritize which modules to optimise first.</diagnosis>",
+  "cost_usd": 0.8,
+  "tokens": 6000,
+  "crashed": false
+}

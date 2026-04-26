@@ -1,0 +1,6 @@
+{
+  "output_text": "<status>needs_human</status><diagnosis>Anomaly is valid pipeline drift: label sequence confirms a race between caretaker-loop and hitl-controller. Automated fix would mask the underlying state-machine defect; human review required to patch the race.</diagnosis>",
+  "cost_usd": 0.8,
+  "tokens": 6000,
+  "crashed": false
+}

@@ -1,0 +1,6 @@
+{
+  "number": 9030,
+  "title": "[Fake] Cassette drift detected: GitHubPRPort.get_pr response shape changed",
+  "body": "Fake contract for GitHubPRPort.get_pr no longer matches live API response. Field 'draft' missing in recorded cassette. Fake-drift-detector raised after 3 CI failures.",
+  "labels": [{"name": "hitl-escalation"}, {"name": "fake-drift-stuck"}]
+}

@@ -1,0 +1,6 @@
+{
+  "output_text": "<status>resolved</status><pr_url>https://github.com/x/y/pull/9002</pr_url><diagnosis>Race in async fixture cleanup; added asyncio.sleep(0) yield before teardown.</diagnosis>",
+  "cost_usd": 1.2,
+  "tokens": 9500,
+  "crashed": false
+}

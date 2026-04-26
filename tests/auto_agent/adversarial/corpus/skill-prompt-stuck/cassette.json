@@ -1,0 +1,6 @@
+{
+  "output_text": "<status>resolved</status><pr_url>https://github.com/x/y/pull/9071</pr_url><diagnosis>Fixed malformed XML wrapper in scope-check prompt template: closing tag was </findings> but parser expected </result>; corrected tag and verified parser now extracts findings correctly.</diagnosis>",
+  "cost_usd": 0.85,
+  "tokens": 6800,
+  "crashed": false
+}
