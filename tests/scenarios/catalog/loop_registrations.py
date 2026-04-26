@@ -916,7 +916,7 @@ _BUILDERS: dict[str, Any] = {
     "principles_audit": _build_principles_audit,
     # architecture knowledge system (Plan C — DiagramLoop L24)
     "diagram_loop": _build_diagram_loop,
-    # pricing refresh (spec §1–§11; ADR-0051)
+    # pricing refresh (PR #8449; ADR-0029 caretaker pattern)
     "pricing_refresh": _build_pricing_refresh_loop,
     # auto-agent (spec §1–§11; ADR-0050)
     "auto_agent_preflight": _build_auto_agent_preflight,
