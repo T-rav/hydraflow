@@ -423,7 +423,7 @@ def build_per_loop_cost(
                     per_loop_llm_calls[name] += 1
                     model_key = str(rec.get("model") or "").strip() or "unknown"
                     bucket = per_loop_model[name][model_key]
-                    bucket["cost_usd"] += float(rec.get("cost_usd", 0.0) or 0.0)
+                    bucket["cost_usd"] += float(rec["cost_usd"])
                     bucket["calls"] += 1
                     bucket["input_tokens"] += int(rec.get("input_tokens", 0) or 0)
                     bucket["output_tokens"] += int(rec.get("output_tokens", 0) or 0)
