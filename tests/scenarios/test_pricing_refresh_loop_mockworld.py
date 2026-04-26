@@ -72,7 +72,7 @@ class TestPricingRefreshLoop:
             find_existing_issue=AsyncMock(return_value=0),
             create_issue=AsyncMock(return_value=0),
         )
-        _seed_ports(world, github=github)
+        _seed_ports(world, github=github, repo_root=tmp_path)
 
         upstream_payload = {
             "claude-haiku-4-5-20251001": {
@@ -113,7 +113,7 @@ class TestPricingRefreshLoop:
             find_existing_issue=AsyncMock(return_value=0),
             create_issue=AsyncMock(return_value=0),
         )
-        _seed_ports(world, github=github)
+        _seed_ports(world, github=github, repo_root=tmp_path)
 
         # Bump haiku's input cost: 1.0/M → 1.5/M (within bounds).
         upstream_payload = {

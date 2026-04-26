@@ -866,11 +866,15 @@ def _build_diagram_loop(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 def _build_pricing_refresh_loop(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from pricing_refresh_loop import PricingRefreshLoop  # noqa: PLC0415
 
-    return PricingRefreshLoop(
+    loop = PricingRefreshLoop(
         config=config,
         pr_manager=ports["github"],
         deps=deps,
     )
+    repo_root = ports.get("repo_root")
+    if repo_root is not None:
+        loop._set_repo_root(repo_root)
+    return loop
 
 
 _BUILDERS: dict[str, Any] = {
