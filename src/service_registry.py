@@ -27,6 +27,7 @@ from crate_manager import CrateManager
 from dependabot_merge_loop import DependabotMergeLoop
 from diagnostic_loop import DiagnosticLoop  # noqa: TCH001
 from diagnostic_runner import DiagnosticRunner
+from diagram_loop import DiagramLoop  # noqa: TCH001
 from discover_phase import DiscoverPhase  # noqa: TCH001
 from discover_runner import DiscoverRunner
 from docker_runner import get_docker_runner
@@ -182,6 +183,7 @@ class ServiceRegistry:
     contract_refresh_loop: ContractRefreshLoop
     corpus_learning_loop: CorpusLearningLoop
     auto_agent_preflight_loop: AutoAgentPreflightLoop
+    diagram_loop: DiagramLoop
 
     # Optional integrations
 
@@ -736,6 +738,11 @@ def build_services(
         credentials=credentials,
         tribal_store=tribal_wiki_store,
     )
+    diagram_loop = DiagramLoop(
+        config=config,
+        pr_manager=prs,
+        deps=loop_deps,
+    )
     diagnostic_runner = DiagnosticRunner(config=config, event_bus=event_bus)
     diagnostic_loop = DiagnosticLoop(
         config=config,
@@ -927,4 +934,5 @@ def build_services(
         contract_refresh_loop=contract_refresh_loop,
         corpus_learning_loop=corpus_learning_loop,
         auto_agent_preflight_loop=auto_agent_preflight_loop,
+        diagram_loop=diagram_loop,
     )

@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W17
 
+- `5837a29` — feat(arch): trust fleet topology page (curated) (#8438) (#8438) *(2026-04-26)*
+- `64e9f31` — fix(arch): lift modules.md drift exemption (root cause: stale baseline) (#8437) (#8437) *(2026-04-26)*
 - `67079aa` — docs(spec): Auto-Agent HITL pre-flight loop design (#8431) (#8431) *(2026-04-25)*
 - `70392a6` — fix(arch): correct GitHub org in all site URLs (#8435) (#8435) *(2026-04-25)*
 - `f893069` — feat(arch): Plan C — DiagramLoop (L24) + CI guard + Pages site (#8434) (#8434) *(2026-04-25)*
@@ -137,4 +139,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `67079aa` on 2026-04-26 16:10 UTC. Source last changed at `67079aa`. Status: 🟢 fresh._
+_Regenerated from commit `acc497e` on 2026-04-26 17:10 UTC. Source last changed at `acc497e`. Status: 🟢 fresh._
