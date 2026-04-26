@@ -497,6 +497,7 @@ def build_scripted_services(
     services.trust_fleet_sanity_loop = FakeBackgroundLoop()
     services.corpus_learning_loop = FakeBackgroundLoop()
     services.contract_refresh_loop = FakeBackgroundLoop()
+    services.auto_agent_preflight_loop = FakeBackgroundLoop()
     services.repo_wiki_store = SimpleNamespace(
         is_ingested=MagicMock(return_value=False),
         mark_ingested=MagicMock(),
