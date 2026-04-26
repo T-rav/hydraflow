@@ -45,6 +45,9 @@ class StagingPromotionLoop(BaseBackgroundLoop):
         return self._config.staging_promotion_interval
 
     async def _do_work(self) -> dict[str, Any] | None:
+        if not self._enabled_cb(self._worker_name):
+            return {"status": "disabled"}
+
         if not self._config.staging_enabled:
             return {"status": "staging_disabled"}
 

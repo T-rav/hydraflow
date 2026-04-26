@@ -225,7 +225,10 @@ class ReportIssueLoop(BaseBackgroundLoop):
         m = cls._ISSUE_URL_RE.search(url)
         return int(m.group(1)) if m else 0
 
-    async def _do_work(self) -> dict[str, Any] | None:
+    async def _do_work(self) -> dict[str, Any] | None:  # noqa: PLR0911
+        if not self._enabled_cb(self._worker_name):
+            return {"status": "disabled"}
+
         if self._config.dry_run:
             return None
 

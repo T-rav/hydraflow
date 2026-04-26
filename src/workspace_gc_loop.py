@@ -51,6 +51,8 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
 
     async def _do_work(self) -> dict[str, Any] | None:
         """Run one GC cycle: state workspaces, orphan dirs, orphan branches."""
+        if not self._enabled_cb(self._worker_name):
+            return {"status": "disabled"}
         collected = 0
         skipped = 0
         errors = 0

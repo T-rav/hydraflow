@@ -84,6 +84,8 @@ def _stub_loop(
     loop._queue = queue or MaintenanceQueue(path=config.repo_root / ".wmq.json")
     loop._open_pr_branch = None
     loop._open_pr_url = None
+    loop._worker_name = "repo_wiki"
+    loop._enabled_cb = lambda _name: True
     return loop
 
 

@@ -34,6 +34,8 @@ class RunsGCLoop(BaseBackgroundLoop):
 
     async def _do_work(self) -> dict[str, Any] | None:
         """Run one GC cycle: purge expired runs, then enforce size cap."""
+        if not self._enabled_cb(self._worker_name):
+            return {"status": "disabled"}
         expired = self._recorder.purge_expired(self._config.artifact_retention_days)
         oversized = self._recorder.purge_oversized(self._config.artifact_max_size_mb)
         stats = self._recorder.get_storage_stats()

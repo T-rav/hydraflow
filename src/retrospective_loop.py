@@ -52,6 +52,8 @@ class RetrospectiveLoop(BaseBackgroundLoop):
         return self._config.retrospective_interval
 
     async def _do_work(self) -> dict[str, Any] | None:
+        if not self._enabled_cb(self._worker_name):
+            return {"status": "disabled"}
         items = self._queue.load()
         if not items:
             return {"processed": 0, "patterns_filed": 0, "stale_proposals": 0}

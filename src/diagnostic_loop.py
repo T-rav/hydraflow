@@ -89,6 +89,8 @@ class DiagnosticLoop(BaseBackgroundLoop):
 
     async def _do_work(self) -> dict[str, Any] | None:
         """Poll for diagnosed issues and run the diagnostic pipeline."""
+        if not self._enabled_cb(self._worker_name):
+            return {"status": "disabled"}
         try:
             issues = await self._prs.list_issues_by_label(
                 self._config.diagnose_label[0]
