@@ -45,6 +45,8 @@ ALL_LOOPS = (
     "contract_refresh",
     # trust-arch corpus learning (§4.1 v2)
     "corpus_learning",
+    # auto-agent HITL pre-flight (ADR-0050)
+    "auto_agent_preflight",
 )
 
 

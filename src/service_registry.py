@@ -12,6 +12,7 @@ from acceptance_criteria import AcceptanceCriteriaGenerator
 from adr_reviewer import ADRCouncilReviewer
 from adr_reviewer_loop import ADRReviewerLoop
 from agent import AgentRunner
+from auto_agent_preflight_loop import AutoAgentPreflightLoop
 from base_background_loop import LoopDeps
 from baseline_policy import BaselinePolicy
 from beads_manager import BeadsManager
@@ -56,6 +57,7 @@ from pr_manager import PRManager
 from pr_unsticker import PRUnsticker
 from pr_unsticker_loop import PRUnstickerLoop
 from precondition_gate import PreconditionGate
+from preflight.audit import PreflightAuditStore
 from principles_audit_loop import PrinciplesAuditLoop
 from rc_budget_loop import RCBudgetLoop
 from repo_wiki import RepoWikiStore
@@ -179,6 +181,7 @@ class ServiceRegistry:
     trust_fleet_sanity_loop: TrustFleetSanityLoop
     contract_refresh_loop: ContractRefreshLoop
     corpus_learning_loop: CorpusLearningLoop
+    auto_agent_preflight_loop: AutoAgentPreflightLoop
 
     # Optional integrations
 
@@ -850,6 +853,16 @@ def build_services(
         state=state,
     )
 
+    auto_agent_audit_store = PreflightAuditStore(config.data_root)
+    auto_agent_preflight_loop = AutoAgentPreflightLoop(  # noqa: F841
+        config=config,
+        state=state,
+        pr_manager=prs,
+        wiki_store=repo_wiki_store,
+        audit_store=auto_agent_audit_store,
+        deps=loop_deps,
+    )
+
     return ServiceRegistry(
         workspaces=workspaces,
         subprocess_runner=subprocess_runner,
@@ -913,4 +926,5 @@ def build_services(
         trust_fleet_sanity_loop=trust_fleet_sanity_loop,
         contract_refresh_loop=contract_refresh_loop,
         corpus_learning_loop=corpus_learning_loop,
+        auto_agent_preflight_loop=auto_agent_preflight_loop,
     )

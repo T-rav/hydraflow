@@ -249,7 +249,7 @@ export const WORKER_PRESETS = {
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'pr_unsticker', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_sweeper', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'code_grooming', 'sentry_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'pr_unsticker', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_sweeper', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'code_grooming', 'sentry_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'auto_agent_preflight'])
 
 /**
  * Default intervals (in seconds) for system workers.
@@ -281,6 +281,7 @@ export const SYSTEM_WORKER_INTERVALS = {
   trust_fleet_sanity: 600,
   contract_refresh: 604800,
   corpus_learning: 3600,
+  auto_agent_preflight: 120,
 }
 
 /**
@@ -330,6 +331,7 @@ export const BACKGROUND_WORKERS = [
   { key: 'trust_fleet_sanity', label: 'Trust Fleet Sanity', description: 'Meta-observability — watches the nine trust loops for issue-storms, repair-failure ratios, tick-error ratios, staleness, and cost spikes; files one-attempt escalations. See spec §12.1.', color: theme.red, system: true, group: 'operations', tags: ['monitoring'] },
   { key: 'contract_refresh', label: 'Contract Refresh', description: 'Weekly refresh of fake-adapter cassettes with autonomous repair dispatch; records live adapters, diffs against committed cassettes, opens auto-merge refresh PRs, and files fake-drift companion issues when replay fails. See spec §4.2.', color: theme.accent, group: 'learning', tags: ['quality'] },
   { key: 'corpus_learning', label: 'Corpus Learning', description: 'Grows the adversarial skill corpus from production escape signals; synthesizes + self-validates before/after cases and files PRs under tests/trust/adversarial/cases/. See spec §4.1 v2.', color: theme.purple, group: 'learning', tags: ['insights'] },
+  { key: 'auto_agent_preflight', label: 'Auto-Agent Pre-Flight', description: 'Intercepts hitl-escalation issues; runs an emulated-engineer subprocess to attempt autonomous resolution before the issue surfaces to a human (spec §1–§11; ADR-0050).', color: theme.purple, group: 'autonomy', tags: ['hitl', 'autonomy'] },
 ]
 
 /**
