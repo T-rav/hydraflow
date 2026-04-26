@@ -25,12 +25,19 @@ from pathlib import Path
 from agent_cli import build_agent_command
 from config import HydraFlowConfig
 from events import EventBus
+from exception_classify import reraise_on_credit_or_bug
 from model_pricing import load_pricing
 from preflight.agent import PreflightSpawn, hash_prompt
 from prompt_telemetry import PromptTelemetry
-from runner_utils import StreamConfig, stream_claude_process
+from runner_utils import AuthenticationRetryError, StreamConfig, stream_claude_process
 
 logger = logging.getLogger("hydraflow.preflight.auto_agent_runner")
+
+
+# Match BaseRunner's auth-retry budget so transient OAuth blips don't burn
+# the per-issue attempt cap. Three tries with exponential backoff: 5s, 10s, 20s.
+_AUTH_RETRY_MAX = 3
+_AUTH_RETRY_BASE_DELAY = 5.0  # seconds
 
 
 # Spec §5.2 — tools the auto-agent must NOT use.
@@ -85,6 +92,19 @@ class AutoAgentRunner:
         `PreflightSpawn(crashed=True, ...)` so the upstream PreflightAgent
         can map it to a `fatal` PreflightResult.
         """
+        # `--disallowedTools=WebFetch` is silently dropped by build_agent_command
+        # for codex/gemini backends (they don't take that flag). Warn so the
+        # operator knows the CLI-level guard isn't active for that backend —
+        # the path-level honor-system in the prompt envelope is the only
+        # remaining restriction layer.
+        if self._config.implementation_tool != "claude":
+            logger.warning(
+                "auto-agent: --disallowedTools is only enforced for the claude "
+                "backend; current implementation_tool=%s — WebFetch restriction "
+                "is honor-system + post-hoc CI for this run",
+                self._config.implementation_tool,
+            )
+
         cmd = build_agent_command(
             tool=self._config.implementation_tool,
             model=self._config.model,
@@ -92,42 +112,78 @@ class AutoAgentRunner:
         )
         usage_stats: dict[str, object] = {}
         prompt_hash = hash_prompt(prompt)
-        # Wall-clock cap defaults to the loop-wide config; if the operator
-        # has set `auto_agent_wall_clock_cap_s`, honour it as the subprocess
-        # timeout. None → fall back to the codebase-wide `agent_timeout`.
         timeout_s = (
             self._config.auto_agent_wall_clock_cap_s or self._config.agent_timeout
         )
         start = time.monotonic()
         crashed = False
         transcript = ""
-        try:
-            transcript = await stream_claude_process(
-                cmd=cmd,
-                prompt=prompt,
-                cwd=Path(worktree_path),
-                active_procs=self._active_procs,
-                event_bus=self._bus,
-                event_data={
-                    "issue": issue_number,
-                    "source": "auto_agent_preflight",
-                },
-                logger=logger,
-                config=StreamConfig(
-                    timeout=timeout_s,
-                    usage_stats=usage_stats,
-                ),
-            )
-        except Exception as exc:
+
+        # Auth-retry loop — mirrors BaseRunner._execute. AuthenticationRetryError
+        # is a transient OAuth blip; retry up to _AUTH_RETRY_MAX times with
+        # exponential backoff before giving up. CreditExhaustedError and
+        # AuthenticationError (terminal) propagate via reraise_on_credit_or_bug
+        # so the caretaker loop's outer handler can suspend ticking.
+        last_auth_error: AuthenticationRetryError | None = None
+        for attempt in range(1, _AUTH_RETRY_MAX + 1):
+            try:
+                transcript = await stream_claude_process(
+                    cmd=cmd,
+                    prompt=prompt,
+                    cwd=Path(worktree_path),
+                    active_procs=self._active_procs,
+                    event_bus=self._bus,
+                    event_data={
+                        "issue": issue_number,
+                        "source": "auto_agent_preflight",
+                    },
+                    logger=logger,
+                    config=StreamConfig(
+                        timeout=timeout_s,
+                        usage_stats=usage_stats,
+                    ),
+                )
+                last_auth_error = None
+                break
+            except AuthenticationRetryError as exc:
+                last_auth_error = exc
+                if attempt < _AUTH_RETRY_MAX:
+                    delay = _AUTH_RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                    logger.warning(
+                        "auto-agent auth retry %d/%d for issue #%d, sleeping %.0fs: %s",
+                        attempt,
+                        _AUTH_RETRY_MAX,
+                        issue_number,
+                        delay,
+                        exc,
+                    )
+                    await asyncio.sleep(delay)
+            except Exception as exc:
+                # Credit exhaustion / terminal auth / programming bugs propagate
+                # so the loop can suspend or surface the bug; everything else
+                # collapses to crashed=True with a partial transcript.
+                reraise_on_credit_or_bug(exc)
+                crashed = True
+                tail = transcript[-2000:] if transcript else ""
+                transcript = f"{tail}\n\nspawn error: {exc}"
+                logger.warning(
+                    "auto-agent subprocess failed for issue #%d: %s",
+                    issue_number,
+                    exc,
+                )
+                last_auth_error = None
+                break
+
+        if last_auth_error is not None:
             crashed = True
-            # Preserve any partial transcript captured before the failure
-            # plus the exception message for the diagnosis comment.
-            tail = transcript[-2000:] if transcript else ""
-            transcript = f"{tail}\n\nspawn error: {exc}"
-            logger.warning(
-                "auto-agent subprocess failed for issue #%d: %s",
+            transcript = (
+                f"{transcript}\n\nauth retry exhausted after "
+                f"{_AUTH_RETRY_MAX} attempts: {last_auth_error}"
+            )
+            logger.error(
+                "auto-agent auth retry exhausted for issue #%d after %d attempts",
                 issue_number,
-                exc,
+                _AUTH_RETRY_MAX,
             )
         wall_s = time.monotonic() - start
 

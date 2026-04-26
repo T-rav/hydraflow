@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -207,3 +207,88 @@ async def test_zero_usage_stats_yields_zero_cost(tmp_path: Path) -> None:
         )
     assert spawn.cost_usd == 0.0
     assert spawn.tokens == 0
+
+
+@pytest.mark.asyncio
+async def test_credit_exhausted_propagates(tmp_path: Path) -> None:
+    """CreditExhaustedError must propagate so the caretaker loop can suspend.
+
+    Catching it inside the broad `except Exception` would silently burn the
+    attempt budget while the credit balance was already gone — exactly the
+    regression that PR review C1 caught.
+    """
+    from subprocess_util import CreditExhaustedError
+
+    async def credit_exhausted(**kwargs: Any) -> str:
+        raise CreditExhaustedError("api credits at zero")
+
+    runner = _make_runner()
+    with (
+        patch(
+            "preflight.auto_agent_runner.stream_claude_process",
+            side_effect=credit_exhausted,
+        ),
+        pytest.raises(CreditExhaustedError),
+    ):
+        await runner.run(prompt="x", worktree_path=str(tmp_path), issue_number=1)
+
+
+@pytest.mark.asyncio
+async def test_auth_retry_then_success(tmp_path: Path) -> None:
+    """First two AuthenticationRetryError attempts retry with backoff; third
+    succeeds. Final spawn must NOT be marked crashed.
+    """
+    from runner_utils import AuthenticationRetryError
+
+    call_count = 0
+
+    async def fake_stream(**kwargs: Any) -> str:
+        nonlocal call_count
+        call_count += 1
+        if call_count < 3:
+            raise AuthenticationRetryError("transient OAuth blip")
+        return "<status>resolved</status><pr_url>x</pr_url><diagnosis>ok</diagnosis>"
+
+    runner = _make_runner()
+    with (
+        patch(
+            "preflight.auto_agent_runner.stream_claude_process",
+            side_effect=fake_stream,
+        ),
+        patch(
+            "preflight.auto_agent_runner.asyncio.sleep",  # skip backoff in tests
+            new_callable=AsyncMock,
+        ),
+    ):
+        spawn = await runner.run(
+            prompt="x", worktree_path=str(tmp_path), issue_number=1
+        )
+    assert call_count == 3
+    assert spawn.crashed is False
+    assert "<status>resolved</status>" in spawn.output_text
+
+
+@pytest.mark.asyncio
+async def test_auth_retry_exhausted_marks_crashed(tmp_path: Path) -> None:
+    """Three consecutive AuthenticationRetryError exhausts retries → crashed."""
+    from runner_utils import AuthenticationRetryError
+
+    async def always_auth_fail(**kwargs: Any) -> str:
+        raise AuthenticationRetryError("OAuth token refresh broken")
+
+    runner = _make_runner()
+    with (
+        patch(
+            "preflight.auto_agent_runner.stream_claude_process",
+            side_effect=always_auth_fail,
+        ),
+        patch(
+            "preflight.auto_agent_runner.asyncio.sleep",
+            new_callable=AsyncMock,
+        ),
+    ):
+        spawn = await runner.run(
+            prompt="x", worktree_path=str(tmp_path), issue_number=1
+        )
+    assert spawn.crashed is True
+    assert "auth retry exhausted" in spawn.output_text
