@@ -171,7 +171,6 @@ class AutoAgentRunner:
                     issue_number,
                     exc,
                 )
-                last_auth_error = None
                 break
 
         if last_auth_error is not None:

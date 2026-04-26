@@ -48,11 +48,15 @@ honor-system but **violations will be caught post-hoc** by the principles
 audit and the resulting PR will fail CI — so a "fix" that modifies any of
 these will not actually merge.
 
-**Enforced by the Claude Code CLI (will return an error):**
+**Enforced by the Claude Code CLI when the implementation tool is `claude`
+(will return an error). For `codex` / `gemini` backends, the CLI flag is
+silently dropped — the runner emits a WARNING log when this happens, and
+this restriction becomes honor-system + post-hoc CI for that run.**
 
-- `WebFetch` — disabled via `--disallowedTools`. You must reason from the
-  context the loop already gathered (issue body, comments, escalation
-  context, wiki, sentry events, recent commits). Do not chase external URLs.
+- `WebFetch` — disabled via `--disallowedTools` on Claude. You must reason
+  from the context the loop already gathered (issue body, comments,
+  escalation context, wiki, sentry events, recent commits). Do not chase
+  external URLs regardless of which backend is in effect.
 
 **Enforced post-hoc by CI / principles audit (honor in your edits):**
 
