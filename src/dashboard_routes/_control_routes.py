@@ -164,6 +164,11 @@ _bg_worker_defs = [
         "Pricing Refresh",
         "Daily upstream-pricing refresh caretaker — fetches LiteLLM JSON, opens PR on drift; bounds-guarded, always human-reviewed.",
     ),
+    (
+        "cost_budget_watcher",
+        "Cost Budget Watcher",
+        "Polls rolling-24h LLM spend; disables caretaker loops when daily cap exceeded. Default unlimited.",
+    ),
 ]
 
 # Workers that have independent configurable intervals
@@ -184,6 +189,7 @@ _INTERVAL_WORKERS = {
     "wiki_rot_detector",
     "trust_fleet_sanity",
     "pricing_refresh",
+    "cost_budget_watcher",
 }
 # Pipeline loops share poll_interval (read-only display)
 _PIPELINE_WORKERS = {"triage", "plan", "implement", "review"}

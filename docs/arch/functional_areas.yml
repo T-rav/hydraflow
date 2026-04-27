@@ -17,6 +17,7 @@ areas:
     loops:
       - ADRReviewerLoop
       - CodeGroomingLoop
+      - CostBudgetWatcherLoop
       - DependabotMergeLoop
       - DiagnosticLoop
       - EpicMonitorLoop

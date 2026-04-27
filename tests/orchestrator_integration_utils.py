@@ -500,6 +500,7 @@ def build_scripted_services(
     services.auto_agent_preflight_loop = FakeBackgroundLoop()
     services.diagram_loop = FakeBackgroundLoop()
     services.pricing_refresh_loop = FakeBackgroundLoop()
+    services.cost_budget_watcher_loop = FakeBackgroundLoop()
     services.repo_wiki_store = SimpleNamespace(
         is_ingested=MagicMock(return_value=False),
         mark_ingested=MagicMock(),

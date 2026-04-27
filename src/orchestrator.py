@@ -174,6 +174,7 @@ class HydraFlowOrchestrator:
             "auto_agent_preflight": svc.auto_agent_preflight_loop,
             "diagram_loop": svc.diagram_loop,
             "pricing_refresh": svc.pricing_refresh_loop,
+            "cost_budget_watcher": svc.cost_budget_watcher_loop,
         }
         self._bg_workers = BGWorkerManager(config, self._state, bg_loop_registry)
         # Loops that need a reference to BGWorkerManager cannot take one
@@ -181,6 +182,7 @@ class HydraFlowOrchestrator:
         # loop registry). Inject it now, post-construction.
         svc.trust_fleet_sanity_loop.set_bg_workers(self._bg_workers)
         svc.health_monitor_loop.set_bg_workers(self._bg_workers)
+        svc.cost_budget_watcher_loop.set_bg_workers(self._bg_workers)
         self._hitl_ctrl = HITLController(svc.hitl_phase, svc.fetcher, config.hitl_label)
         self._state_restorer = StateRestorer(self._state, self._bus, self._bg_workers)
 
@@ -959,6 +961,7 @@ class HydraFlowOrchestrator:
             ("auto_agent_preflight", self._svc.auto_agent_preflight_loop.run),
             ("diagram_loop", self._svc.diagram_loop.run),
             ("pricing_refresh", self._svc.pricing_refresh_loop.run),
+            ("cost_budget_watcher", self._svc.cost_budget_watcher_loop.run),
         ]
 
         # Hindsight WAL replay loop removed in Phase 3 cutover — the wiki

@@ -23,6 +23,7 @@ from code_grooming_loop import CodeGroomingLoop  # noqa: TCH001
 from config import Credentials, HydraFlowConfig
 from contract_refresh_loop import ContractRefreshLoop
 from corpus_learning_loop import CorpusLearningLoop
+from cost_budget_watcher_loop import CostBudgetWatcherLoop  # noqa: TCH001
 from crate_manager import CrateManager
 from dependabot_merge_loop import DependabotMergeLoop
 from diagnostic_loop import DiagnosticLoop  # noqa: TCH001
@@ -185,6 +186,7 @@ class ServiceRegistry:
     corpus_learning_loop: CorpusLearningLoop
     auto_agent_preflight_loop: AutoAgentPreflightLoop
     diagram_loop: DiagramLoop
+    cost_budget_watcher_loop: CostBudgetWatcherLoop
     pricing_refresh_loop: PricingRefreshLoop
 
     # Optional integrations
@@ -745,6 +747,12 @@ def build_services(
         pr_manager=prs,
         deps=loop_deps,
     )
+    cost_budget_watcher_loop = CostBudgetWatcherLoop(
+        config=config,
+        pr_manager=prs,
+        state=state,
+        deps=loop_deps,
+    )
     pricing_refresh_loop = PricingRefreshLoop(
         config=config,
         pr_manager=prs,
@@ -943,5 +951,6 @@ def build_services(
         corpus_learning_loop=corpus_learning_loop,
         auto_agent_preflight_loop=auto_agent_preflight_loop,
         diagram_loop=diagram_loop,
+        cost_budget_watcher_loop=cost_budget_watcher_loop,
         pricing_refresh_loop=pricing_refresh_loop,
     )

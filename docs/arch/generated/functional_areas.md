@@ -9,6 +9,7 @@ flowchart LR
     subgraph caretaking["Caretaking"]
         caretaking_ADRReviewerLoop([ADRReviewerLoop])
         caretaking_CodeGroomingLoop([CodeGroomingLoop])
+        caretaking_CostBudgetWatcherLoop([CostBudgetWatcherLoop])
         caretaking_DependabotMergeLoop([DependabotMergeLoop])
         caretaking_DiagnosticLoop([DiagnosticLoop])
         caretaking_EpicMonitorLoop([EpicMonitorLoop])
@@ -80,6 +81,7 @@ Autonomous background loops that maintain the system without human input — wik
 
 - `ADRReviewerLoop` — `src.adr_reviewer_loop`
 - `CodeGroomingLoop` — `src.code_grooming_loop`
+- `CostBudgetWatcherLoop` — `src.cost_budget_watcher_loop`
 - `DependabotMergeLoop` — `src.dependabot_merge_loop`
 - `DiagnosticLoop` — `src.diagnostic_loop`
 - `EpicMonitorLoop` — `src.epic_monitor_loop`
@@ -253,4 +255,4 @@ The plan→implement→review pipeline driving each issue from hydraflow-ready t
 **Related ADRs:** `ADR-0001`, `ADR-0004`, `ADR-0011`, `ADR-0012`, `ADR-0029`
 
 
-_Regenerated from commit `ce35560` on 2026-04-26 22:57 UTC. Source last changed at `ce35560`. Status: 🟢 fresh._
+_Regenerated from commit `c3f3b17` on 2026-04-27 03:03 UTC. Source last changed at `c3f3b17`. Status: 🟢 fresh._
