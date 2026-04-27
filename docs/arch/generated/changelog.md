@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W17
 
+- `1c3b3f1` — feat(orchestrator): accept pre-built ServiceRegistry via services= kwarg *(2026-04-26)*
 - `fafc818` — refactor(types): widen Port-shaped fields from concrete adapters to Ports *(2026-04-26)*
 - `ad04218` — refactor(mockworld): relocate Fakes from tests/scenarios/fakes/ to src/mockworld/fakes/ *(2026-04-26)*
 - `f07ec68` — feat(scaffold): scripts/scaffold_loop.py upgrade — atomic apply + 5-checkpoint patcher (#8448) (#8448) *(2026-04-26)*
@@ -147,4 +148,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `4192793` on 2026-04-27 04:35 UTC. Source last changed at `4192793`. Status: 🟢 fresh._
+_Regenerated from commit `1c3b3f1` on 2026-04-27 05:00 UTC. Source last changed at `1c3b3f1`. Status: 🟢 fresh._

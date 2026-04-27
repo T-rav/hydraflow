@@ -364,6 +364,17 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             control_status = ControlStatus(status)
         except ValueError:
             control_status = ControlStatus.IDLE
+        # Detect sandbox-mode by duck-typing the injected PRPort. Fake
+        # adapters carry ``_is_fake_adapter = True``; real ones do not.
+        # No conditional import / no isinstance check — the marker is the
+        # contract (ADR — sandbox tier scenario testing, Task 1.3).
+        mockworld_active = False
+        if orch is not None:
+            svc = getattr(orch, "_svc", None)
+            if svc is not None:
+                mockworld_active = bool(
+                    getattr(getattr(svc, "prs", None), "_is_fake_adapter", False)
+                )
         response = ControlStatusResponse(
             status=control_status,
             credits_paused_until=credits_until,
@@ -389,6 +400,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                 pr_unstick_batch_size=_cfg.pr_unstick_batch_size,
                 workspace_base=str(_cfg.workspace_base),
             ),
+            mockworld_active=mockworld_active,
         )
         data = response.model_dump()
         data["current_session_id"] = current_session
