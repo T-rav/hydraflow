@@ -15,10 +15,10 @@
 ## File touchpoints
 
 **Create:**
-- `src/cost_budget_watcher_loop.py` — the watcher loop class
-- `tests/test_cost_budget_watcher_scenario.py` — `_do_work` direct unit tests
-- `tests/test_multi_repo_runtime_integration.py` — closes the ADR-0038 missing-test gap
-- `tests/scenarios/test_cost_budget_watcher_mockworld.py` — full `run_with_loops` scenarios
+- `src/cost_budget_watcher_loop.py` — the watcher loop class (with lazy `build_rolling_24h` wrapper for circular-import avoidance)
+- `tests/test_cost_budget_watcher_scenario.py` — 8 `_do_work` unit tests
+
+(Tasks 4 [multi-repo integration test] and 5 [MockWorld scenarios] are DEFERRED — see those sections for rationale.)
 
 **Modify (eight-checkpoint wiring):**
 - `src/service_registry.py` — import + dataclass field + factory + Services kwarg
@@ -224,7 +224,7 @@ async def test_kill_switch_short_circuits(monkeypatch: pytest.MonkeyPatch) -> No
 
 Run: `uv run pytest tests/test_cost_budget_watcher_scenario.py -v`
 
-Expected: 7 FAIL with `ModuleNotFoundError: No module named 'cost_budget_watcher_loop'`.
+Expected: 8 FAIL with `ModuleNotFoundError: No module named 'cost_budget_watcher_loop'`.
 
 - [ ] **Step 3: Write the implementation**
 
@@ -450,7 +450,7 @@ class CostBudgetWatcherLoop(BaseBackgroundLoop):
 
 Run: `uv run pytest tests/test_cost_budget_watcher_scenario.py -v`
 
-Expected: 7 PASS.
+Expected: 8 PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -768,136 +768,6 @@ This task has no implementation steps — kept here as documentation of why it w
 
 This task has no implementation steps.
 
----
-
-**Files:**
-- Create: `tests/scenarios/test_cost_budget_watcher_mockworld.py`
-
-- [ ] **Step 1: Write the scenarios**
-
-Create `tests/scenarios/test_cost_budget_watcher_mockworld.py`:
-
-```python
-"""MockWorld scenarios for CostBudgetWatcherLoop."""
-
-from __future__ import annotations
-
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
-
-from tests.scenarios.fakes.mock_world import MockWorld
-from tests.scenarios.helpers.loop_port_seeding import seed_ports as _seed_ports
-
-pytestmark = pytest.mark.scenario_loops
-
-
-def _seed_state_and_bg(world: MockWorld) -> tuple[MagicMock, MagicMock]:
-    """Inject MagicMock state + bg_workers into the world's port seed."""
-    bg_workers = MagicMock()
-    bg_workers.set_enabled = MagicMock()
-    bg_workers.is_enabled = MagicMock(return_value=True)
-
-    state = MagicMock()
-    state.get_cost_budget_killed_workers = MagicMock(return_value=set())
-    state.set_cost_budget_killed_workers = MagicMock()
-
-    return bg_workers, state
-
-
-class TestCostBudgetWatcher:
-    """Watcher gates caretaker loops on daily LLM spend cap."""
-
-    async def test_unlimited_cap_no_op(self, tmp_path) -> None:
-        world = MockWorld(tmp_path)
-        # config.daily_cost_budget_usd defaults to None on MockWorld's MagicMock config
-        bg_workers, state = _seed_state_and_bg(world)
-        github = AsyncMock(
-            find_existing_issue=AsyncMock(return_value=0),
-            create_issue=AsyncMock(return_value=0),
-        )
-        _seed_ports(world, github=github, bg_workers=bg_workers, state=state)
-        # Force config.daily_cost_budget_usd to None
-        world.config.daily_cost_budget_usd = None
-
-        with patch(
-            "cost_budget_watcher_loop.build_rolling_24h"
-        ) as mock_rolling:
-            stats = await world.run_with_loops(["cost_budget_watcher"], cycles=1)
-
-        mock_rolling.assert_not_called()
-        bg_workers.set_enabled.assert_not_called()
-        github.create_issue.assert_not_awaited()
-        assert stats["cost_budget_watcher"] == {"action": "unlimited"}
-
-    async def test_over_cap_disables_caretakers(self, tmp_path) -> None:
-        world = MockWorld(tmp_path)
-        bg_workers, state = _seed_state_and_bg(world)
-        github = AsyncMock(
-            find_existing_issue=AsyncMock(return_value=0),
-            create_issue=AsyncMock(return_value=0),
-        )
-        _seed_ports(world, github=github, bg_workers=bg_workers, state=state)
-        world.config.daily_cost_budget_usd = 10.0
-
-        with patch(
-            "cost_budget_watcher_loop.build_rolling_24h",
-            return_value={"total": {"cost_usd": 15.0}},
-        ):
-            stats = await world.run_with_loops(["cost_budget_watcher"], cycles=1)
-
-        result = stats["cost_budget_watcher"]
-        assert result["action"] == "killed"
-        assert result["cap"] == 10.0
-        assert result["total"] == 15.0
-        # Bg workers received set_enabled(name, False) calls
-        assert bg_workers.set_enabled.call_count > 0
-        github.create_issue.assert_awaited_once()
-        kwargs = github.create_issue.await_args.kwargs
-        assert kwargs["title"] == "[cost-budget] daily cap exceeded"
-
-    async def test_recovery_reenables_only_watcher_kills(self, tmp_path) -> None:
-        world = MockWorld(tmp_path)
-        bg_workers, state = _seed_state_and_bg(world)
-        # State reports 2 prior watcher-killed loops; cap not exceeded → recover.
-        state.get_cost_budget_killed_workers = MagicMock(
-            return_value={"dependabot_merge", "ci_monitor"}
-        )
-        github = AsyncMock(
-            find_existing_issue=AsyncMock(return_value=0),
-            create_issue=AsyncMock(return_value=0),
-        )
-        _seed_ports(world, github=github, bg_workers=bg_workers, state=state)
-        world.config.daily_cost_budget_usd = 10.0
-
-        with patch(
-            "cost_budget_watcher_loop.build_rolling_24h",
-            return_value={"total": {"cost_usd": 5.0}},
-        ):
-            stats = await world.run_with_loops(["cost_budget_watcher"], cycles=1)
-
-        result = stats["cost_budget_watcher"]
-        assert result["action"] == "recovered"
-        # Two re-enable calls for the prior-killed set, no new kills
-        enabled_calls = [c for c in bg_workers.set_enabled.call_args_list if c.args[1] is True]
-        enabled_names = {c.args[0] for c in enabled_calls}
-        assert enabled_names == {"dependabot_merge", "ci_monitor"}
-```
-
-- [ ] **Step 2: Run scenarios**
-
-Run: `uv run pytest tests/scenarios/test_cost_budget_watcher_mockworld.py -v -m scenario_loops`
-
-Expected: 3 PASS. **If the catalog builder doesn't support `bg_workers` and `state` ports, the seeding helper will raise.** That's a real gap in the catalog — fix by extending `_BUILDERS["cost_budget_watcher"]` to read `ports.get("bg_workers")` and `ports.get("state")`. The plan's Task 3 step 7 already wires this; verify it matches.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add tests/scenarios/test_cost_budget_watcher_mockworld.py
-git commit -m "test(scenario): MockWorld scenarios for CostBudgetWatcherLoop"
-```
-
----
 
 ## Task 6: PSH onboarding doc + dark-factory.md update
 
@@ -912,7 +782,9 @@ In `docs/wiki/architecture.md`, find the Karpathy-pattern entries and append aft
 ```markdown
 ## Daily Cost-Cap Kill-Switch
 
-HydraFlow honors a global `HYDRAFLOW_DAILY_COST_BUDGET_USD` env var. When the rolling-24h LLM spend exceeds the cap, `CostBudgetWatcherLoop` (5-min tick) calls `BGWorkerManager.set_enabled(name, False)` for ~23 caretaker workers (the curated `_TARGET_WORKERS` list). It records the disabled set in `state.cost_budget_killed_workers` so that recovery (rolling-24h drops back below cap, e.g. at UTC midnight) re-enables ONLY the loops it killed — operator-disabled loops are preserved across the recovery. Default `daily_cost_budget_usd = None` means unlimited (no kills). The watcher itself is not in the target set so it can detect recovery; the pipeline loops (triage/plan/implement/review) are also not gated — their cost discipline is via per-issue caps, not the global gate. See also: Eight-Checkpoint Loop Wiring; cost_budget_alerts.py (alert-only sibling).
+HydraFlow honors a global `HYDRAFLOW_DAILY_COST_BUDGET_USD` env var. When the rolling-24h LLM spend exceeds the cap, `CostBudgetWatcherLoop` (5-min tick) calls `BGWorkerManager.set_enabled(name, False)` for ~23 caretaker workers (the curated `_TARGET_WORKERS` list) — only those that were enabled at kill time, so operator-pre-disabled workers are skipped and not claimed. It records the disabled set in `state.cost_budget_killed_workers` so that recovery (rolling-24h sliding window drops back below cap, typically as old high-cost inferences age out) re-enables ONLY the loops it killed. Default `daily_cost_budget_usd = None` means unlimited (no kills). The watcher itself is not in the target set so it can detect recovery; the pipeline loops (triage/plan/implement/review) are also not gated — their cost discipline is via per-issue caps, not the global gate.
+
+**Operator-conflation gotcha:** while the cap is breached, all gated workers appear as 'disabled' in the dashboard worker toggles (the watcher's kills go through the same `set_enabled` path operators use). If an operator manually re-enables a worker during the kill window, the watcher will re-kill it on the next tick. If an operator manually disables a worker AFTER the watcher has killed it, the watcher will still re-enable it on recovery — there's no way to distinguish "operator disabled this after our kill" from "this was just our kill" without an event log of (name, source, timestamp). Operators wanting a permanent off should set the loop's per-loop kill-switch env var in addition to the dashboard toggle. See also: Eight-Checkpoint Loop Wiring; cost_budget_alerts.py (alert-only sibling).
 
 
 ```json:entry
@@ -1062,7 +934,7 @@ git commit -m "test(regression): lock cost_budget_watcher across all 8 wiring ch
 
 Run: `make quality`
 
-Expected: lint OK, typecheck OK, security OK, tests OK. **11781 (current main) + ~16 new tests = ~11797 passed.**
+Expected: lint OK, typecheck OK, security OK, tests OK. **11781 (current main) + ~19 new tests = ~11800 passed** (8 watcher unit + 3 state mixin + 8 wiring regression).
 
 - [ ] **Step 2: Verify the loop count delta**
 
@@ -1104,19 +976,19 @@ PR body should mention:
 | §3.2 State support (`get/set_cost_budget_killed_workers`) | Task 2 |
 | §3.3 CLI command — DEFERRED | (none — confirmed deferred in spec) |
 | §4 Failure handling (cap=None, rolling raises, recovery dedup) | Task 1 (tests + impl) |
-| §5 Multi-repo isolation | Task 4 (integration test) |
-| §6 Testing strategy | Tasks 1, 4, 5, 7 |
-| §7 Files (all touchpoints) | Tasks 1–7 |
-| §8 Risks (operator override preservation) | Task 1 (recovery test) + Task 2 (state) |
+| §5 Multi-repo isolation | (already covered by `tests/test_repo_runtime.py:269` — Task 4 dropped as redundant) |
+| §6 Testing strategy | Tasks 1, 2 (state mixin tests), 7 (regression) |
+| §7 Files (all touchpoints) | Tasks 1, 2, 3, 6, 7, 8 |
+| §8 Risks (operator override preservation) | Task 1 (kill-time check via `is_enabled`) + Task 2 (state) |
 | §9 Done definition | Task 8 |
 
-No gaps.
+No gaps. Tasks 4 and 5 are deferred — the spec sections they would have implemented are now covered either by existing test infrastructure (multi-repo) or by Task 1's unit tests (cost-watcher behavior).
 
 **Type consistency:**
 
 - `_TARGET_WORKERS` constant: tuple of strings, identical in Task 1 impl and Task 2 state.
-- `state.get/set_cost_budget_killed_workers(set[str])` consistent across Task 1, 2, 5.
-- Loop registry key `cost_budget_watcher` (no `_loop` suffix) consistent across Task 3 wiring sites and Task 5 catalog.
+- `state.get/set_cost_budget_killed_workers(set[str])` consistent across Task 1, 2.
+- Loop registry key `cost_budget_watcher` (no `_loop` suffix) consistent across Task 3 wiring sites.
 - Worker_name `"cost_budget_watcher"` matches registry key (no hyphenation — heeds the lesson from PR #8449's pass-#2 review).
 - Issue title `"[cost-budget] daily cap exceeded"` consistent in Task 1 + Task 5.
 - Kill-switch env `HYDRAFLOW_DISABLE_COST_BUDGET_WATCHER` consistent.

@@ -188,10 +188,10 @@ Originally specced. Pass #2 review found `MockWorld` doesn't expose a config att
 ## 9. Definition of done
 
 - `make quality` passes
-- PSH appears in `/api/runtimes` and `/api/repos` after running `hf repos add ../poop-scoop-hero`
+- PSH appears in `/api/runtimes` and `/api/repos` after `POST /api/repos/add` with PSH path (CLI deferred per §3.3)
 - `HYDRAFLOW_MANAGED_REPOS` includes PSH; `PrinciplesAuditLoop` audits it on next tick
 - Setting `HYDRAFLOW_DAILY_COST_BUDGET_USD=10` and racking up >$10 in 24h disables all caretaker loops; reverts when rolling-24h drops below 10
-- New tests cover: budget watcher unit + MockWorld + multi-repo integration
+- New tests cover: budget watcher unit (Task 1, 8 tests) + state mixin (Task 2, 3 tests) + wiring regression (Task 7, 8 tests)
 - Wiki entry for the cost-cap pattern + PSH onboarding entry in dark-factory.md
 
 ## 10. References
