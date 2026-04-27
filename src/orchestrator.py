@@ -90,6 +90,8 @@ class HydraFlowOrchestrator:
         event_bus: EventBus | None = None,
         state: StateTracker | None = None,
         pipeline_enabled: bool = True,
+        *,
+        services: ServiceRegistry | None = None,
     ) -> None:
         self._config = config
         # Register config for module-level free-function helpers (e.g.
@@ -125,22 +127,31 @@ class HydraFlowOrchestrator:
         # without this the GC can collect the Task before it completes.
         self._deferred_tasks: set[asyncio.Task[None]] = set()
 
-        # Build all services via the factory
-        svc = build_services(
-            config,
-            self._bus,
-            self._state,
-            self._stop_event,
-            WorkerRegistryCallbacks(
-                update_status=self.update_bg_worker_status,
-                is_enabled=self.is_bg_worker_enabled,
-                get_interval=self.get_bg_worker_interval,
-            ),
-            active_issues_cb=self._sync_active_issue_numbers,
-        )
+        # Build all services via the factory (or use what was passed in).
+        # Production callers pass nothing → build a real registry here.
+        # The sandbox entrypoint (mockworld.sandbox_main, Task 1.10) passes
+        # a pre-built registry containing Fakes so a single ServiceRegistry
+        # is wired through both layers without any conditional in the
+        # production code path.
+        if services is None:
+            services = build_services(
+                config,
+                self._bus,
+                self._state,
+                self._stop_event,
+                WorkerRegistryCallbacks(
+                    update_status=self.update_bg_worker_status,
+                    is_enabled=self.is_bg_worker_enabled,
+                    get_interval=self.get_bg_worker_interval,
+                ),
+                active_issues_cb=self._sync_active_issue_numbers,
+            )
 
         # Store the service registry directly — access via self._svc.<name>
-        self._svc: ServiceRegistry = svc
+        self._svc: ServiceRegistry = services
+        # Local alias kept for downstream readability (the registry was
+        # previously named ``svc`` throughout this constructor).
+        svc = services
 
         # Extracted component managers
         bg_loop_registry: dict[str, BaseBackgroundLoop] = {
