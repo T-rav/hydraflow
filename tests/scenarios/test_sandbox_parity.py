@@ -25,12 +25,18 @@ async def test_sandbox_scenario_runs_in_process(mock_world, scenario) -> None:
         "review_loop",
         "merge_loop",
     ]
-    # Best-effort run - if some loop names don't exist in the catalog,
-    # let it raise so the test surfaces the discrepancy.
+    # M1 follow-up: previously a bare ``KeyError`` / ``AttributeError`` here
+    # called ``pytest.skip`` silently, hiding scenarios where the loop
+    # registration drifted. We now ``pytest.xfail`` instead so the missing
+    # loop is visible in the test summary (``X`` not ``s``) and the user
+    # can decide whether to bring the catalog up to parity or drop the
+    # scenario. A hard ``raise`` would break Tier 1 today because the
+    # default loop names ("triage_loop", …) aren't yet in the catalog;
+    # tracking that as a separate sandbox→Tier 1 parity gap.
     try:
         await mock_world.run_with_loops(loops, cycles=seed.cycles_to_run)
     except (KeyError, AttributeError) as exc:
-        pytest.skip(f"loop not registered in catalog: {exc}")
+        pytest.xfail(f"loop not registered in catalog: {exc}")
 
     # Smoke check: at least one issue advanced past "queued".
     last_run = getattr(mock_world, "last_run", None)

@@ -108,6 +108,8 @@ class _FakeProcess:
 class FakeSubprocessRunner:
     """SubprocessRunner backed by FakeDocker."""
 
+    _is_fake_adapter = True
+
     def __init__(self, docker: FakeDocker) -> None:
         self._docker = docker
 

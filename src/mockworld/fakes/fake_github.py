@@ -11,7 +11,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from tests.conftest import PRInfoFactory
+from mockworld.fakes._factories import PRInfoFactory
 
 if TYPE_CHECKING:
     from mockworld.seed import MockWorldSeed

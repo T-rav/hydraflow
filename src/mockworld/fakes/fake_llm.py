@@ -13,13 +13,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from tests.conftest import (
+from mockworld.fakes._factories import (
     PlanResultFactory,
     ReviewResultFactory,
     TriageResultFactory,
     WorkerResultFactory,
 )
-
 from models import EpicDecompResult, ReviewVerdict
 
 

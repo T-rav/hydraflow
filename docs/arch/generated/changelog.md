@@ -4,6 +4,10 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W18
+
+- `d879cb2` — chore(arch): regen generated docs after Task 1.10 *(2026-04-27)*
+
 ## 2026-W17
 
 - `66e9f1d` — feat(mockworld): sandbox_main entrypoint + apply_seed + dashboard banner + s00 *(2026-04-26)*
@@ -149,4 +153,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `66e9f1d` on 2026-04-27 06:12 UTC. Source last changed at `66e9f1d`. Status: 🟢 fresh._
+_Regenerated from commit `d879cb2` on 2026-04-27 21:02 UTC. Source last changed at `d879cb2`. Status: 🟢 fresh._

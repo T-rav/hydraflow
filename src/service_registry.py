@@ -263,10 +263,20 @@ def build_services(
     # Core runners
     if workspaces is None:
         workspaces = WorkspaceManager(config, credentials=credentials)
-    # Re-narrow to concrete adapter for downstream consumers that still
-    # take WorkspaceManager (Task 1.9 will widen these to WorkspacePort).
-    # At runtime the override (FakeWorkspace) satisfies WorkspacePort, and
-    # consumers only call WorkspacePort methods — the cast is duck-safe.
+    # Cast is duck-safe at runtime: the override (FakeWorkspace, if any)
+    # duck-types as WorkspaceManager for downstream callers in this
+    # function. They only call WorkspacePort methods (which both
+    # WorkspaceManager and FakeWorkspace satisfy), so passing the Fake is
+    # safe.
+    #
+    # WARNING — type-checker blind spot. ``cast`` is a no-op at runtime;
+    # pyright then trusts it and treats ``workspaces`` as the concrete
+    # ``WorkspaceManager``. If a downstream caller starts using a method
+    # that lives on ``WorkspaceManager`` but NOT on ``WorkspacePort`` /
+    # ``FakeWorkspace``, the type checker will *not* flag it — the bug
+    # only surfaces at sandbox runtime. The mitigation is Task 1.9's full
+    # widening of downstream method signatures to take
+    # ``WorkspacePort`` directly, after which this cast can be removed.
     workspaces = cast(WorkspaceManager, workspaces)
     subprocess_runner = get_docker_runner(config, credentials=credentials)
     # The self-repo's wiki lives at ``docs/wiki/`` so it is
@@ -322,10 +332,19 @@ def build_services(
     )
     if prs is None:
         prs = PRManager(config, event_bus, credentials=credentials)
-    # Re-narrow to concrete adapter for downstream consumers that still
-    # take PRManager (Task 1.9 will widen these to PRPort). At runtime
-    # the override (FakeGitHub) satisfies PRPort, and consumers only
-    # call PRPort methods — the cast is duck-safe.
+    # Cast is duck-safe at runtime: the override (FakeGitHub, if any)
+    # duck-types as PRManager for downstream callers in this function.
+    # They only call PRPort methods (which both PRManager and
+    # FakeGitHub satisfy), so passing the Fake is safe.
+    #
+    # WARNING — type-checker blind spot. ``cast`` is a no-op at runtime;
+    # pyright then trusts it and treats ``prs`` as the concrete
+    # ``PRManager``. If a downstream caller starts using a method that
+    # lives on ``PRManager`` but NOT on ``PRPort`` / ``FakeGitHub``, the
+    # type checker will *not* flag it — the bug only surfaces at
+    # sandbox runtime. The mitigation is Task 1.9's full widening of
+    # downstream method signatures to take ``PRPort`` directly, after
+    # which this cast can be removed.
     prs = cast(PRManager, prs)
     reviewers = ReviewRunner(
         config,
@@ -369,20 +388,39 @@ def build_services(
     # Data layer
     if fetcher is None:
         fetcher = IssueFetcher(config, credentials=credentials)
-    # Re-narrow to concrete IssueFetcher for downstream consumers that
-    # still take IssueFetcher (Task 1.9 will widen these to
-    # IssueFetcherPort). At runtime the override (FakeIssueFetcher)
-    # satisfies IssueFetcherPort, and consumers only call
-    # IssueFetcherPort methods — the cast is duck-safe.
+    # Cast is duck-safe at runtime: the override (FakeIssueFetcher, if
+    # any) duck-types as IssueFetcher for downstream callers in this
+    # function. They only call IssueFetcherPort methods (which both
+    # IssueFetcher and FakeIssueFetcher satisfy), so passing the Fake is
+    # safe.
+    #
+    # WARNING — type-checker blind spot. ``cast`` is a no-op at runtime;
+    # pyright then trusts it and treats ``fetcher`` as the concrete
+    # ``IssueFetcher``. If a downstream caller starts using a method that
+    # lives on ``IssueFetcher`` but NOT on ``IssueFetcherPort`` /
+    # ``FakeIssueFetcher``, the type checker will *not* flag it — the
+    # bug only surfaces at sandbox runtime. The mitigation is Task 1.9's
+    # full widening of downstream method signatures to take
+    # ``IssueFetcherPort`` directly, after which this cast can be removed.
     fetcher = cast(IssueFetcher, fetcher)
     gh_cache = GitHubDataCache(config, prs, fetcher)  # noqa: F841
     if store is None:
         store = IssueStore(config, GitHubTaskFetcher(fetcher), event_bus)
-    # Re-narrow to concrete IssueStore for downstream consumers that
-    # still take IssueStore (Task 1.9 will widen these to IssueStorePort).
-    # At runtime the override (FakeIssueStore) satisfies IssueStorePort,
-    # and consumers only call IssueStorePort methods — the cast is
-    # duck-safe. Note: ``set_crate_manager`` and ``is_in_pipeline`` are
+    # Cast is duck-safe at runtime: the override (FakeIssueStore, if any)
+    # duck-types as IssueStore for downstream callers in this function.
+    # They only call IssueStorePort methods (which both IssueStore and
+    # FakeIssueStore satisfy), so passing the Fake is safe.
+    #
+    # WARNING — type-checker blind spot. ``cast`` is a no-op at runtime;
+    # pyright then trusts it and treats ``store`` as the concrete
+    # ``IssueStore``. If a downstream caller starts using a method that
+    # lives on ``IssueStore`` but NOT on ``IssueStorePort`` /
+    # ``FakeIssueStore``, the type checker will *not* flag it — the bug
+    # only surfaces at sandbox runtime. The mitigation is Task 1.9's
+    # full widening of downstream method signatures to take
+    # ``IssueStorePort`` directly, after which this cast can be removed.
+    #
+    # Note: ``set_crate_manager`` and ``is_in_pipeline`` are
     # IssueStore-only plumbing not on the Port; both call sites below
     # are gated on attribute presence so override stores remain functional.
     store = cast(IssueStore, store)

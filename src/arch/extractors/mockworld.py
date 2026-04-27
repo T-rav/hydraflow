@@ -1,10 +1,18 @@
 """Extract MockWorldMap from src/mockworld/fakes/ and scenario users.
 
-For each Fake* class under fakes_dir (excluding `__*` and `test_*`),
-records its name, dotted module path, repo-relative source path, and
-candidate Port (Fake<X> → XPort by name). Scans scenarios_dir for
-test_*.py files that mention the fake's module + class name; lists
-each as a scenario user.
+For each Fake* class under fakes_dir (excluding `__*` and `test_*`) that
+carries the ``_is_fake_adapter = True`` class-body marker, records its
+name, dotted module path, repo-relative source path, and candidate Port
+(Fake<X> → XPort by name). Scans scenarios_dir for test_*.py files that
+mention the fake's module + class name; lists each as a scenario user.
+
+The marker filter intentionally excludes nested-record dataclasses
+(``FakeIssue``, ``FakePR``, ``FakeIssueRecord``, ``FakeIssueSummary``)
+that live in the same file as a Fake adapter but are not themselves
+Port-implementing adapters. Without this filter, the naive
+``Fake<Stem>`` → ``<Stem>Port`` rule invented Ports that don't exist
+(``IssuePort``, ``PRPort`` linking to ``FakeIssue``/``FakePR``, …) in
+the generated MockWorld map.
 """
 
 from __future__ import annotations
@@ -30,8 +38,57 @@ def _repo_relative_module(path: Path, repo_root: Path) -> str:
     return ".".join(parts)
 
 
+def _has_fake_adapter_marker(cls: ast.ClassDef) -> bool:
+    """True if the class body contains ``_is_fake_adapter = True``.
+
+    Detected purely via AST so we don't have to import the fake module
+    (importing fakes pulls in production deps that may not be installed
+    when this extractor runs).
+
+    Accepts two assignment shapes used in the codebase:
+
+    1. Plain class-level attribute (most fakes):
+
+        class FakeFoo:
+            _is_fake_adapter = True
+
+    2. ``ClassVar`` annotation (used for ``@dataclass`` fakes like
+       ``FakeWikiCompiler`` so the marker isn't promoted to a dataclass
+       init field):
+
+        @dataclass
+        class FakeFoo:
+            _is_fake_adapter: ClassVar[bool] = True
+    """
+    for stmt in cls.body:
+        # Plain assignment: `_is_fake_adapter = True`
+        if isinstance(stmt, ast.Assign):
+            for target in stmt.targets:
+                if (
+                    isinstance(target, ast.Name)
+                    and target.id == "_is_fake_adapter"
+                    and isinstance(stmt.value, ast.Constant)
+                    and stmt.value.value is True
+                ):
+                    return True
+        # Annotated assignment: `_is_fake_adapter: ClassVar[bool] = True`
+        elif isinstance(stmt, ast.AnnAssign) and (
+            isinstance(stmt.target, ast.Name)
+            and stmt.target.id == "_is_fake_adapter"
+            and isinstance(stmt.value, ast.Constant)
+            and stmt.value.value is True
+        ):
+            return True
+    return False
+
+
 def _fake_classes(fakes_dir: Path, repo_root: Path) -> list[FakeInfo]:
-    """Walk fakes_dir for `class Fake*:` declarations.
+    """Walk fakes_dir for `class Fake*:` declarations carrying the marker.
+
+    Only includes classes that have ``_is_fake_adapter = True`` in their
+    body (see :func:`_has_fake_adapter_marker`). This excludes
+    nested-record dataclasses like ``FakeIssue`` / ``FakePR`` that live
+    alongside Fake adapters but don't implement a Port themselves.
 
     `source_path` is recorded as repo-root-relative so generated Markdown is
     portable and diffable; absolute paths would leak the developer's home dir
@@ -48,7 +105,11 @@ def _fake_classes(fakes_dir: Path, repo_root: Path) -> list[FakeInfo]:
         except SyntaxError:
             continue
         for node in tree.body:
-            if isinstance(node, ast.ClassDef) and node.name.startswith("Fake"):
+            if (
+                isinstance(node, ast.ClassDef)
+                and node.name.startswith("Fake")
+                and _has_fake_adapter_marker(node)
+            ):
                 out.append(
                     FakeInfo(
                         name=node.name,
