@@ -82,4 +82,4 @@ graph LR
   - `WorkspaceManager` (`src.workspace`)
 - Fake: `FakeWorkspace` (`tests.scenarios.fakes.fake_workspace`)
 
-_Regenerated from commit `ce35560` on 2026-04-26 22:57 UTC. Source last changed at `ce35560`. Status: 🟢 fresh._
+_Regenerated from commit `c3f3b17` on 2026-04-27 03:03 UTC. Source last changed at `c3f3b17`. Status: 🟢 fresh._

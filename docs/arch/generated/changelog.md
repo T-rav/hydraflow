@@ -6,12 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W17
 
-- `ce35560` — docs(arch): re-emit after group fix *(2026-04-26)*
-- `b2a19e0` — fix(loop): actually rename worker_name to pricing_refresh *(2026-04-26)*
-- `a2ebabe` — fix(loop): complete eight-checkpoint wiring for PricingRefreshLoop *(2026-04-26)*
-- `0b82773` — docs(wiki): promote loop-wiring guide to 8 checkpoints *(2026-04-26)*
-- `0701d8d` — docs(arch): regenerate after PricingRefreshLoop addition *(2026-04-26)*
-- `932e12e` — fix(arch): assign PricingRefreshLoop to caretaking functional area *(2026-04-26)*
+- `3738e3d` — feat(loop): PricingRefreshLoop — daily LiteLLM upstream-pricing refresh (#8449) (#8449) *(2026-04-26)*
+- `f07ec68` — feat(scaffold): scripts/scaffold_loop.py upgrade — atomic apply + 5-checkpoint patcher (#8448) (#8448) *(2026-04-26)*
+- `3f349d8` — feat(runners): BaseSubprocessRunner + AutoAgentRunner migration + Port↔Fake signature conformance (#8446) (#8446) *(2026-04-26)*
+- `3af8d25` — feat(infra): dark-factory infrastructure hardening — spec + plan + PR1 (ADR-0051 + pre-commit arch-check) (#8445) (#8445) *(2026-04-26)*
 - `6cd7920` — docs(wiki): dark-factory engineering — distill lessons from auto-agent journey (#8443) (#8443) *(2026-04-26)*
 - `717e68f` — feat(auto-agent): wire real Claude Code subprocess (closes ADR-0050 partial landing) (#8439) (#8439) *(2026-04-26)*
 - `204084a` — feat(loop): wire DiagramLoop (L24) into runtime — five-checkpoint pattern (#8440) (#8440) *(2026-04-26)*
@@ -148,4 +146,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `ce35560` on 2026-04-26 22:57 UTC. Source last changed at `ce35560`. Status: 🟢 fresh._
+_Regenerated from commit `c3f3b17` on 2026-04-27 03:03 UTC. Source last changed at `c3f3b17`. Status: 🟢 fresh._

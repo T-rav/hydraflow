@@ -863,6 +863,23 @@ def _build_diagram_loop(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     )
 
 
+def _build_cost_budget_watcher_loop(
+    ports: dict[str, Any], config: Any, deps: Any
+) -> Any:
+    from cost_budget_watcher_loop import CostBudgetWatcherLoop  # noqa: PLC0415
+
+    loop = CostBudgetWatcherLoop(
+        config=config,
+        pr_manager=ports["github"],
+        state=ports["state"],
+        deps=deps,
+    )
+    bg_workers = ports.get("bg_workers")
+    if bg_workers is not None:
+        loop.set_bg_workers(bg_workers)
+    return loop
+
+
 def _build_pricing_refresh_loop(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from pricing_refresh_loop import PricingRefreshLoop  # noqa: PLC0415
 
@@ -918,6 +935,8 @@ _BUILDERS: dict[str, Any] = {
     "diagram_loop": _build_diagram_loop,
     # pricing refresh (PR #8449; ADR-0029 caretaker pattern)
     "pricing_refresh": _build_pricing_refresh_loop,
+    # cost budget watcher (PSH onboarding; ADR-0029 caretaker pattern)
+    "cost_budget_watcher": _build_cost_budget_watcher_loop,
     # auto-agent (spec §1–§11; ADR-0050)
     "auto_agent_preflight": _build_auto_agent_preflight,
 }

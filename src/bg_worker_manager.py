@@ -136,5 +136,6 @@ class BGWorkerManager:
             "workspace_gc": self._config.workspace_gc_interval,
             # Daily caretaker — never falls through to poll_interval.
             "pricing_refresh": 86400,
+            "cost_budget_watcher": 300,  # 5 minutes
         }
         return defaults.get(name, self._config.poll_interval)
