@@ -1,8 +1,8 @@
 """FakeIssueStore — IssueStorePort impl backed by FakeGitHub state.
 
-Extracted from `tests/scenarios/fakes/mock_world.py:_wire_targets`,
-which previously monkeypatched the real IssueStore. Now standalone
-so build_services() can accept it as an override.
+Standalone class created for the sandbox entrypoint (Task 1.10), which
+constructs Fakes via build_services() overrides — monkeypatching only
+works in-process and can't reach the docker container.
 """
 
 from __future__ import annotations
@@ -29,7 +29,15 @@ class FakeIssueRecord:
 
 
 class FakeIssueStore:
-    """IssueStorePort impl. Reads from FakeGitHub; writes back to it."""
+    """Minimal sandbox stand-in — does NOT satisfy IssueStorePort.
+
+    Provides only `get`, `transition`, `list_by_label` — the surface the
+    sandbox entrypoint needs (Task 1.10). The real IssueStorePort has
+    11+ methods (`get_triageable`, `get_plannable`, `mark_active`,
+    `enrich_with_comments`, etc.). Extend here when sandbox scenarios
+    need more methods. Do NOT pass this where an IssueStorePort is
+    required without checking the call site.
+    """
 
     _is_fake_adapter = True
 
@@ -41,7 +49,9 @@ class FakeIssueStore:
     def from_seed(cls, seed: MockWorldSeed, event_bus: EventBus) -> FakeIssueStore:
         from mockworld.fakes.fake_github import FakeGitHub
 
-        # Until FakeGitHub.from_seed lands in Task 1.6, build inline.
+        # TASK 1.6 MIGRATION: when FakeGitHub.from_seed lands, replace these
+        # 6 lines with `github = FakeGitHub.from_seed(seed)`. Same change
+        # required in fake_issue_fetcher.py:from_seed (sister file).
         github = FakeGitHub()
         for issue_dict in seed.issues:
             github.add_issue(

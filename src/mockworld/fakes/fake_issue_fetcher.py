@@ -1,9 +1,8 @@
 """FakeIssueFetcher — IssueFetcherPort impl backed by FakeGitHub state.
 
-Extracted from `tests/scenarios/fakes/mock_world.py:_wire_targets`,
-which previously monkeypatched the real IssueFetcher with FakeGitHub
-methods. Now FakeIssueFetcher is a standalone class that satisfies
-IssueFetcherPort and can be passed via build_services() override.
+Standalone class created for the sandbox entrypoint (Task 1.10), which
+constructs Fakes via build_services() overrides — monkeypatching only
+works in-process and can't reach the docker container.
 """
 
 from __future__ import annotations
@@ -29,7 +28,14 @@ class FakeIssueSummary:
 
 
 class FakeIssueFetcher:
-    """IssueFetcherPort implementation reading from FakeGitHub state."""
+    """Minimal sandbox stand-in — does NOT satisfy IssueFetcherPort.
+
+    Provides only `fetch_open_issues_by_label` — the surface the sandbox
+    entrypoint needs (Task 1.10). The real IssueFetcherPort has additional
+    methods (`fetch_issue_by_number`, `fetch_issues_by_labels`). Extend
+    here when sandbox scenarios need more methods. Do NOT pass this where
+    an IssueFetcherPort is required without checking the call site.
+    """
 
     _is_fake_adapter = True
 
@@ -46,7 +52,9 @@ class FakeIssueFetcher:
         """
         from mockworld.fakes.fake_github import FakeGitHub
 
-        # Until FakeGitHub.from_seed lands in Task 1.6, build inline.
+        # TASK 1.6 MIGRATION: when FakeGitHub.from_seed lands, replace these
+        # 6 lines with `github = FakeGitHub.from_seed(seed)`. Same change
+        # required in fake_issue_store.py:from_seed (sister file).
         github = FakeGitHub()
         for issue_dict in seed.issues:
             github.add_issue(
