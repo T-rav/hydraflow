@@ -56,6 +56,7 @@ class FakePR:
     deletions: int = 0
     reviews: list[tuple[str, str]] = field(default_factory=list)
     checks: list[tuple[str, str]] = field(default_factory=list)
+    labels: list[str] = field(default_factory=list)
 
 
 class FakeGitHub:
@@ -113,6 +114,12 @@ class FakeGitHub:
             merged=merged,
             ci_status=ci_status,
         )
+
+    def add_pr_label(self, pr_number: int, label: str) -> None:
+        """Seed-API helper: attach a label to a fake PR."""
+        pr = self._prs[pr_number]
+        if label not in pr.labels:
+            pr.labels.append(label)
 
     def add_alerts(self, *, branch: str, alerts: list[Any]) -> None:
         """Script code-scanning alerts returned by fetch_code_scanning_alerts."""
@@ -415,6 +422,30 @@ class FakeGitHub:
             if issue.state != "open" and label in issue.labels
         ]
         return rows[:limit]
+
+    async def list_prs_by_label(self, label: str) -> list[Any]:
+        """Return open (non-merged) PRs carrying *label*.
+
+        Mirrors ``PRManager.list_prs_by_label`` (which delegates to
+        ``gh pr list --label <label> --state open``). Used by
+        SandboxFailureFixerLoop to poll auto-fix candidates.
+        """
+        self._maybe_rate_limit()
+        out: list[Any] = []
+        for pr in self._prs.values():
+            if pr.merged:
+                continue
+            if label not in pr.labels:
+                continue
+            out.append(
+                PRInfoFactory.create(
+                    number=pr.number,
+                    issue_number=pr.issue_number,
+                    branch=pr.branch,
+                    draft=pr.draft,
+                )
+            )
+        return out
 
     async def list_issue_comments(self, issue_number: int) -> list[dict[str, Any]]:
         """Return comments seeded on the issue (oldest first).
