@@ -9,19 +9,23 @@ All fakes under `src/mockworld/fakes/`, the `*Port` each implements (by name mat
 | Fake | Implements | Used in scenarios |
 |---|---|---|
 | **FakeBeads** | `BeadsPort` | `tests/scenarios/fakes/test_fake_beads.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_bead_workflow.py` |
-| **FakeClock** | `ClockPort` | `tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/fakes/test_fake_clock.py`<br>`tests/scenarios/fakes/test_port_conformance.py`<br>`tests/scenarios/fakes/test_supporting_fakes.py`<br>`tests/scenarios/test_fidelity.py` |
-| **FakeDocker** | `DockerPort` | `tests/scenarios/fakes/test_fake_docker.py`<br>`tests/scenarios/fakes/test_fake_subprocess_runner.py`<br>`tests/scenarios/fakes/test_port_conformance.py` |
+| **FakeClock** | `ClockPort` | `tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/fakes/test_fake_clock.py`<br>`tests/scenarios/fakes/test_supporting_fakes.py`<br>`tests/scenarios/test_fidelity.py` |
+| **FakeDocker** | `DockerPort` | `tests/scenarios/fakes/test_fake_docker.py`<br>`tests/scenarios/fakes/test_fake_subprocess_runner.py` |
 | **FakeFS** | `FSPort` | `tests/scenarios/fakes/test_fake_fs.py` |
-| **FakeGit** | `GitPort` | `tests/scenarios/behaviors/test_eventual_consistency.py`<br>`tests/scenarios/behaviors/test_flaky.py`<br>`tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/behaviors/test_rate_limit.py`<br>`tests/scenarios/browser/scenarios/test_loops_browser.py`<br>`tests/scenarios/fakes/test_fake_git.py`<br>`tests/scenarios/fakes/test_fake_github.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fakes/test_port_conformance.py`<br>`tests/scenarios/fakes/test_port_signature_conformance.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_fidelity.py`<br>`tests/scenarios/test_loops.py` |
-| **FakeGitHub** | `GitHubPort` | `tests/scenarios/behaviors/test_eventual_consistency.py`<br>`tests/scenarios/behaviors/test_flaky.py`<br>`tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/behaviors/test_rate_limit.py`<br>`tests/scenarios/browser/scenarios/test_loops_browser.py`<br>`tests/scenarios/fakes/test_fake_github.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fakes/test_port_conformance.py`<br>`tests/scenarios/fakes/test_port_signature_conformance.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_fidelity.py`<br>`tests/scenarios/test_loops.py` |
+| **FakeGit** | `GitPort` | `tests/scenarios/behaviors/test_eventual_consistency.py`<br>`tests/scenarios/behaviors/test_flaky.py`<br>`tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/behaviors/test_rate_limit.py`<br>`tests/scenarios/browser/scenarios/test_loops_browser.py`<br>`tests/scenarios/fakes/test_fake_git.py`<br>`tests/scenarios/fakes/test_fake_github.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_fidelity.py`<br>`tests/scenarios/test_loops.py` |
+| **FakeGitHub** | `GitHubPort` | `tests/scenarios/behaviors/test_eventual_consistency.py`<br>`tests/scenarios/behaviors/test_flaky.py`<br>`tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/behaviors/test_rate_limit.py`<br>`tests/scenarios/browser/scenarios/test_loops_browser.py`<br>`tests/scenarios/fakes/test_fake_github.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_fidelity.py`<br>`tests/scenarios/test_loops.py` |
 | **FakeHTTP** | `HTTPPort` | `tests/scenarios/fakes/test_fake_http.py` |
 | **FakeIssue** | `IssuePort` | — |
-| **FakeLLM** | `LLMPort` | `tests/scenarios/behaviors/test_quota.py`<br>`tests/scenarios/fakes/test_fake_llm.py`<br>`tests/scenarios/fakes/test_fake_llm_streaming.py`<br>`tests/scenarios/fakes/test_port_conformance.py`<br>`tests/scenarios/fakes/test_prior_failure_propagation.py`<br>`tests/scenarios/test_fidelity.py` |
+| **FakeIssueFetcher** | `IssueFetcherPort` | — |
+| **FakeIssueRecord** | `IssueRecordPort` | — |
+| **FakeIssueStore** | `IssueStorePort` | — |
+| **FakeIssueSummary** | `IssueSummaryPort` | — |
+| **FakeLLM** | `LLMPort` | `tests/scenarios/behaviors/test_quota.py`<br>`tests/scenarios/fakes/test_fake_llm.py`<br>`tests/scenarios/fakes/test_fake_llm_streaming.py`<br>`tests/scenarios/fakes/test_prior_failure_propagation.py`<br>`tests/scenarios/test_fidelity.py` |
 | **FakePR** | `PRPort` | `tests/scenarios/browser/scenarios/test_loops_browser.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_loops.py` |
-| **FakeSentry** | `SentryPort` | `tests/scenarios/fakes/test_port_conformance.py`<br>`tests/scenarios/fakes/test_supporting_fakes.py` |
-| **FakeSubprocessRunner** | `SubprocessRunnerPort` | `tests/scenarios/fakes/test_fake_subprocess_runner.py`<br>`tests/scenarios/fakes/test_port_conformance.py` |
+| **FakeSentry** | `SentryPort` | `tests/scenarios/fakes/test_supporting_fakes.py` |
+| **FakeSubprocessRunner** | `SubprocessRunnerPort` | `tests/scenarios/fakes/test_fake_subprocess_runner.py` |
 | **FakeWikiCompiler** | `WikiCompilerPort` | `tests/scenarios/test_wiki_evolution_scenarios.py` |
-| **FakeWorkspace** | `WorkspacePort` | `tests/scenarios/fakes/test_port_signature_conformance.py`<br>`tests/scenarios/fakes/test_supporting_fakes.py` |
+| **FakeWorkspace** | `WorkspacePort` | `tests/scenarios/fakes/test_supporting_fakes.py` |
 
 ## Wiring
 
@@ -34,11 +38,10 @@ graph LR
     FakeClock -.-> ClockPort
     tests_scenarios_behaviors_test_latency_py([tests/scenarios/behaviors/test_latency.py]) --> FakeClock
     tests_scenarios_fakes_test_fake_clock_py([tests/scenarios/fakes/test_fake_clock.py]) --> FakeClock
-    tests_scenarios_fakes_test_port_conformance_py([tests/scenarios/fakes/test_port_conformance.py]) --> FakeClock
+    tests_scenarios_fakes_test_supporting_fakes_py([tests/scenarios/fakes/test_supporting_fakes.py]) --> FakeClock
     FakeDocker -.-> DockerPort
     tests_scenarios_fakes_test_fake_docker_py([tests/scenarios/fakes/test_fake_docker.py]) --> FakeDocker
     tests_scenarios_fakes_test_fake_subprocess_runner_py([tests/scenarios/fakes/test_fake_subprocess_runner.py]) --> FakeDocker
-    tests_scenarios_fakes_test_port_conformance_py([tests/scenarios/fakes/test_port_conformance.py]) --> FakeDocker
     FakeFS -.-> FSPort
     tests_scenarios_fakes_test_fake_fs_py([tests/scenarios/fakes/test_fake_fs.py]) --> FakeFS
     FakeGit -.-> GitPort
@@ -52,6 +55,10 @@ graph LR
     FakeHTTP -.-> HTTPPort
     tests_scenarios_fakes_test_fake_http_py([tests/scenarios/fakes/test_fake_http.py]) --> FakeHTTP
     FakeIssue -.-> IssuePort
+    FakeIssueFetcher -.-> IssueFetcherPort
+    FakeIssueRecord -.-> IssueRecordPort
+    FakeIssueStore -.-> IssueStorePort
+    FakeIssueSummary -.-> IssueSummaryPort
     FakeLLM -.-> LLMPort
     tests_scenarios_behaviors_test_quota_py([tests/scenarios/behaviors/test_quota.py]) --> FakeLLM
     tests_scenarios_fakes_test_fake_llm_py([tests/scenarios/fakes/test_fake_llm.py]) --> FakeLLM
@@ -61,16 +68,13 @@ graph LR
     tests_scenarios_fuzz_test_invariants_py([tests/scenarios/fuzz/test_invariants.py]) --> FakePR
     tests_scenarios_test_loops_py([tests/scenarios/test_loops.py]) --> FakePR
     FakeSentry -.-> SentryPort
-    tests_scenarios_fakes_test_port_conformance_py([tests/scenarios/fakes/test_port_conformance.py]) --> FakeSentry
     tests_scenarios_fakes_test_supporting_fakes_py([tests/scenarios/fakes/test_supporting_fakes.py]) --> FakeSentry
     FakeSubprocessRunner -.-> SubprocessRunnerPort
     tests_scenarios_fakes_test_fake_subprocess_runner_py([tests/scenarios/fakes/test_fake_subprocess_runner.py]) --> FakeSubprocessRunner
-    tests_scenarios_fakes_test_port_conformance_py([tests/scenarios/fakes/test_port_conformance.py]) --> FakeSubprocessRunner
     FakeWikiCompiler -.-> WikiCompilerPort
     tests_scenarios_test_wiki_evolution_scenarios_py([tests/scenarios/test_wiki_evolution_scenarios.py]) --> FakeWikiCompiler
     FakeWorkspace -.-> WorkspacePort
-    tests_scenarios_fakes_test_port_signature_conformance_py([tests/scenarios/fakes/test_port_signature_conformance.py]) --> FakeWorkspace
     tests_scenarios_fakes_test_supporting_fakes_py([tests/scenarios/fakes/test_supporting_fakes.py]) --> FakeWorkspace
 ```
 
-_Regenerated from commit `3fe01f7` on 2026-04-27 02:14 UTC. Source last changed at `3fe01f7`. Status: 🟢 fresh._
+_Regenerated from commit `fd1ce34` on 2026-04-27 03:59 UTC. Source last changed at `fd1ce34`. Status: 🟢 fresh._

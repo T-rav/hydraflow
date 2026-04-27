@@ -53,7 +53,7 @@ from models import StatusCallback
 from plan_phase import PlanPhase
 from plan_reviewer import PlanReviewer
 from planner import PlannerRunner
-from ports import IssueStorePort
+from ports import IssueStorePort, PRPort, WorkspacePort
 from post_merge_handler import PostMergeHandler
 from pr_manager import PRManager
 from pr_unsticker import PRUnsticker
@@ -107,11 +107,11 @@ class ServiceRegistry:
     """Holds all service instances for the orchestrator."""
 
     # Core infrastructure
-    workspaces: WorkspaceManager
+    workspaces: WorkspacePort
     subprocess_runner: SubprocessRunner
     agents: AgentRunner
     planners: PlannerRunner
-    prs: PRManager
+    prs: PRPort
     reviewers: ReviewRunner
     hitl_runner: HITLRunner
     triage: TriageRunner
@@ -119,7 +119,7 @@ class ServiceRegistry:
 
     # Data layer
     fetcher: IssueFetcher
-    store: IssueStore
+    store: IssueStorePort
     # Optional read-through cache decorator wrapping `store`. Phases
     # that want stale-bounded enrich_with_comments + fetch recording
     # consume this instead of `store` directly. Defaults to the same

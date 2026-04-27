@@ -7,4 +7,4 @@ Live transitions extracted from source. Compared against the Mermaid block in AD
 _(no transitions discovered)_
 
 
-_Regenerated from commit `3fe01f7` on 2026-04-27 02:14 UTC. Source last changed at `3fe01f7`. Status: 🟢 fresh._
+_Regenerated from commit `fd1ce34` on 2026-04-27 03:59 UTC. Source last changed at `fd1ce34`. Status: 🟢 fresh._

@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W17
 
+- `ad04218` — refactor(mockworld): relocate Fakes from tests/scenarios/fakes/ to src/mockworld/fakes/ *(2026-04-26)*
 - `f07ec68` — feat(scaffold): scripts/scaffold_loop.py upgrade — atomic apply + 5-checkpoint patcher (#8448) (#8448) *(2026-04-26)*
 - `3f349d8` — feat(runners): BaseSubprocessRunner + AutoAgentRunner migration + Port↔Fake signature conformance (#8446) (#8446) *(2026-04-26)*
 - `3af8d25` — feat(infra): dark-factory infrastructure hardening — spec + plan + PR1 (ADR-0051 + pre-commit arch-check) (#8445) (#8445) *(2026-04-26)*
@@ -145,4 +146,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `3fe01f7` on 2026-04-27 02:14 UTC. Source last changed at `3fe01f7`. Status: 🟢 fresh._
+_Regenerated from commit `fd1ce34` on 2026-04-27 03:59 UTC. Source last changed at `fd1ce34`. Status: 🟢 fresh._
