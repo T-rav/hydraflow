@@ -236,6 +236,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_TERM_PROPOSER_COOLDOWN_SECONDS",
         86400,
     ),
+    ("term_pruner_interval", "HYDRAFLOW_TERM_PRUNER_INTERVAL", 86400),
     ("trust_fleet_sanity_interval", "HYDRAFLOW_TRUST_FLEET_SANITY_INTERVAL", 600),
     ("loop_anomaly_issues_per_hour", "HYDRAFLOW_LOOP_ANOMALY_ISSUES_PER_HOUR", 10),
     ("corpus_learning_interval", "HYDRAFLOW_CORPUS_LEARNING_INTERVAL", 3600),
@@ -352,6 +353,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("staging_enabled", "HYDRAFLOW_STAGING_ENABLED", False),
     ("otel_enabled", "HYDRAFLOW_OTEL_ENABLED", False),
     ("term_proposer_enabled", "HYDRAFLOW_TERM_PROPOSER_ENABLED", True),
+    ("term_pruner_enabled", "HYDRAFLOW_TERM_PRUNER_ENABLED", True),
 ]
 
 # Literal-typed env-var overrides.
@@ -1994,6 +1996,18 @@ class HydraFlowConfig(BaseModel):
         ge=3600,
         le=604800,
         description="Cooldown before retrying a candidate that previously failed validation or LLM draft.",
+    )
+
+    # Trust fleet — TermPrunerLoop (ADR-0057)
+    term_pruner_enabled: bool = Field(
+        default=True,
+        description="Kill-switch for TermPrunerLoop (ADR-0057).",
+    )
+    term_pruner_interval: int = Field(
+        default=86400,
+        ge=3600,
+        le=604800,
+        description="Seconds between TermPrunerLoop ticks.",
     )
 
     # Trust fleet — CorpusLearningLoop (spec §4.1 v2)
