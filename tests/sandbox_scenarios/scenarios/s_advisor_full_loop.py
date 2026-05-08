@@ -1,41 +1,36 @@
 """s_advisor_full_loop — advisor pattern end-to-end (Tier-2).
 
-T23 of the advisor-pattern feature. Tier-2 parity for
+T23 of the advisor-pattern feature, activated by T34. Tier-2 parity for
 ``tests/scenarios/test_pr_review_advisor_happy_path.py`` per ADR-0052
 rule 3 (every sandbox scenario has a Tier-1 parity test).
 
-End-to-end flow when the supporting wiring lands:
+End-to-end flow
+---------------
 
-1. seed() registers issue 7 ("Add advisor wiring") with hydraflow-ready.
-2. plan/implement/review scripts drive the in-process parity test
-   (tests/scenarios/test_sandbox_parity.py) past "queued" — Tier-1
-   passes today with no advisor wiring needed.
+1. ``seed()`` registers issue 7 ("Add advisor wiring") with
+   hydraflow-ready, plus plan/implement/review scripts that drive the
+   in-process parity test (``tests/scenarios/test_sandbox_parity.py``)
+   past ``queued`` — Tier-1 passes today with no advisor wiring needed.
+2. The seed also carries an ``advisor_scripts`` entry that the Tier-2
+   loader hands to ``FakeLLM.script_advisor(7, "post_verify", [...])``.
 3. Tier-2 (sandbox) flow expects the executor to APPROVE and the
-   PostVerifyAdvisor to APPROVE, ending with PR merged + the
-   ``review_advisor`` worker card visible on the dashboard.
+   PostVerifyAdvisor to APPROVE, ending with PR merged. The
+   ``review_advisor`` worker card on the System tab proves the
+   ``BACKGROUND_WORKERS`` registration (src/ui/src/constants.js) is
+   rendered by the live stack.
 
-Why ``assert_outcome`` is skipped today
----------------------------------------
+T34 closed the two infrastructure gaps T23 left open:
 
-Two pieces of sandbox-side wiring are not yet in place:
+a. ``src/mockworld/sandbox_main.py`` now sets
+   ``svc.reviewers._mockworld_fake_llm = fake_llm`` so the
+   ``_PostVerifyRunner`` adapter routes advisor consults to FakeLLM
+   instead of spawning a real Claude subprocess (which fails under the
+   air-gapped sandbox network).
 
-a. ``src/mockworld/sandbox_main.py`` does not set
-   ``reviewers._mockworld_fake_llm = fake_llm`` on the override
-   reviewer. Without that sentinel, ``ReviewPhase._build_post_verify_runner``
-   falls through to ``ReviewRunner._execute`` and tries to spawn a
-   real Claude subprocess — which fails under the air-gapped sandbox
-   network.
-
-b. The seed-script loader in ``sandbox_main.main()``
-   (``getattr(fake_llm, f"script_{phase}")(issue_number, results)``)
-   is hard-wired to the 2-arg ``script_<phase>(issue_number, results)``
-   shape. ``script_advisor`` requires the 3-arg form
-   ``(issue_number, role, results)``, so seeded advisor scripts have
-   nowhere to land in the Tier-2 boot path.
-
-Both are tracked separately from T23 (this task is the Tier-2
-*scenario*, not the Tier-2 advisor *infrastructure*). Activate this
-scenario's ``assert_outcome`` body once both gaps close.
+b. ``MockWorldSeed`` now carries an ``advisor_scripts`` field and
+   ``sandbox_main`` invokes ``FakeLLM.script_advisor(issue, role,
+   results)`` for each entry. The 2-arg loader for ``seed.scripts``
+   couldn't carry the role axis advisor calls require.
 """
 
 from __future__ import annotations
@@ -43,26 +38,34 @@ from __future__ import annotations
 import json
 from typing import Any
 
-import pytest
-
 from mockworld.seed import MockWorldSeed
 
 NAME = "s_advisor_full_loop"
 DESCRIPTION = (
     "Advisor pattern end-to-end: executor APPROVE + post-verify advisor APPROVE → "
-    "PR merged, review_advisor worker card visible. SKIPPED until sandbox advisor "
-    "wiring lands (see module docstring)."
+    "PR merged + review_advisor worker card visible on the System tab."
+)
+
+
+# Scripted advisor verdict. Pinned at module scope so the shape stays
+# next to the seed and is reviewable in isolation.
+_ADVISOR_POST_VERIFY_APPROVE: str = json.dumps(
+    {
+        "verdict": "APPROVE",
+        "reasoning": "Executor verdict matches diff intent.",
+        "disagreements": [],
+        "suggested_fix_direction": None,
+    }
 )
 
 
 def seed() -> MockWorldSeed:
-    """Drive a single issue through the full pipeline.
+    """Drive a single issue through the full pipeline + advisor APPROVE.
 
-    The plan/implement/review scripts are sufficient for the Tier-1
-    parity test (``test_sandbox_parity.py``) to advance the issue
-    past ``queued`` without touching the advisor seam at all. When
-    the sandbox-side advisor wiring lands, an ``advisor`` entry in
-    ``scripts`` will become loadable too.
+    The plan/implement/review scripts drive Tier-1 (parity) past
+    ``queued`` without touching the advisor seam. The ``advisor_scripts``
+    entry queues the post-verify APPROVE that Tier-2 (sandbox) consumes
+    via ``FakeLLM.script_advisor`` in ``mockworld.sandbox_main``.
     """
     return MockWorldSeed(
         repos=[("owner/repo", "/workspace/repo")],
@@ -79,48 +82,61 @@ def seed() -> MockWorldSeed:
             "implement": {7: [{"success": True, "branch": "hf/issue-7"}]},
             "review": {7: [{"verdict": "approve", "comments": []}]},
         },
+        advisor_scripts={
+            7: {"post_verify": [_ADVISOR_POST_VERIFY_APPROVE]},
+        },
         cycles_to_run=4,
     )
 
 
-# Scripted advisor verdict the assert_outcome flow will use once the
-# sandbox-side wiring lands. Pinned at module scope so the shape stays
-# next to the seed and is reviewable today.
-_ADVISOR_POST_VERIFY_APPROVE: str = json.dumps(
-    {
-        "verdict": "APPROVE",
-        "reasoning": "Executor verdict matches diff intent.",
-        "disagreements": [],
-        "suggested_fix_direction": None,
-    }
-)
-
-
 async def assert_outcome(api: Any, page: Any) -> None:
-    """End-to-end assertions; skipped pending sandbox advisor wiring.
+    """End-to-end assertions: API confirms merged + UI renders advisor card.
 
-    When the wiring lands (see module docstring), this body will:
-
-    1. Poll ``/api/issues/history`` until issue 7's outcome is ``merged``.
-    2. Open the dashboard, confirm the Outcomes tab renders the merged
-       row for issue 7.
-    3. Assert ``[data-testid='worker-card-review_advisor']`` is visible
-       on the System panel — proves the BACKGROUND_WORKERS registration
-       (src/ui/src/constants.js) is rendered by the running stack.
-    4. Confirm ``advisor_call_count_for("post_verify") == 1`` via an
-       FakeLLM-introspection API once one is exposed (or via the
-       per-PR ``review_logs/{pr}/advisor_session.jsonl`` artifact the
-       PostVerifyAdvisor writes per spec §6).
+    The Tier-2 surface only exposes API/UI affordances (no FakeLLM
+    introspection over HTTP). The advisor's involvement is asserted
+    indirectly: if the post_verify advisor hadn't APPROVED, the merge
+    flow would have stopped short of ``merged``. The ``review_advisor``
+    worker card check then proves the backend's loop registration is
+    actually wired into the dashboard the operator sees.
     """
-    pytest.skip(
-        "Pending sandbox-side advisor wiring: "
-        "(a) reviewers._mockworld_fake_llm sentinel in sandbox_main.py, "
-        "(b) script_advisor (3-arg form) support in the seed-script loader. "
-        "Tier-1 parity at tests/scenarios/test_pr_review_advisor_happy_path.py."
+
+    # API assertion — eventually consistent: poll history until issue 7
+    # carries an outcome of "merged". Same source of truth as the
+    # Outcomes UI tab (IssueHistoryEntry payload).
+    def _has_merged_issue_7(payload: dict) -> bool:
+        items = payload.get("items") if isinstance(payload, dict) else None
+        if not isinstance(items, list):
+            return False
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if item.get("issue_number") != 7:
+                continue
+            outcome = item.get("outcome") or {}
+            if isinstance(outcome, dict) and outcome.get("outcome") == "merged":
+                return True
+        return False
+
+    history = await api.wait_until(
+        "/api/issues/history?limit=500",
+        _has_merged_issue_7,
+        timeout=30.0,
     )
-    # Reference the scripted payload so static analysis doesn't flag it
-    # as dead. This is the verdict the activated assert_outcome will
-    # script via FakeLLM.script_advisor(7, "post_verify", [...]).
-    _ = _ADVISOR_POST_VERIFY_APPROVE
-    _ = api
-    _ = page
+    items = history.get("items") if isinstance(history, dict) else None
+    assert isinstance(items, list), f"history payload missing items: {history!r}"
+    matching = [i for i in items if isinstance(i, dict) and i.get("issue_number") == 7]
+    assert matching, f"no issue_number=7 entry in history: {history!r}"
+    outcome = matching[0].get("outcome") or {}
+    assert outcome.get("outcome") == "merged", (
+        f"PR should merge after advisor APPROVE; got {matching[0]!r}"
+    )
+
+    # UI assertion — System tab renders the review_advisor worker card.
+    # Proves BACKGROUND_WORKERS registration in src/ui/src/constants.js
+    # is rendered by the running stack (SystemPanel.jsx emits
+    # data-testid="worker-card-${def.key}" per worker).
+    await page.goto("/")
+    await page.click("text=System")
+    card = page.locator("[data-testid='worker-card-review_advisor']")
+    await card.wait_for(timeout=10_000)
+    assert await card.is_visible()
