@@ -6,11 +6,13 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W19
 
-- `093a642` — fix: revert Task 4 (redundant with existing test_event_reducer_coverage) *(2026-05-07)*
-- `262b697` — feat(memory-backlog): wire MemoryBacklogLoop into 5 checkpoints + caretaking area *(2026-05-07)*
-- `230b86a` — feat(memory-backlog): MemoryBacklogLoop class + integration tests *(2026-05-07)*
-- `caa8736` — feat(memory-backlog): ADR-0057 + config + state mixin *(2026-05-07)*
-- `fdeeaf8` — feat(memory-backlog): in-repo mirror of feedback memories *(2026-05-07)*
+- `4c1abad` — chore(arch): regen after cleanup commit (commit-SHA pin update only) *(2026-05-07)*
+- `937ae61` — fix: revert Task 4 (redundant with existing test_event_reducer_coverage) *(2026-05-07)*
+- `eb05faf` — feat(memory-backlog): wire MemoryBacklogLoop into 5 checkpoints + caretaking area *(2026-05-07)*
+- `f4e4f73` — feat(memory-backlog): MemoryBacklogLoop class + integration tests *(2026-05-07)*
+- `fd963e8` — feat(memory-backlog): ADR-0057 + config + state mixin *(2026-05-07)*
+- `db80032` — feat(memory-backlog): in-repo mirror of feedback memories *(2026-05-07)*
+- `1966bfd` — fix(staging-promotion): trigger CI on rc/* PRs via synthetic commit *(2026-05-07)*
 - `c681459` — feat(pr): caretaker-loops spec + plan + update_pr_base port method (#8489) (#8489) *(2026-05-07)*
 - `cdb1a31` — feat(testing): document HydraFlow test pyramid + add missing layers for #8482 (#8486) (#8486) *(2026-05-07)*
 - `dd9ce56` — feat(pr): rebase-on-conflict for process-driven merges (#8482) (#8482) *(2026-05-06)*
@@ -176,4 +178,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `093a642` on 2026-05-08 03:18 UTC. Source last changed at `093a642`. Status: 🟢 fresh._
+_Regenerated from commit `4c1abad` on 2026-05-08 03:33 UTC. Source last changed at `4c1abad`. Status: 🟢 fresh._
