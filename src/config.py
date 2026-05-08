@@ -227,6 +227,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_FAKE_COVERAGE_AUDITOR_INTERVAL",
         604800,
     ),
+    (
+        "memory_backlog_interval_seconds",
+        "HYDRAFLOW_MEMORY_BACKLOG_INTERVAL",
+        86_400,
+    ),
     ("rc_budget_interval", "HYDRAFLOW_RC_BUDGET_INTERVAL", 14400),
     ("wiki_rot_detector_interval", "HYDRAFLOW_WIKI_ROT_DETECTOR_INTERVAL", 604800),
     ("term_proposer_interval", "HYDRAFLOW_TERM_PROPOSER_INTERVAL", 14400),
@@ -1903,6 +1908,33 @@ class HydraFlowConfig(BaseModel):
         description="Seconds between FakeCoverageAuditorLoop ticks (default 7d)",
     )
 
+    # Trust fleet — MemoryBacklogLoop (ADR-0057)
+    memory_backlog_interval_seconds: int = Field(
+        default=86_400,
+        ge=3_600,
+        le=604_800,
+        description="Cadence for MemoryBacklogLoop (default 24h, range 1h–7d).",
+    )
+    memory_backlog_enabled: bool = Field(
+        default=True,
+        description=(
+            "Static gate for MemoryBacklogLoop. Defense-in-depth alongside "
+            "the in-body ADR-0049 kill-switch."
+        ),
+    )
+    memory_backlog_label: list[str] = Field(
+        default=["hydraflow-memory-backlog"],
+        description=(
+            "Label applied to issues filed by MemoryBacklogLoop (alongside find_label)."
+        ),
+    )
+    memory_backlog_stuck_label: list[str] = Field(
+        default=["hydraflow-memory-backlog-stuck"],
+        description=(
+            "Escalation label after 3 unresolved attempts on the same memory entry."
+        ),
+    )
+
     # Trust fleet — RCBudgetLoop (spec §4.8)
     rc_budget_interval: int = Field(
         default=14400,
@@ -2280,6 +2312,8 @@ class HydraFlowConfig(BaseModel):
         "verify_label",
         "parked_label",
         "diagnose_label",
+        "memory_backlog_label",
+        "memory_backlog_stuck_label",
     )
     @classmethod
     def labels_must_not_be_empty(cls, v: list[str]) -> list[str]:

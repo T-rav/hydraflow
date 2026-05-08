@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W19
 
+- `fdeeaf8` — feat(memory-backlog): in-repo mirror of feedback memories *(2026-05-07)*
 - `c681459` — feat(pr): caretaker-loops spec + plan + update_pr_base port method (#8489) (#8489) *(2026-05-07)*
 - `cdb1a31` — feat(testing): document HydraFlow test pyramid + add missing layers for #8482 (#8486) (#8486) *(2026-05-07)*
 - `dd9ce56` — feat(pr): rebase-on-conflict for process-driven merges (#8482) (#8482) *(2026-05-06)*
@@ -171,4 +172,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `932466f` on 2026-05-08 02:24 UTC. Source last changed at `932466f`. Status: 🟢 fresh._
+_Regenerated from commit `dfc00a8` on 2026-05-08 02:45 UTC. Source last changed at `dfc00a8`. Status: 🟢 fresh._

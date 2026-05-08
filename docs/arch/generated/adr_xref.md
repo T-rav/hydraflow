@@ -63,6 +63,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0053 | `src.repo_wiki`, `src.repo_wiki_loop` |
 | ADR-0054 | `src.term_proposer_loop`, `src.ubiquitous_language` |
 | ADR-0055 | `src.base_background_loop`, `src.base_runner`, `src.config`, `src.events`, `src.exception_classify`, `src.mockworld.fakes.fake_honeycomb`, `src.pr_manager`, `src.server`, `src.telemetry.__init__`, `src.telemetry.otel`, `src.telemetry.slugs`, `src.telemetry.spans`, `src.telemetry.subprocess_bridge`, `src.trace_collector`, `src.workspace` |
+| ADR-0057 | `src.memory_backlog_loop`, `src.memory_backlog_mirror` |
 
 ## Module → ADRs
 
@@ -108,6 +109,8 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.issue_cache` | ADR-0041 |
 | `src.issue_fetcher` | ADR-0019 |
 | `src.issue_store` | ADR-0006, ADR-0022, ADR-0041 |
+| `src.memory_backlog_loop` | ADR-0057 |
+| `src.memory_backlog_mirror` | ADR-0057 |
 | `src.metrics_manager` | ADR-0010, ADR-0021 |
 | `src.mockworld.fakes.fake_honeycomb` | ADR-0055 |
 | `src.mockworld.sandbox_main` | ADR-0052 |
@@ -164,4 +167,4 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.workspace` | ADR-0055 |
 | `src.worktree` | ADR-0003, ADR-0009, ADR-0010 |
 
-_Regenerated from commit `932466f` on 2026-05-08 02:24 UTC. Source last changed at `932466f`. Status: 🟢 fresh._
+_Regenerated from commit `dfc00a8` on 2026-05-08 02:45 UTC. Source last changed at `dfc00a8`. Status: 🟢 fresh._
