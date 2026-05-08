@@ -23,7 +23,7 @@ graph LR
     src -- "1" --> src_contracts
     src -- "4" --> src_dashboard_routes
     src -- "12" --> src_preflight
-    src -- "44" --> src_state
+    src -- "45" --> src_state
     src -- "7" --> src_telemetry
     src_arch_extractors -- "7" --> src_arch
     src_arch_generators -- "10" --> src_arch
@@ -36,4 +36,4 @@ graph LR
     src_runners -- "1" --> src_preflight
 ```
 
-_Regenerated from commit `dfc00a8` on 2026-05-08 02:45 UTC. Source last changed at `dfc00a8`. Status: 🟢 fresh._
+_Regenerated from commit `caa8736` on 2026-05-08 02:50 UTC. Source last changed at `caa8736`. Status: 🟢 fresh._
