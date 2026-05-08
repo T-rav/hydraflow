@@ -155,6 +155,7 @@ class ReviewRunner(BaseRunner):
         code_scanning_alerts: list[CodeScanningAlert] | None = None,
         bead_tasks: list[dict[str, object]] | None = None,
         pre_flight_plan: ReviewPlan | None = None,
+        surface: str = "pr_review",
     ) -> ReviewResult:
         """Run the review agent for *pr*.
 
@@ -164,6 +165,11 @@ class ReviewRunner(BaseRunner):
         ``PreFlightAdvisor`` upstream in :class:`ReviewPhase`. When set, it
         is rendered into the prompt as a focus rubric the executor should
         prioritize during review.
+
+        ``surface`` selects which advisor surface config drives mid-flight
+        prompt assembly. Defaults to ``"pr_review"`` for back-compat; Phase
+        4 wires other surfaces (``adr_review``, ``visual_gate``, etc.) by
+        passing the surface name explicitly.
         """
         start = time.monotonic()
         result = ReviewResult(
@@ -205,6 +211,7 @@ class ReviewRunner(BaseRunner):
                 code_scanning_alerts=code_scanning_alerts,
                 bead_tasks=bead_tasks,
                 pre_flight_plan=pre_flight_plan,
+                surface=surface,
             )
             before_sha = await self._get_head_sha(worktree_path)
             transcript = await self._execute(
@@ -725,6 +732,7 @@ Then a brief summary on the next line starting with "SUMMARY: ".
         code_scanning_alerts: list[CodeScanningAlert] | None = None,
         bead_tasks: list[dict[str, object]] | None = None,
         pre_flight_plan: ReviewPlan | None = None,
+        surface: str = "pr_review",
     ) -> tuple[str, dict[str, object]]:
         """Build the review prompt and pruning stats."""
         ci_enabled = self._config.max_ci_fix_attempts > 0
@@ -841,13 +849,13 @@ Then a brief summary on the next line starting with "SUMMARY: ".
         # Mid-flight consult section (advisor-pattern T21). When the surface
         # has mid-flight enabled (kill-switch chain open), document the
         # consult_advisor Task tool so the executor knows to call it on
-        # judgment calls. Constructed inline from the hardcoded "pr_review"
-        # surface — T20+T21 are pr_review-only. Threading surface_config
-        # through review() is a Phase 4 follow-up if other surfaces opt in.
+        # judgment calls. The ``surface`` kwarg threaded through ``review()``
+        # picks the surface config (T24.7 — was hardcoded "pr_review" prior
+        # to Phase 4 multi-surface wiring; default keeps back-compat).
         # Returns None when mid-flight is disabled; coerce to "" so the
         # f-string concatenation below stays branch-free.
         mid_flight_section = (
-            format_mid_flight_for_prompt(build_surface_config("pr_review")) or ""
+            format_mid_flight_for_prompt(build_surface_config(surface)) or ""
         )
 
         prompt = f"""You are reviewing PR #{pr.number} which implements issue #{issue.id}.

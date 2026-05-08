@@ -1767,3 +1767,45 @@ class TestDisagreementValidationShortSignals:
             role="pre_flight",
         )
         assert validated == 0
+
+
+class TestSurfaceThreading:
+    """T24.7: confirm the surface parameter routes to the correct advisor config.
+
+    Phase 4 will wire pre_merge_spec_check, adr_review, visual_gate, wiki_ingest;
+    these tests pin that surface threading works without behavior change at
+    pr_review's call sites.
+    """
+
+    def test_pre_flight_input_carries_surface(self):
+        # Construct PreFlightInput directly with a non-pr_review surface.
+        inp = PreFlightInput(surface="adr_review", diff="d")
+        assert inp.surface == "adr_review"
+
+    def test_post_verify_input_carries_surface(self):
+        inp = PostVerifyInput(
+            surface="visual_gate", diff="d", executor_verdict_summary="x"
+        )
+        assert inp.surface == "visual_gate"
+
+    def test_advisor_uses_input_surface_not_config_surface(self):
+        """The advisor's _build_prompt must echo the input's surface, not the
+        config's. This pins back-compat: pr_review tests with hardcoded
+        config still work, but a test passing surface='adr_review' in the
+        PreFlightInput sees that string in the prompt.
+
+        surface_config drives the model resolution; input's surface is just
+        the prompt field. T24.7 doesn't change that contract — it pins it
+        so Phase 4 can rely on it.
+        """
+        runner = _StubAdvisorRunner(
+            '{"risk_summary":"r","focus_areas":[],"rubric":[],"escalation_signals":[]}'
+        )
+        advisor = PreFlightAdvisor(
+            runner=runner,
+            surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"],
+        )
+        # Mismatched surface intentionally — input drives the prompt field.
+        inp = PreFlightInput(surface="adr_review", diff="d")
+        asyncio.run(advisor.run(inp))
+        assert "adr_review" in runner.calls[0]["prompt"]

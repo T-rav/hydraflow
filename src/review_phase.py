@@ -939,8 +939,15 @@ class ReviewPhase:
         idx: int,
         pr: PRInfo,
         issue_map: dict[int, Task],
+        surface: str = "pr_review",
     ) -> ReviewResult:
-        """Core review logic for a single PR — called inside the semaphore."""
+        """Core review logic for a single PR — called inside the semaphore.
+
+        ``surface`` defaults to ``"pr_review"`` for back-compat (T24.7 prep
+        for Phase 4). Phase 4 outer helpers may invoke this with other
+        surface names; the surface is threaded through the advisor and
+        executor prompt-building call sites.
+        """
         from trace_rollup import write_phase_rollup  # noqa: PLC0415
         from tracing_context import (  # noqa: PLC0415
             TracingContext,
@@ -977,7 +984,9 @@ class ReviewPhase:
             if isinstance(pre_review, ReviewResult):
                 return pre_review
 
-            await self._run_pre_flight_advisor(pr, guards.task, pre_review.diff)
+            await self._run_pre_flight_advisor(
+                pr, guards.task, pre_review.diff, surface=surface
+            )
 
             result = await self._run_and_post_review(
                 pr,
@@ -987,6 +996,7 @@ class ReviewPhase:
                 idx,
                 code_scanning_alerts=pre_review.code_scanning_alerts,
                 pre_flight_plan=self._advisor_pre_flight_plan.get(pr.number),
+                surface=surface,
             )
 
             return await self._run_post_review_actions(
@@ -996,6 +1006,7 @@ class ReviewPhase:
                 result,
                 pre_review,
                 idx,
+                surface=surface,
             )
         finally:
             self._reviewers.clear_tracing_context()
@@ -1105,8 +1116,14 @@ class ReviewPhase:
         result: ReviewResult,
         pre_review: PreReviewContext,
         worker_id: int,
+        surface: str = "pr_review",
     ) -> ReviewResult:
-        """Handle re-review, visual validation, verdict flow, and cleanup."""
+        """Handle re-review, visual validation, verdict flow, and cleanup.
+
+        ``surface`` is forwarded to ``_run_post_verify_advisor`` so the
+        post-verify advisor uses the correct surface config (T24.7).
+        Defaults to ``"pr_review"`` for back-compat.
+        """
         diff = pre_review.diff
         code_scanning_alerts = pre_review.code_scanning_alerts
 
@@ -1178,6 +1195,7 @@ class ReviewPhase:
                 diff=diff,
                 worker_id=worker_id,
                 code_scanning_alerts=code_scanning_alerts,
+                surface=surface,
             )
 
         skip_worktree_cleanup = False
@@ -1210,6 +1228,7 @@ class ReviewPhase:
         pr: PRInfo,
         task: Task,
         diff: str,
+        surface: str = "pr_review",
     ) -> None:
         """Run :class:`PreFlightAdvisor` when the composite trigger fires.
 
@@ -1221,12 +1240,16 @@ class ReviewPhase:
         debugging — failures there must not break the pipeline.
 
         No-ops when:
-          * The pr_review surface or pre_flight role is kill-switched off.
+          * The selected ``surface`` or pre_flight role is kill-switched off.
           * The composite trigger returns False (trivial/docs-only diffs
             without prior fix attempts and no critical-path touches).
           * The advisor returns ``None`` (degraded path — runner or parse
             error). The executor proceeds without a plan; the contract is
             "advisor is advisory" per the spec.
+
+        ``surface`` defaults to ``"pr_review"`` for back-compat (T24.7 prep
+        for Phase 4 multi-surface wiring); other surfaces (``adr_review``,
+        ``visual_gate``, etc.) pass the surface name explicitly.
 
         Function-local imports keep the dependency on ``review_advisor``
         contained to where it's used and avoid the auto-lint hook stripping
@@ -1240,11 +1263,11 @@ class ReviewPhase:
             is_advisor_enabled,
         )
 
-        surface_cfg = build_surface_config("pr_review")
+        surface_cfg = build_surface_config(surface)
         if (
             not surface_cfg.pre_flight_enabled
             or surface_cfg.pre_flight_trigger is None
-            or not is_advisor_enabled("pr_review", "pre_flight")
+            or not is_advisor_enabled(surface, "pre_flight")
         ):
             return
 
@@ -1270,7 +1293,7 @@ class ReviewPhase:
         try:
             plan = await advisor.run(
                 PreFlightInput(
-                    surface="pr_review",
+                    surface=surface,
                     diff=diff,
                     spec=task.body or None,
                     related_paths=diff_stats.changed_paths,
@@ -1317,6 +1340,7 @@ class ReviewPhase:
         diff: str,
         worker_id: int,
         code_scanning_alerts: list[CodeScanningAlert] | None = None,
+        surface: str = "pr_review",
     ) -> tuple[ReviewResult, str]:
         """Run PostVerifyAdvisor with bounded VETO retries.
 
@@ -1330,6 +1354,12 @@ class ReviewPhase:
         disagreement transcript and returns ``(result, diff)`` flipped to
         REQUEST_CHANGES so the caller skips the merge branch.
 
+        ``surface`` defaults to ``"pr_review"`` for back-compat (T24.7 prep
+        for Phase 4 multi-surface wiring); other surfaces (``adr_review``,
+        ``visual_gate``, etc.) pass the surface name explicitly. The same
+        surface drives the surface-config lookup, the kill-switch check,
+        the ``PostVerifyInput.surface`` field, and the metric labels.
+
         Function-local imports keep the dependency on ``review_advisor``
         contained to where it's used and avoid the auto-lint hook stripping
         an "unused" top-level import.
@@ -1341,9 +1371,9 @@ class ReviewPhase:
             is_advisor_enabled,
         )
 
-        surface_cfg = build_surface_config("pr_review")
+        surface_cfg = build_surface_config(surface)
         if not surface_cfg.post_verify_enabled or not is_advisor_enabled(
-            "pr_review", "post_verify"
+            surface, "post_verify"
         ):
             return result, diff
 
@@ -1374,7 +1404,7 @@ class ReviewPhase:
             try:
                 pv_result = await advisor.run(
                     PostVerifyInput(
-                        surface="pr_review",
+                        surface=surface,
                         diff=diff,
                         spec=task.body or None,
                         executor_verdict_summary=(
@@ -1416,18 +1446,16 @@ class ReviewPhase:
                 # from, record the recovery in metrics before returning.
                 if attempt_number > 0:
                     _emit_advisor_loop_metric(
-                        _veto_recovered_total, {"surface": "pr_review"}
+                        _veto_recovered_total, {"surface": surface}
                     )
                 return result, diff
 
             # VETO — either retry or escalate.
             if attempt_number >= surface_cfg.max_veto_retries:
-                _emit_advisor_loop_metric(
-                    _veto_exhausted_total, {"surface": "pr_review"}
-                )
+                _emit_advisor_loop_metric(_veto_exhausted_total, {"surface": surface})
                 _emit_advisor_loop_metric(
                     _veto_retries_total,
-                    {"surface": "pr_review", "attempt": "exhausted"},
+                    {"surface": surface, "attempt": "exhausted"},
                 )
                 transcript = self._render_advisor_transcript(pr.number)
                 await self._escalate_to_hitl(
@@ -1470,7 +1498,7 @@ class ReviewPhase:
             # (1-indexed: first retry is attempt=1).
             _emit_advisor_loop_metric(
                 _veto_retries_total,
-                {"surface": "pr_review", "attempt": str(attempt_number + 1)},
+                {"surface": surface, "attempt": str(attempt_number + 1)},
             )
             self._advisor_attempt[pr.number] = attempt_number + 1
             attempt_number += 1
@@ -1826,12 +1854,17 @@ class ReviewPhase:
         worker_id: int,
         code_scanning_alerts: list[CodeScanningAlert] | None = None,
         pre_flight_plan: ReviewPlan | None = None,
+        surface: str = "pr_review",
     ) -> ReviewResult:
         """Run the reviewer, push fixes, post summary, submit formal review.
 
         ``pre_flight_plan`` is the optional :class:`ReviewPlan` produced by
         ``PreFlightAdvisor``. When set, it is rendered into the executor's
         review prompt as a focus rubric.
+
+        ``surface`` selects which advisor surface config drives the
+        executor's mid-flight prompt assembly. Defaults to ``"pr_review"``
+        for back-compat (T24.7).
         """
         # Build bead context for per-bead review when beads are enabled
         bead_tasks = self._build_bead_review_context(issue)
@@ -1845,6 +1878,7 @@ class ReviewPhase:
             code_scanning_alerts=code_scanning_alerts,
             bead_tasks=bead_tasks,
             pre_flight_plan=pre_flight_plan,
+            surface=surface,
         )
 
         if result.fixes_made:
