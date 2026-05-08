@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 from typing import Any
 
 import pytest
@@ -645,3 +646,376 @@ class TestAdvisorSessionLogging:
         )
         result = asyncio.run(advisor.run(inp))
         assert result.verdict == "APPROVE"
+
+
+# --- T13 telemetry helpers ---
+
+
+class _MetricRecorder:
+    """Wraps an OTel ``InMemoryMetricReader`` for ergonomic test assertions.
+
+    The advisor module-level meter is a proxy that resolves to whatever
+    ``MeterProvider`` is set when ``.add()`` / ``.record()`` is called, so
+    installing a provider after import still routes datapoints to the
+    in-memory reader. See verify-script in T13 plan.
+    """
+
+    def __init__(self) -> None:
+        from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+        self._reader = InMemoryMetricReader()
+
+    @property
+    def reader(self):  # type: ignore[no-untyped-def]
+        return self._reader
+
+    def _collect(self) -> list:
+        data = self._reader.get_metrics_data()
+        flat = []
+        if data is None:
+            return flat
+        for rm in data.resource_metrics:
+            for sm in rm.scope_metrics:
+                for metric in sm.metrics:
+                    flat.append(metric)
+        return flat
+
+    def _matching_points(self, metric_name: str, attrs: dict[str, Any]) -> list:
+        out = []
+        for metric in self._collect():
+            if metric.name != metric_name:
+                continue
+            for dp in metric.data.data_points:
+                dp_attrs = dict(dp.attributes or {})
+                if all(dp_attrs.get(k) == v for k, v in attrs.items()):
+                    out.append(dp)
+        return out
+
+    def counter_value(self, metric_name: str, **attrs: Any) -> int | float:
+        """Sum of values for all datapoints matching ``attrs``. 0 if none."""
+        points = self._matching_points(metric_name, attrs)
+        return sum(p.value for p in points)
+
+    def histogram_count(self, metric_name: str, **attrs: Any) -> int:
+        """Count of histogram observations matching ``attrs``."""
+        points = self._matching_points(metric_name, attrs)
+        return sum(int(p.count) for p in points)
+
+    def metric_names(self) -> set[str]:
+        return {m.name for m in self._collect()}
+
+
+@pytest.fixture
+def metric_recorder():
+    """Install a fresh OTel MeterProvider backed by an InMemoryMetricReader.
+
+    Yields a ``_MetricRecorder`` for assertions. After the test, restores a
+    no-op MeterProvider so other tests don't see leaked datapoints.
+
+    Notes:
+        ``opentelemetry.metrics.set_meter_provider`` is gated by a one-shot
+        guard (``_METER_PROVIDER_SET_ONCE``) inside ``opentelemetry.metrics._internal``,
+        so back-to-back calls in tests require resetting the gate. We reach
+        into the private module to flip ``_done``; this is the same gate the
+        SDK exposes for tests in upstream's own test suite.
+    """
+    from opentelemetry import metrics
+    from opentelemetry.metrics import NoOpMeterProvider, _internal
+    from opentelemetry.sdk.metrics import MeterProvider
+
+    recorder = _MetricRecorder()
+    provider = MeterProvider(metric_readers=[recorder.reader])
+    _internal._METER_PROVIDER_SET_ONCE._done = False  # type: ignore[attr-defined]
+    metrics.set_meter_provider(provider)
+    try:
+        yield recorder
+    finally:
+        with contextlib.suppress(Exception):
+            provider.shutdown()
+        _internal._METER_PROVIDER_SET_ONCE._done = False  # type: ignore[attr-defined]
+        metrics.set_meter_provider(NoOpMeterProvider())
+
+
+class TestAdvisorTelemetry:
+    """T13: PostVerifyAdvisor + ReviewPhase retry-loop OTel metric emissions."""
+
+    def test_post_verify_emits_calls_total_on_success(self, metric_recorder):
+        runner = _StubAdvisorRunner(
+            '{"verdict":"APPROVE","reasoning":"ok","disagreements":[]}'
+        )
+        advisor = PostVerifyAdvisor(
+            runner=runner,
+            surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"],
+        )
+        inp = PostVerifyInput(
+            surface="pr_review",
+            diff="d",
+            executor_verdict_summary="x",
+        )
+        asyncio.run(advisor.run(inp))
+        assert (
+            metric_recorder.counter_value(
+                "review_advisor_calls_total",
+                surface="pr_review",
+                role="post_verify",
+                outcome="success",
+            )
+            == 1
+        )
+
+    def test_post_verify_emits_call_duration_histogram(self, metric_recorder):
+        runner = _StubAdvisorRunner(
+            '{"verdict":"APPROVE","reasoning":"ok","disagreements":[]}'
+        )
+        advisor = PostVerifyAdvisor(
+            runner=runner,
+            surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"],
+        )
+        inp = PostVerifyInput(
+            surface="pr_review",
+            diff="d",
+            executor_verdict_summary="x",
+        )
+        asyncio.run(advisor.run(inp))
+        assert (
+            metric_recorder.histogram_count(
+                "review_advisor_call_duration_seconds",
+                surface="pr_review",
+                role="post_verify",
+            )
+            == 1
+        )
+
+    def test_post_verify_emits_verdict_total_approve(self, metric_recorder):
+        runner = _StubAdvisorRunner(
+            '{"verdict":"APPROVE","reasoning":"ok","disagreements":[]}'
+        )
+        advisor = PostVerifyAdvisor(
+            runner=runner,
+            surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"],
+        )
+        inp = PostVerifyInput(
+            surface="pr_review",
+            diff="d",
+            executor_verdict_summary="x",
+        )
+        asyncio.run(advisor.run(inp))
+        assert (
+            metric_recorder.counter_value(
+                "review_advisor_post_verify_verdict_total",
+                surface="pr_review",
+                verdict="approve",
+            )
+            == 1
+        )
+
+    def test_post_verify_emits_verdict_total_veto(self, metric_recorder):
+        # pr_review has authority="veto" so the VETO verdict is preserved
+        # post-advisory-downgrade. The verdict counter should reflect it.
+        runner = _StubAdvisorRunner(
+            '{"verdict":"VETO","reasoning":"r","disagreements":[]}'
+        )
+        advisor = PostVerifyAdvisor(
+            runner=runner,
+            surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"],
+        )
+        inp = PostVerifyInput(
+            surface="pr_review",
+            diff="d",
+            executor_verdict_summary="x",
+        )
+        asyncio.run(advisor.run(inp))
+        assert (
+            metric_recorder.counter_value(
+                "review_advisor_post_verify_verdict_total",
+                surface="pr_review",
+                verdict="veto",
+            )
+            == 1
+        )
+
+    def test_advisory_authority_records_post_downgrade_verdict(self, metric_recorder):
+        # wiki_ingest is advisory: VETO is downgraded to APPROVE before
+        # return — the verdict counter should reflect the downgrade.
+        runner = _StubAdvisorRunner(
+            '{"verdict":"VETO","reasoning":"r","disagreements":[]}'
+        )
+        advisor = PostVerifyAdvisor(
+            runner=runner,
+            surface_config=SURFACE_ADVISOR_CONFIGS["wiki_ingest"],
+        )
+        inp = PostVerifyInput(
+            surface="wiki_ingest",
+            diff="d",
+            executor_verdict_summary="x",
+        )
+        asyncio.run(advisor.run(inp))
+        assert (
+            metric_recorder.counter_value(
+                "review_advisor_post_verify_verdict_total",
+                surface="wiki_ingest",
+                verdict="approve",
+            )
+            == 1
+        )
+        assert (
+            metric_recorder.counter_value(
+                "review_advisor_post_verify_verdict_total",
+                surface="wiki_ingest",
+                verdict="veto",
+            )
+            == 0
+        )
+
+    def test_runner_error_emits_degraded_total_and_outcome_error(
+        self, metric_recorder, monkeypatch
+    ):
+        monkeypatch.delenv("HYDRAFLOW_REVIEW_POSTVERIFY_FAIL_AS_VETO", raising=False)
+        runner = _StubAdvisorRunner(RuntimeError("boom"))
+        advisor = PostVerifyAdvisor(
+            runner=runner,
+            surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"],
+        )
+        inp = PostVerifyInput(
+            surface="pr_review",
+            diff="d",
+            executor_verdict_summary="x",
+        )
+        asyncio.run(advisor.run(inp))
+        assert (
+            metric_recorder.counter_value(
+                "review_advisor_calls_total",
+                surface="pr_review",
+                role="post_verify",
+                outcome="error",
+            )
+            == 1
+        )
+        assert (
+            metric_recorder.counter_value(
+                "review_advisor_post_verify_degraded_total",
+                surface="pr_review",
+            )
+            == 1
+        )
+
+    def test_parse_error_emits_degraded_total_and_outcome_parse_error(
+        self, metric_recorder, monkeypatch
+    ):
+        monkeypatch.delenv("HYDRAFLOW_REVIEW_POSTVERIFY_FAIL_AS_VETO", raising=False)
+        runner = _StubAdvisorRunner("not json at all")
+        advisor = PostVerifyAdvisor(
+            runner=runner,
+            surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"],
+        )
+        inp = PostVerifyInput(
+            surface="pr_review",
+            diff="d",
+            executor_verdict_summary="x",
+        )
+        asyncio.run(advisor.run(inp))
+        assert (
+            metric_recorder.counter_value(
+                "review_advisor_calls_total",
+                surface="pr_review",
+                role="post_verify",
+                outcome="parse_error",
+            )
+            == 1
+        )
+        assert (
+            metric_recorder.counter_value(
+                "review_advisor_post_verify_degraded_total",
+                surface="pr_review",
+            )
+            == 1
+        )
+
+    def test_credit_error_emits_outcome_error_and_no_degraded(self, metric_recorder):
+        # Auth/credit errors propagate WITHOUT going through _handle_failure,
+        # so degraded_total must NOT increment, but calls_total still records
+        # the call as an error.
+        from subprocess_util import CreditExhaustedError
+
+        runner = _StubAdvisorRunner(CreditExhaustedError("out"))
+        advisor = PostVerifyAdvisor(
+            runner=runner,
+            surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"],
+        )
+        inp = PostVerifyInput(
+            surface="pr_review",
+            diff="d",
+            executor_verdict_summary="x",
+        )
+        with pytest.raises(CreditExhaustedError):
+            asyncio.run(advisor.run(inp))
+        assert (
+            metric_recorder.counter_value(
+                "review_advisor_calls_total",
+                surface="pr_review",
+                role="post_verify",
+                outcome="error",
+            )
+            == 1
+        )
+        assert (
+            metric_recorder.counter_value(
+                "review_advisor_post_verify_degraded_total",
+                surface="pr_review",
+            )
+            == 0
+        )
+
+    def test_review_phase_loop_counters_emit_via_helper(self, metric_recorder):
+        # The retry-loop counters live on review_phase. We exercise the
+        # module-level helper directly so this test stays independent of the
+        # full ReviewPhase wiring (covered by tests/scenarios/test_pr_review_advisor_*).
+        from review_phase import (
+            _emit_advisor_loop_metric,
+            _veto_exhausted_total,
+            _veto_recovered_total,
+            _veto_retries_total,
+        )
+
+        _emit_advisor_loop_metric(
+            _veto_retries_total, {"surface": "pr_review", "attempt": "1"}
+        )
+        _emit_advisor_loop_metric(
+            _veto_retries_total, {"surface": "pr_review", "attempt": "2"}
+        )
+        _emit_advisor_loop_metric(
+            _veto_retries_total, {"surface": "pr_review", "attempt": "exhausted"}
+        )
+        _emit_advisor_loop_metric(_veto_recovered_total, {"surface": "pr_review"})
+        _emit_advisor_loop_metric(_veto_exhausted_total, {"surface": "pr_review"})
+
+        assert (
+            metric_recorder.counter_value(
+                "review_advisor_veto_retries_total",
+                surface="pr_review",
+                attempt="1",
+            )
+            == 1
+        )
+        assert (
+            metric_recorder.counter_value(
+                "review_advisor_veto_retries_total",
+                surface="pr_review",
+                attempt="exhausted",
+            )
+            == 1
+        )
+        assert (
+            metric_recorder.counter_value(
+                "review_advisor_veto_recovered_total",
+                surface="pr_review",
+            )
+            == 1
+        )
+        assert (
+            metric_recorder.counter_value(
+                "review_advisor_veto_exhausted_total",
+                surface="pr_review",
+            )
+            == 1
+        )

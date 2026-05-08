@@ -17,9 +17,41 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, Protocol
 
+from opentelemetry import metrics
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
+
+# OTel metric instruments — module-level so the proxy meter delegates to
+# whatever MeterProvider is registered at call time. When no provider is set
+# (default in production prior to T14 dashboard wiring), `.add()` / `.record()`
+# are silently no-op. Tests install an InMemoryMetricReader to read values.
+# Per ADR-0055, OTel is HydraFlow's telemetry layer; this is the metrics
+# counterpart to the existing tracing decorators in src/telemetry/spans.py.
+_meter = metrics.get_meter("hydraflow.review_advisor")
+_calls_total = _meter.create_counter(
+    "review_advisor_calls_total",
+    description="PostVerifyAdvisor invocations, labeled by surface/role/outcome.",
+)
+_call_duration_seconds = _meter.create_histogram(
+    "review_advisor_call_duration_seconds",
+    unit="s",
+    description="PostVerifyAdvisor wall-clock duration per invocation.",
+)
+_post_verify_verdict_total = _meter.create_counter(
+    "review_advisor_post_verify_verdict_total",
+    description=(
+        "PostVerifyAdvisor verdict count, labeled by surface and the "
+        "post-advisory-downgrade verdict (approve/veto)."
+    ),
+)
+_post_verify_degraded_total = _meter.create_counter(
+    "review_advisor_post_verify_degraded_total",
+    description=(
+        "PostVerifyAdvisor degraded-path count (runner error or parse error), "
+        "labeled by surface."
+    ),
+)
 
 
 class FocusArea(BaseModel):
@@ -327,10 +359,14 @@ class PostVerifyAdvisor:
                 self._emit_log(
                     prompt=prompt, payload=None, start=start, error="runner-error"
                 )
+                self._emit_metrics(start=start, outcome="error", verdict=None)
                 raise
             result = self._handle_failure(reason=f"runner-error: {exc!r}")
             self._emit_log(
                 prompt=prompt, payload=None, start=start, error="runner-error"
+            )
+            self._emit_metrics(
+                start=start, outcome="error", verdict=result.verdict.lower()
             )
             return result
 
@@ -341,6 +377,9 @@ class PostVerifyAdvisor:
             result = self._handle_failure(reason=f"parse-error: {exc!r}")
             self._emit_log(
                 prompt=prompt, payload=payload, start=start, error="parse-error"
+            )
+            self._emit_metrics(
+                start=start, outcome="parse_error", verdict=result.verdict.lower()
             )
             return result
 
@@ -353,6 +392,9 @@ class PostVerifyAdvisor:
                 suggested_fix_direction=result.suggested_fix_direction,
             )
         self._emit_log(prompt=prompt, payload=payload, start=start, error=None)
+        self._emit_metrics(
+            start=start, outcome="success", verdict=result.verdict.lower()
+        )
         return result
 
     def _emit_log(
@@ -385,6 +427,39 @@ class PostVerifyAdvisor:
             # best-effort logging; never block the pipeline
             logger.debug("advisor session log write failed", exc_info=True)
 
+    def _emit_metrics(
+        self,
+        *,
+        start: float,
+        outcome: Literal["success", "error", "parse_error"],
+        verdict: str | None,
+    ) -> None:
+        """Best-effort OTel metrics emission. Never raises.
+
+        - ``calls_total`` and ``call_duration_seconds`` always emit (one
+          datapoint per call).
+        - ``post_verify_verdict_total`` emits when a verdict was resolved
+          (i.e. not the auth/credit reraise path).
+        """
+        try:
+            attrs_call = {
+                "surface": self._cfg.surface,
+                "role": "post_verify",
+                "outcome": outcome,
+            }
+            _calls_total.add(1, attrs_call)
+            _call_duration_seconds.record(
+                time.monotonic() - start,
+                {"surface": self._cfg.surface, "role": "post_verify"},
+            )
+            if verdict is not None:
+                _post_verify_verdict_total.add(
+                    1, {"surface": self._cfg.surface, "verdict": verdict}
+                )
+        except Exception:
+            # Telemetry must never alter business control flow (ADR-0055).
+            logger.debug("advisor metrics emit failed", exc_info=True)
+
     def _handle_failure(self, *, reason: str) -> PostVerifyResult:
         fail_as_veto = _env_truthy(
             os.environ.get("HYDRAFLOW_REVIEW_POSTVERIFY_FAIL_AS_VETO")
@@ -396,6 +471,10 @@ class PostVerifyAdvisor:
             reason,
             verdict,
         )
+        try:
+            _post_verify_degraded_total.add(1, {"surface": self._cfg.surface})
+        except Exception:
+            logger.debug("advisor degraded-counter emit failed", exc_info=True)
         return PostVerifyResult(
             verdict=verdict,
             reasoning=f"advisor-degraded: {reason}",

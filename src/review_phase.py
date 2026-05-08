@@ -23,6 +23,9 @@ if TYPE_CHECKING:
         WikiCompiler,
     )
 
+
+from opentelemetry import metrics
+
 from adr_utils import (
     adr_validation_reasons,
     check_adr_duplicate,
@@ -87,6 +90,44 @@ from task_source import TaskTransitioner
 from transcript_summarizer import TranscriptSummarizer
 
 logger = logging.getLogger("hydraflow.review_phase")
+
+# OTel metric instruments for the post-verify advisor's veto-retry loop.
+# Module-level so the proxy meter delegates to the registered MeterProvider
+# at call time. No-op when no provider is set (production today). Tests
+# install an InMemoryMetricReader to read counter values.
+# Per ADR-0055, OTel is the project's telemetry layer.
+_advisor_meter = metrics.get_meter("hydraflow.review_phase.advisor")
+_veto_retries_total = _advisor_meter.create_counter(
+    "review_advisor_veto_retries_total",
+    description=(
+        "Count of advisor-driven veto retry triggers, labeled by surface "
+        "and the attempt number that just kicked off (1, 2, ..., or "
+        "'exhausted' when the retry budget runs out)."
+    ),
+)
+_veto_recovered_total = _advisor_meter.create_counter(
+    "review_advisor_veto_recovered_total",
+    description=(
+        "Count of post-retry advisor APPROVE verdicts (advisor recovered "
+        "from a prior VETO without HITL), labeled by surface."
+    ),
+)
+_veto_exhausted_total = _advisor_meter.create_counter(
+    "review_advisor_veto_exhausted_total",
+    description=(
+        "Count of advisor veto-retry exhaustions that escalated to HITL, "
+        "labeled by surface."
+    ),
+)
+
+
+def _emit_advisor_loop_metric(counter: Any, attrs: dict[str, Any]) -> None:
+    """Best-effort counter increment. Telemetry must never alter business
+    control flow (ADR-0055)."""
+    try:
+        counter.add(1, attrs)
+    except Exception:
+        logger.debug("advisor loop metric emit failed", exc_info=True)
 
 
 def _run_fallback_ingest_review(
@@ -1188,10 +1229,23 @@ class ReviewPhase:
             self._advisor_results[pr.number].append(pv_result)
 
             if pv_result.verdict == "APPROVE":
+                # If a prior VETO drove a retry that this APPROVE recovered
+                # from, record the recovery in metrics before returning.
+                if attempt_number > 0:
+                    _emit_advisor_loop_metric(
+                        _veto_recovered_total, {"surface": "pr_review"}
+                    )
                 return result, diff
 
             # VETO — either retry or escalate.
             if attempt_number >= surface_cfg.max_veto_retries:
+                _emit_advisor_loop_metric(
+                    _veto_exhausted_total, {"surface": "pr_review"}
+                )
+                _emit_advisor_loop_metric(
+                    _veto_retries_total,
+                    {"surface": "pr_review", "attempt": "exhausted"},
+                )
                 transcript = self._render_advisor_transcript(pr.number)
                 await self._escalate_to_hitl(
                     HitlEscalation(
@@ -1228,6 +1282,13 @@ class ReviewPhase:
 
             # Hand back to the executor with the full advisor transcript so
             # the next executor attempt can directly address the disagreement.
+            # Record the retry trigger before mutating attempt_number so the
+            # metric attribute reflects the retry number that's about to run
+            # (1-indexed: first retry is attempt=1).
+            _emit_advisor_loop_metric(
+                _veto_retries_total,
+                {"surface": "pr_review", "attempt": str(attempt_number + 1)},
+            )
             self._advisor_attempt[pr.number] = attempt_number + 1
             attempt_number += 1
             transcript = self._render_advisor_transcript(pr.number)
