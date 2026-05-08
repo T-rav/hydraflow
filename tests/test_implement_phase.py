@@ -183,10 +183,16 @@ class TestImplementIncludesPush:
         assert results[0].pr_info.number == 101
 
     @pytest.mark.asyncio
-    async def test_worker_creates_full_pr_on_failure(
+    async def test_worker_does_not_create_pr_on_fresh_failure(
         self, config: HydraFlowConfig
     ) -> None:
-        """When agent fails, PR should still be created as a full (non-draft) PR."""
+        """Fresh attempts that fail must NOT create a PR (state-machine fix).
+
+        Previously this asserted ``create_pr`` was awaited with a non-draft
+        flag, encoding the half-state bug where failed work still landed as
+        a PR with no label transition. After the fix, fresh failures skip
+        push/PR entirely; the attempt-cap mechanism retries.
+        """
         issue = TaskFactory.create()
 
         phase, _, mock_prs = make_implement_phase(
@@ -198,8 +204,7 @@ class TestImplementIncludesPush:
 
         await phase.run_batch()
 
-        call_kwargs = mock_prs.create_pr.call_args
-        assert "draft" not in (call_kwargs.kwargs or {})
+        mock_prs.create_pr.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_worker_no_pr_when_push_fails(self, config: HydraFlowConfig) -> None:
