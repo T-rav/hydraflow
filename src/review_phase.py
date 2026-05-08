@@ -1194,8 +1194,16 @@ class ReviewPhase:
         ):
             return result, diff
 
-        attempt_number = self._advisor_attempt.setdefault(pr.number, 0)
-        self._advisor_results.setdefault(pr.number, [])
+        # Reset per-PR advisor state on every entry to this function. Each
+        # call to _run_post_verify_advisor represents a fresh review cycle
+        # with its own retry budget — re-using the previous review's
+        # exhausted counter would cause review #2 to skip straight to
+        # "exhausted" without giving the executor a fresh chance. The
+        # _advisor_results queue is the input to the disagreement transcript
+        # rendered for HITL escalation, so it must be cleared too.
+        self._advisor_attempt[pr.number] = 0
+        self._advisor_results[pr.number] = []
+        attempt_number = 0
 
         log_path = (
             self._config.repo_root
@@ -1208,6 +1216,7 @@ class ReviewPhase:
                 runner=self._post_verify_runner,
                 surface_config=surface_cfg,
                 log_path=log_path,
+                pr_number=pr.number,
             )
             try:
                 pv_result = await advisor.run(

@@ -11,6 +11,7 @@ import fnmatch
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -21,6 +22,29 @@ from opentelemetry import metrics
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
+
+
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+_JSON_BLOCK_RE = re.compile(r"(\{.*\})", re.DOTALL)
+
+
+def _extract_json_block(payload: str) -> str:
+    """Extract the JSON object from an agent transcript.
+
+    The Claude subagent's response can include prose, stream events, or
+    fenced code blocks around the JSON we asked for. Production transcripts
+    are not bare JSON — see src/spec_match.py for the same pattern.
+
+    Order: fenced JSON > last/greediest ``{...}`` block > bare payload.
+    """
+    m = _JSON_FENCE_RE.search(payload)
+    if m:
+        return m.group(1)
+    m = _JSON_BLOCK_RE.search(payload)
+    if m:
+        return m.group(1)
+    return payload
+
 
 # OTel metric instruments — module-level so the proxy meter delegates to
 # whatever MeterProvider is registered at call time. When no provider is set
@@ -50,6 +74,14 @@ _post_verify_degraded_total = _meter.create_counter(
     description=(
         "PostVerifyAdvisor degraded-path count (runner error or parse error), "
         "labeled by surface."
+    ),
+)
+_disagreement_total = _meter.create_counter(
+    "review_advisor_disagreement_total",
+    description=(
+        "Disagreements observed in advisor verdicts, partitioned by "
+        "{surface, role, severity}. Feeds the disagreement-validated KPI "
+        "(spec §6.1)."
     ),
 )
 
@@ -333,10 +365,15 @@ class PostVerifyAdvisor:
         surface_config: SurfaceAdvisorConfig,
         *,
         log_path: Path | None = None,
+        pr_number: int | None = None,
     ) -> None:
         self._runner = runner
         self._cfg = surface_config
         self._log_path = log_path
+        # Threaded through to the jsonl session log so each entry carries
+        # the PR number per spec §"Logging". Production callers wire this
+        # from review_phase.py; tests may leave it unset.
+        self._pr_number = pr_number
 
     async def run(self, inp: PostVerifyInput) -> PostVerifyResult:
         prompt = self._build_prompt(inp)
@@ -374,7 +411,7 @@ class PostVerifyAdvisor:
             return result
 
         try:
-            data = json.loads(payload)
+            data = json.loads(_extract_json_block(payload))
             result = PostVerifyResult.model_validate(data)
         except Exception as exc:
             result = self._handle_failure(reason=f"parse-error: {exc!r}")
@@ -394,6 +431,20 @@ class PostVerifyAdvisor:
                 disagreements=result.disagreements,
                 suggested_fix_direction=result.suggested_fix_direction,
             )
+        # Emit per-disagreement telemetry (spec §6.1 — feeds the
+        # disagreement-validated KPI). Telemetry never breaks business logic.
+        for d in result.disagreements:
+            try:
+                _disagreement_total.add(
+                    1,
+                    {
+                        "surface": self._cfg.surface,
+                        "role": "post_verify",
+                        "severity": d.severity,
+                    },
+                )
+            except Exception:  # noqa: BLE001 — telemetry never breaks business logic
+                logger.debug("advisor disagreement-counter emit failed", exc_info=True)
         self._emit_log(prompt=prompt, payload=payload, start=start, error=None)
         self._emit_metrics(
             start=start, outcome="success", verdict=result.verdict.lower()
@@ -412,14 +463,22 @@ class PostVerifyAdvisor:
         if self._log_path is None:
             return
         duration_ms = int((time.monotonic() - start) * 1000)
+        # Token counts are placeholders: the runner adapter does not yet
+        # surface them. Emitting `None` documents the field shape (per spec
+        # §"Logging") so downstream consumers can light up token-aware
+        # dashboards without a schema migration when the runner exposes
+        # token usage.
         entry = {
             "ts": datetime.now(UTC).isoformat(),
+            "pr_number": self._pr_number,
             "surface": self._cfg.surface,
             "role": "post_verify",
             "model": self._cfg.advisor_model,
             "duration_ms": duration_ms,
             "input_summary_chars": len(prompt),
             "output_summary_chars": len(payload or ""),
+            "tokens_in": None,
+            "tokens_out": None,
             "error": error,
         }
         try:

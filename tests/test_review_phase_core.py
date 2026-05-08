@@ -2792,3 +2792,88 @@ class TestNarrowedExceptionHandling:
 
         with pytest.raises(KeyError, match="missing key"):
             await phase._prs.fetch_ci_failure_logs(42)
+
+
+# ---------------------------------------------------------------------------
+# Post-verify advisor runner dispatch (T16 regression — I4)
+# ---------------------------------------------------------------------------
+
+
+class TestPostVerifyRunnerDispatch:
+    """Regression test for T16 (commit 4f49e0f6) — AsyncMock auto-vivification
+    must NOT route the runner adapter into the MockWorld branch.
+
+    Without the ``__dict__``-based probe, ``getattr(asyncmock,
+    "_mockworld_fake_llm")`` returns a child mock that satisfies
+    ``is not None``, causing the runner to route through the FakeLLM
+    dispatch path against AsyncMock test scaffolding that has no
+    ``_is_fake_adapter`` marker. The result is a coroutine returned as the
+    runner's payload.
+
+    See ``src/review_phase.py:_build_post_verify_runner`` for the load-bearing
+    ``__dict__`` check this test pins.
+    """
+
+    @pytest.mark.asyncio
+    async def test_asyncmock_reviewer_does_not_route_to_mockworld_branch(
+        self, config: HydraFlowConfig
+    ) -> None:
+        phase = make_review_phase(config)
+        # AsyncMock-based reviewer: _execute is an awaitable child mock; we
+        # set a deterministic return value so the dispatcher's production
+        # path returns a string rather than an auto-mock coroutine.
+        phase._reviewers._execute = AsyncMock(return_value="production-payload")
+
+        runner = phase._post_verify_runner
+        out = await runner.run(
+            model="opus",
+            subagent_type="hydraflow-review-advisor",
+            prompt="Issue: 1\n\n## Diff\nfoo",
+        )
+
+        # Production path was taken — _execute awaited exactly once with the
+        # advisor source tag — and the runner returned the production payload
+        # rather than a coroutine-as-payload from the FakeLLM branch.
+        assert out == "production-payload"
+        phase._reviewers._execute.assert_awaited_once()
+        _, kwargs = phase._reviewers._execute.call_args
+        # The fourth positional arg is the source tag dict.
+        args = phase._reviewers._execute.call_args.args
+        assert args[-1] == {"source": "advisor"}
+
+    @pytest.mark.asyncio
+    async def test_mockworld_sentinel_routes_to_fake_llm_branch(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Positive path — when a real MockWorld FakeLLM is attached as an
+        instance attribute (with ``_is_fake_adapter=True``), dispatch routes
+        to the MockWorld branch and skips the production ``_execute`` path.
+        """
+        phase = make_review_phase(config)
+
+        class _FakeLLM:
+            _is_fake_adapter = True
+
+            def __init__(self) -> None:
+                self.calls: list[tuple[int, str]] = []
+
+            def pop_advisor_result(self, issue_number: int, role: str) -> str:
+                self.calls.append((issue_number, role))
+                return '{"verdict":"APPROVE","reasoning":"ok","disagreements":[]}'
+
+        fake = _FakeLLM()
+        # Set on instance __dict__ — same shape MockWorld scenarios use.
+        phase._reviewers._mockworld_fake_llm = fake
+        phase._reviewers._execute = AsyncMock()
+
+        runner = phase._post_verify_runner
+        out = await runner.run(
+            model="opus",
+            subagent_type="hydraflow-review-advisor",
+            prompt="Issue: 7\n\n## Diff\nfoo",
+        )
+
+        assert out.startswith('{"verdict":"APPROVE"')
+        assert fake.calls == [(7, "post_verify")]
+        # MockWorld branch must NOT call the production _execute path.
+        phase._reviewers._execute.assert_not_awaited()
