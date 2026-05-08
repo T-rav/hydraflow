@@ -136,6 +136,21 @@ class PRPort(Protocol):
         """
         ...
 
+    async def push_synthetic_commit(self, branch: str, message: str) -> str:
+        """Append a tree-identical synthetic commit on top of *branch*.
+
+        Used by ``StagingPromotionLoop`` to trigger
+        ``pull_request: synchronize`` events on rc/* PRs whose
+        ``pull_request: opened`` events were swallowed by GitHub's
+        bot-PR workflow-suppression heuristic (see issue #8705).
+        Without this, required-status-checks like CodeQL and Browser
+        Scenarios never fire on the PR head SHA, blocking auto-merge.
+
+        Returns the new HEAD SHA. Matches
+        ``pr_manager.PRManager.push_synthetic_commit`` exactly.
+        """
+        ...
+
     async def create_promotion_pr(
         self,
         *,

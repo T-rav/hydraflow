@@ -468,6 +468,84 @@ class PRManager:
         )
         return sha
 
+    async def push_synthetic_commit(self, branch: str, message: str) -> str:
+        """Append a tree-identical synthetic commit on top of *branch*.
+
+        Workaround for issue #8705: rc/* branches created via the git/refs
+        REST API and turned into PRs by ``gh pr create`` don't fire
+        ``pull_request: opened`` workflows reliably (CodeQL, Browser
+        Scenarios, etc. never run on the PR head SHA). Pushing a
+        synthetic commit fires ``pull_request: synchronize`` which DOES
+        trigger workflows. The commit's tree is identical to its parent
+        so no real changes are introduced.
+
+        Returns the new HEAD SHA.
+        """
+        if self._config.dry_run:
+            logger.info(
+                "[dry-run] Would push synthetic commit on %s: %s", branch, message
+            )
+            return "dry-run-sha"
+        self._assert_repo()
+
+        head_raw = await self._run_gh(
+            "gh",
+            "api",
+            f"repos/{self._repo}/git/refs/heads/{branch}",
+            "--jq",
+            ".object.sha",
+        )
+        head_sha = head_raw.strip().strip('"')
+        if not head_sha:
+            raise RuntimeError(f"Could not resolve {branch} HEAD sha")
+
+        tree_raw = await self._run_gh(
+            "gh",
+            "api",
+            f"repos/{self._repo}/git/commits/{head_sha}",
+            "--jq",
+            ".tree.sha",
+        )
+        tree_sha = tree_raw.strip().strip('"')
+        if not tree_sha:
+            raise RuntimeError(f"Could not resolve tree sha for {head_sha}")
+
+        new_raw = await self._run_gh(
+            "gh",
+            "api",
+            f"repos/{self._repo}/git/commits",
+            "--method",
+            "POST",
+            "--field",
+            f"message={message}",
+            "--field",
+            f"tree={tree_sha}",
+            "--raw-field",
+            f"parents[]={head_sha}",
+        )
+        try:
+            new_commit = json.loads(new_raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"Unexpected synthetic-commit POST response: {new_raw[:200]}"
+            ) from exc
+        new_sha = str(new_commit.get("sha", "")).strip()
+        if not new_sha:
+            raise RuntimeError(
+                f"Synthetic commit POST returned no sha: {new_raw[:200]}"
+            )
+
+        await self._run_gh(
+            "gh",
+            "api",
+            f"repos/{self._repo}/git/refs/heads/{branch}",
+            "--method",
+            "PATCH",
+            "--field",
+            f"sha={new_sha}",
+        )
+        return new_sha
+
     async def find_open_promotion_pr(self) -> PRInfo | None:
         """Return the open ``rc/*`` promotion PR targeting ``main_branch``, or None.
 

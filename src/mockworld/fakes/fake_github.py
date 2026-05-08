@@ -617,6 +617,12 @@ class FakeGitHub:
     async def create_rc_branch(self, rc_branch: str) -> str:
         return f"sha-{rc_branch}"
 
+    async def push_synthetic_commit(self, branch: str, message: str) -> str:
+        """Record a synthetic commit; deterministic SHA in scenarios."""
+        _ = (message,)
+        self._maybe_rate_limit()
+        return f"synthetic-sha-{branch}"
+
     async def create_promotion_pr(
         self, *, rc_branch: str, title: str, body: str, **_kw: Any
     ) -> int:
