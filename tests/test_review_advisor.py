@@ -14,6 +14,7 @@ from review_advisor import (
     DiffStats,
     Disagreement,
     FocusArea,
+    MidFlightAdvisor,
     PostVerifyAdvisor,
     PostVerifyInput,
     PostVerifyResult,
@@ -1324,3 +1325,95 @@ class TestPreFlightAdvisor:
         )
         with pytest.raises(CreditExhaustedError):
             asyncio.run(advisor.run(PreFlightInput(surface="pr_review", diff="d")))
+
+
+class TestMidFlightAdvisor:
+    def test_returns_invocation_when_enabled(self, monkeypatch):
+        # Ensure no kill switches are blocking
+        for v in (
+            "HYDRAFLOW_REVIEW_ADVISOR_ENABLED",
+            "HYDRAFLOW_REVIEW_MIDFLIGHT_ENABLED",
+            "HYDRAFLOW_PR_REVIEW_ADVISOR_ENABLED",
+        ):
+            monkeypatch.delenv(v, raising=False)
+        adv = MidFlightAdvisor(surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"])
+        invocation = adv.build_task_invocation(
+            question="is the test wrong or the fix wrong?",
+            context_summary="line 42 fails after my one-line change",
+            options=["test is wrong", "fix is wrong"],
+        )
+        assert invocation is not None
+        assert invocation["model"] == "opus"
+        assert invocation["subagent_type"] == "hydraflow-review-advisor"
+        assert "is the test wrong" in invocation["prompt"]
+        assert "line 42 fails" in invocation["prompt"]
+        # Both options must appear
+        assert "test is wrong" in invocation["prompt"]
+        assert "fix is wrong" in invocation["prompt"]
+
+    def test_returns_none_when_surface_mid_flight_disabled(self, monkeypatch):
+        # adr_review has mid_flight_enabled=False
+        for v in (
+            "HYDRAFLOW_REVIEW_ADVISOR_ENABLED",
+            "HYDRAFLOW_REVIEW_MIDFLIGHT_ENABLED",
+            "HYDRAFLOW_ADR_REVIEW_ADVISOR_ENABLED",
+        ):
+            monkeypatch.delenv(v, raising=False)
+        adv = MidFlightAdvisor(surface_config=SURFACE_ADVISOR_CONFIGS["adr_review"])
+        result = adv.build_task_invocation(question="?", context_summary="x")
+        assert result is None  # surface config disables it
+
+    def test_returns_none_when_role_kill_switch_off(self, monkeypatch):
+        # pr_review has mid_flight_enabled=True but the role kill-switch overrides
+        for v in (
+            "HYDRAFLOW_REVIEW_ADVISOR_ENABLED",
+            "HYDRAFLOW_PR_REVIEW_ADVISOR_ENABLED",
+        ):
+            monkeypatch.delenv(v, raising=False)
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_MIDFLIGHT_ENABLED", "false")
+        adv = MidFlightAdvisor(surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"])
+        assert adv.build_task_invocation(question="?", context_summary="x") is None
+
+    def test_returns_none_when_master_off(self, monkeypatch):
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_ADVISOR_ENABLED", "false")
+        adv = MidFlightAdvisor(surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"])
+        assert adv.build_task_invocation(question="?", context_summary="x") is None
+
+    def test_options_omitted_when_empty(self, monkeypatch):
+        for v in (
+            "HYDRAFLOW_REVIEW_ADVISOR_ENABLED",
+            "HYDRAFLOW_REVIEW_MIDFLIGHT_ENABLED",
+            "HYDRAFLOW_PR_REVIEW_ADVISOR_ENABLED",
+        ):
+            monkeypatch.delenv(v, raising=False)
+        adv = MidFlightAdvisor(surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"])
+        invocation = adv.build_task_invocation(
+            question="how confident is the executor?",
+            context_summary="ran 3 tests, all green",
+        )
+        assert invocation is not None
+        # No "Options under consideration" section when no options provided
+        assert "Options under consideration" not in invocation["prompt"]
+
+    def test_uses_advisor_model_from_surface_config(self, monkeypatch):
+        for v in (
+            "HYDRAFLOW_REVIEW_ADVISOR_ENABLED",
+            "HYDRAFLOW_REVIEW_MIDFLIGHT_ENABLED",
+            "HYDRAFLOW_PR_REVIEW_ADVISOR_ENABLED",
+        ):
+            monkeypatch.delenv(v, raising=False)
+        # Override the advisor model via env
+        monkeypatch.setenv("HYDRAFLOW_PR_REVIEW_ADVISOR_MODEL", "haiku")
+        cfg = build_surface_config("pr_review")
+        adv = MidFlightAdvisor(surface_config=cfg)
+        invocation = adv.build_task_invocation(question="?", context_summary="x")
+        assert invocation is not None
+        assert invocation["model"] == "haiku"
+
+    def test_tool_description_present_as_class_constant(self):
+        # T21 will inject this string into the executor's prompt
+        assert isinstance(MidFlightAdvisor.TOOL_DESCRIPTION, str)
+        assert "consult" in MidFlightAdvisor.TOOL_DESCRIPTION.lower()
+        # Discipline guard — the description must steer the executor away from
+        # using the tool for verifiable things
+        assert "verify" in MidFlightAdvisor.TOOL_DESCRIPTION.lower()

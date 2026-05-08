@@ -772,3 +772,76 @@ class PreFlightAdvisor:
             "should look for, and any signals that suggest mid-flight consult."
         )
         return "\n".join(sections)
+
+
+class MidFlightAdvisor:
+    """Build the Task-tool invocation the executor uses to consult the advisor.
+
+    This class is a descriptor + template builder — it does NOT invoke the
+    Task tool. The executor session itself calls Task(**invocation) with the
+    dict returned by build_task_invocation. This keeps the Task dispatch
+    inside the executor's session boundary (which the advisor pattern
+    requires for "shared context" — the advisor sees the executor's
+    summary, not the literal conversation history).
+
+    T21 wires the TOOL_DESCRIPTION into the executor's review prompt and
+    instructs the executor to call Task(...) with the build_task_invocation
+    output when it needs a judgment call.
+    """
+
+    TOOL_DESCRIPTION = (
+        "Consult an Opus advisor when uncertain about a review decision, "
+        "fix strategy, or whether an issue is real. The advisor is dispatched "
+        "via the Task tool with subagent_type='hydraflow-review-advisor'. "
+        "The advisor does NOT see your full conversation history — include "
+        "enough context in your question. Do NOT use this tool for things "
+        "you can verify yourself (running tests, reading files, grepping "
+        "code) — only judgment calls where the right answer requires more "
+        "than mechanical verification."
+    )
+
+    def __init__(self, surface_config: SurfaceAdvisorConfig) -> None:
+        self._cfg = surface_config
+
+    def build_task_invocation(
+        self,
+        *,
+        question: str,
+        context_summary: str,
+        options: list[str] | None = None,
+    ) -> dict[str, str] | None:
+        """Build the Task-tool invocation dict, or None if mid-flight is disabled.
+
+        Returns a dict with keys ``model``, ``subagent_type``, ``prompt``,
+        suitable for ``Task(**invocation)``. Returns None if the surface's
+        ``mid_flight_enabled`` flag is False or the kill-switch chain
+        disables mid-flight on this surface.
+        """
+        if not self._cfg.mid_flight_enabled:
+            return None
+        if not is_advisor_enabled(self._cfg.surface, "midflight"):
+            return None
+        prompt = self._render_prompt(question, context_summary, options or [])
+        return {
+            "model": self._cfg.advisor_model,
+            "subagent_type": "hydraflow-review-advisor",
+            "prompt": prompt,
+        }
+
+    @staticmethod
+    def _render_prompt(question: str, context: str, options: list[str]) -> str:
+        sections = [
+            "## Mid-flight consult",
+            f"### Question\n{question}",
+            f"\n### Context (summary from executor)\n{context}",
+        ]
+        if options:
+            sections.append(
+                "\n### Options under consideration\n"
+                + "\n".join(f"- {o}" for o in options)
+            )
+        sections.append(
+            '\nRespond with JSON: {"reasoning":str,"recommendation":str,'
+            '"confidence":float}'
+        )
+        return "\n".join(sections)
