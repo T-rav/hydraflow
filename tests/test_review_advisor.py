@@ -1,5 +1,6 @@
 import pytest
 from pydantic import ValidationError
+
 from review_advisor import (
     Disagreement,
     FocusArea,
@@ -67,3 +68,65 @@ class TestInputSchemas:
         )
         assert inp.attempt_number == 0
         assert inp.pre_flight_plan is None
+
+
+from review_advisor import (
+    is_advisor_enabled,
+    resolve_model,
+)
+
+
+class TestModelResolution:
+    def test_per_surface_overrides_global(self, monkeypatch):
+        monkeypatch.setenv("HYDRAFLOW_PR_REVIEW_EXECUTOR_MODEL", "haiku")
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_EXECUTOR_MODEL", "sonnet")
+        assert resolve_model("pr_review", "executor", default="opus") == "haiku"
+
+    def test_global_used_when_per_surface_unset(self, monkeypatch):
+        monkeypatch.delenv("HYDRAFLOW_PR_REVIEW_EXECUTOR_MODEL", raising=False)
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_EXECUTOR_MODEL", "sonnet")
+        assert resolve_model("pr_review", "executor", default="opus") == "sonnet"
+
+    def test_default_used_when_both_unset(self, monkeypatch):
+        monkeypatch.delenv("HYDRAFLOW_PR_REVIEW_EXECUTOR_MODEL", raising=False)
+        monkeypatch.delenv("HYDRAFLOW_REVIEW_EXECUTOR_MODEL", raising=False)
+        assert resolve_model("pr_review", "executor", default="sonnet") == "sonnet"
+
+
+class TestKillSwitches:
+    def test_master_off_disables_all(self, monkeypatch):
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_ADVISOR_ENABLED", "false")
+        assert is_advisor_enabled("pr_review", "post_verify") is False
+
+    def test_role_off_disables_role(self, monkeypatch):
+        for v in (
+            "HYDRAFLOW_REVIEW_ADVISOR_ENABLED",
+            "HYDRAFLOW_PR_REVIEW_ADVISOR_ENABLED",
+        ):
+            monkeypatch.delenv(v, raising=False)
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_PREFLIGHT_ENABLED", "false")
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_POSTVERIFY_ENABLED", "true")
+        assert is_advisor_enabled("pr_review", "pre_flight") is False
+        assert is_advisor_enabled("pr_review", "post_verify") is True
+
+    def test_surface_off_disables_surface(self, monkeypatch):
+        for v in (
+            "HYDRAFLOW_REVIEW_ADVISOR_ENABLED",
+            "HYDRAFLOW_REVIEW_POSTVERIFY_ENABLED",
+        ):
+            monkeypatch.delenv(v, raising=False)
+        monkeypatch.setenv("HYDRAFLOW_VISUAL_GATE_ADVISOR_ENABLED", "false")
+        monkeypatch.setenv("HYDRAFLOW_PR_REVIEW_ADVISOR_ENABLED", "true")
+        assert is_advisor_enabled("visual_gate", "post_verify") is False
+        assert is_advisor_enabled("pr_review", "post_verify") is True
+
+    def test_all_default_true(self, monkeypatch):
+        for v in (
+            "HYDRAFLOW_REVIEW_ADVISOR_ENABLED",
+            "HYDRAFLOW_REVIEW_PREFLIGHT_ENABLED",
+            "HYDRAFLOW_REVIEW_POSTVERIFY_ENABLED",
+            "HYDRAFLOW_REVIEW_MIDFLIGHT_ENABLED",
+            "HYDRAFLOW_PR_REVIEW_ADVISOR_ENABLED",
+        ):
+            monkeypatch.delenv(v, raising=False)
+        assert is_advisor_enabled("pr_review", "post_verify") is True
