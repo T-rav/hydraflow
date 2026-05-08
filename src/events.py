@@ -67,19 +67,13 @@ class EventType(StrEnum):
     HITL_UPDATE = "hitl_update"
     ORCHESTRATOR_STATUS = "orchestrator_status"
     ERROR = "error"
-    MEMORY_SYNC = (
-        "memory_sync"  # frontend: backend-only — hindsight sync, no UI surface
-    )
+    MEMORY_SYNC = "memory_sync"
     METRICS_UPDATE = "metrics_update"
     BACKGROUND_WORKER_STATUS = "background_worker_status"
     QUEUE_UPDATE = "queue_update"
     SYSTEM_ALERT = "system_alert"
-    VERIFICATION_JUDGE = (
-        "verification_judge"  # frontend: backend-only — review internal scoring
-    )
-    TRANSCRIPT_SUMMARY = (
-        "transcript_summary"  # frontend: backend-only — compaction internal
-    )
+    VERIFICATION_JUDGE = "verification_judge"
+    TRANSCRIPT_SUMMARY = "transcript_summary"
     SESSION_START = "session_start"
     SESSION_END = "session_end"
     EPIC_UPDATE = "epic_update"
@@ -96,17 +90,11 @@ class EventType(StrEnum):
     CRATE_ACTIVATED = "crate_activated"
     CRATE_COMPLETED = "crate_completed"
     AGENT_ACTIVITY = "agent_activity"
-    SYSTEM_REROUTE = (
-        "system_reroute"  # frontend: backend-only — orchestrator internal routing
-    )
+    SYSTEM_REROUTE = "system_reroute"
     DIAGNOSTIC_UPDATE = "diagnostic_update"
     RETROSPECTIVE_UPDATE = "retrospective_update"
-    WIKI_SUPERSEDES = (
-        "wiki_supersedes"  # frontend: backend-only — RepoWikiLoop internal bookkeeping
-    )
-    TRIBAL_PROMOTION = (
-        "tribal_promotion"  # frontend: backend-only — corpus learning internal
-    )
+    WIKI_SUPERSEDES = "wiki_supersedes"
+    TRIBAL_PROMOTION = "tribal_promotion"
     ADR_DRAFT_OPENED = "adr_draft_opened"
 
 
