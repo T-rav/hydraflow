@@ -2349,6 +2349,230 @@ class TestADRReviewPath:
         phase._store.mark_merged.assert_not_called()
 
 
+class TestADRReviewAdvisor:
+    """T26 — PreFlightAdvisor (AlwaysTrigger) + PostVerifyAdvisor wired into
+    ``_review_single_adr`` with surface=``adr_review``.
+
+    ADR review has no fix loop (mid_flight=False), so post-verify is a
+    one-shot binary gate: VETO requeues to plan with the advisor's
+    reasoning; APPROVE falls through to the existing finalize/approve path.
+    """
+
+    _VALID_ADR_BODY = (
+        "## Context\nCurrent rendering logic is split across hooks and cards.\n\n"
+        "## Decision\nAdopt a single-stage snapshot model with normalized events "
+        "to ensure deterministic rendering and simpler queue-state reconciliation.\n\n"
+        "## Consequences\nRequires state migration but removes drift and duplicate "
+        "count paths."
+    )
+
+    @pytest.mark.asyncio
+    async def test_advisor_approve_lets_valid_adr_finalize(
+        self, config: HydraFlowConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Pre-flight + post-verify APPROVE -> ADR finalizes (existing behavior)."""
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_ADVISOR_ENABLED", "true")
+        monkeypatch.setenv("HYDRAFLOW_ADR_REVIEW_ADVISOR_ENABLED", "true")
+
+        phase = make_review_phase(config)
+        issue = TaskFactory.create(
+            id=820,
+            title="[ADR] Stream rendering architecture",
+            body=self._VALID_ADR_BODY,
+        )
+
+        # Pre-flight returns a plan; post-verify returns APPROVE.
+        plan_payload = (
+            '{"risk_summary":"low risk",'
+            '"focus_areas":[],"rubric":[],"escalation_signals":[]}'
+        )
+        approve_payload = (
+            '{"verdict":"APPROVE","reasoning":"ADR is sound","disagreements":[]}'
+        )
+        runner_run = AsyncMock(side_effect=[plan_payload, approve_payload])
+        phase._post_verify_runner.run = runner_run  # type: ignore[method-assign]
+
+        results = await phase.review_adrs([issue])
+
+        assert len(results) == 1
+        assert results[0].verdict == ReviewVerdict.APPROVE
+        # Existing finalize path: labels swapped + close + mark_merged.
+        phase._prs.swap_pipeline_labels.assert_awaited_once_with(
+            820, config.fixed_label[0]
+        )
+        phase._prs.close_task.assert_awaited_once_with(820)
+        # Two advisor calls: pre-flight + post-verify.
+        assert runner_run.await_count == 2
+        roles = [c.kwargs.get("role") for c in runner_run.await_args_list]
+        assert roles == ["pre_flight", "post_verify"]
+
+    @pytest.mark.asyncio
+    async def test_advisor_veto_blocks_finalize_and_requeues_to_plan(
+        self, config: HydraFlowConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Post-verify VETO requeues a structurally-valid ADR to plan."""
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_ADVISOR_ENABLED", "true")
+        monkeypatch.setenv("HYDRAFLOW_ADR_REVIEW_ADVISOR_ENABLED", "true")
+
+        phase = make_review_phase(config)
+        issue = TaskFactory.create(
+            id=821,
+            title="[ADR] Stream rendering architecture",
+            body=self._VALID_ADR_BODY,
+        )
+
+        plan_payload = (
+            '{"risk_summary":"moderate","focus_areas":[],'
+            '"rubric":[],"escalation_signals":["missing trade-offs"]}'
+        )
+        veto_payload = (
+            '{"verdict":"VETO",'
+            '"reasoning":"Decision section omits the trade-off analysis '
+            'demanded by the rubric",'
+            '"disagreements":[{"executor_claim":"structural validation passed",'
+            '"advisor_assessment":"trade-off discussion missing",'
+            '"severity":"blocking"}],'
+            '"suggested_fix_direction":"Document why the snapshot model was '
+            'preferred over the streaming alternative"}'
+        )
+        runner_run = AsyncMock(side_effect=[plan_payload, veto_payload])
+        phase._post_verify_runner.run = runner_run  # type: ignore[method-assign]
+
+        results = await phase.review_adrs([issue])
+
+        assert len(results) == 1
+        assert results[0].verdict == ReviewVerdict.REQUEST_CHANGES
+        assert "advisor veto" in (results[0].summary or "").lower()
+
+        # ADR must NOT have finalized: no label swap, no close.
+        phase._prs.swap_pipeline_labels.assert_not_awaited()
+        phase._prs.close_task.assert_not_awaited()
+        # Requeue to plan path: transition + enqueue + comment.
+        phase._prs.transition.assert_awaited_once_with(821, "plan")
+        phase._store.enqueue_transition.assert_called_once()
+        phase._store.mark_merged.assert_not_called()
+        # The post_verify runner saw role="post_verify".
+        roles = [c.kwargs.get("role") for c in runner_run.await_args_list]
+        assert "post_verify" in roles
+
+    @pytest.mark.asyncio
+    async def test_pre_flight_plan_threaded_into_post_verify(
+        self, config: HydraFlowConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Pre-flight plan must be stashed under issue.id and reach post-verify."""
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_ADVISOR_ENABLED", "true")
+        monkeypatch.setenv("HYDRAFLOW_ADR_REVIEW_ADVISOR_ENABLED", "true")
+
+        phase = make_review_phase(config)
+        issue = TaskFactory.create(
+            id=822,
+            title="[ADR] Stream rendering architecture",
+            body=self._VALID_ADR_BODY,
+        )
+
+        plan_payload = (
+            '{"risk_summary":"identified risk",'
+            '"focus_areas":[],"rubric":["check trade-offs"],'
+            '"escalation_signals":[]}'
+        )
+        approve_payload = '{"verdict":"APPROVE","reasoning":"OK","disagreements":[]}'
+        runner_run = AsyncMock(side_effect=[plan_payload, approve_payload])
+        phase._post_verify_runner.run = runner_run  # type: ignore[method-assign]
+
+        await phase.review_adrs([issue])
+
+        # Plan stashed under issue.id (no PR for ADR).
+        assert 822 in phase._advisor_pre_flight_plan
+        stashed = phase._advisor_pre_flight_plan[822]
+        assert stashed.risk_summary == "identified risk"
+        # Post-verify prompt should mention the rubric from the plan.
+        post_verify_call = runner_run.await_args_list[1]
+        prompt = post_verify_call.kwargs.get("prompt", "")
+        assert "check trade-offs" in prompt
+
+    @pytest.mark.asyncio
+    async def test_per_surface_kill_switch_skips_advisor(
+        self, config: HydraFlowConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When ``HYDRAFLOW_ADR_REVIEW_ADVISOR_ENABLED=false``, advisor is not invoked."""
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_ADVISOR_ENABLED", "true")
+        monkeypatch.setenv("HYDRAFLOW_ADR_REVIEW_ADVISOR_ENABLED", "false")
+
+        phase = make_review_phase(config)
+        issue = TaskFactory.create(
+            id=823,
+            title="[ADR] Stream rendering architecture",
+            body=self._VALID_ADR_BODY,
+        )
+
+        runner_run = AsyncMock()
+        phase._post_verify_runner.run = runner_run  # type: ignore[method-assign]
+
+        results = await phase.review_adrs([issue])
+
+        # Existing structural-validation path: APPROVE + finalize.
+        assert results[0].verdict == ReviewVerdict.APPROVE
+        runner_run.assert_not_awaited()
+        # No plan stashed when advisor never ran.
+        assert 823 not in phase._advisor_pre_flight_plan
+
+    @pytest.mark.asyncio
+    async def test_advisor_credit_exhausted_propagates(
+        self, config: HydraFlowConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """CreditExhaustedError from post-verify advisor must propagate (dark-factory §2.2)."""
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_ADVISOR_ENABLED", "true")
+        monkeypatch.setenv("HYDRAFLOW_ADR_REVIEW_ADVISOR_ENABLED", "true")
+
+        phase = make_review_phase(config)
+        issue = TaskFactory.create(
+            id=824,
+            title="[ADR] Stream rendering architecture",
+            body=self._VALID_ADR_BODY,
+        )
+
+        from subprocess_util import CreditExhaustedError
+
+        plan_payload = '{"risk_summary":"low","focus_areas":[],"rubric":[],"escalation_signals":[]}'
+        runner_run = AsyncMock(
+            side_effect=[plan_payload, CreditExhaustedError("no credits")]
+        )
+        phase._post_verify_runner.run = runner_run  # type: ignore[method-assign]
+
+        with pytest.raises(CreditExhaustedError):
+            await phase.review_adrs([issue])
+
+    @pytest.mark.asyncio
+    async def test_invalid_adr_skips_post_verify(
+        self, config: HydraFlowConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Structural validation failure short-circuits BEFORE post-verify.
+
+        Pre-flight still runs (AlwaysTrigger), but the validator's reasons
+        path returns directly so the post-verify advisor is never invoked.
+        """
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_ADVISOR_ENABLED", "true")
+        monkeypatch.setenv("HYDRAFLOW_ADR_REVIEW_ADVISOR_ENABLED", "true")
+
+        phase = make_review_phase(config)
+        issue = TaskFactory.create(
+            id=825,
+            title="[ADR] Bad draft",
+            body="## Context\nShort.\n\n## Decision\nTiny.\n\n## Consequences\nTiny.",
+        )
+
+        plan_payload = '{"risk_summary":"low","focus_areas":[],"rubric":[],"escalation_signals":[]}'
+        runner_run = AsyncMock(return_value=plan_payload)
+        phase._post_verify_runner.run = runner_run  # type: ignore[method-assign]
+
+        results = await phase.review_adrs([issue])
+
+        assert results[0].verdict == ReviewVerdict.REQUEST_CHANGES
+        # Pre-flight ran (AlwaysTrigger) — exactly one advisor call, role=pre_flight.
+        assert runner_run.await_count == 1
+        assert runner_run.await_args_list[0].kwargs.get("role") == "pre_flight"
+
+
 # ---------------------------------------------------------------------------
 # _run_initial_guards
 # ---------------------------------------------------------------------------
