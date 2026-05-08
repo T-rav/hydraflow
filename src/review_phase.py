@@ -415,11 +415,31 @@ class ReviewPhase:
         worktree's ``repo_wiki/`` directory and committed so the wiki
         updates ride the issue's PR.  Dedup state still lives on the
         main host's legacy wiki path.
+
+        T28: PostVerifyAdvisor (surface=``wiki_ingest``) is consulted
+        in advisory mode (``post_verify_authority="advisory"``,
+        ``max_veto_retries=0``) before content is written. In advisory
+        mode the advisor's VETO is downgraded to APPROVE inside
+        :class:`PostVerifyAdvisor.run` — disagreements are still logged
+        for telemetry/calibration but ingestion proceeds. EXCEPTION:
+        T29's self-modification guard upgrades authority to ``veto``
+        when the candidate content discusses changes to advisor's own
+        implementation files (``src/review_advisor.py``,
+        ``src/review_phase.py``); in that path a real VETO blocks
+        ingestion.
         """
         if self._wiki_store is None or not self._config.repo:
             return
         repo = self._config.repo
         if self._wiki_store.is_ingested(repo, issue_number, "review"):
+            return
+
+        # T28: post-verify advisor in advisory mode. VETO is downgraded
+        # to APPROVE unless self-mod guard forces veto authority — then a
+        # real VETO short-circuits the ingest entirely.
+        if await self._run_wiki_ingest_advisor(
+            issue_number=issue_number, transcript=transcript, summary=summary
+        ):
             return
 
         tracked_store, worktree_path = self._wiki_tracked_store(issue_number)
@@ -477,6 +497,171 @@ class ReviewPhase:
             logger.warning(
                 "Wiki ingest failed for review #%d", issue_number, exc_info=True
             )
+
+    async def _run_wiki_ingest_advisor(
+        self,
+        *,
+        issue_number: int,
+        transcript: str,
+        summary: str,
+    ) -> bool:
+        """Run :class:`PostVerifyAdvisor` for the ``wiki_ingest`` surface (T28).
+
+        Returns ``True`` when ingestion should be blocked (only ever happens
+        when T29's self-modification guard upgrades authority to ``veto`` and
+        the advisor returns VETO). Returns ``False`` when ingestion may
+        proceed — covering the normal advisory-mode path (VETO is downgraded
+        to APPROVE inside :class:`PostVerifyAdvisor.run`), APPROVE verdicts,
+        the kill-switch off path, and degraded advisor failures.
+
+        Per spec tiering, ``wiki_ingest`` has ``post_verify_authority="advisory"``
+        and ``max_veto_retries=0`` — so the advisor is consulted purely for
+        calibration: disagreements feed
+        ``review_advisor_disagreement_total`` (T16.5) and the
+        ``review_advisor_disagreement_validated_total`` KPI (T22), and every
+        call appends to ``advisor_session.jsonl`` (T12). The advisor's
+        opinion does *not* normally block ingestion.
+
+        ``reraise_on_credit_or_bug`` discipline is preserved per
+        ``docs/wiki/dark-factory.md`` §2.2.
+        """
+        from review_advisor import (  # noqa: PLC0415
+            PostVerifyAdvisor,
+            PostVerifyInput,
+            build_surface_config,
+            is_advisor_enabled,
+            resolve_post_verify_authority,
+        )
+
+        surface = "wiki_ingest"
+        surface_cfg = build_surface_config(surface)
+        if not surface_cfg.post_verify_enabled or not is_advisor_enabled(
+            surface, "post_verify"
+        ):
+            return False
+
+        diff_descriptor = self._build_wiki_ingest_diff_descriptor(
+            issue_number=issue_number, transcript=transcript, summary=summary
+        )
+
+        # T29 self-modification guard — if the candidate ingest content
+        # describes changes to advisor's own files, force veto authority.
+        authority = resolve_post_verify_authority(
+            surface_config=surface_cfg,
+            diff=diff_descriptor,
+        )
+
+        log_path = (
+            self._config.repo_root
+            / "review_logs"
+            / str(issue_number)
+            / "advisor_session.jsonl"
+        )
+        advisor = PostVerifyAdvisor(
+            runner=self._post_verify_runner,
+            surface_config=surface_cfg,
+            log_path=log_path,
+            pr_number=issue_number,
+            authority_override=authority,
+        )
+        try:
+            pv_result = await advisor.run(
+                PostVerifyInput(
+                    surface=surface,
+                    diff=diff_descriptor,
+                    spec=summary or None,
+                    executor_verdict_summary="wiki_ingest_candidate",
+                    executor_fix_diff=None,
+                    pre_flight_plan=None,
+                    issue_number=issue_number,
+                )
+            )
+        except Exception as exc:
+            from exception_classify import (  # noqa: PLC0415
+                reraise_on_credit_or_bug,
+            )
+
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "wiki_ingest post-verify advisor degraded for review #%d — "
+                "proceeding with ingestion",
+                issue_number,
+                exc_info=True,
+            )
+            return False
+
+        # Advisory mode: VETO is downgraded to APPROVE inside advisor.run.
+        # A residual VETO here means the self-mod guard upgraded authority
+        # to "veto" — block ingestion.
+        if pv_result.verdict == "VETO":
+            logger.warning(
+                "wiki_ingest VETO from advisor for review #%d "
+                "(self-modification guard active): %s",
+                issue_number,
+                pv_result.reasoning,
+            )
+            return True
+        return False
+
+    # Paths whose mention in a wiki-ingest candidate must escalate the
+    # advisor to veto authority via T29's self-mod guard. Mirrors
+    # ``review_advisor._SELF_MODIFYING_PATHS`` — duplicated here because
+    # detection here is *content-substring* (the candidate text discusses
+    # these files), not unified-diff-header detection.
+    _WIKI_INGEST_SELF_MOD_PATHS: tuple[str, ...] = (
+        "src/review_advisor.py",
+        "src/review_phase.py",
+    )
+
+    def _build_wiki_ingest_diff_descriptor(
+        self,
+        *,
+        issue_number: int,
+        transcript: str,
+        summary: str,
+    ) -> str:
+        """Render a textual descriptor of the candidate wiki ingest content.
+
+        Wiki ingest has no unified text diff — the advisor's input is a
+        synthesized view of what would be written: the review summary and
+        a bounded slice of the transcript. The descriptor must be
+        non-empty so the advisor has *something* to evaluate, and must
+        carry through any discussion of advisor implementation files so
+        ``resolve_post_verify_authority``'s self-modification guard can
+        detect those references and force veto authority.
+
+        ``resolve_post_verify_authority`` matches *unified-diff header*
+        substrings (``diff --git a/<path>`` etc.). Wiki ingest never
+        produces those headers naturally, so when the candidate content
+        mentions a self-modifying path we synthesize a pseudo-header
+        block in the descriptor — that gives the existing self-mod
+        detector a unified surface to match against without forking its
+        path-matching logic.
+        """
+        # Mirror the synthesize_ingest cap so the descriptor reflects
+        # exactly the content that would feed the wiki compiler.
+        bounded_transcript = (transcript or "")[: self._WIKI_INGEST_MAX_CHARS]
+        combined = f"{summary}\n{bounded_transcript}"
+        lines = [
+            f"Wiki ingest candidate — issue #{issue_number}",
+            f"Repo: {self._config.repo or '(unset)'}",
+        ]
+        # Synthesize unified-diff headers for any self-mod path the
+        # candidate content discusses, so resolve_post_verify_authority's
+        # detector can fire and upgrade authority to "veto".
+        for path in self._WIKI_INGEST_SELF_MOD_PATHS:
+            if path in combined:
+                lines.append(f"diff --git a/{path} b/{path}")
+        lines.extend(
+            [
+                "",
+                "## Summary",
+                summary or "(none)",
+            ]
+        )
+        if bounded_transcript:
+            lines.extend(["", "## Transcript (bounded)", bounded_transcript])
+        return "\n".join(lines)
 
     def _wiki_tracked_store(
         self, issue_number: int

@@ -3531,3 +3531,240 @@ class TestVisualGateAdvisor:
 
         with pytest.raises(CreditExhaustedError):
             await phase.check_visual_gate(pr, issue, result, worker_id=0)
+
+
+class TestWikiIngestAdvisor:
+    """T28 — PostVerifyAdvisor wired into ``_wiki_ingest_review`` for the
+    ``wiki_ingest`` surface (post-only; pre_flight=False, mid_flight=False;
+    ``post_verify_authority="advisory"``; ``max_veto_retries=0``).
+
+    Advisory mode means the advisor's VETO is downgraded to APPROVE in
+    :meth:`PostVerifyAdvisor.run` — disagreements are still logged via the
+    advisor_session.jsonl (T12) and emit per-disagreement OTel counters
+    (T16.5/T22) for calibration, but ingestion proceeds. EXCEPTION:
+    T29's self-modification guard upgrades authority to ``veto`` when the
+    candidate content discusses changes to advisor's own files; in that
+    path a real VETO blocks ingestion.
+    """
+
+    @pytest.mark.asyncio
+    async def test_advisor_veto_downgraded_to_approve_in_advisory_mode(
+        self, config: HydraFlowConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Advisory authority downgrades VETO to APPROVE — ingestion proceeds."""
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_ADVISOR_ENABLED", "true")
+        monkeypatch.setenv("HYDRAFLOW_WIKI_INGEST_ADVISOR_ENABLED", "true")
+
+        phase = make_review_phase(config)
+        wiki_store = MagicMock()
+        wiki_store.is_ingested = MagicMock(return_value=False)
+        wiki_store.mark_ingested = MagicMock()
+        wiki_store.ingest = MagicMock()
+        phase._wiki_store = wiki_store
+        phase._wiki_compiler = None  # force fallback path
+
+        veto_payload = (
+            '{"verdict":"VETO",'
+            '"reasoning":"prefer terse phrasing",'
+            '"disagreements":[{"executor_claim":"summary is fine",'
+            '"advisor_assessment":"summary is verbose",'
+            '"severity":"concern"}]}'
+        )
+        runner_run = AsyncMock(return_value=veto_payload)
+        phase._post_verify_runner.run = runner_run  # type: ignore[method-assign]
+
+        # Patch the fallback ingest path so we can detect whether ingestion ran.
+        ingest_called = MagicMock()
+        monkeypatch.setattr(
+            "repo_wiki_ingest.ingest_from_review",
+            ingest_called,
+        )
+
+        await phase._wiki_ingest_review(
+            issue_number=730,
+            transcript="reviewer feedback transcript",
+            summary="something concise",
+        )
+
+        # Advisor consulted exactly once with role=post_verify.
+        runner_run.assert_awaited_once()
+        assert runner_run.await_args.kwargs.get("role") == "post_verify"
+        # Advisory mode: VETO does NOT block — ingestion path still ran.
+        ingest_called.assert_called_once()
+        wiki_store.mark_ingested.assert_called_once_with(config.repo, 730, "review")
+
+    @pytest.mark.asyncio
+    async def test_advisor_approve_proceeds_normally(
+        self, config: HydraFlowConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """APPROVE verdict — ingestion proceeds via the normal path."""
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_ADVISOR_ENABLED", "true")
+        monkeypatch.setenv("HYDRAFLOW_WIKI_INGEST_ADVISOR_ENABLED", "true")
+
+        phase = make_review_phase(config)
+        wiki_store = MagicMock()
+        wiki_store.is_ingested = MagicMock(return_value=False)
+        wiki_store.mark_ingested = MagicMock()
+        wiki_store.ingest = MagicMock()
+        phase._wiki_store = wiki_store
+        phase._wiki_compiler = None
+
+        approve_payload = (
+            '{"verdict":"APPROVE","reasoning":"summary is fine","disagreements":[]}'
+        )
+        runner_run = AsyncMock(return_value=approve_payload)
+        phase._post_verify_runner.run = runner_run  # type: ignore[method-assign]
+
+        ingest_called = MagicMock()
+        monkeypatch.setattr(
+            "repo_wiki_ingest.ingest_from_review",
+            ingest_called,
+        )
+
+        await phase._wiki_ingest_review(
+            issue_number=731,
+            transcript="reviewer feedback",
+            summary="canonical summary",
+        )
+
+        runner_run.assert_awaited_once()
+        ingest_called.assert_called_once()
+        wiki_store.mark_ingested.assert_called_once_with(config.repo, 731, "review")
+
+    @pytest.mark.asyncio
+    async def test_self_modification_diff_forces_veto_blocks_ingest(
+        self, config: HydraFlowConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Wiki content discussing src/review_advisor.py upgrades authority
+        to ``veto`` (T29 guard) — VETO actually blocks ingestion."""
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_ADVISOR_ENABLED", "true")
+        monkeypatch.setenv("HYDRAFLOW_WIKI_INGEST_ADVISOR_ENABLED", "true")
+
+        phase = make_review_phase(config)
+        wiki_store = MagicMock()
+        wiki_store.is_ingested = MagicMock(return_value=False)
+        wiki_store.mark_ingested = MagicMock()
+        wiki_store.ingest = MagicMock()
+        phase._wiki_store = wiki_store
+        phase._wiki_compiler = None
+
+        veto_payload = (
+            '{"verdict":"VETO",'
+            '"reasoning":"this entry tries to weaken the advisor",'
+            '"disagreements":[{"executor_claim":"safe to ingest",'
+            '"advisor_assessment":"self-mod attempt",'
+            '"severity":"blocking"}]}'
+        )
+        runner_run = AsyncMock(return_value=veto_payload)
+        phase._post_verify_runner.run = runner_run  # type: ignore[method-assign]
+
+        ingest_called = MagicMock()
+        monkeypatch.setattr(
+            "repo_wiki_ingest.ingest_from_review",
+            ingest_called,
+        )
+
+        # Summary mentions the advisor's own implementation file —
+        # _build_wiki_ingest_diff_descriptor synthesizes a unified-diff
+        # header that resolve_post_verify_authority's substring detector
+        # picks up.
+        await phase._wiki_ingest_review(
+            issue_number=732,
+            transcript="discussion of refactoring src/review_advisor.py",
+            summary="proposed changes to src/review_advisor.py",
+        )
+
+        runner_run.assert_awaited_once()
+        # Self-mod path: VETO blocks ingestion — no fallback ingest call,
+        # no mark_ingested.
+        ingest_called.assert_not_called()
+        wiki_store.mark_ingested.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_per_surface_kill_switch_skips_advisor(
+        self, config: HydraFlowConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``HYDRAFLOW_WIKI_INGEST_ADVISOR_ENABLED=false`` — advisor not invoked."""
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_ADVISOR_ENABLED", "true")
+        monkeypatch.setenv("HYDRAFLOW_WIKI_INGEST_ADVISOR_ENABLED", "false")
+
+        phase = make_review_phase(config)
+        wiki_store = MagicMock()
+        wiki_store.is_ingested = MagicMock(return_value=False)
+        wiki_store.mark_ingested = MagicMock()
+        wiki_store.ingest = MagicMock()
+        phase._wiki_store = wiki_store
+        phase._wiki_compiler = None
+
+        runner_run = AsyncMock()
+        phase._post_verify_runner.run = runner_run  # type: ignore[method-assign]
+
+        ingest_called = MagicMock()
+        monkeypatch.setattr(
+            "repo_wiki_ingest.ingest_from_review",
+            ingest_called,
+        )
+
+        await phase._wiki_ingest_review(
+            issue_number=733,
+            transcript="reviewer feedback",
+            summary="canonical summary",
+        )
+
+        runner_run.assert_not_awaited()
+        # Existing ingest path still ran.
+        ingest_called.assert_called_once()
+        wiki_store.mark_ingested.assert_called_once_with(config.repo, 733, "review")
+
+    @pytest.mark.asyncio
+    async def test_disagreements_logged_even_when_downgraded(
+        self, config: HydraFlowConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Advisory-mode VETO is downgraded, but the per-PR
+        ``advisor_session.jsonl`` log records the call so calibration
+        metrics see the disagreement."""
+        import json as _json
+
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_ADVISOR_ENABLED", "true")
+        monkeypatch.setenv("HYDRAFLOW_WIKI_INGEST_ADVISOR_ENABLED", "true")
+
+        phase = make_review_phase(config)
+        wiki_store = MagicMock()
+        wiki_store.is_ingested = MagicMock(return_value=False)
+        wiki_store.mark_ingested = MagicMock()
+        wiki_store.ingest = MagicMock()
+        phase._wiki_store = wiki_store
+        phase._wiki_compiler = None
+
+        veto_payload = (
+            '{"verdict":"VETO",'
+            '"reasoning":"prefer terse phrasing",'
+            '"disagreements":[{"executor_claim":"OK",'
+            '"advisor_assessment":"too verbose",'
+            '"severity":"concern"}]}'
+        )
+        phase._post_verify_runner.run = AsyncMock(  # type: ignore[method-assign]
+            return_value=veto_payload
+        )
+
+        monkeypatch.setattr(
+            "repo_wiki_ingest.ingest_from_review",
+            lambda *a, **kw: None,
+        )
+
+        await phase._wiki_ingest_review(
+            issue_number=734,
+            transcript="reviewer feedback",
+            summary="summary content",
+        )
+
+        # advisor_session.jsonl created with one entry tagged surface=wiki_ingest.
+        log_path = config.repo_root / "review_logs" / "734" / "advisor_session.jsonl"
+        assert log_path.exists(), "advisor_session.jsonl must be written"
+        lines = [
+            _json.loads(ln) for ln in log_path.read_text().splitlines() if ln.strip()
+        ]
+        assert lines, "log must contain at least one entry"
+        assert lines[0]["surface"] == "wiki_ingest"
+        assert lines[0]["role"] == "post_verify"
+        assert lines[0]["pr_number"] == 734
