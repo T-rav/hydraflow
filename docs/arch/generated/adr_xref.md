@@ -66,6 +66,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0056 | `src.adr_drift`, `src.adr_touchpoint_auditor_loop`, `src.state._adr_audit` |
 | ADR-0057 | `src.term_pruner_loop`, `src.ubiquitous_language` |
 | ADR-0058 | `src.edge_proposer_loop`, `src.ubiquitous_language` |
+| ADR-0059 | `src.mockworld.fakes.fake_llm`, `src.review_advisor`, `src.review_phase`, `src.reviewer` |
 
 ## Module → ADRs
 
@@ -116,6 +117,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.issue_store` | ADR-0006, ADR-0022, ADR-0041 |
 | `src.metrics_manager` | ADR-0010, ADR-0021 |
 | `src.mockworld.fakes.fake_honeycomb` | ADR-0055 |
+| `src.mockworld.fakes.fake_llm` | ADR-0059 |
 | `src.mockworld.sandbox_main` | ADR-0052 |
 | `src.models` | ADR-0011, ADR-0012, ADR-0013, ADR-0014, ADR-0015, ADR-0016, ADR-0025, ADR-0031, ADR-0037, ADR-0045, ADR-0050 |
 | `src.orchestrator` | ADR-0006, ADR-0009, ADR-0014, ADR-0044, ADR-0045 |
@@ -140,8 +142,9 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.repo_wiki` | ADR-0032, ADR-0053 |
 | `src.repo_wiki_loop` | ADR-0032, ADR-0053 |
 | `src.report_issue_loop` | ADR-0013, ADR-0018, ADR-0045 |
-| `src.review_phase` | ADR-0012, ADR-0014, ADR-0015, ADR-0031 |
-| `src.reviewer` | ADR-0025, ADR-0027 |
+| `src.review_advisor` | ADR-0059 |
+| `src.review_phase` | ADR-0012, ADR-0014, ADR-0015, ADR-0031, ADR-0059 |
+| `src.reviewer` | ADR-0025, ADR-0027, ADR-0059 |
 | `src.route_back` | ADR-0041 |
 | `src.screenshot_scanner` | ADR-0018 |
 | `src.sentry.reverse_lookup` | ADR-0050 |
@@ -172,4 +175,4 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.workspace` | ADR-0055 |
 | `src.worktree` | ADR-0003, ADR-0009, ADR-0010 |
 
-_Regenerated from commit `08ff62b` on 2026-05-07 23:02 UTC. Source last changed at `08ff62b`. Status: 🟢 fresh._
+_Regenerated from commit `2953fc7` on 2026-05-08 22:53 UTC. Source last changed at `2953fc7`. Status: 🟢 fresh._

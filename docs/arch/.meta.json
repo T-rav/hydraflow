@@ -1,33 +1,33 @@
 {
-  "regenerated_at": "2026-05-07T23:02:53.494846+00:00",
-  "commit_sha": "08ff62b2a10e514455ee49aac963f12a18a376ad",
+  "regenerated_at": "2026-05-08T22:53:57.259921+00:00",
+  "commit_sha": "2953fc7eee3f1370504caf96baf2b70fe3d81b59",
   "artifacts": {
     "loops.md": {
-      "source_sha": "08ff62b2a10e514455ee49aac963f12a18a376ad"
+      "source_sha": "2953fc7eee3f1370504caf96baf2b70fe3d81b59"
     },
     "ports.md": {
-      "source_sha": "08ff62b2a10e514455ee49aac963f12a18a376ad"
+      "source_sha": "2953fc7eee3f1370504caf96baf2b70fe3d81b59"
     },
     "labels.md": {
-      "source_sha": "08ff62b2a10e514455ee49aac963f12a18a376ad"
+      "source_sha": "2953fc7eee3f1370504caf96baf2b70fe3d81b59"
     },
     "modules.md": {
-      "source_sha": "08ff62b2a10e514455ee49aac963f12a18a376ad"
+      "source_sha": "2953fc7eee3f1370504caf96baf2b70fe3d81b59"
     },
     "events.md": {
-      "source_sha": "08ff62b2a10e514455ee49aac963f12a18a376ad"
+      "source_sha": "2953fc7eee3f1370504caf96baf2b70fe3d81b59"
     },
     "adr_xref.md": {
-      "source_sha": "08ff62b2a10e514455ee49aac963f12a18a376ad"
+      "source_sha": "2953fc7eee3f1370504caf96baf2b70fe3d81b59"
     },
     "mockworld.md": {
-      "source_sha": "08ff62b2a10e514455ee49aac963f12a18a376ad"
+      "source_sha": "2953fc7eee3f1370504caf96baf2b70fe3d81b59"
     },
     "changelog.md": {
-      "source_sha": "08ff62b2a10e514455ee49aac963f12a18a376ad"
+      "source_sha": "2953fc7eee3f1370504caf96baf2b70fe3d81b59"
     },
     "functional_areas.md": {
-      "source_sha": "08ff62b2a10e514455ee49aac963f12a18a376ad"
+      "source_sha": "2953fc7eee3f1370504caf96baf2b70fe3d81b59"
     }
   }
 }
