@@ -1214,11 +1214,22 @@ class ReviewPhase:
                         issue_number=task.id,
                     )
                 )
-            except Exception:
-                # Auth / credit errors are re-raised inside PostVerifyAdvisor.run.
-                # Anything bubbling out here is a true degraded path — log and
-                # fall through to the executor's verdict (fail-open; a future
-                # task may revisit per HYDRAFLOW_REVIEW_POSTVERIFY_FAIL_AS_VETO).
+            except Exception as exc:
+                # Auth / credit errors are re-raised inside PostVerifyAdvisor.run,
+                # but per docs/wiki/dark-factory.md §2.2 the retry loop's broad
+                # except must also reraise credit-exhausted / likely-bug errors
+                # so the orchestrator sees infrastructure failures and the
+                # attempt budget isn't burned against an exhausted billing
+                # signal.
+                from exception_classify import (  # noqa: PLC0415
+                    reraise_on_credit_or_bug,
+                )
+
+                reraise_on_credit_or_bug(exc)
+                # Anything bubbling out past the helper is a true degraded
+                # path — log and fall through to the executor's verdict
+                # (fail-open; a future task may revisit per
+                # HYDRAFLOW_REVIEW_POSTVERIFY_FAIL_AS_VETO).
                 logger.warning(
                     "post_verify advisor errored for PR #%d — proceeding with executor verdict",
                     pr.number,

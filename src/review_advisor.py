@@ -348,14 +348,17 @@ class PostVerifyAdvisor:
                 prompt=prompt,
             )
         except Exception as exc:
-            # Authentication and credit errors must propagate — they signal
-            # infrastructure state the orchestrator's higher layers handle.
-            from subprocess_util import (  # noqa: PLC0415
-                AuthenticationError,
-                CreditExhaustedError,
+            # Authentication, credit, and likely-bug errors must propagate
+            # per docs/wiki/dark-factory.md §2.2 — they signal infrastructure
+            # state (or programming bugs) the orchestrator's higher layers
+            # need to see, not transient advisor-runner failures.
+            from exception_classify import (  # noqa: PLC0415
+                reraise_on_credit_or_bug,
             )
 
-            if isinstance(exc, AuthenticationError | CreditExhaustedError):
+            try:
+                reraise_on_credit_or_bug(exc)
+            except BaseException:
                 self._emit_log(
                     prompt=prompt, payload=None, start=start, error="runner-error"
                 )
