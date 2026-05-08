@@ -1170,7 +1170,9 @@ class ReviewPhase:
             and pr.number > 0
             and self._is_product_track_pr(task)
         ):
-            spec_ok = await self._run_pre_merge_spec_check(task, diff)
+            spec_ok = await self._run_pre_merge_spec_check(
+                task, diff, pr_number=pr.number
+            )
             if not spec_ok:
                 result = result.model_copy(
                     update={
@@ -1561,11 +1563,19 @@ class ReviewPhase:
             for c in (task.comments or [])
         )
 
-    async def _run_pre_merge_spec_check(self, task: Task, diff: str) -> bool:
+    async def _run_pre_merge_spec_check(
+        self, task: Task, diff: str, pr_number: int | None = None
+    ) -> bool:
         """Run a lightweight spec-match check before merge.
 
         Returns True if the implementation matches the spec (proceed with merge).
         Returns False if significant gaps are found (block merge).
+
+        ``pr_number`` (T25) is used to look up the pre-flight ReviewPlan from
+        ``self._advisor_pre_flight_plan`` so the post-verify advisor for the
+        ``pre_merge_spec_check`` surface can piggyback on ``pr_review``'s
+        plan. Defaults to ``None`` for back-compat with regression tests that
+        invoke the function directly.
         """
         from spec_match import (  # noqa: PLC0415
             build_self_review_prompt,
@@ -1590,7 +1600,7 @@ class ReviewPhase:
                 {"issue": task.id, "source": "spec-check"},
             )
             result = extract_spec_match(transcript)
-            verdict = result.get("verdict", "UNKNOWN")
+            verdict = str(result.get("verdict", "UNKNOWN"))
 
             if result.get("content"):
                 await self._prs.post_comment(
@@ -1598,12 +1608,36 @@ class ReviewPhase:
                     f"## Pre-Merge Spec Check\n\n{result['content']}",
                 )
 
+            executor_match = verdict != "MISMATCH"
+
+            # T25: pre_merge_spec_check post-verify advisor — second-opinion
+            # gate on the executor's verdict. The advisor sees the spec, the
+            # diff, and the executor's verdict summary, and can VETO the merge
+            # even when the executor's verdict was MATCH. Piggybacks on
+            # ``pr_review``'s pre-flight plan when present (per spec tiering
+            # matrix; pre_merge_spec_check has pre_flight_enabled=False).
+            #
+            # No bounded retry loop here: pre_merge_spec_check is a one-shot
+            # binary gate, not a fix-and-iterate cycle. If post-verify VETOes,
+            # we return False to block the merge directly; the caller (in
+            # _run_post_review_actions) flips the ReviewResult to
+            # REQUEST_CHANGES. Future work: fold in retry semantics if the
+            # spec-check ever grows a fix loop.
+            advisor_blocked = await self._run_pre_merge_spec_check_advisor(
+                task=task,
+                diff=diff,
+                executor_verdict_summary=verdict,
+                pr_number=pr_number,
+            )
+            if advisor_blocked:
+                return False
+
             if verdict == "MISMATCH":
                 logger.warning(
                     "Issue #%d spec-match MISMATCH — blocking merge", task.id
                 )
                 return False
-            return True
+            return executor_match
         except Exception as exc:
             # Fatal infrastructure errors (auth, credit, likely-bug) must
             # propagate so the pipeline's auth-retry / credit-pause / crash
@@ -1639,6 +1673,108 @@ class ReviewPhase:
                 exc_info=True,
             )
             return False
+
+    async def _run_pre_merge_spec_check_advisor(
+        self,
+        *,
+        task: Task,
+        diff: str,
+        executor_verdict_summary: str,
+        pr_number: int | None,
+    ) -> bool:
+        """Run PostVerifyAdvisor for the ``pre_merge_spec_check`` surface.
+
+        Returns ``True`` when the advisor VETOes (caller must block the merge);
+        ``False`` when the advisor APPROVEs, the surface/role kill-switches
+        are off, or the advisor degrades on a non-fatal error.
+
+        The pre_merge_spec_check surface is a binary gate — there is no
+        fix-and-iterate retry loop here. If VETO occurs, the merge is blocked
+        directly; the executor's existing fail-closed behaviour on MISMATCH
+        is preserved. ``reraise_on_credit_or_bug`` discipline is preserved
+        per docs/wiki/dark-factory.md §2.2.
+        """
+        from review_advisor import (  # noqa: PLC0415
+            PostVerifyAdvisor,
+            PostVerifyInput,
+            build_surface_config,
+            is_advisor_enabled,
+            resolve_post_verify_authority,
+        )
+
+        surface = "pre_merge_spec_check"
+        surface_cfg = build_surface_config(surface)
+        if not surface_cfg.post_verify_enabled or not is_advisor_enabled(
+            surface, "post_verify"
+        ):
+            return False
+
+        # Piggyback on pr_review's pre-flight plan when present (per spec
+        # tiering matrix). pre_merge_spec_check has pre_flight_enabled=False
+        # so it never produces its own plan.
+        pre_flight_plan = (
+            self._advisor_pre_flight_plan.get(pr_number)
+            if pr_number is not None
+            else None
+        )
+
+        # T29 self-modification guard — diffs touching advisor's own files
+        # force veto authority regardless of surface config.
+        authority = resolve_post_verify_authority(
+            surface_config=surface_cfg,
+            diff=diff,
+        )
+
+        log_path = (
+            self._config.repo_root
+            / "review_logs"
+            / str(pr_number if pr_number is not None else task.id)
+            / "advisor_session.jsonl"
+        )
+        advisor = PostVerifyAdvisor(
+            runner=self._post_verify_runner,
+            surface_config=surface_cfg,
+            log_path=log_path,
+            pr_number=pr_number,
+            authority_override=authority,
+        )
+        try:
+            pv_result = await advisor.run(
+                PostVerifyInput(
+                    surface=surface,
+                    diff=diff,
+                    spec=task.body or None,
+                    executor_verdict_summary=executor_verdict_summary,
+                    executor_fix_diff=None,
+                    pre_flight_plan=pre_flight_plan,
+                    issue_number=task.id,
+                )
+            )
+        except Exception as exc:
+            from exception_classify import (  # noqa: PLC0415
+                reraise_on_credit_or_bug,
+            )
+
+            reraise_on_credit_or_bug(exc)
+            # Degraded path: log and let the executor's verdict stand. The
+            # executor's existing fail-closed semantics on MISMATCH still
+            # block bad merges; the advisor is a strict tightening on
+            # MATCH-shaped verdicts only.
+            logger.warning(
+                "pre_merge_spec_check post-verify advisor degraded for "
+                "issue #%d — proceeding with executor verdict",
+                task.id,
+                exc_info=True,
+            )
+            return False
+
+        if pv_result.verdict == "VETO":
+            logger.warning(
+                "Issue #%d pre_merge_spec_check VETO from advisor — blocking merge",
+                task.id,
+            )
+            return True
+        return False
 
     def _compute_visual_validation(
         self, diff: str, task: Task

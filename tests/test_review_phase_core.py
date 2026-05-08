@@ -2879,3 +2879,243 @@ class TestPostVerifyRunnerDispatch:
         assert fake.calls == [(7, "post_verify")]
         # MockWorld branch must NOT call the production _execute path.
         phase._reviewers._execute.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Pre-merge spec check post-verify advisor (T25)
+# ---------------------------------------------------------------------------
+
+
+class TestPreMergeSpecCheckAdvisor:
+    """T25 — PostVerifyAdvisor wired into ``_run_pre_merge_spec_check``.
+
+    The pre_merge_spec_check surface is a binary gate: post-verify VETO
+    blocks the merge regardless of the executor's MATCH verdict; APPROVE
+    falls through to the executor's existing decision.
+    """
+
+    @pytest.mark.asyncio
+    async def test_advisor_veto_blocks_merge_on_executor_match(
+        self, config: HydraFlowConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Executor returns MATCH but advisor VETOes — merge must be blocked."""
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_ADVISOR_ENABLED", "true")
+        monkeypatch.setenv("HYDRAFLOW_PRE_MERGE_SPEC_CHECK_ADVISOR_ENABLED", "true")
+
+        phase = make_review_phase(config, default_mocks=True)
+        task = TaskFactory.create(id=42, body="The widget should frobnicate")
+
+        # Stub the spec-match executor to return MATCH.
+        monkeypatch.setattr(
+            "spec_match.build_self_review_prompt",
+            lambda _t, _d: "prompt",
+        )
+        monkeypatch.setattr(
+            "spec_match.extract_spec_match",
+            lambda _t: {"verdict": "MATCH", "content": ""},
+        )
+        monkeypatch.setattr(
+            "agent_cli.build_agent_command",
+            lambda **_kw: ["echo", "ok"],
+        )
+        phase._reviewers._execute = AsyncMock(return_value="transcript")
+
+        # Stub the post-verify runner to return a VETO payload.
+        veto_payload = (
+            '{"verdict":"VETO","reasoning":"missing acceptance criterion 2",'
+            '"disagreements":[{"executor_claim":"spec match",'
+            '"advisor_assessment":"AC2 not addressed",'
+            '"severity":"blocking"}]}'
+        )
+        runner_run = AsyncMock(return_value=veto_payload)
+        phase._post_verify_runner.run = runner_run  # type: ignore[method-assign]
+
+        result = await phase._run_pre_merge_spec_check(task, "diff text", pr_number=99)
+
+        assert result is False, "Advisor VETO must block the merge"
+        runner_run.assert_awaited_once()
+        # Surface threading: the runner is called with role="post_verify".
+        kwargs = runner_run.await_args.kwargs
+        assert kwargs.get("role") == "post_verify"
+
+    @pytest.mark.asyncio
+    async def test_advisor_approve_respects_executor_match(
+        self, config: HydraFlowConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Executor MATCH + advisor APPROVE -> proceed with merge."""
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_ADVISOR_ENABLED", "true")
+        monkeypatch.setenv("HYDRAFLOW_PRE_MERGE_SPEC_CHECK_ADVISOR_ENABLED", "true")
+
+        phase = make_review_phase(config, default_mocks=True)
+        task = TaskFactory.create(id=42, body="spec body")
+
+        monkeypatch.setattr(
+            "spec_match.build_self_review_prompt",
+            lambda _t, _d: "prompt",
+        )
+        monkeypatch.setattr(
+            "spec_match.extract_spec_match",
+            lambda _t: {"verdict": "MATCH", "content": ""},
+        )
+        monkeypatch.setattr(
+            "agent_cli.build_agent_command",
+            lambda **_kw: ["echo", "ok"],
+        )
+        phase._reviewers._execute = AsyncMock(return_value="transcript")
+
+        approve_payload = (
+            '{"verdict":"APPROVE","reasoning":"looks good","disagreements":[]}'
+        )
+        phase._post_verify_runner.run = AsyncMock(  # type: ignore[method-assign]
+            return_value=approve_payload
+        )
+
+        result = await phase._run_pre_merge_spec_check(task, "diff text", pr_number=99)
+
+        assert result is True, "Executor MATCH + advisor APPROVE -> proceed"
+
+    @pytest.mark.asyncio
+    async def test_advisor_approve_does_not_override_executor_mismatch(
+        self, config: HydraFlowConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Fail-closed preserved: advisor APPROVE cannot rescue an executor MISMATCH."""
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_ADVISOR_ENABLED", "true")
+        monkeypatch.setenv("HYDRAFLOW_PRE_MERGE_SPEC_CHECK_ADVISOR_ENABLED", "true")
+
+        phase = make_review_phase(config, default_mocks=True)
+        task = TaskFactory.create(id=42, body="spec body")
+
+        monkeypatch.setattr(
+            "spec_match.build_self_review_prompt",
+            lambda _t, _d: "prompt",
+        )
+        monkeypatch.setattr(
+            "spec_match.extract_spec_match",
+            lambda _t: {"verdict": "MISMATCH", "content": "gap details"},
+        )
+        monkeypatch.setattr(
+            "agent_cli.build_agent_command",
+            lambda **_kw: ["echo", "ok"],
+        )
+        phase._reviewers._execute = AsyncMock(return_value="transcript")
+
+        # Advisor returns APPROVE — should not override the executor's MISMATCH.
+        approve_payload = (
+            '{"verdict":"APPROVE","reasoning":"looks fine","disagreements":[]}'
+        )
+        phase._post_verify_runner.run = AsyncMock(  # type: ignore[method-assign]
+            return_value=approve_payload
+        )
+
+        result = await phase._run_pre_merge_spec_check(task, "diff text", pr_number=99)
+
+        assert result is False, (
+            "Advisor APPROVE must not override executor MISMATCH (fail-closed)"
+        )
+
+    @pytest.mark.asyncio
+    async def test_per_surface_kill_switch_skips_advisor(
+        self, config: HydraFlowConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When the per-surface kill switch is off, advisor is not invoked."""
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_ADVISOR_ENABLED", "true")
+        monkeypatch.setenv("HYDRAFLOW_PRE_MERGE_SPEC_CHECK_ADVISOR_ENABLED", "false")
+
+        phase = make_review_phase(config, default_mocks=True)
+        task = TaskFactory.create(id=42, body="spec body")
+
+        monkeypatch.setattr(
+            "spec_match.build_self_review_prompt",
+            lambda _t, _d: "prompt",
+        )
+        monkeypatch.setattr(
+            "spec_match.extract_spec_match",
+            lambda _t: {"verdict": "MATCH", "content": ""},
+        )
+        monkeypatch.setattr(
+            "agent_cli.build_agent_command",
+            lambda **_kw: ["echo", "ok"],
+        )
+        phase._reviewers._execute = AsyncMock(return_value="transcript")
+
+        runner_run = AsyncMock()
+        phase._post_verify_runner.run = runner_run  # type: ignore[method-assign]
+
+        result = await phase._run_pre_merge_spec_check(task, "diff text", pr_number=99)
+
+        assert result is True
+        runner_run.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_advisor_runtime_error_degrades_to_executor_verdict(
+        self, config: HydraFlowConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Soft advisor failure (e.g. RuntimeError) falls through to executor's verdict.
+
+        The executor's existing fail-closed semantics on MISMATCH still
+        apply; a non-fatal advisor error doesn't itself block a MATCH.
+        """
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_ADVISOR_ENABLED", "true")
+        monkeypatch.setenv("HYDRAFLOW_PRE_MERGE_SPEC_CHECK_ADVISOR_ENABLED", "true")
+
+        phase = make_review_phase(config, default_mocks=True)
+        task = TaskFactory.create(id=42, body="spec body")
+
+        monkeypatch.setattr(
+            "spec_match.build_self_review_prompt",
+            lambda _t, _d: "prompt",
+        )
+        monkeypatch.setattr(
+            "spec_match.extract_spec_match",
+            lambda _t: {"verdict": "MATCH", "content": ""},
+        )
+        monkeypatch.setattr(
+            "agent_cli.build_agent_command",
+            lambda **_kw: ["echo", "ok"],
+        )
+        phase._reviewers._execute = AsyncMock(return_value="transcript")
+
+        # Advisor errors with a transient runtime issue.
+        phase._post_verify_runner.run = AsyncMock(  # type: ignore[method-assign]
+            side_effect=RuntimeError("advisor temporarily unavailable")
+        )
+
+        result = await phase._run_pre_merge_spec_check(task, "diff text", pr_number=99)
+
+        # Executor's MATCH stands when the advisor degrades; fail-closed
+        # behaviour on MISMATCH is preserved by the executor's own branch.
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_advisor_credit_exhausted_propagates(
+        self, config: HydraFlowConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """CreditExhaustedError from the advisor must propagate (dark-factory §2.2)."""
+        monkeypatch.setenv("HYDRAFLOW_REVIEW_ADVISOR_ENABLED", "true")
+        monkeypatch.setenv("HYDRAFLOW_PRE_MERGE_SPEC_CHECK_ADVISOR_ENABLED", "true")
+
+        phase = make_review_phase(config, default_mocks=True)
+        task = TaskFactory.create(id=42, body="spec body")
+
+        monkeypatch.setattr(
+            "spec_match.build_self_review_prompt",
+            lambda _t, _d: "prompt",
+        )
+        monkeypatch.setattr(
+            "spec_match.extract_spec_match",
+            lambda _t: {"verdict": "MATCH", "content": ""},
+        )
+        monkeypatch.setattr(
+            "agent_cli.build_agent_command",
+            lambda **_kw: ["echo", "ok"],
+        )
+        phase._reviewers._execute = AsyncMock(return_value="transcript")
+
+        from subprocess_util import CreditExhaustedError
+
+        phase._post_verify_runner.run = AsyncMock(  # type: ignore[method-assign]
+            side_effect=CreditExhaustedError("no credits")
+        )
+
+        with pytest.raises(CreditExhaustedError):
+            await phase._run_pre_merge_spec_check(task, "diff text", pr_number=99)
