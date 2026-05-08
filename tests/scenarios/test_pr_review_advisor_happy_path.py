@@ -3,6 +3,9 @@
 T9 of the advisor-pattern feature. Asserts that when the executor returns
 APPROVE and the advisor returns APPROVE, the PR is merged and the advisor
 was invoked exactly once for the post_verify role.
+
+Tier-2 parity test: ``tests/sandbox_scenarios/scenarios/s_advisor_full_loop.py``
+(ADR-0052 rule 3 — every sandbox scenario has a Tier-1 parity test).
 """
 
 from __future__ import annotations
