@@ -2510,7 +2510,13 @@ class TestHandleSuccessfulPush:
     async def test_returns_none_when_push_succeeds_but_agent_failed(
         self, config: HydraFlowConfig
     ) -> None:
-        """When push succeeds but result.success=False, no PR actions fire and None is returned."""
+        """When result.success=False on a fresh attempt, no PR is opened.
+
+        Previously this asserted create_pr was awaited (encoding the
+        half-state bug). After the half-state fix, _handle_successful_push
+        bails before _resolve_pr when the implementation failed and we
+        are not on a retry path.
+        """
         issue = TaskFactory.create()
         result = WorkerResultFactory.create(
             issue_number=42,
@@ -2524,9 +2530,9 @@ class TestHandleSuccessfulPush:
 
         early = await phase._handle_successful_push(issue, result, is_retry=False)
 
-        assert early is None  # no early return — caller handles status marking
+        assert early is None
         mock_prs.transition.assert_not_awaited()
-        mock_prs.create_pr.assert_awaited_once()  # PR is still resolved
+        mock_prs.create_pr.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
