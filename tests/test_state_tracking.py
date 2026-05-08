@@ -131,6 +131,8 @@ class TestInitialization:
             "auto_agent_daily_spend",
             # SandboxFailureFixerLoop (sandbox-tier scenario testing track)
             "sandbox_failure_fixer_attempts",
+            # MemoryBacklogLoop (ADR-0057)
+            "memory_backlog_attempts",
         }
         assert set(d.keys()) == expected_keys
 

@@ -35,6 +35,7 @@ from ._flake_tracker import FlakeTrackerStateMixin
 from ._hitl import HITLStateMixin
 from ._issue import IssueStateMixin
 from ._lifetime import LifetimeStatsMixin
+from ._memory_backlog import MemoryBacklogStateMixin
 from ._principles_audit import PrinciplesAuditStateMixin
 from ._rc_budget import RCBudgetStateMixin
 from ._report import ReportStateMixin
@@ -87,6 +88,7 @@ class StateTracker(
     FlakeTrackerStateMixin,
     SkillPromptEvalStateMixin,
     FakeCoverageStateMixin,
+    MemoryBacklogStateMixin,
     RCBudgetStateMixin,
     WikiRotDetectorStateMixin,
     TrustFleetSanityStateMixin,
