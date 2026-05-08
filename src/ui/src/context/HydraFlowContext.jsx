@@ -815,6 +815,62 @@ export function reducer(state, action) {
         ],
       }
 
+    case 'baseline_update':
+      // TODO(EventType.BASELINE_UPDATE): wire UI when feature lands
+      return addEvent(state, action)
+
+    case 'ci_check':
+      // TODO(EventType.CI_CHECK): wire UI when feature lands
+      return addEvent(state, action)
+
+    case 'crate_activated':
+      // TODO(EventType.CRATE_ACTIVATED): wire UI when feature lands
+      return addEvent(state, action)
+
+    case 'crate_completed':
+      // TODO(EventType.CRATE_COMPLETED): wire UI when feature lands
+      return addEvent(state, action)
+
+    case 'diagnostic_update':
+      // TODO(EventType.DIAGNOSTIC_UPDATE): wire UI when feature lands
+      return addEvent(state, action)
+
+    case 'discover_update':
+      // TODO(EventType.DISCOVER_UPDATE): wire UI when feature lands
+      return addEvent(state, action)
+
+    case 'epic_progress':
+      // TODO(EventType.EPIC_PROGRESS): wire UI when feature lands
+      return addEvent(state, action)
+
+    case 'epic_ready':
+      // TODO(EventType.EPIC_READY): wire UI when feature lands
+      return addEvent(state, action)
+
+    case 'epic_released':
+      // TODO(EventType.EPIC_RELEASED): wire UI when feature lands
+      return addEvent(state, action)
+
+    case 'epic_releasing':
+      // TODO(EventType.EPIC_RELEASING): wire UI when feature lands
+      return addEvent(state, action)
+
+    case 'issue_created':
+      // TODO(EventType.ISSUE_CREATED): wire UI when feature lands
+      return addEvent(state, action)
+
+    case 'retrospective_update':
+      // TODO(EventType.RETROSPECTIVE_UPDATE): wire UI when feature lands
+      return addEvent(state, action)
+
+    case 'shape_update':
+      // TODO(EventType.SHAPE_UPDATE): wire UI when feature lands
+      return addEvent(state, action)
+
+    case 'visual_gate':
+      // TODO(EventType.VISUAL_GATE): wire UI when feature lands
+      return addEvent(state, action)
+
     default:
       return addEvent(state, action)
   }
