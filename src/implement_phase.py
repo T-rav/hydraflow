@@ -618,7 +618,13 @@ class ImplementPhase:
         if self._is_zero_commit_failure(result):
             return await self._handle_zero_commits(issue, result)
 
-        if result.workspace_path:
+        # Fresh failed attempts skip the push entirely — partial commits
+        # never land on origin, so there is no orphan branch and no
+        # opportunity for _handle_successful_push to drift state.
+        # Cycling retries reset the worktree to main, discarding partial
+        # commits anyway. Retries with review feedback push so the
+        # existing PR sees the iteration.
+        if result.workspace_path and (result.success or is_retry):
             pushed = await self._prs.push_branch(
                 Path(result.workspace_path), result.branch
             )
@@ -629,7 +635,6 @@ class ImplementPhase:
                 if early_return is not None:
                     return early_return
 
-        # Post-implementation: flag any requirements gaps discovered
         if result.success and result.transcript:
             await self._flag_requirements_gaps(issue, result.transcript)
 
@@ -725,7 +730,16 @@ class ImplementPhase:
         outcome is fully resolved (PR-less failure or zero-diff escalation).
         Returns ``None`` when the caller should continue to the final
         status-marking step.
+
+        On a fresh attempt with ``result.success`` False, returns ``None``
+        without resolving a PR. Creating a PR for failed work caused
+        state-machine drift: the issue stayed at ``hydraflow-ready`` while
+        the PR sat unlabeled. The attempt-cap mechanism retries with
+        ``prior_failure`` feedback. Retry path is unchanged.
         """
+        if not result.success and not is_retry:
+            return None
+
         pr = await self._resolve_pr(issue, result, is_retry)
 
         if result.success and (pr is None or pr.number <= 0):
