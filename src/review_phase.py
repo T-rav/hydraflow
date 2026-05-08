@@ -315,7 +315,17 @@ class ReviewPhase:
                 # calls past the production ReviewRunner._execute (which
                 # would hit a real Claude subprocess). Production reviewers
                 # never carry this sentinel.
-                fake_llm = getattr(reviewers, "_mockworld_fake_llm", None)
+                #
+                # Use ``vars()`` (not ``getattr``) for the presence check —
+                # ``unittest.mock.AsyncMock`` auto-vivifies any attribute
+                # access into a child mock, which would route every test
+                # using an AsyncMock-based reviewer into the MockWorld
+                # branch and return a coroutine-as-payload. Real MockWorld
+                # scenarios set the sentinel as an instance attribute
+                # (see tests/scenarios/fakes/mock_world.py), so checking
+                # ``__dict__`` cleanly distinguishes them.
+                instance_dict = getattr(reviewers, "__dict__", None) or {}
+                fake_llm = instance_dict.get("_mockworld_fake_llm")
                 if fake_llm is not None and getattr(
                     fake_llm, "_is_fake_adapter", False
                 ):
