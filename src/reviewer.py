@@ -348,11 +348,18 @@ class ReviewRunner(BaseRunner):
         worktree_path: Path,
         review_summary: str,
         worker_id: int = 0,
+        advisor_transcript: str | None = None,
+        suggested_fix_direction: str | None = None,
     ) -> ReviewResult:
         """Spin up a sub-agent to fix issues found during review.
 
         Takes the review feedback and asks the agent to fix the identified
         issues, commit the fixes, and report whether it succeeded.
+
+        When invoked from the post-verify advisor's VETO retry loop,
+        ``advisor_transcript`` and ``suggested_fix_direction`` carry the
+        advisor's disagreement record so the fix prompt can direct the
+        executor to address it specifically.
         """
         start = time.monotonic()
         result = ReviewResult(
@@ -397,7 +404,13 @@ class ReviewRunner(BaseRunner):
 
         try:
             cmd = self._build_command(worktree_path)
-            prompt = self._build_review_fix_prompt(pr, issue, review_summary)
+            prompt = self._build_review_fix_prompt(
+                pr,
+                issue,
+                review_summary,
+                advisor_transcript=advisor_transcript,
+                suggested_fix_direction=suggested_fix_direction,
+            )
             before_sha = await self._get_head_sha(worktree_path)
             transcript = await self._execute(
                 cmd,
@@ -446,14 +459,31 @@ class ReviewRunner(BaseRunner):
         pr: PRInfo,
         issue: Task,
         review_summary: str,
+        advisor_transcript: str | None = None,
+        suggested_fix_direction: str | None = None,
     ) -> str:
-        """Build a prompt to fix issues identified during review."""
+        """Build a prompt to fix issues identified during review.
+
+        When ``advisor_transcript`` is provided, an "Advisor disagreement"
+        section is appended so the executor can address what the advisor
+        flagged.
+        """
         test_cmd = self._config.test_command
+        advisor_section = ""
+        if advisor_transcript:
+            advisor_section = (
+                "\n\n## Advisor disagreement (you must address this)\n\n"
+                f"{advisor_transcript}"
+            )
+        if suggested_fix_direction:
+            advisor_section += (
+                f"\n\n## Suggested direction\n\n{suggested_fix_direction}"
+            )
         return f"""You are fixing review findings on PR #{pr.number} (issue #{issue.id}: {issue.title}).
 
 ## Review Feedback
 
-{review_summary}
+{review_summary}{advisor_section}
 
 ## Instructions
 

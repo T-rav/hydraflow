@@ -231,9 +231,13 @@ class ReviewPhase:
 
             self._visual_validator = VisualValidator(config)
 
-        # Per-PR advisor retry counter — T9 only reads it (always 0). T10 will
-        # increment it on VETO and use it to bound the retry loop.
+        # Per-PR advisor retry counter — incremented on VETO. Bounded by
+        # surface_cfg.max_veto_retries.
         self._advisor_attempt: dict[int, int] = {}
+        # Per-PR list of advisor PostVerifyResults collected this run. The
+        # transcript hand-back to the executor (on VETO) is rendered from
+        # this list. T12 will replace this with persistent advisor_session.jsonl.
+        self._advisor_results: dict[int, list[Any]] = {}
         self._post_verify_runner = self._build_post_verify_runner()
 
     def _build_post_verify_runner(self) -> Any:
@@ -1060,15 +1064,18 @@ class ReviewPhase:
                 )
 
         # PostVerifyAdvisor — second-opinion gate on APPROVE verdicts.
-        # T9 simplification: a single VETO escalates to HITL and aborts the
-        # merge. T10 will replace this with a bounded retry loop driven by
-        # surface_cfg.max_veto_retries.
+        # On VETO, the advisor hands the disagreement back to the executor
+        # for up to ``surface_cfg.max_veto_retries`` retries. After the
+        # retry budget is exhausted, the disagreement is escalated to HITL.
         if result.verdict == ReviewVerdict.APPROVE and pr.number > 0:
-            result = await self._run_post_verify_advisor(
+            result, diff = await self._run_post_verify_advisor(
                 pr=pr,
                 task=task,
+                wt_path=wt_path,
                 result=result,
                 diff=diff,
+                worker_id=worker_id,
+                code_scanning_alerts=code_scanning_alerts,
             )
 
         skip_worktree_cleanup = False
@@ -1101,15 +1108,23 @@ class ReviewPhase:
         *,
         pr: PRInfo,
         task: Task,
+        wt_path: Path,
         result: ReviewResult,
         diff: str,
-    ) -> ReviewResult:
-        """Invoke PostVerifyAdvisor for a pr_review APPROVE; return updated result.
+        worker_id: int,
+        code_scanning_alerts: list[CodeScanningAlert] | None = None,
+    ) -> tuple[ReviewResult, str]:
+        """Run PostVerifyAdvisor with bounded VETO retries.
 
-        On VETO, escalates to HITL and returns a result with the verdict
-        flipped to REQUEST_CHANGES so the caller skips the merge branch.
-        On APPROVE (or when the surface/role kill-switches are off), returns
-        the original result unchanged.
+        On APPROVE (or when the surface/role kill-switches are off) returns
+        ``(result, diff)`` unchanged.
+
+        On VETO, hands the full advisor transcript back to ``_attempt_review_fix``
+        so the executor can address the disagreement, then re-runs the advisor.
+        Repeats up to ``surface_cfg.max_veto_retries`` retries. Once the
+        retry budget is exhausted, escalates to HITL with the full
+        disagreement transcript and returns ``(result, diff)`` flipped to
+        REQUEST_CHANGES so the caller skips the merge branch.
 
         Function-local imports keep the dependency on ``review_advisor``
         contained to where it's used and avoid the auto-lint hook stripping
@@ -1126,62 +1141,127 @@ class ReviewPhase:
         if not surface_cfg.post_verify_enabled or not is_advisor_enabled(
             "pr_review", "post_verify"
         ):
-            return result
+            return result, diff
 
-        advisor = PostVerifyAdvisor(
-            runner=self._post_verify_runner,
-            surface_config=surface_cfg,
-        )
-        try:
-            pv_result = await advisor.run(
-                PostVerifyInput(
-                    surface="pr_review",
-                    diff=diff,
-                    spec=task.body or None,
-                    executor_verdict_summary=(result.summary or result.verdict.value),
-                    executor_fix_diff=None,
-                    pre_flight_plan=None,
-                    attempt_number=self._advisor_attempt.get(pr.number, 0),
-                    issue_number=task.id,
+        attempt_number = self._advisor_attempt.setdefault(pr.number, 0)
+        self._advisor_results.setdefault(pr.number, [])
+
+        while True:
+            advisor = PostVerifyAdvisor(
+                runner=self._post_verify_runner,
+                surface_config=surface_cfg,
+            )
+            try:
+                pv_result = await advisor.run(
+                    PostVerifyInput(
+                        surface="pr_review",
+                        diff=diff,
+                        spec=task.body or None,
+                        executor_verdict_summary=(
+                            result.summary or result.verdict.value
+                        ),
+                        executor_fix_diff=None,
+                        pre_flight_plan=None,
+                        attempt_number=attempt_number,
+                        issue_number=task.id,
+                    )
                 )
-            )
-        except Exception:
-            # Auth / credit errors are re-raised inside PostVerifyAdvisor.run.
-            # Anything bubbling out here is a true degraded path — log and
-            # fall through to the executor's verdict (fail-open for T9; T10
-            # will revisit per HYDRAFLOW_REVIEW_POSTVERIFY_FAIL_AS_VETO).
-            logger.warning(
-                "post_verify advisor errored for PR #%d — proceeding with executor verdict",
-                pr.number,
-                exc_info=True,
-            )
-            return result
+            except Exception:
+                # Auth / credit errors are re-raised inside PostVerifyAdvisor.run.
+                # Anything bubbling out here is a true degraded path — log and
+                # fall through to the executor's verdict (fail-open; a future
+                # task may revisit per HYDRAFLOW_REVIEW_POSTVERIFY_FAIL_AS_VETO).
+                logger.warning(
+                    "post_verify advisor errored for PR #%d — proceeding with executor verdict",
+                    pr.number,
+                    exc_info=True,
+                )
+                return result, diff
 
-        if pv_result.verdict == "VETO":
-            await self._escalate_to_hitl(
-                HitlEscalation(
-                    issue_number=task.id,
-                    pr_number=pr.number,
-                    cause="PostVerifyAdvisor vetoed merge",
-                    origin_label=self._config.review_label[0],
-                    comment=(
-                        "## Advisor Veto\n\n"
-                        f"{pv_result.reasoning}\n\n"
-                        "Escalating to human review."
+            self._advisor_results[pr.number].append(pv_result)
+
+            if pv_result.verdict == "APPROVE":
+                return result, diff
+
+            # VETO — either retry or escalate.
+            if attempt_number >= surface_cfg.max_veto_retries:
+                transcript = self._render_advisor_transcript(pr.number)
+                await self._escalate_to_hitl(
+                    HitlEscalation(
+                        issue_number=task.id,
+                        pr_number=pr.number,
+                        cause=(
+                            f"PostVerifyAdvisor vetoed merge after "
+                            f"{attempt_number + 1} attempts"
+                        ),
+                        origin_label=self._config.review_label[0],
+                        comment=(
+                            "## Advisor Veto (retry budget exhausted)\n\n"
+                            f"{pv_result.reasoning}\n\n"
+                            "### Disagreement transcript\n\n"
+                            f"{transcript}\n\n"
+                            "Escalating to human review."
+                        ),
+                        event_cause="advisor_post_verify_veto",
+                        task=task,
+                    )
+                )
+                return (
+                    result.model_copy(
+                        update={
+                            "verdict": ReviewVerdict.REQUEST_CHANGES,
+                            "summary": (result.summary or "")
+                            + "\n\nPostVerifyAdvisor vetoed merge after "
+                            + f"{attempt_number + 1} attempts: "
+                            + pv_result.reasoning,
+                        }
                     ),
-                    event_cause="advisor_post_verify_veto",
-                    task=task,
+                    diff,
                 )
+
+            # Hand back to the executor with the full advisor transcript so
+            # the next executor attempt can directly address the disagreement.
+            self._advisor_attempt[pr.number] = attempt_number + 1
+            attempt_number += 1
+            transcript = self._render_advisor_transcript(pr.number)
+            result, diff = await self._attempt_review_fix(
+                pr,
+                task,
+                wt_path,
+                result,
+                diff,
+                worker_id,
+                code_scanning_alerts=code_scanning_alerts,
+                advisor_transcript=transcript,
+                suggested_fix_direction=pv_result.suggested_fix_direction,
             )
-            return result.model_copy(
-                update={
-                    "verdict": ReviewVerdict.REQUEST_CHANGES,
-                    "summary": (result.summary or "")
-                    + "\n\nPostVerifyAdvisor vetoed merge: "
-                    + pv_result.reasoning,
-                }
-            )
-        return result
+
+            # If the executor could not produce an APPROVE verdict, abort the
+            # advisor loop — the caller's normal rejection path takes over.
+            if result.verdict != ReviewVerdict.APPROVE:
+                return result, diff
+
+    def _render_advisor_transcript(self, pr_number: int) -> str:
+        """Render the in-memory advisor disagreement transcript for ``pr_number``.
+
+        Phase 2 builds the transcript from ``self._advisor_results``;
+        T12 will replace this with a persistent ``advisor_session.jsonl``.
+        """
+        results = self._advisor_results.get(pr_number, [])
+        parts: list[str] = []
+        for i, r in enumerate(results, 1):
+            parts.append(f"### Attempt {i}")
+            parts.append(f"Verdict: {r.verdict}")
+            parts.append(f"Reasoning: {r.reasoning}")
+            for d in r.disagreements:
+                parts.append(
+                    f"  - [{d.severity}] executor said: {d.executor_claim}\n"
+                    f"    advisor said: {d.advisor_assessment}"
+                )
+            if r.suggested_fix_direction:
+                parts.append(f"Suggested direction: {r.suggested_fix_direction}")
+            parts.append("")
+        return "\n".join(parts)
 
     @staticmethod
     def _is_product_track_pr(task: Task) -> bool:
@@ -1609,11 +1689,17 @@ class ReviewPhase:
         attempt: int,
         worker_id: int,
         code_scanning_alerts: list[CodeScanningAlert] | None = None,
+        advisor_transcript: str | None = None,
+        suggested_fix_direction: str | None = None,
     ) -> tuple[ReviewResult, str] | None:
         """Run one fix-then-re-review cycle.
 
         Returns ``(re_result, updated_diff)`` on success, or ``None`` if
         the fix agent made no changes.
+
+        ``advisor_transcript`` and ``suggested_fix_direction`` are
+        propagated into the fix-agent prompt when the call originates from
+        the post-verify advisor's VETO retry loop.
         """
         await self._publish_review_status(pr, worker_id, "fixing_review")
 
@@ -1623,6 +1709,8 @@ class ReviewPhase:
             wt_path,
             result.summary,
             worker_id=worker_id,
+            advisor_transcript=advisor_transcript,
+            suggested_fix_direction=suggested_fix_direction,
         )
 
         if not fix_result.fixes_made:
@@ -1662,12 +1750,19 @@ class ReviewPhase:
         diff: str,
         worker_id: int,
         code_scanning_alerts: list[CodeScanningAlert] | None = None,
+        advisor_transcript: str | None = None,
+        suggested_fix_direction: str | None = None,
     ) -> tuple[ReviewResult, str]:
         """Spin up a sub-agent to fix review findings, then re-review.
 
         Tries up to 2 fix-then-review cycles. If the fix agent makes
         changes and the re-review approves, returns the upgraded result.
         Otherwise falls through to the normal rejection path.
+
+        When called from the post-verify advisor's VETO retry loop,
+        ``advisor_transcript`` and ``suggested_fix_direction`` thread the
+        full advisor disagreement record into the executor's prompt so the
+        next attempt can directly address the disagreement.
         """
         max_fix_attempts = 2
 
@@ -1688,6 +1783,8 @@ class ReviewPhase:
                     attempt,
                     worker_id,
                     code_scanning_alerts=code_scanning_alerts,
+                    advisor_transcript=advisor_transcript,
+                    suggested_fix_direction=suggested_fix_direction,
                 ),
                 on_failure=lambda _: None,
                 context=f"PR #{pr.number}: review fix attempt {attempt} failed — falling back to rejection",

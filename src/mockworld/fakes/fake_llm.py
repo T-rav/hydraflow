@@ -249,6 +249,31 @@ class _FakeReviewRunner(_ScriptedRunner):
             fixes_made=True,
         )
 
+    async def fix_review_findings(
+        self,
+        pr: Any,
+        issue: Any,
+        _worktree_path: Path,
+        _review_summary: str,
+        **_kwargs: Any,
+    ) -> Any:
+        """Default fake: report fixes_made=True so the retry loop re-reviews.
+
+        Production ``ReviewRunner.fix_review_findings`` would spawn a real
+        subprocess. The retry path triggered by the post-verify advisor's
+        VETO branch lands here in MockWorld scenarios — the executor is
+        treated as having committed a fix, so the next ``review()`` pop
+        decides the outcome.
+        """
+        issue_number = getattr(issue, "id", getattr(issue, "number", 0))
+        pr_number = getattr(pr, "number", 0)
+        return ReviewResultFactory.create(
+            pr_number=pr_number,
+            issue_number=issue_number,
+            verdict=ReviewVerdict.APPROVE,
+            fixes_made=True,
+        )
+
 
 class _FakeAdvisorRunner:
     """Per-(issue, role) scripted advisor responses for MockWorld scenarios.
