@@ -249,7 +249,7 @@ export const WORKER_PRESETS = {
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'pr_unsticker', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_sweeper', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'code_grooming', 'sentry_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'pr_unsticker', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_sweeper', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'code_grooming', 'sentry_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher'])
 
 /**
  * Default intervals (in seconds) for system workers.
@@ -286,6 +286,7 @@ export const SYSTEM_WORKER_INTERVALS = {
   diagram_loop: 14400,
   pricing_refresh: 86400,
   cost_budget_watcher: 300,
+  label_drift_watcher: 600,
 }
 
 /**
@@ -342,6 +343,7 @@ export const BACKGROUND_WORKERS = [
   { key: 'diagram_loop', label: 'Diagram Loop (L24)', description: 'Self-documenting architecture caretaker. Walks src/, tests/, docs/adr/ every 4h; emits regenerated docs/arch/generated/ markdown + opens a PR when the live truth has drifted. Per ADR-0029 (caretaker pattern) and the Architecture Knowledge System spec.', color: theme.cyan, group: 'learning', tags: ['knowledge'] },
   { key: 'pricing_refresh', label: 'Pricing Refresh', description: 'Daily upstream-pricing refresh caretaker. Fetches LiteLLM\'s structured pricing JSON, diffs against src/assets/model_pricing.json, opens a PR if upstream has new or changed Claude models. Bounds-guard rejects suspicious price moves (>+100% or <-50%). Always human-reviewed; never auto-merges.', color: theme.cyan, group: 'learning', tags: ['cost'] },
   { key: 'cost_budget_watcher', label: 'Cost Budget Watcher', description: 'Polls rolling-24h LLM spend every 5 min; disables caretaker loops when daily cap exceeded; auto-recovers as the rolling window drops below the cap. Default unlimited (cap=None).', color: theme.cyan, group: 'operations', tags: ['monitoring'] },
+  { key: 'label_drift_watcher', label: 'Label Drift Watcher', description: 'Periodic scan for cross-entity issue/PR label drift (e.g., issue at hydraflow-ready while linked PR at hydraflow-review with commits); reconciles via per-entity swap_pipeline_labels. See ADR-0056.', color: theme.orange, group: 'repo_health', tags: ['hygiene'] },
 ]
 
 /**

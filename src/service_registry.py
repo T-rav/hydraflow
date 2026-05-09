@@ -48,6 +48,7 @@ from implement_phase import ImplementPhase
 from issue_cache import IssueCache
 from issue_fetcher import GitHubTaskFetcher, IssueFetcher
 from issue_store import IssueStore
+from label_drift_watcher_loop import LabelDriftWatcherLoop
 from memory_backlog_loop import MemoryBacklogLoop
 from merge_conflict_resolver import MergeConflictResolver
 from models import StatusCallback
@@ -186,6 +187,7 @@ class ServiceRegistry:
     rc_budget_loop: RCBudgetLoop
     wiki_rot_detector_loop: WikiRotDetectorLoop
     trust_fleet_sanity_loop: TrustFleetSanityLoop
+    label_drift_watcher_loop: LabelDriftWatcherLoop
     contract_refresh_loop: ContractRefreshLoop
     corpus_learning_loop: CorpusLearningLoop
     auto_agent_preflight_loop: AutoAgentPreflightLoop
@@ -1059,6 +1061,12 @@ def build_services(
                 "prs.add_pr_labels into an `open_bot_pr(...)` shape."
             )
 
+    label_drift_watcher_loop = LabelDriftWatcherLoop(  # noqa: F841
+        config=config,
+        pr_manager=prs,
+        deps=loop_deps,
+    )
+
     term_proposer_llm = TermProposerLLM(client=_NotWiredLLMClient())
     term_proposer_pr_port: BotPRPort = _NotWiredBotPRPort()
     term_proposer_loop = TermProposerLoop(  # noqa: F841
@@ -1132,6 +1140,7 @@ def build_services(
         rc_budget_loop=rc_budget_loop,
         wiki_rot_detector_loop=wiki_rot_detector_loop,
         trust_fleet_sanity_loop=trust_fleet_sanity_loop,
+        label_drift_watcher_loop=label_drift_watcher_loop,
         contract_refresh_loop=contract_refresh_loop,
         corpus_learning_loop=corpus_learning_loop,
         auto_agent_preflight_loop=auto_agent_preflight_loop,

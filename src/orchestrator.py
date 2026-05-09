@@ -183,6 +183,7 @@ class HydraFlowOrchestrator:
             "rc_budget": svc.rc_budget_loop,
             "wiki_rot_detector": svc.wiki_rot_detector_loop,
             "trust_fleet_sanity": svc.trust_fleet_sanity_loop,
+            "label_drift_watcher": svc.label_drift_watcher_loop,
             "contract_refresh": svc.contract_refresh_loop,
             "corpus_learning": svc.corpus_learning_loop,
             "auto_agent_preflight": svc.auto_agent_preflight_loop,

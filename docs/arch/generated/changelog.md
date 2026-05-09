@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W19
 
+- `907c272` — feat(caretaker): LabelDriftWatcherLoop — detect+reconcile drift *(2026-05-08)*
 - `5b34e92` — feat(pr-manager): find_label_drift — detects cross-entity drift *(2026-05-08)*
 - `3a2a939` — docs(adr): ADR-0056 LabelDriftWatcherLoop — proposed *(2026-05-08)*
 - `df80b0c` — fix(pr-unsticker): split issue vs PR label targets on HITL release (#8715) (#8715) *(2026-05-08)*
@@ -177,4 +178,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `5b34e92` on 2026-05-09 04:52 UTC. Source last changed at `5b34e92`. Status: 🟢 fresh._
+_Regenerated from commit `907c272` on 2026-05-09 04:58 UTC. Source last changed at `907c272`. Status: 🟢 fresh._
