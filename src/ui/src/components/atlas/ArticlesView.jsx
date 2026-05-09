@@ -65,10 +65,18 @@ export function ArticlesView() {
     else if (selected.type === 'wiki' && selected.repo)
       url = `/api/wiki/repos/${selected.repo.owner}/${selected.repo.repo}/entries/${selected.id}`
     if (!url) return
+    let cancelled = false
     fetch(url)
       .then((r) => (r.ok ? r.json() : null))
-      .then(setBodyDetail)
-      .catch(() => setBodyDetail(null))
+      .then((d) => {
+        if (!cancelled) setBodyDetail(d)
+      })
+      .catch(() => {
+        if (!cancelled) setBodyDetail(null)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [selected])
 
   const merged = useMemo(() => {

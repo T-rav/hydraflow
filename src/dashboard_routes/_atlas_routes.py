@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hydraflow.dashboard.atlas")
 
-_ADR_FILENAME_RE = re.compile(r"^(\d{4})-(.+)\.md$")
+_ADR_FILENAME_RE = re.compile(r"^(\d{4,5})-(.+)\.md$")
 _ADR_TITLE_RE = re.compile(r"^#\s+ADR-\d{4,5}:\s+(.+?)\s*$", re.MULTILINE)
 
 
