@@ -48,7 +48,7 @@ class LabelDriftWatcherLoop(BaseBackgroundLoop):
         self._prs = pr_manager
 
     def _get_default_interval(self) -> int:
-        return self._config.label_drift_interval
+        return self._config.label_drift_watcher_interval
 
     async def _do_work(self) -> WorkCycleResult:
         if not self._enabled_cb(self._worker_name):

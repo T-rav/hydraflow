@@ -999,6 +999,7 @@ class HydraFlowOrchestrator:
             ("rc_budget", self._svc.rc_budget_loop.run),
             ("wiki_rot_detector", self._svc.wiki_rot_detector_loop.run),
             ("trust_fleet_sanity", self._svc.trust_fleet_sanity_loop.run),
+            ("label_drift_watcher", self._svc.label_drift_watcher_loop.run),
             ("contract_refresh", self._svc.contract_refresh_loop.run),
             ("corpus_learning", self._svc.corpus_learning_loop.run),
             ("auto_agent_preflight", self._svc.auto_agent_preflight_loop.run),

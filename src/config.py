@@ -242,7 +242,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         86400,
     ),
     ("trust_fleet_sanity_interval", "HYDRAFLOW_TRUST_FLEET_SANITY_INTERVAL", 600),
-    ("label_drift_interval", "HYDRAFLOW_LABEL_DRIFT_INTERVAL", 600),
+    ("label_drift_watcher_interval", "HYDRAFLOW_LABEL_DRIFT_WATCHER_INTERVAL", 600),
     ("loop_anomaly_issues_per_hour", "HYDRAFLOW_LOOP_ANOMALY_ISSUES_PER_HOUR", 10),
     ("corpus_learning_interval", "HYDRAFLOW_CORPUS_LEARNING_INTERVAL", 3600),
     ("contract_refresh_interval", "HYDRAFLOW_CONTRACT_REFRESH_INTERVAL", 604800),
@@ -781,7 +781,7 @@ class HydraFlowConfig(BaseModel):
         le=86400,
         description="Stale issue GC loop interval in seconds (default 1 hour)",
     )
-    label_drift_interval: int = Field(
+    label_drift_watcher_interval: int = Field(
         default=600,
         ge=120,
         le=86400,

@@ -48,7 +48,7 @@ def test_worker_name_and_default_interval(loop_env) -> None:
     stop = asyncio.Event()
     loop = LabelDriftWatcherLoop(config=cfg, pr_manager=pr, deps=_deps(stop))
     assert loop._worker_name == "label_drift_watcher"
-    assert loop._get_default_interval() == cfg.label_drift_interval
+    assert loop._get_default_interval() == cfg.label_drift_watcher_interval
 
 
 @pytest.mark.asyncio

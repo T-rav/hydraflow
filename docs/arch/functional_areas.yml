@@ -24,6 +24,7 @@ areas:
       - EpicSweeperLoop
       - GitHubCacheLoop
       - HealthMonitorLoop
+      - LabelDriftWatcherLoop
       - MemoryBacklogLoop
       - PRUnstickerLoop
       - PricingRefreshLoop

@@ -16,6 +16,7 @@ flowchart LR
         caretaking_EpicSweeperLoop([EpicSweeperLoop])
         caretaking_GitHubCacheLoop([GitHubCacheLoop])
         caretaking_HealthMonitorLoop([HealthMonitorLoop])
+        caretaking_LabelDriftWatcherLoop([LabelDriftWatcherLoop])
         caretaking_MemoryBacklogLoop([MemoryBacklogLoop])
         caretaking_PRUnstickerLoop([PRUnstickerLoop])
         caretaking_PricingRefreshLoop([PricingRefreshLoop])
@@ -92,6 +93,7 @@ Autonomous background loops that maintain the system without human input — wik
 - `EpicSweeperLoop` — `src.epic_sweeper_loop`
 - `GitHubCacheLoop` — `src.github_cache_loop`
 - `HealthMonitorLoop` — `src.health_monitor_loop`
+- `LabelDriftWatcherLoop` — `src.label_drift_watcher_loop`
 - `MemoryBacklogLoop` — `src.memory_backlog_loop`
 - `PRUnstickerLoop` — `src.pr_unsticker_loop`
 - `PricingRefreshLoop` — `src.pricing_refresh_loop`
@@ -263,4 +265,4 @@ The plan→implement→review pipeline driving each issue from hydraflow-ready t
 **Related ADRs:** `ADR-0001`, `ADR-0004`, `ADR-0011`, `ADR-0012`, `ADR-0029`
 
 
-_Regenerated from commit `907c272` on 2026-05-09 04:58 UTC. Source last changed at `907c272`. Status: 🟢 fresh._
+_Regenerated from commit `188a51e` on 2026-05-09 05:19 UTC. Source last changed at `188a51e`. Status: 🟢 fresh._
