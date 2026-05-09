@@ -6,6 +6,11 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W19
 
+- `1d0390f` — feat(atlas): UI shell + Domain/Articles/Maintenance views + tab rename (T5-T11) *(2026-05-08)*
+- `634ba7f` — feat(atlas): /api/atlas/* term + ADR endpoints (T2-T4 + T14-T15) *(2026-05-08)*
+- `169ff25` — docs(adr): ADR-0059 atlas knowledge graph dashboard *(2026-05-08)*
+- `fb1cdb4` — Merge pull request #8491 from T-rav/rc/2026-05-07-0648 *(2026-05-07)*
+- `5bc84da` — feat(ul): wire EdgeProposerLoop into ServiceRegistry + orchestrator *(2026-05-07)*
 - `8962798` — docs(adr): add ADR-0058 edge-proposer loop *(2026-05-07)*
 - `76e91e0` — feat(ul): wire TermPrunerLoop into ServiceRegistry + orchestrator *(2026-05-07)*
 - `882171c` — docs(adr): add ADR-0057 term-pruner loop *(2026-05-07)*
@@ -19,6 +24,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `ba2f7b8` — feat(ul): term-proposer batch — 1 drafts *(2026-05-07)*
 - `2ffae14` — chore(arch): regenerate arch artifacts after term-proposer-adapters merge *(2026-05-07)*
 - `c45e243` — Merge remote-tracking branch 'origin/feat/term-proposer-adapters' into feat/term-proposer-adapters *(2026-05-07)*
+- `cdb1a31` — feat(testing): document HydraFlow test pyramid + add missing layers for #8482 (#8486) (#8486) *(2026-05-07)*
 - `8b62616` — chore: re-regen arch artifacts after rebase onto staging *(2026-05-07)*
 - `c9c5d35` — chore: arch-regen + lint-fix to unblock CI on #8478 *(2026-05-07)*
 - `775eebe` — feat(adr): AdrTouchpointAuditorLoop replaces deleted touchpoint gate (ADR-0056) *(2026-05-06)*
@@ -186,4 +192,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `08ff62b` on 2026-05-07 23:02 UTC. Source last changed at `08ff62b`. Status: 🟢 fresh._
+_Regenerated from commit `61214f1` on 2026-05-09 05:07 UTC. Source last changed at `61214f1`. Status: 🟢 fresh._
