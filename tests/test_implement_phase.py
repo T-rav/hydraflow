@@ -2381,7 +2381,11 @@ class TestIsZeroCommitFailure:
 
         assert ImplementPhase._is_zero_commit_failure(result) is False
 
-    def test_returns_false_when_different_error(self) -> None:
+    def test_returns_true_when_different_error(self) -> None:
+        """Any failed run with commits=0 is a zero-commit failure — not just
+        the canonical 'No commits found on branch' error. This test was
+        previously pinning the bug; broadened in PR-B.
+        """
         result = WorkerResultFactory.create(
             issue_number=1,
             branch="agent/issue-1",
@@ -2391,7 +2395,7 @@ class TestIsZeroCommitFailure:
         )
         from implement_phase import ImplementPhase
 
-        assert ImplementPhase._is_zero_commit_failure(result) is False
+        assert ImplementPhase._is_zero_commit_failure(result) is True
 
     def test_returns_false_when_has_commits(self) -> None:
         result = WorkerResultFactory.create(
