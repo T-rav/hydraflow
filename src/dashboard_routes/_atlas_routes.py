@@ -226,7 +226,13 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
                     for line in related_lines:
                         line_lower = line.lower()
                         for needle, term_id in term_lookup.items():
-                            if needle in line_lower and term_id not in seen_targets:
+                            # Word-boundary match — substring matching gave
+                            # spurious edges (e.g., the term "Task" matched
+                            # incidental prose like "this ADR task").
+                            if term_id in seen_targets:
+                                continue
+                            pattern = rf"\b{re.escape(needle)}\b"
+                            if re.search(pattern, line_lower):
                                 edges.append(
                                     {
                                         "source": adr_id,
@@ -268,20 +274,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
                 if title_match
                 else path.stem.split("-", 1)[-1].replace("-", " ")
             )
-            related_lines: list[str] = []
-            related_match = re.search(
-                r"^##\s+Related\s*$",
-                text,
-                re.MULTILINE,
-            )
-            if related_match:
-                rest = text[related_match.end() :].lstrip("\n")
-                for line in rest.splitlines():
-                    if line.startswith("## "):
-                        break
-                    stripped = line.strip()
-                    if stripped.startswith("- "):
-                        related_lines.append(stripped[2:].strip())
+            related_lines = _adr_related_terms(text)
             return {
                 "number": number,
                 "title": title,

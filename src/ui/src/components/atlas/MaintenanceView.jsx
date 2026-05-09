@@ -153,9 +153,9 @@ export function MaintenanceView() {
         >
           {['term_proposer', 'term_pruner', 'edge_proposer'].map((name) => {
             const loop = termLoops?.[name]
-            const status = loop?.status ?? 'unknown'
+            const loopStatus = loop?.status ?? 'unknown'
             const lastRun = loop?.last_run
-            const prUrl = loop?.last_pr_url
+            const loopPrUrl = loop?.last_pr_url
             const count = loop?.last_action_count
             return (
               <div
@@ -168,14 +168,14 @@ export function MaintenanceView() {
               >
                 <div style={{ color: theme.textBright }}>{name}</div>
                 <div style={{ color: theme.textMuted, fontSize: 10 }}>
-                  status: {status}
+                  status: {loopStatus}
                 </div>
                 <div style={{ color: theme.textMuted, fontSize: 10 }}>
                   last run: {lastRun ? lastRun.split('T')[0] : '—'}
                 </div>
-                {prUrl && (
+                {loopPrUrl && (
                   <a
-                    href={prUrl}
+                    href={loopPrUrl}
                     target="_blank"
                     rel="noreferrer"
                     style={{ color: theme.accent, fontSize: 10 }}
