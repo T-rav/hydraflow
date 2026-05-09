@@ -2381,7 +2381,11 @@ class TestIsZeroCommitFailure:
 
         assert ImplementPhase._is_zero_commit_failure(result) is False
 
-    def test_returns_false_when_different_error(self) -> None:
+    def test_returns_true_when_different_error(self) -> None:
+        """Any failed run with commits=0 is a zero-commit failure — not just
+        the canonical 'No commits found on branch' error. This test was
+        previously pinning the bug; broadened in PR-B.
+        """
         result = WorkerResultFactory.create(
             issue_number=1,
             branch="agent/issue-1",
@@ -2391,7 +2395,7 @@ class TestIsZeroCommitFailure:
         )
         from implement_phase import ImplementPhase
 
-        assert ImplementPhase._is_zero_commit_failure(result) is False
+        assert ImplementPhase._is_zero_commit_failure(result) is True
 
     def test_returns_false_when_has_commits(self) -> None:
         result = WorkerResultFactory.create(
@@ -2400,6 +2404,46 @@ class TestIsZeroCommitFailure:
             success=False,
             error="No commits found on branch",
             commits=3,
+        )
+        from implement_phase import ImplementPhase
+
+        assert ImplementPhase._is_zero_commit_failure(result) is False
+
+    def test_zero_commits_with_process_killed_is_zero_commit_failure(self) -> None:
+        """ProcessLookupError or any zero-commit failure must hit the
+        zero-commit handler, not push/PR.
+        """
+        result = WorkerResultFactory.create(
+            issue_number=8511,
+            success=False,
+            error="ProcessLookupError()",
+            commits=0,
+        )
+        from implement_phase import ImplementPhase
+
+        assert ImplementPhase._is_zero_commit_failure(result) is True
+
+    def test_zero_commits_with_arbitrary_error_is_zero_commit_failure(self) -> None:
+        """Any failure with commits=0 is a zero-commit failure regardless of error string."""
+        result = WorkerResultFactory.create(
+            issue_number=99,
+            success=False,
+            error="Some unexpected error",
+            commits=0,
+        )
+        from implement_phase import ImplementPhase
+
+        assert ImplementPhase._is_zero_commit_failure(result) is True
+
+    def test_success_with_zero_commits_is_not_zero_commit_failure(self) -> None:
+        """A 'successful' run that produced no commits is a separate concern
+        (the no-PR fallback path). Don't confuse the two.
+        """
+        result = WorkerResultFactory.create(
+            issue_number=99,
+            success=True,
+            error=None,
+            commits=0,
         )
         from implement_phase import ImplementPhase
 

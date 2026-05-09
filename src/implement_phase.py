@@ -644,12 +644,15 @@ class ImplementPhase:
 
     @staticmethod
     def _is_zero_commit_failure(result: WorkerResult) -> bool:
-        """Check whether *result* represents a zero-commit implementation failure."""
-        return (
-            not result.success
-            and result.error == "No commits found on branch"
-            and result.commits == 0
-        )
+        """Check whether *result* represents a zero-commit implementation failure.
+
+        Any failed run with no commits is a zero-commit failure — not just
+        the canonical "No commits found on branch" error. ProcessLookupError
+        (subprocess killed mid-run), AuthenticationRetryError (credentials
+        expired), and any other early-exit Exception path that leaves
+        commits=0 must route to _handle_zero_commits, not push/PR.
+        """
+        return not result.success and result.commits == 0
 
     async def _flag_requirements_gaps(self, issue: Task, transcript: str) -> None:
         """Detect and post requirements gaps discovered during implementation."""
