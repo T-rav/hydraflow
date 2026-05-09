@@ -1,6 +1,6 @@
 # ADR-0056: LabelDriftWatcherLoop — Cross-Entity State-Machine Drift Caretaker
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-05-07
 - **Supersedes:** none
 - **Superseded by:** none
