@@ -54,6 +54,7 @@ from models import (
     GitHubIssue,
     GitHubIssueSummary,
     HITLItem,
+    LabelDrift,
     LoopResult,
     PRInfo,
     ReviewVerdict,
@@ -371,6 +372,15 @@ class PRPort(Protocol):
         Used by SandboxFailureFixerLoop to poll PRs that need auto-fix
         intervention. Excludes merged and closed PRs by definition —
         callers wanting closed PRs use a different method.
+        """
+        ...
+
+    async def find_label_drift(self) -> list[LabelDrift]:
+        """Scan open PRs for cross-entity label drift vs their linked issues.
+
+        Returns a list of :class:`LabelDrift` records — one per drifted
+        (issue, PR) pair. See ADR-0056 for the drift kinds and the
+        ``LabelDriftWatcherLoop`` reconciliation policy.
         """
         ...
 

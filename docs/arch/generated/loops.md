@@ -22,6 +22,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **FlakeTrackerLoop** | `src.flake_tracker_loop` | — | — | — | — |
 | **GitHubCacheLoop** | `src.github_cache_loop` | — | — | — | — |
 | **HealthMonitorLoop** | `src.health_monitor_loop` | — | — | — | — |
+| **LabelDriftWatcherLoop** | `src.label_drift_watcher_loop` | — | — | — | — |
 | **MemoryBacklogLoop** | `src.memory_backlog_loop` | — | — | — | — |
 | **PRUnstickerLoop** | `src.pr_unsticker_loop` | — | — | — | — |
 | **PricingRefreshLoop** | `src.pricing_refresh_loop` | — | — | — | — |
@@ -44,4 +45,4 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **WikiRotDetectorLoop** | `src.wiki_rot_detector_loop` | — | — | — | — |
 | **WorkspaceGCLoop** | `src.workspace_gc_loop` | — | — | — | — |
 
-_Regenerated from commit `4c1abad` on 2026-05-08 03:33 UTC. Source last changed at `4c1abad`. Status: 🟢 fresh._
+_Regenerated from commit `188a51e` on 2026-05-09 05:19 UTC. Source last changed at `188a51e`. Status: 🟢 fresh._

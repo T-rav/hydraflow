@@ -29,6 +29,7 @@ from models import (
     HITLItem,
     IssueCreatedPayload,
     LabelCounts,
+    LabelDrift,
     MergeUpdatePayload,
     PRCreatedPayload,
     PRInfo,
@@ -1642,6 +1643,114 @@ class PRManager:
                 await self._remove_label("issue", issue_number, lbl)
                 if pr_number is not None:
                     await self._remove_label("pr", pr_number, lbl)
+
+    async def find_label_drift(self) -> list[LabelDrift]:
+        """Scan open PRs for cross-entity label drift vs their linked issues.
+
+        Returns a list of :class:`LabelDrift` records, one per drifted pair.
+        See ADR-0056 for the drift kinds and reconciliation policy.
+
+        Each tick: fetch open PRs (any state), parse ``Fixes #N`` from the
+        body, fetch the linked issue's labels, then classify the pair.
+        """
+        raw = await self._gh_json_query(
+            "gh",
+            "pr",
+            "list",
+            "--repo",
+            self._repo,
+            "--state",
+            "open",
+            "--limit",
+            "200",
+            "--json",
+            "number,labels,body,commits",
+            dry_run_return=[],
+            error_log="find_label_drift: pr list failed",
+        )
+        if not isinstance(raw, list):
+            return []
+
+        out: list[LabelDrift] = []
+        pre_pr_labels = {"hydraflow-ready", "hydraflow-plan", "hydraflow-find"}
+        post_pr_labels = {"hydraflow-fixed", "hydraflow-hitl"}
+        fixes_re = re.compile(r"[Ff]ixes\s+#(\d+)")
+
+        for pr in raw:
+            if not isinstance(pr, dict):
+                continue
+            try:
+                pr_n = int(pr.get("number", 0))
+            except (TypeError, ValueError):
+                continue
+            if pr_n <= 0:
+                continue
+            pr_labels = {
+                lbl.get("name", "")
+                for lbl in (pr.get("labels") or [])
+                if isinstance(lbl, dict)
+            }
+            pr_pipeline = next(
+                (lbl for lbl in pr_labels if lbl.startswith("hydraflow-")),
+                "",
+            )
+            commits = len(pr.get("commits") or [])
+            body = pr.get("body") or ""
+            m = fixes_re.search(body)
+            if not m:
+                continue
+            issue_n = int(m.group(1))
+
+            issue_labels_raw = await self._gh_json_query(
+                "gh",
+                "issue",
+                "view",
+                str(issue_n),
+                "--repo",
+                self._repo,
+                "--json",
+                "labels",
+                dry_run_return={"labels": []},
+                error_log=f"find_label_drift: issue {issue_n} fetch failed",
+            )
+            if not isinstance(issue_labels_raw, dict):
+                continue
+            issue_labels = {
+                lbl.get("name", "")
+                for lbl in (issue_labels_raw.get("labels") or [])
+                if isinstance(lbl, dict)
+            }
+            issue_pipeline = next(
+                (lbl for lbl in issue_labels if lbl.startswith("hydraflow-")),
+                "",
+            )
+
+            kind: str | None = None
+            if (
+                issue_pipeline in pre_pr_labels
+                and pr_pipeline == "hydraflow-review"
+                and commits > 0
+            ):
+                kind = "pr_ahead_of_issue"
+            elif pr_pipeline in pre_pr_labels and commits > 0:
+                kind = "pr_at_pre_pr_stage"
+            elif pr_pipeline in post_pr_labels and issue_pipeline in pre_pr_labels:
+                kind = "pr_ahead_of_issue"
+
+            if kind is None:
+                continue
+            out.append(
+                LabelDrift(
+                    issue=issue_n,
+                    pr=pr_n,
+                    pr_commits=commits,
+                    issue_label=issue_pipeline,
+                    pr_label=pr_pipeline,
+                    kind=kind,  # type: ignore[arg-type]
+                    detected_at=datetime.now(UTC),
+                )
+            )
+        return out
 
     async def get_dependabot_alerts(self, state: str = "open") -> list[dict]:
         """Fetch Dependabot alerts for the repository.

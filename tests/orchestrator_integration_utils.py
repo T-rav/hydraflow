@@ -496,6 +496,7 @@ def build_scripted_services(
     services.rc_budget_loop = FakeBackgroundLoop()
     services.wiki_rot_detector_loop = FakeBackgroundLoop()
     services.trust_fleet_sanity_loop = FakeBackgroundLoop()
+    services.label_drift_watcher_loop = FakeBackgroundLoop()
     services.corpus_learning_loop = FakeBackgroundLoop()
     services.contract_refresh_loop = FakeBackgroundLoop()
     services.auto_agent_preflight_loop = FakeBackgroundLoop()

@@ -9,9 +9,11 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from mockworld.fakes._factories import PRInfoFactory
+from models import LabelDrift
 
 if TYPE_CHECKING:
     from mockworld.seed import MockWorldSeed
@@ -61,6 +63,10 @@ class FakePR:
     reviews: list[tuple[str, str]] = field(default_factory=list)
     checks: list[tuple[str, str]] = field(default_factory=list)
     labels: list[str] = field(default_factory=list)
+    # Commit count used by ``find_label_drift`` (ADR-0056) to distinguish
+    # zero-commit PRs from real ones. Defaults to 1 so seeded PRs look
+    # "real" without explicit setup.
+    commits: int = 1
 
 
 class FakeGitHub:
@@ -497,6 +503,60 @@ class FakeGitHub:
                     branch=pr.branch,
                     draft=pr.draft,
                     labels=list(pr.labels),
+                )
+            )
+        return out
+
+    async def find_label_drift(self) -> list[LabelDrift]:
+        """In-memory mirror of :meth:`PRPort.find_label_drift` (ADR-0056).
+
+        Walks open, non-merged PRs and pairs each with its linked issue;
+        classifies drift kinds the same way ``PRManager.find_label_drift``
+        classifies them.
+        """
+        self._maybe_rate_limit()
+        pre_pr_labels = {"hydraflow-ready", "hydraflow-plan", "hydraflow-find"}
+        post_pr_labels = {"hydraflow-fixed", "hydraflow-hitl"}
+        out: list[LabelDrift] = []
+        for pr in self._prs.values():
+            if pr.merged:
+                continue
+            issue = self._issues.get(pr.issue_number)
+            if issue is None:
+                continue
+            pr_pipeline = next(
+                (lbl for lbl in pr.labels if lbl.startswith("hydraflow-")),
+                "",
+            )
+            issue_pipeline = next(
+                (lbl for lbl in issue.labels if lbl.startswith("hydraflow-")),
+                "",
+            )
+            commits = pr.commits
+
+            kind: str | None = None
+            if (
+                issue_pipeline in pre_pr_labels
+                and pr_pipeline == "hydraflow-review"
+                and commits > 0
+            ):
+                kind = "pr_ahead_of_issue"
+            elif pr_pipeline in pre_pr_labels and commits > 0:
+                kind = "pr_at_pre_pr_stage"
+            elif pr_pipeline in post_pr_labels and issue_pipeline in pre_pr_labels:
+                kind = "pr_ahead_of_issue"
+
+            if kind is None:
+                continue
+            out.append(
+                LabelDrift(
+                    issue=pr.issue_number,
+                    pr=pr.number,
+                    pr_commits=commits,
+                    issue_label=issue_pipeline,
+                    pr_label=pr_pipeline,
+                    kind=kind,  # type: ignore[arg-type]
+                    detected_at=datetime.now(UTC),
                 )
             )
         return out
