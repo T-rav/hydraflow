@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W19
 
+- `f202f81` — docs(adr): ADR-0060 atlas graph view + ADR nodes + term provenance *(2026-05-09)*
+- `f0dc42d` — chore(arch): regen artifacts post-quality (T13) *(2026-05-08)*
 - `1d0390f` — feat(atlas): UI shell + Domain/Articles/Maintenance views + tab rename (T5-T11) *(2026-05-08)*
 - `634ba7f` — feat(atlas): /api/atlas/* term + ADR endpoints (T2-T4 + T14-T15) *(2026-05-08)*
 - `169ff25` — docs(adr): ADR-0059 atlas knowledge graph dashboard *(2026-05-08)*
@@ -192,4 +194,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `61214f1` on 2026-05-09 05:07 UTC. Source last changed at `61214f1`. Status: 🟢 fresh._
+_Regenerated from commit `f202f81` on 2026-05-09 17:08 UTC. Source last changed at `f202f81`. Status: 🟢 fresh._
