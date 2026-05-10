@@ -215,7 +215,9 @@ export function AtlasExplorer() {
         t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')
       if (e.key === 'Escape' && selectedNodeId) {
         setSelectedNodeId(null)
-        e.preventDefault()
+        // Don't preventDefault while typing — let the browser's native
+        // "clear input" Esc behavior still fire so users keep both gestures.
+        if (!typing) e.preventDefault()
         return
       }
       if (e.key === '/' && !typing && activeSubtab === 'articles') {
