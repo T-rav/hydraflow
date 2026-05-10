@@ -15,6 +15,7 @@ from config import HydraFlowConfig
 from events import EventBus
 from fake_coverage_auditor_loop import (
     FakeCoverageAuditorLoop,
+    _is_helper,
     catalog_cassette_methods,
     catalog_fake_methods,
 )
@@ -76,6 +77,34 @@ def test_catalog_fake_methods_splits_surface_vs_helper(tmp_path: Path) -> None:
     helpers = set(cat["FakeGitHub"]["test-helper"])
     assert surface == {"create_issue", "close_issue"}
     assert helpers == {"script_ci", "fail_service"}
+
+
+def test_catalog_fake_methods_fake_git_script_api_helpers_are_test_helpers(
+    tmp_path: Path,
+) -> None:
+    """reject_next_push / set_corrupted_config / active_worktrees must land in test-helper."""
+    fake_dir = tmp_path / "fakes"
+    fake_dir.mkdir()
+    (fake_dir / "fake_git.py").write_text(
+        "class FakeGit:\n"
+        "    def reject_next_push(self): ...\n"
+        "    def set_corrupted_config(self, cwd, *, key, value): ...\n"
+        "    def active_worktrees(self): ...\n"
+        "    async def push(self, cwd, remote, branch): ...\n"
+        "    async def commit(self, cwd, message): ...\n"
+    )
+
+    cat = catalog_fake_methods(fake_dir)
+    assert "FakeGit" in cat
+    surface = set(cat["FakeGit"]["adapter-surface"])
+    helpers = set(cat["FakeGit"]["test-helper"])
+
+    for method in ("reject_next_push", "set_corrupted_config", "active_worktrees"):
+        assert method not in surface, f"{method} must not be adapter-surface"
+        assert method in helpers, f"{method} must be in test-helper"
+
+    assert "push" in surface
+    assert "commit" in surface
 
 
 def test_catalog_cassette_methods_reads_input_command(tmp_path: Path) -> None:
@@ -287,3 +316,36 @@ async def test_kill_switch_short_circuits_do_work(loop_env) -> None:
     assert stats == {"status": "disabled"}
     loop._reconcile_closed_escalations.assert_not_awaited()
     pr.create_issue.assert_not_awaited()
+
+
+def test_is_helper_returns_true_for_class_overrides() -> None:
+    """_FAKE_HELPER_OVERRIDES entries classify as test-helper regardless of prefix/name."""
+    assert _is_helper("clear_rate_limit", "FakeGitHub") is True
+    assert _is_helper("set_rate_limit_mode", "FakeGitHub") is True
+
+
+def test_is_helper_override_does_not_affect_other_classes() -> None:
+    """Override is class-scoped — same method name on another fake is adapter-surface."""
+    assert _is_helper("clear_rate_limit", "FakeDocker") is False
+    assert _is_helper("clear_rate_limit", "") is False
+
+
+def test_catalog_fake_methods_applies_class_overrides(tmp_path: Path) -> None:
+    """Methods in _FAKE_HELPER_OVERRIDES land in test-helper, not adapter-surface."""
+    fake_dir = tmp_path / "fakes"
+    fake_dir.mkdir()
+    (fake_dir / "fake_github.py").write_text(
+        "class FakeGitHub:\n"
+        "    async def create_issue(self, title): ...\n"
+        "    def clear_rate_limit(self): ...\n"
+        "    def set_rate_limit_mode(self, *, remaining=0): ...\n"
+    )
+    cat = catalog_fake_methods(fake_dir)
+    assert "FakeGitHub" in cat
+    surface = set(cat["FakeGitHub"]["adapter-surface"])
+    helpers = set(cat["FakeGitHub"]["test-helper"])
+    assert "clear_rate_limit" not in surface
+    assert "clear_rate_limit" in helpers
+    assert "set_rate_limit_mode" not in surface
+    assert "set_rate_limit_mode" in helpers
+    assert "create_issue" in surface

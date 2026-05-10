@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W19
 
+- `ab7d575` — chore(arch): regenerate curated arch docs for ADR-0059 cross-references (T30.7) *(2026-05-08)*
 - `2953fc7` — docs(wiki): advisor-pattern entries (architecture-async-control + dark-factory) (T32, advisor-h4y) *(2026-05-08)*
 - `7a8b37a` — docs(adr): advisor-pattern self-repairing review (T31, advisor-5o4) *(2026-05-08)*
 - `fb1cdb4` — Merge pull request #8491 from T-rav/rc/2026-05-07-0648 *(2026-05-07)*
@@ -191,4 +192,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `2953fc7` on 2026-05-08 22:53 UTC. Source last changed at `2953fc7`. Status: 🟢 fresh._
+_Regenerated from commit `109888f` on 2026-05-10 22:21 UTC. Source last changed at `109888f`. Status: 🟢 fresh._

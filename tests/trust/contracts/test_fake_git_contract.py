@@ -42,11 +42,15 @@ async def _invoke_fake_git(cassette: Cassette) -> FakeOutput:
             stderr="",
         )
 
-    if method == "rev_parse_head":
+    if method == "rev_parse":
         # Seed a commit so rev_parse returns something non-zero.
         await fake.commit(cwd, message="seed")
         sha = await fake.rev_parse(cwd, "HEAD")
         return FakeOutput(exit_code=0, stdout=f"{sha}\n", stderr="")
+
+    if method == "worktree_prune":
+        await fake.worktree_prune()
+        return FakeOutput(exit_code=0, stdout="", stderr="")
 
     msg = f"FakeGit has no contract-tested method {method!r}"
     raise NotImplementedError(msg)

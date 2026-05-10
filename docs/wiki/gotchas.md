@@ -727,3 +727,65 @@ Example: Hook fails → fix code → try commit again, not `git commit --no-veri
 ```json:entry
 {"id":"01KQP0HK6TCK1CTRYANSJ8NRTN","title":"Never use git commit --no-verify or --no-hooks","topic":null,"source_type":"compiled","source_issue":null,"source_repo":null,"created_at":"2026-05-03T04:11:32.954849+00:00","updated_at":"2026-05-03T04:11:32.954849+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"medium","stale":false,"corroborations":1}
 ```
+
+
+### Implement-phase: never publish work for `result.success is False`
+
+**Pattern:** A blocking post-implementation skill (`discover-completeness`,
+`scope-check`, `diff-sanity`) trips. The agent returns
+`WorkerResult(success=False, commits=2)`. The implement-phase pushes the
+branch and opens a PR, but the swap to `hydraflow-review` is gated on
+`result.success` — so the PR sits unlabeled and the issue stays at
+`hydraflow-ready`. ADR-0002's "one pipeline label per item" invariant
+holds for each entity in isolation, but the *pair* drifts.
+
+**Rule:** In `_handle_implementation_result` and `_handle_successful_push`,
+gate `push_branch`, `_resolve_pr`, and `transition` on
+`(result.success or is_retry)`. Fresh failed attempts never touch GitHub —
+the attempt-cap mechanism retries with `prior_failure` feedback (which
+also resets the worktree, discarding partial commits).
+
+**Diagnostic signal:** open issues at `hydraflow-ready` whose
+`agent/issue-N` branch has an open non-draft PR.
+
+```json:entry
+{
+  "id": "implement-phase-half-state-on-skill-failure",
+  "topic": "implement_phase",
+  "tags": ["state-machine", "ADR-0002", "skill-failure", "label-drift"],
+  "rule": "Gate push_branch, _resolve_pr, and transition on (result.success or is_retry).",
+  "anti_pattern": "Calling push_branch or create_pr regardless of result.success",
+  "code_refs": [
+    "src/implement_phase.py:_handle_implementation_result",
+    "src/implement_phase.py:_handle_successful_push",
+    "src/implement_phase.py:_resolve_pr"
+  ],
+  "fixed_in_pr": "#8713",
+  "added": "2026-05-07"
+}
+```
+
+### swap_pipeline_labels: same label to both is wrong for ready/review boundary
+
+**Pattern:** `swap_pipeline_labels(issue_number, label, pr_number=pr)` applies
+the SAME label to issue and PR. For most transitions this is correct (e.g.
+review→fixed, both go fixed). But across the ready/review boundary it
+dragged PRs back to `hydraflow-ready` when an issue was released from HITL
+back to its pre-HITL origin (`pr_unsticker.py:312-322` before fix).
+
+**Rule:** When issue and PR live at *different* pipeline stages (e.g. issue
+at ready waiting for impl, PR at review awaiting human), call
+`swap_pipeline_labels` twice — once for each, with the right target.
+
+```json:entry
+{
+  "id": "swap-pipeline-labels-ready-review-boundary",
+  "topic": "label_state_machine",
+  "tags": ["state-machine", "ADR-0002", "pr-unsticker", "label-drift"],
+  "rule": "Across the ready/review boundary, swap issue and PR with separate calls.",
+  "anti_pattern": "swap_pipeline_labels(issue, ready_label, pr_number=pr) when PR has commits",
+  "code_refs": ["src/pr_unsticker.py:_resolve_or_release_back_to_hitl"],
+  "fixed_in_pr": "#8715",
+  "added": "2026-05-07"
+}
+```

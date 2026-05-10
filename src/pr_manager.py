@@ -30,6 +30,7 @@ from models import (
     HITLItem,
     IssueCreatedPayload,
     LabelCounts,
+    LabelDrift,
     MergeUpdatePayload,
     PRCreatedPayload,
     PRInfo,
@@ -469,6 +470,84 @@ class PRManager:
         )
         return sha
 
+    async def push_synthetic_commit(self, branch: str, message: str) -> str:
+        """Append a tree-identical synthetic commit on top of *branch*.
+
+        Workaround for issue #8705: rc/* branches created via the git/refs
+        REST API and turned into PRs by ``gh pr create`` don't fire
+        ``pull_request: opened`` workflows reliably (CodeQL, Browser
+        Scenarios, etc. never run on the PR head SHA). Pushing a
+        synthetic commit fires ``pull_request: synchronize`` which DOES
+        trigger workflows. The commit's tree is identical to its parent
+        so no real changes are introduced.
+
+        Returns the new HEAD SHA.
+        """
+        if self._config.dry_run:
+            logger.info(
+                "[dry-run] Would push synthetic commit on %s: %s", branch, message
+            )
+            return "dry-run-sha"
+        self._assert_repo()
+
+        head_raw = await self._run_gh(
+            "gh",
+            "api",
+            f"repos/{self._repo}/git/refs/heads/{branch}",
+            "--jq",
+            ".object.sha",
+        )
+        head_sha = head_raw.strip().strip('"')
+        if not head_sha:
+            raise RuntimeError(f"Could not resolve {branch} HEAD sha")
+
+        tree_raw = await self._run_gh(
+            "gh",
+            "api",
+            f"repos/{self._repo}/git/commits/{head_sha}",
+            "--jq",
+            ".tree.sha",
+        )
+        tree_sha = tree_raw.strip().strip('"')
+        if not tree_sha:
+            raise RuntimeError(f"Could not resolve tree sha for {head_sha}")
+
+        new_raw = await self._run_gh(
+            "gh",
+            "api",
+            f"repos/{self._repo}/git/commits",
+            "--method",
+            "POST",
+            "--field",
+            f"message={message}",
+            "--field",
+            f"tree={tree_sha}",
+            "--raw-field",
+            f"parents[]={head_sha}",
+        )
+        try:
+            new_commit = json.loads(new_raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"Unexpected synthetic-commit POST response: {new_raw[:200]}"
+            ) from exc
+        new_sha = str(new_commit.get("sha", "")).strip()
+        if not new_sha:
+            raise RuntimeError(
+                f"Synthetic commit POST returned no sha: {new_raw[:200]}"
+            )
+
+        await self._run_gh(
+            "gh",
+            "api",
+            f"repos/{self._repo}/git/refs/heads/{branch}",
+            "--method",
+            "PATCH",
+            "--field",
+            f"sha={new_sha}",
+        )
+        return new_sha
+
     async def find_open_promotion_pr(self) -> PRInfo | None:
         """Return the open ``rc/*`` promotion PR targeting ``main_branch``, or None.
 
@@ -746,6 +825,40 @@ class PRManager:
         except RuntimeError as exc:
             logger.warning(
                 "update_pr_branch(#%d, method=%s) failed: %s", pr_number, method, exc
+            )
+            return False
+
+    @port_span("hf.port.pr.update_pr_base")
+    async def update_pr_base(self, pr_number: int, *, base: str) -> bool:
+        """Retarget a PR's base branch via `gh pr edit --base`.
+
+        Used by ``BaseBranchAutoRetargeter`` to retarget PRs opened against
+        the wrong base after the two-tier branch model is activated. Idempotent
+        from GitHub's side (re-targeting to the same base is a no-op).
+
+        Returns True on success, False on failure.
+        """
+        self._assert_repo()
+        if self._config.dry_run:
+            logger.info("[dry-run] Would update PR #%d base to %s", pr_number, base)
+            return True
+        try:
+            await run_subprocess(
+                "gh",
+                "pr",
+                "edit",
+                str(pr_number),
+                "--repo",
+                self._repo,
+                "--base",
+                base,
+                cwd=self._config.repo_root,
+                gh_token=self._credentials.gh_token,
+            )
+            return True
+        except RuntimeError as exc:
+            logger.warning(
+                "update_pr_base(#%d, base=%s) failed: %s", pr_number, base, exc
             )
             return False
 
@@ -1532,6 +1645,114 @@ class PRManager:
                 if pr_number is not None:
                     await self._remove_label("pr", pr_number, lbl)
 
+    async def find_label_drift(self) -> list[LabelDrift]:
+        """Scan open PRs for cross-entity label drift vs their linked issues.
+
+        Returns a list of :class:`LabelDrift` records, one per drifted pair.
+        See ADR-0056 for the drift kinds and reconciliation policy.
+
+        Each tick: fetch open PRs (any state), parse ``Fixes #N`` from the
+        body, fetch the linked issue's labels, then classify the pair.
+        """
+        raw = await self._gh_json_query(
+            "gh",
+            "pr",
+            "list",
+            "--repo",
+            self._repo,
+            "--state",
+            "open",
+            "--limit",
+            "200",
+            "--json",
+            "number,labels,body,commits",
+            dry_run_return=[],
+            error_log="find_label_drift: pr list failed",
+        )
+        if not isinstance(raw, list):
+            return []
+
+        out: list[LabelDrift] = []
+        pre_pr_labels = {"hydraflow-ready", "hydraflow-plan", "hydraflow-find"}
+        post_pr_labels = {"hydraflow-fixed", "hydraflow-hitl"}
+        fixes_re = re.compile(r"[Ff]ixes\s+#(\d+)")
+
+        for pr in raw:
+            if not isinstance(pr, dict):
+                continue
+            try:
+                pr_n = int(pr.get("number", 0))
+            except (TypeError, ValueError):
+                continue
+            if pr_n <= 0:
+                continue
+            pr_labels = {
+                lbl.get("name", "")
+                for lbl in (pr.get("labels") or [])
+                if isinstance(lbl, dict)
+            }
+            pr_pipeline = next(
+                (lbl for lbl in pr_labels if lbl.startswith("hydraflow-")),
+                "",
+            )
+            commits = len(pr.get("commits") or [])
+            body = pr.get("body") or ""
+            m = fixes_re.search(body)
+            if not m:
+                continue
+            issue_n = int(m.group(1))
+
+            issue_labels_raw = await self._gh_json_query(
+                "gh",
+                "issue",
+                "view",
+                str(issue_n),
+                "--repo",
+                self._repo,
+                "--json",
+                "labels",
+                dry_run_return={"labels": []},
+                error_log=f"find_label_drift: issue {issue_n} fetch failed",
+            )
+            if not isinstance(issue_labels_raw, dict):
+                continue
+            issue_labels = {
+                lbl.get("name", "")
+                for lbl in (issue_labels_raw.get("labels") or [])
+                if isinstance(lbl, dict)
+            }
+            issue_pipeline = next(
+                (lbl for lbl in issue_labels if lbl.startswith("hydraflow-")),
+                "",
+            )
+
+            kind: str | None = None
+            if (
+                issue_pipeline in pre_pr_labels
+                and pr_pipeline == "hydraflow-review"
+                and commits > 0
+            ):
+                kind = "pr_ahead_of_issue"
+            elif pr_pipeline in pre_pr_labels and commits > 0:
+                kind = "pr_at_pre_pr_stage"
+            elif pr_pipeline in post_pr_labels and issue_pipeline in pre_pr_labels:
+                kind = "pr_ahead_of_issue"
+
+            if kind is None:
+                continue
+            out.append(
+                LabelDrift(
+                    issue=issue_n,
+                    pr=pr_n,
+                    pr_commits=commits,
+                    issue_label=issue_pipeline,
+                    pr_label=pr_pipeline,
+                    kind=kind,  # type: ignore[arg-type]
+                    detected_at=datetime.now(UTC),
+                )
+            )
+        return out
+
     async def get_dependabot_alerts(self, state: str = "open") -> list[dict]:
         """Fetch Dependabot alerts for the repository.
 
@@ -1747,7 +1968,12 @@ class PRManager:
 
         fd, tmp_path = tempfile.mkstemp(suffix=".png", prefix="hydraflow-screenshot-")
         try:
-            with os.fdopen(fd, "wb") as f:
+            try:
+                f = os.fdopen(fd, "wb")
+            except OSError:
+                os.close(fd)
+                raise
+            with f:
                 f.write(png_bytes)
 
             gist_args = [
@@ -2053,7 +2279,23 @@ class PRManager:
             checks = await self.get_pr_checks(pr_number)
 
             if not checks:
-                return True, "No CI checks found"
+                # No checks registered yet. For freshly-opened PRs (e.g.
+                # RC promotion PRs cut by StagingPromotionLoop), CI may
+                # not have registered any checks in the rollup until a
+                # few seconds after the PR opens. The legacy behavior
+                # ("treat empty as success") raced with the merge
+                # attempt: wait_for_ci would return True immediately,
+                # the loop would attempt merge, and GitHub would reject
+                # because required checks weren't satisfied. Fix: treat
+                # empty as PENDING — keep polling until checks appear or
+                # timeout. The caller's "timed out" / "ci_pending" path
+                # retries on the next loop tick.
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=poll_interval)
+                    return False, "Stopped"
+                except TimeoutError:
+                    elapsed += poll_interval
+                    continue
 
             verdict = self._evaluate_ci_checks(checks, pr_number)
             if verdict is None:
@@ -2705,7 +2947,12 @@ class PRManager:
         """
         fd, tmp_path = tempfile.mkstemp(suffix=".md", prefix="hydraflow-body-")
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
+            try:
+                f = os.fdopen(fd, "w", encoding="utf-8")
+            except OSError:
+                os.close(fd)
+                raise
+            with f:
                 f.write(body)
             return await run_subprocess_with_retry(
                 *cmd,

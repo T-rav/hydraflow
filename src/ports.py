@@ -55,6 +55,7 @@ from models import (
     GitHubIssue,
     GitHubIssueSummary,
     HITLItem,
+    LabelDrift,
     LoopResult,
     PRInfo,
     ReviewVerdict,
@@ -121,10 +122,34 @@ class PRPort(Protocol):
         """
         ...
 
+    async def update_pr_base(self, pr_number: int, *, base: str) -> bool:
+        """Retarget a PR's base branch.
+
+        Wraps ``gh pr edit --base``. Returns True on success.
+
+        Matches ``pr_manager.PRManager.update_pr_base`` exactly.
+        """
+        ...
+
     async def create_rc_branch(self, rc_branch: str) -> str:
         """Create *rc_branch* at staging HEAD. Returns the SHA.
 
         Matches ``pr_manager.PRManager.create_rc_branch`` exactly.
+        """
+        ...
+
+    async def push_synthetic_commit(self, branch: str, message: str) -> str:
+        """Append a tree-identical synthetic commit on top of *branch*.
+
+        Used by ``StagingPromotionLoop`` to trigger
+        ``pull_request: synchronize`` events on rc/* PRs whose
+        ``pull_request: opened`` events were swallowed by GitHub's
+        bot-PR workflow-suppression heuristic (see issue #8705).
+        Without this, required-status-checks like CodeQL and Browser
+        Scenarios never fire on the PR head SHA, blocking auto-merge.
+
+        Returns the new HEAD SHA. Matches
+        ``pr_manager.PRManager.push_synthetic_commit`` exactly.
         """
         ...
 
@@ -357,6 +382,15 @@ class PRPort(Protocol):
         Used by SandboxFailureFixerLoop to poll PRs that need auto-fix
         intervention. Excludes merged and closed PRs by definition —
         callers wanting closed PRs use a different method.
+        """
+        ...
+
+    async def find_label_drift(self) -> list[LabelDrift]:
+        """Scan open PRs for cross-entity label drift vs their linked issues.
+
+        Returns a list of :class:`LabelDrift` records — one per drifted
+        (issue, PR) pair. See ADR-0056 for the drift kinds and the
+        ``LabelDriftWatcherLoop`` reconciliation policy.
         """
         ...
 
