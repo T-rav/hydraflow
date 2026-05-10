@@ -42,7 +42,16 @@ logger = logging.getLogger("hydraflow.fake_coverage_auditor_loop")
 
 _MAX_ATTEMPTS = 3
 _HELPER_PREFIXES = ("script_",)
-_HELPER_NAMES = frozenset({"fail_service", "heal_service", "set_state"})
+_HELPER_NAMES = frozenset(
+    {
+        "fail_service",
+        "heal_service",
+        "set_state",
+        "reject_next_push",
+        "set_corrupted_config",
+        "active_worktrees",
+    }
+)
 
 # Per-class overrides: methods that don't match the generic prefix/name rules
 # but are test-only helpers rather than real adapter-surface methods.
