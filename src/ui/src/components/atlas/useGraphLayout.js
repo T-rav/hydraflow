@@ -50,6 +50,25 @@ function nodeStyle(node, selected) {
       padding: 6,
     }
   }
+  if (node.type === 'entry') {
+    // Entry nodes are leaves — smaller, lower-contrast. Discovered (orphan)
+    // entries get dashed borders so the bot-generated evidence reads as
+    // secondary signal next to the curated term/ADR vocabulary.
+    const dashed = node.parent === 'discovered'
+    return {
+      width: 100,
+      height: 24,
+      background: dashed ? 'transparent' : theme.surfaceInset,
+      border: `1px ${dashed ? 'dashed' : 'solid'} ${
+        selected ? theme.accent : '#555'
+      }`,
+      borderRadius: 2,
+      color: dashed ? theme.textMuted : theme.text,
+      fontSize: 10,
+      padding: 4,
+      opacity: dashed ? 0.7 : 1,
+    }
+  }
   return {
     width: NODE_W,
     height: NODE_H,
@@ -73,8 +92,14 @@ function buildEdges(rawEdges) {
     label: e.kind,
     labelStyle: { fontSize: 10, fill: theme.textMuted },
     style: {
-      stroke: e.kind === 'relates_to' ? '#666' : theme.border,
-      strokeDasharray: e.kind === 'relates_to' ? '4,2' : undefined,
+      stroke:
+        e.kind === 'relates_to' || e.kind === 'evidence_for'
+          ? '#666'
+          : theme.border,
+      strokeDasharray:
+        e.kind === 'relates_to' || e.kind === 'evidence_for'
+          ? '4,2'
+          : undefined,
     },
   }))
 }
@@ -177,16 +202,18 @@ function layoutForce(payload, selectedId) {
   const flowNodes = simNodes.map((n) => {
     const ctxColor = CONTEXT_COLORS[n.parent] || theme.border
     const baseStyle = nodeStyle(n, n.id === selectedId)
+    // Entry nodes keep the dashed/discovered styling computed by nodeStyle —
+    // overriding their border here would erase the Discovered-bucket signal
+    // (orphans become visually indistinguishable from linked entries).
+    const border =
+      n.type === 'entry'
+        ? baseStyle.border
+        : `1px ${n.confidence === 'proposed' ? 'dashed' : 'solid'} ${ctxColor}`
     return {
       id: n.id,
       position: { x: n.x ?? 0, y: n.y ?? 0 },
       data: { label: n.name, kind: n.kind, type: n.type },
-      style: {
-        ...baseStyle,
-        // In force mode, color the node border by context (not kind) so the
-        // free layout still telegraphs which subgraph each node lives in.
-        border: `1px ${n.confidence === 'proposed' ? 'dashed' : 'solid'} ${ctxColor}`,
-      },
+      style: { ...baseStyle, border },
     }
   })
 
