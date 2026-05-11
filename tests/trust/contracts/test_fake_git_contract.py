@@ -59,13 +59,13 @@ async def _invoke_fake_git(cassette: Cassette) -> FakeOutput:  # noqa: PLR0911
     if method == "config_unset":
         # Seed the key so there is something to unset, mirroring real usage
         # where a corrupted config entry is cleared.
-        fake.set_corrupted_config(cwd, key=str(args[0]), value="stale")
+        fake.script_set_corrupted_config(cwd, key=str(args[0]), value="stale")
         await fake.config_unset(cwd, key=str(args[0]))
         return FakeOutput(exit_code=0, stdout="", stderr="")
 
     if method == "config_get":
         # Seed the value so config_get has something to return.
-        fake.set_corrupted_config(cwd, key=str(args[0]), value="false")
+        fake.script_set_corrupted_config(cwd, key=str(args[0]), value="false")
         result = await fake.config_get(cwd, str(args[0]))
         if result is None:
             return FakeOutput(exit_code=1, stdout="", stderr="")
