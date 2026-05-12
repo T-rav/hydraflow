@@ -6,9 +6,17 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W19
 
+- `9cb158f` — Merge origin/staging into feat/advisor-pattern-review *(2026-05-10)*
+- `8db1004` — feat(caretaker): LabelDriftWatcherLoop — periodic drift reconciliation (#8723) (#8723) *(2026-05-08)*
+- `f018b09` — feat(memory-backlog): auto-mirror feedback memories on Write (closes hydraflow-edn7) (#8721) (#8721) *(2026-05-08)*
+- `2533d8f` — docs(memory-backlog): mirror 3 new feedback memories (#8720) (#8720) *(2026-05-08)*
+- `df80b0c` — fix(pr-unsticker): split issue vs PR label targets on HITL release (#8715) (#8715) *(2026-05-08)*
 - `ab7d575` — chore(arch): regenerate curated arch docs for ADR-0059 cross-references (T30.7) *(2026-05-08)*
 - `2953fc7` — docs(wiki): advisor-pattern entries (architecture-async-control + dark-factory) (T32, advisor-h4y) *(2026-05-08)*
 - `7a8b37a` — docs(adr): advisor-pattern self-repairing review (T31, advisor-5o4) *(2026-05-08)*
+- `69d9f4a` — feat: tier-2 enforcement batch (mock spec, ci git, memory backlog loop) (#8714) (#8714) *(2026-05-08)*
+- `6704c08` — fix(implement): don't publish PRs for failed fresh attempts (#8713) (#8713) *(2026-05-08)*
+- `1966bfd` — fix(staging-promotion): trigger CI on rc/* PRs via synthetic commit *(2026-05-07)*
 - `fb1cdb4` — Merge pull request #8491 from T-rav/rc/2026-05-07-0648 *(2026-05-07)*
 - `5bc84da` — feat(ul): wire EdgeProposerLoop into ServiceRegistry + orchestrator *(2026-05-07)*
 - `8962798` — docs(adr): add ADR-0058 edge-proposer loop *(2026-05-07)*
@@ -24,6 +32,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `ba2f7b8` — feat(ul): term-proposer batch — 1 drafts *(2026-05-07)*
 - `2ffae14` — chore(arch): regenerate arch artifacts after term-proposer-adapters merge *(2026-05-07)*
 - `c45e243` — Merge remote-tracking branch 'origin/feat/term-proposer-adapters' into feat/term-proposer-adapters *(2026-05-07)*
+- `c681459` — feat(pr): caretaker-loops spec + plan + update_pr_base port method (#8489) (#8489) *(2026-05-07)*
 - `cdb1a31` — feat(testing): document HydraFlow test pyramid + add missing layers for #8482 (#8486) (#8486) *(2026-05-07)*
 - `8b62616` — chore: re-regen arch artifacts after rebase onto staging *(2026-05-07)*
 - `c9c5d35` — chore: arch-regen + lint-fix to unblock CI on #8478 *(2026-05-07)*
@@ -192,4 +201,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `109888f` on 2026-05-10 22:21 UTC. Source last changed at `109888f`. Status: 🟢 fresh._
+_Regenerated from commit `d649803` on 2026-05-11 15:51 UTC. Source last changed at `d649803`. Status: 🟢 fresh._

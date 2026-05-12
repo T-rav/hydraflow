@@ -21,7 +21,7 @@ Every `EventType` published or subscribed in `src/`. Events with no subscribers 
 | **EPIC_RELEASING** ⚠️ | `src.epic:EpicManager._execute_release` | — |
 | **EPIC_UPDATE** ⚠️ | `src.epic:EpicManager._publish_update` | — |
 | **ERROR** ⚠️ | `src.base_background_loop:BaseBackgroundLoop._execute_cycle`<br>`src.orchestrator:HydraFlowOrchestrator._polling_loop`<br>`src.orchestrator:HydraFlowOrchestrator._restart_loop` | — |
-| **HITL_ESCALATION** ⚠️ | `src.dashboard_routes._routes:create_router.request_changes`<br>`src.review_phase:ReviewPhase._escalate_to_hitl` | — |
+| **HITL_ESCALATION** ⚠️ | `src.dashboard_routes._routes:create_router.request_changes`<br>`src.review_phase._phase:ReviewPhase._escalate_to_hitl` | — |
 | **HITL_UPDATE** ⚠️ | `src.dashboard_routes._hitl_routes:register._resolve_hitl_item`<br>`src.dashboard_routes._hitl_routes:register.hitl_correct`<br>`src.hitl_phase:HITLPhase._process_one_hitl`<br>`src.hitl_runner:HITLRunner.run`<br>`src.pr_unsticker:PRUnsticker.unstick` | — |
 | **ISSUE_CREATED** ⚠️ | `src.pr_manager:PRManager.create_issue` | — |
 | **MERGE_UPDATE** ⚠️ | `src.pr_manager:PRManager.merge_pr`<br>`src.pr_manager:PRManager.merge_promotion_pr` | — |
@@ -39,12 +39,12 @@ Every `EventType` published or subscribed in `src/`. Events with no subscribers 
 | **SESSION_START** ⚠️ | `src.orchestrator:HydraFlowOrchestrator._start_session` | — |
 | **SHAPE_UPDATE** ⚠️ | `src.shape_phase:ShapePhase._process_finalization`<br>`src.shape_phase:ShapePhase._run_council_vote`<br>`src.shape_phase:ShapePhase._shape_with_runner` | — |
 | **SYSTEM_ALERT** ⚠️ | `src.cost_budget_alerts:check_daily_budget`<br>`src.cost_budget_alerts:check_issue_cost`<br>`src.epic:EpicManager.check_stale_epics`<br>`src.orchestrator:HydraFlowOrchestrator._deferred_pipeline_start`<br>`src.orchestrator:HydraFlowOrchestrator._handle_auth_error`<br>`src.orchestrator:HydraFlowOrchestrator._pause_for_credits`<br>`src.orchestrator:HydraFlowOrchestrator._polling_loop`<br>`src.orchestrator:HydraFlowOrchestrator._resume_loops_after_credit_pause`<br>`src.post_merge_handler:PostMergeHandler._safe_hook`<br>`src.post_merge_handler:PostMergeHandler.handle_approved` | — |
-| **SYSTEM_REROUTE** ⚠️ | `src.review_phase:ReviewPhase._review_single_adr`<br>`src.review_phase:ReviewPhase._run_post_verify_advisor_for_adr`<br>`src.triage_phase:TriagePhase._triage_single_traced` | — |
+| **SYSTEM_REROUTE** ⚠️ | `src.review_phase._phase:ReviewPhase._review_single_adr`<br>`src.review_phase._phase:ReviewPhase._run_post_verify_advisor_for_adr`<br>`src.triage_phase:TriagePhase._triage_single_traced` | — |
 | **TRANSCRIPT_LINE** ⚠️ | `src.runner_utils:_stream_and_collect`<br>`src.triage:TriageRunner._emit_transcript` | — |
 | **TRANSCRIPT_SUMMARY** ⚠️ | `src.transcript_summarizer:TranscriptSummarizer._summarize_and_comment_inner` | — |
 | **TRIAGE_UPDATE** ⚠️ | `src.triage:TriageRunner._emit_status` | — |
 | **VERIFICATION_JUDGE** ⚠️ | `src.verification_judge:VerificationJudge.judge` | — |
-| **VISUAL_GATE** ⚠️ | `src.post_merge_handler:PostMergeHandler._run_visual_gate`<br>`src.review_phase:ReviewPhase._emit_visual_gate_telemetry`<br>`src.review_phase:ReviewPhase.check_visual_gate` | — |
+| **VISUAL_GATE** ⚠️ | `src.post_merge_handler:PostMergeHandler._run_visual_gate`<br>`src.review_phase._phase:ReviewPhase._emit_visual_gate_telemetry`<br>`src.review_phase._phase:ReviewPhase.check_visual_gate` | — |
 | **WORKER_UPDATE** ⚠️ | `src.agent:AgentRunner._emit_status` | — |
 
-_Regenerated from commit `109888f` on 2026-05-10 22:21 UTC. Source last changed at `109888f`. Status: 🟢 fresh._
+_Regenerated from commit `d649803` on 2026-05-11 15:51 UTC. Source last changed at `d649803`. Status: 🟢 fresh._

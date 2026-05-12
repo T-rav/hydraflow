@@ -1,4 +1,13 @@
-"""Review processing for the HydraFlow orchestrator."""
+"""Main ``ReviewPhase`` class.
+
+Split out of the original ``src/review_phase.py`` (T36) for file-size
+discipline. The module-level constants, dataclasses, regex patterns, and
+standalone helper functions live in ``_common.py``; this file holds the
+``ReviewPhase`` class body unchanged.
+
+External callers continue to import via ``from review_phase import ReviewPhase``
+— see ``__init__.py`` for back-compat re-exports.
+"""
 
 from __future__ import annotations
 
@@ -7,17 +16,19 @@ import logging
 import re
 import time
 from collections.abc import Callable, Coroutine
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from issue_cache import IssueCache
     from ports import IssueStorePort, PRPort, ReviewInsightStorePort, WorkspacePort
     from precondition_gate import PreconditionGate
     from retrospective_queue import RetrospectiveQueue
-    from review_advisor import ReviewPlan  # noqa: TCH004 — used in __init__ + sig
+    from review_advisor import (  # noqa: TCH004 — used in __init__ + sig
+        PostVerifyResult,
+        ReviewPlan,
+    )
     from visual_validator import VisualValidator
     from wiki_compiler import (  # noqa: TCH004 — used in __init__ signature
         CorroborationDecision,
@@ -25,8 +36,32 @@ if TYPE_CHECKING:
     )
 
 
-from opentelemetry import metrics
-
+# Late-binding access for symbols that tests patch via
+# ``unittest.mock.patch("review_phase.<name>")``. The patch installs the
+# mock on the package module object, so call sites must look up the
+# attribute at *call time* rather than caching a local binding at import
+# time. Today this covers ``record_harness_failure`` and
+# ``analyze_patterns``; if you add another patchable name, expose it from
+# ``__init__.py`` and reference it as ``review_phase.<name>`` here.
+#
+# ``import review_phase`` is circular-safe: the package is already in
+# ``sys.modules`` (partially initialized) when this submodule loads, so
+# the bound name resolves to the same module object the patch will
+# mutate later. Attribute access at call time sees the fully-loaded
+# package.
+# Late-binding access for symbols that tests patch via
+# ``unittest.mock.patch("review_phase.<name>")``. The patch installs the
+# mock on the package module object, so call sites must look up the
+# attribute at *call time* rather than caching a local binding at
+# import time. Today this covers ``record_harness_failure`` and
+# ``analyze_patterns``; if you add another patchable name, expose it
+# from ``__init__.py`` and reference it as ``review_phase.<name>``.
+#
+# ``import review_phase`` is circular-safe: the package is already in
+# ``sys.modules`` (partially initialized) when this submodule loads, so
+# the bound name resolves to the same module object the patch mutates
+# later. Attribute access at call time sees the fully-loaded package.
+import review_phase  # noqa: E402, F401  — used by call sites below
 from adr_utils import (
     adr_validation_reasons,
     check_adr_duplicate,
@@ -63,7 +98,6 @@ from phase_utils import (
     _sentry_transaction,
     log_exception_with_bug_classification,
     publish_review_status,
-    record_harness_failure,
     release_batch_in_flight,
     run_concurrent_batch,
     run_with_fatal_guard,
@@ -80,7 +114,6 @@ from review_insights import (
     _PROPOSAL_STALE_DAYS,
     CATEGORY_DESCRIPTIONS,
     ReviewRecord,
-    analyze_patterns,
     build_insight_issue_body,
     extract_categories,
     verify_proposals,
@@ -90,131 +123,20 @@ from state import StateTracker
 from task_source import TaskTransitioner
 from transcript_summarizer import TranscriptSummarizer
 
+from ._common import (
+    PreReviewContext,
+    ReviewGuardContext,
+    _AdvisorRole,
+    _detect_self_modification_context,
+    _emit_advisor_loop_metric,
+    _is_meaningful_verdict,
+    _run_fallback_ingest_review,
+    _veto_exhausted_total,
+    _veto_recovered_total,
+    _veto_retries_total,
+)
+
 logger = logging.getLogger("hydraflow.review_phase")
-
-# ``_AdvisorRole`` pins the runner-protocol role contract — used by
-# ``_PostVerifyRunner.run`` (T24.5 closed I1+I2: explicit role beats
-# substring detection on the prompt). Module-scope so the inner
-# ``_PostVerifyRunner`` class body can reference it via closure when
-# ``_build_post_verify_runner`` is invoked.
-_AdvisorRole = Literal["pre_flight", "mid_flight", "post_verify"]
-
-# OTel metric instruments for the post-verify advisor's veto-retry loop.
-# Module-level so the proxy meter delegates to the registered MeterProvider
-# at call time. No-op when no provider is set (production today). Tests
-# install an InMemoryMetricReader to read counter values.
-# Per ADR-0055, OTel is the project's telemetry layer.
-_advisor_meter = metrics.get_meter("hydraflow.review_phase.advisor")
-_veto_retries_total = _advisor_meter.create_counter(
-    "review_advisor_veto_retries_total",
-    description=(
-        "Count of advisor-driven veto retry triggers, labeled by surface "
-        "and the attempt number that just kicked off (1, 2, ..., or "
-        "'exhausted' when the retry budget runs out)."
-    ),
-)
-_veto_recovered_total = _advisor_meter.create_counter(
-    "review_advisor_veto_recovered_total",
-    description=(
-        "Count of post-retry advisor APPROVE verdicts (advisor recovered "
-        "from a prior VETO without HITL), labeled by surface."
-    ),
-)
-_veto_exhausted_total = _advisor_meter.create_counter(
-    "review_advisor_veto_exhausted_total",
-    description=(
-        "Count of advisor veto-retry exhaustions that escalated to HITL, "
-        "labeled by surface."
-    ),
-)
-
-
-def _emit_advisor_loop_metric(counter: Any, attrs: dict[str, Any]) -> None:
-    """Best-effort counter increment. Telemetry must never alter business
-    control flow (ADR-0055)."""
-    try:
-        counter.add(1, attrs)
-    except Exception:
-        logger.debug("advisor loop metric emit failed", exc_info=True)
-
-
-def _run_fallback_ingest_review(
-    *,
-    tracked_store: RepoWikiStore,
-    worktree_path: Path,
-    repo: str,
-    issue_number: int,
-    summary: str,
-    path_prefix: str,
-) -> None:
-    """Sync wrapper for the fallback review-ingest path.
-
-    Module-level so it can be dispatched via ``asyncio.to_thread`` — the
-    sync ``git commit`` in ``commit_pending_entries`` would otherwise
-    stall the event loop (ADR-0001).
-    """
-    from repo_wiki_ingest import ingest_from_review  # noqa: PLC0415
-
-    count = ingest_from_review(
-        tracked_store, repo, issue_number, summary, git_backed=True
-    )
-    if count:
-        tracked_store.commit_pending_entries(
-            worktree_path=worktree_path,
-            phase="review",
-            issue_number=issue_number,
-            path_prefix=path_prefix,
-        )
-
-
-@dataclass(slots=True)
-class ReviewGuardContext:
-    """Successful result from _run_initial_guards."""
-
-    task: Task
-    workspace_path: Path
-
-
-@dataclass(slots=True)
-class PreReviewContext:
-    """Artifacts captured before running the reviewer."""
-
-    diff: str
-    visual_decision: VisualValidationDecision | None
-    code_scanning_alerts: list[CodeScanningAlert] | None
-
-
-# Marker substrings indicating a ReviewResult that did NOT reach a real
-# verdict and therefore must NOT be cached. Caching these as
-# has_blocking=False would silently let a non-reviewed PR satisfy the
-# downstream gate.
-_NON_VERDICT_SUMMARY_MARKERS: tuple[str, ...] = (
-    "stopped",
-    "Issue not found",
-    "Merge conflicts with main",
-    "Review failed due to unexpected error",
-)
-
-
-def _is_meaningful_verdict(result: ReviewResult) -> bool:
-    """Return True if *result* represents a real review decision worth caching.
-
-    Skips:
-      - COMMENT verdicts (advisory only, no decision)
-      - results whose summary contains a non-verdict marker substring
-        (stopped, infrastructure error, missing issue, merge conflict)
-
-    Keeps:
-      - APPROVE / REQUEST_CHANGES with a normal summary
-
-    Used by ReviewPhase.review_prs to gate the review_stored cache
-    write so a no-real-review result cannot poison the downstream
-    READY-stage precondition gate.
-    """
-    if result.verdict == ReviewVerdict.COMMENT:
-        return False
-    summary = result.summary or ""
-    return not any(marker in summary for marker in _NON_VERDICT_SUMMARY_MARKERS)
 
 
 class ReviewPhase:
@@ -287,11 +209,21 @@ class ReviewPhase:
         # transcript hand-back to the executor (on VETO) is rendered from
         # this list. T12 will replace this with persistent advisor_session.jsonl.
         self._advisor_results: dict[int, list[Any]] = {}
-        # Per-PR pre-flight ReviewPlan, captured by ``_run_pre_flight_advisor``
-        # before the executor runs and threaded into both the executor's
-        # review prompt and the post-verify advisor's input. Reset on every
-        # ``_review_one_inner`` entry so plans don't leak across reviews.
-        self._advisor_pre_flight_plan: dict[int, ReviewPlan] = {}
+        # Per-surface pre-flight ReviewPlan, captured by
+        # ``_run_pre_flight_advisor`` before the executor runs and threaded
+        # into both the executor's review prompt and the post-verify
+        # advisor's input. Reset on every ``_review_one_inner`` entry so
+        # plans don't leak across reviews.
+        #
+        # Keyed by ``(surface, identifier)`` (T38) so per-surface plans
+        # don't collide when identifier sequences overlap — e.g., ADR-on-fork
+        # renumbering, third-party adapters with their own counters, or any
+        # future surface that doesn't share GitHub's global PR/issue sequence.
+        # In production today PR numbers and issue numbers come from disjoint
+        # segments of one sequence so the int-keyed dict was safe in practice,
+        # but the tuple key removes the "could be either id" ambiguity at
+        # read sites.
+        self._advisor_pre_flight_plan: dict[tuple[str, int], ReviewPlan] = {}
         self._post_verify_runner = self._build_post_verify_runner()
 
     def _build_post_verify_runner(self) -> Any:
@@ -523,71 +455,21 @@ class ReviewPhase:
         opinion does *not* normally block ingestion.
 
         ``reraise_on_credit_or_bug`` discipline is preserved per
-        ``docs/wiki/dark-factory.md`` §2.2.
+        ``docs/wiki/dark-factory.md`` §2.2 inside
+        :meth:`_run_post_verify_for_surface`.
         """
-        from review_advisor import (  # noqa: PLC0415
-            PostVerifyAdvisor,
-            PostVerifyInput,
-            build_surface_config,
-            is_advisor_enabled,
-            resolve_post_verify_authority,
-        )
-
-        surface = "wiki_ingest"
-        surface_cfg = build_surface_config(surface)
-        if not surface_cfg.post_verify_enabled or not is_advisor_enabled(
-            surface, "post_verify"
-        ):
-            return False
-
         diff_descriptor = self._build_wiki_ingest_diff_descriptor(
             issue_number=issue_number, transcript=transcript, summary=summary
         )
 
-        # T29 self-modification guard — if the candidate ingest content
-        # describes changes to advisor's own files, force veto authority.
-        authority = resolve_post_verify_authority(
-            surface_config=surface_cfg,
+        pv_result = await self._run_post_verify_for_surface(
+            surface="wiki_ingest",
             diff=diff_descriptor,
+            spec=summary or None,
+            executor_verdict_summary="wiki_ingest_candidate",
+            issue_number=issue_number,
         )
-
-        log_path = (
-            self._config.repo_root
-            / "review_logs"
-            / str(issue_number)
-            / "advisor_session.jsonl"
-        )
-        advisor = PostVerifyAdvisor(
-            runner=self._post_verify_runner,
-            surface_config=surface_cfg,
-            log_path=log_path,
-            pr_number=issue_number,
-            authority_override=authority,
-        )
-        try:
-            pv_result = await advisor.run(
-                PostVerifyInput(
-                    surface=surface,
-                    diff=diff_descriptor,
-                    spec=summary or None,
-                    executor_verdict_summary="wiki_ingest_candidate",
-                    executor_fix_diff=None,
-                    pre_flight_plan=None,
-                    issue_number=issue_number,
-                )
-            )
-        except Exception as exc:
-            from exception_classify import (  # noqa: PLC0415
-                reraise_on_credit_or_bug,
-            )
-
-            reraise_on_credit_or_bug(exc)
-            logger.warning(
-                "wiki_ingest post-verify advisor degraded for review #%d — "
-                "proceeding with ingestion",
-                issue_number,
-                exc_info=True,
-            )
+        if pv_result is None:
             return False
 
         # Advisory mode: VETO is downgraded to APPROVE inside advisor.run.
@@ -629,9 +511,16 @@ class ReviewPhase:
         path-matching logic.
 
         Path list source-of-truth (T30.5 I3): we import
-        ``review_advisor.SELF_MODIFYING_PATHS`` rather than duplicating
-        the list locally. Different matchers (unified-diff headers vs.
-        content-substring) consume the same paths.
+        ``review_advisor.SELF_MODIFYING_PATHS`` to keep the recognized-path
+        set aligned with the advisor module; different matchers (unified-
+        diff headers vs. content context) consume the same paths.
+
+        T37: detection is context-sensitive. A bare substring mention of an
+        advisor source path (e.g., "review found a type-hint gap in
+        src/review_advisor.py") no longer synthesizes the pseudo header —
+        only modification context (already-formed diff headers, fenced
+        diff/patch blocks, or editorial verbs like "modified <path>") does.
+        See ``_detect_self_modification_context``.
         """
         from review_advisor import SELF_MODIFYING_PATHS  # noqa: PLC0415
 
@@ -643,11 +532,14 @@ class ReviewPhase:
             f"Wiki ingest candidate — issue #{issue_number}",
             f"Repo: {self._config.repo or '(unset)'}",
         ]
-        # Synthesize unified-diff headers for any self-mod path the
-        # candidate content discusses, so resolve_post_verify_authority's
-        # detector can fire and upgrade authority to "veto".
-        for path in SELF_MODIFYING_PATHS:
-            if path in combined:
+        # Synthesize unified-diff headers only for self-mod paths that
+        # appear in a *modification context* — bare substring mentions
+        # (benign prose) do NOT trigger synthesis. Intersect with
+        # SELF_MODIFYING_PATHS so the regex remains the gate but the
+        # canonical path list still governs which paths are eligible.
+        detected = _detect_self_modification_context(combined)
+        for path in detected:
+            if path in SELF_MODIFYING_PATHS:
                 lines.append(f"diff --git a/{path} b/{path}")
         lines.extend(
             [
@@ -1001,10 +893,11 @@ class ReviewPhase:
 
         # T26 pre-flight (AlwaysTrigger). The ADR body is the "diff" for the
         # advisor — there is no PR or unified diff. Plan is keyed by
-        # ``issue.id`` (no PR number) and consumed by the post-verify call
-        # below for plan-aware second-opinion.
+        # ``("adr_review", issue.id)`` (T38; no PR number, surface-scoped)
+        # and consumed by the post-verify call below for plan-aware
+        # second-opinion.
         adr_content = issue.body or ""
-        self._advisor_pre_flight_plan.pop(issue.id, None)
+        self._advisor_pre_flight_plan.pop(("adr_review", issue.id), None)
         await self._run_pre_flight_advisor_for_adr(issue=issue, diff=adr_content)
 
         reasons = adr_validation_reasons(issue.body)
@@ -1187,7 +1080,7 @@ class ReviewPhase:
             # across reviews of the same PR — reusing a stale plan from the
             # prior cycle would feed an out-of-date rubric to both the
             # executor's prompt and the post-verify advisor.
-            self._advisor_pre_flight_plan.pop(pr.number, None)
+            self._advisor_pre_flight_plan.pop((surface, pr.number), None)
 
             guards = await self._run_initial_guards(idx, pr, issue_map)
             if isinstance(guards, ReviewResult):
@@ -1208,7 +1101,7 @@ class ReviewPhase:
                 pre_review.diff,
                 idx,
                 code_scanning_alerts=pre_review.code_scanning_alerts,
-                pre_flight_plan=self._advisor_pre_flight_plan.get(pr.number),
+                pre_flight_plan=self._advisor_pre_flight_plan.get((surface, pr.number)),
                 surface=surface,
             )
 
@@ -1448,11 +1341,12 @@ class ReviewPhase:
         """Run :class:`PreFlightAdvisor` when the composite trigger fires.
 
         Stashes the resulting :class:`ReviewPlan` under
-        ``self._advisor_pre_flight_plan[pr.number]`` so downstream call sites
-        (the executor's review prompt + the post-verify advisor's input) can
-        consume it without a second invocation. Best-effort writes a JSON
-        scratchpad to ``review_logs/<pr>/preflight.json`` for operator
-        debugging — failures there must not break the pipeline.
+        ``self._advisor_pre_flight_plan[(surface, pr.number)]`` (T38) so
+        downstream call sites (the executor's review prompt + the
+        post-verify advisor's input) can consume it without a second
+        invocation. Best-effort writes a JSON scratchpad to
+        ``review_logs/<pr>/preflight.json`` for operator debugging —
+        failures there must not break the pipeline.
 
         No-ops when:
           * The selected ``surface`` or pre_flight role is kill-switched off.
@@ -1535,7 +1429,7 @@ class ReviewPhase:
 
         if plan is None:
             return
-        self._advisor_pre_flight_plan[pr.number] = plan
+        self._advisor_pre_flight_plan[(surface, pr.number)] = plan
         scratchpad = (
             self._config.repo_root / "review_logs" / str(pr.number) / "preflight.json"
         )
@@ -1544,6 +1438,117 @@ class ReviewPhase:
             scratchpad.write_text(plan.model_dump_json(indent=2), encoding="utf-8")
         except Exception:
             logger.debug("preflight scratchpad write failed", exc_info=True)
+
+    async def _run_post_verify_for_surface(
+        self,
+        *,
+        surface: str,
+        diff: str,
+        spec: str | None,
+        executor_verdict_summary: str,
+        executor_fix_diff: str | None = None,
+        pre_flight_plan: ReviewPlan | None = None,
+        attempt_number: int = 0,
+        issue_number: int,
+        log_pr_number: int | None = None,
+    ) -> PostVerifyResult | None:
+        """Run a single post-verify advisor invocation for ``surface``.
+
+        Returns the :class:`PostVerifyResult`, or ``None`` when the advisor
+        was skipped (surface/role kill-switch off) or degraded (runner crash
+        / parse error surfaced past ``reraise_on_credit_or_bug``). Callers
+        layer their own disposition logic on top: binary-gate (block on
+        VETO), advisory (downgrade VETO to APPROVE inside the advisor's
+        ``run``), requeue (ADR), retry-loop (pr_review).
+
+        Shared skeleton extracted from the five per-surface helpers (T35).
+        Each helper now owns only the disposition logic specific to its
+        surface; the surface-config lookup, kill-switch check, authority
+        resolution (T29 self-modification guard), log path construction,
+        :class:`PostVerifyAdvisor` instantiation, and
+        ``reraise_on_credit_or_bug`` discipline (``docs/wiki/dark-factory.md``
+        §2.2) all live here.
+
+        Authority is resolved on every call, so the pr_review retry loop
+        — which wraps this helper in a while-loop — re-checks
+        :func:`resolve_post_verify_authority` per iteration. A fix that
+        introduces or removes a self-modifying path is picked up on the
+        next pass.
+
+        ``log_pr_number`` defaults to ``None``; when supplied, the log
+        path is keyed by the PR number, and ``PostVerifyAdvisor.pr_number``
+        receives the PR number. When unset, both fall back to
+        ``issue_number`` — the convention for surfaces with no PR (ADR
+        review, wiki ingest).
+        """
+        from review_advisor import (  # noqa: PLC0415
+            PostVerifyAdvisor,
+            PostVerifyInput,
+            build_surface_config,
+            is_advisor_enabled,
+            resolve_post_verify_authority,
+        )
+
+        surface_cfg = build_surface_config(surface)
+        if not surface_cfg.post_verify_enabled or not is_advisor_enabled(
+            surface, "post_verify"
+        ):
+            return None
+
+        # T29 self-modification guard — diffs touching advisor's own
+        # implementation files force veto authority regardless of surface
+        # config. Resolved on every call so a fix that introduces or
+        # removes a self-modifying path is picked up on the next pass.
+        authority = resolve_post_verify_authority(
+            surface_config=surface_cfg,
+            diff=diff,
+        )
+
+        log_key = log_pr_number if log_pr_number is not None else issue_number
+        log_path = (
+            self._config.repo_root
+            / "review_logs"
+            / str(log_key)
+            / "advisor_session.jsonl"
+        )
+        advisor = PostVerifyAdvisor(
+            runner=self._post_verify_runner,
+            surface_config=surface_cfg,
+            log_path=log_path,
+            pr_number=log_key,
+            authority_override=authority,
+        )
+        try:
+            return await advisor.run(
+                PostVerifyInput(
+                    surface=surface,
+                    diff=diff,
+                    spec=spec,
+                    executor_verdict_summary=executor_verdict_summary,
+                    executor_fix_diff=executor_fix_diff,
+                    pre_flight_plan=pre_flight_plan,
+                    attempt_number=attempt_number,
+                    issue_number=issue_number,
+                )
+            )
+        except Exception as exc:
+            # Per docs/wiki/dark-factory.md §2.2: the broad-except must
+            # reraise credit-exhausted / likely-bug errors so the
+            # orchestrator's higher layers see infrastructure failures
+            # rather than burn the attempt budget against an exhausted
+            # billing signal.
+            from exception_classify import (  # noqa: PLC0415
+                reraise_on_credit_or_bug,
+            )
+
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "post_verify advisor degraded surface=%s log_key=%s — %r",
+                surface,
+                log_key,
+                exc,
+            )
+            return None
 
     async def _run_post_verify_advisor(
         self,
@@ -1580,11 +1585,8 @@ class ReviewPhase:
         an "unused" top-level import.
         """
         from review_advisor import (  # noqa: PLC0415
-            PostVerifyAdvisor,
-            PostVerifyInput,
             build_surface_config,
             is_advisor_enabled,
-            resolve_post_verify_authority,
         )
 
         surface_cfg = build_surface_config(surface)
@@ -1604,65 +1606,29 @@ class ReviewPhase:
         self._advisor_results[pr.number] = []
         attempt_number = 0
 
-        log_path = (
-            self._config.repo_root
-            / "review_logs"
-            / str(pr.number)
-            / "advisor_session.jsonl"
-        )
         while True:
-            # T29 self-modification guard (spec §5.8): when the diff modifies
-            # advisor's own implementation files, force veto authority — even
-            # on advisory surfaces (e.g., wiki_ingest). Resolved per-iteration
-            # so a fix that introduces or removes a self-modifying path is
-            # picked up on the next pass.
-            authority = resolve_post_verify_authority(
-                surface_config=surface_cfg,
+            # Each call re-resolves the T29 self-modification authority
+            # override against the current diff (skeleton handles this),
+            # so a fix that introduces or removes a self-modifying path
+            # is picked up on the next pass.
+            pv_result = await self._run_post_verify_for_surface(
+                surface=surface,
                 diff=diff,
+                spec=task.body or None,
+                executor_verdict_summary=(result.summary or result.verdict.value),
+                pre_flight_plan=self._advisor_pre_flight_plan.get((surface, pr.number)),
+                attempt_number=attempt_number,
+                issue_number=task.id,
+                log_pr_number=pr.number,
             )
-            advisor = PostVerifyAdvisor(
-                runner=self._post_verify_runner,
-                surface_config=surface_cfg,
-                log_path=log_path,
-                pr_number=pr.number,
-                authority_override=authority,
-            )
-            try:
-                pv_result = await advisor.run(
-                    PostVerifyInput(
-                        surface=surface,
-                        diff=diff,
-                        spec=task.body or None,
-                        executor_verdict_summary=(
-                            result.summary or result.verdict.value
-                        ),
-                        executor_fix_diff=None,
-                        pre_flight_plan=self._advisor_pre_flight_plan.get(pr.number),
-                        attempt_number=attempt_number,
-                        issue_number=task.id,
-                    )
-                )
-            except Exception as exc:
-                # Auth / credit errors are re-raised inside PostVerifyAdvisor.run,
-                # but per docs/wiki/dark-factory.md §2.2 the retry loop's broad
-                # except must also reraise credit-exhausted / likely-bug errors
-                # so the orchestrator sees infrastructure failures and the
-                # attempt budget isn't burned against an exhausted billing
-                # signal.
-                from exception_classify import (  # noqa: PLC0415
-                    reraise_on_credit_or_bug,
-                )
-
-                reraise_on_credit_or_bug(exc)
-                # Anything bubbling out past the helper is a true degraded
-                # path — log and fall through to the executor's verdict
-                # (fail-open; a future task may revisit per
-                # HYDRAFLOW_REVIEW_POSTVERIFY_FAIL_AS_VETO).
-                logger.warning(
-                    "post_verify advisor errored for PR #%d — proceeding with executor verdict",
-                    pr.number,
-                    exc_info=True,
-                )
+            if pv_result is None:
+                # Degraded path: log and fall through to the executor's
+                # verdict (fail-open; a future task may revisit per
+                # HYDRAFLOW_REVIEW_POSTVERIFY_FAIL_AS_VETO). The skeleton
+                # already re-raised credit/bug errors per
+                # docs/wiki/dark-factory.md §2.2; anything reaching here
+                # is a true degraded path or a freshly-disabled kill-switch
+                # mid-loop. Either way, defer to the executor's verdict.
                 return result, diff
 
             self._advisor_results[pr.number].append(pv_result)
@@ -1789,7 +1755,10 @@ class ReviewPhase:
         ``self._advisor_pre_flight_plan`` so the post-verify advisor for the
         ``pre_merge_spec_check`` surface can piggyback on ``pr_review``'s
         plan. Defaults to ``None`` for back-compat with regression tests that
-        invoke the function directly.
+        invoke the function directly. T38 (M7) keys the dict by
+        ``(surface, identifier)``; the piggyback lookup explicitly uses
+        ``("pr_review", pr_number)`` because ``pre_merge_spec_check`` itself
+        never produces a plan (``pre_flight_enabled=False``).
         """
         from spec_match import (  # noqa: PLC0415
             build_self_review_prompt,
@@ -1906,80 +1875,34 @@ class ReviewPhase:
         fix-and-iterate retry loop here. If VETO occurs, the merge is blocked
         directly; the executor's existing fail-closed behaviour on MISMATCH
         is preserved. ``reraise_on_credit_or_bug`` discipline is preserved
-        per docs/wiki/dark-factory.md §2.2.
+        inside :meth:`_run_post_verify_for_surface` per
+        ``docs/wiki/dark-factory.md`` §2.2.
         """
-        from review_advisor import (  # noqa: PLC0415
-            PostVerifyAdvisor,
-            PostVerifyInput,
-            build_surface_config,
-            is_advisor_enabled,
-            resolve_post_verify_authority,
-        )
-
-        surface = "pre_merge_spec_check"
-        surface_cfg = build_surface_config(surface)
-        if not surface_cfg.post_verify_enabled or not is_advisor_enabled(
-            surface, "post_verify"
-        ):
-            return False
-
         # Piggyback on pr_review's pre-flight plan when present (per spec
         # tiering matrix). pre_merge_spec_check has pre_flight_enabled=False
-        # so it never produces its own plan.
+        # so it never produces its own plan — the lookup key is therefore
+        # ("pr_review", pr_number), NOT ("pre_merge_spec_check", pr_number).
+        # (T38: dict keyed by (surface, identifier).)
         pre_flight_plan = (
-            self._advisor_pre_flight_plan.get(pr_number)
+            self._advisor_pre_flight_plan.get(("pr_review", pr_number))
             if pr_number is not None
             else None
         )
 
-        # T29 self-modification guard — diffs touching advisor's own files
-        # force veto authority regardless of surface config.
-        authority = resolve_post_verify_authority(
-            surface_config=surface_cfg,
+        pv_result = await self._run_post_verify_for_surface(
+            surface="pre_merge_spec_check",
             diff=diff,
+            spec=task.body or None,
+            executor_verdict_summary=executor_verdict_summary,
+            pre_flight_plan=pre_flight_plan,
+            issue_number=task.id,
+            log_pr_number=pr_number,
         )
-
-        log_path = (
-            self._config.repo_root
-            / "review_logs"
-            / str(pr_number if pr_number is not None else task.id)
-            / "advisor_session.jsonl"
-        )
-        advisor = PostVerifyAdvisor(
-            runner=self._post_verify_runner,
-            surface_config=surface_cfg,
-            log_path=log_path,
-            pr_number=pr_number,
-            authority_override=authority,
-        )
-        try:
-            pv_result = await advisor.run(
-                PostVerifyInput(
-                    surface=surface,
-                    diff=diff,
-                    spec=task.body or None,
-                    executor_verdict_summary=executor_verdict_summary,
-                    executor_fix_diff=None,
-                    pre_flight_plan=pre_flight_plan,
-                    issue_number=task.id,
-                )
-            )
-        except Exception as exc:
-            from exception_classify import (  # noqa: PLC0415
-                reraise_on_credit_or_bug,
-            )
-
-            reraise_on_credit_or_bug(exc)
-            # Degraded path: log and let the executor's verdict stand. The
-            # executor's existing fail-closed semantics on MISMATCH still
-            # block bad merges; the advisor is a strict tightening on
-            # MATCH-shaped verdicts only.
-            logger.warning(
-                "pre_merge_spec_check post-verify advisor degraded for "
-                "issue #%d — proceeding with executor verdict",
-                task.id,
-                exc_info=True,
-            )
+        if pv_result is None:
+            # Degraded path or kill-switch off: let the executor's verdict
+            # stand. The executor's existing fail-closed semantics on
+            # MISMATCH still block bad merges; the advisor is a strict
+            # tightening on MATCH-shaped verdicts only.
             return False
 
         if pv_result.verdict == "VETO":
@@ -2000,10 +1923,11 @@ class ReviewPhase:
 
         ADR review has no PR; this thin wrapper mirrors
         ``_run_pre_flight_advisor`` but keys ``self._advisor_pre_flight_plan``
-        and the log path by ``issue.id`` instead of ``pr.number``. Same
-        advisor logic, same kill-switch behaviour, same scratchpad
-        convention. The trigger is :class:`AlwaysTrigger` per spec, so the
-        advisor runs whenever the surface kill-switch allows.
+        by ``("adr_review", issue.id)`` (T38) and the log path by
+        ``issue.id`` instead of ``pr.number``. Same advisor logic, same
+        kill-switch behaviour, same scratchpad convention. The trigger is
+        :class:`AlwaysTrigger` per spec, so the advisor runs whenever the
+        surface kill-switch allows.
 
         Function-local imports keep the dependency on ``review_advisor``
         contained to where it's used and avoid the auto-lint hook stripping
@@ -2072,7 +1996,7 @@ class ReviewPhase:
 
         if plan is None:
             return
-        self._advisor_pre_flight_plan[issue.id] = plan
+        self._advisor_pre_flight_plan[("adr_review", issue.id)] = plan
         scratchpad = (
             self._config.repo_root / "review_logs" / str(issue.id) / "preflight.json"
         )
@@ -2101,72 +2025,22 @@ class ReviewPhase:
         retry could give different input to. On VETO we requeue the issue
         to ``plan`` with the advisor's reasoning, mirroring the existing
         structural-validation requeue path. ``reraise_on_credit_or_bug``
-        discipline is preserved per docs/wiki/dark-factory.md §2.2.
+        discipline is preserved inside :meth:`_run_post_verify_for_surface`
+        per ``docs/wiki/dark-factory.md`` §2.2.
 
         T29 self-modification guard: when the ADR content touches advisor's
         own implementation files, ``resolve_post_verify_authority`` forces
         veto authority regardless of surface config.
         """
-        from review_advisor import (  # noqa: PLC0415
-            PostVerifyAdvisor,
-            PostVerifyInput,
-            build_surface_config,
-            is_advisor_enabled,
-            resolve_post_verify_authority,
-        )
-
-        surface = "adr_review"
-        surface_cfg = build_surface_config(surface)
-        if not surface_cfg.post_verify_enabled or not is_advisor_enabled(
-            surface, "post_verify"
-        ):
-            return None
-
-        authority = resolve_post_verify_authority(
-            surface_config=surface_cfg,
+        pv_result = await self._run_post_verify_for_surface(
+            surface="adr_review",
             diff=diff,
+            spec=issue.body or None,
+            executor_verdict_summary=executor_verdict_summary,
+            pre_flight_plan=self._advisor_pre_flight_plan.get(("adr_review", issue.id)),
+            issue_number=issue.id,
         )
-
-        log_path = (
-            self._config.repo_root
-            / "review_logs"
-            / str(issue.id)
-            / "advisor_session.jsonl"
-        )
-        advisor = PostVerifyAdvisor(
-            runner=self._post_verify_runner,
-            surface_config=surface_cfg,
-            log_path=log_path,
-            pr_number=issue.id,
-            authority_override=authority,
-        )
-        try:
-            pv_result = await advisor.run(
-                PostVerifyInput(
-                    surface=surface,
-                    diff=diff,
-                    spec=issue.body or None,
-                    executor_verdict_summary=executor_verdict_summary,
-                    executor_fix_diff=None,
-                    pre_flight_plan=self._advisor_pre_flight_plan.get(issue.id),
-                    issue_number=issue.id,
-                )
-            )
-        except Exception as exc:
-            from exception_classify import (  # noqa: PLC0415
-                reraise_on_credit_or_bug,
-            )
-
-            reraise_on_credit_or_bug(exc)
-            logger.warning(
-                "post_verify advisor degraded for ADR issue #%d — "
-                "proceeding with structural verdict",
-                issue.id,
-                exc_info=True,
-            )
-            return None
-
-        if pv_result.verdict != "VETO":
+        if pv_result is None or pv_result.verdict != "VETO":
             return None
 
         # VETO — requeue to plan with the advisor's reasoning surfaced.
@@ -2348,7 +2222,7 @@ class ReviewPhase:
             self._state.record_review_duration(result.duration_seconds)
         await self._record_review_insight(result)
         if result.verdict != ReviewVerdict.APPROVE:
-            record_harness_failure(
+            review_phase.record_harness_failure(
                 self._harness_insights,
                 pr.issue_number,
                 FailureCategory.REVIEW_REJECTION,
@@ -2545,7 +2419,7 @@ class ReviewPhase:
                 updated_diff,
                 worker_id=worker_id,
                 code_scanning_alerts=code_scanning_alerts,
-                pre_flight_plan=self._advisor_pre_flight_plan.get(pr.number),
+                pre_flight_plan=self._advisor_pre_flight_plan.get((surface, pr.number)),
                 surface=surface,
             )
             if re_result.fixes_made:
@@ -2631,7 +2505,7 @@ class ReviewPhase:
             updated_diff,
             worker_id=worker_id,
             code_scanning_alerts=code_scanning_alerts,
-            pre_flight_plan=self._advisor_pre_flight_plan.get(pr.number),
+            pre_flight_plan=self._advisor_pre_flight_plan.get((surface, pr.number)),
             surface=surface,
         )
 
@@ -2928,28 +2802,14 @@ class ReviewPhase:
         and ``pre_flight_enabled=False``, so this is a one-shot binary gate
         with a tighter retry budget (``max_veto_retries=1`` per spec) — no
         plan threading, no fix-and-iterate loop. ``reraise_on_credit_or_bug``
-        discipline is preserved per docs/wiki/dark-factory.md §2.2.
+        discipline is preserved inside :meth:`_run_post_verify_for_surface`
+        per ``docs/wiki/dark-factory.md`` §2.2.
 
         T29 self-modification guard: visual_gate has no diff to inspect for
         self-modifying paths, so the descriptor is passed for completeness
         but will not normally trigger the guard. The descriptor is non-empty
         — the advisor needs *something* to evaluate.
         """
-        from review_advisor import (  # noqa: PLC0415
-            PostVerifyAdvisor,
-            PostVerifyInput,
-            build_surface_config,
-            is_advisor_enabled,
-            resolve_post_verify_authority,
-        )
-
-        surface = "visual_gate"
-        surface_cfg = build_surface_config(surface)
-        if not surface_cfg.post_verify_enabled or not is_advisor_enabled(
-            surface, "post_verify"
-        ):
-            return None
-
         diff_descriptor = self._build_visual_diff_descriptor(
             pr=pr,
             issue=issue,
@@ -2958,53 +2818,15 @@ class ReviewPhase:
             artifacts=artifacts,
         )
 
-        # T29 self-modification guard — a visual diff descriptor will not
-        # normally touch advisor's own files, but resolve here for parity.
-        authority = resolve_post_verify_authority(
-            surface_config=surface_cfg,
+        pv_result = await self._run_post_verify_for_surface(
+            surface="visual_gate",
             diff=diff_descriptor,
+            spec=issue.body or None,
+            executor_verdict_summary=executor_verdict_summary,
+            issue_number=issue.id,
+            log_pr_number=pr.number,
         )
-
-        log_path = (
-            self._config.repo_root
-            / "review_logs"
-            / str(pr.number)
-            / "advisor_session.jsonl"
-        )
-        advisor = PostVerifyAdvisor(
-            runner=self._post_verify_runner,
-            surface_config=surface_cfg,
-            log_path=log_path,
-            pr_number=pr.number,
-            authority_override=authority,
-        )
-        try:
-            pv_result = await advisor.run(
-                PostVerifyInput(
-                    surface=surface,
-                    diff=diff_descriptor,
-                    spec=issue.body or None,
-                    executor_verdict_summary=executor_verdict_summary,
-                    executor_fix_diff=None,
-                    pre_flight_plan=None,
-                    issue_number=issue.id,
-                )
-            )
-        except Exception as exc:
-            from exception_classify import (  # noqa: PLC0415
-                reraise_on_credit_or_bug,
-            )
-
-            reraise_on_credit_or_bug(exc)
-            logger.warning(
-                "visual_gate post-verify advisor degraded for PR #%d — "
-                "proceeding with visual pipeline verdict",
-                pr.number,
-                exc_info=True,
-            )
-            return None
-
-        if pv_result.verdict != "VETO":
+        if pv_result is None or pv_result.verdict != "VETO":
             return None
 
         logger.warning(
@@ -3218,7 +3040,7 @@ class ReviewPhase:
     ) -> None:
         """Record state, record harness failure, escalate to HITL."""
         self._state.record_ci_fix_rounds(ci_fix_attempts)
-        record_harness_failure(
+        review_phase.record_harness_failure(
             self._harness_insights,
             issue.id,
             FailureCategory.CI_FAILURE,
@@ -3368,7 +3190,7 @@ class ReviewPhase:
             else:
                 # Fallback: inline analysis when queue not wired
                 recent = self._insights.load_recent(self._config.review_insight_window)
-                patterns = analyze_patterns(
+                patterns = review_phase.analyze_patterns(
                     recent, self._config.review_pattern_threshold
                 )
                 proposed = self._insights.get_proposed_categories()
@@ -3492,7 +3314,7 @@ class ReviewPhase:
         category = (
             FailureCategory.VISUAL_FAIL if fail_items else FailureCategory.VISUAL_WARN
         )
-        record_harness_failure(
+        review_phase.record_harness_failure(
             self._harness_insights,
             issue_number,
             category,
@@ -3592,6 +3414,9 @@ class ReviewPhase:
 
         # Thread the pre-flight plan into retries so the executor keeps
         # the same focus rubric across the loop (T24.5 closed I3).
+        # Adversarial-threshold re-review is pr_review-track only (it gates
+        # PR approval), so we hard-code the surface here. T38 (M7) key:
+        # ``(surface, identifier)``.
         re_result = await self._reviewers.review(
             pr,
             issue,
@@ -3599,7 +3424,7 @@ class ReviewPhase:
             diff,
             worker_id=worker_id,
             code_scanning_alerts=code_scanning_alerts,
-            pre_flight_plan=self._advisor_pre_flight_plan.get(pr.number),
+            pre_flight_plan=self._advisor_pre_flight_plan.get(("pr_review", pr.number)),
         )
 
         # If re-review still under threshold without justification, accept
@@ -3671,7 +3496,7 @@ class ReviewPhase:
                 max_attempts,
                 pr.issue_number,
             )
-            record_harness_failure(
+            review_phase.record_harness_failure(
                 self._harness_insights,
                 pr.issue_number,
                 FailureCategory.HITL_ESCALATION,
