@@ -151,5 +151,7 @@ class BGWorkerManager:
             "wiki_rot_detector": self._config.wiki_rot_detector_interval,
             "trust_fleet_sanity": self._config.trust_fleet_sanity_interval,
             "adr_touchpoint_auditor": self._config.adr_touchpoint_auditor_interval,
+            "stale_issue": self._config.stale_issue_interval,
+            "stale_issue_gc": self._config.stale_issue_gc_interval,
         }
         return defaults.get(name, self._config.poll_interval)
