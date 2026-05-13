@@ -42,11 +42,20 @@
 
 ## Aliases
 
-(Populated during extraction. Maps row name to extra grep-matching strings.)
+(Currently none. Add as <RowName>: ["string1", "string2"] when an extractor false-negative is fixed by adding a grep variant.)
 
 ## Excluded refs
 
-(Populated during extraction. Per-row list of files whose mention does not count.)
+The following files contain only roll-call mentions and do NOT count as substantive coverage for any row that appears only there:
+
+- `docs/adr/0044-hydraflow-principles.md` — principles audit lists every loop.
+- `docs/adr/0049-trust-loop-kill-switch-convention.md` — kill-switch convention lists every loop the convention applies to.
+- `docs/wiki/index.md` — wiki index, lists entries by name without describing them.
+- `docs/wiki/index.json` — machine wiki index.
+
+Per-row overrides (loops where the only match was in one of the above and the cell was flipped to ⚠️):
+
+None — every loop has substantive (non-roll-call) coverage when an ADR mention exists.
 
 ---
 
