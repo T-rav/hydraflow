@@ -63,6 +63,7 @@ from typing import TYPE_CHECKING
 
 from auto_pr import open_automated_pr_async
 from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
+from exception_classify import reraise_on_credit_or_bug
 from models import WorkCycleResult  # noqa: TCH001
 from skill_registry import BUILTIN_SKILLS, AgentSkill
 
@@ -532,7 +533,8 @@ class CorpusLearningLoop(BaseBackgroundLoop):
                 body,
                 ["hitl-escalation", "corpus-learning-stuck"],
             )
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            reraise_on_credit_or_bug(exc)
             logger.warning(
                 "corpus-learning: failed to file `corpus-learning-stuck` "
                 "escalation for #%d",
@@ -756,7 +758,8 @@ class CorpusLearningLoop(BaseBackgroundLoop):
             if proc.returncode != 0:
                 return
             issues = json.loads(out or b"[]")
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            reraise_on_credit_or_bug(exc)
             logger.debug("corpus-learning reconcile: skipped", exc_info=True)
             return
         for issue in issues:
@@ -812,7 +815,8 @@ class CorpusLearningLoop(BaseBackgroundLoop):
                         continue
                     seen_issues.add(sig.issue_number)
                     signals.append(sig)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            reraise_on_credit_or_bug(exc)
             logger.warning(
                 "corpus-learning: escape-signal query failed — skipping tick",
                 exc_info=True,

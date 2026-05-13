@@ -25,6 +25,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
+from exception_classify import reraise_on_credit_or_bug
 from models import WorkCycleResult
 
 if TYPE_CHECKING:
@@ -84,14 +85,19 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
                 self._config.skill_prompt_eval_max_corpus_cases
             ),
         }
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=self._config.repo_root,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
-        )
-        stdout, stderr = await proc.communicate()
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=self._config.repo_root,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+            )
+            stdout, stderr = await proc.communicate()
+        except Exception as exc:  # noqa: BLE001
+            reraise_on_credit_or_bug(exc)
+            logger.warning("trust-adversarial subprocess failed: %s", exc)
+            return []
         if proc.returncode not in (0, 1):  # 1 = failures present; still valid output
             logger.warning(
                 "trust-adversarial exit=%d: %s",
