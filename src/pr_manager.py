@@ -2197,7 +2197,17 @@ class PRManager:
     _RUN_ID_PATTERN = re.compile(r"/actions/runs/(\d+)")
 
     async def _get_failed_check_runs(self, pr_number: int) -> list[tuple[str, str]]:
-        """Return [(name, run_id), ...] for failed CI checks on this PR."""
+        """Return [(name, run_id), ...] for failed CI checks on this PR.
+
+        #8786 Phase 13: routed through the contracts boundary helper in
+        lenient mode against ``GhCheckRun``. The helper logs WARN on
+        shape drift (e.g. a new check state enum value, removed
+        detailsUrl) and falls back to the raw dict so the existing
+        downstream processing keeps working.
+        """
+        from contracts.boundary import parse_list_with_shape  # noqa: PLC0415
+        from contracts.shapes import GhCheckRun  # noqa: PLC0415
+
         raw = await self._run_gh(
             "gh",
             "pr",
@@ -2208,15 +2218,23 @@ class PRManager:
             "--json",
             "name,state,detailsUrl",
         )
-        checks = json.loads(raw)
+        results = parse_list_with_shape(raw, GhCheckRun)
 
         seen_run_ids: set[str] = set()
         failed_names: list[tuple[str, str]] = []
-        for check in checks:
-            state = check.get("state", "").upper()
+        for r in results:
+            if r.model_instance is not None:
+                m = r.model_instance
+                name = m.name
+                state = (m.state or "").upper() if m.state else ""
+                details_url = m.details_url or ""
+            else:
+                check = r.payload if isinstance(r.payload, dict) else {}
+                name = str(check.get("name", "unknown"))
+                state = str(check.get("state", "")).upper()
+                details_url = str(check.get("detailsUrl", ""))
             if state in self._PASSING_STATES or state in self._PENDING_STATES:
                 continue
-            details_url = check.get("detailsUrl", "")
             if not details_url:
                 continue
             match = self._RUN_ID_PATTERN.search(details_url)
@@ -2225,7 +2243,7 @@ class PRManager:
             run_id = match.group(1)
             if run_id not in seen_run_ids:
                 seen_run_ids.add(run_id)
-                failed_names.append((check.get("name", "unknown"), run_id))
+                failed_names.append((name or "unknown", run_id))
         return failed_names
 
     async def _fetch_run_log(self, name: str, run_id: str) -> str:
