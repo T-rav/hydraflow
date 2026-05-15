@@ -13,7 +13,6 @@ flowchart LR
         caretaking_DependabotMergeLoop([DependabotMergeLoop])
         caretaking_DiagnosticLoop([DiagnosticLoop])
         caretaking_EdgeProposerLoop([EdgeProposerLoop])
-        caretaking_EntryEvidenceLoop([EntryEvidenceLoop])
         caretaking_EpicMonitorLoop([EpicMonitorLoop])
         caretaking_EpicSweeperLoop([EpicSweeperLoop])
         caretaking_GitHubCacheLoop([GitHubCacheLoop])
@@ -96,7 +95,6 @@ Autonomous background loops that maintain the system without human input — wik
 - `DependabotMergeLoop` — `src.dependabot_merge_loop`
 - `DiagnosticLoop` — `src.diagnostic_loop`
 - `EdgeProposerLoop` — `src.edge_proposer_loop`
-- `EntryEvidenceLoop` — `src.entry_evidence_loop`
 - `EpicMonitorLoop` — `src.epic_monitor_loop`
 - `EpicSweeperLoop` — `src.epic_sweeper_loop`
 - `GitHubCacheLoop` — `src.github_cache_loop`
@@ -277,4 +275,4 @@ The plan→implement→review pipeline driving each issue from hydraflow-ready t
 **Related ADRs:** `ADR-0001`, `ADR-0004`, `ADR-0011`, `ADR-0012`, `ADR-0029`
 
 
-_Regenerated from commit `b1eafc5` on 2026-05-17 02:17 UTC. Source last changed at `b1eafc5`. Status: 🟢 fresh._
+_Regenerated from commit `aa2e86d` on 2026-05-15 18:32 UTC. Source last changed at `aa2e86d`. Status: 🟢 fresh._
