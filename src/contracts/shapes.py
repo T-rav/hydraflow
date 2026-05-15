@@ -133,3 +133,21 @@ class GhIssueListItem(BaseModel):
     title: str
     body: str | None = None
     updated_at: str | None = Field(default=None, alias="updatedAt")
+
+
+class GhPromotionPR(BaseModel):
+    """``gh api repos/.../pulls`` element after the custom ``--jq`` filter
+    used by :meth:`PRManager.list_recent_promotion_prs`.
+
+    Shape: ``{number, branch, merged, closed_at, url}``. Not directly
+    produced by any ``gh ... --json FIELDS`` invocation — this is the
+    HydraFlow-defined projection over the GitHub REST PR payload.
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    number: int
+    branch: str
+    merged: bool
+    closed_at: str | None = None
+    url: str | None = None

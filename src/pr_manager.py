@@ -687,9 +687,18 @@ class PRManager:
         Each entry: ``{number, branch, merged, closed_at, url}``. Used for
         RC lifecycle dashboard metrics (throughput + failure rate). Only
         PRs whose ``updated_at`` is within *days* of now are returned.
+
+        #8786 Phase 11: routed through the contracts boundary helper in
+        lenient mode against ``GhPromotionPR``. The HydraFlow-defined
+        projection (a custom ``--jq``) is part of our public contract
+        with downstream callers and benefits from the same drift signal
+        as direct ``--json`` invocations.
         """
         if self._config.dry_run:
             return []
+        from contracts.boundary import parse_list_with_shape  # noqa: PLC0415
+        from contracts.shapes import GhPromotionPR  # noqa: PLC0415
+
         prefix = self._config.rc_branch_prefix
         cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
         try:
@@ -720,7 +729,15 @@ class PRManager:
             text = raw.strip()
             if not text:
                 return []
-            return json.loads(text)
+            results = parse_list_with_shape(text, GhPromotionPR)
+            return [
+                (
+                    r.model_instance.model_dump(by_alias=False)
+                    if r.model_instance is not None
+                    else (r.payload if isinstance(r.payload, dict) else {})
+                )
+                for r in results
+            ]
         except (RuntimeError, ValueError, json.JSONDecodeError):
             logger.debug("Could not list recent promotion PRs", exc_info=True)
             return []
