@@ -113,7 +113,7 @@ JSON-file backed state service for crash recovery. Composes ~30 domain mixins (i
 
 ## Task
 
-**Kind:** `entity` · **Context:** `builder` · **Anchor:** `src/models/__init__.py:Task` · **Confidence:** `accepted`
+**Kind:** `entity` · **Context:** `builder` · **Anchor:** `src/models.py:Task` · **Confidence:** `accepted`
 **Aliases:** `work item`, `ticket`
 
 A source-agnostic work item abstraction representing tasks from any source (GitHub issues, Linear tickets, etc.) that flow through HydraFlow's pipeline. Tasks carry metadata, support typed relationships via TaskLink, and serve as the unified representation for all work regardless of origin. Relationship extraction follows first-match precedence across compiled regex patterns.

@@ -4,6 +4,10 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W20
+
+- `200b955` — feat(adversarial): add Concern/ConcernResolution/AdversarialState models *(2026-05-16)*
+
 ## 2026-W19
 
 - `48ffc6b` — feat(loops): EntryEvidenceLoop — autonomous term ↔ wiki-entry backlinks (ADR-0062) *(2026-05-10)*
@@ -201,4 +205,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `244af5d` on 2026-05-16 21:13 UTC. Source last changed at `244af5d`. Status: 🟢 fresh._
+_Regenerated from commit `200b955` on 2026-05-16 21:39 UTC. Source last changed at `200b955`. Status: 🟢 fresh._
