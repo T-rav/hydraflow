@@ -14,6 +14,7 @@ graph LR
     src_dashboard_routes["src.dashboard_routes"]
     src_mockworld["src.mockworld"]
     src_mockworld_fakes["src.mockworld.fakes"]
+    src_models["src.models"]
     src_preflight["src.preflight"]
     src_runners["src.runners"]
     src_sentry["src.sentry"]
@@ -22,18 +23,23 @@ graph LR
     src -- "4" --> src_arch
     src -- "1" --> src_contracts
     src -- "4" --> src_dashboard_routes
+    src -- "98" --> src_models
     src -- "12" --> src_preflight
     src -- "45" --> src_state
     src -- "7" --> src_telemetry
     src_arch_extractors -- "7" --> src_arch
     src_arch_generators -- "10" --> src_arch
+    src_dashboard_routes -- "12" --> src_models
     src_dashboard_routes -- "1" --> src_preflight
     src_dashboard_routes -- "1" --> src_state
     src_mockworld_fakes -- "25" --> src_mockworld
+    src_mockworld_fakes -- "13" --> src_models
     src_mockworld_fakes -- "1" --> src_telemetry
+    src_preflight -- "1" --> src_models
     src_preflight -- "1" --> src_runners
     src_preflight -- "1" --> src_sentry
     src_runners -- "1" --> src_preflight
+    src_state -- "48" --> src_models
 ```
 
-_Regenerated from commit `9d837fb` on 2026-05-11 02:38 UTC. Source last changed at `9d837fb`. Status: 🟢 fresh._
+_Regenerated from commit `244af5d` on 2026-05-16 21:13 UTC. Source last changed at `244af5d`. Status: 🟢 fresh._

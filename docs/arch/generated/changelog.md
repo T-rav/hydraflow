@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W19
 
+- `48ffc6b` — feat(loops): EntryEvidenceLoop — autonomous term ↔ wiki-entry backlinks (ADR-0062) *(2026-05-10)*
 - `367d165` — chore(arch): regen artifacts post-quality (P4) *(2026-05-09)*
 - `fe84239` — chore(arch): regen artifacts post-quality (P3) *(2026-05-09)*
 - `9a5df5a` — feat(atlas): entries-as-evidence + Discovered bucket endpoints (T3-T4) *(2026-05-09)*
@@ -200,4 +201,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `9d837fb` on 2026-05-11 02:38 UTC. Source last changed at `9d837fb`. Status: 🟢 fresh._
+_Regenerated from commit `244af5d` on 2026-05-16 21:13 UTC. Source last changed at `244af5d`. Status: 🟢 fresh._

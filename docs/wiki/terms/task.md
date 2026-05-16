@@ -3,7 +3,7 @@ id: "01KR1GDECRP5Z9X3HNGX3XFS8B"
 name: "Task"
 kind: "entity"
 bounded_context: "builder"
-code_anchor: "src/models.py:Task"
+code_anchor: "src/models/__init__.py:Task"
 aliases: ["work item", "ticket"]
 related: []
 evidence: []
