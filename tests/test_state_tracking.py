@@ -134,6 +134,8 @@ class TestInitialization:
             # AdrTouchpointAuditorLoop (ADR-0056)
             "adr_audit_cursor",
             "adr_audit_attempts",
+            # Earlier-adversarial pipeline (Task 7)
+            "adversarial_states",
         }
         assert set(d.keys()) == expected_keys
 

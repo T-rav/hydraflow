@@ -18,15 +18,12 @@ import json
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Literal, Protocol
+from typing import Literal
 
+from src.adversarial_agents import AgentLike
 from src.pending_concerns import Concern
 
 logger = logging.getLogger(__name__)
-
-
-class AgentLike(Protocol):
-    async def run(self, system_prompt: str, user_message: str) -> str: ...
 
 
 _SYSTEM_PROMPT = """\

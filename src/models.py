@@ -31,6 +31,8 @@ from pydantic.alias_generators import (
 )
 from typing_extensions import TypedDict
 
+from src.pending_concerns import AdversarialState
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -1841,6 +1843,13 @@ class StateData(BaseModel):
     # (spec §4.1 v2 step 5). At 3 consecutive failures on the same escape
     # issue the loop files `hitl-escalation` + `corpus-learning-stuck`.
     corpus_learning_validation_attempts: dict[str, int] = Field(default_factory=dict)
+    # Earlier-adversarial pipeline (ADR-pending). One AdversarialState per
+    # issue, persisted across phases so implement_phase can read carryover
+    # concerns surfaced during plan_phase without re-running the stages.
+    # Keyed by str(issue_id) for JSON-compat with the rest of StateData.
+    # Default empty dict — schema-evolution safe: legacy state files load
+    # cleanly because Pydantic fills the default.
+    adversarial_states: dict[str, AdversarialState] = Field(default_factory=dict)
     last_updated: str | None = None
 
 

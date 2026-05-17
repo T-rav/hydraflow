@@ -26,8 +26,8 @@ import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
-from typing import Protocol
 
+from src.adversarial_agents import AgentLike
 from src.pending_concerns import Concern
 from src.plan_council_prompts import (
     BUILDER_PROMPT,
@@ -44,10 +44,6 @@ _PROMPTS: dict[str, str] = {
     "tester": TESTER_PROMPT,
     "risk_skeptic": RISK_SKEPTIC_PROMPT,
 }
-
-
-class AgentLike(Protocol):
-    async def run(self, system_prompt: str, user_message: str) -> str: ...
 
 
 @dataclass

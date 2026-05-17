@@ -4,15 +4,12 @@ import json
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Protocol, cast
+from typing import cast
 
+from src.adversarial_agents import AgentLike
 from src.pending_concerns import Concern, Phase
 
 logger = logging.getLogger(__name__)
-
-
-class AgentLike(Protocol):
-    async def run(self, system_prompt: str, user_message: str) -> str: ...
 
 
 @dataclass

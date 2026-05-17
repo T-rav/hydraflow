@@ -12,13 +12,10 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import Protocol
+
+from src.adversarial_agents import AgentLike
 
 logger = logging.getLogger(__name__)
-
-
-class AgentLike(Protocol):
-    async def run(self, system_prompt: str, user_message: str) -> str: ...
 
 
 _SYSTEM_PROMPT = """\
