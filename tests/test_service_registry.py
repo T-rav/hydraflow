@@ -53,8 +53,9 @@ class TestBuildServices:
 
         registry = build_services(config, bus, state, stop_event, callbacks)
 
-        # hindsight is None when not configured — that's expected
-        optional_fields = {"hindsight", "hindsight_wal"}
+        # hindsight is None when not configured — that's expected.
+        # live_corpus_replay_loop is gated by config.shadow_corpus_enabled.
+        optional_fields = {"hindsight", "hindsight_wal", "live_corpus_replay_loop"}
         for field_name in ServiceRegistry.__dataclass_fields__:
             if field_name in optional_fields:
                 continue

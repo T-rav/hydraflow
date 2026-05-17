@@ -52,6 +52,7 @@ from issue_cache import IssueCache
 from issue_fetcher import GitHubTaskFetcher, IssueFetcher
 from issue_store import IssueStore
 from label_drift_watcher_loop import LabelDriftWatcherLoop
+from live_corpus_replay_loop import LiveCorpusReplayLoop
 from memory_backlog_loop import MemoryBacklogLoop
 from merge_conflict_resolver import MergeConflictResolver
 from merge_state_watcher_loop import MergeStateWatcherLoop
@@ -207,6 +208,12 @@ class ServiceRegistry:
     edge_proposer_loop: EdgeProposerLoop
 
     # Optional integrations
+
+    # LiveCorpusReplayLoop is gated by ``config.shadow_corpus_enabled``.
+    # When the shadow corpus is off the loop is not constructed and the
+    # field is ``None``; consumers (orchestrator bg_loop_registry,
+    # loop_factories) include it only when present.
+    live_corpus_replay_loop: LiveCorpusReplayLoop | None = None
 
 
 @dataclass(frozen=True)
@@ -1048,14 +1055,13 @@ def build_services(
     # corpus is enabled — otherwise the corpus is empty every tick and the
     # loop is a no-op. Tied to the same flag so a single toggle controls
     # the full v2 path.
+    live_corpus_replay_loop: LiveCorpusReplayLoop | None = None
     if config.shadow_corpus_enabled and shadow_corpus is not None:
-        from live_corpus_replay_loop import LiveCorpusReplayLoop
-
         _live_corpus_replay_dedup = DedupStore(
             "live_corpus_replay",
             config.data_root / "dedup" / "live_corpus_replay.json",
         )
-        _live_corpus_replay_loop = LiveCorpusReplayLoop(  # noqa: F841
+        _lcr_loop = LiveCorpusReplayLoop(
             config=config,
             corpus=shadow_corpus,
             pr_manager=prs,
@@ -1069,16 +1075,15 @@ def build_services(
         # fields, new enum values) fires immediately on the next tick.
         from contracts.shape_dispatchers import gh_shape_validator
 
-        _live_corpus_replay_loop.register("github", "gh", gh_shape_validator)
+        _lcr_loop.register("github", "gh", gh_shape_validator)
 
         # Phase 9: thread LiveCorpusReplayLoop's registered_shapes() into
         # FakeCoverageAuditorLoop so the retirement audit can flag
         # baseline cassettes whose shape is now dispatcher-covered. Only
         # wired when both flags are on — the audit is gated by
         # ``cassette_retirement_audit_enabled``.
-        fake_coverage_auditor_loop.set_retirement_keys_cb(
-            _live_corpus_replay_loop.registered_shapes
-        )
+        fake_coverage_auditor_loop.set_retirement_keys_cb(_lcr_loop.registered_shapes)
+        live_corpus_replay_loop = _lcr_loop
 
     corpus_learning_dedup = DedupStore(
         "corpus_learning",
@@ -1250,4 +1255,5 @@ def build_services(
         term_proposer_loop=term_proposer_loop,
         term_pruner_loop=term_pruner_loop,
         edge_proposer_loop=edge_proposer_loop,
+        live_corpus_replay_loop=live_corpus_replay_loop,
     )

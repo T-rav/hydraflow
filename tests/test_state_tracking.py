@@ -136,6 +136,8 @@ class TestInitialization:
             "adr_audit_attempts",
             # MemoryBacklogLoop (ADR-0057)
             "memory_backlog_attempts",
+            # LiveCorpusReplayLoop (#8786 / ADR-0045)
+            "live_corpus_drift_attempts",
         }
         assert set(d.keys()) == expected_keys
 
