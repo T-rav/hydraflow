@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W20
 
+- `954ab0b` — feat(adversarial): wire AssumptionSurfacer + PlanCouncil + SpecJudge into plan_phase *(2026-05-16)*
 - `2da0878` — refactor(adversarial): use flat src/pending_concerns.py, restore src/models.py *(2026-05-16)*
 - `200b955` — feat(adversarial): add Concern/ConcernResolution/AdversarialState models *(2026-05-16)*
 
@@ -206,4 +207,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `9c3337a` on 2026-05-17 02:27 UTC. Source last changed at `9c3337a`. Status: 🟢 fresh._
+_Regenerated from commit `954ab0b` on 2026-05-17 03:10 UTC. Source last changed at `954ab0b`. Status: 🟢 fresh._

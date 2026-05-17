@@ -17,6 +17,11 @@ from phase_utils import (
     store_lifecycle,
 )
 from pr_manager import PRManager
+from src.adversarial_agents import AgentLike
+from src.adversarial_retry_loop import AdversarialRetryLoop
+from src.assumption_surfacer import AssumptionSurfacer, SurfacerOutput
+from src.discovery_council import CouncilTally, DiscoveryCouncil
+from src.pending_concerns import AdversarialState, StageRun
 from state import StateTracker
 from task_source import TaskTransitioner
 
@@ -55,6 +60,142 @@ class DiscoverPhase:
                 config.data_root / "memory" / "hitl_escalations_dedup.json",
             )
             self._runner.bind_escalation_deps(self._prs, dedup)
+        # Earlier-adversarial pipeline agents (ADR-pending). Optional —
+        # the factory wires them in when feature-enabled; legacy paths
+        # leave them None and the adversarial stages are skipped. See
+        # ``attach_adversarial_agents`` for the production entry point.
+        self._surfacer_agent: AgentLike | None = None
+        self._council_agents: dict[str, AgentLike] | None = None
+        self._adversarial_budget: int = 3
+
+    # ------------------------------------------------------------------
+    # Earlier-adversarial pipeline wiring (ADR-pending)
+    # ------------------------------------------------------------------
+
+    def attach_adversarial_agents(
+        self,
+        *,
+        surfacer_agent: AgentLike | None = None,
+        council_agents: dict[str, AgentLike] | None = None,
+        budget: int = 3,
+    ) -> None:
+        """Wire the two Discovery-phase adversarial agents onto this phase.
+
+        Called by the factory once on construction (or by tests). Each
+        agent is independently optional — when ``None``, that stage is
+        skipped, the rest of the pipeline runs unchanged. Both together
+        enable the full Surfacer → Council sequence around the existing
+        DiscoverRunner.
+
+        ``council_agents`` must contain keys ``problem_sharpener``,
+        ``existing_solution_hunter``, ``cheapest_test_advocate`` (per
+        ``DiscoveryCouncil``'s contract).
+        """
+        self._surfacer_agent = surfacer_agent
+        self._council_agents = council_agents
+        self._adversarial_budget = budget
+
+    def _has_any_adversarial_agent(self) -> bool:
+        return self._surfacer_agent is not None or self._council_agents is not None
+
+    def _persist_adversarial_state(self, issue: Task, adv: AdversarialState) -> None:
+        """Persist *adv* into state.json under the issue's key.
+
+        Per contract: every adversarial stage persists before returning
+        so the next stage (and shape_phase) can read the accumulated
+        pending concerns.
+        """
+        self._state.set_adversarial_state(issue.id, adv)
+
+    async def _run_assumption_surfacer(
+        self, issue: Task, adv: AdversarialState, research_context: str
+    ) -> None:
+        """Surface assumptions + uncertainty concerns before the council.
+
+        One-shot — the surfacer is a read-only critic. Concerns are
+        appended to ``adv.pending_concerns`` and the state is persisted
+        before returning.
+        """
+        if self._surfacer_agent is None:
+            return
+        surfacer = AssumptionSurfacer(agent=self._surfacer_agent, phase="discover")
+        out: SurfacerOutput = await surfacer.run(
+            issue_body=issue.body or "",
+            research_context=research_context,
+            carryover_concerns=list(adv.pending_concerns),
+        )
+        adv.pending_concerns.extend(out.concerns)
+        adv.current_stage = "assumption_surfacer"
+        adv.stage_history.append(
+            StageRun(
+                stage="assumption_surfacer",
+                phase="discover",
+                retries=0,
+                converged=True,
+                concerns_raised=len(out.concerns),
+                concerns_forwarded=len(out.concerns),
+                oscillation_detected=False,
+                duration_ms=0,
+            )
+        )
+        self._persist_adversarial_state(issue, adv)
+
+    async def _run_discovery_council(
+        self,
+        issue: Task,
+        adv: AdversarialState,
+        discovery_text: str,
+    ) -> None:
+        """DiscoveryCouncil tight-loop around the (already-produced) brief.
+
+        Wired via AdversarialRetryLoop with the configured budget.
+        Because the DiscoverRunner has already produced its brief and we
+        don't currently re-invoke it on Council retry, the loop runs the
+        Council with a no-op ``retry`` step so unresolved concerns
+        forward rather than block. Honors the dark-factory contract:
+        never deadlock; surface, persist, forward.
+        """
+        if self._council_agents is None:
+            return
+        council = DiscoveryCouncil(agents=self._council_agents)
+
+        async def _critic(_ctx: str) -> CouncilTally:
+            return await council.deliberate(
+                discovery_text=_ctx, pending_concerns=list(adv.pending_concerns)
+            )
+
+        async def _retry(_findings: CouncilTally, ctx: str) -> str:
+            # The brief text is unchanged on retry — we do not currently
+            # re-invoke the DiscoverRunner from inside the council loop.
+            # In a future pass we may thread a runner-retry callback in
+            # here. For now: forward findings (dark-factory contract)
+            # once budget is exhausted.
+            return ctx
+
+        def _converged(t: CouncilTally) -> bool:
+            return not t.should_retry
+
+        loop: AdversarialRetryLoop[str, CouncilTally] = AdversarialRetryLoop(
+            budget=self._adversarial_budget
+        )
+        _ctx_out, unresolved = await loop.run(
+            discovery_text, _critic, _retry, _converged
+        )
+        adv.pending_concerns.extend(unresolved)
+        adv.current_stage = "discovery_council"
+        adv.stage_history.append(
+            StageRun(
+                stage="discovery_council",
+                phase="discover",
+                retries=0,
+                converged=not bool(unresolved),
+                concerns_raised=len(unresolved),
+                concerns_forwarded=len(unresolved),
+                oscillation_detected=False,
+                duration_ms=0,
+            )
+        )
+        self._persist_adversarial_state(issue, adv)
 
     async def discover_issues(self) -> bool:
         """Process discover-labeled issues. Returns True if work was done."""
@@ -83,6 +224,18 @@ class DiscoverPhase:
                     )
                 )
 
+                # Earlier-adversarial pipeline stage 1: surface assumptions
+                # before the runner produces its brief. No-op when no agent
+                # is attached. Reads carryover from any prior phase (none
+                # currently feeds discover, but the carryover contract is
+                # uniform across phases).
+                adv: AdversarialState | None = None
+                if self._has_any_adversarial_agent():
+                    adv = self._state.get_adversarial_state(issue.id) or (
+                        AdversarialState(phase="discover")
+                    )
+                    await self._run_assumption_surfacer(issue, adv, research_context="")
+
                 if self._runner:
                     result = await self._runner.discover(issue)
                 else:
@@ -93,6 +246,15 @@ class DiscoverPhase:
                             "Configure the discover runner to enable real product research."
                         ),
                         opportunities=["Discovery runner not configured"],
+                    )
+
+                # Earlier-adversarial pipeline stage 2: DiscoveryCouncil
+                # tight-loop around the produced brief. Concerns are
+                # persisted and forward to ``shape`` per the dark-factory
+                # contract.
+                if adv is not None:
+                    await self._run_discovery_council(
+                        issue, adv, discovery_text=result.research_brief
                     )
 
                 # Post research brief as structured comment
