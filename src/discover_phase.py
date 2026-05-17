@@ -20,12 +20,29 @@ from pr_manager import PRManager
 from src.adversarial_agents import AgentLike
 from src.adversarial_retry_loop import AdversarialRetryLoop
 from src.assumption_surfacer import AssumptionSurfacer, SurfacerOutput
+from src.complexity_gate import Complexity, ComplexityGate
 from src.discovery_council import CouncilTally, DiscoveryCouncil
 from src.pending_concerns import AdversarialState, StageRun
 from state import StateTracker
 from task_source import TaskTransitioner
 
 logger = logging.getLogger("hydraflow.discover_phase")
+
+
+class _TaskAsIssueLike:
+    """Adapt ``Task.tags`` to ``IssueLike.labels`` for ComplexityGate.
+
+    ``Task`` (the source-agnostic representation used inside phases) names
+    the label list ``tags``; ``ComplexityGate.classify`` reads ``labels``
+    per the ``IssueLike`` Protocol. This zero-cost wrapper bridges the
+    two without forcing every Task carrier to also expose ``labels``.
+    """
+
+    __slots__ = ("body", "labels")
+
+    def __init__(self, task: Task) -> None:
+        self.body = task.body or ""
+        self.labels = list(task.tags)
 
 
 class DiscoverPhase:
@@ -67,6 +84,12 @@ class DiscoverPhase:
         self._surfacer_agent: AgentLike | None = None
         self._council_agents: dict[str, AgentLike] | None = None
         self._adversarial_budget: int = 3
+        # ComplexityGate (Task 10). Optional — when attached, trivial
+        # issues bypass Discovery + Shape entirely and transition to
+        # ``hydraflow-ready``. Load-bearing issues proceed through the
+        # canonical discovery flow. Legacy paths leave this None and
+        # every discover-labeled issue runs full discovery.
+        self._complexity_gate: ComplexityGate | None = None
 
     # ------------------------------------------------------------------
     # Earlier-adversarial pipeline wiring (ADR-pending)
@@ -94,6 +117,20 @@ class DiscoverPhase:
         self._surfacer_agent = surfacer_agent
         self._council_agents = council_agents
         self._adversarial_budget = budget
+
+    def attach_complexity_gate(self, gate: ComplexityGate) -> None:
+        """Wire the ComplexityGate onto this phase.
+
+        Called by the factory once on construction (or by tests). When
+        attached, the gate runs at the top of each discover invocation:
+        trivial issues bypass Discovery + Shape entirely and transition
+        directly to ``hydraflow-ready``; load-bearing issues proceed
+        through the canonical discovery flow.
+
+        Backward-compat: when no gate is attached, every discover-labeled
+        issue runs full discovery (no bypass).
+        """
+        self._complexity_gate = gate
 
     def _has_any_adversarial_agent(self) -> bool:
         return self._surfacer_agent is not None or self._council_agents is not None
@@ -223,6 +260,42 @@ class DiscoverPhase:
                         data={"issue": issue.id, "action": "started"},
                     )
                 )
+
+                # ComplexityGate (Task 10). When attached, trivial issues
+                # bypass Discovery + Shape entirely and transition straight
+                # to hydraflow-ready. Load-bearing issues fall through to
+                # the canonical discovery flow. The gate is opt-in — no
+                # gate attached means no bypass (legacy behavior).
+                #
+                # ComplexityGate's IssueLike protocol expects ``.labels``;
+                # ``Task`` exposes the same data as ``tags``. Wrap to bridge.
+                if self._complexity_gate is not None:
+                    complexity = await self._complexity_gate.classify(
+                        _TaskAsIssueLike(issue)
+                    )
+                    if complexity == Complexity.TRIVIAL:
+                        if not self._config.dry_run:
+                            self._store.enqueue_transition(issue, "ready")
+                            await self._transitioner.transition(issue.id, "ready")
+                            self._state.increment_session_counter(
+                                "complexity_gate_bypass"
+                            )
+                        await self._bus.publish(
+                            HydraFlowEvent(
+                                type=EventType.DISCOVER_UPDATE,
+                                data={
+                                    "issue": issue.id,
+                                    "action": "bypassed",
+                                    "complexity": "trivial",
+                                },
+                            )
+                        )
+                        logger.info(
+                            "Issue #%d trivial — bypassing Discovery + Shape → %s",
+                            issue.id,
+                            self._config.ready_label[0],
+                        )
+                        return 1
 
                 # Earlier-adversarial pipeline stage 1: surface assumptions
                 # before the runner produces its brief. No-op when no agent
