@@ -252,6 +252,12 @@ async def test_s4_github_5xx_during_implement(world, page) -> None:
     assert outcome.merged is False
 
 
+@pytest.mark.skip(
+    reason="MockWorld dropped the hindsight fake; only docker/github are "
+    "modelled by fail_service. The reference Python-side test "
+    "(TestS5HindsightDown) still covers the contract — rewrite this browser "
+    "port if/when MockWorld grows a hindsight fake again."
+)
 async def test_s5_hindsight_down_pipeline_continues(world, page) -> None:
     """S5: Hindsight service fails; pipeline still completes and merges issue.
 
