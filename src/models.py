@@ -2568,6 +2568,76 @@ class TriageUpdatePayload(TypedDict, total=False):
     role: str
 
 
+# --- Earlier-adversarial pipeline event payloads (ADR pending) -----------
+#
+# These power dashboard observability for the new adversarial stages
+# (DiscoveryCouncil, PlanCouncil, SpecJudge, ShapeChallenger,
+# ShapeExpertCouncil, AssumptionSurfacer). Emitted by
+# ``AdversarialRetryLoop`` and by post-merge wiki carryover.
+
+
+class AdversarialStageStartedPayload(TypedDict):
+    """Payload for ``EventType.ADVERSARIAL_STAGE_STARTED``."""
+
+    issue_id: int
+    phase: str
+    stage: str
+    retry_count: int
+
+
+class AdversarialStageConvergedPayload(TypedDict, total=False):
+    """Payload for ``EventType.ADVERSARIAL_STAGE_CONVERGED``."""
+
+    issue_id: int
+    phase: str
+    stage: str
+    retries: int
+    concerns_raised: int
+    concerns_forwarded: int  # default 0
+
+
+class AdversarialStageExhaustedPayload(TypedDict):
+    """Payload for ``EventType.ADVERSARIAL_STAGE_EXHAUSTED``."""
+
+    issue_id: int
+    phase: str
+    stage: str
+    retries: int
+    concerns_forwarded: int
+
+
+class ConcernForwardedPayload(TypedDict):
+    """Payload for ``EventType.CONCERN_FORWARDED``."""
+
+    issue_id: int
+    concern_id: str
+    from_stage: str
+    to_stage: str
+    severity: str
+
+
+class ConcernAddressedPayload(TypedDict):
+    """Payload for ``EventType.CONCERN_ADDRESSED``."""
+
+    issue_id: int
+    concern_id: str
+    addressed_by_stage: str
+    resolution_kind: str
+
+
+class ShippedWithKnownGapPayload(TypedDict):
+    """Payload for ``EventType.SHIPPED_WITH_KNOWN_GAP``.
+
+    ``surviving_concerns`` is a list of serialized ``Concern`` dicts —
+    each entry is the output of ``Concern.model_dump(mode="json")`` so
+    the payload is JSON-safe for ``EventLog`` persistence.
+    """
+
+    issue_id: int
+    pr_number: int
+    surviving_concerns: list[dict[str, object]]
+
+
 class GitHubIssueSummary(TypedDict):
     """Lightweight issue dict returned by ``PRPort.list_issues_by_label``."""
 

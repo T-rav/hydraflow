@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W20
 
+- `8a80f95` — feat(adversarial): wire ComplexityGate routing + register transient labels *(2026-05-16)*
 - `473ceef` — refactor(adversarial): retrofit Shape Challenger + Expert Council to uniform contract *(2026-05-16)*
 - `7b1e445` — feat(adversarial): add DiscoveryCouncil with Problem-Sharpener/Existing-Solution-Hunter/Cheapest-Test-Advocate voters + wiring *(2026-05-16)*
 - `954ab0b` — feat(adversarial): wire AssumptionSurfacer + PlanCouncil + SpecJudge into plan_phase *(2026-05-16)*
@@ -209,4 +210,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `473ceef` on 2026-05-17 05:13 UTC. Source last changed at `473ceef`. Status: 🟢 fresh._
+_Regenerated from commit `8a80f95` on 2026-05-17 06:18 UTC. Source last changed at `8a80f95`. Status: 🟢 fresh._

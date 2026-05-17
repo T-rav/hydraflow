@@ -7,10 +7,14 @@ Every `EventType` published or subscribed in `src/`. Events with no subscribers 
 | Event | Publishers | Subscribers |
 |---|---|---|
 | **ADR_DRAFT_OPENED** ⚠️ | `src.base_runner:BaseRunner._process_transcript_for_adr_draft` | — |
+| **ADVERSARIAL_STAGE_CONVERGED** ⚠️ | `src.adversarial_retry_loop:AdversarialRetryLoop._emit_stage_converged` | — |
+| **ADVERSARIAL_STAGE_EXHAUSTED** ⚠️ | `src.adversarial_retry_loop:AdversarialRetryLoop._emit_stage_exhausted` | — |
+| **ADVERSARIAL_STAGE_STARTED** ⚠️ | `src.adversarial_retry_loop:AdversarialRetryLoop._emit_stage_started` | — |
 | **AGENT_ACTIVITY** ⚠️ | `src.runner_utils:_stream_and_collect` | — |
 | **BACKGROUND_WORKER_STATUS** ⚠️ | `src.base_background_loop:BaseBackgroundLoop._execute_cycle` | — |
 | **BASELINE_UPDATE** ⚠️ | `src.baseline_policy:BaselinePolicy.check_approval`<br>`src.baseline_policy:BaselinePolicy.rollback` | — |
 | **CI_CHECK** ⚠️ | `src.pr_manager:PRManager.wait_for_ci`<br>`src.reviewer:ReviewRunner.fix_ci` | — |
+| **CONCERN_FORWARDED** ⚠️ | `src.adversarial_retry_loop:AdversarialRetryLoop._emit_concerns_forwarded` | — |
 | **CRATE_ACTIVATED** ⚠️ | `src.crate_manager:CrateManager.activate_crate` | — |
 | **CRATE_COMPLETED** ⚠️ | `src.crate_manager:CrateManager.check_and_advance` | — |
 | **DIAGNOSTIC_UPDATE** ⚠️ | `src.diagnostic_loop:DiagnosticLoop._publish_update` | — |
@@ -47,4 +51,4 @@ Every `EventType` published or subscribed in `src/`. Events with no subscribers 
 | **VISUAL_GATE** ⚠️ | `src.post_merge_handler:PostMergeHandler._run_visual_gate`<br>`src.review_phase:ReviewPhase._emit_visual_gate_telemetry`<br>`src.review_phase:ReviewPhase.check_visual_gate` | — |
 | **WORKER_UPDATE** ⚠️ | `src.agent:AgentRunner._emit_status` | — |
 
-_Regenerated from commit `473ceef` on 2026-05-17 05:13 UTC. Source last changed at `473ceef`. Status: 🟢 fresh._
+_Regenerated from commit `8a80f95` on 2026-05-17 06:18 UTC. Source last changed at `8a80f95`. Status: 🟢 fresh._
