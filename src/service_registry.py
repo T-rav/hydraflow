@@ -592,6 +592,23 @@ def build_services(
     from expert_council import ExpertCouncil  # noqa: PLC0415
 
     shape_phase._council = ExpertCouncil(config, event_bus)
+
+    # Earlier-adversarial pipeline (ADR-pending). Opt-in via
+    # ``adversarial_pipeline_enabled`` so the pipeline ships dark by
+    # default. The full wiring (AssumptionSurfacer, Council voters,
+    # SpecACGenerator, SpecJudge) requires AgentLike adapters around
+    # the existing subprocess agent runners — a follow-up. For now we
+    # only wire the lightest dependency, ``ComplexityGate``, which
+    # works without an LLM (heuristic-only) and routes trivial issues
+    # past Discovery + Shape. See change-B report in PR #8953.
+    if config.adversarial_pipeline_enabled:
+        from complexity_gate import ComplexityGate  # noqa: PLC0415
+
+        # ``llm=None`` falls back to label + keyword heuristics; the
+        # gate defaults to LOAD_BEARING when uncertain, so a heuristic-
+        # only gate is safe (it never silently skips real work).
+        discover_phase.attach_complexity_gate(ComplexityGate(llm=None))
+
     planner_phase = PlanPhase(
         config,
         state,

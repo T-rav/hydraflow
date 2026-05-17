@@ -319,3 +319,78 @@ class TestWorkerRegistryCallbacks:
 
         registry = build_services(config, bus, state, stop_event, callbacks)
         assert isinstance(registry, ServiceRegistry)
+
+
+class TestAdversarialPipelineWiring:
+    """Factory wiring for the earlier-adversarial pipeline.
+
+    Per ``HydraFlowConfig.adversarial_pipeline_enabled``: defaults False
+    (the pipeline ships dark — legacy behavior preserved). When flipped
+    True, ``DiscoverPhase`` gets a ``ComplexityGate`` attached so trivial
+    issues bypass Discovery + Shape.
+
+    The remaining adapters (AssumptionSurfacer/Council/SpecJudge agents
+    around the existing planner) are NOT yet wired — they require
+    AgentLike adapters around the subprocess runners and ship as a
+    follow-up. The config flag + this single wiring is the
+    load-bearing scaffolding.
+    """
+
+    @staticmethod
+    def _build(config: HydraFlowConfig) -> ServiceRegistry:
+        bus = EventBus()
+        state = StateTracker(config.state_file)
+        stop_event = asyncio.Event()
+        callbacks = _make_callbacks()
+        return build_services(config, bus, state, stop_event, callbacks)
+
+    def test_default_disabled_no_complexity_gate_attached(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Default ``adversarial_pipeline_enabled=False`` preserves legacy behavior.
+
+        DiscoverPhase has no ComplexityGate attached — every discover-
+        labeled issue runs the full discovery flow with no bypass.
+        """
+        assert config.adversarial_pipeline_enabled is False  # default
+        registry = self._build(config)
+        assert registry.discover_phase._complexity_gate is None
+
+    def test_enabled_attaches_complexity_gate(self, config: HydraFlowConfig) -> None:
+        """``adversarial_pipeline_enabled=True`` attaches the ComplexityGate."""
+        from complexity_gate import ComplexityGate
+
+        enabled_config = config.model_copy(
+            update={"adversarial_pipeline_enabled": True}
+        )
+        registry = self._build(enabled_config)
+        gate = registry.discover_phase._complexity_gate
+        assert gate is not None
+        assert isinstance(gate, ComplexityGate)
+        # Heuristic-only — no LLM callable. The gate falls back to
+        # LOAD_BEARING on uncertainty so this is safe.
+        assert gate.llm is None
+
+    def test_enabled_does_not_attach_full_council_agents_yet(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Documents the partial wiring: PlanPhase adversarial agents still None.
+
+        AssumptionSurfacer, PlanCouncil, SpecAC, SpecJudge adapters
+        require AgentLike wrappers around the subprocess agent runners
+        — that's a follow-up. Today the flag only flips the
+        ComplexityGate on. This assertion guards against silent regression
+        when the follow-up lands (update the test then).
+        """
+        enabled_config = config.model_copy(
+            update={"adversarial_pipeline_enabled": True}
+        )
+        registry = self._build(enabled_config)
+        # PlanPhase: no agents wired yet.
+        assert registry.planner_phase._surfacer_agent is None
+        assert registry.planner_phase._council_agents is None
+        assert registry.planner_phase._spec_ac_agent is None
+        assert registry.planner_phase._spec_judge_agent is None
+        # DiscoverPhase: surfacer + council not wired (only gate is).
+        assert registry.discover_phase._surfacer_agent is None
+        assert registry.discover_phase._council_agents is None
