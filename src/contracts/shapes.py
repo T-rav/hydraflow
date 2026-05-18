@@ -116,3 +116,77 @@ class GhIssueSummary(BaseModel):
     body: str | None = None
     labels: list[GhLabel] = Field(default_factory=list)
     updated_at: str | None = Field(default=None, alias="updatedAt")
+
+
+class GhIssueListItem(BaseModel):
+    """``gh issue list --json number,title,body,updatedAt`` element shape.
+
+    Narrower than :class:`GhIssueSummary` — list invocations typically
+    omit ``state`` (the filter is already applied by ``--state open|closed``)
+    and ``labels``. A separate shape so the broader summary keeps its
+    drift-detection bite on view invocations.
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    number: int
+    title: str
+    body: str | None = None
+    updated_at: str | None = Field(default=None, alias="updatedAt")
+
+
+class GhPromotionPR(BaseModel):
+    """``gh api repos/.../pulls`` element after the custom ``--jq`` filter
+    used by :meth:`PRManager.list_recent_promotion_prs`.
+
+    Shape: ``{number, branch, merged, closed_at, url}``. Not directly
+    produced by any ``gh ... --json FIELDS`` invocation — this is the
+    HydraFlow-defined projection over the GitHub REST PR payload.
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    number: int
+    branch: str
+    merged: bool
+    closed_at: str | None = None
+    url: str | None = None
+
+
+_GhReviewState = Literal[
+    "APPROVED",
+    "CHANGES_REQUESTED",
+    "COMMENTED",
+    "DISMISSED",
+    "PENDING",
+]
+
+
+class GhReviewAuthor(BaseModel):
+    """Reviewer identity. ``login`` is the GitHub username."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    login: str = ""
+
+
+class GhReview(BaseModel):
+    """One PR review as returned by ``gh pr view N --json reviews`` (each
+    element of the ``reviews`` array) or the underlying GitHub REST
+    ``/pulls/N/reviews`` endpoint."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    state: _GhReviewState
+    author: GhReviewAuthor | None = None
+    submitted_at: str | None = Field(default=None, alias="submittedAt")
+    commit_id: str | None = Field(default=None, alias="commitId")
+
+
+class GhPRReviewsResponse(BaseModel):
+    """Wrapper for ``gh pr view N --json reviews`` — the outer object
+    carries a single ``reviews`` array."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    reviews: list[GhReview] = Field(default_factory=list)

@@ -95,6 +95,15 @@ class LiveCorpusReplayLoop(BaseBackgroundLoop):
         """
         self._dispatchers[(adapter, command)] = fn
 
+    def registered_shapes(self) -> set[DispatcherKey]:
+        """Return the set of ``(adapter, command)`` pairs covered by this loop.
+
+        Used by external retirement-audit code (Phase 6 of #8786) — when
+        a hand-authored baseline cassette's shape is covered by a live
+        dispatcher, the cassette becomes a retirement candidate.
+        """
+        return set(self._dispatchers.keys())
+
     async def _do_work(self) -> WorkCycleResult:
         if not self._enabled_cb(self._worker_name):
             return {"status": "disabled"}
