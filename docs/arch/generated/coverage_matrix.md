@@ -21,7 +21,8 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `DependabotMergeLoop` | ✅ [0054, 0057, 0058] | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_dependabot_merge_loop.py` | ⚠️ in catalog (no scenario file) | ✅ `s09_dependabot_auto_merge.py` |
 | `DiagnosticLoop` | ✅ [0050] | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_diagnostic_loop.py` | ✅ in catalog | ❌ |
 | `DiagramLoop` | ✅ [0001] | ❌ | ❌ | ❌ | ✅ `test_diagram_loop.py` | ✅ in catalog | ❌ |
-| `EdgeProposerLoop` | ✅ [0058] | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_edge_proposer_loop.py` | ❌ | ❌ |
+| `EdgeProposerLoop` | ✅ [0058, 0060, 0062] | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_edge_proposer_loop.py` | ❌ | ❌ |
+| `EntryEvidenceLoop` | ✅ [0062] | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_entry_evidence_loop.py` | ❌ | ❌ |
 | `EpicMonitorLoop` | ❌ | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_epic_monitor_loop.py` | ✅ in catalog | ❌ |
 | `EpicSweeperLoop` | ❌ | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_epic_sweeper_loop.py` | ✅ in catalog | ❌ |
 | `FakeCoverageAuditorLoop` | ✅ [0045, 0056, 0057] | ❌ | ❌ | ❌ | ✅ `test_fake_coverage_auditor_loop.py` | ✅ in catalog | ❌ |
@@ -29,13 +30,14 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `GitHubCacheLoop` | ❌ | ❌ | ❌ | ✅ (caretaker loop) | ❌ | ❌ | ❌ |
 | `HealthMonitorLoop` | ✅ [0045, 0046] | ✅ [testing.md] | ❌ | ✅ (caretaker loop) | ❌ | ⚠️ in catalog (no scenario file) | ❌ |
 | `LabelDriftWatcherLoop` | ✅ [0056] | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_label_drift_watcher_loop.py` | ❌ | ❌ |
-| `MemoryBacklogLoop` | ✅ [0057] | ✅ [README.md] | ❌ | ✅ (caretaker loop) | ✅ `test_memory_backlog_loop.py` | ⚠️ in catalog (no scenario file) | ❌ |
+| `LiveCorpusReplayLoop` | ❌ | ❌ | ❌ | ❌ | ✅ `test_live_corpus_replay_loop.py` | ❌ | ❌ |
+| `MemoryBacklogLoop` | ✅ [0057] | ✅ [README.md] | ❌ | ✅ (caretaker loop) | ✅ `test_memory_backlog_loop.py` | ✅ in catalog | ❌ |
 | `MergeStateWatcherLoop` | ❌ | ❌ | ❌ | ✅ (caretaker loop) | ❌ | ⚠️ in catalog (no scenario file) | ❌ |
 | `PRUnstickerLoop` | ❌ | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_pr_unsticker_loop.py` | ⚠️ in catalog (no scenario file) | ✅ `s08_pr_unsticker_revives_stuck_pr.py` |
 | `PricingRefreshLoop` | ❌ | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_pricing_refresh_loop_scenario.py` | ✅ in catalog | ❌ |
 | `PrinciplesAuditLoop` | ✅ [0045, 0056] | ✅ [dark-factory.md] | ❌ | ❌ | ✅ `test_principles_audit_loop.py` | ✅ in catalog | ❌ |
 | `RCBudgetLoop` | ✅ [0045] | ❌ | ❌ | ❌ | ✅ `test_rc_budget_loop.py` | ✅ in catalog | ❌ |
-| `RepoWikiLoop` | ✅ [0032, 0053] | ✅ [dark-factory.md] | ❌ | ✅ (caretaker loop) | ✅ `test_repo_wiki_loop.py` | ✅ in catalog | ❌ |
+| `RepoWikiLoop` | ✅ [0032, 0053, 0061, 0062] | ✅ [dark-factory.md] | ❌ | ✅ (caretaker loop) | ✅ `test_repo_wiki_loop.py` | ✅ in catalog | ❌ |
 | `ReportIssueLoop` | ✅ [0013, 0018, 0028] | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_report_issue_loop.py` | ✅ in catalog | ❌ |
 | `RetrospectiveLoop` | ❌ | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_retrospective_loop.py` | ✅ in catalog | ❌ |
 | `RunsGCLoop` | ❌ | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_runs_gc_loop.py` | ✅ in catalog | ❌ |
@@ -47,8 +49,8 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `StagingPromotionLoop` | ✅ [0042] | ✅ [patterns.md] | ❌ | ✅ README.md | ✅ `test_staging_promotion_loop.py` | ❌ | ✅ `s13_rc_rebase_recovery.py` |
 | `StaleIssueGCLoop` | ✅ [0029] | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_stale_issue_gc_loop.py` | ✅ in catalog | ❌ |
 | `StaleIssueLoop` | ❌ | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_stale_issue_loop.py` | ✅ in catalog | ❌ |
-| `TermProposerLoop` | ✅ [0054, 0057] | ✅ [bot-pr-port.md, task.md] | ❌ | ✅ (caretaker loop) | ✅ `test_term_proposer_loop.py` | ❌ | ❌ |
-| `TermPrunerLoop` | ✅ [0057] | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_term_pruner_loop.py` | ❌ | ❌ |
+| `TermProposerLoop` | ✅ [0054, 0057, 0060, 0061, 0062] | ✅ [bot-pr-port.md, task.md] | ❌ | ✅ (caretaker loop) | ✅ `test_term_proposer_loop.py` | ❌ | ❌ |
+| `TermPrunerLoop` | ✅ [0057, 0060, 0062] | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_term_pruner_loop.py` | ❌ | ❌ |
 | `TrustFleetSanityLoop` | ✅ [0045, 0046] | ✅ [testing.md] | ❌ | ❌ | ✅ `test_trust_fleet_sanity_loop.py` | ✅ in catalog | ❌ |
 | `WikiRotDetectorLoop` | ✅ [0045, 0056, 0057] | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_wiki_rot_detector_loop.py` | ✅ in catalog | ❌ |
 | `WorkspaceGCLoop` | ❌ | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_workspace_gc_loop.py` | ⚠️ in catalog (no scenario file) | ✅ `s07_workspace_gc_reaps_dead_worktree.py` |
@@ -75,4 +77,4 @@ HITL trigger). It is not regenerable from source and is maintained in
 `docs/arch/coverage_matrix.md` (the hand-curated baseline document).
 
 
-_Regenerated from commit `038f214` on 2026-05-13 03:59 UTC. Source last changed at `038f214`. Status: 🟢 fresh._
+_Regenerated from commit `c2b2569` on 2026-05-18 14:53 UTC. Source last changed at `c2b2569`. Status: 🟢 fresh._
