@@ -37,7 +37,9 @@ def _make_hitl_item(issue: int = 10) -> HITLItem:
 
 
 def _make_label_counts() -> LabelCounts:
-    return LabelCounts(open_by_label={"hydraflow-review": 2}, total_closed=5, total_merged=3)
+    return LabelCounts(
+        open_by_label={"hydraflow-review": 2}, total_closed=5, total_merged=3
+    )
 
 
 def _make_cache(
@@ -66,16 +68,22 @@ def _make_cache(
         prs.list_hitl_items = AsyncMock(side_effect=hitl_error or prs_error)
         prs.get_label_counts = AsyncMock(side_effect=label_error or prs_error)
     else:
-        prs.list_open_prs = AsyncMock(return_value=open_prs if open_prs is not None else [])
-        prs.list_hitl_items = AsyncMock(
-            side_effect=hitl_error,
-        ) if hitl_error is not None else AsyncMock(
-            return_value=hitl_items if hitl_items is not None else []
+        prs.list_open_prs = AsyncMock(
+            return_value=open_prs if open_prs is not None else []
         )
-        prs.get_label_counts = AsyncMock(
-            side_effect=label_error,
-        ) if label_error is not None else AsyncMock(
-            return_value=label_counts
+        prs.list_hitl_items = (
+            AsyncMock(
+                side_effect=hitl_error,
+            )
+            if hitl_error is not None
+            else AsyncMock(return_value=hitl_items if hitl_items is not None else [])
+        )
+        prs.get_label_counts = (
+            AsyncMock(
+                side_effect=label_error,
+            )
+            if label_error is not None
+            else AsyncMock(return_value=label_counts)
         )
 
     fetcher = MagicMock()
@@ -149,7 +157,9 @@ class TestGitHubDataCacheInitialState:
         cache, _, _ = _make_cache(tmp_path)
         assert cache.get_open_prs() == []
 
-    def test_get_hitl_items_returns_empty_list_before_poll(self, tmp_path: Path) -> None:
+    def test_get_hitl_items_returns_empty_list_before_poll(
+        self, tmp_path: Path
+    ) -> None:
         cache, _, _ = _make_cache(tmp_path)
         assert cache.get_hitl_items() == []
 
@@ -165,7 +175,9 @@ class TestGitHubDataCacheInitialState:
         cache, _, _ = _make_cache(tmp_path)
         assert cache.get_cache_age("open_prs") == float("inf")
 
-    def test_get_cache_age_returns_inf_for_unknown_dataset(self, tmp_path: Path) -> None:
+    def test_get_cache_age_returns_inf_for_unknown_dataset(
+        self, tmp_path: Path
+    ) -> None:
         cache, _, _ = _make_cache(tmp_path)
         assert cache.get_cache_age("nonexistent") == float("inf")
 
@@ -226,7 +238,9 @@ class TestGitHubDataCachePoll:
         assert cache.get_cache_age("open_prs") < 5
 
     @pytest.mark.asyncio
-    async def test_poll_uses_combined_label_list_for_open_prs(self, tmp_path: Path) -> None:
+    async def test_poll_uses_combined_label_list_for_open_prs(
+        self, tmp_path: Path
+    ) -> None:
         """list_open_prs is called with the deduplicated union of ready/review/hitl labels."""
         cache, prs_mock, _ = _make_cache(tmp_path)
 
@@ -527,9 +541,7 @@ class TestGitHubDataCacheInvalidate:
             assert cache.get_cache_age(dataset) == float("inf"), dataset
 
     @pytest.mark.asyncio
-    async def test_invalidate_resets_snapshot_to_empty(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_invalidate_resets_snapshot_to_empty(self, tmp_path: Path) -> None:
         """invalidate() replaces the snapshot with a blank CacheSnapshot so that
         both the timestamp and the data are cleared — the next poll fills it fresh."""
         prs_data = [_make_pr(7)]
