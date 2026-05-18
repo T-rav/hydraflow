@@ -108,7 +108,7 @@ class CostBudgetWatcherLoop(BaseBackgroundLoop):
         # 5 minutes; configurable via HydraFlowConfig.
         return 300
 
-    async def _do_work(self) -> WorkCycleResult:
+    async def _do_work(self) -> WorkCycleResult:  # noqa: PLR0911
         # Canonical operator UI kill-switch (ADR-0049).
         if not self._enabled_cb(self._worker_name):
             return {"status": "disabled"}
