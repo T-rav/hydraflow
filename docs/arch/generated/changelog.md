@@ -4,18 +4,39 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W21
+
+- `586b727` — cleanup: CI integrity fixes — ubiquitous-language guard + 3 misc (slices 5.5 + 5.10) *(2026-05-18)*
+- `c0c7aab` — Merge pull request #8824 from T-rav/docs/promote-adrs-31-47 *(2026-05-18)*
+
 ## 2026-W20
 
+- `0c98560` — merge: reconcile main into staging (33 commits ahead) *(2026-05-16)*
+- `b1eafc5` — fix(staging): wire LiveCorpusReplayLoop + audit fixes — unblock RC promotion (#8939) (#8939) *(2026-05-16)*
+- `ef3b5f5` — chore(arch): regen arch + wiki artifacts from staging tip (#8926) (#8926) *(2026-05-16)*
+- `4ba1202` — docs(adr): promote 0031 + 0047 to Accepted (status drift fix from slice 5 audits) *(2026-05-12)*
 - `01ae95c` — fix(bg-loops): YAML resilience + auto-ensure PR labels (#8753) (#8753) *(2026-05-12)*
 - `dcde17f` — docs(audit): coherency drift audit — slice #2 of 5 *(2026-05-12)*
 - `67a16cd` — refactor(review): split review_phase.py into package for file-size discipline (T36, advisor-zpv) *(2026-05-11)*
 
 ## 2026-W19
 
+- `48ffc6b` — feat(loops): EntryEvidenceLoop — autonomous term ↔ wiki-entry backlinks (ADR-0062) *(2026-05-10)*
 - `9cb158f` — Merge origin/staging into feat/advisor-pattern-review *(2026-05-10)*
+- `367d165` — chore(arch): regen artifacts post-quality (P4) *(2026-05-09)*
+- `fe84239` — chore(arch): regen artifacts post-quality (P3) *(2026-05-09)*
+- `9a5df5a` — feat(atlas): entries-as-evidence + Discovered bucket endpoints (T3-T4) *(2026-05-09)*
+- `68c9342` — docs(adr): ADR-0061 atlas entries-as-evidence + Discovered bucket *(2026-05-09)*
+- `da05260` — chore(arch): regen artifacts post-quality (P2) *(2026-05-09)*
+- `315b5e4` — feat(atlas): graph + ADRs + term provenance + term-loops status (T4-T6) *(2026-05-09)*
+- `f202f81` — docs(adr): ADR-0060 atlas graph view + ADR nodes + term provenance *(2026-05-09)*
 - `8db1004` — feat(caretaker): LabelDriftWatcherLoop — periodic drift reconciliation (#8723) (#8723) *(2026-05-08)*
 - `f018b09` — feat(memory-backlog): auto-mirror feedback memories on Write (closes hydraflow-edn7) (#8721) (#8721) *(2026-05-08)*
+- `f0dc42d` — chore(arch): regen artifacts post-quality (T13) *(2026-05-08)*
+- `1d0390f` — feat(atlas): UI shell + Domain/Articles/Maintenance views + tab rename (T5-T11) *(2026-05-08)*
 - `2533d8f` — docs(memory-backlog): mirror 3 new feedback memories (#8720) (#8720) *(2026-05-08)*
+- `634ba7f` — feat(atlas): /api/atlas/* term + ADR endpoints (T2-T4 + T14-T15) *(2026-05-08)*
+- `169ff25` — docs(adr): ADR-0059 atlas knowledge graph dashboard *(2026-05-08)*
 - `df80b0c` — fix(pr-unsticker): split issue vs PR label targets on HITL release (#8715) (#8715) *(2026-05-08)*
 - `ab7d575` — chore(arch): regenerate curated arch docs for ADR-0059 cross-references (T30.7) *(2026-05-08)*
 - `2953fc7` — docs(wiki): advisor-pattern entries (architecture-async-control + dark-factory) (T32, advisor-h4y) *(2026-05-08)*
@@ -207,4 +228,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `aa2e86d` on 2026-05-15 18:32 UTC. Source last changed at `aa2e86d`. Status: 🟢 fresh._
+_Regenerated from commit `586b727` on 2026-05-18 14:53 UTC. Source last changed at `586b727`. Status: 🟢 fresh._
