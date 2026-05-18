@@ -13,7 +13,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `ADRReviewerLoop` | ❌ | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_adr_reviewer_loop.py` | ✅ in catalog | ❌ |
 | `AdrTouchpointAuditorLoop` | ✅ [0056, 0057] | ❌ | ❌ | ❌ | ✅ `test_adr_touchpoint_auditor_loop.py` | ✅ in catalog | ❌ |
 | `AutoAgentPreflightLoop` | ✅ [0050, 0063] | ✅ [dark-factory.md] | ❌ | ❌ | ✅ `test_auto_agent_preflight_loop.py` | ✅ in catalog | ❌ |
-| `CIMonitorLoop` | ✅ [0029] | ❌ | ❌ | ❌ | ✅ `test_ci_monitor_loop.py` | ⚠️ in catalog (no scenario file) | ❌ |
+| `CIMonitorLoop` | ✅ [0029] | ❌ | ❌ | ❌ | ✅ `test_ci_monitor_loop.py` | ⚠️ in catalog (no scenario file) | ✅ `s15_ci_monitor_main_branch_red.py` |
 | `CodeGroomingLoop` | ✅ [0029] | ✅ [architecture-async-control.md] | ❌ | ✅ (caretaker loop) | ✅ `test_code_grooming_loop.py` | ✅ in catalog | ❌ |
 | `ContractRefreshLoop` | ✅ [0045, 0047] | ❌ | ❌ | ❌ | ✅ `test_contract_refresh_loop.py` | ✅ in catalog | ❌ |
 | `CorpusLearningLoop` | ✅ [0045] | ❌ | ❌ | ❌ | ✅ `test_corpus_learning_loop.py` | ✅ in catalog | ❌ |
@@ -77,4 +77,4 @@ HITL trigger). It is not regenerable from source and is maintained in
 `docs/arch/coverage_matrix.md` (the hand-curated baseline document).
 
 
-_Regenerated from commit `5f46a68` on 2026-05-18 22:56 UTC. Source last changed at `5f46a68`. Status: 🟢 fresh._
+_Regenerated from commit `4163239` on 2026-05-18 23:12 UTC. Source last changed at `4163239`. Status: 🟢 fresh._

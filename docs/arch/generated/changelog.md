@@ -4,6 +4,10 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W21
+
+- `4163239` — merge: integrate origin/staging into earlier-adversarial-pipeline *(2026-05-18)*
+
 ## 2026-W20
 
 - `092a210` — feat(adversarial): factory wiring + adversarial_pipeline_enabled config flag (ComplexityGate only) *(2026-05-17)*
@@ -216,4 +220,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `5f46a68` on 2026-05-18 22:56 UTC. Source last changed at `5f46a68`. Status: 🟢 fresh._
+_Regenerated from commit `4163239` on 2026-05-18 23:12 UTC. Source last changed at `4163239`. Status: 🟢 fresh._
