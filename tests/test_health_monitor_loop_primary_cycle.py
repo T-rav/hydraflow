@@ -15,9 +15,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -25,15 +24,14 @@ from base_background_loop import LoopDeps
 from config import HydraFlowConfig
 from events import EventBus
 from health_monitor_loop import (
-    ADJUSTMENT_RULES,
-    TUNABLE_BOUNDS,
-    HealthMonitorLoop,
-    TrendMetrics,
     _FIRST_PASS_HIGH,
     _FIRST_PASS_LOW,
     _HITL_HIGH,
     _STALE_COUNT_HIGH,
     _SURPRISE_HIGH,
+    TUNABLE_BOUNDS,
+    HealthMonitorLoop,
+    TrendMetrics,
     compute_trend_metrics,
 )
 
