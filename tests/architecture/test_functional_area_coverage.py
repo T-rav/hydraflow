@@ -77,8 +77,8 @@ def test_functional_areas_modules_paths_exist(real_repo_root: Path):
                 missing.append(path)
 
     assert not missing, (
-        f"Bad modules: paths in docs/arch/functional_areas.yml "
-        f"(paths that don't exist on disk):\n  " + "\n  ".join(sorted(missing))
+        "Bad modules: paths in docs/arch/functional_areas.yml "
+        "(paths that don't exist on disk):\n  " + "\n  ".join(sorted(missing))
     )
 
 
