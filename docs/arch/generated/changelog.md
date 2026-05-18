@@ -6,7 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W21
 
-- `cbde7f7` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
+- `5a74449` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
+- `8d259e3` — Merge branch 'staging' into cleanup/ci-integrity-trio *(2026-05-18)*
+- `5f913e6` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
+- `a5e7c4a` — fix(adr): reformat ADR-0031 enforcement (commas + bare paths for parser) *(2026-05-18)*
 - `d75c5e3` — Merge branch 'staging' into cleanup/ci-integrity-trio *(2026-05-18)*
 - `3cf70d6` — fix(adr): add Enforced by line to ADR-0031 (unblocks Tests on staging) *(2026-05-18)*
 - `f9ad184` — Merge pull request #8738 from T-rav/worktree-audit+coverage-matrix-baseline *(2026-05-18)*
@@ -284,4 +287,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `cbde7f7` on 2026-05-18 15:48 UTC. Source last changed at `cbde7f7`. Status: 🟢 fresh._
+_Regenerated from commit `5a74449` on 2026-05-18 17:23 UTC. Source last changed at `5a74449`. Status: 🟢 fresh._
