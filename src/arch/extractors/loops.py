@@ -47,7 +47,9 @@ def _module_int_constants(tree: ast.Module) -> dict[str, int]:
     for node in tree.body:
         if not isinstance(node, ast.Assign):
             continue
-        if not (isinstance(node.value, ast.Constant) and isinstance(node.value.value, int)):
+        if not (
+            isinstance(node.value, ast.Constant) and isinstance(node.value.value, int)
+        ):
             continue
         for tgt in node.targets:
             if isinstance(tgt, ast.Name):
@@ -80,7 +82,11 @@ def _load_config_defaults(src_dir: Path) -> dict[str, int]:
         if not isinstance(node.value, ast.Call):
             continue
         for kw in node.value.keywords:
-            if kw.arg == "default" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, int):
+            if (
+                kw.arg == "default"
+                and isinstance(kw.value, ast.Constant)
+                and isinstance(kw.value.value, int)
+            ):
                 result[node.target.id] = kw.value.value
                 break
     return result
@@ -207,7 +213,9 @@ def extract_loops(src_dir: Path) -> list[LoopInfo]:
                     name=node.name,
                     module=_module_for(py, src_dir),
                     source_path=str(py.relative_to(src_dir.parent)),
-                    tick_interval_seconds=_tick_interval(node, module_constants, config_defaults),
+                    tick_interval_seconds=_tick_interval(
+                        node, module_constants, config_defaults
+                    ),
                     event_subscriptions=_event_subs(node),
                     kill_switch_var=_kill_switch(node, source),
                     adr_refs=_adr_refs(node, tree),
