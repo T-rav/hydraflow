@@ -53,7 +53,7 @@ class TestBuildServices:
 
         registry = build_services(config, bus, state, stop_event, callbacks)
 
-        # hindsight is None when not configured — that's expected
+        # hindsight is None when not configured — that's expected.
         optional_fields = {"hindsight", "hindsight_wal"}
         for field_name in ServiceRegistry.__dataclass_fields__:
             if field_name in optional_fields:
@@ -322,7 +322,7 @@ class TestWorkerRegistryCallbacks:
 
 
 class TestAdversarialPipelineWiring:
-    """Factory wiring for the earlier-adversarial pipeline (ADR-0063).
+    """Factory wiring for the earlier-adversarial pipeline (ADR-0064).
 
     Per ``HydraFlowConfig.adversarial_pipeline_enabled``: defaults False
     (the pipeline ships dark — legacy behavior preserved). When flipped

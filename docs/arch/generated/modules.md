@@ -15,26 +15,30 @@ graph LR
     src_mockworld["src.mockworld"]
     src_mockworld_fakes["src.mockworld.fakes"]
     src_preflight["src.preflight"]
+    src_review_phase["src.review_phase"]
     src_runners["src.runners"]
     src_sentry["src.sentry"]
     src_state["src.state"]
     src_telemetry["src.telemetry"]
     src -- "4" --> src_arch
-    src -- "1" --> src_contracts
+    src -- "25" --> src_contracts
     src -- "4" --> src_dashboard_routes
     src -- "12" --> src_preflight
-    src -- "45" --> src_state
+    src -- "1" --> src_review_phase
+    src -- "46" --> src_state
     src -- "7" --> src_telemetry
     src_arch_extractors -- "7" --> src_arch
-    src_arch_generators -- "10" --> src_arch
+    src_arch_generators -- "11" --> src_arch
     src_dashboard_routes -- "1" --> src_preflight
     src_dashboard_routes -- "1" --> src_state
     src_mockworld_fakes -- "25" --> src_mockworld
     src_mockworld_fakes -- "1" --> src_telemetry
     src_preflight -- "1" --> src_runners
     src_preflight -- "1" --> src_sentry
+    src_review_phase -- "1" --> src
+    src_review_phase -- "1" --> src_state
     src_runners -- "1" --> src_preflight
     src_state -- "1" --> src
 ```
 
-_Regenerated from commit `c452ae3` on 2026-05-17 21:50 UTC. Source last changed at `c452ae3`. Status: 🟢 fresh._
+_Regenerated from commit `5f46a68` on 2026-05-18 22:56 UTC. Source last changed at `5f46a68`. Status: 🟢 fresh._

@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W20
 
+- `092a210` — feat(adversarial): factory wiring + adversarial_pipeline_enabled config flag (ComplexityGate only) *(2026-05-17)*
 - `c452ae3` — fix(adversarial): clear adversarial_state on HITL escalation to prevent unbounded concern accumulation *(2026-05-17)*
 - `fb30f4b` — fix(adversarial): review fixes — CreditExhaustedError reraise + concerns_raised count + DiscoveryCouncil runner gate *(2026-05-17)*
 - `9972ac3` — docs(adr): add ADR-0063 for earlier-adversarial pipeline + wiki entries *(2026-05-17)*
@@ -215,4 +216,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `c452ae3` on 2026-05-17 21:50 UTC. Source last changed at `c452ae3`. Status: 🟢 fresh._
+_Regenerated from commit `5f46a68` on 2026-05-18 22:56 UTC. Source last changed at `5f46a68`. Status: 🟢 fresh._

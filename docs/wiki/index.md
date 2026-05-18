@@ -1,6 +1,6 @@
 # Wiki Index: T-rav/hydraflow
 
-**293 entries** | Last updated: 2026-05-03T04:19:35.650996+00:00
+**300 entries** | Last updated: 2026-05-12T00:00:00.000000+00:00
 
 ## Terms — Ubiquitous Language
 
@@ -47,7 +47,7 @@ See [ADR-0053](../adr/0053-ubiquitous-language-as-living-artifact.md).
 - Restart Safety for self._ State in Background Loops
 - Daily Cost-Cap Kill-Switch
 
-## Architecture-Async-Control (24)
+## Architecture-Async-Control (32)
 
 - A-prefixed async wrappers delegate sync I/O to asyncio.to_thread()
 - Async context managers: add __aenter__, __aexit__, _closed flag
@@ -75,6 +75,14 @@ See [ADR-0053](../adr/0053-ubiquitous-language-as-living-artifact.md).
 - Operator review gates dynamic skills due to prompt injection risk
 - Pending concerns forwarding contract — tight loop, wide loop, wiki carryover
 - Complexity gate routing — bypass adversarial stages for trivial issues
+- Advisor pattern layers Opus reviewer over Sonnet executor on review surfaces
+- Advisor uses Claude Code subagent dispatch — never the Anthropic SDK directly
+- EpicMonitorLoop — stale epic detection and progress refresh
+- EpicSweeperLoop — auto-close completed epics
+- RetrospectiveLoop — durable-queue pattern analysis
+- RunsGCLoop — artifact retention enforcement
+- SecurityPatchLoop — Dependabot alert triage and issue filing
+- HITLController and HITLPhase — correction lifecycle
 
 ## Architecture-Imports-Types (12)
 
@@ -212,7 +220,7 @@ See [ADR-0053](../adr/0053-ubiquitous-language-as-living-artifact.md).
 - Type signatures communicate breaking contract changes
 - Never import optional deps at module level in tests
 
-## Gotchas (52)
+## Gotchas (53)
 
 - Verify imports are present and not circular before type annotations
 - Import ordering follows isort: stdlib, third-party, local
@@ -266,6 +274,7 @@ See [ADR-0053](../adr/0053-ubiquitous-language-as-living-artifact.md).
 - Use explicit reasoning prompts for analysis-heavy tasks
 - Sentry captures real code bugs only, not transient failures
 - Never use git commit --no-verify or --no-hooks
+- StaleIssueLoop vs StaleIssueGCLoop — distinct scopes, zero business-logic overlap
 
 ## Patterns (32)
 

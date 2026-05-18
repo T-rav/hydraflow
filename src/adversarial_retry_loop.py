@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Generic, Protocol, TypeVar
 
-from src.pending_concerns import Concern
-from src.subprocess_util import CreditExhaustedError
+from pending_concerns import Concern
+from subprocess_util import CreditExhaustedError
 
 if TYPE_CHECKING:
     from events import EventBus

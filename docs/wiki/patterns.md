@@ -434,7 +434,7 @@ Canonical rulesets are versioned JSON at [`docs/standards/branch_protection/`](.
 
 ## AdversarialRetryLoop pattern — shared contract for dissent stages
 
-The earlier-adversarial pipeline (ADR-0063) routes every dissent stage — `AssumptionSurfacer`, `DiscoveryCouncil`, `PlanCouncil`, pre-impl `SpecJudge`, and the retrofitted Shape `Challenger`/`ExpertCouncil` — through a single shared retry primitive: `src/adversarial_retry_loop.py:AdversarialRetryLoop`.
+The earlier-adversarial pipeline (ADR-0064) routes every dissent stage — `AssumptionSurfacer`, `DiscoveryCouncil`, `PlanCouncil`, pre-impl `SpecJudge`, and the retrofitted Shape `Challenger`/`ExpertCouncil` — through a single shared retry primitive: `src/adversarial_retry_loop.py:AdversarialRetryLoop`.
 
 The contract is uniform:
 
