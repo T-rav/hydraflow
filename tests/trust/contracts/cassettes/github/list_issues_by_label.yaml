@@ -22,3 +22,4 @@ output:
   stderr: ""
 normalizers:
   - timestamps.ISO8601
+baseline_only: true

@@ -21,3 +21,4 @@ output:
   stdout: "https://github.com/test-org/test-repo/issues/9001\n"
   stderr: ""
 normalizers: []
+baseline_only: true
