@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 import trace_collector
 from base_background_loop import BaseBackgroundLoop, LoopDeps
+from exception_classify import reraise_on_credit_or_bug
 from models import WorkCycleResult
 
 if TYPE_CHECKING:
@@ -95,7 +96,8 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
         # running.
         try:
             self_report = await self._run_audit(_HYDRAFLOW_SELF, self._config.repo_root)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            reraise_on_credit_or_bug(exc)
             logger.warning(
                 "Skipping self-audit this tick — audit-json unavailable",
                 exc_info=True,
@@ -135,7 +137,8 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
                     stats["escalations_filed"] += fire["escalated"]
                 else:
                     self._state.set_last_green_audit(mr.slug, snapshot)
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
+                reraise_on_credit_or_bug(exc)
                 logger.warning(
                     "PrinciplesAuditLoop: skipping %s — audit failed",
                     mr.slug,
@@ -382,7 +385,8 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
                 logger.debug("reconcile: gh issue list failed")
                 return
             issues = json.loads(out or b"[]")
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            reraise_on_credit_or_bug(exc)
             logger.debug("reconcile: skipped", exc_info=True)
             return
         for issue in issues:

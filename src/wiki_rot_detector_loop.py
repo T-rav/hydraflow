@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
+from exception_classify import reraise_on_credit_or_bug
 from models import WorkCycleResult
 from wiki_rot_citations import (
     Cite,
@@ -110,7 +111,8 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         for slug in repos:
             try:
                 result = await self._tick_repo(slug, self_slug)
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
+                reraise_on_credit_or_bug(exc)
                 logger.exception("wiki_rot_detector: slug=%s failed", slug)
                 continue
             scanned += 1
@@ -160,7 +162,8 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
                     f"scanned={scanned} filed={filed} escalated={escalated}"
                 ),
             )
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            reraise_on_credit_or_bug(exc)
             logger.debug("trace emission failed", exc_info=True)
 
     async def _tick_repo(
@@ -235,7 +238,8 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         """
         try:
             repo_dir = self._wiki.repo_dir(slug)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            reraise_on_credit_or_bug(exc)
             logger.debug("wiki.repo_dir(%s) failed", slug, exc_info=True)
             return []
         if not repo_dir.is_dir():
@@ -364,7 +368,8 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         """
         try:
             closed = await self._gh_closed_escalations()
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            reraise_on_credit_or_bug(exc)
             logger.debug("reconcile: gh list failed", exc_info=True)
             return
 
