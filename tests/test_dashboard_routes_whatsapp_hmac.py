@@ -31,11 +31,7 @@ _VALID_PAYLOAD = {
     "entry": [
         {
             "changes": [
-                {
-                    "value": {
-                        "messages": [{"text": {"body": "LGTM, ship it #99"}}]
-                    }
-                }
+                {"value": {"messages": [{"text": {"body": "LGTM, ship it #99"}}]}}
             ]
         }
     ]
@@ -210,7 +206,10 @@ class TestWhatsAppWebhookHMAC:
 
         request = _make_request(_VALID_PAYLOAD, signature_header=valid_sig)
 
-        with patch("whatsapp_bridge.WhatsAppBridge.parse_webhook", return_value=("LGTM, ship it #99", 99)):
+        with patch(
+            "whatsapp_bridge.WhatsAppBridge.parse_webhook",
+            return_value=("LGTM, ship it #99", 99),
+        ):
             response = await handler(request)
 
         assert response.status_code == 200
