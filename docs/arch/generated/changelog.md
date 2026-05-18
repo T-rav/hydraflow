@@ -6,47 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W21
 
-- `28d5c30` — fix(format): ruff format *(2026-05-18)*
-- `47d4138` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `95b28e1` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `ff38501` — fix: ruff auto-fixes (unused imports + import sort) *(2026-05-18)*
-- `280478c` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `b6e104d` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `bcc0b25` — fix(contracts): widen Cassette._validate_adapter to accept all 9 known fakes (closes slice 5.7) *(2026-05-18)*
-- `a06faa7` — fix(format): ruff format *(2026-05-18)*
-- `0a5dcad` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `11b4807` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `899d7aa` — fix: ruff auto-fixes (unused imports + import sort) *(2026-05-18)*
-- `3d724e9` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `bf90023` — fix(format): ruff format *(2026-05-18)*
-- `2ff5ebd` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `60c556b` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `a0fd1b9` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `57291d2` — fix(arch): functional_areas.yml module paths + add CI validation *(2026-05-18)*
-- `0c8243a` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `84b64fd` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `b714ab0` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `dc79b3f` — chore(arch): regen arch artifacts from rebased staging tip *(2026-05-18)*
-- `f202e6e` — feat(arch): regenerable coverage_matrix generator for arch-regen (closes advisor-bpl parent bead) *(2026-05-18)*
-- `7f7792d` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `672680d` — fix(format): ruff format *(2026-05-18)*
-- `ebe1710` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `d0635fe` — fix(format): ruff format *(2026-05-18)*
-- `ea0e084` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `469d933` — fix(format): ruff format *(2026-05-18)*
-- `73a1a7f` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `6811034` — fix(format): ruff format *(2026-05-18)*
-- `ea0e457` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `6b7e670` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `f50f9d7` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `8f2ece5` — fix(format): ruff format *(2026-05-18)*
-- `77b63eb` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `2997071` — fix(arch): populate Tick + Kill columns in loops.md generator (closes audit gap) *(2026-05-18)*
-- `e3822b1` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `8d259e3` — Merge branch 'staging' into cleanup/ci-integrity-trio *(2026-05-18)*
-- `5f913e6` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `a5e7c4a` — fix(adr): reformat ADR-0031 enforcement (commas + bare paths for parser) *(2026-05-18)*
-- `d75c5e3` — Merge branch 'staging' into cleanup/ci-integrity-trio *(2026-05-18)*
+- `3e19ddc` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
+- `ca0f5e2` — fix: ruff auto-fixes (unused imports + import sort) *(2026-05-18)*
 - `3cf70d6` — fix(adr): add Enforced by line to ADR-0031 (unblocks Tests on staging) *(2026-05-18)*
 - `f9ad184` — Merge pull request #8738 from T-rav/worktree-audit+coverage-matrix-baseline *(2026-05-18)*
 - `c17ffe4` — Merge pull request #8841 from T-rav/docs/wiki-backfill-seven *(2026-05-18)*
@@ -62,7 +23,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `ef8979f` — Merge pull request #8787 from T-rav/audit/area-dashboard *(2026-05-18)*
 - `423f2dc` — Merge pull request #8782 from T-rav/audit/area-caretaking *(2026-05-18)*
 - `94a0c81` — Merge pull request #8757 from T-rav/audit/factory-phase-drift *(2026-05-18)*
-- `5d2da98` — chore(arch): regen after rebase onto staging *(2026-05-18)*
 - `ff2e21e` — docs(audit): post-review fixups — bead bodies, header SHA, Ports criteria *(2026-05-18)*
 - `b14d242` — docs(audit): coverage matrix — gap beads filed and cross-linked *(2026-05-18)*
 - `76a89f8` — docs(audit): coverage matrix — parent automation bead advisor-bpl linked *(2026-05-18)*
@@ -73,7 +33,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `826355b` — docs(audit): coverage matrix — Ports section populated (9 rows × 7 cols) *(2026-05-18)*
 - `98872f2` — docs(audit): coverage matrix — Loops section populated (41 rows × 7 cols) *(2026-05-18)*
 - `8b43af9` — docs(audit): coverage matrix baseline skeleton (slice 1 of 5) *(2026-05-18)*
-- `586b727` — cleanup: CI integrity fixes — ubiquitous-language guard + 3 misc (slices 5.5 + 5.10) *(2026-05-18)*
 - `6e74dcf` — Merge branch 'staging' into docs/wiki-backfill-seven *(2026-05-18)*
 - `127d4ae` — Merge branch 'staging' into audit/area-auto-agent *(2026-05-18)*
 - `7ac00f7` — Merge branch 'staging' into audit/area-hexagonal *(2026-05-18)*
@@ -92,6 +51,11 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W20
 
+- `0c98560` — merge: reconcile main into staging (33 commits ahead) *(2026-05-16)*
+- `b1eafc5` — fix(staging): wire LiveCorpusReplayLoop + audit fixes — unblock RC promotion (#8939) (#8939) *(2026-05-16)*
+- `ef3b5f5` — chore(arch): regen arch + wiki artifacts from staging tip (#8926) (#8926) *(2026-05-16)*
+- `9bfce88` — docs(wiki): backfill 7 undocumented topics (closes slice 5.0 + 5.3 doc gaps) *(2026-05-12)*
+- `4ba1202` — docs(adr): promote 0031 + 0047 to Accepted (status drift fix from slice 5 audits) *(2026-05-12)*
 - `01ae95c` — fix(bg-loops): YAML resilience + auto-ensure PR labels (#8753) (#8753) *(2026-05-12)*
 - `92601fd` — audit: per-area review — Auto-Agent (slice 5.3) *(2026-05-12)*
 - `1f954c2` — docs(audit): per-area review — Hexagonal Boundaries (slice 5.2 of 5) *(2026-05-12)*
@@ -318,4 +282,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `7ab9e33` on 2026-05-13 04:34 UTC. Source last changed at `7ab9e33`. Status: 🟢 fresh._
+_Regenerated from commit `3e19ddc` on 2026-05-18 15:47 UTC. Source last changed at `3e19ddc`. Status: 🟢 fresh._
