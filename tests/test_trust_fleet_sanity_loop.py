@@ -6,7 +6,7 @@ import asyncio
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -15,8 +15,8 @@ from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from trust_fleet_sanity_loop import (
     _DAY_SECONDS,
-    _parse_iso,
     TrustFleetSanityLoop,
+    _parse_iso,
 )
 
 
@@ -343,7 +343,9 @@ async def test_do_work_files_escalation_on_cost_spike_breach(loop_env) -> None:
 
     cost_reader = MagicMock()
     cost_reader.get_loop_cost_today.return_value = 50.0
-    cost_reader.get_loop_cost_30d_median.return_value = 5.0  # ratio 10.0 >= 5.0 threshold
+    cost_reader.get_loop_cost_30d_median.return_value = (
+        5.0  # ratio 10.0 >= 5.0 threshold
+    )
 
     loop = _loop(loop_env)
     loop._reconcile_closed_escalations = AsyncMock(return_value=None)
@@ -464,7 +466,9 @@ async def test_reconcile_tolerates_invalid_json(loop_env, monkeypatch) -> None:
     dedup.set_all.assert_not_called()
 
 
-async def test_reconcile_skips_issues_with_unmatched_title(loop_env, monkeypatch) -> None:
+async def test_reconcile_skips_issues_with_unmatched_title(
+    loop_env, monkeypatch
+) -> None:
     """Closed issue whose title doesn't match _TITLE_RE -> key NOT cleared."""
     loop = _loop(loop_env)
     cfg, state, bg_workers, pr, dedup, bus = loop_env
@@ -575,7 +579,9 @@ async def test_collect_window_metrics_ignores_event_outside_day_window(
     """Status event older than 24h -> not counted even if type matches."""
     loop = _loop(loop_env)
 
-    old_event = _make_status_event("rc_budget", "ok", ago_s=_DAY_SECONDS + 600, filed=99)
+    old_event = _make_status_event(
+        "rc_budget", "ok", ago_s=_DAY_SECONDS + 600, filed=99
+    )
 
     async def fake_load(since):  # noqa: ARG001
         return [old_event]
