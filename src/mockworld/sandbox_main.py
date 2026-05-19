@@ -14,6 +14,7 @@ import asyncio
 import os
 import signal
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -47,6 +48,40 @@ def _load_seed() -> MockWorldSeed:
     if not path:
         return MockWorldSeed()
     return MockWorldSeed.from_json(Path(path).read_text())
+
+
+def _build_caretaker_enabled_cb(
+    loops_enabled: list[str] | None,
+) -> Callable[[str], bool]:
+    """Build the kill-switch gate for caretaker loops (ADR-0049).
+
+    Semantics of ``MockWorldSeed.loops_enabled``:
+
+    - ``None`` — all caretaker loops enabled (production default; scenario
+      didn't opt into a subset).
+    - ``[]`` — no caretaker loops enabled (universal kill-switch — proves
+      ADR-0049 wiring; phase orchestrators are unaffected because they
+      consult ``BGWorkerManager.is_enabled`` via the orchestrator's own
+      ``is_bg_worker_enabled``, not this callback).
+    - ``["name1", "name2", ...]`` — only those caretakers are enabled.
+      Names match the keys in ``HydraFlowOrchestrator._bg_loop_registry``
+      (e.g. ``"workspace_gc"``, ``"dependabot_merge"``, ``"ci_monitor"``).
+
+    This callback is fed into ``WorkerRegistryCallbacks.is_enabled`` and
+    becomes each caretaker's ``LoopDeps.enabled_cb`` — the in-body
+    ``self._enabled_cb(self._worker_name)`` gate every
+    ``BaseBackgroundLoop`` subclass checks per ADR-0049. Phase
+    orchestrators (``_triage_loop``, ``_discover_loop``, ``_shape_loop``,
+    ``_plan_loop``, ``_implement_loop``, ``_review_loop``, ``_hitl_loop``)
+    use a different gate (``orchestrator.is_bg_worker_enabled`` →
+    ``BGWorkerManager``) and so are not affected here. That's the
+    per-triage-comment-on-#8483 contract: the kill-switch suppresses
+    cadence-driven loops, not work-driven phase orchestrators.
+    """
+    if loops_enabled is None:
+        return lambda *_a, **_kw: True
+    allowed = frozenset(loops_enabled)
+    return lambda name, *_a, **_kw: name in allowed
 
 
 async def main() -> None:
@@ -118,9 +153,13 @@ async def main() -> None:
     # ``tests/regressions/test_async_subprocess_timeouts.py``), so caretaker
     # loops that try to call out under air-gap fail fast instead of hanging
     # the dashboard's uvicorn bind. No sandbox-specific carve-out is needed.
+    # ADR-0049 universal kill-switch wiring (#8483). ``seed.loops_enabled``
+    # gates caretaker-loop ``enabled_cb`` only; phase orchestrators consult
+    # ``BGWorkerManager.is_enabled`` and are unaffected. See
+    # ``_build_caretaker_enabled_cb`` docstring for full semantics.
     callbacks = WorkerRegistryCallbacks(
         update_status=lambda *_a, **_kw: None,
-        is_enabled=lambda *_a, **_kw: True,
+        is_enabled=_build_caretaker_enabled_cb(seed.loops_enabled),
         get_interval=lambda *_a, **_kw: 60,
     )
 
