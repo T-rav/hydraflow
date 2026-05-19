@@ -9,6 +9,7 @@ graph LR
     AgentPort --> AgentRunner
     AgentPort -.-> FakeAgent
     BotPRPort --> OpenAutoPRBotPRPort
+    BotPRPort -.-> FakeBotPR
     IssueFetcherPort --> IssueFetcher
     IssueFetcherPort -.-> FakeIssueFetcher
     IssueStorePort --> IssueStore
@@ -40,7 +41,7 @@ graph LR
 - Methods: `open_bot_pr`
 - Adapters:
   - `OpenAutoPRBotPRPort` (`src.term_proposer_runtime`)
-- Fake: ⚠️ no fake (every Port needs a fake per ADR-0047)
+- Fake: `FakeBotPR` (`mockworld.fakes.fake_bot_pr`)
 
 ### IssueFetcherPort
 
@@ -98,4 +99,4 @@ graph LR
   - `WorkspaceManager` (`src.workspace`)
 - Fake: `FakeWorkspace` (`mockworld.fakes.fake_workspace`)
 
-_Regenerated from commit `c83cd0c` on 2026-05-19 16:09 UTC. Source last changed at `c83cd0c`. Status: 🟢 fresh._
+_Regenerated from commit `dc49678` on 2026-05-19 15:26 UTC. Source last changed at `dc49678`. Status: 🟢 fresh._

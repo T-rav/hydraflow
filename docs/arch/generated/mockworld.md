@@ -10,6 +10,7 @@ All Fake adapters under `src/mockworld/fakes/` (classes with ``_is_fake_adapter 
 |---|---|---|
 | **FakeAgent** | `AgentPort` | — |
 | **FakeBeads** | `BeadsPort` | `tests/scenarios/fakes/test_fake_beads.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_bead_workflow.py` |
+| **FakeBotPR** | `BotPRPort` | — |
 | **FakeClock** | `ClockPort` | `tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/fakes/test_fake_clock.py`<br>`tests/scenarios/fakes/test_supporting_fakes.py`<br>`tests/scenarios/test_fidelity.py` |
 | **FakeDocker** | `DockerPort` | `tests/scenarios/fakes/test_fake_docker.py`<br>`tests/scenarios/fakes/test_fake_subprocess_runner.py` |
 | **FakeFS** | `FSPort` | `tests/scenarios/fakes/test_fake_fs.py` |
@@ -34,6 +35,7 @@ graph LR
     tests_scenarios_fakes_test_fake_beads_py([tests/scenarios/fakes/test_fake_beads.py]) --> FakeBeads
     tests_scenarios_fakes_test_mock_world_py([tests/scenarios/fakes/test_mock_world.py]) --> FakeBeads
     tests_scenarios_fuzz_test_invariants_py([tests/scenarios/fuzz/test_invariants.py]) --> FakeBeads
+    FakeBotPR -.-> BotPRPort
     FakeClock -.-> ClockPort
     tests_scenarios_behaviors_test_latency_py([tests/scenarios/behaviors/test_latency.py]) --> FakeClock
     tests_scenarios_fakes_test_fake_clock_py([tests/scenarios/fakes/test_fake_clock.py]) --> FakeClock
@@ -70,4 +72,4 @@ graph LR
     tests_scenarios_fakes_test_supporting_fakes_py([tests/scenarios/fakes/test_supporting_fakes.py]) --> FakeWorkspace
 ```
 
-_Regenerated from commit `c83cd0c` on 2026-05-19 16:09 UTC. Source last changed at `c83cd0c`. Status: 🟢 fresh._
+_Regenerated from commit `dc49678` on 2026-05-19 15:26 UTC. Source last changed at `dc49678`. Status: 🟢 fresh._

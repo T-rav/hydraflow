@@ -7,6 +7,7 @@ only the sandbox entrypoint does.
 
 from mockworld.fakes.fake_agent import FakeAgent
 from mockworld.fakes.fake_beads import FakeBeads
+from mockworld.fakes.fake_bot_pr import FakeBotPR
 from mockworld.fakes.fake_clock import FakeClock
 from mockworld.fakes.fake_docker import FakeDocker
 from mockworld.fakes.fake_fs import FakeFS
@@ -25,6 +26,7 @@ from mockworld.fakes.fake_workspace import FakeWorkspace
 __all__ = [
     "FakeAgent",
     "FakeBeads",
+    "FakeBotPR",
     "FakeClock",
     "FakeDocker",
     "FakeFS",
