@@ -12,7 +12,14 @@ from analysis import PlanAnalyzer
 from config import HydraFlowConfig
 from events import EventBus
 from harness_insights import FailureCategory, HarnessInsightStore
-from models import EpicGapReview, IssueOutcomeType, PipelineStage, PlanResult, Task
+from models import (
+    EpicGapReview,
+    IssueOutcomeType,
+    PipelineStage,
+    PlanResult,
+    PlanReview,
+    Task,
+)
 from phase_utils import (
     MemorySuggester,
     PipelineEscalator,
@@ -46,6 +53,7 @@ if TYPE_CHECKING:
     from epic import EpicManager
     from issue_cache import IssueCache
     from plan_reviewer import PlanReviewer
+    from plan_touchpoint_expander import PlanTouchpointExpander
     from ports import IssueStorePort, PRPort
     from wiki_compiler import CorroborationDecision, WikiCompiler  # noqa: TCH004
 
@@ -106,6 +114,7 @@ class PlanPhase:
         wiki_compiler: WikiCompiler | None = None,
         issue_cache: IssueCache | None = None,
         plan_reviewer: PlanReviewer | None = None,
+        touchpoint_expander: PlanTouchpointExpander | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -124,6 +133,13 @@ class PlanPhase:
         self._wiki_compiler = wiki_compiler
         self._issue_cache = issue_cache
         self._plan_reviewer = plan_reviewer
+        # Touchpoint expander (ADR-0063 W3b). Dispatched on the FIRST
+        # PlanReviewer blocking-finding failure to enrich the next
+        # review pass with cross-referenced ADRs, recent PR conflict
+        # history, and current wiki entries for the touched modules.
+        # Optional — when None, the existing route-back path runs
+        # unchanged (backward-compat).
+        self._touchpoint_expander = touchpoint_expander
         # Earlier-adversarial pipeline agents (ADR-pending). Optional —
         # the factory wires them in when feature-enabled; legacy paths
         # leave them None and the adversarial stages are skipped. See
@@ -614,6 +630,15 @@ class PlanPhase:
             review = await self._plan_reviewer.review(
                 issue, result, plan_version=plan_version
             )
+            # ADR-0063 W3b: on the FIRST blocking review, dispatch the
+            # touchpoint-expander (if wired) and re-run the reviewer
+            # against an enriched plan. Bounded to one expansion attempt
+            # — if the second pass still flags blocking findings, the
+            # existing READY-stage gate routes the issue back to plan
+            # (or escalates after the per-issue route-back cap).
+            review = await self._maybe_expand_touchpoints(
+                issue, result, review, plan_version
+            )
             if review.success:
                 self._issue_cache.record_review_stored(
                     issue.id,
@@ -644,6 +669,86 @@ class PlanPhase:
             )
 
         return plan_version
+
+    async def _maybe_expand_touchpoints(
+        self,
+        issue: Task,
+        result: PlanResult,
+        first_review: PlanReview,
+        plan_version: int,
+    ) -> PlanReview:
+        """Run the touchpoint-expander + re-review on FIRST blocking failure.
+
+        Returns the review that should be cached. When no expander is
+        wired, the first review has no blocking findings, the expander
+        surfaces no touchpoints, or the reviewer is missing, returns
+        ``first_review`` unchanged so the existing route-back path runs.
+
+        Bounded to one expansion attempt per ADR-0063 W3b — the second
+        review's verdict (clean or still-blocking) is what the cache
+        records. A still-blocking second review routes back via the
+        existing READY-stage gate.
+        """
+        if (
+            self._touchpoint_expander is None
+            or self._plan_reviewer is None
+            or not first_review.success
+            or not first_review.has_blocking_findings
+        ):
+            return first_review
+
+        try:
+            expansion = await self._touchpoint_expander.expand_touchpoints(
+                original_plan=result.plan,
+                reviewer_failure=first_review,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Touchpoint expander raised for issue #%d — falling back "
+                "to existing route-back path",
+                issue.id,
+                exc_info=True,
+            )
+            return first_review
+
+        context_block = expansion.render_context_block()
+        if not context_block:
+            logger.info(
+                "Touchpoint expander surfaced no touchpoints for issue #%d "
+                "— skipping re-review",
+                issue.id,
+            )
+            return first_review
+
+        # Build an enriched plan_result for the second review pass. We
+        # do NOT mutate the original result — the cached plan_stored
+        # record (already written above) reflects the planner's output,
+        # not the enrichment. The expansion is a reviewer-side aid.
+        enriched_plan = f"{result.plan}\n\n{context_block}"
+        enriched_result = result.model_copy(update={"plan": enriched_plan})
+
+        try:
+            second_review = await self._plan_reviewer.review(
+                issue, enriched_result, plan_version=plan_version
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Re-review with expanded touchpoints raised for issue #%d "
+                "— falling back to original review",
+                issue.id,
+                exc_info=True,
+            )
+            return first_review
+
+        logger.info(
+            "Touchpoint-expander re-review for issue #%d: %d touchpoints "
+            "surfaced, blocking=%s → %s",
+            issue.id,
+            len(expansion.touchpoints),
+            first_review.has_blocking_findings,
+            second_review.has_blocking_findings,
+        )
+        return second_review
 
     _WIKI_INGEST_MAX_CHARS = 40_000
 
