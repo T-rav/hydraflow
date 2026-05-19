@@ -7,6 +7,7 @@
 # `audit` job, ADR-0051), so the rule is in effect from this commit
 # forward.
 #
+<<<<<<< Updated upstream
 # Bumped 2026-05-17 to b1eafc58 (post #8939 wiring-fix on staging).
 # The prior baseline captured a two-week window in which fix commits
 # accumulated without regression tests, blocking RC promotion. Note: the
@@ -18,3 +19,13 @@
 # past affected commits is the audit's own prescribed remediation.
 # Every fix commit from this point on MUST carry a regression test.
 b1eafc58
+=======
+# Bumped 2026-05-17 to 54319dca (current staging tip): the prior baseline
+# captured a two-week window in which 9/13 fix commits landed without a
+# regression test, blocking RC promotion. The discipline is now active
+# *forward* from this point; the audit's own remediation message
+# explicitly endorses bumping the baseline to a post-adoption commit
+# when drift has accumulated. The next fix commit MUST land with a
+# regression test under tests/regressions/.
+54319dca
+>>>>>>> Stashed changes
