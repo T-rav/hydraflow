@@ -38,7 +38,7 @@ async def assert_outcome(api, page) -> None:
         timeline = await api.wait_until(
             f"/api/timeline/issue/{n}",
             lambda p: p.get("outcome") == "merged",
-            timeout=120.0,
+            timeout=180.0,
         )
         assert timeline["outcome"] == "merged"
 

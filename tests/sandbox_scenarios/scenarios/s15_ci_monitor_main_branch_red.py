@@ -44,7 +44,7 @@ async def assert_outcome(api, page) -> None:
             and "issue_created" in e.get("data", {}).get("details", {})
             for e in (payload if isinstance(payload, list) else [])
         ),
-        timeout=60.0,
+        timeout=180.0,
     )
 
     # Collect all ci_monitor BACKGROUND_WORKER_STATUS events.

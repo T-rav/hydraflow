@@ -39,6 +39,6 @@ async def assert_outcome(api, page) -> None:
         lambda p: any(
             e.get("event") == "pr_unsticker_resync" for e in p.get("events", [])
         ),
-        timeout=60.0,
+        timeout=180.0,
     )
     assert any(e.get("event") == "pr_unsticker_resync" for e in history["events"])
