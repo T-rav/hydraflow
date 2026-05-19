@@ -227,9 +227,9 @@ class TestAdrTouchpointAuditor:
           ``config.auto_agent_skip_sublabels`` — confirming the AutoAgentPreflightLoop
           preflight path (ADR-0050) is reachable for this escalation class.
         """
-        from adr_index import ADRIndex  # noqa: PLC0415
         from unittest.mock import MagicMock  # noqa: PLC0415
 
+        from adr_index import ADRIndex  # noqa: PLC0415
         from config import HydraFlowConfig  # noqa: PLC0415
 
         world = MockWorld(tmp_path)
