@@ -200,3 +200,93 @@ class TestReviewPhaseFallbackDedup:
         phase._prs.post_comment.assert_awaited_once()
         assert phase._prs.post_comment.await_args.args[0] == 7777
         phase._prs.create_task.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_fallback_window_guard_skips_back_to_back_filings(self) -> None:
+        """Review #8992 S2 fix: two PR reviews completing back-to-back for
+        the same stale category must not both file — the in-memory
+        ``_hitl_filed_at`` window guard short-circuits the second call
+        before it can race ``find_existing_issue``.
+        """
+        from models import ReviewVerdict
+        from tests.conftest import ConfigFactory, ReviewResultFactory
+        from tests.helpers import make_review_phase
+
+        config = ConfigFactory.create()
+        phase = make_review_phase(config, default_mocks=True)
+        phase._retrospective_queue = None
+
+        # First call: no open issue → would file. Second call: same
+        # category, no open issue *yet* (GH search hasn't indexed) →
+        # must be short-circuited by the window guard.
+        phase._prs.find_existing_issue = AsyncMock(return_value=None)
+        phase._prs.post_comment = AsyncMock()
+        phase._prs.create_task = AsyncMock()
+
+        result = ReviewResultFactory.create(verdict=ReviewVerdict.REQUEST_CHANGES)
+
+        mock_insights = MagicMock()
+        mock_insights.load_recent.return_value = []
+        mock_insights.get_proposed_categories.return_value = set()
+        phase._insights = mock_insights
+
+        with (
+            patch("review_phase.analyze_patterns", return_value=[]),
+            patch(
+                "review_phase._phase.verify_proposals",
+                return_value=["missing_tests"],
+            ),
+            patch(
+                "review_phase._phase.CATEGORY_DESCRIPTIONS",
+                {"missing_tests": "Missing test coverage"},
+            ),
+            patch("review_phase._phase._PROPOSAL_STALE_DAYS", 30),
+        ):
+            # First tick: fires through to create_task.
+            await phase._record_review_insight(result)
+            # Second tick (back-to-back, same category): blocked by guard.
+            await phase._record_review_insight(result)
+
+        # Only one task created — window guard skipped the second tick.
+        assert phase._prs.create_task.await_count == 1
+
+
+class TestRetrospectiveLoopGuardCrashWindow:
+    """Review #8992 S1 fix: the in-memory ``_hitl_filed_at`` guard must
+    be populated BEFORE the ``await create_issue``, not after — otherwise
+    a crash between the GitHub write and the assignment leaves the
+    just-filed issue with no in-memory guard on restart.
+    """
+
+    @pytest.mark.asyncio
+    async def test_guard_is_set_before_create_issue_await(
+        self, tmp_path: Path
+    ) -> None:
+        from retrospective_loop import RetrospectiveLoop  # noqa: PLC0415
+
+        loop, insights, _queue, prs = _make_loop_with_prs(tmp_path)
+        prs.find_existing_issue = AsyncMock(return_value=None)
+        prs.post_comment = AsyncMock()
+
+        # Sentinel that captures the guard value at the moment of the await.
+        captured: dict[str, datetime | None] = {"value_at_await": None}
+
+        async def capture_create_issue(_title, _body, _labels):
+            captured["value_at_await"] = loop._hitl_filed_at.get(
+                "missing_tests"
+            )
+            return 9999
+
+        prs.create_issue = AsyncMock(side_effect=capture_create_issue)
+
+        insights.load_recent.return_value = []
+
+        with patch(
+            "review_insights.verify_proposals",
+            return_value=["missing_tests"],
+        ):
+            await loop._handle_verify_proposals()
+
+        # The guard was set *before* the await completed — fixing
+        # the crash-window race.
+        assert captured["value_at_await"] is not None

@@ -223,7 +223,12 @@ class RetrospectiveLoop(BaseBackgroundLoop):
                 self._hitl_filed_at[category] = now
                 continue
 
-            # 3. File a fresh HITL issue.
+            # 3. File a fresh HITL issue. Set the window-tracker BEFORE
+            #    the await so a crash between issue creation and the
+            #    assignment doesn't strand the freshly-filed issue with
+            #    no in-memory guard — protects against the cross-tick
+            #    race where ``find_existing_issue`` may not yet see the
+            #    just-filed issue via GitHub's search index.
             body = (
                 f"## Stale Improvement Proposal\n\n"
                 f"The improvement proposal for **{category}** ({desc}) "
@@ -233,8 +238,14 @@ class RetrospectiveLoop(BaseBackgroundLoop):
                 f"---\n*Auto-escalated by HydraFlow review insight verification.*"
             )
             hitl_labels = list(self._config.hitl_label)
-            await self._prs.create_issue(title, body, hitl_labels)
             self._hitl_filed_at[category] = now
+            try:
+                await self._prs.create_issue(title, body, hitl_labels)
+            except Exception:
+                # Filing failed — clear the optimistic guard so the next
+                # tick can retry. Re-raise to preserve normal error flow.
+                self._hitl_filed_at.pop(category, None)
+                raise
 
         return {"stale_proposals": len(stale)}
 
