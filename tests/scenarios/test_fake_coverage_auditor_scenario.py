@@ -78,9 +78,12 @@ class TestFakeCoverageAuditor:
 
         assert fake_pr.create_issue.await_count == 1
         args = fake_pr.create_issue.await_args.args
-        title, _body, labels = args[0], args[1], args[2]
-        assert "close_issue" in title
+        title, body, labels = args[0], args[1], args[2]
+        # #8986 — rollup shape: title names the (fake, kind) pair; the
+        # uncovered method names live in the body.
         assert "FakeGitHub" in title
+        assert "adapter surface" in title
+        assert "close_issue" in body
         assert "hydraflow-adapter-surface" in labels
         assert "hydraflow-fake-coverage-gap" in labels
         assert "hydraflow-find" in labels
@@ -116,9 +119,12 @@ class TestFakeCoverageAuditor:
 
         assert fake_pr.create_issue.await_count == 1
         args = fake_pr.create_issue.await_args.args
-        title, _body, labels = args[0], args[1], args[2]
-        assert "script_run" in title
+        title, body, labels = args[0], args[1], args[2]
+        # #8986 — rollup shape: title names the (fake, kind) pair; the
+        # uncovered helper names live in the body.
         assert "FakeDocker" in title
+        assert "test helpers" in title
+        assert "script_run" in body
         assert "hydraflow-test-helper" in labels
         assert "hydraflow-fake-coverage-gap" in labels
         assert "hydraflow-find" in labels

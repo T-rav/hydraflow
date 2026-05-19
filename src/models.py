@@ -1837,6 +1837,11 @@ class StateData(BaseModel):
     skill_prompt_attempts: dict[str, int] = Field(default_factory=dict)
     fake_coverage_last_known: dict[str, list[str]] = Field(default_factory=dict)
     fake_coverage_attempts: dict[str, int] = Field(default_factory=dict)
+    # #8986 — rollup issue tracking: maps "{Fake}:{gap_kind}" → open GH issue
+    # number. Lets the auditor `update_issue_body` instead of filing N parallel
+    # issues per uncovered method. See `_handle_rollup` in
+    # `fake_coverage_auditor_loop.py`.
+    fake_coverage_rollup_issues: dict[str, int] = Field(default_factory=dict)
     # AdrTouchpointAuditorLoop (ADR-0056) — cursor is ISO-8601 of last-scanned merged PR.
     adr_audit_cursor: str = Field(default="")
     adr_audit_attempts: dict[str, int] = Field(default_factory=dict)

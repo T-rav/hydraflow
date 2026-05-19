@@ -41,8 +41,11 @@ def loop_env(tmp_path: Path):
     # Default: returns 1 (< _MAX_ATTEMPTS=3) so gap filing path is taken.
     # Escalation tests override this explicitly.
     state.inc_fake_coverage_attempts.return_value = 1
+    # #8986 — rollup-issue tracking: default no tracked rollup.
+    state.get_fake_coverage_rollup_issue.return_value = None
     pr = AsyncMock()
     pr.create_issue = AsyncMock(return_value=42)
+    pr.update_issue_body = AsyncMock(return_value=None)
     dedup = MagicMock()
     dedup.get.return_value = set()
     return cfg, state, pr, dedup
@@ -123,8 +126,9 @@ def test_catalog_cassette_methods_reads_input_command(tmp_path: Path) -> None:
 
 
 async def test_do_work_files_surface_gap(loop_env, monkeypatch, tmp_path) -> None:
-    """Un-cassetted public method → one ``adapter-surface`` issue."""
+    """Un-cassetted public method → one ``adapter-surface`` rollup issue."""
     cfg, state, pr, dedup = loop_env
+    state.get_fake_coverage_rollup_issue.return_value = None
     fake_dir = tmp_path / "src" / "mockworld" / "fakes"
     fake_dir.mkdir(parents=True)
     (fake_dir / "fake_github.py").write_text(
@@ -149,7 +153,11 @@ async def test_do_work_files_surface_gap(loop_env, monkeypatch, tmp_path) -> Non
     async def fake_reconcile():
         return None
 
+    async def fake_list_titles():
+        return set()
+
     monkeypatch.setattr(loop, "_reconcile_closed_escalations", fake_reconcile)
+    monkeypatch.setattr(loop, "_list_open_rollup_titles", fake_list_titles)
 
     stats = await loop._do_work()
     assert stats["filed"] == 1
@@ -159,8 +167,9 @@ async def test_do_work_files_surface_gap(loop_env, monkeypatch, tmp_path) -> Non
 
 
 async def test_do_work_files_helper_gap(loop_env, monkeypatch, tmp_path) -> None:
-    """Un-exercised ``script_*`` helper → one ``test-helper`` issue."""
+    """Un-exercised ``script_*`` helper → one ``test-helper`` rollup issue."""
     cfg, state, pr, dedup = loop_env
+    state.get_fake_coverage_rollup_issue.return_value = None
     fake_dir = tmp_path / "src" / "mockworld" / "fakes"
     fake_dir.mkdir(parents=True)
     (fake_dir / "fake_docker.py").write_text(
@@ -180,23 +189,30 @@ async def test_do_work_files_helper_gap(loop_env, monkeypatch, tmp_path) -> None
     async def fake_grep(helper):
         return False  # no scenario calls the helper
 
+    async def fake_list_titles():
+        return set()
+
     monkeypatch.setattr(loop, "_reconcile_closed_escalations", fake_reconcile)
     monkeypatch.setattr(loop, "_grep_scenario_for_helper", fake_grep)
+    monkeypatch.setattr(loop, "_list_open_rollup_titles", fake_list_titles)
 
     stats = await loop._do_work()
     assert stats["filed"] == 1
     labels = pr.create_issue.await_args.args[2]
     assert "hydraflow-test-helper" in labels
     title = pr.create_issue.await_args.args[0]
-    assert "script_run" in title
+    assert "FakeDocker" in title
+    body = pr.create_issue.await_args.args[1]
+    assert "script_run" in body
 
 
 async def test_escalation_fires_after_three_attempts(
     loop_env, monkeypatch, tmp_path
 ) -> None:
-    """3rd re-file of a stuck gap → ``hitl-escalation`` issue, not another gap."""
+    """3rd attempt at a stuck ``(fake, kind)`` rollup → ``hitl-escalation``."""
     cfg, state, pr, dedup = loop_env
     state.inc_fake_coverage_attempts.return_value = 3
+    state.get_fake_coverage_rollup_issue.return_value = None
     fake_dir = tmp_path / "src" / "mockworld" / "fakes"
     fake_dir.mkdir(parents=True)
     (fake_dir / "fake_github.py").write_text(
@@ -214,13 +230,21 @@ async def test_escalation_fires_after_three_attempts(
     async def fake_reconcile():
         return None
 
+    async def fake_list_titles():
+        return set()
+
     monkeypatch.setattr(loop, "_reconcile_closed_escalations", fake_reconcile)
+    monkeypatch.setattr(loop, "_list_open_rollup_titles", fake_list_titles)
 
     stats = await loop._do_work()
     assert stats["escalated"] == 1
+    # The escalation issue is the only one created (no rollup filed when
+    # attempts >= _MAX_ATTEMPTS).
     labels = pr.create_issue.await_args.args[2]
     assert "hydraflow-hitl-escalation" in labels
     assert "hydraflow-fake-coverage-stuck" in labels
+    # Attempt counter keyed by ``{fake}:{kind}``, not ``{fake}.{method}:{kind}``.
+    state.inc_fake_coverage_attempts.assert_called_with("FakeGitHub:adapter-surface")
 
 
 async def test_close_reconcile_clears_dedup_on_closed_escalation(
@@ -228,8 +252,9 @@ async def test_close_reconcile_clears_dedup_on_closed_escalation(
 ) -> None:
     """Closed ``fake-coverage-stuck`` issues clear their dedup key + attempts."""
     cfg, state, pr, dedup = loop_env
-    stuck_key = "fake_coverage_auditor:FakeGitHub.missing:adapter-surface"
-    current = {stuck_key, "fake_coverage_auditor:FakeGitHub.other:adapter-surface"}
+    # New rollup key shape: ``{fake}:{kind}``.
+    stuck_key = "fake_coverage_auditor:FakeGitHub:adapter-surface"
+    current = {stuck_key, "fake_coverage_auditor:FakeDocker:adapter-surface"}
     dedup.get.return_value = current
 
     stop = asyncio.Event()
@@ -238,7 +263,7 @@ async def test_close_reconcile_clears_dedup_on_closed_escalation(
     )
 
     closed_payload = json.dumps(
-        [{"title": "HITL: fake coverage gap FakeGitHub.missing:adapter-surface ..."}]
+        [{"title": "HITL: fake coverage gap FakeGitHub:adapter-surface ..."}]
     ).encode()
 
     class _FakeProc:
@@ -258,9 +283,9 @@ async def test_close_reconcile_clears_dedup_on_closed_escalation(
     dedup.set_all.assert_called_once()
     remaining = dedup.set_all.call_args.args[0]
     assert stuck_key not in remaining
-    assert "fake_coverage_auditor:FakeGitHub.other:adapter-surface" in remaining
+    assert "fake_coverage_auditor:FakeDocker:adapter-surface" in remaining
     state.clear_fake_coverage_attempts.assert_called_once_with(
-        "FakeGitHub.missing:adapter-surface"
+        "FakeGitHub:adapter-surface"
     )
 
 
@@ -283,9 +308,9 @@ async def test_all_emitted_labels_are_registered_hydraflow_labels(loop_env) -> N
         config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
     )
 
-    await loop._file_surface_gap("FakeGitHub", "create_issue")
-    await loop._file_helper_gap("FakeDocker", "script_run")
-    await loop._file_escalation("FakeGitHub.missing:adapter-surface", 3)
+    await loop._file_surface_gap("FakeGitHub", ["create_issue"])
+    await loop._file_helper_gap("FakeDocker", ["script_run"])
+    await loop._file_escalation("FakeGitHub:adapter-surface", 3)
 
     emitted: set[str] = set()
     for call in pr.create_issue.await_args_list:
@@ -380,3 +405,420 @@ def test_fake_to_cassette_dir_keys_match_real_classes() -> None:
     assert not stale, (
         f"Stale _FAKE_TO_CASSETTE_DIR keys (class no longer exists): {stale}"
     )
+
+
+# =============================================================================
+# #8986 rollup behavior — one issue per (fake, gap_kind), not per method.
+# =============================================================================
+
+
+def _write_fake_with_methods(
+    fake_dir: Path, class_name: str, methods: list[str]
+) -> None:
+    body_lines = "\n".join(
+        f"    async def {m}(self): ..."  # public, non-helper → adapter-surface
+        for m in methods
+    )
+    (fake_dir / f"{class_name.lower().replace('fake', 'fake_')}.py").write_text(
+        f"class {class_name}:\n{body_lines}\n"
+    )
+
+
+async def test_rollup_files_one_issue_for_many_uncovered_methods(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """#8986: 12 uncovered FakeGitHub methods → 1 rollup issue, not 12."""
+    cfg, state, pr, dedup = loop_env
+    state.get_fake_coverage_rollup_issue.return_value = None
+    state.get_fake_coverage_last_known.return_value = {}
+    fake_dir = tmp_path / "src" / "mockworld" / "fakes"
+    fake_dir.mkdir(parents=True)
+    methods = [f"op_{i:02d}" for i in range(12)]
+    body_lines = "\n".join(f"    async def {m}(self): ..." for m in methods)
+    (fake_dir / "fake_github.py").write_text(f"class FakeGitHub:\n{body_lines}\n")
+    (tmp_path / "tests" / "trust" / "contracts" / "cassettes" / "github").mkdir(
+        parents=True
+    )
+
+    stop = asyncio.Event()
+    loop = FakeCoverageAuditorLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    async def fake_reconcile():
+        return None
+
+    async def fake_list_titles():
+        return set()
+
+    monkeypatch.setattr(loop, "_reconcile_closed_escalations", fake_reconcile)
+    monkeypatch.setattr(loop, "_list_open_rollup_titles", fake_list_titles)
+
+    stats = await loop._do_work()
+
+    # Exactly ONE issue filed for all 12 uncovered methods.
+    assert pr.create_issue.await_count == 1
+    assert stats["filed"] == 1
+    title = pr.create_issue.await_args.args[0]
+    body = pr.create_issue.await_args.args[1]
+    assert "FakeGitHub" in title
+    assert "12 methods" in title
+    for method in methods:
+        assert method in body
+    # Rollup-issue number was stashed in state.
+    state.set_fake_coverage_rollup_issue.assert_called_once_with(
+        "FakeGitHub:adapter-surface", 42
+    )
+
+
+async def test_rollup_tick_2_updates_body_when_method_gains_coverage(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """Tick 2: previously-uncovered method now cassetted → update body, remove it."""
+    cfg, state, pr, dedup = loop_env
+    # State as if tick 1 already filed: rollup-issue tracked + prior uncovered set.
+    # Per-kind tracking — only adapter-surface has a tracked issue; the
+    # test-helper kind is untouched (no helpers in this fake).
+    state.get_fake_coverage_rollup_issue.side_effect = lambda k: (
+        4242 if k == "FakeGitHub:adapter-surface" else None
+    )
+    state.get_fake_coverage_last_known.return_value = {
+        "__uncovered__:FakeGitHub:adapter-surface": ["create_issue", "close_issue"],
+        "FakeGitHub": [],
+    }
+    fake_dir = tmp_path / "src" / "mockworld" / "fakes"
+    fake_dir.mkdir(parents=True)
+    (fake_dir / "fake_github.py").write_text(
+        "class FakeGitHub:\n"
+        "    async def create_issue(self): ...\n"
+        "    async def close_issue(self): ...\n"
+    )
+    cassettes = tmp_path / "tests" / "trust" / "contracts" / "cassettes" / "github"
+    cassettes.mkdir(parents=True)
+    # create_issue gained coverage between ticks.
+    (cassettes / "create_issue.yaml").write_text(
+        yaml.safe_dump({"input": {"command": "create_issue"}, "output": {}})
+    )
+
+    stop = asyncio.Event()
+    loop = FakeCoverageAuditorLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    async def fake_reconcile():
+        return None
+
+    async def fake_list_titles():
+        # Pretend the rollup is still open.
+        return {"Fake coverage gap: FakeGitHub adapter surface (2 methods)"}
+
+    monkeypatch.setattr(loop, "_reconcile_closed_escalations", fake_reconcile)
+    monkeypatch.setattr(loop, "_list_open_rollup_titles", fake_list_titles)
+
+    stats = await loop._do_work()
+
+    # No new issue created; existing one updated.
+    pr.create_issue.assert_not_awaited()
+    pr.update_issue_body.assert_awaited_once()
+    args = pr.update_issue_body.await_args.args
+    assert args[0] == 4242
+    body = args[1]
+    # The remaining uncovered method is listed; the recovered one is struck.
+    assert "close_issue" in body
+    assert "~~`create_issue`~~" in body
+    assert stats["updated"] == 1
+
+
+async def test_rollup_tick_3_appends_newly_uncovered_method(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """Tick 3: a new method becomes uncovered → body updated, method appended."""
+    cfg, state, pr, dedup = loop_env
+    state.get_fake_coverage_rollup_issue.return_value = 4242
+    # Tick 2 reported only [close_issue]; tick 3 sees close_issue + new_method.
+    state.get_fake_coverage_last_known.return_value = {
+        "__uncovered__:FakeGitHub:adapter-surface": ["close_issue"],
+        "FakeGitHub": ["create_issue"],
+    }
+    fake_dir = tmp_path / "src" / "mockworld" / "fakes"
+    fake_dir.mkdir(parents=True)
+    (fake_dir / "fake_github.py").write_text(
+        "class FakeGitHub:\n"
+        "    async def create_issue(self): ...\n"
+        "    async def close_issue(self): ...\n"
+        "    async def new_method(self): ...\n"
+    )
+    cassettes = tmp_path / "tests" / "trust" / "contracts" / "cassettes" / "github"
+    cassettes.mkdir(parents=True)
+    (cassettes / "create_issue.yaml").write_text(
+        yaml.safe_dump({"input": {"command": "create_issue"}, "output": {}})
+    )
+
+    stop = asyncio.Event()
+    loop = FakeCoverageAuditorLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    async def fake_reconcile():
+        return None
+
+    async def fake_list_titles():
+        return {"Fake coverage gap: FakeGitHub adapter surface (1 methods)"}
+
+    monkeypatch.setattr(loop, "_reconcile_closed_escalations", fake_reconcile)
+    monkeypatch.setattr(loop, "_list_open_rollup_titles", fake_list_titles)
+
+    await loop._do_work()
+
+    pr.create_issue.assert_not_awaited()
+    pr.update_issue_body.assert_awaited_once()
+    body = pr.update_issue_body.await_args.args[1]
+    assert "close_issue" in body
+    assert "new_method" in body
+    # create_issue is now covered, not listed (nor strikethrough — it
+    # wasn't in last tick's uncovered set; it was already covered).
+    assert "`create_issue`" not in body or "~~`create_issue`~~" not in body
+
+
+async def test_rollup_escalation_keyed_on_fake_kind_not_method(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """3-strikes counter is per ``(fake, kind)``, never per method."""
+    cfg, state, pr, dedup = loop_env
+    state.inc_fake_coverage_attempts.return_value = 3
+    state.get_fake_coverage_rollup_issue.return_value = None
+    fake_dir = tmp_path / "src" / "mockworld" / "fakes"
+    fake_dir.mkdir(parents=True)
+    (fake_dir / "fake_github.py").write_text(
+        "class FakeGitHub:\n"
+        "    async def a(self): ...\n"
+        "    async def b(self): ...\n"
+        "    async def c(self): ...\n"
+    )
+    (tmp_path / "tests" / "trust" / "contracts" / "cassettes" / "github").mkdir(
+        parents=True
+    )
+
+    stop = asyncio.Event()
+    loop = FakeCoverageAuditorLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    async def fake_reconcile():
+        return None
+
+    async def fake_list_titles():
+        return set()
+
+    monkeypatch.setattr(loop, "_reconcile_closed_escalations", fake_reconcile)
+    monkeypatch.setattr(loop, "_list_open_rollup_titles", fake_list_titles)
+
+    stats = await loop._do_work()
+
+    # Attempt counter incremented once for the whole (FakeGitHub, adapter-surface)
+    # rollup — NOT once per uncovered method.
+    state.inc_fake_coverage_attempts.assert_called_once_with(
+        "FakeGitHub:adapter-surface"
+    )
+    assert stats["escalated"] == 1
+    # And the escalation issue's title carries the rollup key.
+    title = pr.create_issue.await_args.args[0]
+    assert "FakeGitHub:adapter-surface" in title
+
+
+async def test_rollup_closed_by_human_refiles_cleanly(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """Closed-by-human rollup: next tick re-files a fresh issue (zombie guard)."""
+    cfg, state, pr, dedup = loop_env
+    # State thinks rollup #4242 is open, but no matching open title is found.
+    state.get_fake_coverage_rollup_issue.return_value = 4242
+    state.get_fake_coverage_last_known.return_value = {}
+    pr.create_issue = AsyncMock(return_value=5000)
+    fake_dir = tmp_path / "src" / "mockworld" / "fakes"
+    fake_dir.mkdir(parents=True)
+    (fake_dir / "fake_github.py").write_text(
+        "class FakeGitHub:\n    async def missing(self): ...\n"
+    )
+    (tmp_path / "tests" / "trust" / "contracts" / "cassettes" / "github").mkdir(
+        parents=True
+    )
+
+    stop = asyncio.Event()
+    loop = FakeCoverageAuditorLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    async def fake_reconcile():
+        return None
+
+    async def fake_list_titles():
+        return set()  # no open rollup → it was closed by a human
+
+    monkeypatch.setattr(loop, "_reconcile_closed_escalations", fake_reconcile)
+    monkeypatch.setattr(loop, "_list_open_rollup_titles", fake_list_titles)
+
+    stats = await loop._do_work()
+
+    # The stale rollup number was dropped and a fresh issue was filed.
+    state.clear_fake_coverage_rollup_issue.assert_any_call("FakeGitHub:adapter-surface")
+    state.clear_fake_coverage_attempts.assert_any_call("FakeGitHub:adapter-surface")
+    assert pr.create_issue.await_count == 1
+    assert stats["filed"] == 1
+    # New issue number recorded.
+    state.set_fake_coverage_rollup_issue.assert_called_with(
+        "FakeGitHub:adapter-surface", 5000
+    )
+
+
+async def test_escalation_does_not_storm_after_threshold(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """Regression: escalation fires exactly once when attempts crosses
+    ``_MAX_ATTEMPTS`` (==3), not every tick at >=3.
+
+    Without this guard, an open rollup that stays uncovered would file a
+    fresh HITL escalation issue on every subsequent tick until a human
+    closed it — the original bug review caught before merge.
+    """
+    cfg, state, pr, dedup = loop_env
+    # Tracked rollup already open; counter has already crossed threshold.
+    state.get_fake_coverage_rollup_issue.return_value = 4242
+    state.get_fake_coverage_last_known.return_value = {}
+    state.inc_fake_coverage_attempts.return_value = 4  # >MAX, post-threshold tick
+    fake_dir = tmp_path / "src" / "mockworld" / "fakes"
+    fake_dir.mkdir(parents=True)
+    (fake_dir / "fake_github.py").write_text(
+        "class FakeGitHub:\n    async def missing(self): ...\n"
+    )
+    (tmp_path / "tests" / "trust" / "contracts" / "cassettes" / "github").mkdir(
+        parents=True
+    )
+
+    stop = asyncio.Event()
+    loop = FakeCoverageAuditorLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    async def fake_reconcile():
+        return None
+
+    async def fake_list_titles():
+        return {"Fake coverage gap: FakeGitHub adapter surface (1 method)"}
+
+    monkeypatch.setattr(loop, "_reconcile_closed_escalations", fake_reconcile)
+    monkeypatch.setattr(loop, "_list_open_rollup_titles", fake_list_titles)
+
+    stats = await loop._do_work()
+
+    # Body got updated (the rollup is still open and uncovered).
+    assert pr.update_issue_body.await_count == 1
+    # And NO new escalation issue was filed this tick — the
+    # ``attempts == _MAX_ATTEMPTS`` guard only fires once at threshold.
+    assert pr.create_issue.await_count == 0
+    assert stats["escalated"] == 0
+
+
+async def test_rollup_body_updated_when_gap_fully_closes(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """Regression: when all methods become covered, the rollup body is
+    repainted to the "all covered" view BEFORE state is cleared.
+
+    Without this update, the open rollup issue retains the stale list of
+    uncovered methods — humans see "12 methods missing" on an issue where
+    every method is now cassetted.
+    """
+    cfg, state, pr, dedup = loop_env
+    # Tracked rollup #5050 is open ONLY for adapter-surface; prior tick had
+    # ``missing`` uncovered. (Per-kind tracking — test-helper has no issue.)
+    state.get_fake_coverage_rollup_issue.side_effect = lambda k: (
+        5050 if k == "FakeGitHub:adapter-surface" else None
+    )
+    state.get_fake_coverage_last_known.return_value = {
+        "FakeGitHub": ["missing"],
+        "__uncovered__:FakeGitHub:adapter-surface": ["missing"],
+    }
+    fake_dir = tmp_path / "src" / "mockworld" / "fakes"
+    fake_dir.mkdir(parents=True)
+    (fake_dir / "fake_github.py").write_text(
+        "class FakeGitHub:\n    async def missing(self): ...\n"
+    )
+    cassette_dir = tmp_path / "tests" / "trust" / "contracts" / "cassettes" / "github"
+    cassette_dir.mkdir(parents=True)
+    # Cassette now exists for the previously-missing method → fully covered.
+    (cassette_dir / "missing.yaml").write_text(
+        yaml.safe_dump({"input": {"command": "missing"}, "output": {}})
+    )
+
+    stop = asyncio.Event()
+    loop = FakeCoverageAuditorLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    async def fake_reconcile():
+        return None
+
+    async def fake_list_titles():
+        return set()
+
+    monkeypatch.setattr(loop, "_reconcile_closed_escalations", fake_reconcile)
+    monkeypatch.setattr(loop, "_list_open_rollup_titles", fake_list_titles)
+
+    await loop._do_work()
+
+    # Body was updated with the "all covered" view before state cleared.
+    assert pr.update_issue_body.await_count >= 1
+    update_call = pr.update_issue_body.await_args_list[0]
+    assert update_call.args[0] == 5050
+    body = update_call.args[1]
+    # The recovered method appears (struck through) and no live uncovered.
+    assert "missing" in body
+    # State was cleared after the body update.
+    state.clear_fake_coverage_rollup_issue.assert_any_call("FakeGitHub:adapter-surface")
+
+
+async def test_helper_rollup_same_shape(loop_env, monkeypatch, tmp_path) -> None:
+    """#8986: test-helper gaps also roll up — 3 uncovered helpers → 1 issue."""
+    cfg, state, pr, dedup = loop_env
+    state.get_fake_coverage_rollup_issue.return_value = None
+    fake_dir = tmp_path / "src" / "mockworld" / "fakes"
+    fake_dir.mkdir(parents=True)
+    (fake_dir / "fake_docker.py").write_text(
+        "class FakeDocker:\n"
+        "    def script_a(self): ...\n"
+        "    def script_b(self): ...\n"
+        "    def script_c(self): ...\n"
+    )
+    (tmp_path / "tests" / "trust" / "contracts" / "cassettes" / "docker").mkdir(
+        parents=True
+    )
+
+    stop = asyncio.Event()
+    loop = FakeCoverageAuditorLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    async def fake_reconcile():
+        return None
+
+    async def fake_grep(_helper):
+        return False
+
+    async def fake_list_titles():
+        return set()
+
+    monkeypatch.setattr(loop, "_reconcile_closed_escalations", fake_reconcile)
+    monkeypatch.setattr(loop, "_grep_scenario_for_helper", fake_grep)
+    monkeypatch.setattr(loop, "_list_open_rollup_titles", fake_list_titles)
+
+    stats = await loop._do_work()
+
+    assert pr.create_issue.await_count == 1
+    assert stats["filed"] == 1
+    title = pr.create_issue.await_args.args[0]
+    body = pr.create_issue.await_args.args[1]
+    assert "FakeDocker" in title
+    assert "3 methods" in title
+    for helper in ("script_a", "script_b", "script_c"):
+        assert helper in body

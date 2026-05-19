@@ -95,3 +95,18 @@ The following files carry this ADR's decisions and must be kept in sync with any
 - `src/corpus_learning_loop.py`, `src/contract_refresh_loop.py`, `src/staging_bisect_loop.py`, `src/principles_audit_loop.py`, `src/flake_tracker_loop.py`, `src/skill_prompt_eval_loop.py`, `src/fake_coverage_auditor_loop.py`, `src/rc_budget_loop.py`, `src/wiki_rot_detector_loop.py` — the nine watched trust loops.
 - `src/discover_phase.py`, `src/discover_runner.py`, `src/shape_phase.py`, `src/shape_runner.py` — §4.10 product-phase evaluator dispatch (extends ADR-0031 with evaluator skill retry + HITL escalation).
 - `src/report_issue_loop.py` — §4.11 daily-budget sweep hook inside `_do_work` (additive; does not change the screenshot-capture behavior covered by ADR-0018).
+
+## Update Log
+
+- **2026-05-19 (#8986):** `FakeCoverageAuditorLoop` issue shape changed from
+  one-issue-per-`(fake, method)` to a **rollup** issue per `(fake, gap_kind)`
+  with the uncovered-method list in the body. Subsequent ticks update the
+  body via `PRPort.update_issue_body`; 3-strikes escalation moves to the
+  rollup granularity. Background: the per-method shape produced 154 noise
+  issues that were closed en masse on 2026-05-19. The shape change is
+  spec-level (§4.7) and does not affect the ADR's load-bearing decisions
+  (still nine watched trust loops, still weekly cadence, still
+  `hitl-escalation` + `fake-coverage-stuck` on stuck gaps). Migration is
+  self-healing: old per-method dedup keys age out silently when no
+  matching open escalation title is found; the loop's first post-deploy
+  tick produces new rollup issues for any live gaps.
