@@ -8,6 +8,7 @@ All Fake adapters under `src/mockworld/fakes/` (classes with ``_is_fake_adapter 
 
 | Fake | Implements | Used in scenarios |
 |---|---|---|
+| **FakeAgent** | `AgentPort` | — |
 | **FakeBeads** | `BeadsPort` | `tests/scenarios/fakes/test_fake_beads.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_bead_workflow.py` |
 | **FakeClock** | `ClockPort` | `tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/fakes/test_fake_clock.py`<br>`tests/scenarios/fakes/test_supporting_fakes.py`<br>`tests/scenarios/test_fidelity.py` |
 | **FakeDocker** | `DockerPort` | `tests/scenarios/fakes/test_fake_docker.py`<br>`tests/scenarios/fakes/test_fake_subprocess_runner.py` |
@@ -27,6 +28,7 @@ All Fake adapters under `src/mockworld/fakes/` (classes with ``_is_fake_adapter 
 
 ```mermaid
 graph LR
+    FakeAgent -.-> AgentPort
     FakeBeads -.-> BeadsPort
     tests_scenarios_fakes_test_fake_beads_py([tests/scenarios/fakes/test_fake_beads.py]) --> FakeBeads
     tests_scenarios_fakes_test_mock_world_py([tests/scenarios/fakes/test_mock_world.py]) --> FakeBeads
@@ -66,4 +68,4 @@ graph LR
     tests_scenarios_fakes_test_supporting_fakes_py([tests/scenarios/fakes/test_supporting_fakes.py]) --> FakeWorkspace
 ```
 
-_Regenerated from commit `589fcdc` on 2026-05-19 09:11 UTC. Source last changed at `589fcdc`. Status: 🟢 fresh._
+_Regenerated from commit `dc49678` on 2026-05-19 15:21 UTC. Source last changed at `dc49678`. Status: 🟢 fresh._

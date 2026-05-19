@@ -7,6 +7,7 @@ Hexagonal boundaries. Each `*Port` Protocol with its concrete adapter(s) and fak
 ```mermaid
 graph LR
     AgentPort --> AgentRunner
+    AgentPort -.-> FakeAgent
     BotPRPort --> OpenAutoPRBotPRPort
     IssueFetcherPort --> IssueFetcher
     IssueFetcherPort -.-> FakeIssueFetcher
@@ -30,7 +31,7 @@ graph LR
 - Methods: `build_command`, `execute`, `verify_result`
 - Adapters:
   - `AgentRunner` (`src.agent`)
-- Fake: ⚠️ no fake (every Port needs a fake per ADR-0047)
+- Fake: `FakeAgent` (`mockworld.fakes.fake_agent`)
 
 ### BotPRPort
 
@@ -96,4 +97,4 @@ graph LR
   - `WorkspaceManager` (`src.workspace`)
 - Fake: `FakeWorkspace` (`mockworld.fakes.fake_workspace`)
 
-_Regenerated from commit `589fcdc` on 2026-05-19 09:11 UTC. Source last changed at `589fcdc`. Status: 🟢 fresh._
+_Regenerated from commit `dc49678` on 2026-05-19 15:21 UTC. Source last changed at `dc49678`. Status: 🟢 fresh._
