@@ -1371,23 +1371,6 @@ class HydraFlowConfig(BaseModel):
         ),
     )
 
-    # Earlier-adversarial pipeline (ADR-0064). Flipped ON by default — the
-    # four adversarial stages (AssumptionSurfacer, PlanCouncil,
-    # SpecACGenerator, SpecJudge in plan; ComplexityGate + DiscoveryCouncil
-    # in discover; ShapeChallenger + ShapeExpertCouncil in shape) wire onto
-    # the phases at factory construction. Operators can set this to False
-    # to disable, but the intent is one-way-on: the pipeline is the new
-    # baseline for load-bearing work in the dark factory.
-    adversarial_pipeline_enabled: bool = Field(
-        default=True,
-        description=(
-            "Enable the earlier-adversarial pipeline: ComplexityGate routing "
-            "+ AssumptionSurfacer / Council / SpecJudge stages around the "
-            "existing planner. ON by default — the pipeline is now the "
-            "baseline for load-bearing work."
-        ),
-    )
-
     # Shadow corpus (#8786) — opt-in live sampling of production
     # subprocess calls. When enabled, every gh/git/docker/claude call
     # feeds a bounded, normalized, PII-scrubbed YAML corpus that
