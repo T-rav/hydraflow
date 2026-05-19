@@ -139,6 +139,10 @@ class TestInitialization:
             "adr_rollup_issues",
             # MemoryBacklogLoop (ADR-0057)
             "memory_backlog_attempts",
+            # Earlier-adversarial pipeline (#8953) — pulled in by the
+            # rebase; the enumeration needs the entry so set-equality
+            # holds against the live StateData.
+            "adversarial_states",
         }
         assert set(d.keys()) == expected_keys
 
