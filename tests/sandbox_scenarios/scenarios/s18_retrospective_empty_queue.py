@@ -10,9 +10,7 @@ from __future__ import annotations
 from mockworld.seed import MockWorldSeed
 
 NAME = "s18_retrospective_empty_queue"
-DESCRIPTION = (
-    "RetrospectiveLoop drains empty queue → emits worker-status event."
-)
+DESCRIPTION = "RetrospectiveLoop drains empty queue → emits worker-status event."
 
 
 def seed() -> MockWorldSeed:

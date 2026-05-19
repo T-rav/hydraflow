@@ -19,7 +19,12 @@ import pytest
 
 from tests.scenarios.fakes.mock_world import MockWorld
 from tests.scenarios.helpers.loop_port_seeding import seed_ports as _seed_ports
-from ubiquitous_language import BoundedContext, Term, TermKind, TermStore, dump_term_file
+from ubiquitous_language import (
+    BoundedContext,
+    Term,
+    TermKind,
+    dump_term_file,
+)
 
 pytestmark = pytest.mark.scenario_loops
 

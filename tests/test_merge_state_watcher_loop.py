@@ -11,8 +11,6 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock
 
-import pytest
-
 from base_background_loop import LoopDeps
 from config import HydraFlowConfig
 from events import EventBus

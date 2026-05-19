@@ -10,9 +10,7 @@ from __future__ import annotations
 from mockworld.seed import MockWorldSeed
 
 NAME = "s19_report_issue_empty_queue"
-DESCRIPTION = (
-    "ReportIssueLoop sees empty queue → emits worker-status event."
-)
+DESCRIPTION = "ReportIssueLoop sees empty queue → emits worker-status event."
 
 
 def seed() -> MockWorldSeed:

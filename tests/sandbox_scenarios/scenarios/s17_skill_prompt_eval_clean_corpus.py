@@ -11,9 +11,7 @@ from __future__ import annotations
 from mockworld.seed import MockWorldSeed
 
 NAME = "s17_skill_prompt_eval_clean_corpus"
-DESCRIPTION = (
-    "SkillPromptEvalLoop fires with empty corpus → emits worker-status event."
-)
+DESCRIPTION = "SkillPromptEvalLoop fires with empty corpus → emits worker-status event."
 
 
 def seed() -> MockWorldSeed:

@@ -11,9 +11,7 @@ from __future__ import annotations
 from mockworld.seed import MockWorldSeed
 
 NAME = "s16_stale_issue_scan"
-DESCRIPTION = (
-    "StaleIssueLoop scans issues (empty repo) → emits worker-status event."
-)
+DESCRIPTION = "StaleIssueLoop scans issues (empty repo) → emits worker-status event."
 
 
 def seed() -> MockWorldSeed:
