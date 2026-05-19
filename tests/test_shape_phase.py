@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from config import HydraFlowConfig
-from models import Task
+from expert_council import CouncilResult, CouncilVote
+from models import ShapeConversation, Task
 from shape_phase import _SHAPE_OPTIONS_MARKER, ShapePhase
 
 
@@ -190,3 +191,213 @@ class TestFormatOptions:
         assert "**Differentiator:** Strong" in formatted
         assert "Go with A for MVP" in formatted
         assert "Reply with your selection" in formatted
+
+
+# ---------------------------------------------------------------------------
+# ADR-0063 W4 — council round-3 with diversified personas
+# ---------------------------------------------------------------------------
+
+
+def _make_split_result() -> CouncilResult:
+    """Three-way split council result (no consensus)."""
+    return CouncilResult(
+        [
+            CouncilVote("User Advocate", "A", "user reasoning", 7),
+            CouncilVote("Technical Lead", "B", "tech reasoning", 7),
+            CouncilVote("Product Strategist", "C", "strategy reasoning", 6),
+        ]
+    )
+
+
+def _make_consensus_result(direction: str = "B") -> CouncilResult:
+    """2/3 supermajority on *direction*."""
+    return CouncilResult(
+        [
+            CouncilVote("Dissenter", direction, "less bad than alternatives", 8),
+            CouncilVote("Consensus-Seeker", direction, "broadest acceptance", 7),
+            CouncilVote("Regret-in-6-Months", "A", "regret reasoning", 6),
+        ]
+    )
+
+
+class TestCouncilVoteRoundThree:
+    """Round 3 (W4) activates only when rounds 1 + 2 split, then either
+    converges (auto-select) or escalates (returns None)."""
+
+    @pytest.fixture
+    def conv(self) -> ShapeConversation:
+        return ShapeConversation(
+            issue_number=42, started_at="2026-05-19T00:00:00+00:00"
+        )
+
+    def _wire_council(
+        self,
+        phase: ShapePhase,
+        round_results: list[CouncilResult],
+        diversified_result: CouncilResult | None = None,
+    ) -> MagicMock:
+        """Wire a mock ExpertCouncil onto *phase*.
+
+        ``round_results`` supplies the standard-panel ``vote`` returns in
+        order (round 1, round 2). ``diversified_result`` supplies the
+        ``vote_diversified`` return for round 3 (None means round 3 is
+        not expected to be called).
+        """
+        council = MagicMock()
+        council.vote = AsyncMock(side_effect=round_results)
+        council.mediate = AsyncMock(return_value="mediation synthesis text")
+        council.vote_diversified = AsyncMock(return_value=diversified_result)
+        phase._council = council
+        return council
+
+    @pytest.mark.asyncio
+    async def test_round_3_runs_after_two_splits_and_converges(
+        self,
+        phase: ShapePhase,
+        sample_task: Task,
+        conv: ShapeConversation,
+        deps: dict,
+    ) -> None:
+        """Two split rounds followed by a converging diversified-panel vote
+        produces consensus and returns 1 (issue transitioned to plan).
+
+        This is the W4 happy path: standard panel deadlocks twice, the
+        diversified personas break the tie, no human needed.
+        """
+        diversified = _make_consensus_result("B")
+        council = self._wire_council(
+            phase,
+            round_results=[_make_split_result(), _make_split_result()],
+            diversified_result=diversified,
+        )
+
+        result = await phase._run_council_vote(sample_task, conv, "directions text")
+
+        assert result == 1
+        # Standard panel called twice (rounds 1 + 2)
+        assert council.vote.await_count == 2
+        # Mediation runs before round 2
+        council.mediate.assert_awaited_once()
+        # Diversified panel runs exactly once for round 3
+        council.vote_diversified.assert_awaited_once()
+        # The round-3 prompt includes the prior split for context
+        prompt_arg = council.vote_diversified.await_args.args[1]
+        assert "Prior Council Vote (Round 2)" in prompt_arg
+
+    @pytest.mark.asyncio
+    async def test_round_3_split_escalates_to_human(
+        self,
+        phase: ShapePhase,
+        sample_task: Task,
+        conv: ShapeConversation,
+        deps: dict,
+    ) -> None:
+        """If round 3 also splits, ``_run_council_vote`` returns None so the
+        caller can fall through to the existing human-escalation path."""
+        # All three rounds split. Build the diversified split with names
+        # matching the round-3 panel so the format_summary debug output
+        # accurately reflects what happened in production.
+        diversified_split = CouncilResult(
+            [
+                CouncilVote("Dissenter", "A", "argues against B", 7),
+                CouncilVote("Consensus-Seeker", "B", "broadest fit", 6),
+                CouncilVote("Regret-in-6-Months", "C", "least regret", 6),
+            ]
+        )
+        council = self._wire_council(
+            phase,
+            round_results=[_make_split_result(), _make_split_result()],
+            diversified_result=diversified_split,
+        )
+
+        result = await phase._run_council_vote(sample_task, conv, "directions text")
+
+        assert result is None
+        assert council.vote.await_count == 2
+        council.vote_diversified.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_round_1_consensus_skips_round_3(
+        self,
+        phase: ShapePhase,
+        sample_task: Task,
+        conv: ShapeConversation,
+        deps: dict,
+    ) -> None:
+        """W4 must activate ONLY on a split after round 2. If round 1 reaches
+        consensus, neither the mediator nor the diversified panel runs."""
+        consensus = CouncilResult(
+            [
+                CouncilVote("User Advocate", "A", "r", 8),
+                CouncilVote("Technical Lead", "A", "r", 8),
+                CouncilVote("Product Strategist", "A", "r", 8),
+            ]
+        )
+        council = self._wire_council(
+            phase,
+            round_results=[consensus],
+            diversified_result=None,
+        )
+
+        result = await phase._run_council_vote(sample_task, conv, "directions text")
+
+        assert result == 1
+        assert council.vote.await_count == 1
+        council.mediate.assert_not_called()
+        council.vote_diversified.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_round_2_consensus_skips_round_3(
+        self,
+        phase: ShapePhase,
+        sample_task: Task,
+        conv: ShapeConversation,
+        deps: dict,
+    ) -> None:
+        """If round 2 converges, the diversified panel does NOT run — round 3
+        is gated on a split after round 2, not on every council invocation."""
+        round_2_consensus = CouncilResult(
+            [
+                CouncilVote("User Advocate", "B", "r", 7),
+                CouncilVote("Technical Lead", "B", "r", 7),
+                CouncilVote("Product Strategist", "A", "r", 6),
+            ]
+        )
+        council = self._wire_council(
+            phase,
+            round_results=[_make_split_result(), round_2_consensus],
+            diversified_result=None,
+        )
+
+        result = await phase._run_council_vote(sample_task, conv, "directions text")
+
+        assert result == 1
+        assert council.vote.await_count == 2
+        council.mediate.assert_awaited_once()
+        council.vote_diversified.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_round_3_publishes_diversified_event(
+        self,
+        phase: ShapePhase,
+        sample_task: Task,
+        conv: ShapeConversation,
+        deps: dict,
+    ) -> None:
+        """The diversified-round activation must be observable via the event
+        bus so the audit JSONL can attribute W4 outcomes (per ADR-0063
+        measurability section)."""
+        diversified = _make_consensus_result("B")
+        self._wire_council(
+            phase,
+            round_results=[_make_split_result(), _make_split_result()],
+            diversified_result=diversified,
+        )
+
+        await phase._run_council_vote(sample_task, conv, "directions text")
+
+        published_actions = [
+            call.args[0].data.get("action")
+            for call in deps["event_bus"].publish.await_args_list
+        ]
+        assert "council_diversified_round" in published_actions

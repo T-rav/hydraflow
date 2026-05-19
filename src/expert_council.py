@@ -53,6 +53,59 @@ EXPERTS = [
 ]
 
 
+# Diversified-persona experts for round 3 (ADR-0063 W4). When the standard
+# council remains split after two rounds of normal voting + mediation, these
+# three personas often unblock the deadlock by forcing the question from
+# angles the standard experts share too much in common to surface:
+#
+#   * The Dissenter argues *against* whichever direction is leading — the
+#     specific failure modes that make it the wrong choice 6 months out.
+#   * The Consensus-Seeker hunts for the lowest-common-denominator option
+#     that every standard expert can live with, even if it's nobody's first
+#     pick.
+#   * The Regret-in-6-Months persona pre-imagines the post-mortem: assume
+#     the decision shipped, then describe what they wish had been chosen
+#     instead and why.
+DIVERSIFIED_EXPERTS = [
+    {
+        "name": "Dissenter",
+        "perspective": (
+            "You are the contrarian on this council. Your job is to argue "
+            "AGAINST the option that currently appears to be leading in the "
+            "prior round's vote. Identify the specific failure modes that "
+            "would make the leading option the wrong choice 6 months from "
+            "now. Then vote for whichever direction best avoids those failure "
+            "modes — even if it wasn't the leader. If the leading option "
+            "genuinely has no serious downsides relative to its alternatives, "
+            "say so and vote for it with high confidence."
+        ),
+    },
+    {
+        "name": "Consensus-Seeker",
+        "perspective": (
+            "You are the consensus-builder on this council. Look at the prior "
+            "round's votes and identify the lowest-common-denominator option "
+            "that every expert could LIVE WITH, even if it's no one's first "
+            "pick. The goal is not the most ambitious direction or the safest "
+            "direction — it is the one with the broadest acceptable footprint "
+            "across user, technical, and strategic concerns. Vote for that "
+            "option."
+        ),
+    },
+    {
+        "name": "Regret-in-6-Months",
+        "perspective": (
+            "You are looking back from 6 months after this decision shipped. "
+            "Imagine each candidate direction was chosen, then ask: which one "
+            "would the team regret LEAST? Which one would they say 'we wish "
+            "we'd done differently' about the most? Vote for the direction "
+            "you'd regret the least having chosen, and explain the concrete "
+            "regret you'd feel about the rejected alternatives."
+        ),
+    },
+]
+
+
 class CouncilVote:
     """Result of a single expert's vote."""
 
@@ -154,9 +207,36 @@ class ExpertCouncil(BaseRunner):
 
     async def vote(self, task: Task, directions_text: str) -> CouncilResult:
         """Run all experts and collect votes on the proposed directions."""
-        votes: list[CouncilVote] = []
+        return await self._vote_with_panel(task, directions_text, EXPERTS)
 
-        for expert in EXPERTS:
+    async def vote_diversified(self, task: Task, directions_text: str) -> CouncilResult:
+        """Round-3 vote using diversified personas (ADR-0063 W4).
+
+        Runs the :data:`DIVERSIFIED_EXPERTS` panel (Dissenter,
+        Consensus-Seeker, Regret-in-6-Months) instead of the standard
+        role-based panel. Called by :class:`ShapePhase._run_council_vote`
+        only when the standard council remains split after two rounds.
+
+        Returns a :class:`CouncilResult` using the same consensus rule
+        (2/3 supermajority) as the standard vote, so the downstream
+        consensus / escalate handling in :class:`ShapePhase` is unchanged.
+        """
+        return await self._vote_with_panel(task, directions_text, DIVERSIFIED_EXPERTS)
+
+    async def _vote_with_panel(
+        self, task: Task, directions_text: str, panel: list[dict]
+    ) -> CouncilResult:
+        """Run every expert in *panel* and collect their votes.
+
+        Failures from individual experts are logged and skipped so a
+        single crash never disqualifies the whole vote — matches the
+        contract the standard ``vote`` had before extraction.
+        ``reraise_on_credit_or_bug`` still propagates credit-exhaustion
+        and Hydraflow-bug signals up to the caller per dark-factory
+        rules.
+        """
+        votes: list[CouncilVote] = []
+        for expert in panel:
             try:
                 vote = await self._run_expert(task, expert, directions_text)
                 if vote:
@@ -169,7 +249,6 @@ class ExpertCouncil(BaseRunner):
                     task.id,
                     exc,
                 )
-
         return CouncilResult(votes)
 
     async def mediate(
