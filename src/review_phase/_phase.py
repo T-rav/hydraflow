@@ -3221,9 +3221,31 @@ class ReviewPhase:
                     self._insights.record_proposal(category, pre_count=count)
 
                 stale = verify_proposals(self._insights, recent)
+                # Dedup mirror of RetrospectiveLoop._handle_verify_proposals
+                # (#8988). This fallback branch fires only when no
+                # retrospective_queue is wired, but it MUST avoid filing a
+                # duplicate `[HITL] Stale review insight: <category>` when
+                # one is already open — same anti-pattern as the loop site.
                 for category in stale:
                     desc = CATEGORY_DESCRIPTIONS.get(category, category)
                     title = f"[HITL] Stale review insight: {desc}"
+                    hitl_labels = list(self._config.hitl_label)
+                    existing = await self._prs.find_existing_issue(title)
+                    if existing:
+                        await self._prs.post_comment(
+                            existing,
+                            (
+                                f"Still stale — pattern frequency for "
+                                f"**{category}** ({desc}) has not decreased "
+                                f"after {_PROPOSAL_STALE_DAYS}+ days. "
+                                f"Recurring tick from `ReviewPhase` fallback "
+                                f"(retrospective queue not wired); the "
+                                f"underlying escalation remains open.\n\n"
+                                f"_Auto-comment by HydraFlow review insight "
+                                f"verification._"
+                            ),
+                        )
+                        continue
                     body = (
                         f"## Stale Improvement Proposal\n\n"
                         f"The improvement proposal for **{category}** ({desc}) "
@@ -3232,7 +3254,6 @@ class ReviewPhase:
                         f"required to resolve this recurring feedback loop.\n\n"
                         f"---\n*Auto-escalated by HydraFlow review insight verification.*"
                     )
-                    hitl_labels = list(self._config.hitl_label)
                     await self._transitioner.create_task(title, body, hitl_labels)
         except (RuntimeError, OSError):
             status = "error"

@@ -6,9 +6,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W21
 
-- `4667a12` — feat(loops): remove CodeGroomingLoop (#8984) (#8984) *(2026-05-19)*
-- `6d7319a` — feat(adversarial): earlier-adversarial pipeline — Discovery + Shape + Plan dissent stages (#8953) (#8953) *(2026-05-19)*
-- `35d0308` — test(sandbox): bump scenario timeouts past observed pipeline duration (#8989) (#8989) *(2026-05-19)*
 - `8c85c14` — fix(sandbox): wire FakeSubprocessRunner — the actual claude bypass (#8965) (#8965) *(2026-05-18)*
 - `5f762b0` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
 - `119279f` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
@@ -336,4 +333,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `4667a12` on 2026-05-19 07:49 UTC. Source last changed at `4667a12`. Status: 🟢 fresh._
+_Regenerated from commit `67d29f1` on 2026-05-19 07:16 UTC. Source last changed at `67d29f1`. Status: 🟢 fresh._
