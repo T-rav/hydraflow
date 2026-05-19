@@ -6,7 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W21
 
-- `dd8eade` — feat(mockworld): FakeReviewInsightStore satisfies ReviewInsightStorePort (ADR-0047, closes advisor-luab) *(2026-05-19)*
+- `10a0316` — feat(triage): TriageRetryLoop (ADR-0063 W2, closes advisor-vz1l) *(2026-05-19)*
 - `4cd8a62` — feat(mockworld): FakeObservability satisfies ObservabilityPort (ADR-0047, closes advisor-ddje) *(2026-05-19)*
 - `0546b35` — style(tests): ruff format test_fake_bot_pr.py — collapse short kwarg calls *(2026-05-19)*
 - `1c2daf7` — feat(mockworld): FakeBotPR satisfies BotPRPort Protocol (ADR-0047, closes advisor-25fr) *(2026-05-19)*
@@ -346,4 +346,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `dd8eade` on 2026-05-19 16:25 UTC. Source last changed at `dd8eade`. Status: 🟢 fresh._
+_Regenerated from commit `10a0316` on 2026-05-19 16:25 UTC. Source last changed at `10a0316`. Status: 🟢 fresh._

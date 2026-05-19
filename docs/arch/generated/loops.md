@@ -46,8 +46,9 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **StaleIssueLoop** | `src.stale_issue_loop` | 86400 | — | — | — |
 | **TermProposerLoop** | `src.term_proposer_loop` | 14400 | — | — | ADR-0054 |
 | **TermPrunerLoop** | `src.term_pruner_loop` | 86400 | — | — | — |
+| **TriageRetryLoop** | `src.triage_retry_loop` | 86400 | — | — | ADR-0063 |
 | **TrustFleetSanityLoop** | `src.trust_fleet_sanity_loop` | 600 | — | BACKGROUND_WORKER_STATUS | — |
 | **WikiRotDetectorLoop** | `src.wiki_rot_detector_loop` | 604800 | — | — | — |
 | **WorkspaceGCLoop** | `src.workspace_gc_loop` | 1800 | — | — | — |
 
-_Regenerated from commit `dd8eade` on 2026-05-19 16:25 UTC. Source last changed at `dd8eade`. Status: 🟢 fresh._
+_Regenerated from commit `10a0316` on 2026-05-19 16:25 UTC. Source last changed at `10a0316`. Status: 🟢 fresh._
