@@ -176,12 +176,6 @@ def _build_diagnostic(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     )
 
 
-def _build_code_grooming(ports: dict[str, Any], config: Any, deps: Any) -> Any:
-    from code_grooming_loop import CodeGroomingLoop  # noqa: PLC0415
-
-    return CodeGroomingLoop(config=config, pr_manager=ports["github"], deps=deps)
-
-
 def _build_report_issue(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from report_issue_loop import ReportIssueLoop  # noqa: PLC0415
 
@@ -1170,7 +1164,6 @@ _BUILDERS: dict[str, Any] = {
     "repo_wiki": _build_repo_wiki,
     "sentry_ingest": _build_sentry_ingest,
     "diagnostic": _build_diagnostic,
-    "code_grooming": _build_code_grooming,
     "report_issue": _build_report_issue,
     "epic_sweeper": _build_epic_sweeper,
     "security_patch": _build_security_patch,

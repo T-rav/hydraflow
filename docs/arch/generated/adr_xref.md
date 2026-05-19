@@ -75,6 +75,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0062 | `src.entry_evidence_loop`, `src.term_proposer_llm` |
 | ADR-0063 | `src.auto_agent_preflight_loop`, `src.discover_runner`, `src.implement_phase`, `src.plan_phase`, `src.review_phase._phase`, `src.shape_phase`, `src.triage_phase` |
 | ADR-0064 | `src.adversarial_labels`, `src.adversarial_retry_loop`, `src.assumption_surfacer`, `src.complexity_gate`, `src.discovery_council`, `src.discovery_council_prompts`, `src.events`, `src.models`, `src.pending_concerns`, `src.plan_council`, `src.plan_council_prompts`, `src.plan_phase`, `src.post_merge_handler`, `src.shape_challenger`, `src.shape_expert_council`, `src.shape_phase`, `src.spec_ac_generator`, `src.spec_judge`, `src.wiki_carryover` |
+| ADR-0065 | `src.code_grooming_loop`, `src.config`, `src.skill_registry` |
 
 ## Module → ADRs
 
@@ -95,8 +96,9 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.bg_worker_manager` | ADR-0049 |
 | `src.caching_issue_store` | ADR-0041 |
 | `src.cli` | ADR-0036 |
+| `src.code_grooming_loop` | ADR-0065 |
 | `src.complexity_gate` | ADR-0064 |
-| `src.config` | ADR-0002, ADR-0009, ADR-0010, ADR-0018, ADR-0021, ADR-0022, ADR-0031, ADR-0033, ADR-0034, ADR-0035, ADR-0036, ADR-0045, ADR-0050, ADR-0055 |
+| `src.config` | ADR-0002, ADR-0009, ADR-0010, ADR-0018, ADR-0021, ADR-0022, ADR-0031, ADR-0033, ADR-0034, ADR-0035, ADR-0036, ADR-0045, ADR-0050, ADR-0055, ADR-0065 |
 | `src.contract_diff` | ADR-0047, ADR-0052 |
 | `src.contract_recording` | ADR-0047, ADR-0052 |
 | `src.contract_refresh_loop` | ADR-0045, ADR-0047 |
@@ -178,6 +180,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.shape_phase` | ADR-0031, ADR-0045, ADR-0063, ADR-0064 |
 | `src.shape_runner` | ADR-0031, ADR-0045 |
 | `src.skill_prompt_eval_loop` | ADR-0045 |
+| `src.skill_registry` | ADR-0065 |
 | `src.spec_ac_generator` | ADR-0064 |
 | `src.spec_judge` | ADR-0064 |
 | `src.staging_bisect_loop` | ADR-0045, ADR-0048 |
@@ -204,4 +207,4 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.workspace` | ADR-0055 |
 | `src.worktree` | ADR-0003, ADR-0009, ADR-0010 |
 
-_Regenerated from commit `f9c757b` on 2026-05-19 06:50 UTC. Source last changed at `f9c757b`. Status: 🟢 fresh._
+_Regenerated from commit `4667a12` on 2026-05-19 07:49 UTC. Source last changed at `4667a12`. Status: 🟢 fresh._

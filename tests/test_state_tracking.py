@@ -51,8 +51,6 @@ class TestInitialization:
             "dependabot_merge_settings",
             "ci_monitor_settings",
             "ci_monitor_tracked_failures",
-            "code_grooming_filed",
-            "code_grooming_settings",
             "cost_budget_killed_workers",
             "disabled_workers",
             "epic_states",

@@ -16,7 +16,6 @@ areas:
       Per ADR-0029 (caretaker pattern) and ADR-0049 (kill-switch).
     loops:
       - ADRReviewerLoop
-      - CodeGroomingLoop
       - CostBudgetWatcherLoop
       - DependabotMergeLoop
       - DiagnosticLoop

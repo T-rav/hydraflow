@@ -21,7 +21,6 @@ from beads_manager import BeadsManager
 from bug_reproducer import BugReproducer
 from caching_issue_store import CachingIssueStore
 from ci_monitor_loop import CIMonitorLoop  # noqa: TCH001
-from code_grooming_loop import CodeGroomingLoop  # noqa: TCH001
 from config import Credentials, HydraFlowConfig
 from contract_refresh_loop import ContractRefreshLoop
 from corpus_learning_loop import CorpusLearningLoop
@@ -191,7 +190,6 @@ class ServiceRegistry:
     stale_issue_gc_loop: StaleIssueGCLoop
     ci_monitor_loop: CIMonitorLoop
     security_patch_loop: SecurityPatchLoop
-    code_grooming_loop: CodeGroomingLoop
     repo_wiki_store: RepoWikiStore
     repo_wiki_loop: RepoWikiLoop
     diagnostic_loop: DiagnosticLoop
@@ -975,12 +973,6 @@ def build_services(
         pr_manager=prs,
         deps=loop_deps,
     )
-    code_grooming_loop = CodeGroomingLoop(  # noqa: F841
-        config=config,
-        pr_manager=prs,
-        deps=loop_deps,
-        credentials=credentials,
-    )
     repo_wiki_loop = RepoWikiLoop(
         config=config,
         wiki_store=repo_wiki_store,
@@ -1325,7 +1317,6 @@ def build_services(
         stale_issue_gc_loop=stale_issue_gc_loop,
         ci_monitor_loop=ci_monitor_loop,
         security_patch_loop=security_patch_loop,
-        code_grooming_loop=code_grooming_loop,
         repo_wiki_store=repo_wiki_store,
         repo_wiki_loop=repo_wiki_loop,
         diagnostic_loop=diagnostic_loop,

@@ -136,7 +136,6 @@ class TestIntervalFieldsHaveBounds:
             "stale_issue_gc_interval": "stale_issue_gc",
             "ci_monitor_interval": "ci_monitor",
             "security_patch_interval": "security_patch",
-            "code_grooming_interval": "code_grooming",
         }
 
         missing = set()

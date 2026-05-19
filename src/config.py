@@ -210,7 +210,6 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("sentry_min_events", "SENTRY_MIN_EVENTS", 2),
     ("sentry_max_creation_attempts", "SENTRY_MAX_CREATION_ATTEMPTS", 3),
     ("security_patch_interval", "HYDRAFLOW_SECURITY_PATCH_INTERVAL", 3600),
-    ("code_grooming_interval", "HYDRAFLOW_CODE_GROOMING_INTERVAL", 86400),
     ("repo_wiki_interval", "HYDRAFLOW_REPO_WIKI_INTERVAL", 3600),
     ("max_repo_wiki_chars", "HYDRAFLOW_MAX_REPO_WIKI_CHARS", 15_000),
     ("diagnostic_interval", "HYDRAFLOW_DIAGNOSTIC_INTERVAL", 30),
@@ -338,7 +337,6 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_PRECONDITION_GATE_ENABLED",
         False,
     ),
-    ("code_grooming_enabled", "HYDRAFLOW_CODE_GROOMING_ENABLED", False),
     ("docker_read_only_root", "HYDRAFLOW_DOCKER_READ_ONLY_ROOT", True),
     ("docker_no_new_privileges", "HYDRAFLOW_DOCKER_NO_NEW_PRIVILEGES", True),
     (
@@ -525,7 +523,6 @@ _ENV_COMBO_OVERRIDES: list[tuple[str, str, str]] = [
     ),
     ("HYDRAFLOW_WIKI_COMPILATION", "wiki_compilation_tool", "wiki_compilation_model"),
     ("HYDRAFLOW_SENTRY", "sentry_tool", "sentry_model"),
-    ("HYDRAFLOW_CODE_GROOMING", "code_grooming_tool", "code_grooming_model"),
     ("HYDRAFLOW_ADR_REVIEW", "adr_review_tool", "adr_review_model"),
     ("HYDRAFLOW_REPORT_ISSUE", "report_issue_tool", "report_issue_model"),
 ]
@@ -1382,22 +1379,6 @@ class HydraFlowConfig(BaseModel):
         ),
     )
 
-    # Code grooming
-    code_grooming_enabled: bool = Field(
-        default=False,
-        description=(
-            "Enable the daily code grooming audit worker. Defaults to "
-            "False because the audit tends to surface noisy, low-signal "
-            "findings; operators opt in explicitly when they want it."
-        ),
-    )
-    code_grooming_interval: int = Field(
-        default=86400,
-        ge=3600,
-        le=604800,
-        description="Seconds between code grooming audit cycles",
-    )
-
     # Repo wiki
     repo_wiki_interval: int = Field(
         default=3600,
@@ -1653,14 +1634,6 @@ class HydraFlowConfig(BaseModel):
     sentry_model: str = Field(
         default="sonnet",
         description="Model for sentry_loop ingestion worker (issue triage + filing from Sentry events) — sonnet is sufficient; the task is stack-trace parsing + issue filing, not deep reasoning. Opus was 4-5× the cost for no measurable quality win.",
-    )
-    code_grooming_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
-        default="claude",
-        description="CLI backend for code_grooming_loop audit worker",
-    )
-    code_grooming_model: str = Field(
-        default="sonnet",
-        description="Model for code_grooming_loop audit worker (daily code-quality scan)",
     )
     report_issue_interval: int = Field(
         default=30,
@@ -2933,7 +2906,6 @@ def _apply_profile_overrides(config: HydraFlowConfig) -> None:
             "transcript_summary_tool",
             "report_issue_tool",
             "sentry_tool",
-            "code_grooming_tool",
             "adr_review_tool",
         ):
             _apply_if_default(field, config.background_tool)
@@ -2944,7 +2916,6 @@ def _apply_profile_overrides(config: HydraFlowConfig) -> None:
             "transcript_summary_model",
             "report_issue_model",
             "sentry_model",
-            "code_grooming_model",
             "adr_review_model",
         ):
             _apply_if_default(field, config.background_model)
@@ -3019,7 +2990,6 @@ def _harmonize_tool_model_defaults(config: HydraFlowConfig) -> None:
         ),
         ("report_issue", config.report_issue_tool, config.report_issue_model),
         ("sentry", config.sentry_tool, config.sentry_model),
-        ("code_grooming", config.code_grooming_tool, config.code_grooming_model),
         ("adr_review", config.adr_review_tool, config.adr_review_model),
     ]
 

@@ -512,12 +512,12 @@ See `docs/wiki/gotchas.md` for the canonical rule descriptions.
 - **medium**: over-engineering accumulation (single-use helpers, speculative abstractions, stale feature flags, backwards-compat shims)
 - **low**: cosmetic drift (old comments, unused `_`-vars)
 
-Only `high` and `medium` findings are filed as issues by the grooming loop — `low` findings are logged for trend analysis but not turned into work.
+Only `high` and `medium` findings should be filed as issues — `low` findings can be logged for trend analysis but not turned into work.
 
 ## Keep-in-sync principle
 This agent reads `docs/wiki/gotchas.md` at runtime. Adding a new avoided pattern to that doc automatically adds it to the next sweep — no code change needed here. If you find yourself hardcoding a new pattern in this prompt, STOP and add it to the doc instead.
 
-Emit findings as JSON objects (one per theme) matching the schema parsed by `src/code_grooming_loop.py::_FINDING_RE`:
+Emit findings as JSON objects (one per theme):
   `{"id": "<stable hash>", "severity": "high|medium|low", "title": "...", "description": "<markdown>"}`
 
 Return a summary of all findings grouped by category, with GH issue URLs created.

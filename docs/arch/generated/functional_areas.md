@@ -8,7 +8,6 @@ Top-level conceptual view of HydraFlow. Each cluster is a **functional area** �
 flowchart LR
     subgraph caretaking["Caretaking"]
         caretaking_ADRReviewerLoop([ADRReviewerLoop])
-        caretaking_CodeGroomingLoop([CodeGroomingLoop])
         caretaking_CostBudgetWatcherLoop([CostBudgetWatcherLoop])
         caretaking_DependabotMergeLoop([DependabotMergeLoop])
         caretaking_DiagnosticLoop([DiagnosticLoop])
@@ -91,7 +90,6 @@ Autonomous background loops that maintain the system without human input — wik
 **Loops**
 
 - `ADRReviewerLoop` — `src.adr_reviewer_loop`
-- `CodeGroomingLoop` — `src.code_grooming_loop`
 - `CostBudgetWatcherLoop` — `src.cost_budget_watcher_loop`
 - `DependabotMergeLoop` — `src.dependabot_merge_loop`
 - `DiagnosticLoop` — `src.diagnostic_loop`
@@ -276,4 +274,4 @@ The plan→implement→review pipeline driving each issue from hydraflow-ready t
 **Related ADRs:** `ADR-0001`, `ADR-0004`, `ADR-0011`, `ADR-0012`, `ADR-0029`
 
 
-_Regenerated from commit `f9c757b` on 2026-05-19 06:50 UTC. Source last changed at `f9c757b`. Status: 🟢 fresh._
+_Regenerated from commit `4667a12` on 2026-05-19 07:49 UTC. Source last changed at `4667a12`. Status: 🟢 fresh._

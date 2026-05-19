@@ -851,35 +851,3 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             return JSONResponse({"error": "Invalid settings"}, status_code=400)
         ctx.state.set_ci_monitor_settings(new_settings)
         return JSONResponse({"status": "ok", **new_settings.model_dump()})
-
-    # --- Code Grooming Settings ---
-
-    @router.get("/api/code-grooming/settings")
-    async def get_code_grooming_settings() -> JSONResponse:
-        """Return current code grooming settings."""
-        settings = ctx.state.get_code_grooming_settings()
-        return JSONResponse(settings.model_dump())
-
-    @router.post("/api/code-grooming/settings")
-    async def set_code_grooming_settings(body: dict[str, Any]) -> JSONResponse:
-        """Update code grooming settings."""
-        current = ctx.state.get_code_grooming_settings()
-        update = current.model_dump()
-        for key in (
-            "max_issues_per_cycle",
-            "min_priority",
-            "enabled_audits",
-            "dry_run",
-        ):
-            if key in body:
-                update[key] = body[key]
-        try:
-            from models import CodeGroomingSettings  # noqa: PLC0415
-
-            new_settings = CodeGroomingSettings(**update)
-        except ValidationError as exc:
-            return JSONResponse({"error": _safe_error_message(exc)}, status_code=400)
-        except ValueError:
-            return JSONResponse({"error": "Invalid settings"}, status_code=400)
-        ctx.state.set_code_grooming_settings(new_settings)
-        return JSONResponse({"status": "ok", **new_settings.model_dump()})
