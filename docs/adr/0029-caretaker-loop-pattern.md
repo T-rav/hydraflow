@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted (CodeGroomingLoop removed in ADR-0065 — the pattern itself remains in use by the other three caretaker loops listed below)
 
 ## Context
 

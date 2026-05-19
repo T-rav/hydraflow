@@ -13,8 +13,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `ADRReviewerLoop` | ❌ | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_adr_reviewer_loop.py` | ✅ in catalog | ❌ |
 | `AdrTouchpointAuditorLoop` | ✅ [0056, 0057] | ❌ | ❌ | ❌ | ✅ `test_adr_touchpoint_auditor_loop.py` | ✅ in catalog | ❌ |
 | `AutoAgentPreflightLoop` | ✅ [0050, 0063] | ✅ [dark-factory.md] | ❌ | ❌ | ✅ `test_auto_agent_preflight_loop.py` | ✅ in catalog | ❌ |
-| `CIMonitorLoop` | ✅ [0029] | ❌ | ❌ | ❌ | ✅ `test_ci_monitor_loop.py` | ⚠️ in catalog (no scenario file) | ✅ `s15_ci_monitor_main_branch_red.py` |
-| `CodeGroomingLoop` | ✅ [0029] | ✅ [architecture-async-control.md] | ❌ | ✅ (caretaker loop) | ✅ `test_code_grooming_loop.py` | ✅ in catalog | ❌ |
+| `CIMonitorLoop` | ✅ [0029, 0065] | ❌ | ❌ | ❌ | ✅ `test_ci_monitor_loop.py` | ⚠️ in catalog (no scenario file) | ✅ `s15_ci_monitor_main_branch_red.py` |
 | `ContractRefreshLoop` | ✅ [0045, 0047] | ❌ | ❌ | ❌ | ✅ `test_contract_refresh_loop.py` | ✅ in catalog | ❌ |
 | `CorpusLearningLoop` | ✅ [0045] | ❌ | ❌ | ❌ | ✅ `test_corpus_learning_loop.py` | ✅ in catalog | ❌ |
 | `CostBudgetWatcherLoop` | ✅ [0054] | ✅ [architecture.md] | ✅ loops.md | ✅ (caretaker loop) | ❌ | ⚠️ in catalog (no scenario file) | ❌ |
@@ -26,7 +25,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `EpicMonitorLoop` | ❌ | ✅ [architecture-async-control.md] | ❌ | ✅ (caretaker loop) | ✅ `test_epic_monitor_loop.py` | ✅ in catalog | ❌ |
 | `EpicSweeperLoop` | ❌ | ✅ [architecture-async-control.md] | ❌ | ✅ (caretaker loop) | ✅ `test_epic_sweeper_loop.py` | ✅ in catalog | ❌ |
 | `FakeCoverageAuditorLoop` | ✅ [0045, 0056, 0057] | ❌ | ❌ | ❌ | ✅ `test_fake_coverage_auditor_loop.py` | ✅ in catalog | ❌ |
-| `FlakeTrackerLoop` | ✅ [0045, 0056, 0057] | ❌ | ❌ | ❌ | ✅ `test_flake_tracker_loop.py` | ✅ in catalog | ❌ |
+| `FlakeTrackerLoop` | ✅ [0045, 0056, 0057, 0065] | ❌ | ❌ | ❌ | ✅ `test_flake_tracker_loop.py` | ✅ in catalog | ❌ |
 | `GitHubCacheLoop` | ❌ | ❌ | ❌ | ✅ (caretaker loop) | ❌ | ❌ | ❌ |
 | `HealthMonitorLoop` | ✅ [0045, 0046] | ✅ [testing.md] | ❌ | ✅ (caretaker loop) | ✅ `test_health_monitor_loop_primary_cycle.py` | ⚠️ in catalog (no scenario file) | ❌ |
 | `LabelDriftWatcherLoop` | ✅ [0056] | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_label_drift_watcher_loop.py` | ⚠️ in catalog (no scenario file) | ❌ |
@@ -42,7 +41,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `RetrospectiveLoop` | ❌ | ✅ [architecture-async-control.md] | ❌ | ✅ (caretaker loop) | ✅ `test_retrospective_loop.py` | ✅ in catalog | ❌ |
 | `RunsGCLoop` | ❌ | ✅ [architecture-async-control.md] | ❌ | ✅ (caretaker loop) | ✅ `test_runs_gc_loop.py` | ✅ in catalog | ❌ |
 | `SandboxFailureFixerLoop` | ✅ [0052, 0063] | ✅ [dark-factory.md] | ❌ | ❌ | ✅ `test_sandbox_failure_fixer_loop.py` | ✅ in catalog | ❌ |
-| `SecurityPatchLoop` | ✅ [0029] | ✅ [architecture-async-control.md] | ❌ | ✅ (caretaker loop) | ✅ `test_security_patch_loop.py` | ✅ in catalog | ❌ |
+| `SecurityPatchLoop` | ✅ [0029, 0065] | ✅ [architecture-async-control.md] | ❌ | ✅ (caretaker loop) | ✅ `test_security_patch_loop.py` | ✅ in catalog | ❌ |
 | `SentryLoop` | ✅ [0055] | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_sentry_loop.py` | ❌ | ❌ |
 | `SkillPromptEvalLoop` | ✅ [0045] | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_skill_prompt_eval_loop.py` | ✅ in catalog | ❌ |
 | `StagingBisectLoop` | ✅ [0045, 0048, 0063] | ✅ [architecture.md] | ❌ | ❌ | ✅ `test_staging_bisect_loop.py` | ✅ in catalog | ❌ |
@@ -77,4 +76,4 @@ HITL trigger). It is not regenerable from source and is maintained in
 `docs/arch/coverage_matrix.md` (the hand-curated baseline document).
 
 
-_Regenerated from commit `f9c757b` on 2026-05-19 06:50 UTC. Source last changed at `f9c757b`. Status: 🟢 fresh._
+_Regenerated from commit `67d29f1` on 2026-05-19 07:41 UTC. Source last changed at `67d29f1`. Status: 🟢 fresh._

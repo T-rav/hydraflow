@@ -233,7 +233,7 @@ describe('EDITABLE_INTERVAL_WORKERS includes dependabot_merge', () => {
 
 describe('WORKER_PRESETS', () => {
   it('has exactly the expected worker keys', () => {
-    expect(Object.keys(WORKER_PRESETS).sort()).toEqual(['adr_reviewer', 'ci_monitor', 'code_grooming', 'dependabot_merge', 'pipeline_poller', 'report_issue', 'security_patch', 'sentry_ingest', 'stale_issue'])
+    expect(Object.keys(WORKER_PRESETS).sort()).toEqual(['adr_reviewer', 'ci_monitor', 'dependabot_merge', 'pipeline_poller', 'report_issue', 'security_patch', 'sentry_ingest', 'stale_issue'])
   })
 
   it('maps pipeline_poller to PIPELINE_POLLER_PRESETS', () => {

@@ -17,7 +17,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from events import EventBus
 from models import (
     CIMonitorSettings,
-    CodeGroomingSettings,
     DependabotMergeSettings,
     SecurityPatchSettings,
     StaleIssueSettings,
@@ -169,42 +168,6 @@ class TestCIMonitorSettingsEndpoints:
 
 
 # ---------------------------------------------------------------------------
-# Code Grooming Settings
-# ---------------------------------------------------------------------------
-
-
-class TestCodeGroomingSettingsEndpoints:
-    """GET/POST /api/code-grooming/settings use ctx.state, not orch.state."""
-
-    @pytest.mark.asyncio
-    async def test_get_code_grooming_settings_without_orchestrator(
-        self, _router_no_orch
-    ):
-        router, _state = _router_no_orch
-        handler = find_endpoint(router, "/api/code-grooming/settings", method="GET")
-        assert handler is not None
-        response = await handler()
-        data = json.loads(response.body)
-        assert data == CodeGroomingSettings().model_dump()
-
-    @pytest.mark.asyncio
-    async def test_post_code_grooming_settings_without_orchestrator(
-        self, _router_no_orch
-    ):
-        router, state = _router_no_orch
-        handler = find_endpoint(router, "/api/code-grooming/settings", method="POST")
-        assert handler is not None
-        response = await handler(body={"max_issues_per_cycle": 10, "dry_run": True})
-        data = json.loads(response.body)
-        assert data["status"] == "ok"
-        assert data["max_issues_per_cycle"] == 10
-        assert data["dry_run"] is True
-        settings = state.get_code_grooming_settings()
-        assert settings.max_issues_per_cycle == 10
-        assert settings.dry_run is True
-
-
-# ---------------------------------------------------------------------------
 # Source-level guard: no orch.state in settings endpoints
 # ---------------------------------------------------------------------------
 
@@ -224,7 +187,6 @@ class TestNoOrchStateInSettings:
             "stale_issue",
             "security_patch",
             "ci_monitor",
-            "code_grooming",
         ):
             assert f"orch.state.get_{name}_settings" not in source
             assert f"orch.state.set_{name}_settings" not in source

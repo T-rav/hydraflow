@@ -1716,17 +1716,6 @@ class CIMonitorSettings(BaseModel):
     create_issue: bool = True
 
 
-class CodeGroomingSettings(BaseModel):
-    """Configuration for the code grooming worker."""
-
-    max_issues_per_cycle: int = Field(default=5, ge=1, le=50)
-    min_priority: Literal["P0", "P1", "P2", "P3"] = "P1"
-    enabled_audits: list[str] = Field(
-        default_factory=lambda: ["lint", "complexity", "dead_code"]
-    )
-    dry_run: bool = False
-
-
 class ActiveTraceRun(BaseModel):
     """A single in-progress trace run stored in ``trace_runs["active"]``."""
 
@@ -1823,10 +1812,6 @@ class StateData(BaseModel):
     route_back_counts: dict[str, int] = Field(default_factory=dict)
     ci_monitor_settings: CIMonitorSettings = Field(default_factory=CIMonitorSettings)
     ci_monitor_tracked_failures: dict[str, str] = Field(default_factory=dict)
-    code_grooming_settings: CodeGroomingSettings = Field(
-        default_factory=CodeGroomingSettings
-    )
-    code_grooming_filed: list[str] = Field(default_factory=list)
     # Trust fleet — RCBudgetLoop (spec §4.8)
     rc_budget_duration_history: list[dict[str, Any]] = Field(default_factory=list)
     rc_budget_attempts: dict[str, int] = Field(default_factory=dict)

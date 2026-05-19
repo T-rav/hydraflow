@@ -6,8 +6,20 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W21
 
-- `f9c757b` — merge: third pass — integrate latest origin/staging (DiscoverRunner/ShapeRunner phase_name fix) *(2026-05-18)*
-- `26f0ac7` — merge: second pass — integrate latest origin/staging (CI cassettes + flag) *(2026-05-18)*
+- `8c85c14` — fix(sandbox): wire FakeSubprocessRunner — the actual claude bypass (#8965) (#8965) *(2026-05-18)*
+- `5f762b0` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
+- `119279f` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
+- `0d3d203` — fix(persistence): ADR-0021 data layout + metrics path slug-doubling (closes slice 5.6 advisor-0ca7) *(2026-05-18)*
+- `4a5caa1` — fix(sandbox): also disable ResearchRunner — second claude-spawning caller (#8966) (#8966) *(2026-05-18)*
+- `6d35133` — fix(lint): ruff auto-fixes after staging rebase *(2026-05-18)*
+- `7ad3209` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
+- `6badaf2` — fix(format): ruff format *(2026-05-18)*
+- `e80d302` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
+- `d67e2b4` — fix: ruff auto-fixes (unused imports + import sort) *(2026-05-18)*
+- `990441b` — fix(format): ruff format *(2026-05-18)*
+- `47d4138` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
+- `95b28e1` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
+- `ff38501` — fix: ruff auto-fixes (unused imports + import sort) *(2026-05-18)*
 - `280478c` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
 - `b6e104d` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
 - `bcc0b25` — fix(contracts): widen Cassette._validate_adapter to accept all 9 known fakes (closes slice 5.7) *(2026-05-18)*
@@ -334,4 +346,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `f9c757b` on 2026-05-19 06:50 UTC. Source last changed at `f9c757b`. Status: 🟢 fresh._
+_Regenerated from commit `67d29f1` on 2026-05-19 07:41 UTC. Source last changed at `67d29f1`. Status: 🟢 fresh._

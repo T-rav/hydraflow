@@ -227,7 +227,7 @@ _Source: #6360 (plan)_
 
 ## Background loops: five-step audit pattern
 
-(1) _run_audit() invokes slash command; (2) parse severity-headed output into findings; (3) deduplicate via DedupStore (architecture_audit_dedup.json, test_audit_dedup.json); (4) file GitHub issues for Critical/High; (5) track via discovery. Pattern from CodeGroomingLoop. See also: Async patterns—background loop wiring.
+(1) _run_audit() invokes slash command; (2) parse severity-headed output into findings; (3) deduplicate via DedupStore (architecture_audit_dedup.json, test_audit_dedup.json); (4) file GitHub issues for Critical/High; (5) track via discovery. (Pattern previously hosted by CodeGroomingLoop; the loop was removed in ADR-0065, but the five-step shape still describes any future audit-style background worker.) See also: Async patterns—background loop wiring.
 
 **Why:** Establishes repeatable, discoverable audit infrastructure.
 

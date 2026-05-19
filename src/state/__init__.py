@@ -26,7 +26,6 @@ from ._adr_audit import AdrAuditStateMixin
 from ._adversarial import AdversarialStateMixin
 from ._auto_agent import AutoAgentStateMixin
 from ._ci_monitor import CIMonitorStateMixin
-from ._code_grooming import CodeGroomingStateMixin
 from ._contract_refresh import ContractRefreshStateMixin
 from ._corpus_learning import CorpusLearningStateMixin
 from ._dependabot_merge import DependabotMergeStateMixin
@@ -84,7 +83,6 @@ class StateTracker(
     StagingBisectStateMixin,
     SecurityPatchStateMixin,
     CIMonitorStateMixin,
-    CodeGroomingStateMixin,
     DiagnosticStateMixin,
     SentryStateMixin,
     TraceRunsMixin,

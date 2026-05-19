@@ -70,7 +70,6 @@ _TARGET_WORKERS = (
     "trust_fleet_sanity",
     "contract_refresh",
     "corpus_learning",
-    "code_grooming",
     "retrospective",
 )
 

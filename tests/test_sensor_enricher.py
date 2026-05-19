@@ -51,7 +51,7 @@ class TestFileChangedTrigger:
         trigger = FileChanged("src/*_loop.py")
         assert trigger.matches(
             raw_output="",
-            changed_files=[Path("src/code_grooming_loop.py")],
+            changed_files=[Path("src/sentry_loop.py")],
         )
 
     def test_no_match_when_unrelated_file(self) -> None:
