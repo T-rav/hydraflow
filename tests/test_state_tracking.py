@@ -103,6 +103,7 @@ class TestInitialization:
             "auto_reverts_successful",
             "fake_coverage_attempts",
             "fake_coverage_last_known",
+            "fake_coverage_rollup_issues",
             "flake_attempts",
             "flake_counts",
             "flake_reruns_total",

@@ -38,3 +38,26 @@ class FakeCoverageStateMixin:
         attempts.pop(key, None)
         self._data.fake_coverage_attempts = attempts
         self.save()
+
+    # --- #8986 rollup issue tracking ---
+
+    def get_fake_coverage_rollup_issue(self, key: str) -> int | None:
+        """Return the open rollup issue number for ``key`` (``{Fake}:{kind}``),
+        or ``None`` if no rollup is tracked.
+        """
+        value = self._data.fake_coverage_rollup_issues.get(key)
+        return int(value) if value else None
+
+    def set_fake_coverage_rollup_issue(self, key: str, issue_number: int) -> None:
+        """Record the open rollup issue number for ``key`` (``{Fake}:{kind}``)."""
+        mapping = dict(self._data.fake_coverage_rollup_issues)
+        mapping[key] = int(issue_number)
+        self._data.fake_coverage_rollup_issues = mapping
+        self.save()
+
+    def clear_fake_coverage_rollup_issue(self, key: str) -> None:
+        """Forget the rollup issue number for ``key`` (closed-by-human reset)."""
+        mapping = dict(self._data.fake_coverage_rollup_issues)
+        mapping.pop(key, None)
+        self._data.fake_coverage_rollup_issues = mapping
+        self.save()

@@ -483,6 +483,9 @@ def _build_fake_coverage_auditor(ports: dict[str, Any], config: Any, deps: Any) 
         # Default < _MAX_ATTEMPTS=3 so gap-filing path is taken; escalation
         # tests override explicitly via ``fake_coverage_state``.
         state.inc_fake_coverage_attempts.return_value = 1
+        # #8986 rollup tracking: default to no tracked rollup so the first
+        # tick files a fresh issue (the typical scenario start state).
+        state.get_fake_coverage_rollup_issue.return_value = None
         ports["fake_coverage_state"] = state
 
     dedup = ports.get("fake_coverage_dedup")
@@ -508,6 +511,14 @@ def _build_fake_coverage_auditor(ports: dict[str, Any], config: Any, deps: Any) 
     grep = ports.get("fake_coverage_grep")
     if grep is not None:
         loop._grep_scenario_for_helper = grep  # type: ignore[method-assign]
+    # #8986 — the rollup-existence probe also shells out to ``gh``; default
+    # to "no open rollups" so scenarios don't need to seed it unless they
+    # specifically test the closed-by-human / update-existing paths.
+    list_titles = ports.get("fake_coverage_list_open_titles")
+    if list_titles is None:
+        list_titles = AsyncMock(return_value=set())
+        ports["fake_coverage_list_open_titles"] = list_titles
+    loop._list_open_rollup_titles = list_titles  # type: ignore[method-assign]
 
     return loop
 
