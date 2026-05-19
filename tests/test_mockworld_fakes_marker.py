@@ -19,6 +19,7 @@ import pytest
 
 from mockworld.fakes import (
     FakeBeads,
+    FakeBotPR,
     FakeClock,
     FakeDocker,
     FakeFS,
@@ -40,6 +41,7 @@ from mockworld.fakes import (
 # generated MockWorld map to surface it.
 _FAKE_CLASSES = [
     FakeBeads,
+    FakeBotPR,
     FakeClock,
     FakeDocker,
     FakeFS,
