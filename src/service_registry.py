@@ -62,6 +62,7 @@ from models import StatusCallback
 from observability.sentry_adapter import SentryObservabilityAdapter
 from plan_phase import PlanPhase
 from plan_reviewer import PlanReviewer
+from plan_touchpoint_expander import PlanTouchpointExpander
 from planner import PlannerRunner
 from ports import (
     IssueFetcherPort,
@@ -708,6 +709,13 @@ def build_services(
             },
             spec_ac_agent=adversarial_agent,
             spec_judge_agent=adversarial_agent,
+        )
+        # ADR-0063 W3b: the plan touchpoint-expander shares the same
+        # AgentLike contract and the same enablement gate. Wired post-
+        # construction (mirrors ``attach_adversarial_agents``) so the
+        # field default stays ``None`` for legacy code paths and tests.
+        planner_phase._touchpoint_expander = PlanTouchpointExpander(
+            agent=adversarial_agent,
         )
         discover_phase.attach_adversarial_agents(
             surfacer_agent=adversarial_agent,
