@@ -71,15 +71,9 @@ async def test_open_bot_pr_records_call() -> None:
 @pytest.mark.asyncio
 async def test_open_bot_pr_increments_pr_number() -> None:
     fake = FakeBotPR()
-    n1 = await fake.open_bot_pr(
-        branch="b1", title="T1", body="", labels=[], files={}
-    )
-    n2 = await fake.open_bot_pr(
-        branch="b2", title="T2", body="", labels=[], files={}
-    )
-    n3 = await fake.open_bot_pr(
-        branch="b3", title="T3", body="", labels=[], files={}
-    )
+    n1 = await fake.open_bot_pr(branch="b1", title="T1", body="", labels=[], files={})
+    n2 = await fake.open_bot_pr(branch="b2", title="T2", body="", labels=[], files={})
+    n3 = await fake.open_bot_pr(branch="b3", title="T3", body="", labels=[], files={})
     assert (n1, n2, n3) == (1, 2, 3)
     assert len(fake.calls) == 3
 
@@ -110,7 +104,9 @@ async def test_reset_clears_calls_and_resets_counter() -> None:
     assert fake.calls == []
     assert fake.next_pr_number == 1
 
-    n = await fake.open_bot_pr(branch="fresh", title="Fresh", body="", labels=[], files={})
+    n = await fake.open_bot_pr(
+        branch="fresh", title="Fresh", body="", labels=[], files={}
+    )
     assert n == 1
     assert len(fake.calls) == 1
 
@@ -129,9 +125,7 @@ async def test_recorded_call_is_snapshot_of_labels_and_files() -> None:
     labels: list[str] = ["hydraflow-ul-proposed"]
     files: dict[str, str] = {"docs/wiki/terms/foo.md": "# Foo\n"}
 
-    await fake.open_bot_pr(
-        branch="b", title="T", body="", labels=labels, files=files
-    )
+    await fake.open_bot_pr(branch="b", title="T", body="", labels=labels, files=files)
 
     # Mutate the originals after the call.
     labels.append("extra-label")

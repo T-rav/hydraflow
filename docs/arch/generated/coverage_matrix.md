@@ -60,7 +60,7 @@ per-adapter, not per-port).
 
 | Port | ADR | Wiki | Generated | Standard | Fake | Cassette | Contract |
 |---|---|---|---|---|---|---|---|
-| `AgentPort` | ❌ | ✅ [architecture-layers.md] | ✅ ports.md | ❌ | ❌ | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
+| `AgentPort` | ❌ | ✅ [architecture-layers.md] | ✅ ports.md | ❌ | ✅ `FakeAgent` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `BotPRPort` | ❌ | ✅ [bot-pr-port.md] | ✅ ports.md | ❌ | ✅ `FakeBotPR` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `IssueFetcherPort` | ❌ | ✅ [architecture-async-control.md] | ✅ ports.md | ❌ | ✅ `FakeIssueFetcher` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `IssueStorePort` | ✅ [0041] | ✅ [architecture-layers.md, issue-store-port.md] | ✅ ports.md | ❌ | ✅ `FakeIssueStore` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
@@ -76,4 +76,4 @@ HITL trigger). It is not regenerable from source and is maintained in
 `docs/arch/coverage_matrix.md` (the hand-curated baseline document).
 
 
-_Regenerated from commit `dc49678` on 2026-05-19 15:26 UTC. Source last changed at `dc49678`. Status: 🟢 fresh._
+_Regenerated from commit `b915e02` on 2026-05-19 16:17 UTC. Source last changed at `b915e02`. Status: 🟢 fresh._
