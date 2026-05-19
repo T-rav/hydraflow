@@ -419,24 +419,33 @@ class ShapePhase:
     async def _run_council_vote(
         self, issue: Task, conv: ShapeConversation, directions_content: str
     ) -> int | None:
-        """Run expert council vote with up to 2 rounds before human escalation.
+        """Run expert council vote with up to 3 rounds before human escalation.
 
-        Round 1: Each expert votes independently.
-        Round 2 (if split): Experts see each other's votes and reasoning,
-                then revote with the full context — often reaches consensus.
-        If still split after 2 rounds: escalate to human.
+        Round 1: Each standard expert (User Advocate, Tech Lead,
+                 Product Strategist) votes independently.
+        Round 2 (if split): Mediator synthesizes the disagreement, then the
+                same standard experts revote with the synthesis in context.
+                Often reaches consensus.
+        Round 3 (if still split, ADR-0063 W4): A *diversified-persona*
+                panel votes instead of the standard one (Dissenter,
+                Consensus-Seeker, Regret-in-6-Months). These personas
+                attack the question from angles the standard panel shares
+                too much in common to surface, and frequently unblock
+                deadlocks where the same three roles re-anchor on the
+                same disagreement.
+        If still split after round 3: escalate to human.
 
         Returns 1 if consensus reached and issue transitioned to plan.
-        Returns None if no consensus after 2 rounds.
+        Returns None if no consensus after 3 rounds.
         """
         assert self._council is not None  # guaranteed by caller
-        max_rounds = 2
+        max_rounds = 3
         prev_result: CouncilResult | None = None
 
         for round_num in range(1, max_rounds + 1):
             if round_num == 1 or prev_result is None:
                 council_result = await self._council.vote(issue, directions_content)
-            else:
+            elif round_num == 2:
                 # Mediate: synthesize the disagreement before revoting
                 mediation = await self._council.mediate(
                     issue, prev_result, directions_content
@@ -481,6 +490,35 @@ class ShapePhase:
                     f"should take priority."
                 )
                 council_result = await self._council.vote(issue, enriched_directions)
+            else:
+                # Round 3 (ADR-0063 W4): diversified-persona panel.
+                # The standard experts have now voted twice; the same three
+                # roles re-anchoring on the same disagreement is the
+                # signature failure this round is built to break. Pass the
+                # prior split as context so each diversified persona sees
+                # which option leads and which experts hold which positions.
+                round_3_directions = (
+                    f"{directions_content}\n\n"
+                    f"## Prior Council Vote (Round {round_num - 1})\n\n"
+                    f"{prev_result.format_summary()}\n\n"
+                    f"The standard council (User Advocate, Technical Lead, "
+                    f"Product Strategist) split after two rounds of voting "
+                    f"and mediation. You are a different panel — bring your "
+                    f"persona's distinct angle to break the deadlock."
+                )
+                await self._bus.publish(
+                    HydraFlowEvent(
+                        type=EventType.SHAPE_UPDATE,
+                        data={
+                            "issue": issue.id,
+                            "action": "council_diversified_round",
+                            "round": round_num,
+                        },
+                    )
+                )
+                council_result = await self._council.vote_diversified(
+                    issue, round_3_directions
+                )
 
             # Post vote summary
             round_label = f" (Round {round_num})" if max_rounds > 1 else ""
@@ -547,7 +585,11 @@ class ShapePhase:
                 )
                 return 1
 
-            # Split — save for next round context
+            # Split — save for next round context. Without this assignment
+            # the next iteration's mediation/diversified-persona prompt would
+            # have no prior vote to anchor against, defeating the point of
+            # multi-round escalation.
+            prev_result = council_result
             logger.info(
                 "Issue #%d shape — council split in round %d",
                 issue.id,
