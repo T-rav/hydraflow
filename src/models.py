@@ -1840,6 +1840,10 @@ class StateData(BaseModel):
     # AdrTouchpointAuditorLoop (ADR-0056) — cursor is ISO-8601 of last-scanned merged PR.
     adr_audit_cursor: str = Field(default="")
     adr_audit_attempts: dict[str, int] = Field(default_factory=dict)
+    # Per-ADR rollup tracking (#8987). Keyed by "ADR-NNNN"; value carries the
+    # rollup issue number + the set of PR numbers currently listed in the body.
+    # Used so subsequent ticks update the body in-place rather than re-filing.
+    adr_rollup_issues: dict[str, dict] = Field(default_factory=dict)
     memory_backlog_attempts: dict[str, int] = Field(default_factory=dict)
     # LiveCorpusReplayLoop (#8786 Phase 3) — per-drift-signature attempt
     # counters for the 3-attempt escalation chain.

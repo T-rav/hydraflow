@@ -38,3 +38,32 @@ class AdrAuditStateMixin:
         attempts.pop(key, None)
         self._data.adr_audit_attempts = attempts
         self.save()
+
+    # Per-ADR rollup tracking (#8987) — see ADR-0056 amendment.
+
+    def get_adr_rollup(self, adr_key: str) -> dict | None:
+        """Return ``{'issue_number': int, 'pr_numbers': list[int]}`` or ``None``."""
+        entry = self._data.adr_rollup_issues.get(adr_key)
+        if not entry:
+            return None
+        return {
+            "issue_number": int(entry.get("issue_number", 0)),
+            "pr_numbers": list(entry.get("pr_numbers", [])),
+        }
+
+    def set_adr_rollup(
+        self, adr_key: str, *, issue_number: int, pr_numbers: list[int]
+    ) -> None:
+        rollups = dict(self._data.adr_rollup_issues)
+        rollups[adr_key] = {
+            "issue_number": int(issue_number),
+            "pr_numbers": sorted({int(n) for n in pr_numbers}),
+        }
+        self._data.adr_rollup_issues = rollups
+        self.save()
+
+    def clear_adr_rollup(self, adr_key: str) -> None:
+        rollups = dict(self._data.adr_rollup_issues)
+        rollups.pop(adr_key, None)
+        self._data.adr_rollup_issues = rollups
+        self.save()
