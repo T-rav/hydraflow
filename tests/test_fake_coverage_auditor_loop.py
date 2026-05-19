@@ -477,7 +477,11 @@ async def test_rollup_tick_2_updates_body_when_method_gains_coverage(
     """Tick 2: previously-uncovered method now cassetted → update body, remove it."""
     cfg, state, pr, dedup = loop_env
     # State as if tick 1 already filed: rollup-issue tracked + prior uncovered set.
-    state.get_fake_coverage_rollup_issue.return_value = 4242
+    # Per-kind tracking — only adapter-surface has a tracked issue; the
+    # test-helper kind is untouched (no helpers in this fake).
+    state.get_fake_coverage_rollup_issue.side_effect = lambda k: (
+        4242 if k == "FakeGitHub:adapter-surface" else None
+    )
     state.get_fake_coverage_last_known.return_value = {
         "__uncovered__:FakeGitHub:adapter-surface": ["create_issue", "close_issue"],
         "FakeGitHub": [],
@@ -665,6 +669,113 @@ async def test_rollup_closed_by_human_refiles_cleanly(
     state.set_fake_coverage_rollup_issue.assert_called_with(
         "FakeGitHub:adapter-surface", 5000
     )
+
+
+async def test_escalation_does_not_storm_after_threshold(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """Regression: escalation fires exactly once when attempts crosses
+    ``_MAX_ATTEMPTS`` (==3), not every tick at >=3.
+
+    Without this guard, an open rollup that stays uncovered would file a
+    fresh HITL escalation issue on every subsequent tick until a human
+    closed it — the original bug review caught before merge.
+    """
+    cfg, state, pr, dedup = loop_env
+    # Tracked rollup already open; counter has already crossed threshold.
+    state.get_fake_coverage_rollup_issue.return_value = 4242
+    state.get_fake_coverage_last_known.return_value = {}
+    state.inc_fake_coverage_attempts.return_value = 4  # >MAX, post-threshold tick
+    fake_dir = tmp_path / "src" / "mockworld" / "fakes"
+    fake_dir.mkdir(parents=True)
+    (fake_dir / "fake_github.py").write_text(
+        "class FakeGitHub:\n    async def missing(self): ...\n"
+    )
+    (tmp_path / "tests" / "trust" / "contracts" / "cassettes" / "github").mkdir(
+        parents=True
+    )
+
+    stop = asyncio.Event()
+    loop = FakeCoverageAuditorLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    async def fake_reconcile():
+        return None
+
+    async def fake_list_titles():
+        return {"Fake coverage gap: FakeGitHub adapter surface (1 method)"}
+
+    monkeypatch.setattr(loop, "_reconcile_closed_escalations", fake_reconcile)
+    monkeypatch.setattr(loop, "_list_open_rollup_titles", fake_list_titles)
+
+    stats = await loop._do_work()
+
+    # Body got updated (the rollup is still open and uncovered).
+    assert pr.update_issue_body.await_count == 1
+    # And NO new escalation issue was filed this tick — the
+    # ``attempts == _MAX_ATTEMPTS`` guard only fires once at threshold.
+    assert pr.create_issue.await_count == 0
+    assert stats["escalated"] == 0
+
+
+async def test_rollup_body_updated_when_gap_fully_closes(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """Regression: when all methods become covered, the rollup body is
+    repainted to the "all covered" view BEFORE state is cleared.
+
+    Without this update, the open rollup issue retains the stale list of
+    uncovered methods — humans see "12 methods missing" on an issue where
+    every method is now cassetted.
+    """
+    cfg, state, pr, dedup = loop_env
+    # Tracked rollup #5050 is open ONLY for adapter-surface; prior tick had
+    # ``missing`` uncovered. (Per-kind tracking — test-helper has no issue.)
+    state.get_fake_coverage_rollup_issue.side_effect = lambda k: (
+        5050 if k == "FakeGitHub:adapter-surface" else None
+    )
+    state.get_fake_coverage_last_known.return_value = {
+        "FakeGitHub": ["missing"],
+        "__uncovered__:FakeGitHub:adapter-surface": ["missing"],
+    }
+    fake_dir = tmp_path / "src" / "mockworld" / "fakes"
+    fake_dir.mkdir(parents=True)
+    (fake_dir / "fake_github.py").write_text(
+        "class FakeGitHub:\n    async def missing(self): ...\n"
+    )
+    cassette_dir = tmp_path / "tests" / "trust" / "contracts" / "cassettes" / "github"
+    cassette_dir.mkdir(parents=True)
+    # Cassette now exists for the previously-missing method → fully covered.
+    (cassette_dir / "missing.yaml").write_text(
+        yaml.safe_dump({"input": {"command": "missing"}, "output": {}})
+    )
+
+    stop = asyncio.Event()
+    loop = FakeCoverageAuditorLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    async def fake_reconcile():
+        return None
+
+    async def fake_list_titles():
+        return set()
+
+    monkeypatch.setattr(loop, "_reconcile_closed_escalations", fake_reconcile)
+    monkeypatch.setattr(loop, "_list_open_rollup_titles", fake_list_titles)
+
+    await loop._do_work()
+
+    # Body was updated with the "all covered" view before state cleared.
+    assert pr.update_issue_body.await_count >= 1
+    update_call = pr.update_issue_body.await_args_list[0]
+    assert update_call.args[0] == 5050
+    body = update_call.args[1]
+    # The recovered method appears (struck through) and no live uncovered.
+    assert "missing" in body
+    # State was cleared after the body update.
+    state.clear_fake_coverage_rollup_issue.assert_any_call("FakeGitHub:adapter-surface")
 
 
 async def test_helper_rollup_same_shape(loop_env, monkeypatch, tmp_path) -> None:

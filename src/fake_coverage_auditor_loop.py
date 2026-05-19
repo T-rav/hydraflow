@@ -549,7 +549,9 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
             else:
                 # Gap closed — clear attempts + drop the rollup mapping so
                 # the next regression re-files cleanly.
-                self._clear_rollup_state(fake, "adapter-surface", dedup)
+                await self._clear_rollup_state(
+                    fake, "adapter-surface", dedup, recovered=recovered_surface
+                )
 
             # --- test-helper rollup ---
             if uncovered_helpers:
@@ -568,7 +570,9 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
                 elif action == "updated":
                     updated += 1
             else:
-                self._clear_rollup_state(fake, "test-helper", dedup)
+                await self._clear_rollup_state(
+                    fake, "test-helper", dedup, recovered=recovered_helpers
+                )
 
             all_known[fake] = sorted(covered)
             # Persist this tick's uncovered set under sentinel keys so the
@@ -631,9 +635,12 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
                 body = self._render_helper_body(fake, uncovered, recovered)
             await self._pr.update_issue_body(tracked_number, body)
             # Bump the attempt counter once per tick the gap remains open
-            # so 3-strikes escalation still fires.
+            # so 3-strikes escalation still fires. Fire escalation exactly
+            # once — when the counter crosses ``_MAX_ATTEMPTS`` — not every
+            # subsequent tick (which would file a fresh HITL issue per
+            # tick until a human acts).
             attempts = self._state.inc_fake_coverage_attempts(key)
-            if attempts >= _MAX_ATTEMPTS:
+            if attempts == _MAX_ATTEMPTS:
                 await self._file_escalation(key, attempts)
                 return ("escalated", False)
             return ("updated", False)
@@ -657,7 +664,11 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
             self._dedup.set_all(dedup)
 
         attempts = self._state.inc_fake_coverage_attempts(key)
-        if attempts >= _MAX_ATTEMPTS:
+        if attempts == _MAX_ATTEMPTS:
+            # Fire once when the counter crosses the threshold. Subsequent
+            # ticks fall through to a fresh rollup file via the path below
+            # (or skip if dedup_key was set earlier), which avoids the
+            # tick-per-tick escalation storm.
             await self._file_escalation(key, attempts)
             dedup.add(dedup_key)
             self._dedup.set_all(dedup)
@@ -673,16 +684,32 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
         self._dedup.set_all(dedup)
         return ("filed", True)
 
-    def _clear_rollup_state(self, fake: str, kind: str, dedup: set[str]) -> None:
+    async def _clear_rollup_state(
+        self,
+        fake: str,
+        kind: str,
+        dedup: set[str],
+        recovered: list[str] | None = None,
+    ) -> None:
         """Reset rollup tracking when the gap closes (no uncovered methods).
 
         Drops the attempt counter, dedup key, and rollup-issue mapping so
-        a future regression re-files cleanly. The issue itself is left
-        for humans to close (the body will read "(none — auditor should
-        close this issue on next tick)" on the prior tick's update).
+        a future regression re-files cleanly. When the previous tick had
+        an actual gap (``recovered`` is non-empty) AND a rollup issue is
+        tracked, repaint the body with the "all covered" view first so
+        humans looking at the open issue see the resolution rather than
+        a stale list of methods. The issue itself is left open for humans
+        to close.
         """
         key = f"{fake}:{kind}"  # shared key for attempts + rollup mapping
         dedup_key = f"fake_coverage_auditor:{fake}:{kind}"
+        tracked_number = self._state.get_fake_coverage_rollup_issue(key)
+        if tracked_number and recovered:
+            if kind == "adapter-surface":
+                body = self._render_surface_body(fake, [], recovered)
+            else:
+                body = self._render_helper_body(fake, [], recovered)
+            await self._pr.update_issue_body(tracked_number, body)
         self._state.clear_fake_coverage_attempts(key)
         self._state.clear_fake_coverage_rollup_issue(key)
         if dedup_key in dedup:
