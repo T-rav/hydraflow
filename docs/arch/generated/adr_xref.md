@@ -82,6 +82,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0076 | `src.github_cache_loop` |
 | ADR-0077 | `src.pr_unsticker`, `src.pr_unsticker_loop` |
 | ADR-0078 | `src.pricing_refresh_diff`, `src.pricing_refresh_loop` |
+| ADR-0079 | `src.adr_reviewer`, `src.adr_reviewer_loop` |
 
 ## Module → ADRs
 
@@ -89,7 +90,8 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 |---|---|
 | `src.adr_drift` | ADR-0056 |
 | `src.adr_pre_validator` | ADR-0037 |
-| `src.adr_reviewer` | ADR-0033, ADR-0034, ADR-0037, ADR-0039, ADR-0040 |
+| `src.adr_reviewer` | ADR-0033, ADR-0034, ADR-0037, ADR-0039, ADR-0040, ADR-0079 |
+| `src.adr_reviewer_loop` | ADR-0079 |
 | `src.adr_touchpoint_auditor_loop` | ADR-0056 |
 | `src.adversarial_labels` | ADR-0064 |
 | `src.adversarial_retry_loop` | ADR-0064 |
@@ -225,4 +227,4 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.workspace` | ADR-0055 |
 | `src.worktree` | ADR-0003, ADR-0009, ADR-0010 |
 
-_Regenerated from commit `1147674` on 2026-05-19 20:33 UTC. Source last changed at `1147674`. Status: 🟢 fresh._
+_Regenerated from commit `6fd6f1f` on 2026-05-19 21:59 UTC. Source last changed at `6fd6f1f`. Status: 🟢 fresh._

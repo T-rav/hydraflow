@@ -6,7 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W21
 
+- `c96d91d` — merge: integrate origin/staging (PR #9026 bulk-B scenarios) *(2026-05-19)*
 - `1147674` — merge: integrate latest origin/staging into adversarial-pipeline-default-on *(2026-05-19)*
+- `c32919f` — test(scenarios): coverage backfill for 10 loops (bulk B) *(2026-05-19)*
 - `194894a` — feat(adversarial): flip pipeline ON by default *(2026-05-19)*
 - `2cc3d81` — chore(arch): regen after UL lint updates generated views *(2026-05-19)*
 - `7e4fc62` — docs(wiki+standards+adr): backfill 19 coverage-gap beads (batch 2) *(2026-05-19)*
@@ -355,4 +357,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `1147674` on 2026-05-19 20:33 UTC. Source last changed at `1147674`. Status: 🟢 fresh._
+_Regenerated from commit `6fd6f1f` on 2026-05-19 21:59 UTC. Source last changed at `6fd6f1f`. Status: 🟢 fresh._
