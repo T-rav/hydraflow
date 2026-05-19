@@ -43,6 +43,7 @@ from exception_classify import reraise_on_credit_or_bug
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
+    from models import GitHubIssueSummary
     from pr_manager import PRManager
     from state import StateTracker
 
@@ -188,7 +189,7 @@ class TriageRetryLoop(BaseBackgroundLoop):
         return {"status": "ok", **stats}
 
     async def _retry_triage(
-        self, issue_number: int, issue: dict[str, Any], prior_attempts: int
+        self, issue_number: int, issue: GitHubIssueSummary, prior_attempts: int
     ) -> None:
         """Bump the counter, comment with context, and route back to find."""
         attempts = self._state.inc_triage_retry_attempts(issue_number)
@@ -227,7 +228,7 @@ class TriageRetryLoop(BaseBackgroundLoop):
         )
 
     async def _escalate_to_hitl(
-        self, issue_number: int, issue: dict[str, Any], attempts: int
+        self, issue_number: int, issue: GitHubIssueSummary, attempts: int
     ) -> None:
         """File a hitl-escalation companion issue when the retry budget is gone."""
         title_text = issue.get("title") or f"#{issue_number}"
