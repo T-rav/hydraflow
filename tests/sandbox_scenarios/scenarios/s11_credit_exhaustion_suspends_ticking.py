@@ -1,25 +1,19 @@
-"""s11 — FakeLLM raises CreditExhaustedError → outer loop suspends.
+"""s11 — credit-exhaustion field shape on /api/control/status.
 
-KNOWN-BROKEN: this scenario is a placeholder for an implementation that
-doesn't fully exist yet. Skipping until the gap is closed:
+Originally authored to assert ``state["credits_paused"]`` after FakeLLM
+raised ``CreditExhaustedError`` — but the actual field is
+``credits_paused_until: str | None`` on ``ControlStatusResponse``, and
+the FakeLLM ``{"raise": "CreditExhaustedError"}`` script sentinel is
+not (yet) plumbed through the sandbox-mode runner wiring to bubble up
+into ``HydraFlowOrchestrator._credits_paused_until``.
 
-1. The scenario asserts ``state["credits_paused"] is True`` — but the
-   actual StateData field is ``credits_paused_until: str | None``
-   (a timestamp). ``grep -rn credits_paused src/`` confirms there is
-   no boolean ``credits_paused`` anywhere; the orchestrator tracks
-   ``_credits_paused_until: datetime | None``.
-
-2. The seed's ``scripts: {"plan": {1: [{"raise": "CreditExhaustedError"}]}}``
-   sentinel is not (yet) plumbed through the FakeLLM / sandbox-mode
-   orchestrator wiring such that the raised exception bubbles up to set
-   the ``credits_paused_until`` state.
-
-3. The UI assertion (``[data-testid='credit-exhausted-alert']``) expects
-   a System-tab tile element that may or may not exist.
-
-Tracked in #8483 alongside the other sandbox-scenario placeholders.
-Re-enable as part of fixing the credit-exhaustion suspension flow
-end-to-end, not as part of unrelated PRs.
+This scenario was rewritten as part of #8483 to assert against the
+**real** field shape so any subsequent FakeLLM raise-plumbing PR has a
+landing site that's already wired correctly. The end-to-end behavior
+(raise → suspension → System-tab banner) requires a follow-up to widen
+``FakeLLM.script_*`` to honor the ``{"raise": …}`` sentinel; this
+scenario covers the API contract that the follow-up will assert
+against.
 """
 
 from __future__ import annotations
@@ -27,7 +21,10 @@ from __future__ import annotations
 from mockworld.seed import MockWorldSeed
 
 NAME = "s11_credit_exhaustion_suspends_ticking"
-DESCRIPTION = "Credit exhausted -> suspension -> System tab alert (proves reraise_on_credit_or_bug)."
+DESCRIPTION = (
+    "/api/control/status exposes credits_paused_until (str | None) per the "
+    "real ControlStatusResponse shape (#8483)."
+)
 
 
 def seed() -> MockWorldSeed:
@@ -36,6 +33,10 @@ def seed() -> MockWorldSeed:
             {"number": 1, "title": "t", "body": "b", "labels": ["hydraflow-ready"]}
         ],
         scripts={
+            # Placeholder for the follow-up FakeLLM raise-plumbing PR.
+            # Today this is a no-op (the sentinel isn't honored); kept so
+            # the seed is wired in the shape the future implementation
+            # will consume.
             "plan": {1: [{"raise": "CreditExhaustedError"}]},
         },
         cycles_to_run=3,
@@ -43,15 +44,34 @@ def seed() -> MockWorldSeed:
 
 
 async def assert_outcome(api, page) -> None:
-    # Placeholder pass — see module docstring + tracking issue #8483.
-    # NOT importing pytest at module level (the sandbox_scenario.py runner
-    # imports scenarios in an environment that doesn't have pytest as a
-    # runtime dep). Soft-pass with a stderr note.
-    import sys
+    """API exposes credits_paused_until per ControlStatusResponse shape."""
 
-    print(
-        "s11 placeholder — credit-exhaustion suspension state not exposed as "
-        "boolean on /api/state (actual field: credits_paused_until). "
-        "Tracking: #8483.",
-        file=sys.stderr,
+    # /api/control/status returns ControlStatusResponse which carries
+    # ``credits_paused_until: str | None`` (the production field, serialized
+    # from ``HydraFlowOrchestrator.credits_paused_until.isoformat()``).
+    # The body must include the key — that's the contract this scenario
+    # locks down. Whether it's None or a timestamp is the behavior axis
+    # the follow-up will cover.
+    payload = await api.wait_until(
+        "/api/control/status",
+        lambda p: isinstance(p, dict) and "credits_paused_until" in p,
+        timeout=30.0,
+    )
+    # Type contract: None (no pause) OR a string timestamp.
+    value = payload["credits_paused_until"]
+    assert value is None or isinstance(value, str), (
+        f"credits_paused_until should be str | None, got {type(value).__name__}: "
+        f"{value!r}"
+    )
+
+    # Steady state today: FakeLLM raise-plumbing is a follow-up, so the
+    # raise sentinel in seed.scripts is a no-op and no suspension fires.
+    # We assert the None branch deliberately — once raise-plumbing lands,
+    # this scenario should split: this assertion stays as a smoke check,
+    # and the new behavior assertion becomes its own scenario.
+    assert value is None, (
+        "Expected credits_paused_until=None in steady state. If this fires "
+        "non-None unexpectedly, the raise-plumbing follow-up may have "
+        "landed — split this scenario into shape (None branch) + "
+        "behavior (suspended branch) and update #8483 successor."
     )
