@@ -6,7 +6,11 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W21
 
-- `58a8dc0` — test(contracts): FakeHoneycomb contract test (closes ADR-0047 gap for fake #5 of 11) *(2026-05-19)*
+- `d35bc0b` — fix(tests): import AgentPort + FakeAgent in conformance test *(2026-05-19)*
+- `1a5b156` — test(contracts): FakeHoneycomb contract test (closes ADR-0047 gap for fake #5 of 11) *(2026-05-19)*
+- `d5f127d` — fix(tests): import AgentPort + FakeAgent in conformance test *(2026-05-19)*
+- `d566f5d` — feat(triage): TriageRetryLoop (ADR-0063 W2, closes advisor-vz1l) *(2026-05-19)*
+- `7a958b0` — feat(mockworld): FakeReviewInsightStore satisfies ReviewInsightStorePort (ADR-0047, closes advisor-luab) *(2026-05-19)*
 - `4cd8a62` — feat(mockworld): FakeObservability satisfies ObservabilityPort (ADR-0047, closes advisor-ddje) *(2026-05-19)*
 - `0546b35` — style(tests): ruff format test_fake_bot_pr.py — collapse short kwarg calls *(2026-05-19)*
 - `1c2daf7` — feat(mockworld): FakeBotPR satisfies BotPRPort Protocol (ADR-0047, closes advisor-25fr) *(2026-05-19)*
@@ -346,4 +350,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `58a8dc0` on 2026-05-19 16:25 UTC. Source last changed at `58a8dc0`. Status: 🟢 fresh._
+_Regenerated from commit `d35bc0b` on 2026-05-19 18:52 UTC. Source last changed at `d35bc0b`. Status: 🟢 fresh._
