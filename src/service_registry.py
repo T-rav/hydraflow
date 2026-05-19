@@ -60,10 +60,17 @@ from memory_backlog_loop import MemoryBacklogLoop
 from merge_conflict_resolver import MergeConflictResolver
 from merge_state_watcher_loop import MergeStateWatcherLoop
 from models import StatusCallback
+from observability.sentry_adapter import SentryObservabilityAdapter
 from plan_phase import PlanPhase
 from plan_reviewer import PlanReviewer
 from planner import PlannerRunner
-from ports import IssueFetcherPort, IssueStorePort, PRPort, WorkspacePort
+from ports import (
+    IssueFetcherPort,
+    IssueStorePort,
+    ObservabilityPort,
+    PRPort,
+    WorkspacePort,
+)
 from post_merge_handler import PostMergeHandler
 from pr_manager import PRManager
 from pr_unsticker import PRUnsticker
@@ -120,6 +127,7 @@ class ServiceRegistry:
     """Holds all service instances for the orchestrator."""
 
     # Core infrastructure
+    observability: ObservabilityPort
     workspaces: WorkspacePort
     subprocess_runner: SubprocessRunner
     agents: AgentRunner
@@ -251,11 +259,23 @@ def build_services(
     workspaces: WorkspacePort | None = None,
     store: IssueStorePort | None = None,
     fetcher: IssueFetcherPort | None = None,
+    observability: ObservabilityPort | None = None,
     # ``runners`` is duck-typed: any object exposing the four runner
     # attrs (triage_runner, planners, agents, reviewers) suffices.
     # FakeLLM does. See spec Component 1 RunnerSet pattern if a
     # stricter type is preferred.
     runners: object | None = None,
+    # ``subprocess_runner`` is the LOWER-LEVEL docker dispatch — separate
+    # from the four phase runners above.  ``runners=fake_llm`` rebinds
+    # the phase runners but ``SubprocessRunner`` is still used by
+    # ``TranscriptSummarizer``, ``HITLRunner``, ``AutoAgentRunner``,
+    # and the pre-quality-review skill subprocesses inside
+    # ``AgentRunner``.  All of those shell ``claude -p`` directly,
+    # which hangs forever on the sandbox's air-gapped network.  Pass a
+    # ``FakeSubprocessRunner`` here to short-circuit every remaining
+    # claude path; production callers pass nothing and get the real
+    # Docker runner.
+    subprocess_runner: SubprocessRunner | None = None,
 ) -> ServiceRegistry:
     """Create all services wired together.
 
@@ -296,6 +316,12 @@ def build_services(
     # historical Hindsight content that needs to be preserved should have
     # been extracted via scripts/extract_hindsight_to_wiki.py before merge.
 
+    # Observability port — constructed once and injected throughout.
+    # Production path: SentryObservabilityAdapter (no-ops when sentry_sdk
+    # is absent). Sandbox/test path: caller passes FakeSentry.
+    if observability is None:
+        observability = SentryObservabilityAdapter()
+
     # Core runners
     if workspaces is None:
         workspaces = WorkspaceManager(config, credentials=credentials)
@@ -314,7 +340,8 @@ def build_services(
     # widening of downstream method signatures to take
     # ``WorkspacePort`` directly, after which this cast can be removed.
     workspaces = cast(WorkspaceManager, workspaces)
-    subprocess_runner = get_docker_runner(config, credentials=credentials)
+    if subprocess_runner is None:
+        subprocess_runner = get_docker_runner(config, credentials=credentials)
     # The self-repo's wiki lives at ``docs/wiki/`` so it is
     # git-tracked alongside the code it documents. Other managed repos'
     # wikis are runtime-cached under ``.hydraflow/repo_wiki/<owner>/<repo>/``.
@@ -406,6 +433,7 @@ def build_services(
         wiki_store=repo_wiki_store,
         tribal_wiki_store=tribal_wiki_store,
     )
+    triage.set_observability(observability)
     # Sandbox override — replace the four LLM-backed runners with the
     # caller-supplied set (e.g. FakeLLM in mockworld.sandbox_main). The
     # real-runner constructions above still execute (they're cheap; we
@@ -482,7 +510,7 @@ def build_services(
     # IssueStorePort interface) so the wiring is unchanged whether
     # caching is enabled or not.
     phase_store: IssueStorePort = (
-        CachingIssueStore(
+        CachingIssueStore(  # type: ignore[assignment]
             store,
             cache=issue_cache,
             cache_ttl_seconds=config.issue_cache_enrich_ttl_seconds,
@@ -495,11 +523,13 @@ def build_services(
     harness_insights = HarnessInsightStore(
         config.data_path("memory"),
         sensor_enrichment_enabled=config.sensor_enrichment_enabled,
+        observability=observability,
     )
 
     # Troubleshooting pattern store (CI timeout feedback loop)
     troubleshooting_store = TroubleshootingPatternStore(
         config.data_path("memory"),
+        observability=observability,
     )
 
     # Epic management
@@ -763,6 +793,7 @@ def build_services(
         state,
         prs,
         queue=retrospective_queue,
+        observability=observability,
     )
     ac_generator = AcceptanceCriteriaGenerator(
         config, prs, event_bus, runner=subprocess_runner, credentials=credentials
@@ -793,6 +824,7 @@ def build_services(
     # ReviewInsightStore shared between AgentRunner and ReviewPhase
     review_insights = ReviewInsightStore(
         config.memory_dir,
+        observability=observability,
     )
     # ``_insights`` is internal AgentRunner plumbing not part of any Port.
     # Sandbox runners (FakeAgentRunner) don't implement it — gate the
@@ -881,6 +913,7 @@ def build_services(
         prs=prs,
         retrospective_queue=retrospective_queue,
         state=state,
+        observability=observability,
         # bg_workers is injected post-construction by the orchestrator
         # (chicken-and-egg with BGWorkerManager); see orchestrator.py.
     )
@@ -908,6 +941,7 @@ def build_services(
         prs=prs,
         state=state,
         deps=loop_deps,
+        observability=observability,
     )
     gh_cache_loop = GitHubCacheLoop(config, gh_cache, deps=loop_deps)  # noqa: F841
     from dedup_store import DedupStore  # noqa: PLC0415
@@ -1242,6 +1276,7 @@ def build_services(
     )
 
     return ServiceRegistry(
+        observability=observability,
         workspaces=workspaces,
         subprocess_runner=subprocess_runner,
         agents=agents,

@@ -6,7 +6,11 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W21
 
+- `f9c757b` — merge: third pass — integrate latest origin/staging (DiscoverRunner/ShapeRunner phase_name fix) *(2026-05-18)*
 - `26f0ac7` — merge: second pass — integrate latest origin/staging (CI cassettes + flag) *(2026-05-18)*
+- `280478c` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
+- `b6e104d` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
+- `bcc0b25` — fix(contracts): widen Cassette._validate_adapter to accept all 9 known fakes (closes slice 5.7) *(2026-05-18)*
 - `4163239` — merge: integrate origin/staging into earlier-adversarial-pipeline *(2026-05-18)*
 - `a06faa7` — fix(format): ruff format *(2026-05-18)*
 - `0a5dcad` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
@@ -330,4 +334,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `26f0ac7` on 2026-05-18 23:31 UTC. Source last changed at `26f0ac7`. Status: 🟢 fresh._
+_Regenerated from commit `f9c757b` on 2026-05-19 06:50 UTC. Source last changed at `f9c757b`. Status: 🟢 fresh._

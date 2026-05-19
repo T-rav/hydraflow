@@ -45,7 +45,9 @@ class TestFakeGitHelperClassification:
         )
         import asyncio
 
-        result = asyncio.get_event_loop().run_until_complete(
-            fake.config_get(tmp_path, "core.worktree")
-        )
+        # ``asyncio.get_event_loop()`` raises on Python 3.12+ when no running
+        # loop exists in the current thread (deprecation completed in PEP 705
+        # follow-up).  ``asyncio.run`` builds + tears down a fresh loop
+        # deterministically and is the documented replacement.
+        result = asyncio.run(fake.config_get(tmp_path, "core.worktree"))
         assert result == "/workspace"

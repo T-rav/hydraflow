@@ -28,7 +28,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `FakeCoverageAuditorLoop` | ✅ [0045, 0056, 0057] | ❌ | ❌ | ❌ | ✅ `test_fake_coverage_auditor_loop.py` | ✅ in catalog | ❌ |
 | `FlakeTrackerLoop` | ✅ [0045, 0056, 0057] | ❌ | ❌ | ❌ | ✅ `test_flake_tracker_loop.py` | ✅ in catalog | ❌ |
 | `GitHubCacheLoop` | ❌ | ❌ | ❌ | ✅ (caretaker loop) | ❌ | ❌ | ❌ |
-| `HealthMonitorLoop` | ✅ [0045, 0046] | ✅ [testing.md] | ❌ | ✅ (caretaker loop) | ❌ | ⚠️ in catalog (no scenario file) | ❌ |
+| `HealthMonitorLoop` | ✅ [0045, 0046] | ✅ [testing.md] | ❌ | ✅ (caretaker loop) | ✅ `test_health_monitor_loop_primary_cycle.py` | ⚠️ in catalog (no scenario file) | ❌ |
 | `LabelDriftWatcherLoop` | ✅ [0056] | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_label_drift_watcher_loop.py` | ⚠️ in catalog (no scenario file) | ❌ |
 | `LiveCorpusReplayLoop` | ❌ | ❌ | ❌ | ❌ | ✅ `test_live_corpus_replay_loop.py` | ❌ | ❌ |
 | `MemoryBacklogLoop` | ✅ [0057] | ✅ [README.md] | ❌ | ✅ (caretaker loop) | ✅ `test_memory_backlog_loop.py` | ✅ in catalog | ❌ |
@@ -41,7 +41,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `ReportIssueLoop` | ✅ [0013, 0018, 0028] | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_report_issue_loop.py` | ✅ in catalog | ❌ |
 | `RetrospectiveLoop` | ❌ | ✅ [architecture-async-control.md] | ❌ | ✅ (caretaker loop) | ✅ `test_retrospective_loop.py` | ✅ in catalog | ❌ |
 | `RunsGCLoop` | ❌ | ✅ [architecture-async-control.md] | ❌ | ✅ (caretaker loop) | ✅ `test_runs_gc_loop.py` | ✅ in catalog | ❌ |
-| `SandboxFailureFixerLoop` | ✅ [0052, 0063] | ✅ [dark-factory.md] | ❌ | ❌ | ✅ `test_sandbox_failure_fixer_loop.py` | ⚠️ in catalog (no scenario file) | ❌ |
+| `SandboxFailureFixerLoop` | ✅ [0052, 0063] | ✅ [dark-factory.md] | ❌ | ❌ | ✅ `test_sandbox_failure_fixer_loop.py` | ✅ in catalog | ❌ |
 | `SecurityPatchLoop` | ✅ [0029] | ✅ [architecture-async-control.md] | ❌ | ✅ (caretaker loop) | ✅ `test_security_patch_loop.py` | ✅ in catalog | ❌ |
 | `SentryLoop` | ✅ [0055] | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_sentry_loop.py` | ❌ | ❌ |
 | `SkillPromptEvalLoop` | ✅ [0045] | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_skill_prompt_eval_loop.py` | ✅ in catalog | ❌ |
@@ -65,7 +65,7 @@ per-adapter, not per-port).
 | `BotPRPort` | ❌ | ✅ [bot-pr-port.md] | ✅ ports.md | ❌ | ❌ | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `IssueFetcherPort` | ❌ | ✅ [architecture-async-control.md] | ✅ ports.md | ❌ | ✅ `FakeIssueFetcher` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `IssueStorePort` | ✅ [0041] | ✅ [architecture-layers.md, issue-store-port.md] | ✅ ports.md | ❌ | ✅ `FakeIssueStore` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
-| `ObservabilityPort` | ❌ | ❌ | ✅ ports.md | ❌ | ❌ | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
+| `ObservabilityPort` | ❌ | ❌ | ✅ ports.md | ❌ | ✅ `FakeSentry` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `PRPort` | ✅ [0052] | ✅ [architecture-async-control.md, architecture-layers.md, dark-factory.md, gotchas.md, pr-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakePR` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `ReviewInsightStorePort` | ❌ | ❌ | ✅ ports.md | ❌ | ❌ | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `RouteBackCounterPort` | ❌ | ❌ | ✅ ports.md | ❌ | ❌ | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
@@ -77,4 +77,4 @@ HITL trigger). It is not regenerable from source and is maintained in
 `docs/arch/coverage_matrix.md` (the hand-curated baseline document).
 
 
-_Regenerated from commit `26f0ac7` on 2026-05-18 23:31 UTC. Source last changed at `26f0ac7`. Status: 🟢 fresh._
+_Regenerated from commit `f9c757b` on 2026-05-19 06:50 UTC. Source last changed at `f9c757b`. Status: 🟢 fresh._

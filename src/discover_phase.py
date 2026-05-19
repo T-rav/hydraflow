@@ -4,27 +4,29 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import TYPE_CHECKING
 
+from adversarial_agents import AgentLike
+from adversarial_retry_loop import AdversarialRetryLoop
+from assumption_surfacer import AssumptionSurfacer, SurfacerOutput
+from complexity_gate import Complexity, ComplexityGate
 from config import HydraFlowConfig
 from dedup_store import DedupStore
 from discover_runner import DiscoverRunner
+from discovery_council import CouncilTally, DiscoveryCouncil
 from events import EventBus, EventType, HydraFlowEvent
-from issue_store import IssueStore
 from models import DiscoverResult, Task
+from pending_concerns import AdversarialState, StageRun
 from phase_utils import (
     _sentry_transaction,
     run_refilling_pool,
     store_lifecycle,
 )
-from pr_manager import PRManager
-from src.adversarial_agents import AgentLike
-from src.adversarial_retry_loop import AdversarialRetryLoop
-from src.assumption_surfacer import AssumptionSurfacer, SurfacerOutput
-from src.complexity_gate import Complexity, ComplexityGate
-from src.discovery_council import CouncilTally, DiscoveryCouncil
-from src.pending_concerns import AdversarialState, StageRun
 from state import StateTracker
 from task_source import TaskTransitioner
+
+if TYPE_CHECKING:
+    from ports import IssueStorePort, PRPort
 
 logger = logging.getLogger("hydraflow.discover_phase")
 
@@ -57,8 +59,8 @@ class DiscoverPhase:
         self,
         config: HydraFlowConfig,
         state: StateTracker,
-        store: IssueStore,
-        prs: PRManager,
+        store: IssueStorePort,
+        prs: PRPort,
         event_bus: EventBus,
         stop_event: asyncio.Event,
         discover_runner: DiscoverRunner | None = None,
@@ -76,7 +78,7 @@ class DiscoverPhase:
                 "hitl_escalations",
                 config.data_root / "memory" / "hitl_escalations_dedup.json",
             )
-            self._runner.bind_escalation_deps(self._prs, dedup)
+            self._runner.bind_escalation_deps(self._prs, dedup)  # type: ignore[arg-type]
         # Earlier-adversarial pipeline agents (ADR-pending). Optional —
         # the factory wires them in when feature-enabled; legacy paths
         # leave them None and the adversarial stages are skipped. See

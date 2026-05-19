@@ -6,12 +6,12 @@ import asyncio
 import logging
 import re
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from config import HydraFlowConfig
 from dedup_store import DedupStore
 from events import EventBus, EventType, HydraFlowEvent
 from expert_council import CouncilResult, ExpertCouncil  # noqa: TCH001
-from issue_store import IssueStore
 from models import (
     ConversationTurn,
     ShapeConversation,
@@ -24,7 +24,6 @@ from phase_utils import (
     run_refilling_pool,
     store_lifecycle,
 )
-from pr_manager import PRManager
 from shape_runner import ShapeRunner  # noqa: TCH001
 from src.adversarial_agents import AgentLike
 from src.adversarial_retry_loop import AdversarialRetryLoop
@@ -35,6 +34,9 @@ from src.shape_expert_council import ShapeExpertCouncil
 from state import StateTracker
 from task_source import TaskTransitioner
 from whatsapp_bridge import WhatsAppBridge  # noqa: TCH001
+
+if TYPE_CHECKING:
+    from ports import IssueStorePort, PRPort
 
 logger = logging.getLogger("hydraflow.shape_phase")
 
@@ -82,8 +84,8 @@ class ShapePhase:
         self,
         config: HydraFlowConfig,
         state: StateTracker,
-        store: IssueStore,
-        prs: PRManager,
+        store: IssueStorePort,
+        prs: PRPort,
         event_bus: EventBus,
         stop_event: asyncio.Event,
         shape_runner: ShapeRunner | None = None,
@@ -101,7 +103,10 @@ class ShapePhase:
         self._council: ExpertCouncil | None = None
         self._suggest_memory = MemorySuggester(config)
         if self._runner is not None:
-            self._runner.bind_escalation_deps(self._prs, _build_hitl_dedup(config))
+            self._runner.bind_escalation_deps(
+                self._prs,  # type: ignore[arg-type]
+                _build_hitl_dedup(config),
+            )
         # Earlier-adversarial pipeline agents (ADR-pending). Optional —
         # the factory wires them in when feature-enabled; legacy paths
         # leave them None and the adversarial stages are skipped. See

@@ -26,6 +26,8 @@ from mockworld.fakes import (
     FakeLLM,
     FakeWorkspace,
 )
+from mockworld.fakes.fake_docker import FakeDocker
+from mockworld.fakes.fake_subprocess_runner import FakeSubprocessRunner
 from mockworld.seed import MockWorldSeed
 from orchestrator import HydraFlowOrchestrator
 from ports import IssueFetcherPort, IssueStorePort, PRPort, WorkspacePort
@@ -49,20 +51,24 @@ def _load_seed() -> MockWorldSeed:
 
 async def main() -> None:
     config = load_runtime_config()
-    # Sandbox-specific config override — disable transcript summarization.
-    # TranscriptSummarizer spawns a real `claude` subprocess via
-    # `subprocess_util.run_simple` after each agent phase to summarize the
-    # transcript. The sandbox is `internal: true` per
-    # docker-compose.sandbox.yml, so that subprocess hangs for ~30s of
-    # api_retry exponential backoff before failing with "unknown" network
-    # errors. With multiple parallel issues (s02_batch_three_issues) the
-    # cumulative hang exceeds the per-scenario 60s test timeout and the
-    # implement phase reports `in_progress` past deadline.
+    # Sandbox-specific config overrides — disable downstream code paths
+    # that spawn real `claude` subprocesses. The sandbox is `internal: true`
+    # per docker-compose.sandbox.yml, so these subprocesses hang for ~30s
+    # of api_retry exponential backoff before failing with "unknown"
+    # network errors. With multiple parallel issues (s02_batch_three_issues)
+    # the cumulative hang exceeds the per-scenario 60s test timeout.
     #
     # The four primary LLM-backed runners (triage/plan/agent/review) are
-    # already overridden via `runners=fake_llm` below; this turns off the
-    # remaining secondary `claude` caller on the post-phase hook path.
+    # already overridden via `runners=fake_llm` below; these flags turn
+    # off the remaining secondary `claude` callers:
+    #
+    # - TranscriptSummarizer: spawns `claude` via subprocess_util.run_simple
+    #   after each agent phase to summarize the transcript.
+    # - ResearchRunner: spawns `claude` via _execute before each plan phase
+    #   to gather codebase context. PlanPhase._should_research() honors
+    #   this flag (see src/plan_phase.py).
     config.transcript_summarization_enabled = False  # type: ignore[misc]
+    config.research_enabled = False  # type: ignore[misc]
     seed = _load_seed()
     event_bus = EventBus()
     state = build_state_tracker(config)
@@ -118,6 +124,17 @@ async def main() -> None:
         get_interval=lambda *_a, **_kw: 60,
     )
 
+    # FakeSubprocessRunner short-circuits every remaining shell-out to
+    # ``claude -p`` that isn't covered by ``runners=fake_llm`` — most
+    # critically ``TranscriptSummarizer``, ``HITLRunner``, and the
+    # pre-quality-review skill subprocesses inside ``AgentRunner``.
+    # Without this override they hit the air-gapped network, retry for
+    # ~90s each, and overrun the scenario timeout.  The default
+    # FakeDocker response is a single ``{success: True}`` event that
+    # returns instantly.
+    fake_docker = FakeDocker()
+    fake_subprocess_runner = FakeSubprocessRunner(fake_docker)
+
     svc = build_services(
         config,
         event_bus,
@@ -129,6 +146,7 @@ async def main() -> None:
         store=store,
         fetcher=fetcher,
         runners=fake_llm,
+        subprocess_runner=fake_subprocess_runner,
     )
 
     # Attach the advisor-routing sentinel — mirrors
