@@ -497,14 +497,15 @@ def build_services(
     # at the raw IssueStore. Phases consume `phase_store` (the
     # IssueStorePort interface) so the wiring is unchanged whether
     # caching is enabled or not.
-    phase_store: IssueStorePort = (
+    phase_store: IssueStorePort = cast(
+        IssueStorePort,
         CachingIssueStore(
             store,
             cache=issue_cache,
             cache_ttl_seconds=config.issue_cache_enrich_ttl_seconds,
         )
         if config.issue_cache_enabled and config.caching_issue_store_enabled
-        else store
+        else store,
     )
 
     # Harness insight store (shared across phases)

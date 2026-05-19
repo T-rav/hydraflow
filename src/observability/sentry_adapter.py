@@ -42,9 +42,15 @@ class SentryObservabilityAdapter:
     def capture_message(self, message: str, *, level: str = "info") -> None:
         """Forward *message* to ``sentry_sdk.capture_message``."""
         try:
+            from typing import Any, cast  # noqa: PLC0415
+
             import sentry_sdk  # noqa: PLC0415
 
-            sentry_sdk.capture_message(message, level=level)
+            # sentry-sdk's `capture_message` types `level` as
+            # ``LogLevelStr | None`` (a Literal). Our public API accepts
+            # an open ``str`` so callers don't have to import sentry-sdk
+            # types; narrow at this seam via cast.
+            sentry_sdk.capture_message(message, level=cast(Any, level))
         except ImportError:
             pass
         except Exception:  # noqa: BLE001

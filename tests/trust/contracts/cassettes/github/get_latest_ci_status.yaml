@@ -18,3 +18,4 @@ output:
   stdout: "success\n\n"
   stderr: ""
 normalizers: []
+baseline_only: true
