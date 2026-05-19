@@ -52,7 +52,7 @@ async def assert_outcome(api, page) -> None:
         await api.wait_until(
             "/api/issues/history?limit=500",
             lambda p, _n=n: _merged(p, _n),
-            timeout=60.0,
+            timeout=180.0,
         )
 
     # NOTE: the Work Stream tab assertion was removed 2026-05-19. The

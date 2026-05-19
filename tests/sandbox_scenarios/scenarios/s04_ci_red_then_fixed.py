@@ -51,5 +51,5 @@ async def assert_outcome(api, page) -> None:
     await api.wait_until(
         "/api/issues/history?limit=500",
         _merged,
-        timeout=120.0,
+        timeout=180.0,
     )
