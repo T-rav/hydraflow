@@ -357,30 +357,15 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
         (slug, check_id) pair from the title, and calls
         ``reset_drift_attempts``. Close-to-clear latency is bounded by the
         loop interval.
+
+        Routes through ``self._pr.list_closed_issues_by_label`` so
+        MockWorld scenarios can stub this call without spawning real
+        subprocesses (advisor-0dmd).
         """
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "gh",
-                "issue",
-                "list",
-                "--repo",
-                self._config.repo,
-                "--state",
-                "closed",
-                "--label",
-                "principles-stuck",
-                "--json",
-                "title",
-                "--limit",
-                "100",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            issues = await self._pr.list_closed_issues_by_label(
+                "principles-stuck", limit=100
             )
-            out, _ = await proc.communicate()
-            if proc.returncode != 0:
-                logger.debug("reconcile: gh issue list failed")
-                return
-            issues = json.loads(out or b"[]")
         except Exception as exc:  # noqa: BLE001
             reraise_on_credit_or_bug(exc)
             logger.debug("reconcile: skipped", exc_info=True)
