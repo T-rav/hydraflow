@@ -6,6 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W21
 
+- `4667a12` — feat(loops): remove CodeGroomingLoop (#8984) (#8984) *(2026-05-19)*
+- `6d7319a` — feat(adversarial): earlier-adversarial pipeline — Discovery + Shape + Plan dissent stages (#8953) (#8953) *(2026-05-19)*
+- `35d0308` — test(sandbox): bump scenario timeouts past observed pipeline duration (#8989) (#8989) *(2026-05-19)*
 - `8c85c14` — fix(sandbox): wire FakeSubprocessRunner — the actual claude bypass (#8965) (#8965) *(2026-05-18)*
 - `5f762b0` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
 - `119279f` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
@@ -23,7 +26,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `280478c` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
 - `b6e104d` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
 - `bcc0b25` — fix(contracts): widen Cassette._validate_adapter to accept all 9 known fakes (closes slice 5.7) *(2026-05-18)*
-- `4163239` — merge: integrate origin/staging into earlier-adversarial-pipeline *(2026-05-18)*
 - `a06faa7` — fix(format): ruff format *(2026-05-18)*
 - `0a5dcad` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
 - `11b4807` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
@@ -103,21 +105,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W20
 
-- `092a210` — feat(adversarial): factory wiring + adversarial_pipeline_enabled config flag (ComplexityGate only) *(2026-05-17)*
-- `c452ae3` — fix(adversarial): clear adversarial_state on HITL escalation to prevent unbounded concern accumulation *(2026-05-17)*
-- `fb30f4b` — fix(adversarial): review fixes — CreditExhaustedError reraise + concerns_raised count + DiscoveryCouncil runner gate *(2026-05-17)*
-- `9972ac3` — docs(adr): add ADR-0063 for earlier-adversarial pipeline + wiki entries *(2026-05-17)*
-- `4cb1dfb` — feat(adversarial): add ShippedWithKnownGap → wiki carryover *(2026-05-17)*
-- `50d6654` — feat(adversarial): add 6 EventBus events for adversarial stages *(2026-05-17)*
-- `8a80f95` — feat(adversarial): wire ComplexityGate routing + register transient labels *(2026-05-16)*
-- `473ceef` — refactor(adversarial): retrofit Shape Challenger + Expert Council to uniform contract *(2026-05-16)*
-- `7b1e445` — feat(adversarial): add DiscoveryCouncil with Problem-Sharpener/Existing-Solution-Hunter/Cheapest-Test-Advocate voters + wiring *(2026-05-16)*
-- `954ab0b` — feat(adversarial): wire AssumptionSurfacer + PlanCouncil + SpecJudge into plan_phase *(2026-05-16)*
 - `0c98560` — merge: reconcile main into staging (33 commits ahead) *(2026-05-16)*
 - `b1eafc5` — fix(staging): wire LiveCorpusReplayLoop + audit fixes — unblock RC promotion (#8939) (#8939) *(2026-05-16)*
 - `ef3b5f5` — chore(arch): regen arch + wiki artifacts from staging tip (#8926) (#8926) *(2026-05-16)*
-- `2da0878` — refactor(adversarial): use flat src/pending_concerns.py, restore src/models.py *(2026-05-16)*
-- `200b955` — feat(adversarial): add Concern/ConcernResolution/AdversarialState models *(2026-05-16)*
 - `9bfce88` — docs(wiki): backfill 7 undocumented topics (closes slice 5.0 + 5.3 doc gaps) *(2026-05-12)*
 - `4ba1202` — docs(adr): promote 0031 + 0047 to Accepted (status drift fix from slice 5 audits) *(2026-05-12)*
 - `01ae95c` — fix(bg-loops): YAML resilience + auto-ensure PR labels (#8753) (#8753) *(2026-05-12)*
@@ -346,4 +336,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `67d29f1` on 2026-05-19 07:41 UTC. Source last changed at `67d29f1`. Status: 🟢 fresh._
+_Regenerated from commit `4667a12` on 2026-05-19 07:49 UTC. Source last changed at `4667a12`. Status: 🟢 fresh._

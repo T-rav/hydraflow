@@ -6,20 +6,20 @@ Accepted (CodeGroomingLoop removed in ADR-0065 — the pattern itself remains in
 
 ## Context
 
-HydraFlow needed proactive maintenance workers — auto-closing stale issues, monitoring CI health, patching security vulnerabilities, and running code audits. These are "caretaker" concerns: low-priority, periodic, zero-token (except code grooming), and independent of the main pipeline.
+HydraFlow needed proactive maintenance workers — auto-closing stale issues, monitoring CI health, patching security vulnerabilities, and (originally) running code audits. These are "caretaker" concerns: low-priority, periodic, zero-token, and independent of the main pipeline.
 
-Four new loops were needed: `StaleIssueGCLoop`, `CIMonitorLoop`, `SecurityPatchLoop`, `CodeGroomingLoop`.
+Four loops were introduced under this pattern: `StaleIssueGCLoop`, `CIMonitorLoop`, `SecurityPatchLoop`, and `CodeGroomingLoop`. The fourth — `CodeGroomingLoop` — has since been retired (see ADR-0065); the pattern remains in use by the other three.
 
 ## Decision
 
 ### Pattern: Extend `BaseBackgroundLoop` with `DedupStore`
 
-All 4 loops follow the same pattern:
+All active loops follow the same pattern:
 
 1. **Extend `BaseBackgroundLoop`** — provides the polling loop, enabled/disabled check, error handling, status publishing, and interval management
 2. **Constructor takes `(config, pr_manager, deps: LoopDeps)`** — minimal dependencies, no direct state coupling
 3. **`_do_work()` returns a stats dict** — consumed by the `BACKGROUND_WORKER_STATUS` event for dashboard display
-4. **`DedupStore` for idempotency** — `SecurityPatchLoop` and `CodeGroomingLoop` track processed items to avoid filing duplicate issues across restarts
+4. **`DedupStore` for idempotency** — `SecurityPatchLoop` tracks processed items to avoid filing duplicate issues across restarts (the retired `CodeGroomingLoop` used the same mechanism)
 
 ### Wiring: ServiceRegistry + BGWorkerManager
 
@@ -35,7 +35,8 @@ Each loop gets a config field with `ge`/`le` validation and an `_ENV_INT_OVERRID
 - `stale_issue_gc_interval` (300-86400, default 3600)
 - `ci_monitor_interval` (60-86400, default 300)
 - `security_patch_interval` (300-86400, default 3600)
-- `code_grooming_interval` (3600-604800, default 86400)
+
+(The retired `code_grooming_interval` knob followed the same convention; see ADR-0065.)
 
 Intervals are also in `_INTERVAL_BOUNDS` in `_common.py` for dashboard API editing.
 
