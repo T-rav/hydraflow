@@ -597,5 +597,7 @@ async def test_reconcile_closed_escalations_resets_counter(
     )
 
     await loop._reconcile_closed_escalations()
-    pr.list_closed_issues_by_label.assert_awaited_once_with("principles-stuck", limit=100)
+    pr.list_closed_issues_by_label.assert_awaited_once_with(
+        "principles-stuck", limit=100
+    )
     state.reset_drift_attempts.assert_called_once_with("hydra/widgets", "P2.3")

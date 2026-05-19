@@ -47,6 +47,7 @@ from ports import WorkspacePort
 # Helper
 # ---------------------------------------------------------------------------
 
+
 def _make_fake(tmp_path: Path) -> FakeWorkspace:
     """Return a fresh FakeWorkspace rooted at *tmp_path*."""
     return FakeWorkspace(base_path=tmp_path)
@@ -85,15 +86,11 @@ _PORT_METHODS = [
 
 
 @pytest.mark.parametrize("method_name", _PORT_METHODS)
-def test_fake_workspace_method_is_async(
-    tmp_path: Path, method_name: str
-) -> None:
+def test_fake_workspace_method_is_async(tmp_path: Path, method_name: str) -> None:
     """Every WorkspacePort method on FakeWorkspace must be a coroutine function."""
     fake = _make_fake(tmp_path)
     method = getattr(fake, method_name, None)
-    assert method is not None, (
-        f"FakeWorkspace is missing Port method {method_name!r}"
-    )
+    assert method is not None, f"FakeWorkspace is missing Port method {method_name!r}"
     assert inspect.iscoroutinefunction(method), (
         f"FakeWorkspace.{method_name} must be async (coroutine function)"
     )
@@ -128,9 +125,7 @@ async def test_destroy_returns_none_and_tracks(tmp_path: Path) -> None:
     fake = _make_fake(tmp_path)
     result = await fake.destroy(issue_number=42)
 
-    assert result is None, (
-        f"WorkspacePort.destroy must return None; got {result!r}"
-    )
+    assert result is None, f"WorkspacePort.destroy must return None; got {result!r}"
     assert 42 in fake.destroyed
 
 
@@ -145,9 +140,7 @@ async def test_destroy_all_returns_none(tmp_path: Path) -> None:
     fake = _make_fake(tmp_path)
     result = await fake.destroy_all()
 
-    assert result is None, (
-        f"WorkspacePort.destroy_all must return None; got {result!r}"
-    )
+    assert result is None, f"WorkspacePort.destroy_all must return None; got {result!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -219,9 +212,7 @@ async def test_post_work_cleanup_returns_none(tmp_path: Path) -> None:
     """post_work_cleanup() returns None; keyword arg phase= is accepted."""
     fake = _make_fake(tmp_path)
     result_default = await fake.post_work_cleanup(issue_number=42)
-    result_explicit = await fake.post_work_cleanup(
-        issue_number=42, phase="review"
-    )
+    result_explicit = await fake.post_work_cleanup(issue_number=42, phase="review")
 
     assert result_default is None, (
         f"WorkspacePort.post_work_cleanup must return None; got {result_default!r}"
@@ -242,9 +233,7 @@ async def test_abort_merge_returns_none(tmp_path: Path) -> None:
     fake = _make_fake(tmp_path)
     result = await fake.abort_merge(worktree_path=tmp_path / "issue-1")
 
-    assert result is None, (
-        f"WorkspacePort.abort_merge must return None; got {result!r}"
-    )
+    assert result is None, f"WorkspacePort.abort_merge must return None; got {result!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -261,8 +250,7 @@ async def test_start_merge_main_returns_bool_true(tmp_path: Path) -> None:
     )
 
     assert isinstance(result, bool), (
-        f"WorkspacePort.start_merge_main must return bool; "
-        f"got {type(result).__name__}"
+        f"WorkspacePort.start_merge_main must return bool; got {type(result).__name__}"
     )
     assert result is True, (
         "FakeWorkspace.start_merge_main must return True on happy path"
