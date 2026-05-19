@@ -284,7 +284,9 @@ async def test_download_junit_gh_failure_returns_empty(loop_env, monkeypatch) ->
         async def communicate(self):
             return b"", b"no artifact named junit-scenario"
 
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", AsyncMock(return_value=_FailProc()))
+    monkeypatch.setattr(
+        asyncio, "create_subprocess_exec", AsyncMock(return_value=_FailProc())
+    )
     result = await loop._download_junit({"databaseId": 99})
     assert result == {}
 
@@ -300,12 +302,16 @@ async def test_download_junit_no_xml_files_returns_empty(loop_env, monkeypatch) 
             return b"", b""
 
     # The subprocess writes nothing; the temp dir remains empty.
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", AsyncMock(return_value=_OkProc()))
+    monkeypatch.setattr(
+        asyncio, "create_subprocess_exec", AsyncMock(return_value=_OkProc())
+    )
     result = await loop._download_junit({"databaseId": 7})
     assert result == {}
 
 
-async def test_download_junit_valid_xml_returns_parsed_results(loop_env, monkeypatch) -> None:
+async def test_download_junit_valid_xml_returns_parsed_results(
+    loop_env, monkeypatch
+) -> None:
     """gh succeeds and writes a valid JUnit XML → parsed pass/fail dict."""
     loop = _make_loop(loop_env)
     captured_dir: list[str] = []
@@ -397,7 +403,9 @@ async def test_download_junit_multiple_xml_files_merged(loop_env, monkeypatch) -
     assert result["tests.b.test_three"] == "fail"
 
 
-async def test_download_junit_only_malformed_xml_returns_empty(loop_env, monkeypatch) -> None:
+async def test_download_junit_only_malformed_xml_returns_empty(
+    loop_env, monkeypatch
+) -> None:
     """All XML files malformed → {} (every file triggers ET.ParseError and is skipped)."""
     loop = _make_loop(loop_env)
     captured_dir: list[str] = []
