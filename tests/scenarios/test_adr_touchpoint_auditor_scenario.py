@@ -38,15 +38,17 @@ def _write_adr(adr_dir, *, number: int, title: str, related: list[str]) -> None:
 
 
 class TestAdrTouchpointAuditor:
-    """ADR-0056 — drift detection MockWorld scenarios."""
+    """ADR-0056 — drift detection MockWorld scenarios (per-ADR rollup #8987)."""
 
-    async def test_drift_files_one_finding(self, tmp_path) -> None:
-        """Merged PR touches an ADR-cited src/ file → one drift issue filed."""
+    async def test_drift_files_one_rollup(self, tmp_path) -> None:
+        """Merged PR touches an ADR-cited src/ file → one rollup issue filed."""
         from adr_index import ADRIndex  # noqa: PLC0415
 
         world = MockWorld(tmp_path)
         fake_pr = AsyncMock()
         fake_pr.create_issue = AsyncMock(return_value=2001)
+        fake_pr.update_issue_body = AsyncMock(return_value=None)
+        fake_pr.close_issue = AsyncMock(return_value=None)
 
         repo = tmp_path / "repo"
         adr_dir = repo / "docs" / "adr"
@@ -71,6 +73,7 @@ class TestAdrTouchpointAuditor:
         state.get_adr_audit_cursor.return_value = "2026-05-01T00:00:00Z"
         state.get_adr_audit_attempts.return_value = 0
         state.inc_adr_audit_attempts.return_value = 1
+        state.get_adr_rollup.return_value = None
 
         _seed_ports(
             world,
@@ -84,11 +87,71 @@ class TestAdrTouchpointAuditor:
         await world.run_with_loops(["adr_touchpoint_auditor"], cycles=1)
 
         assert fake_pr.create_issue.await_count == 1
-        title, _body, labels = fake_pr.create_issue.await_args.args
+        title, body, labels = fake_pr.create_issue.await_args.args
         assert "ADR-0024" in title
-        assert "PR #8473" in title
+        assert "1 PR" in title
+        assert "#8473" in body
         assert "hydraflow-find" in labels
         assert "hydraflow-adr-drift" in labels
+
+    async def test_three_prs_drifting_same_adr_one_rollup(self, tmp_path) -> None:
+        """3 PRs drifting the same ADR file ONE rollup with all PRs in body."""
+        from adr_index import ADRIndex  # noqa: PLC0415
+
+        world = MockWorld(tmp_path)
+        fake_pr = AsyncMock()
+        fake_pr.create_issue = AsyncMock(return_value=2010)
+        fake_pr.update_issue_body = AsyncMock(return_value=None)
+        fake_pr.close_issue = AsyncMock(return_value=None)
+
+        repo = tmp_path / "repo"
+        adr_dir = repo / "docs" / "adr"
+        adr_dir.mkdir(parents=True)
+        _write_adr(adr_dir, number=24, title="alpha", related=["src/agent.py"])
+        adr_index = ADRIndex(adr_dir)
+
+        async def list_merged_prs(_cursor):
+            return [
+                {
+                    "number": 8501,
+                    "mergedAt": "2026-05-07T10:00:00Z",
+                    "files": [{"path": "src/agent.py"}],
+                },
+                {
+                    "number": 8502,
+                    "mergedAt": "2026-05-07T11:00:00Z",
+                    "files": [{"path": "src/agent.py"}],
+                },
+                {
+                    "number": 8503,
+                    "mergedAt": "2026-05-07T12:00:00Z",
+                    "files": [{"path": "src/agent.py"}],
+                },
+            ]
+
+        from unittest.mock import MagicMock  # noqa: PLC0415
+
+        state = MagicMock()
+        state.get_adr_audit_cursor.return_value = "2026-05-01T00:00:00Z"
+        state.get_adr_audit_attempts.return_value = 0
+        state.inc_adr_audit_attempts.return_value = 1
+        state.get_adr_rollup.return_value = None
+
+        _seed_ports(
+            world,
+            pr_manager=fake_pr,
+            adr_touchpoint_state=state,
+            adr_touchpoint_index=adr_index,
+            adr_touchpoint_list_merged_prs=list_merged_prs,
+            adr_touchpoint_reconcile_closed=AsyncMock(return_value=None),
+        )
+
+        await world.run_with_loops(["adr_touchpoint_auditor"], cycles=1)
+
+        assert fake_pr.create_issue.await_count == 1
+        body = fake_pr.create_issue.await_args.args[1]
+        for n in (8501, 8502, 8503):
+            assert f"#{n}" in body
 
     async def test_no_drift_when_adr_in_diff(self, tmp_path) -> None:
         """ADR file in the diff → no issue filed."""
@@ -97,6 +160,8 @@ class TestAdrTouchpointAuditor:
         world = MockWorld(tmp_path)
         fake_pr = AsyncMock()
         fake_pr.create_issue = AsyncMock(return_value=2002)
+        fake_pr.update_issue_body = AsyncMock(return_value=None)
+        fake_pr.close_issue = AsyncMock(return_value=None)
 
         repo = tmp_path / "repo"
         adr_dir = repo / "docs" / "adr"
@@ -122,6 +187,7 @@ class TestAdrTouchpointAuditor:
         state.get_adr_audit_cursor.return_value = "2026-05-01T00:00:00Z"
         state.get_adr_audit_attempts.return_value = 0
         state.inc_adr_audit_attempts.return_value = 1
+        state.get_adr_rollup.return_value = None
 
         _seed_ports(
             world,

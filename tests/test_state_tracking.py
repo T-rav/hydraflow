@@ -135,10 +135,14 @@ class TestInitialization:
             # AdrTouchpointAuditorLoop (ADR-0056)
             "adr_audit_cursor",
             "adr_audit_attempts",
-            # Earlier-adversarial pipeline (ADR-0064)
-            "adversarial_states",
+            # Per-ADR rollup tracking (#8987) — see ADR-0056 amendment.
+            "adr_rollup_issues",
             # MemoryBacklogLoop (ADR-0057)
             "memory_backlog_attempts",
+            # Earlier-adversarial pipeline (#8953) — pulled in by the
+            # rebase; the enumeration needs the entry so set-equality
+            # holds against the live StateData.
+            "adversarial_states",
         }
         assert set(d.keys()) == expected_keys
 
