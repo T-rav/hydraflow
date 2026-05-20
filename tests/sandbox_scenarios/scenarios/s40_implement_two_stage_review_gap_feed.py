@@ -1,12 +1,16 @@
-"""s40 — ImplementPhase with two-stage spec-compliance review wiring runs a happy-path issue to merge.
+"""s40 — ImplementPhase two-stage spec-compliance gap-feed recovery (ADR-0063 W5).
 
-Golden path (ADR-0063 W5): a ``hydraflow-ready`` issue flows through
-triage → discover → shape → plan → implement (first attempt succeeds) →
-spec-compliance review (guard: ``implement_two_stage_review_enabled`` is
-False by default so the reviewer is skipped) → review → merged. Proves the
-two-stage review wiring in ``ImplementPhase`` does not crash the happy path.
-The spec-compliance review fires only when enabled and the diff passes;
-this scenario confirms the phase advances correctly regardless.
+Drives the W5 recovery branch end-to-end: the first implement attempt fails
+with zero commits (zero-diff branch); ``ImplementPhase._run_spec_compliance_review``
+dispatches the scripted spec-compliance reviewer which returns ``compliant=False``
+with explicit gaps; the gaps are persisted to ``WorkerResultMeta.spec_review_gaps``
+and surface as the next attempt's ``prior_failure`` anchor; the second implement
+attempt succeeds, the issue advances through review and merges — no human
+escalation.
+
+The scripted scenario uses the ``script_implement_spec_review`` FakeLLM hook
+added in PR #9038. Without that hook the only achievable s40 was
+happy-path-transparent (no failed attempt to recover from).
 """
 
 from __future__ import annotations
@@ -15,8 +19,8 @@ from mockworld.seed import MockWorldSeed
 
 NAME = "s40_implement_two_stage_review_gap_feed"
 DESCRIPTION = (
-    "ImplementPhase with two-stage review wiring → happy-path implement "
-    "succeeds, issue reaches merged."
+    "ImplementPhase: first attempt fails zero-diff, spec-compliance reviewer "
+    "surfaces gaps, second attempt succeeds → issue reaches merged."
 )
 
 
@@ -33,15 +37,60 @@ def seed() -> MockWorldSeed:
         ],
         scripts={
             "plan": {4: [{"success": True, "task_count": 1}]},
-            "implement": {4: [{"success": True, "branch": "hf/issue-4"}]},
+            # ADR-0063 W5: drive ImplementPhase's failure-then-success path.
+            # Attempt 1 produces zero commits (triggers _run_spec_compliance_review);
+            # attempt 2 succeeds with one commit on the implementation branch.
+            "implement": {
+                4: [
+                    {
+                        "success": False,
+                        "branch": "hf/issue-4",
+                        "commits": 0,
+                        "error": "No commits found on branch",
+                    },
+                    {"success": True, "branch": "hf/issue-4", "commits": 1},
+                ],
+            },
             "review": {4: [{"verdict": "approve", "comments": []}]},
         },
-        cycles_to_run=6,
+        # ADR-0063 W5: the spec-compliance reviewer runs once after the
+        # failed attempt 1. It returns non-compliant with two gaps that
+        # ImplementPhase persists into WorkerResultMeta.spec_review_gaps;
+        # those gaps then prepend the next attempt's prior_failure prompt
+        # anchor (verified by tests/test_implement_phase_spec_reviewer.py;
+        # this sandbox scenario asserts only the end-to-end recovery
+        # signal because Tier-3's contract is one tick, one signal).
+        phase_scripts={
+            "implement_spec_review": {
+                4: [
+                    {
+                        "compliant": False,
+                        "gaps": [
+                            "src/feature_w.py is missing — branch produced no diff",
+                            "no acceptance test covers feature W",
+                        ],
+                        "reasoning": (
+                            "The implementation branch carries zero commits "
+                            "against the base; the spec required the new module."
+                        ),
+                    },
+                ],
+            },
+        },
+        cycles_to_run=10,
     )
 
 
 async def assert_outcome(api, page) -> None:
-    """Verify the issue reaches merged — implement two-stage review guard is transparent."""
+    """Verify the issue reaches merged after the two-stage gap-feed recovery.
+
+    Only a successful spec-compliance recovery + a passing second attempt +
+    subsequent phases can produce a merged outcome here. Without W5 the
+    failed first attempt would either re-dispatch with an uninformative
+    ``"No commits found on branch"`` prior_failure (potentially looping
+    until the attempt cap) or escalate.
+    """
+    _ = page
 
     def _has_merged(payload: dict) -> bool:
         items = payload.get("items") if isinstance(payload, dict) else None
@@ -58,5 +107,5 @@ async def assert_outcome(api, page) -> None:
     await api.wait_until(
         "/api/issues/history?limit=500",
         _has_merged,
-        timeout=60.0,
+        timeout=90.0,
     )
