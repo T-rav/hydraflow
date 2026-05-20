@@ -6,8 +6,11 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W21
 
-- `92d8648` — chore(arch): regen after lint pass *(2026-05-20)*
-- `cf93c46` — docs(wiki+standards+adr): bulk backfill 3 — 12 wiki terms, standards wiring, 2 ADR drafts *(2026-05-20)*
+- `b46ee9b` — chore(arch): regen post-rebase + ADR renumber *(2026-05-20)*
+- `67dc8fa` — chore(arch): regen after lint pass *(2026-05-20)*
+- `c13debd` — docs(wiki+standards+adr): bulk backfill 3 — 12 wiki terms, standards wiring, 2 ADR drafts *(2026-05-20)*
+- `75ad1a4` — chore(arch): regen after rebase against staging *(2026-05-20)*
+- `a8e86d7` — chore: ruff format + arch-regen refresh *(2026-05-20)*
 - `4ff3f88` — chore(arch): regen after rebase against staging *(2026-05-20)*
 - `d15e32a` — style(trust-fleet-sanity): ruff lint + format fixes on breach-path tests *(2026-05-20)*
 - `18041e1` — feat(adversarial): remove the switch — adversarial pipeline always on (#9036) (#9036) *(2026-05-19)*
@@ -362,4 +365,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `92d8648` on 2026-05-20 15:10 UTC. Source last changed at `92d8648`. Status: 🟢 fresh._
+_Regenerated from commit `b46ee9b` on 2026-05-20 15:34 UTC. Source last changed at `b46ee9b`. Status: 🟢 fresh._

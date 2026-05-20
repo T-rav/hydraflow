@@ -44,4 +44,4 @@ graph LR
     src_state -- "1" --> src
 ```
 
-_Regenerated from commit `92d8648` on 2026-05-20 15:10 UTC. Source last changed at `92d8648`. Status: 🟢 fresh._
+_Regenerated from commit `b46ee9b` on 2026-05-20 15:34 UTC. Source last changed at `b46ee9b`. Status: 🟢 fresh._
