@@ -439,6 +439,38 @@ class TestKnownPatterns:
         save_known_patterns(nested, patterns)
         assert (nested / "log_patterns.jsonl").exists()
 
+    def test_save_is_atomic_on_write_failure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A crash during the write must not truncate the existing file (#8080).
+
+        Pre-existing good content is written, then the atomic ``os.replace``
+        step is forced to fail mid-save. The original file must survive intact
+        rather than being left empty/partial. A non-atomic ``write_text`` would
+        truncate the target on open and leave the new (or partial) content,
+        failing this assertion.
+        """
+        import file_util
+
+        good = {"mod.a:fp <N>": self._make_known("fp <N>", "mod.a")}
+        save_known_patterns(tmp_path, good)
+        original = (tmp_path / "log_patterns.jsonl").read_text(encoding="utf-8")
+        assert original  # sanity: file has content
+
+        def _boom(*_a: object, **_k: object) -> None:
+            raise OSError("simulated crash during atomic rename")
+
+        monkeypatch.setattr(file_util.os, "replace", _boom)
+
+        # A second save that crashes during the rename — swallowed internally.
+        new = {"mod.b:other <S>": self._make_known("other <S>", "mod.b")}
+        save_known_patterns(tmp_path, new)
+
+        # Original content must be intact, not truncated or replaced.
+        assert (tmp_path / "log_patterns.jsonl").read_text(encoding="utf-8") == original
+        # No leftover temp files in the directory.
+        assert not list(tmp_path.glob(".log_patterns-*.tmp"))
+
 
 # ---------------------------------------------------------------------------
 # TestFileLogPatterns
