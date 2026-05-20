@@ -6,9 +6,18 @@
 graph LR
   subgraph builder
     AgentRunner["AgentRunner<br/><i>runner</i>"]
+    ReportIssueLoop["ReportIssueLoop<br/><i>loop</i>"]
     Task["Task<br/><i>entity</i>"]
   end
   subgraph caretaker
+    GitHubCacheLoop["GitHubCacheLoop<br/><i>loop</i>"]
+    MergeStateWatcherLoop["MergeStateWatcherLoop<br/><i>loop</i>"]
+    PricingRefreshLoop["PricingRefreshLoop<br/><i>loop</i>"]
+    PRUnstickerLoop["PRUnstickerLoop<br/><i>loop</i>"]
+    RCBudgetLoop["RCBudgetLoop<br/><i>loop</i>"]
+    SentryLoop["SentryLoop<br/><i>loop</i>"]
+    SkillPromptEvalLoop["SkillPromptEvalLoop<br/><i>loop</i>"]
+    StaleIssueGCLoop["StaleIssueGCLoop<br/><i>loop</i>"]
     TermPrunerLoop["TermPrunerLoop<br/><i>loop</i>"]
     WikiRotDetectorLoop["WikiRotDetectorLoop<br/><i>loop</i>"]
     WorkspaceGCLoop["WorkspaceGCLoop<br/><i>loop</i>"]

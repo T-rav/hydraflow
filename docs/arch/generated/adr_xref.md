@@ -83,6 +83,13 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0070 | `src.ports`, `src.review_insights` |
 | ADR-0071 | `src.route_back`, `src.state` |
 | ADR-0072 | `src.stale_issue_gc_loop`, `src.stale_issue_loop` |
+| ADR-0073 | `src.run_recorder`, `src.runs_gc_loop` |
+| ADR-0074 | `src.retrospective`, `src.retrospective_loop`, `src.retrospective_queue` |
+| ADR-0075 | `src.merge_state_watcher`, `src.merge_state_watcher_loop` |
+| ADR-0076 | `src.github_cache_loop` |
+| ADR-0077 | `src.pr_unsticker`, `src.pr_unsticker_loop` |
+| ADR-0078 | `src.pricing_refresh_diff`, `src.pricing_refresh_loop` |
+| ADR-0079 | `src.adr_reviewer`, `src.adr_reviewer_loop` |
 
 ## Module → ADRs
 
@@ -90,7 +97,8 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 |---|---|
 | `src.adr_drift` | ADR-0056 |
 | `src.adr_pre_validator` | ADR-0037 |
-| `src.adr_reviewer` | ADR-0033, ADR-0034, ADR-0037, ADR-0039, ADR-0040 |
+| `src.adr_reviewer` | ADR-0033, ADR-0034, ADR-0037, ADR-0039, ADR-0040, ADR-0079 |
+| `src.adr_reviewer_loop` | ADR-0079 |
 | `src.adr_touchpoint_auditor_loop` | ADR-0056 |
 | `src.adversarial_labels` | ADR-0064 |
 | `src.adversarial_retry_loop` | ADR-0064 |
@@ -131,6 +139,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.fake_coverage_auditor_loop` | ADR-0045 |
 | `src.file_util` | ADR-0021 |
 | `src.flake_tracker_loop` | ADR-0045 |
+| `src.github_cache_loop` | ADR-0076 |
 | `src.health_monitor_loop` | ADR-0045, ADR-0046 |
 | `src.hf_cli.__main__` | ADR-0036 |
 | `src.hf_cli.supervisor_client` | ADR-0007 |
@@ -143,6 +152,8 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.label_drift_watcher_loop` | ADR-0056 |
 | `src.memory_backlog_loop` | ADR-0057 |
 | `src.memory_backlog_mirror` | ADR-0057 |
+| `src.merge_state_watcher` | ADR-0075 |
+| `src.merge_state_watcher_loop` | ADR-0075 |
 | `src.metrics_manager` | ADR-0010, ADR-0021 |
 | `src.mockworld.fakes.fake_honeycomb` | ADR-0055 |
 | `src.mockworld.fakes.fake_llm` | ADR-0059 |
@@ -157,6 +168,8 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.ports` | ADR-0003, ADR-0044, ADR-0066, ADR-0067, ADR-0068, ADR-0069, ADR-0070 |
 | `src.post_merge_handler` | ADR-0012, ADR-0014, ADR-0015, ADR-0016, ADR-0019, ADR-0064 |
 | `src.pr_manager` | ADR-0002, ADR-0005, ADR-0011, ADR-0013, ADR-0018, ADR-0045, ADR-0055, ADR-0056 |
+| `src.pr_unsticker` | ADR-0077 |
+| `src.pr_unsticker_loop` | ADR-0077 |
 | `src.precondition_gate` | ADR-0041 |
 | `src.preflight` | ADR-0043 |
 | `src.preflight.agent` | ADR-0050 |
@@ -165,6 +178,8 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.preflight.context` | ADR-0050 |
 | `src.preflight.decision` | ADR-0050 |
 | `src.preflight.runner` | ADR-0050 |
+| `src.pricing_refresh_diff` | ADR-0078 |
+| `src.pricing_refresh_loop` | ADR-0078 |
 | `src.principles_audit_loop` | ADR-0045 |
 | `src.prompt_builder` | ADR-0043 |
 | `src.prompt_template` | ADR-0043 |
@@ -173,12 +188,17 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.repo_wiki` | ADR-0032, ADR-0053, ADR-0061 |
 | `src.repo_wiki_loop` | ADR-0032, ADR-0053 |
 | `src.report_issue_loop` | ADR-0013, ADR-0018, ADR-0045 |
+| `src.retrospective` | ADR-0074 |
+| `src.retrospective_loop` | ADR-0074 |
+| `src.retrospective_queue` | ADR-0074 |
 | `src.review_advisor` | ADR-0059 |
 | `src.review_insights` | ADR-0070 |
 | `src.review_phase` | ADR-0012, ADR-0014, ADR-0015, ADR-0031, ADR-0059 |
 | `src.review_phase._phase` | ADR-0063 |
 | `src.reviewer` | ADR-0025, ADR-0027, ADR-0059 |
 | `src.route_back` | ADR-0041, ADR-0071 |
+| `src.run_recorder` | ADR-0073 |
+| `src.runs_gc_loop` | ADR-0073 |
 | `src.screenshot_scanner` | ADR-0018 |
 | `src.sentry.reverse_lookup` | ADR-0050 |
 | `src.server` | ADR-0038, ADR-0055 |
@@ -218,4 +238,4 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.workspace_gc_loop` | ADR-0069 |
 | `src.worktree` | ADR-0003, ADR-0009, ADR-0010 |
 
-_Regenerated from commit `32e2589` on 2026-05-19 20:04 UTC. Source last changed at `32e2589`. Status: 🟢 fresh._
+_Regenerated from commit `50edc5c` on 2026-05-20 15:08 UTC. Source last changed at `50edc5c`. Status: 🟢 fresh._
