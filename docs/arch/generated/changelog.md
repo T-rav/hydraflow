@@ -6,7 +6,11 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W21
 
-- `b1bbffe` — chore(arch): regen after rebase against staging *(2026-05-20)*
+- `d483b28` — chore(arch): regen post-rebase *(2026-05-20)*
+- `cda3bd4` — chore(arch): regenerate arch artifacts post-backfill *(2026-05-20)*
+- `e788dcb` — docs(standards,adr): backfill standards refs and ADR drafts for 9 ports/loops *(2026-05-20)*
+- `ac80bb8` — docs(wiki): backfill missing wiki entries for 8 ports/loops *(2026-05-20)*
+- `75ad1a4` — chore(arch): regen after rebase against staging *(2026-05-20)*
 - `a8e86d7` — chore: ruff format + arch-regen refresh *(2026-05-20)*
 - `4ff3f88` — chore(arch): regen after rebase against staging *(2026-05-20)*
 - `d15e32a` — style(trust-fleet-sanity): ruff lint + format fixes on breach-path tests *(2026-05-20)*
@@ -362,4 +366,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `b1bbffe` on 2026-05-20 15:06 UTC. Source last changed at `b1bbffe`. Status: 🟢 fresh._
+_Regenerated from commit `d483b28` on 2026-05-20 15:33 UTC. Source last changed at `d483b28`. Status: 🟢 fresh._

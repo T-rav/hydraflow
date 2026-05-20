@@ -2,9 +2,21 @@
 
 # Ubiquitous Language
 
-_20 terms across 3 bounded contexts._
+_28 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
+
+## AgentPort
+
+**Kind:** `port` · **Context:** `shared-kernel` · **Anchor:** `src/ports.py:AgentPort` · **Confidence:** `accepted`
+**Aliases:** `agent port`, `agent runner port`
+
+Hexagonal port for agent runner operations used by infrastructure modules. Implemented by `agent.AgentRunner` via `base_runner.BaseRunner`. The port was introduced so that infrastructure modules like `merge_conflict_resolver` can accept the agent runner via dependency injection without importing from the runner layer, keeping the four-layer boundary clean and making those modules independently testable with a mock.
+
+**Invariants:**
+- Pure Protocol — no implementation, no state.
+- Three methods: `build_command` constructs the CLI invocation; `execute` runs the subprocess and returns the full transcript; `verify_result` checks that the agent produced valid commits and that `make quality` passes.
+- Parameter names and types are kept identical to the concrete implementations to satisfy structural subtype checks in `tests/test_ports.py`.
 
 ## AgentRunner
 
@@ -77,6 +89,18 @@ Pydantic-validated runtime configuration aggregate for the HydraFlow orchestrato
 - batch_size is bounded ge=1, le=50.
 - repo is auto-detected from the git remote when left empty.
 
+## IssueFetcherPort
+
+**Kind:** `port` · **Context:** `shared-kernel` · **Anchor:** `src/ports.py:IssueFetcherPort` · **Confidence:** `accepted`
+**Aliases:** `issue fetcher port`, `github issue fetching port`
+
+Hexagonal port for fetching GitHub issues from the upstream source of truth. Exposes two methods consumed by domain code (phases and background loops): `fetch_issue_by_number` for single-issue lookups and `fetch_issues_by_labels` for label-scoped batch fetches. Implemented by `issue_fetcher.IssueFetcher`, which shells out to the `gh` CLI and applies internal caching and rate-limit back-off.
+
+**Invariants:**
+- Pure Protocol — no implementation, no state.
+- Only the two methods domain code actually calls are declared here; the concrete `IssueFetcher` carries additional infrastructure methods (PR cache, collaborator cache) that stay off the port.
+- `fetch_issues_by_labels` accepts an optional `exclude_labels` list and a `require_complete` flag so callers can narrow results without extra filtering passes.
+
 ## IssueStorePort
 
 **Kind:** `port` · **Context:** `shared-kernel` · **Anchor:** `src/ports.py:IssueStorePort` · **Confidence:** `accepted`
@@ -99,6 +123,18 @@ Caretaker loop that periodically scans all open PRs for merge conflicts and auto
 - Default tick interval is 600 seconds (10 minutes).
 - PRs labeled `hydraflow-hitl` or `hydraflow-review` are skipped.
 - Kill-switch is via `enabled_cb("merge_state_watcher")` and `config.merge_state_watcher_loop_enabled`.
+
+## ObservabilityPort
+
+**Kind:** `port` · **Context:** `shared-kernel` · **Anchor:** `src/ports.py:ObservabilityPort` · **Confidence:** `accepted`
+**Aliases:** `observability port`, `sentry port`, `error capture port`
+
+Hexagonal port for the observability boundary (ADR-0044 P7.7). Exposes five methods: `capture_exception`, `capture_message`, `breadcrumb`, `set_measurement`, and `flush`. The production adapter is `SentryObservabilityAdapter` in `src/observability/sentry_adapter.py`, which wraps `sentry_sdk` and silently degrades to a no-op when the SDK is not installed. The port is intentionally minimal — rich APIs drag every backend into the union.
+
+**Invariants:**
+- Pure Protocol — no implementation, no state.
+- The adapter is a no-op when `sentry_sdk` is absent; every method returns silently so callers never need a try/except around port calls.
+- Domain code never imports `sentry_sdk` directly; all observability routes through the injected `ObservabilityPort` so a future OTLP, structured-log, or sidecar adapter can replace Sentry without touching call sites.
 
 ## PricingRefreshLoop
 
@@ -171,6 +207,29 @@ File-based per-repo wiki manager (ADR-0032). Owns the on-disk layout for both th
 - ingest() updates topic pages, refreshes index.json/index.md, and appends to log.jsonl in a single operation.
 - When a tracked_root with per-entry layout is configured, reads prefer it and fall back to the legacy topic-page layout.
 
+## ReviewInsightStorePort
+
+**Kind:** `port` · **Context:** `shared-kernel` · **Anchor:** `src/ports.py:ReviewInsightStorePort` · **Confidence:** `accepted`
+**Aliases:** `review insight store port`, `review insight port`
+
+Hexagonal port for persisting and querying recurring reviewer-feedback patterns. Implemented by `review_insights.ReviewInsightStore`. `ReviewPhase` injects this port to record each review outcome and to query which feedback categories have been seen often enough to inject mandatory guidance blocks into the next agent prompt. The port decouples `ReviewPhase` from the JSONL file-storage backend.
+
+**Invariants:**
+- Pure Protocol — no implementation, no state.
+- Methods cover the full lifecycle: `append_review` writes a new record, `load_recent` reads recent history, `get_proposed_categories` and `mark_category_proposed` gate category escalation, and `record_proposal`, `load_proposal_metadata`, and `update_proposal_verified` track whether a proposed mandatory block reduced the pattern.
+
+## RouteBackCounterPort
+
+**Kind:** `port` · **Context:** `shared-kernel` · **Anchor:** `src/route_back.py:RouteBackCounterPort` · **Confidence:** `accepted`
+**Aliases:** `route-back counter port`, `route back counter`, `precondition retry counter port`
+
+Hexagonal port for the per-issue route-back counter. Lives in `src/route_back.py` alongside `RouteBackCoordinator`. The coordinator depends on this port rather than `StateTracker` directly, so unit tests can wire a tiny in-memory dict implementation without pulling in the full state layer. Production wiring connects `StateTracker` as the concrete adapter.
+
+**Invariants:**
+- Pure Protocol — no implementation, no state.
+- Three methods: `get_route_back_count` reads the current count; `increment_route_back_count` returns the new count after incrementing; `decrement_route_back_count` rolls back an increment when a subsequent label swap fails, preventing transient network blips from burning route-back budget without any actual route-back occurring.
+- `decrement_route_back_count` must be a no-op (returning 0) when the counter is already at zero.
+
 ## SentryLoop
 
 **Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/sentry_loop.py:SentryLoop` · **Confidence:** `accepted`
@@ -230,6 +289,44 @@ A source-agnostic work item abstraction representing tasks from any source (GitH
 - TaskLink relationships extracted via regex patterns with first-match precedence per target_id
 - URLs validated as empty or http(s):// via AfterValidator
 - Timestamps validated as empty or ISO 8601 format
+
+## TermPrunerLoop
+
+**Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/term_pruner_loop.py:TermPrunerLoop` · **Confidence:** `accepted`
+**Aliases:** `term pruner loop`, `UL pruner`, `glossary pruner`
+
+Caretaker background loop that autonomously prunes stale terms from the ubiquitous-language glossary (ADR-0057). On each tick it scans every `confidence == "accepted"` term in `docs/wiki/terms/`; for any term whose `code_anchor` no longer resolves in the live symbol index (built by `ubiquitous_language.build_symbol_index`), it opens an auto-merging bot PR that flips `confidence` to `deprecated` and records a `superseded_reason` with the broken anchor. The loop makes no LLM calls — detection is purely structural.
+
+**Invariants:**
+- Kill-switch: `enabled_cb("term_pruner")` AND `config.term_pruner_enabled` — both must be true for work to proceed.
+- Opens at most one PR per tick, bundling all eligible terms into a single `hydraflow-ul-deprecated`-labelled PR.
+- `ReviewPhase` skips routing for PRs carrying `TERM_PRUNER_PR_LABEL` so the deprecation PR is not sent through the agent pipeline.
+- Companion to `TermProposerLoop`: together they implement the two-tick grow/prune cycle that keeps `make lint-ul` anchor-resolution green without human intervention.
+
+## WikiRotDetectorLoop
+
+**Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/wiki_rot_detector_loop.py:WikiRotDetectorLoop` · **Confidence:** `accepted`
+**Aliases:** `wiki rot detector loop`, `wiki rot detector`, `cite freshness loop`
+
+Trust-fleet caretaker loop (ADR-0045 §4.9) that detects broken code citations in per-repo wikis. On each tick it walks every `RepoWikiStore`-registered repo's wiki entries, extracts code references via three patterns (`path.py:symbol`, dotted `src.module.Class`, and bare identifiers inside fenced code blocks as hints only), then verifies each hard cite. HydraFlow-self cites are checked via AST introspection; managed-repo cites are verified via grep over wiki markdown mirrors. For each broken cite the loop files a `hydraflow-find` + `wiki-rot` issue via `PRManager`, with a fuzzy-match suggestion from `difflib.get_close_matches` when the containing module still exists. After three unresolved attempts for a given slug+cite pair the loop escalates to `hitl-escalation` + `wiki-rot-stuck`.
+
+**Invariants:**
+- Kill-switch: `enabled_cb("wiki_rot_detector")` only — no config field (ADR-0049 trust-fleet convention).
+- Calls `reraise_on_credit_or_bug(exc)` in its broad except block to prevent `CreditExhaustedError` from being silently swallowed.
+- Does not run on startup (`run_on_startup=False`) — the first tick is deferred to the normal interval.
+
+## WorkspaceGCLoop
+
+**Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/workspace_gc_loop.py:WorkspaceGCLoop` · **Confidence:** `accepted`
+**Aliases:** `workspace gc loop`, `workspace garbage collector`, `worktree gc loop`
+
+Background caretaker loop that periodically garbage-collects stale worktrees and orphaned branches. Handles three leak classes: worktrees tracked in `StateTracker` whose PR has been merged or closed, orphaned worktree directories on disk with no `StateTracker` entry, and orphaned remote branches with no open PR. Catches worktrees that leak when PRs are merged manually, via HITL resolution, or when implementations fail or crash mid-cleanup.
+
+**Invariants:**
+- Kill-switch: `enabled_cb("workspace_gc")` AND `config.workspace_gc_loop_enabled` — both must be true to run.
+- Caps at `_MAX_GC_PER_CYCLE = 20` collections per tick to avoid long-running passes.
+- State removal happens before `WorkspacePort.destroy()` so a crash between the two steps leaves the entry gone; `destroy()` is idempotent.
+- An optional `is_in_pipeline_cb` guard prevents GC of issues still being actively processed by a phase.
 
 ## WorkspacePort
 

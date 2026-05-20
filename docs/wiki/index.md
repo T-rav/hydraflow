@@ -11,6 +11,16 @@ the context map at
 [`../arch/generated/ubiquitous-language-context-map.md`](../arch/generated/ubiquitous-language-context-map.md).
 See [ADR-0053](../adr/0053-ubiquitous-language-as-living-artifact.md).
 
+New terms added 2026-05-19 (wiki-gap backfill):
+- [`AgentPort`](terms/agent-port.md) — port for `AgentRunner` operations (dependency injection boundary for infra modules)
+- [`IssueFetcherPort`](terms/issue-fetcher-port.md) — port for GitHub issue fetching (two-method surface for domain code)
+- [`ObservabilityPort`](terms/observability-port.md) — observability boundary (capture_exception, breadcrumb, set_measurement)
+- [`ReviewInsightStorePort`](terms/review-insight-store-port.md) — port for reviewer-feedback pattern persistence
+- [`RouteBackCounterPort`](terms/route-back-counter-port.md) — port for the per-issue route-back counter (decouples RouteBackCoordinator from StateTracker)
+- [`TermPrunerLoop`](terms/term-pruner-loop.md) — caretaker that deprecates terms with broken code anchors (ADR-0057)
+- [`WikiRotDetectorLoop`](terms/wiki-rot-detector-loop.md) — trust-fleet loop detecting broken code cites in wiki entries (ADR-0045 §4.9)
+- [`WorkspaceGCLoop`](terms/workspace-gc-loop.md) — caretaker that GCs stale worktrees and orphaned branches
+
 ## Architecture (33)
 
 - ADR Structure and Validation Checklist

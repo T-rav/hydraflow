@@ -96,6 +96,13 @@ ADR and that named test files actually exist.
 | [0063](0063-factory-phase-drift-mitigation.md) | Factory-Phase Drift Mitigation | Proposed |
 | [0064](0064-earlier-adversarial-pipeline.md) | Earlier Adversarial Pipeline | Proposed |
 | [0065](0065-remove-code-grooming-loop.md) | Remove CodeGroomingLoop | Accepted |
+| [0066](0066-agent-port.md) | AgentPort: Dependency-Injection Boundary for Agent Runner | Proposed |
+| [0067](0067-issue-fetcher-port.md) | IssueFetcherPort: GitHub Issue Fetching Boundary | Proposed |
+| [0068](0068-bot-pr-port.md) | BotPRPort: Minimal Interface for Caretaker Bot-PRs | Proposed |
+| [0069](0069-workspace-gc-loop.md) | WorkspaceGCLoop: Autonomous Worktree Garbage Collection | Proposed |
+| [0070](0070-review-insight-store-port.md) | ReviewInsightStorePort: Persistence Boundary for Review Feedback Patterns | Proposed |
+| [0071](0071-route-back-counter-port.md) | RouteBackCounterPort: Testable Counter for Precondition Route-Backs | Proposed |
+| [0072](0072-stale-issue-loop.md) | StaleIssueLoop: Auto-Close Stale General Issues | Proposed |
 | [0073](0073-runs-gc-loop.md) | RunsGCLoop: Artifact Retention Enforcement | Proposed |
 | [0074](0074-retrospective-loop.md) | RetrospectiveLoop: Durable-Queue Pattern Analysis | Proposed |
 | [0075](0075-merge-state-watcher-loop.md) | MergeStateWatcherLoop: Autonomous Conflict Detection and Rebase | Proposed |
