@@ -46,14 +46,14 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `SkillPromptEvalLoop` | ✅ [0045] | ✅ [skill-prompt-eval-loop.md] | ❌ | ✅ README.md | ✅ `test_skill_prompt_eval_loop.py` | ✅ in catalog | ✅ `s17_skill_prompt_eval_clean_corpus.py` |
 | `StagingBisectLoop` | ✅ [0045, 0048, 0063] | ✅ [architecture.md] | ❌ | ✅ README.md | ✅ `test_staging_bisect_loop.py` | ✅ in catalog | ❌ |
 | `StagingPromotionLoop` | ✅ [0042] | ✅ [patterns.md] | ❌ | ✅ README.md | ✅ `test_staging_promotion_loop.py` | ✅ in catalog | ✅ `s13_rc_rebase_recovery.py` |
-| `StaleIssueGCLoop` | ✅ [0029] | ✅ [gotchas.md, stale-issue-gc-loop.md] | ❌ | ✅ README.md | ✅ `test_stale_issue_gc_loop.py` | ✅ in catalog | ❌ |
-| `StaleIssueLoop` | ❌ | ✅ [gotchas.md, stale-issue-gc-loop.md] | ❌ | ✅ README.md | ✅ `test_stale_issue_loop.py` | ✅ in catalog | ✅ `s16_stale_issue_scan.py` |
-| `TermProposerLoop` | ✅ [0054, 0057, 0060, 0061, 0062] | ✅ [bot-pr-port.md, entry-evidence-loop.md, task.md] | ❌ | ✅ README.md | ✅ `test_term_proposer_loop.py` | ✅ in catalog | ❌ |
-| `TermPrunerLoop` | ✅ [0057, 0060, 0062] | ❌ | ❌ | ✅ README.md | ✅ `test_term_pruner_loop.py` | ✅ in catalog | ❌ |
+| `StaleIssueGCLoop` | ✅ [0029, 0072] | ✅ [gotchas.md, stale-issue-gc-loop.md] | ❌ | ✅ README.md | ✅ `test_stale_issue_gc_loop.py` | ✅ in catalog | ❌ |
+| `StaleIssueLoop` | ✅ [0072] | ✅ [gotchas.md, stale-issue-gc-loop.md] | ❌ | ✅ README.md | ✅ `test_stale_issue_loop.py` | ✅ in catalog | ✅ `s16_stale_issue_scan.py` |
+| `TermProposerLoop` | ✅ [0054, 0057, 0060, 0061, 0062, 0068] | ✅ [bot-pr-port.md, entry-evidence-loop.md, task.md, term-pruner-loop.md] | ❌ | ✅ README.md | ✅ `test_term_proposer_loop.py` | ✅ in catalog | ❌ |
+| `TermPrunerLoop` | ✅ [0057, 0060, 0062, 0068] | ✅ [term-pruner-loop.md] | ❌ | ✅ README.md | ✅ `test_term_pruner_loop.py` | ✅ in catalog | ❌ |
 | `TriageRetryLoop` | ✅ [0063] | ❌ | ❌ | ✅ README.md | ✅ `test_triage_retry_loop.py` | ✅ in catalog | ❌ |
 | `TrustFleetSanityLoop` | ✅ [0045, 0046] | ✅ [testing.md] | ❌ | ✅ README.md | ✅ `test_trust_fleet_sanity_loop.py` | ✅ in catalog | ❌ |
-| `WikiRotDetectorLoop` | ✅ [0045, 0056, 0057] | ❌ | ❌ | ✅ README.md | ✅ `test_wiki_rot_detector_loop.py` | ✅ in catalog | ❌ |
-| `WorkspaceGCLoop` | ❌ | ❌ | ❌ | ✅ README.md | ✅ `test_workspace_gc_loop.py` | ⚠️ in catalog (no scenario file) | ✅ `s07_workspace_gc_reaps_dead_worktree.py` |
+| `WikiRotDetectorLoop` | ✅ [0045, 0056, 0057] | ✅ [wiki-rot-detector-loop.md] | ❌ | ✅ README.md | ✅ `test_wiki_rot_detector_loop.py` | ✅ in catalog | ❌ |
+| `WorkspaceGCLoop` | ✅ [0069] | ✅ [workspace-gc-loop.md] | ❌ | ✅ README.md | ✅ `test_workspace_gc_loop.py` | ⚠️ in catalog (no scenario file) | ✅ `s07_workspace_gc_reaps_dead_worktree.py` |
 ## Section 2: Ports
 
 Cassette and Contract columns are N/A for all ports (ADR-0047 contracts are
@@ -61,15 +61,15 @@ per-adapter, not per-port).
 
 | Port | ADR | Wiki | Generated | Standard | Fake | Cassette | Contract |
 |---|---|---|---|---|---|---|---|
-| `AgentPort` | ❌ | ✅ [architecture-layers.md] | ✅ ports.md | ✅ README.md | ✅ `FakeAgent` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
-| `BotPRPort` | ❌ | ✅ [bot-pr-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeBotPR` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
-| `IssueFetcherPort` | ✅ [0081] | ✅ [architecture-async-control.md] | ✅ ports.md | ✅ README.md | ✅ `FakeIssueFetcher` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
+| `AgentPort` | ✅ [0066] | ✅ [agent-port.md, architecture-layers.md] | ✅ ports.md | ✅ README.md | ✅ `FakeAgent` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
+| `BotPRPort` | ✅ [0068] | ✅ [bot-pr-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeBotPR` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
+| `IssueFetcherPort` | ✅ [0067, 0081] | ✅ [architecture-async-control.md, issue-fetcher-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeIssueFetcher` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `IssueStorePort` | ✅ [0041] | ✅ [architecture-layers.md, issue-store-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeIssueStore` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
-| `ObservabilityPort` | ❌ | ❌ | ✅ ports.md | ✅ README.md | ✅ `FakeSentry` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
-| `PRPort` | ✅ [0045, 0052, 0056, 0075, 0077] | ✅ [architecture-async-control.md, architecture-layers.md, dark-factory.md, diagram-loop.md, fake-coverage-auditor-loop.md, gotchas.md, pr-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakePR` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
-| `ReviewInsightStorePort` | ❌ | ❌ | ✅ ports.md | ✅ README.md | ✅ `FakeReviewInsightStore` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
-| `RouteBackCounterPort` | ❌ | ❌ | ✅ ports.md | ✅ README.md | ✅ `FakeRouteBackCounter` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
-| `WorkspacePort` | ✅ [0003, 0050] | ✅ [workspace-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeWorkspace` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
+| `ObservabilityPort` | ✅ [0072] | ✅ [observability-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeSentry` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
+| `PRPort` | ✅ [0045, 0052, 0056, 0068, 0069, 0075, 0077] | ✅ [architecture-async-control.md, architecture-layers.md, dark-factory.md, diagram-loop.md, fake-coverage-auditor-loop.md, gotchas.md, pr-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakePR` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
+| `ReviewInsightStorePort` | ✅ [0070] | ✅ [review-insight-store-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeReviewInsightStore` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
+| `RouteBackCounterPort` | ✅ [0071] | ✅ [route-back-counter-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeRouteBackCounter` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
+| `WorkspacePort` | ✅ [0003, 0050, 0069] | ✅ [workspace-gc-loop.md, workspace-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeWorkspace` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 ## Section 3: Factory phases
 
 Section 3 contains hand-curated prose (Loops driving it / Escalation path /
@@ -77,4 +77,4 @@ HITL trigger). It is not regenerable from source and is maintained in
 `docs/arch/coverage_matrix.md` (the hand-curated baseline document).
 
 
-_Regenerated from commit `b46ee9b` on 2026-05-20 15:34 UTC. Source last changed at `b46ee9b`. Status: 🟢 fresh._
+_Regenerated from commit `21b59db` on 2026-05-20 15:53 UTC. Source last changed at `21b59db`. Status: 🟢 fresh._

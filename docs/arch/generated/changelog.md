@@ -6,9 +6,15 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W21
 
-- `b46ee9b` — chore(arch): regen post-rebase + ADR renumber *(2026-05-20)*
-- `67dc8fa` — chore(arch): regen after lint pass *(2026-05-20)*
-- `c13debd` — docs(wiki+standards+adr): bulk backfill 3 — 12 wiki terms, standards wiring, 2 ADR drafts *(2026-05-20)*
+- `21b59db` — chore(arch): regen post-rebase round 2 *(2026-05-20)*
+- `0b33086` — chore(arch): regen post-rebase + ADR renumber *(2026-05-20)*
+- `9843c52` — chore(arch): regen after lint pass *(2026-05-20)*
+- `6da9a75` — docs(wiki+standards+adr): bulk backfill 3 — 12 wiki terms, standards wiring, 2 ADR drafts *(2026-05-20)*
+- `cd44f14` — chore(arch): regen post-rebase round 2 *(2026-05-20)*
+- `d483b28` — chore(arch): regen post-rebase *(2026-05-20)*
+- `cda3bd4` — chore(arch): regenerate arch artifacts post-backfill *(2026-05-20)*
+- `e788dcb` — docs(standards,adr): backfill standards refs and ADR drafts for 9 ports/loops *(2026-05-20)*
+- `ac80bb8` — docs(wiki): backfill missing wiki entries for 8 ports/loops *(2026-05-20)*
 - `75ad1a4` — chore(arch): regen after rebase against staging *(2026-05-20)*
 - `a8e86d7` — chore: ruff format + arch-regen refresh *(2026-05-20)*
 - `4ff3f88` — chore(arch): regen after rebase against staging *(2026-05-20)*
@@ -365,4 +371,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `b46ee9b` on 2026-05-20 15:34 UTC. Source last changed at `b46ee9b`. Status: 🟢 fresh._
+_Regenerated from commit `21b59db` on 2026-05-20 15:53 UTC. Source last changed at `21b59db`. Status: 🟢 fresh._
