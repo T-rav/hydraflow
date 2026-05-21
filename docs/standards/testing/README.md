@@ -74,6 +74,35 @@ A feature merges into `staging` when ALL three layers exist for it. Specifically
 - The `assert_outcome` body uses the dashboard API (`api.get("/api/state")`) and Playwright (`page.click(...)`) to verify production-shaped behavior
 - **Scenarios must `import pytest` only inside function bodies** — the sandbox runner imports each scenario module in an environment that does not have pytest as a runtime dep. A top-level `import pytest` crashes the import.
 
+## Fake adapters, cassettes & the coverage matrix (ADR-0047)
+
+These conventions govern fakes, contract cassettes, and any tooling that
+audits or generates the coverage matrix. They were corrected during the
+coverage-matrix-baseline work (PR #8738) after the original spec — which is
+gitignored and does not survive session boundaries — got several details
+wrong. Canonicalised here so the generator slice and future audits agree.
+
+- **Fakes live in `src/mockworld/fakes/`**, not `tests/scenarios/fakes/`.
+  Per [ADR-0047](../../adr/0047-fake-adapter-contract-testing-cassettes.md)
+  and codebase inspection, the Fake adapter implementations are production
+  test-support code under `src/mockworld/fakes/` (e.g. `fake_github.py`,
+  `fake_docker.py`). Any "Fake adapter" column in the coverage matrix must
+  point there.
+- **Fake naming strips the `Port` suffix: `Fake<base>`, not `Fake<PortName>`.**
+  A `WorkspacePort` is implemented by `FakeWorkspace`, a `PRPort` by
+  `FakeGitHub` (the concrete-adapter base name), never `FakeWorkspacePort`.
+- **Cassette and Contract columns are per *adapter*, not per *port*.**
+  ADR-0047 trust contracts are recorded per concrete adapter — `github` /
+  `git` / `docker` / `llm` — not per port interface. In the coverage matrix
+  the Ports section marks both the Cassette and Contract columns **N/A**;
+  those columns belong only to the per-adapter section. A generator that
+  emits per-port cassette/contract cells is wrong.
+- **Bead filing uses `bd create --silent`, not `bd q --description`.**
+  `bd q --description "..."` does not exist. The working command is
+  `bd create --silent --title "..." --description "..."`. Bead IDs are short
+  alphanumeric strings (e.g. `advisor-bpl`), not sequential integers — any
+  tooling that parses or generates bead IDs must not assume numeric IDs.
+
 ## Anti-patterns
 
 - **"My feature is too small to need scenario / sandbox tests."** This is the rationalisation that ships features which pass unit tests but break in real conditions. If the feature has any observable runtime path through a loop or the orchestrator, both higher layers apply. Real-API behavior (e.g. GitHub's update-branch endpoint, OAuth flows, third-party rate limits) is invisible to unit tests.
