@@ -141,6 +141,7 @@ curl -X POST "http://localhost:5556/api/runtimes/{slug}/start"
 ```bash
 make              # command help
 make setup        # bootstrap .env, hooks, labels, local assets
+make ensure-hooks # (canary) re-point core.hooksPath at .githooks if hooks aren't firing
 make prep         # repo audit + scaffold + hardening loop
 make run          # start backend + dashboard
 make dry-run      # print actions without executing
