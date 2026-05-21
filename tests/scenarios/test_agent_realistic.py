@@ -996,3 +996,104 @@ async def test_A22_wiki_populated_plan_consults_it(tmp_path) -> None:
     assert result.issue(1).merged, (
         f"expected merged=True with wiki wired; outcome={result.issue(1)}"
     )
+
+
+async def test_A23_auth_retry_marker_heals_then_merges(tmp_path) -> None:
+    """`authentication_failed` in the agent stream triggers the retryable
+    auth path: runner_utils._is_auth_failure raises AuthenticationRetryError,
+    base_runner._execute retries up to _AUTH_RETRY_MAX, and the issue merges
+    when a later attempt succeeds (#8365).
+
+    Distinct from A17 (AuthenticationError hard-halt via a mocked _execute) —
+    this exercises the *real* in-_execute detection of the
+    `authentication_failed` stream marker plus the retry loop and heal-to-merge.
+    A4 documents that `auth_retry_required` is an unknown event type that the
+    StreamParser ignores; the real production trigger is the marker string in
+    the raw stream, which is what this scripts.
+    """
+    from tests.scenarios.helpers.git_worktree_fixture import init_test_worktree
+
+    world = MockWorld(tmp_path, use_real_agent_runner=True)
+    world.add_issue(1, "t", "b", labels=["hydraflow-ready"])
+    worktree_cwd = tmp_path / "worktrees" / "issue-1"
+    init_test_worktree(worktree_cwd, branch="agent/issue-1")
+
+    # Attempts 1 and 2: the stream carries the `authentication_failed` marker,
+    # so runner_utils raises AuthenticationRetryError and base_runner retries.
+    def _auth_fail_stream() -> list[dict[str, object]]:
+        return [
+            {"type": "error", "subtype": "authentication_failed"},
+            {"type": "result", "success": False, "exit_code": 1},
+        ]
+
+    world.docker.script_run(_auth_fail_stream())
+    world.docker.script_run(_auth_fail_stream())
+    # Attempt 3 (the last allowed by _AUTH_RETRY_MAX=3): clean success + commit.
+    world.docker.script_run_with_commits(
+        events=[{"type": "result", "success": True, "exit_code": 0}],
+        commits=[("x.py", "fixed after auth retry")],
+        cwd=worktree_cwd,
+    )
+
+    result = await world.run_pipeline()
+
+    outcome = result.issue(1)
+    assert outcome.merged, (
+        f"expected merged after auth-retry heal; outcome={outcome!r}; "
+        f"docker_invocations={len(world.docker.invocations)}"
+    )
+    # Proves the retry loop fired: 2 auth-failed attempts + 1 success ⇒ ≥3
+    # implement invocations before any post-implement skill runs.
+    assert len(world.docker.invocations) >= 3, (
+        f"expected >=3 implement attempts (2 auth-retry + 1 heal); "
+        f"got {len(world.docker.invocations)}"
+    )
+
+
+async def test_A24_rate_limit_in_implement_phase_no_special_handling(tmp_path) -> None:
+    """GitHub rate-limit fired during the implement phase (the create_pr path)
+    — documents that prod has NO bespoke rate-limit handling there (#8366).
+
+    A6/A7 arm the limit before triage, so it fires at the earliest GitHub call
+    (triage's find_existing_issue) and the issue never reaches implement. This
+    scenario lets triage + plan succeed, then arms `remaining=0` via an
+    `on_phase("implement", ...)` hook (the inverse of A18's heal) so the limit
+    first bites inside the implement phase — the same phase that owns
+    `pr_manager.create_pr`.
+
+    Finding (#8366): there is no create_pr-specific retry/backoff/HITL path.
+    The implement phase's GitHub calls (label/PR ops including create_pr) all
+    route through `FakeGitHub._maybe_rate_limit`; the resulting `RateLimitError`
+    is neither `AuthenticationError`, `CreditExhaustedError`, nor `MemoryError`,
+    so `phase_utils.run_refilling_pool` absorbs it as a non-fatal warning (same
+    path as A6). Targeting create_pr *exactly* would need a fragile tuned
+    `remaining=N` budget — the issue explicitly accepts documenting the
+    phase-level finding instead.
+
+    Observable behaviour (asserted so the test fails if handling changes):
+    `run_pipeline` returns normally, the issue is not merged, no PR is
+    recorded, and the rate-limit was consumed.
+    """
+    from tests.scenarios.helpers.git_worktree_fixture import init_test_worktree
+
+    world = MockWorld(tmp_path, use_real_agent_runner=True)
+    world.add_issue(1, "t", "b", labels=["hydraflow-ready"])
+    worktree_cwd = tmp_path / "worktrees" / "issue-1"
+    init_test_worktree(worktree_cwd, branch="agent/issue-1")
+
+    world.docker.script_run_with_commits(
+        events=[{"type": "result", "success": True, "exit_code": 0}],
+        commits=[("x.py", "ok")],
+        cwd=worktree_cwd,
+    )
+
+    # Triage + plan run with no limit; arm remaining=0 as implement starts.
+    world.on_phase("implement", lambda: world.github.set_rate_limit_mode(remaining=0))
+
+    result = await world.run_pipeline()
+
+    # No bespoke handling: RateLimitError is pool-absorbed, pipeline returns
+    # normally, the issue does not merge, and no PR exists.
+    assert not result.issue(1).merged, f"unexpected merge; outcome={result.issue(1)}"
+    assert world.github.pr_for_issue(1) is None, "no PR should be created"
+    assert world.github._rate_limit_remaining == 0, "rate-limit should be consumed"
