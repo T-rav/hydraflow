@@ -827,6 +827,110 @@ class HydraFlowConfig(BaseModel):
         default=["hydraflow-fake-coverage-stuck"],
         description="Labels for stuck fake-coverage gaps (paired with hitl_escalation_label)",
     )
+    flaky_test_label: list[str] = Field(
+        default=["hydraflow-flaky-test"],
+        description="Labels for flaky-test issues filed by FlakeTrackerLoop",
+    )
+    flaky_test_stuck_label: list[str] = Field(
+        default=["hydraflow-flaky-test-stuck"],
+        description="Labels for stuck flaky-test escalations",
+    )
+    fake_drift_label: list[str] = Field(
+        default=["hydraflow-fake-drift"],
+        description="Labels for fake drift findings filed by ContractRefreshLoop",
+    )
+    fake_repair_stuck_label: list[str] = Field(
+        default=["hydraflow-fake-repair-stuck"],
+        description="Labels for stuck fake repair escalations",
+    )
+    corpus_learning_stuck_label: list[str] = Field(
+        default=["hydraflow-corpus-learning-stuck"],
+        description="Labels for stuck corpus learning escalations",
+    )
+    trust_loop_anomaly_label: list[str] = Field(
+        default=["hydraflow-trust-loop-anomaly"],
+        description="Labels for TrustFleetSanityLoop anomaly escalations",
+    )
+    rc_duration_regression_label: list[str] = Field(
+        default=["hydraflow-rc-duration-regression"],
+        description="Labels for RC duration regression issues",
+    )
+    rc_duration_stuck_label: list[str] = Field(
+        default=["hydraflow-rc-duration-stuck"],
+        description="Labels for stuck RC duration escalations",
+    )
+    wiki_rot_label: list[str] = Field(
+        default=["hydraflow-wiki-rot"],
+        description="Labels for wiki rot findings",
+    )
+    wiki_rot_stuck_label: list[str] = Field(
+        default=["hydraflow-wiki-rot-stuck"],
+        description="Labels for stuck wiki rot escalations",
+    )
+    skill_prompt_case_weak_label: list[str] = Field(
+        default=["hydraflow-corpus-case-weak"],
+        description="Labels for weak skill prompt corpus cases",
+    )
+    skill_prompt_stuck_label: list[str] = Field(
+        default=["hydraflow-skill-prompt-stuck"],
+        description="Labels for stuck skill prompt drift escalations",
+    )
+    discover_stuck_label: list[str] = Field(
+        default=["hydraflow-discover-stuck"],
+        description="Labels for stuck Discover evaluator escalations",
+    )
+    shape_stuck_label: list[str] = Field(
+        default=["hydraflow-shape-stuck"],
+        description="Labels for stuck Shape evaluator escalations",
+    )
+    shadow_drift_label: list[str] = Field(
+        default=["hydraflow-shadow-drift"],
+        description="Labels for shadow corpus drift findings",
+    )
+    shadow_drift_stuck_label: list[str] = Field(
+        default=["hydraflow-shadow-drift-stuck"],
+        description="Labels for stuck shadow corpus drift escalations",
+    )
+    principles_drift_label: list[str] = Field(
+        default=["hydraflow-principles-drift"],
+        description="Labels for managed-repo principles audit drift findings",
+    )
+    principles_stuck_label: list[str] = Field(
+        default=["hydraflow-principles-stuck"],
+        description="Labels for stuck principles audit drift escalations",
+    )
+    cultural_check_label: list[str] = Field(
+        default=["hydraflow-cultural-check"],
+        description="Labels for cultural principles audit escalations",
+    )
+    staging_revert_conflict_label: list[str] = Field(
+        default=["hydraflow-revert-conflict"],
+        description="Labels for staging bisect revert-conflict escalations",
+    )
+    staging_bisect_harness_failure_label: list[str] = Field(
+        default=["hydraflow-bisect-harness-failure"],
+        description="Labels for staging bisect harness failure escalations",
+    )
+    staging_rc_red_bisect_exhausted_label: list[str] = Field(
+        default=["hydraflow-rc-red-bisect-exhausted"],
+        description="Labels for exhausted RC-red bisect escalations",
+    )
+    staging_retry_lineage_exhausted_label: list[str] = Field(
+        default=["hydraflow-retry-lineage-exhausted"],
+        description="Labels for exhausted retry-lineage escalations",
+    )
+    staging_rc_red_post_revert_red_label: list[str] = Field(
+        default=["hydraflow-rc-red-post-revert-red"],
+        description="Labels for post-revert red RC escalations",
+    )
+    staging_rc_red_verify_timeout_label: list[str] = Field(
+        default=["hydraflow-rc-red-verify-timeout"],
+        description="Labels for RC verification timeout escalations",
+    )
+    staging_rc_red_retry_label: list[str] = Field(
+        default=["hydraflow-rc-red-retry"],
+        description="Labels for staging retry issues filed after auto-reverts",
+    )
     max_diagnosticians: int = Field(
         default=1,
         description="Max concurrent diagnostic workers",
@@ -2395,7 +2499,10 @@ class HydraFlowConfig(BaseModel):
         description="Per-issue attempt cap before auto-agent-exhausted (default 3).",
     )
     auto_agent_skip_sublabels: list[str] = Field(
-        default_factory=lambda: ["principles-stuck", "cultural-check"],
+        default_factory=lambda: [
+            "hydraflow-principles-stuck",
+            "hydraflow-cultural-check",
+        ],
         description=(
             "Sub-labels that bypass auto-agent pre-flight entirely. Default = the "
             "principles-audit recursion guard."
@@ -2685,6 +2792,37 @@ class HydraFlowConfig(BaseModel):
         "diagnose_label",
         "memory_backlog_label",
         "memory_backlog_stuck_label",
+        "hitl_escalation_label",
+        "fake_coverage_gap_label",
+        "adapter_surface_label",
+        "test_helper_label",
+        "fake_coverage_stuck_label",
+        "flaky_test_label",
+        "flaky_test_stuck_label",
+        "fake_drift_label",
+        "fake_repair_stuck_label",
+        "corpus_learning_stuck_label",
+        "trust_loop_anomaly_label",
+        "rc_duration_regression_label",
+        "rc_duration_stuck_label",
+        "wiki_rot_label",
+        "wiki_rot_stuck_label",
+        "skill_prompt_case_weak_label",
+        "skill_prompt_stuck_label",
+        "discover_stuck_label",
+        "shape_stuck_label",
+        "shadow_drift_label",
+        "shadow_drift_stuck_label",
+        "principles_drift_label",
+        "principles_stuck_label",
+        "cultural_check_label",
+        "staging_revert_conflict_label",
+        "staging_bisect_harness_failure_label",
+        "staging_rc_red_bisect_exhausted_label",
+        "staging_retry_lineage_exhausted_label",
+        "staging_rc_red_post_revert_red_label",
+        "staging_rc_red_verify_timeout_label",
+        "staging_rc_red_retry_label",
     )
     @classmethod
     def labels_must_not_be_empty(cls, v: list[str]) -> list[str]:

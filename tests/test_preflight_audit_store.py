@@ -18,7 +18,7 @@ def _entry(
     return PreflightAuditEntry(
         ts=ts,
         issue=issue,
-        sub_label="flaky-test-stuck",
+        sub_label="hydraflow-flaky-test-stuck",
         attempt_n=1,
         prompt_hash="sha256:abc",
         cost_usd=cost,

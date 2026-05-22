@@ -640,7 +640,7 @@ class ConfigFactory:
                 auto_agent_max_attempts=auto_agent_max_attempts,
                 auto_agent_skip_sublabels=auto_agent_skip_sublabels
                 if auto_agent_skip_sublabels is not None
-                else ["principles-stuck", "cultural-check"],
+                else ["hydraflow-principles-stuck", "hydraflow-cultural-check"],
                 auto_agent_persona=auto_agent_persona,
                 auto_agent_preflight_enabled=auto_agent_preflight_enabled,
             )

@@ -132,7 +132,7 @@ class TestV2DriftChainMockWorld:
         assert "hydraflow-find" in issue.labels
         assert "shadow-drift" in issue.labels
         # Critical: no HITL labels — autonomous-only routing.
-        assert "hitl-escalation" not in issue.labels
+        assert "hydraflow-hitl-escalation" not in issue.labels
         assert "human-required" not in issue.labels
 
     async def test_clean_tick_files_no_issue(self, tmp_path: Path) -> None:

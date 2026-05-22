@@ -199,7 +199,9 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
             f"{attempts} times without closure. Human review needed.\n\n"
             f"_Closing this issue clears the dedup key + attempt counter._"
         )
-        labels = ["hitl-escalation"] + list(self._config.memory_backlog_stuck_label)
+        labels = list(self._config.hitl_escalation_label) + list(
+            self._config.memory_backlog_stuck_label
+        )
         return await self._pr.create_issue(title, body, labels)
 
     async def _reconcile_closed_escalations(self) -> None:
@@ -220,7 +222,7 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
             "--state",
             "closed",
             "--label",
-            "hitl-escalation",
+            self._config.hitl_escalation_label[0],
             "--label",
             stuck_label,
             "--author",

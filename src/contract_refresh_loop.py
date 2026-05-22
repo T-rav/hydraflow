@@ -471,9 +471,7 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         pr_url: str | None,
     ) -> int:
         adapters_joined = ", ".join(adapters)
-        labels = ["hydraflow-find", "fake-drift"]
-        for adapter in adapters:
-            labels.append(f"adapter-{adapter}")
+        labels = [self._config.find_label[0], self._config.fake_drift_label[0]]
 
         title = (
             f"Fake drift: replay gate failed after contract refresh ({adapters_joined})"
@@ -541,7 +539,10 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         adapter name in the label + title to jump straight to the stuck
         fake.
         """
-        labels = ["hitl-escalation", "fake-repair-stuck", f"adapter-{adapter}"]
+        labels = [
+            self._config.hitl_escalation_label[0],
+            self._config.fake_repair_stuck_label[0],
+        ]
         title = (
             f"Contract refresh stuck: {adapter} has drifted "
             f"{attempts} consecutive ticks"

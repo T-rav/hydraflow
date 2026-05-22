@@ -4,7 +4,7 @@ Two scenarios over a 20-RC-run window:
 
 * ``test_files_issue_when_threshold_crossed`` — a single test fails on 4 of
   the 20 simulated RC promotion runs (above the default threshold of 3).
-  FlakeTrackerLoop must file exactly one ``flaky-test`` +
+  FlakeTrackerLoop must file exactly one ``hydraflow-flaky-test`` +
   ``hydraflow-find`` issue.
 * ``test_no_file_below_threshold`` — a test fails on only 2 runs (below
   threshold). The loop must NOT file an issue.
@@ -33,7 +33,7 @@ class TestFlakeTracker:
     """§4.5 — flake detector MockWorld scenarios."""
 
     async def test_files_issue_when_threshold_crossed(self, tmp_path) -> None:
-        """20 RC runs with one test failing on 4 → one flaky-test issue filed."""
+        """20 RC runs with one test failing on 4 → one hydraflow-flaky-test issue filed."""
         world = MockWorld(tmp_path)
         fake_pr = AsyncMock()
         fake_pr.create_issue = AsyncMock(return_value=101)
@@ -75,7 +75,7 @@ class TestFlakeTracker:
         title, _body, labels = args[0], args[1], args[2]
         assert "test_flaky" in title
         assert "flake rate: 4/20" in title
-        assert "flaky-test" in labels
+        assert "hydraflow-flaky-test" in labels
         assert "hydraflow-find" in labels
         fake_fetch.assert_awaited_once()
         # _download_junit called once per run
