@@ -176,7 +176,7 @@ async def test_third_attempt_escalates(env) -> None:
     call_args = pr.create_issue.await_args
     assert "feedback-gamma" in call_args.args[0]
     labels = call_args.args[2]
-    assert "hitl-escalation" in labels
+    assert "hydraflow-hitl-escalation" in labels
     assert any("memory-backlog-stuck" in lab for lab in labels)
 
 

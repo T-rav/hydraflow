@@ -7,7 +7,7 @@ Two scenarios:
   should file nothing.
 * ``test_staleness_breach_files_escalation`` — `flake_tracker` heartbeat
   is old enough that the staleness detector fires. The loop should file
-  one ``hitl-escalation`` + ``trust-loop-anomaly`` issue with labels
+  one ``hydraflow-hitl-escalation`` + ``hydraflow-trust-loop-anomaly`` issue with labels
   that include the breached detector kind.
 
 The loop's external surface (``_collect_window_metrics`` via the
@@ -124,5 +124,5 @@ class TestTrustFleetSanityScenario:
         assert fake_pr.create_issue.await_count >= 1
 
         labels = fake_pr.create_issue.await_args.args[2]
-        assert "hitl-escalation" in labels
-        assert "trust-loop-anomaly" in labels
+        assert "hydraflow-hitl-escalation" in labels
+        assert "hydraflow-trust-loop-anomaly" in labels

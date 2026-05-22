@@ -546,7 +546,7 @@ async def test_kill_switch_short_circuits_do_work(loop_env) -> None:
 @pytest.mark.asyncio
 async def test_maybe_escalate_fires_once_at_threshold(loop_env) -> None:
     """After the first escalation, repeat ticks at the same attempt count
-    must not re-file the hitl-escalation issue (ADR-0045 §3.2 lifecycle)."""
+    must not re-file the hydraflow-hitl-escalation issue (ADR-0045 §3.2 lifecycle)."""
     cfg, state, pr = loop_env
     stop = asyncio.Event()
     # Simulate: first call returns 3 (hits structural threshold), subsequent
@@ -576,7 +576,7 @@ async def test_maybe_escalate_fires_once_at_threshold(loop_env) -> None:
 async def test_reconcile_closed_escalations_resets_counter(
     loop_env, monkeypatch
 ) -> None:
-    """Closing a `principles-stuck` issue triggers reset_drift_attempts
+    """Closing a `hydraflow-principles-stuck` issue triggers reset_drift_attempts
     with the (slug, check_id) parsed from the title."""
     cfg, state, pr = loop_env
     stop = asyncio.Event()

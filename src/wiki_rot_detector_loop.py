@@ -51,8 +51,6 @@ logger = logging.getLogger("hydraflow.wiki_rot_detector_loop")
 
 _MAX_ATTEMPTS = 3
 _EXCERPT_CHARS = 500
-_ISSUE_LABELS_FIND: tuple[str, ...] = ("hydraflow-find", "wiki-rot")
-_ISSUE_LABELS_ESCALATE: tuple[str, ...] = ("hitl-escalation", "wiki-rot-stuck")
 
 
 class WikiRotDetectorLoop(BaseBackgroundLoop):
@@ -157,7 +155,13 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         try:
             emit_loop_subprocess_trace(
                 loop=self._worker_name,
-                command=["gh", "issue", "list", "--label", "wiki-rot-stuck"],
+                command=[
+                    "gh",
+                    "issue",
+                    "list",
+                    "--label",
+                    self._config.wiki_rot_stuck_label[0],
+                ],
                 exit_code=0,
                 duration_ms=duration_ms,
                 stderr_excerpt=(
@@ -335,7 +339,7 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         await self._pr.create_issue(
             title,
             body_out,
-            list(_ISSUE_LABELS_FIND),
+            [self._config.find_label[0], self._config.wiki_rot_label[0]],
         )
 
     async def _file_escalation(
@@ -359,7 +363,10 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         await self._pr.create_issue(
             title,
             body,
-            list(_ISSUE_LABELS_ESCALATE),
+            [
+                self._config.hitl_escalation_label[0],
+                self._config.wiki_rot_stuck_label[0],
+            ],
         )
 
     async def _reconcile_closed_escalations(self) -> None:
@@ -415,9 +422,9 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
             "--state",
             "closed",
             "--label",
-            "hitl-escalation",
+            self._config.hitl_escalation_label[0],
             "--label",
-            "wiki-rot-stuck",
+            self._config.wiki_rot_stuck_label[0],
             "--author",
             "@me",
             "--json",

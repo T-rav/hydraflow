@@ -1708,28 +1708,14 @@ async def test_ensure_labels_exist_uses_config_label_names(config, event_bus, tm
         create_idx = list(args).index("create")
         created_labels.add(args[create_idx + 1])
 
-    assert created_labels == {
-        "custom-find",
-        "custom-plan",
-        "custom-ready",
-        "custom-review",
-        "custom-hitl",
-        "custom-hitl-active",
-        "custom-fixed",
-        "custom-dup",
-        "custom-epic",
-        "custom-epic-child",
-        "custom-verify",
-        "hydraflow-parked",
-        "hydraflow-diagnose",
-        "hydraflow-hitl-escalation",
-        "hydraflow-fake-coverage-gap",
-        "hydraflow-adapter-surface",
-        "hydraflow-test-helper",
-        "hydraflow-fake-coverage-stuck",
-        "hydraflow-adr-drift",
-        "hydraflow-adr-drift-stuck",
+    from prep import HYDRAFLOW_LABELS
+
+    expected_labels = {
+        label
+        for field_name, _color, _description in HYDRAFLOW_LABELS
+        for label in getattr(cfg, field_name)
     }
+    assert created_labels == expected_labels
 
 
 @pytest.mark.asyncio

@@ -201,7 +201,10 @@ class LiveCorpusReplayLoop(BaseBackgroundLoop):
         ``human-required``. The combined autonomous-attempt budget is
         ``live_corpus_max_drift_attempts × auto_agent_max_attempts``.
         """
-        labels = ["hitl-escalation", "shadow-drift-stuck"]
+        labels = [
+            self._config.hitl_escalation_label[0],
+            self._config.shadow_drift_stuck_label[0],
+        ]
         title = (
             f"Shadow drift stuck: {len(signatures)} signature(s) survived "
             f"{self._config.live_corpus_max_drift_attempts} tick(s) without repair"
@@ -229,7 +232,7 @@ class LiveCorpusReplayLoop(BaseBackgroundLoop):
 
     async def _file_drift_issue(self, drifted: list[tuple[Path, str]]) -> int:
         """File a single hydraflow-find issue covering all drift this tick."""
-        labels = ["hydraflow-find", "shadow-drift"]
+        labels = [self._config.find_label[0], self._config.shadow_drift_label[0]]
         title = (
             f"Shadow drift: {len(drifted)} fake-adapter output(s) diverged "
             f"from live samples"

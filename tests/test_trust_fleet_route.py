@@ -275,7 +275,7 @@ def test_anomaly_reader_is_cached(config, monkeypatch) -> None:
 
     from dashboard_routes import _trust_routes as _mod
 
-    monkeypatch.setattr(_mod, "_build_anomaly_reader", lambda repo: _reader)
+    monkeypatch.setattr(_mod, "_build_anomaly_reader", lambda repo, **_: _reader)
     monkeypatch.setattr(_mod, "_ANOMALY_CACHE_TTL", 60)
     _mod._ANOMALY_CACHE.clear()
 

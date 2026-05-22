@@ -63,6 +63,9 @@ _ANOMALY_CACHE_TTL = 60
 
 def _build_anomaly_reader(
     repo: str | None,
+    *,
+    hitl_escalation_label: str = "hydraflow-hitl-escalation",
+    trust_loop_anomaly_label: str = "hydraflow-trust-loop-anomaly",
 ) -> Callable[[str], list[dict[str, Any]]]:
     """Return a callable that runs ``gh issue list`` for anomaly rows.
 
@@ -79,9 +82,9 @@ def _build_anomaly_reader(
             "--state",
             "all",
             "--label",
-            "hitl-escalation",
+            hitl_escalation_label,
             "--label",
-            "trust-loop-anomaly",
+            trust_loop_anomaly_label,
             "--limit",
             "200",
             "--json",
@@ -433,7 +436,11 @@ def build_trust_router(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         deps = deps_factory()
-        reader = _build_anomaly_reader(config.repo)
+        reader = _build_anomaly_reader(
+            config.repo,
+            hitl_escalation_label=config.hitl_escalation_label[0],
+            trust_loop_anomaly_label=config.trust_loop_anomaly_label[0],
+        )
         return asyncio.run(
             _read_fleet(
                 config,

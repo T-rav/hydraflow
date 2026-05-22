@@ -305,9 +305,8 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
             f"Filed by PrinciplesAuditLoop (spec §4.4)."
         )
         labels = [
-            "hydraflow-find",
-            "principles-drift",
-            f"check-{check_id}",
+            self._config.find_label[0],
+            self._config.principles_drift_label[0],
         ]
         return await self._pr.create_issue(title, body, labels)
 
@@ -339,12 +338,11 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
             f"Closing this issue clears the attempt counter (§3.2 lifecycle)."
         )
         labels = [
-            "hitl-escalation",
-            "principles-stuck",
-            f"check-{check_id}",
+            self._config.hitl_escalation_label[0],
+            self._config.principles_stuck_label[0],
         ]
         if severity == "CULTURAL":
-            labels.append("cultural-check")
+            labels.append(self._config.cultural_check_label[0])
         await self._pr.create_issue(title, body, labels)
         return True
 
@@ -368,7 +366,7 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
                 "--state",
                 "closed",
                 "--label",
-                "principles-stuck",
+                self._config.principles_stuck_label[0],
                 "--json",
                 "title",
                 "--limit",

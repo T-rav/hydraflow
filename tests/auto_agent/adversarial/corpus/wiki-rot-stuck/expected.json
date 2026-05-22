@@ -1,6 +1,6 @@
 {
   "status": "resolved",
   "labels_added": [],
-  "labels_removed": ["hitl-escalation", "human-required", "wiki-rot-stuck"],
+  "labels_removed": ["hydraflow-hitl-escalation", "human-required", "hydraflow-wiki-rot-stuck"],
   "pr_url": "https://github.com/x/y/pull/9051"
 }

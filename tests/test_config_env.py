@@ -473,7 +473,10 @@ class TestEnvVarOverrideTable:
 
 
 class TestOtelConfigFields:
-    def test_config_otel_defaults(self, tmp_path: Path) -> None:
+    def test_config_otel_defaults(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HF_ENV", raising=False)
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             workspace_base=tmp_path / "wt",

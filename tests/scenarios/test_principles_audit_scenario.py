@@ -10,7 +10,7 @@ Two scenarios cover the loop's ends-of-the-world:
   all-green on the prior tick (``state.get_last_green_audit`` returns
   a snapshot with ``P1.1: PASS``) but the current audit reports
   ``P1.1: FAIL``. The loop must file one ``hydraflow-find`` +
-  ``principles-drift`` + ``check-P1.1`` issue.
+  ``hydraflow-principles-drift`` issue.
 
 The loop's external surface — ``_run_audit`` (``make audit-json``
 subprocess) and ``_refresh_checkout`` (``git clone``/``git fetch``) —
@@ -192,5 +192,4 @@ class TestPrinciplesAuditScenario:
         assert "P1.1" in title
         assert "hydraflow-self" in title
         assert "hydraflow-find" in labels
-        assert "principles-drift" in labels
-        assert "check-P1.1" in labels
+        assert "hydraflow-principles-drift" in labels

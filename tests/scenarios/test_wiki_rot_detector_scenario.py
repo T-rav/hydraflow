@@ -3,7 +3,7 @@
 Fabricates a one-entry wiki whose cite points at a real module but a
 symbol that does not exist, stubs ``gh issue list`` to return empty
 (no prior escalations to reconcile), and asserts one ``hydraflow-find``
-+ ``wiki-rot`` issue is filed via the bot's ``create_issue`` port.
++ ``hydraflow-wiki-rot`` issue is filed via the bot's ``create_issue`` port.
 
 Follows the F7 FlakeTracker (``eac5fc72``), S6 SkillPromptEval
 (``93ebf387``), C6 FakeCoverageAuditor (``32b43ab0``), and rc-budget T9
@@ -77,7 +77,7 @@ class TestWikiRotDetectorScenario:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Seeded broken cite ⇒ exactly one ``hydraflow-find`` + ``wiki-rot`` fire.
+        """Seeded broken cite => exactly one ``hydraflow-find`` + ``hydraflow-wiki-rot`` fire.
 
         AST verification against the seeded HydraFlow-self source tree
         resolves ``src/foo.py`` but not the symbol ``bar`` — the loop
@@ -132,7 +132,7 @@ class TestWikiRotDetectorScenario:
 
         assert "src/foo.py:bar" in title
         assert "hydraflow-find" in labels
-        assert "wiki-rot" in labels
+        assert "hydraflow-wiki-rot" in labels
         # Fuzzy suggestion surfaces — ``bar`` ↔ ``other`` via difflib 0.6 cutoff
         # OR the loop's first-symbol fallback when no close match clears.
         assert "Did you mean" in body
