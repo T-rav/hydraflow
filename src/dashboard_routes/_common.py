@@ -19,10 +19,9 @@ from issue_store import IssueStoreStage
 _SAFE_SLUG_COMPONENT = re.compile(r"^[A-Za-z0-9_.\-]+$")
 
 # Interval bounds per editable worker.
-# memory_sync, metrics, pr_unsticker, adr_reviewer bounds must match config.py Field constraints.
+# metrics, pr_unsticker, adr_reviewer bounds must match config.py Field constraints.
 # pipeline_poller has no config Field; 5s minimum matches the hardcoded default.
 _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
-    "memory_sync": (10, 14400),
     "metrics": (30, 14400),
     "pr_unsticker": (60, 86400),
     "merge_state_watcher": (60, 86400),  # 1m min, 1d max (default 10m)

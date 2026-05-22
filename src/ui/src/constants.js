@@ -238,7 +238,7 @@ export const WORKER_PRESETS = {
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'sentry_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'sentry_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry'])
 
 /**
  * Default intervals (in seconds) for system workers.
@@ -249,7 +249,6 @@ export const SYSTEM_WORKER_INTERVALS = {
   pipeline_poller: 5,
   pr_unsticker: 3600,
   merge_state_watcher: 600,
-  memory_sync: 3600,
   report_issue: 30,
   worktree_gc: 1800,
   adr_reviewer: 86400,
@@ -304,7 +303,6 @@ export const CRATE_STATUSES = ['open', 'closed']
 export const BACKGROUND_WORKERS = [
   { key: 'retrospective', label: 'Retrospective', description: 'Periodic analysis of delivery patterns and review feedback. Runs pattern detection, proposal verification, and improvement filing.', color: theme.purple, group: 'learning', tags: ['insights'] },
   { key: 'pipeline_poller', label: 'Pipeline Poller', description: 'Refreshes live pipeline snapshots for queue and status visibility.', color: theme.textMuted, system: true, group: 'operations', tags: ['infra'] },
-  { key: 'memory_sync',     label: 'Memory Manager', description: 'Ingests memory and transcript issues into durable learnings.', color: theme.accent, system: true, group: 'intake', tags: ['memory'] },
   { key: 'pr_unsticker',    label: 'PR Unsticker',   description: 'Requeues stalled HITL PRs once requirements are actionable.', color: theme.orange, system: true, group: 'operations', tags: ['recovery'] },
   { key: 'merge_state_watcher', label: 'Merge State Watcher', description: 'Auto-rebases or HITL-escalates open PRs flagged mergeable=CONFLICTING (RC, dependabot, agent).', color: theme.orange, system: true, group: 'operations', tags: ['recovery'] },
   { key: 'report_issue',   label: 'Report Issue',   description: 'Processes queued bug reports into GitHub issues.', color: theme.red, group: 'intake', tags: ['issues'] },

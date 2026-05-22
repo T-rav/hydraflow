@@ -77,11 +77,6 @@ _bg_worker_defs = [
         "Reviews PRs, applies fixes, and merges approved work when checks pass.",
     ),
     (
-        "memory_sync",
-        "Memory Manager",
-        "Ingests memory and transcript issues into durable learnings and proposals.",
-    ),
-    (
         "retrospective",
         "Retrospective",
         "Captures post-merge outcomes and identifies recurring delivery patterns.",
@@ -176,7 +171,6 @@ _bg_worker_defs = [
 
 # Workers that have independent configurable intervals
 _INTERVAL_WORKERS = {
-    "memory_sync",
     "pr_unsticker",
     "pipeline_poller",
     "report_issue",
@@ -532,9 +526,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             if name in _INTERVAL_WORKERS and orch:
                 interval = orch.get_bg_worker_interval(name)
             elif name in _INTERVAL_WORKERS:
-                if name == "memory_sync":
-                    interval = _cfg.memory_sync_interval
-                elif name == "pr_unsticker":
+                if name == "pr_unsticker":
                     interval = _cfg.pr_unstick_interval
                 elif name == "pipeline_poller":
                     interval = 5

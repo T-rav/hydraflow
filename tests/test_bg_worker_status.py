@@ -283,14 +283,13 @@ class TestSystemWorkersEndpoint:
 
         response = await endpoint()
         data = json.loads(response.body)
-        assert len(data["workers"]) == 23
+        assert len(data["workers"]) == 22
         names = [w["name"] for w in data["workers"]]
         assert names == [
             "triage",
             "plan",
             "implement",
             "review",
-            "memory_sync",
             "retrospective",
             "review_insights",
             "pipeline_poller",
@@ -336,14 +335,14 @@ class TestSystemWorkersEndpoint:
         from orchestrator import HydraFlowOrchestrator
 
         orch = HydraFlowOrchestrator(config, event_bus=event_bus)
-        orch.update_bg_worker_status("memory_sync", "ok", {"item_count": 12})
+        orch.update_bg_worker_status("pr_unsticker", "ok", {"item_count": 12})
 
         router = self._make_router(config, event_bus, state, tmp_path, orch=orch)
         endpoint = self._find_endpoint(router, "/api/system/workers")
         response = await endpoint()
         data = json.loads(response.body)
 
-        ms = next(w for w in data["workers"] if w["name"] == "memory_sync")
+        ms = next(w for w in data["workers"] if w["name"] == "pr_unsticker")
         assert ms["status"] == "ok"
         assert ms["details"]["item_count"] == 12
         assert ms["last_run"] is not None
@@ -357,9 +356,9 @@ class TestSystemWorkersEndpoint:
         self, config, event_bus: EventBus, state, tmp_path: Path
     ) -> None:
         state.set_bg_worker_state(
-            "memory_sync",
+            "pr_unsticker",
             BackgroundWorkerState(
-                name="memory_sync",
+                name="pr_unsticker",
                 status="ok",
                 last_run="2026-02-20T10:00:00Z",
                 details={"count": 7},
@@ -371,7 +370,7 @@ class TestSystemWorkersEndpoint:
         response = await endpoint()
         data = json.loads(response.body)
 
-        ms = next(w for w in data["workers"] if w["name"] == "memory_sync")
+        ms = next(w for w in data["workers"] if w["name"] == "pr_unsticker")
         assert ms["status"] == "ok"
         assert ms["last_run"] == "2026-02-20T10:00:00Z"
         assert ms["details"]["count"] == 7
@@ -539,8 +538,8 @@ class TestSystemWorkersEndpointIntervals:
         response = await endpoint()
         data = json.loads(response.body)
 
-        ms = next(w for w in data["workers"] if w["name"] == "memory_sync")
-        assert ms["interval_seconds"] == config.memory_sync_interval
+        ms = next(w for w in data["workers"] if w["name"] == "pr_unsticker")
+        assert ms["interval_seconds"] == config.pr_unstick_interval
 
         # Pipeline workers should have poll_interval
         triage = next(w for w in data["workers"] if w["name"] == "triage")
@@ -553,13 +552,13 @@ class TestSystemWorkersEndpointIntervals:
         from orchestrator import HydraFlowOrchestrator
 
         orch = HydraFlowOrchestrator(config, event_bus=event_bus)
-        orch.update_bg_worker_status("memory_sync", "ok", {"count": 1})
+        orch.update_bg_worker_status("pr_unsticker", "ok", {"count": 1})
         router = self._make_router(config, event_bus, tmp_path, orch=orch)
         endpoint = self._find_endpoint(router, "/api/system/workers")
         response = await endpoint()
         data = json.loads(response.body)
 
-        ms = next(w for w in data["workers"] if w["name"] == "memory_sync")
+        ms = next(w for w in data["workers"] if w["name"] == "pr_unsticker")
         assert ms["next_run"] is not None  # computed from last_run + interval
         assert ms["last_run"] is not None
 
@@ -620,7 +619,7 @@ class TestSystemWorkersEndpointIntervals:
         response = await endpoint()
         data = json.loads(response.body)
 
-        ms = next(w for w in data["workers"] if w["name"] == "memory_sync")
+        ms = next(w for w in data["workers"] if w["name"] == "pr_unsticker")
         assert ms["next_run"] is None  # no last_run yet
 
 
@@ -703,12 +702,12 @@ class TestBgWorkerIntervalEndpoint:
         )
         endpoint = self._find_endpoint(router, "/api/control/bg-worker/interval")
 
-        # Too low for memory_sync (min 10)
-        response = await endpoint({"name": "memory_sync", "interval_seconds": 5})
+        # Too low for pr_unsticker (min 60)
+        response = await endpoint({"name": "pr_unsticker", "interval_seconds": 5})
         assert response.status_code == 422
 
-        # Too high (max 14400)
-        response = await endpoint({"name": "memory_sync", "interval_seconds": 99999})
+        # Too high (max 86400)
+        response = await endpoint({"name": "pr_unsticker", "interval_seconds": 99999})
         assert response.status_code == 422
 
     @pytest.mark.asyncio
@@ -723,12 +722,12 @@ class TestBgWorkerIntervalEndpoint:
         )
         endpoint = self._find_endpoint(router, "/api/control/bg-worker/interval")
 
-        response = await endpoint({"name": "memory_sync", "interval_seconds": 7200})
+        response = await endpoint({"name": "pr_unsticker", "interval_seconds": 7200})
         data = json.loads(response.body)
         assert data["status"] == "ok"
-        assert data["name"] == "memory_sync"
+        assert data["name"] == "pr_unsticker"
         assert data["interval_seconds"] == 7200
-        mock_orch.set_bg_worker_interval.assert_called_once_with("memory_sync", 7200)
+        mock_orch.set_bg_worker_interval.assert_called_once_with("pr_unsticker", 7200)
 
     @pytest.mark.asyncio
     async def test_interval_update_returns_error_without_orchestrator(

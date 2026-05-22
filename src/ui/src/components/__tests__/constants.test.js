@@ -166,10 +166,6 @@ describe('INTERVAL_PRESETS', () => {
 })
 
 describe('EDITABLE_INTERVAL_WORKERS', () => {
-  it('includes memory_sync', () => {
-    expect(EDITABLE_INTERVAL_WORKERS.has('memory_sync')).toBe(true)
-  })
-
   it('includes report_issue', () => {
     expect(EDITABLE_INTERVAL_WORKERS.has('report_issue')).toBe(true)
   })
