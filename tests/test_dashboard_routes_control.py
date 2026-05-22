@@ -398,15 +398,6 @@ class TestBgWorkerIntervalEndpoint:
         mock_orch.set_bg_worker_interval.assert_called_once_with("pr_unsticker", 7200)
 
     @pytest.mark.asyncio
-    async def test_interval_update_succeeds_for_memory_sync(self, _endpoint) -> None:
-        endpoint, mock_orch = _endpoint
-        response = await endpoint({"name": "memory_sync", "interval_seconds": 3600})
-        data = json.loads(response.body)
-        assert response.status_code == 200
-        assert data["status"] == "ok"
-        mock_orch.set_bg_worker_interval.assert_called_once_with("memory_sync", 3600)
-
-    @pytest.mark.asyncio
     async def test_interval_update_succeeds_for_metrics(self, _endpoint) -> None:
         endpoint, mock_orch = _endpoint
         response = await endpoint({"name": "metrics", "interval_seconds": 1800})
@@ -512,30 +503,10 @@ class TestBgWorkerIntervalEndpoint:
         endpoint = find_endpoint(router, "/api/control/bg-worker/interval")
         assert endpoint is not None
 
-        response = await endpoint({"name": "memory_sync", "interval_seconds": 3600})
+        response = await endpoint({"name": "metrics", "interval_seconds": 3600})
         data = json.loads(response.body)
         assert response.status_code == 400
         assert data["error"] == "no orchestrator"
-
-    @pytest.mark.asyncio
-    async def test_interval_rejects_below_minimum_for_memory_sync(
-        self, _endpoint
-    ) -> None:
-        endpoint, _ = _endpoint
-        response = await endpoint({"name": "memory_sync", "interval_seconds": 5})
-        data = json.loads(response.body)
-        assert response.status_code == 422
-        assert "between 10 and 14400" in data["error"]
-
-    @pytest.mark.asyncio
-    async def test_interval_rejects_above_maximum_for_memory_sync(
-        self, _endpoint
-    ) -> None:
-        endpoint, _ = _endpoint
-        response = await endpoint({"name": "memory_sync", "interval_seconds": 20000})
-        data = json.loads(response.body)
-        assert response.status_code == 422
-        assert "between 10 and 14400" in data["error"]
 
     @pytest.mark.asyncio
     async def test_interval_rejects_below_minimum_for_metrics(self, _endpoint) -> None:
@@ -589,7 +560,6 @@ class TestBgWorkerIntervalEndpoint:
         from dashboard_routes._common import _INTERVAL_BOUNDS
 
         assert isinstance(_INTERVAL_BOUNDS, dict)
-        assert "memory_sync" in _INTERVAL_BOUNDS
         assert "metrics" in _INTERVAL_BOUNDS
         assert "pr_unsticker" in _INTERVAL_BOUNDS
         assert "pipeline_poller" in _INTERVAL_BOUNDS
