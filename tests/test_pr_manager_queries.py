@@ -364,7 +364,7 @@ class TestRetryWrapperUsage:
             mock_plain.return_value = ""
             await mgr.push_branch(tmp_path, "agent/issue-42")
 
-        mock_plain.assert_awaited_once()
+        assert mock_plain.await_count == 3
         mock_retry.assert_not_awaited()
 
     @pytest.mark.asyncio

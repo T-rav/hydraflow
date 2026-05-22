@@ -770,11 +770,64 @@ async def test_push_branch_calls_git_push(config, event_bus, tmp_path):
     args = mock_create.call_args[0]
     assert args[0] == "git"
     assert args[1] == "push"
-    assert "--no-verify" in args
+    assert "--no-verify" not in args
     assert "-u" in args
     assert "origin" in args
     assert "agent/issue-42" in args
     assert "--force-with-lease" not in args
+
+
+@pytest.mark.asyncio
+async def test_push_branch_runs_arch_regen_before_push(config, event_bus, tmp_path):
+    manager = make_pr_manager(config, event_bus)
+
+    with patch("pr_manager.run_subprocess", new_callable=AsyncMock) as mock_run:
+        mock_run.return_value = ""
+        result = await manager.push_branch(tmp_path, "agent/issue-42")
+
+    assert result is True
+    calls = [call.args for call in mock_run.await_args_list]
+    assert calls[0] == ("make", "arch-regen")
+    assert calls[1] == ("git", "status", "--porcelain", "docs/arch")
+    assert calls[-1][:2] == ("git", "push")
+    assert "--no-verify" not in calls[-1]
+
+
+@pytest.mark.asyncio
+async def test_push_branch_commits_regenerated_arch_docs(config, event_bus, tmp_path):
+    manager = make_pr_manager(config, event_bus)
+
+    async def fake_run(*args, cwd=None, gh_token=None):
+        if args == ("git", "status", "--porcelain", "docs/arch"):
+            return " M docs/arch/generated/modules.md\n"
+        return ""
+
+    with patch("pr_manager.run_subprocess", side_effect=fake_run) as mock_run:
+        result = await manager.push_branch(tmp_path, "agent/issue-42")
+
+    assert result is True
+    calls = [call.args for call in mock_run.await_args_list]
+    assert ("git", "add", "docs/arch") in calls
+    assert any(call[:3] == ("git", "commit", "-m") for call in calls)
+    assert calls[-1][:2] == ("git", "push")
+
+
+@pytest.mark.asyncio
+async def test_push_branch_arch_regen_failure_returns_false(
+    config, event_bus, tmp_path, caplog
+):
+    manager = make_pr_manager(config, event_bus)
+
+    with (
+        caplog.at_level(logging.WARNING, logger="hydraflow.pr_manager"),
+        patch("pr_manager.run_subprocess", new_callable=AsyncMock) as mock_run,
+    ):
+        mock_run.side_effect = RuntimeError("arch failed")
+        result = await manager.push_branch(tmp_path, "agent/issue-42")
+
+    assert result is False
+    assert "Architecture regeneration failed" in caplog.text
+    mock_run.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -798,16 +851,15 @@ async def test_push_branch_failure_logs_warning_not_error(
     config, event_bus, tmp_path, caplog
 ):
     manager = make_pr_manager(config, event_bus)
-    mock_create = (
-        SubprocessMockBuilder()
-        .with_returncode(1)
-        .with_stderr("error: failed to push")
-        .build()
-    )
+
+    async def fake_run(*args, cwd=None, gh_token=None):
+        if args[:2] == ("git", "push"):
+            raise RuntimeError("error: failed to push")
+        return ""
 
     with (
         caplog.at_level(logging.WARNING, logger="hydraflow.pr_manager"),
-        patch("asyncio.create_subprocess_exec", mock_create),
+        patch("pr_manager.run_subprocess", side_effect=fake_run),
     ):
         result = await manager.push_branch(tmp_path, "agent/issue-99")
 
