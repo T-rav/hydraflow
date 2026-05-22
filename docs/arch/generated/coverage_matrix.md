@@ -23,8 +23,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `DiagramLoop` | ✅ [0001] | ❌ | ✅ loops.md | ❌ | ✅ `test_diagram_loop.py` | ✅ in catalog | ❌ |
 | `EdgeProposerLoop` | ✅ [0058, 0060, 0062] | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_edge_proposer_loop.py` | ✅ in catalog | ❌ |
 | `EntryEvidenceLoop` | ✅ [0062] | ❌ | ❌ | ✅ (caretaker loop) | ✅ `test_entry_evidence_loop.py` | ❌ | ❌ |
-| `EpicMonitorLoop` | ❌ | ✅ [architecture-async-control.md] | ❌ | ✅ (caretaker loop) | ✅ `test_epic_monitor_loop.py` | ✅ in catalog | ❌ |
-| `EpicSweeperLoop` | ❌ | ✅ [architecture-async-control.md] | ❌ | ✅ (caretaker loop) | ✅ `test_epic_sweeper_loop.py` | ✅ in catalog | ❌ |
+| `EpicMonitorLoop` | ✅ [0064] | ✅ [architecture-async-control.md] | ❌ | ✅ (caretaker loop) | ✅ `test_epic_monitor_loop.py` | ✅ in catalog | ❌ |
 | `FakeCoverageAuditorLoop` | ✅ [0045, 0056, 0057] | ❌ | ❌ | ❌ | ✅ `test_fake_coverage_auditor_loop.py` | ✅ in catalog | ❌ |
 | `FlakeTrackerLoop` | ✅ [0045, 0056, 0057] | ❌ | ❌ | ❌ | ✅ `test_flake_tracker_loop.py` | ✅ in catalog | ❌ |
 | `GitHubCacheLoop` | ❌ | ❌ | ❌ | ✅ (caretaker loop) | ❌ | ❌ | ❌ |
@@ -63,7 +62,7 @@ per-adapter, not per-port).
 |---|---|---|---|---|---|---|---|
 | `AgentPort` | ❌ | ✅ [architecture-layers.md] | ✅ ports.md | ❌ | ❌ | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `BotPRPort` | ❌ | ✅ [bot-pr-port.md] | ✅ ports.md | ❌ | ❌ | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
-| `IssueFetcherPort` | ❌ | ✅ [architecture-async-control.md] | ✅ ports.md | ❌ | ✅ `FakeIssueFetcher` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
+| `IssueFetcherPort` | ❌ | ❌ | ✅ ports.md | ❌ | ✅ `FakeIssueFetcher` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `IssueStorePort` | ✅ [0041] | ✅ [architecture-layers.md, issue-store-port.md] | ✅ ports.md | ❌ | ✅ `FakeIssueStore` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `ObservabilityPort` | ❌ | ❌ | ✅ ports.md | ❌ | ✅ `FakeSentry` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `PRPort` | ✅ [0052] | ✅ [architecture-async-control.md, architecture-layers.md, dark-factory.md, gotchas.md, pr-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakePR` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
@@ -77,4 +76,4 @@ HITL trigger). It is not regenerable from source and is maintained in
 `docs/arch/coverage_matrix.md` (the hand-curated baseline document).
 
 
-_Regenerated from commit `43356e7` on 2026-05-22 21:40 UTC. Source last changed at `43356e7`. Status: 🟢 fresh._
+_Regenerated from commit `41abb41` on 2026-05-22 22:14 UTC. Source last changed at `41abb41`. Status: 🟢 fresh._

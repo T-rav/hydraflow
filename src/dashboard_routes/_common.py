@@ -39,7 +39,6 @@ _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
     "sentry_ingest": (60, 86400),
     "report_issue": (10, 3600),
     "epic_monitor": (60, 86400),
-    "epic_sweeper": (600, 86400),
     "workspace_gc": (300, 86400),
     "runs_gc": (300, 86400),
     "health_monitor": (60, 86400),

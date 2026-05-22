@@ -23,7 +23,6 @@ areas:
       - EdgeProposerLoop
       - EntryEvidenceLoop
       - EpicMonitorLoop
-      - EpicSweeperLoop
       - GitHubCacheLoop
       - HealthMonitorLoop
       - LabelDriftWatcherLoop

@@ -27,7 +27,6 @@ _INTERVAL_BOUNDS_SKIP: set[str] = {
     "dependabot_merge_interval",
     "report_issue_interval",
     "epic_monitor_interval",
-    "epic_sweep_interval",
     "workspace_gc_interval",
     "runs_gc_interval",
     "health_monitor_interval",

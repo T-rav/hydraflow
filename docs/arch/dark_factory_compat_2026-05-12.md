@@ -62,7 +62,6 @@
 | `EdgeProposerLoop` | missing [bd:advisor-u93e] | covered | n/a |
 | `EntryEvidenceLoop` | source_not_found | source_not_found | source_not_found |
 | `EpicMonitorLoop` | covered | missing [bd:advisor-405m] | n/a |
-| `EpicSweeperLoop` | covered | missing [bd:advisor-405m] | n/a |
 | `FakeCoverageAuditorLoop` | covered | missing [bd:advisor-405m] | n/a |
 | `FlakeTrackerLoop` | covered | missing [bd:advisor-405m] | n/a |
 | `GitHubCacheLoop` | covered | missing [bd:advisor-405m] | n/a |
