@@ -100,6 +100,13 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
                     escalated += 1
                 else:
                     issue_num = await self._file_backlog_issue(entry)
+                    if issue_num is None:
+                        logger.warning(
+                            "memory_backlog: failed to file issue for %s; "
+                            "not marking dedup",
+                            entry.slug,
+                        )
+                        continue
                     update_status(entry.path, status="issue-open", issue=issue_num)
                     filed += 1
                     filed_issue_numbers.append(issue_num)
@@ -185,14 +192,14 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
                 commit_err.decode(errors="replace").strip(),
             )
 
-    async def _file_backlog_issue(self, entry: MirrorEntry) -> int:
+    async def _file_backlog_issue(self, entry: MirrorEntry) -> int | None:
         rel = entry.path.relative_to(self._config.repo_root)
         body = render_issue_body(entry, repo_relative_path=str(rel))
         title = f"Memory backlog: {entry.name}"
         labels = list(self._config.find_label) + list(self._config.memory_backlog_label)
         return await self._pr.create_issue(title, body, labels)
 
-    async def _file_escalation(self, entry: MirrorEntry, attempts: int) -> int:
+    async def _file_escalation(self, entry: MirrorEntry, attempts: int) -> int | None:
         title = f"HITL: memory backlog {entry.slug} unresolved after {attempts}"
         body = (
             f"`memory_backlog` has re-filed the `{entry.slug}` entry "

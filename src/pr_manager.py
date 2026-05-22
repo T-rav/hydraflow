@@ -1877,19 +1877,18 @@ class PRManager:
         title: str,
         body: str,
         labels: list[str] | None = None,
-    ) -> int:
-        """Create a new GitHub issue. Returns the issue number (0 on failure).
+    ) -> int | None:
+        """Create a new GitHub issue. Returns the issue number, or None on failure.
 
-        Callers MUST check for ``0`` before storing or referencing the
-        returned value.  Treating ``0`` as a real issue number causes
-        downstream ``gh issue comment 0`` / ``gh issue close 0`` calls
-        to fail with "Could not resolve to an issue or pull request with
-        the number of 0" every cycle.
+        Callers that need to store or reference the issue MUST handle
+        ``None``.  Treating a failed creation as a real issue number
+        obscures the original ``gh issue create`` failure behind later
+        comment/close errors.
         """
         self._assert_repo()
         if self._config.dry_run:
             logger.info("[dry-run] Would create issue: %s", title)
-            return 0
+            return None
 
         existing = await self.find_existing_issue(title)
         if existing:
@@ -1937,7 +1936,7 @@ class PRManager:
             return issue_number
         except (RuntimeError, ValueError) as exc:
             logger.warning("Issue creation failed for %r: %s", title, exc)
-            return 0
+            return None
 
     _SCREENSHOT_RELEASE_TAG = "screenshots"
 
@@ -3117,7 +3116,7 @@ class PRManager:
 
     async def create_task(
         self, title: str, body: str, labels: list[str] | None = None
-    ) -> int:
+    ) -> int | None:
         """Implement :class:`task_source.TaskTransitioner` — create a new issue."""
         return await self.create_issue(title, body, labels)
 

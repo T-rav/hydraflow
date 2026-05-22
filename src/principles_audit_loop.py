@@ -289,7 +289,7 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
 
     async def _file_drift_issue(
         self, slug: str, finding: dict[str, Any], last_status: str
-    ) -> int:
+    ) -> int | None:
         """File a ``hydraflow-find`` + ``principles-drift`` issue for one regression."""
         check_id = finding["check_id"]
         title = f"Principles drift: {check_id} regressed in {slug}"
@@ -343,7 +343,14 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
         ]
         if severity == "CULTURAL":
             labels.append(self._config.cultural_check_label[0])
-        await self._pr.create_issue(title, body, labels)
+        issue_number = await self._pr.create_issue(title, body, labels)
+        if issue_number is None:
+            logger.warning(
+                "principles audit: failed to file escalation for %s/%s",
+                slug,
+                check_id,
+            )
+            return False
         return True
 
     async def _reconcile_closed_escalations(self) -> None:
@@ -449,7 +456,7 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
         mr: ManagedRepo,
         fails: list[str],
         report: dict[str, Any],
-    ) -> int:
+    ) -> int | None:
         findings_by_id = {f["check_id"]: f for f in report.get("findings", [])}
         bullets = "\n".join(
             f"- **{cid}** ({findings_by_id[cid]['severity']}): "

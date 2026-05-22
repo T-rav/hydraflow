@@ -218,7 +218,7 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
         # rg exits 0 on match, 1 on no-match, 2+ on error.
         return proc.returncode == 0 and bool(stdout.strip())
 
-    async def _file_surface_gap(self, fake: str, method: str) -> int:
+    async def _file_surface_gap(self, fake: str, method: str) -> int | None:
         title = f"Un-cassetted adapter method: {fake}.{method}"
         subdir = _FAKE_TO_CASSETTE_DIR.get(fake, "?")
         body = (
@@ -239,7 +239,7 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
             ],
         )
 
-    async def _file_helper_gap(self, fake: str, method: str) -> int:
+    async def _file_helper_gap(self, fake: str, method: str) -> int | None:
         title = f"Un-exercised test helper: {fake}.{method}"
         body = (
             f"## Fake coverage gap — test helper\n\n"
@@ -258,7 +258,7 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
             ],
         )
 
-    async def _file_escalation(self, key: str, attempts: int) -> int:
+    async def _file_escalation(self, key: str, attempts: int) -> int | None:
         title = f"HITL: fake coverage gap {key} unresolved after {attempts}"
         body = (
             f"`fake_coverage_auditor` has re-filed the `{key}` gap "
@@ -456,9 +456,12 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
             "cassette-retirement-ready",
         ]
         try:
-            await self._pr.create_issue(title, body, labels)
+            issue_number = await self._pr.create_issue(title, body, labels)
         except Exception:  # noqa: BLE001 — issue filing failure ≠ loop failure
             logger.exception("retirement audit: create_issue failed")
+            issue_number = None
+        if issue_number is None:
+            logger.warning("retirement audit: create_issue failed; not marking dedup")
             return 0
         seen = self._dedup.get()
         seen.add(dedup_key)

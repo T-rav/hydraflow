@@ -1834,7 +1834,7 @@ def create_router(
             title=title, body=body, labels=labels
         )
 
-        if issue_number == 0:
+        if issue_number is None:
             return JSONResponse({"error": "Failed to create issue"}, status_code=500)
 
         url = f"https://github.com/{config.repo}/issues/{issue_number}"

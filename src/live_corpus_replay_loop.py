@@ -191,7 +191,7 @@ class LiveCorpusReplayLoop(BaseBackgroundLoop):
             "escalated_signatures": len(escalated_signatures),
         }
 
-    async def _file_escalation_issue(self, signatures: list[str]) -> int:
+    async def _file_escalation_issue(self, signatures: list[str]) -> int | None:
         """File a ``hitl-escalation`` issue when drift signatures exhaust
         the loop's own retry budget.
 
@@ -230,7 +230,7 @@ class LiveCorpusReplayLoop(BaseBackgroundLoop):
             labels=labels,
         )
 
-    async def _file_drift_issue(self, drifted: list[tuple[Path, str]]) -> int:
+    async def _file_drift_issue(self, drifted: list[tuple[Path, str]]) -> int | None:
         """File a single hydraflow-find issue covering all drift this tick."""
         labels = [self._config.find_label[0], self._config.shadow_drift_label[0]]
         title = (

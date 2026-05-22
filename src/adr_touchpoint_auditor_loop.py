@@ -107,7 +107,7 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
     def _changed_paths(pr: dict) -> list[str]:
         return [f.get("path", "") for f in pr.get("files", []) if f.get("path")]
 
-    async def _file_drift_finding(self, finding: DriftFinding) -> int:
+    async def _file_drift_finding(self, finding: DriftFinding) -> int | None:
         adr = finding.adr
         title = (
             f"ADR drift: ADR-{adr.number:04d} cited modules changed in "
@@ -132,7 +132,7 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
             [*self._config.find_label, *self._config.adr_drift_label],
         )
 
-    async def _file_drift_escalation(self, key: str, attempts: int) -> int:
+    async def _file_drift_escalation(self, key: str, attempts: int) -> int | None:
         title = f"HITL: ADR drift {key} unresolved after {attempts}"
         body = (
             f"`adr_touchpoint_auditor` has re-filed `{key}` "

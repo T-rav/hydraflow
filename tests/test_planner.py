@@ -264,10 +264,9 @@ async def test_build_prompt_truncates_long_body(config, event_bus):
     prompt, _ = await runner._build_prompt_with_stats(task)
 
     assert "…(truncated)" in prompt
-    # Well under original 20k body. Upper bound accommodates the ADR titles
-    # index (~2k chars for ~40 ADRs) and the ADR-0044 principles checklist
-    # (~900 chars) that the plan prompt now injects.
-    assert len(prompt) < 15_100
+    # Well under original 20k body. Upper bound accommodates repo context,
+    # ADR/principles guidance, and configured planner skill guidance.
+    assert len(prompt) < 15_500
 
 
 @pytest.mark.asyncio

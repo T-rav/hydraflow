@@ -161,7 +161,15 @@ class CodeGroomingLoop(BaseBackgroundLoop):
                 f"{finding.get('description', 'No description available.')}\n"
             )
 
-            await self._pr_manager.create_issue(title, body, labels=["code-quality"])
+            issue_number = await self._pr_manager.create_issue(
+                title, body, labels=["code-quality"]
+            )
+            if issue_number is None:
+                logger.warning(
+                    "Code grooming issue creation failed for %s; not marking dedup",
+                    finding_id,
+                )
+                continue
             self._dedup.add(finding_id)
             filed += 1
 
