@@ -4,7 +4,7 @@ Two scenarios over a 30-day synthetic RC-promotion history:
 
 * ``test_files_issue_on_spike`` — 29 prior runs at ~300s + a current run at
   900s (spike_ratio=2.0 → fires at 640s). RCBudgetLoop must file at least
-  one ``hydraflow-find`` + ``rc-duration-regression`` issue.
+  one ``hydraflow-find`` + ``hydraflow-rc-duration-regression`` issue.
 * ``test_no_file_when_within_budget`` — 29 prior runs at ~300s + a current
   run also at 300s. Neither signal trips; no issue filed.
 
@@ -87,7 +87,7 @@ class TestRCBudgetScenario:
         labels = fake_pr.create_issue.await_args.args[2]
         assert "RC gate duration regression" in title
         assert "hydraflow-find" in labels
-        assert "rc-duration-regression" in labels
+        assert "hydraflow-rc-duration-regression" in labels
 
     async def test_no_file_when_within_budget(self, tmp_path) -> None:
         """Current run matches history baseline → no signal, no file."""

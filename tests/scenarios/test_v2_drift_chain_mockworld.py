@@ -11,7 +11,7 @@ the chain reaches a real fake adapter's storage. Pattern A here drives:
 3. A real ``LiveCorpusReplayLoop`` registered with the real Phase 5
    ``gh_shape_validator`` dispatcher.
 4. A drifted sample is captured (shape validation MUST fail).
-5. The loop ticks and fires ``hydraflow-find`` + ``shadow-drift`` issue.
+5. The loop ticks and fires ``hydraflow-find`` + ``hydraflow-shadow-drift`` issue.
 6. The issue lands in ``FakeGitHub``'s issue store — verifiable by the
    scenario, the same way a production drift would land on a real
    github repo.
@@ -97,7 +97,7 @@ class TestV2DriftChainMockWorld:
         """End-to-end scenario test:
         - Inject a sample with a drifted ``mergeable`` enum.
         - Tick the loop.
-        - Verify a ``hydraflow-find`` + ``shadow-drift`` issue lands in
+        - Verify a ``hydraflow-find`` + ``hydraflow-shadow-drift`` issue lands in
           MockWorld's FakeGitHub.
         """
         world = MockWorld(tmp_path)
@@ -130,7 +130,7 @@ class TestV2DriftChainMockWorld:
         filed_issue_number = next(iter(world.github._issues))
         issue = world.github._issues[filed_issue_number]
         assert "hydraflow-find" in issue.labels
-        assert "shadow-drift" in issue.labels
+        assert "hydraflow-shadow-drift" in issue.labels
         # Critical: no HITL labels — autonomous-only routing.
         assert "hydraflow-hitl-escalation" not in issue.labels
         assert "human-required" not in issue.labels
