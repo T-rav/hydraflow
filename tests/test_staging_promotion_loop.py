@@ -251,7 +251,7 @@ class TestOpenPromotionFailing:
         )
         prs.create_issue.side_effect = RuntimeError("gh down")
         result = await loop._do_work()
-        assert result == {"status": "ci_failed", "pr": 99, "find_issue": 0}
+        assert result == {"status": "ci_failed", "pr": 99, "find_issue": None}
         prs.close_issue.assert_called_once_with(99)
 
     @pytest.mark.asyncio

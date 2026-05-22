@@ -181,7 +181,7 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
 
     async def _file_flake_issue(
         self, test_id: str, flake_count: int, runs: list[dict[str, Any]]
-    ) -> int:
+    ) -> int | None:
         """File a ``hydraflow-find`` + ``flaky-test`` issue. Returns issue number."""
         title = f"Flaky test: {test_id} (flake rate: {flake_count}/{_RUN_WINDOW})"
         run_lines = "\n".join(
@@ -200,7 +200,7 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
             title, body, [self._config.find_label[0], self._config.flaky_test_label[0]]
         )
 
-    async def _file_escalation(self, test_id: str, attempts: int) -> int:
+    async def _file_escalation(self, test_id: str, attempts: int) -> int | None:
         """File ``hitl-escalation`` + ``flaky-test-stuck`` after N failed repairs."""
         title = f"HITL: flaky test {test_id} unresolved after {attempts} attempts"
         body = (

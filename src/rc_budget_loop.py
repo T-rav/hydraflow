@@ -337,7 +337,7 @@ class RCBudgetLoop(BaseBackgroundLoop):
         previous_5: list[dict[str, Any]],
         jobs: list[dict[str, Any]],
         junit_tests: list[tuple[str, float]],
-    ) -> int:
+    ) -> int | None:
         """File a ``hydraflow-find`` + ``rc-duration-regression`` issue."""
         cfg = self._config
         cur = int(current["duration_s"])
@@ -381,7 +381,7 @@ class RCBudgetLoop(BaseBackgroundLoop):
             [self._config.find_label[0], self._config.rc_duration_regression_label[0]],
         )
 
-    async def _file_escalation(self, kind: str, attempts: int) -> int:
+    async def _file_escalation(self, kind: str, attempts: int) -> int | None:
         """File a ``hitl-escalation`` + ``rc-duration-stuck`` issue."""
         title = (
             f"HITL: RC gate duration regression ({kind}) unresolved after "

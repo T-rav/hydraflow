@@ -329,7 +329,7 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
         worker: str,
         kind: str,
         details: dict[str, Any],
-    ) -> int:
+    ) -> int | None:
         title = f"HITL: trust-loop anomaly — {worker} {kind}"
         detail_lines = "\n".join(
             f"- `{k}`: `{v}`" for k, v in sorted(details.items()) if k not in {"worker"}

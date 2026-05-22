@@ -434,11 +434,11 @@ async def test_create_issue_dry_run(dry_config, event_bus):
         number = await mgr.create_issue("Bug", "Details")
 
     mock_create.assert_not_called()
-    assert number == 0
+    assert number is None
 
 
 @pytest.mark.asyncio
-async def test_create_issue_failure_returns_zero(config, event_bus):
+async def test_create_issue_failure_returns_none(config, event_bus):
     mgr = make_pr_manager(config, event_bus)
     mock_create = (
         SubprocessMockBuilder()
@@ -450,7 +450,7 @@ async def test_create_issue_failure_returns_zero(config, event_bus):
     with patch("asyncio.create_subprocess_exec", mock_create):
         number = await mgr.create_issue("Bug", "Details")
 
-    assert number == 0
+    assert number is None
 
 
 @pytest.mark.asyncio
@@ -2120,10 +2120,10 @@ class TestCreateIssueEdgeCases:
     """Edge case tests for PRManager.create_issue."""
 
     @pytest.mark.asyncio
-    async def test_create_issue_malformed_output_returns_zero(
+    async def test_create_issue_malformed_output_returns_none(
         self, config, event_bus
     ) -> None:
-        """create_issue should return 0 when gh output is not a valid URL."""
+        """create_issue should return None when gh output is not a valid URL."""
         mgr = make_pr_manager(config, event_bus)
         mock_create = (
             SubprocessMockBuilder().with_stdout("Error: something went wrong").build()
@@ -2132,20 +2132,20 @@ class TestCreateIssueEdgeCases:
         with patch("asyncio.create_subprocess_exec", mock_create):
             result = await mgr.create_issue("Bug found", "Details here", ["bug"])
 
-        assert result == 0
+        assert result is None
 
     @pytest.mark.asyncio
-    async def test_create_issue_empty_output_returns_zero(
+    async def test_create_issue_empty_output_returns_none(
         self, config, event_bus
     ) -> None:
-        """create_issue should return 0 when gh output is empty."""
+        """create_issue should return None when gh output is empty."""
         mgr = make_pr_manager(config, event_bus)
         mock_create = SubprocessMockBuilder().build()
 
         with patch("asyncio.create_subprocess_exec", mock_create):
             result = await mgr.create_issue("Bug found", "Details here", ["bug"])
 
-        assert result == 0
+        assert result is None
 
 
 class TestWaitForCiEdgeCases:
@@ -2890,7 +2890,7 @@ async def test_create_issue_failure_logs_warning_not_error(config, event_bus, ca
     ):
         result = await manager.create_issue("Test Issue", "body")
 
-    assert result == 0
+    assert result is None
     assert "Issue creation failed" in caplog.text
     error_records = [r for r in caplog.records if r.levelno >= logging.ERROR]
     assert error_records == [], (
