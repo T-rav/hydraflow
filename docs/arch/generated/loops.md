@@ -20,7 +20,6 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **EdgeProposerLoop** | `src.edge_proposer_loop` | 86400 | — | — | — |
 | **EntryEvidenceLoop** | `src.entry_evidence_loop` | 86400 | — | — | ADR-0062 |
 | **EpicMonitorLoop** | `src.epic_monitor_loop` | 1800 | — | — | — |
-| **EpicSweeperLoop** | `src.epic_sweeper_loop` | 3600 | — | — | — |
 | **FakeCoverageAuditorLoop** | `src.fake_coverage_auditor_loop` | 604800 | — | — | — |
 | **FlakeTrackerLoop** | `src.flake_tracker_loop` | 14400 | — | — | — |
 | **GitHubCacheLoop** | `src.github_cache_loop` | 300 | — | — | — |
@@ -51,4 +50,4 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **WikiRotDetectorLoop** | `src.wiki_rot_detector_loop` | 604800 | — | — | — |
 | **WorkspaceGCLoop** | `src.workspace_gc_loop` | 1800 | — | — | — |
 
-_Regenerated from commit `43356e7` on 2026-05-22 21:40 UTC. Source last changed at `43356e7`. Status: 🟢 fresh._
+_Regenerated from commit `41abb41` on 2026-05-22 22:14 UTC. Source last changed at `41abb41`. Status: 🟢 fresh._

@@ -138,90 +138,47 @@ class TestL11RetrospectiveLoop:
 
 
 # ---------------------------------------------------------------------------
-# L12: Epic Sweeper verifies done-epic children closed
+# L12: Epic Monitor includes completed-epic sweep stats
 # ---------------------------------------------------------------------------
 
 
-class TestL12EpicSweeperLoop:
-    """L12: epic_sweeper_loop sweeps open epics and auto-closes completed ones."""
-
+class TestL12EpicMonitorSweep:
     async def test_no_epics_returns_zero_counts(self, tmp_path) -> None:
-        """When no open epics exist, the loop reports zero checked and swept.
-
-        IssueFetcherPort.fetch_issues_by_labels is async so we need AsyncMock.
-        """
         world = MockWorld(tmp_path)
 
-        fake_fetcher = AsyncMock()
-        fake_fetcher.fetch_issues_by_labels.return_value = []
-        fake_state = MagicMock()
-        fake_state.get_epic_state.return_value = None
-        _seed_ports(
-            world,
-            issue_fetcher=fake_fetcher,
-            epic_sweeper_state=fake_state,
+        epic_mgr = MagicMock()
+        epic_mgr.check_stale_epics = AsyncMock(return_value=[])
+        epic_mgr.sweep_completed_epics = AsyncMock(
+            return_value={"checked": 0, "swept": 0, "total_open_epics": 0}
         )
+        epic_mgr.refresh_cache = AsyncMock(return_value=None)
+        epic_mgr.get_all_progress.return_value = []
+        _seed_ports(world, epic_manager=epic_mgr)
 
-        stats = await world.run_with_loops(["epic_sweeper"], cycles=1)
+        stats = await world.run_with_loops(["epic_monitor"], cycles=1)
 
-        assert stats["epic_sweeper"] is not None
-        assert stats["epic_sweeper"]["checked"] == 0
-        assert stats["epic_sweeper"]["swept"] == 0
-        assert stats["epic_sweeper"]["total_open_epics"] == 0
+        assert stats["epic_monitor"] is not None
+        assert stats["epic_monitor"]["checked"] == 0
+        assert stats["epic_monitor"]["swept"] == 0
+        assert stats["epic_monitor"]["total_open_epics"] == 0
 
     async def test_epic_with_all_closed_sub_issues_is_swept(self, tmp_path) -> None:
-        """An epic whose sub-issues are all closed gets auto-closed by the sweeper.
-
-        The epic body contains a checkbox reference to issue #200.  Issue #200
-        is closed.  After one cycle: epic closed, comment posted via FakeGitHub.
-        """
-        from models import GitHubIssue  # noqa: PLC0415
-
         world = MockWorld(tmp_path)
 
-        # Epic issue with a checkbox ref to sub-issue #200
-        epic_body = "## Tasks\n- [x] #200 — implement feature\n"
-        epic = GitHubIssue(
-            number=100,
-            title="Epic: Implement feature",
-            body=epic_body,
-            state="open",
-            labels=["hydraflow-epic"],
+        epic_mgr = MagicMock()
+        epic_mgr.check_stale_epics = AsyncMock(return_value=[])
+        epic_mgr.sweep_completed_epics = AsyncMock(
+            return_value={"checked": 1, "swept": 1, "total_open_epics": 1}
         )
+        epic_mgr.refresh_cache = AsyncMock(return_value=None)
+        epic_mgr.get_all_progress.return_value = []
+        _seed_ports(world, epic_manager=epic_mgr)
 
-        # Sub-issue that is already closed
-        sub_issue = GitHubIssue(
-            number=200,
-            title="Implement feature",
-            body="",
-            state="closed",
-            labels=[],
-        )
+        stats = await world.run_with_loops(["epic_monitor"], cycles=1)
 
-        # Pre-seed FakeGitHub so close_issue / post_comment have a real target
-        world.github.add_issue(100, epic.title, epic.body, labels=epic.labels)
-        world.github.add_issue(200, sub_issue.title, sub_issue.body, labels=[])
-        world.github.issue(200).state = "closed"
-
-        fake_fetcher = AsyncMock()
-        fake_fetcher.fetch_issues_by_labels.return_value = [epic]
-        fake_fetcher.fetch_issue_by_number.return_value = sub_issue
-
-        fake_state = MagicMock()
-        fake_state.get_epic_state.return_value = None  # no formal EpicState children
-
-        _seed_ports(
-            world,
-            issue_fetcher=fake_fetcher,
-            epic_sweeper_state=fake_state,
-        )
-
-        stats = await world.run_with_loops(["epic_sweeper"], cycles=1)
-
-        assert stats["epic_sweeper"]["swept"] == 1
-        assert stats["epic_sweeper"]["checked"] == 1
-        # FakeGitHub close_issue should have been called
-        assert world.github.issue(100).state == "closed"
+        assert stats["epic_monitor"]["swept"] == 1
+        assert stats["epic_monitor"]["checked"] == 1
+        epic_mgr.sweep_completed_epics.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------

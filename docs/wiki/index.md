@@ -75,8 +75,7 @@ See [ADR-0053](../adr/0053-ubiquitous-language-as-living-artifact.md).
 - Operator review gates dynamic skills due to prompt injection risk
 - Advisor pattern layers Opus reviewer over Sonnet executor on review surfaces
 - Advisor uses Claude Code subagent dispatch — never the Anthropic SDK directly
-- EpicMonitorLoop — stale epic detection and progress refresh
-- EpicSweeperLoop — auto-close completed epics
+- EpicMonitorLoop — stale epic detection, completion sweep, and progress refresh
 - RetrospectiveLoop — durable-queue pattern analysis
 - RunsGCLoop — artifact retention enforcement
 - SecurityPatchLoop — Dependabot alert triage and issue filing

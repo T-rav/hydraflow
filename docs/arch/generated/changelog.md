@@ -6,7 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W21
 
-- `43356e7` — Fixes #8928: make issue creation failure explicit *(2026-05-22)*
+- `41abb41` — Fixes #8979: fold epic sweep into monitor *(2026-05-22)*
+- `527bea0` — Fixes #8928: make issue creation failure explicit *(2026-05-22)*
 - `e7d4296` — Fixes #8481: register caretaker escalation labels *(2026-05-22)*
 - `8c85c14` — fix(sandbox): wire FakeSubprocessRunner — the actual claude bypass (#8965) (#8965) *(2026-05-18)*
 - `5f762b0` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
@@ -335,4 +336,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `43356e7` on 2026-05-22 21:40 UTC. Source last changed at `43356e7`. Status: 🟢 fresh._
+_Regenerated from commit `41abb41` on 2026-05-22 22:14 UTC. Source last changed at `41abb41`. Status: 🟢 fresh._

@@ -249,7 +249,7 @@ export const WORKER_PRESETS = {
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'code_grooming', 'sentry_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'code_grooming', 'sentry_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc'])
 
 /**
  * Default intervals (in seconds) for system workers.
@@ -264,7 +264,6 @@ export const SYSTEM_WORKER_INTERVALS = {
   report_issue: 30,
   worktree_gc: 1800,
   adr_reviewer: 86400,
-  epic_sweeper: 3600,
   dependabot_merge: 3600,
   staging_promotion: 300,
   staging_bisect: 600,
@@ -322,7 +321,6 @@ export const BACKGROUND_WORKERS = [
   { key: 'workspace_gc',   label: 'Workspace GC',   description: 'Garbage-collects stale workspaces and orphaned branches.', color: theme.textMuted, system: true, group: 'repo_health', tags: ['hygiene'] },
   { key: 'adr_reviewer',   label: 'ADR Reviewer',   description: 'Reviews proposed ADRs via a 3-judge council and routes to accept, reject, or escalate.', color: theme.accent, group: 'intake', tags: ['review'] },
   { key: 'review_advisor', label: 'Review Advisor', description: 'Event-driven post-verify second-opinion gate on PR review APPROVE verdicts. Vetoes hand back transcripts to the executor for bounded retries; exhaustion escalates to HITL. Per-PR sessions logged to review_logs/{pr}/advisor_session.jsonl; OTel metrics under review_advisor_*. See docs/superpowers/specs/2026-05-08-advisor-pattern-self-repairing-review-design.md.', color: theme.accent, group: 'intake', tags: ['review'] },
-  { key: 'epic_sweeper',    label: 'Epic Sweeper',    description: 'Periodically sweeps open epics and auto-closes those with all sub-issues resolved.', color: theme.purple, system: true, group: 'operations', tags: ['lifecycle'] },
   { key: 'dependabot_merge', label: 'Dependabot Merge', description: 'Auto-merges dependency update PRs from configured bots after CI passes.', color: theme.green, group: 'repo_health', tags: ['security'] },
   { key: 'staging_promotion', label: 'Staging Promotion', description: 'Cuts release-candidate snapshots from staging and auto-promotes them to main on green CI. See ADR-0042.', color: theme.accent, group: 'release', tags: ['release'] },
   { key: 'staging_bisect', label: 'Staging Bisect', description: 'Bisects the culprit PR on RC-red, files auto-revert + retry issue, watchdogs the next RC. See ADR-0042 §4.3.', color: theme.red, group: 'release', tags: ['release', 'recovery'] },

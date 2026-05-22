@@ -74,6 +74,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0061 | `src.repo_wiki` |
 | ADR-0062 | `src.entry_evidence_loop`, `src.term_proposer_llm` |
 | ADR-0063 | `src.auto_agent_preflight_loop`, `src.discover_runner`, `src.implement_phase`, `src.plan_phase`, `src.review_phase._phase`, `src.shape_phase`, `src.triage_phase` |
+| ADR-0064 | — |
 
 ## Module → ADRs
 
@@ -189,4 +190,4 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.workspace` | ADR-0055 |
 | `src.worktree` | ADR-0003, ADR-0009, ADR-0010 |
 
-_Regenerated from commit `43356e7` on 2026-05-22 21:40 UTC. Source last changed at `43356e7`. Status: 🟢 fresh._
+_Regenerated from commit `41abb41` on 2026-05-22 22:14 UTC. Source last changed at `41abb41`. Status: 🟢 fresh._

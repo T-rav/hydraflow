@@ -35,6 +35,11 @@ class EpicMonitorLoop(BaseBackgroundLoop):
         if not self._config.epic_monitor_loop_enabled:
             return {"status": "config_disabled"}
         stale = await self._epic_manager.check_stale_epics()
+        sweep_stats = await self._epic_manager.sweep_completed_epics()
         await self._epic_manager.refresh_cache()
         all_progress = self._epic_manager.get_all_progress()
-        return {"stale_count": len(stale), "tracked_epics": len(all_progress)}
+        return {
+            "stale_count": len(stale),
+            "tracked_epics": len(all_progress),
+            **sweep_stats,
+        }

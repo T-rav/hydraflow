@@ -136,7 +136,6 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("report_issue_interval", "HYDRAFLOW_REPORT_ISSUE_INTERVAL", 30),
     ("stale_report_threshold_hours", "HYDRAFLOW_STALE_REPORT_THRESHOLD_HOURS", 6),
     ("epic_monitor_interval", "HYDRAFLOW_EPIC_MONITOR_INTERVAL", 1800),
-    ("epic_sweep_interval", "HYDRAFLOW_EPIC_SWEEP_INTERVAL", 3600),
     ("workspace_gc_interval", "HYDRAFLOW_WORKTREE_GC_INTERVAL", 1800),
     ("stale_issue_gc_interval", "HYDRAFLOW_STALE_ISSUE_GC_INTERVAL", 3600),
     ("stale_issue_threshold_days", "HYDRAFLOW_STALE_ISSUE_THRESHOLD_DAYS", 14),
@@ -397,7 +396,6 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("diagram_loop_enabled", "HYDRAFLOW_DIAGRAM_LOOP_ENABLED", True),
     ("entry_evidence_enabled", "HYDRAFLOW_ENTRY_EVIDENCE_ENABLED", True),
     ("epic_monitor_loop_enabled", "HYDRAFLOW_EPIC_MONITOR_LOOP_ENABLED", True),
-    ("epic_sweeper_loop_enabled", "HYDRAFLOW_EPIC_SWEEPER_LOOP_ENABLED", True),
     (
         "fake_coverage_auditor_loop_enabled",
         "HYDRAFLOW_FAKE_COVERAGE_AUDITOR_LOOP_ENABLED",
@@ -972,12 +970,6 @@ class HydraFlowConfig(BaseModel):
     epic_monitor_interval: int = Field(
         default=1800,
         description="Epic monitor loop interval in seconds (default 30 min)",
-    )
-    epic_sweep_interval: int = Field(
-        default=3600,
-        ge=600,
-        le=86400,
-        description="Epic sweeper loop interval in seconds (default 1 hour)",
     )
     workspace_gc_interval: int = Field(
         default=1800,
@@ -2675,10 +2667,6 @@ class HydraFlowConfig(BaseModel):
     epic_monitor_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for EpicMonitorLoop.",
-    )
-    epic_sweeper_loop_enabled: bool = Field(
-        default=True,
-        description="Deploy-time kill-switch for EpicSweeperLoop.",
     )
     fake_coverage_auditor_loop_enabled: bool = Field(
         default=True,

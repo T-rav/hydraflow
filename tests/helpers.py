@@ -335,7 +335,6 @@ class ConfigFactory:
         epic_group_planning: bool = False,
         epic_decompose_complexity_threshold: int = 8,
         epic_monitor_interval: int = 1800,
-        epic_sweep_interval: int = 3600,
         workspace_gc_interval: int = 1800,
         epic_stale_days: int = 7,
         epic_merge_strategy: Literal[
@@ -562,7 +561,6 @@ class ConfigFactory:
                 epic_group_planning=epic_group_planning,
                 epic_decompose_complexity_threshold=epic_decompose_complexity_threshold,
                 epic_monitor_interval=epic_monitor_interval,
-                epic_sweep_interval=epic_sweep_interval,
                 workspace_gc_interval=workspace_gc_interval,
                 epic_stale_days=epic_stale_days,
                 epic_merge_strategy=epic_merge_strategy,
@@ -1728,7 +1726,6 @@ def mock_fetcher_noop(orch: Any) -> None:
         "dependabot_merge_loop",
         "diagnostic_loop",
         "epic_monitor_loop",
-        "epic_sweeper_loop",
         "github_cache_loop",
         "health_monitor_loop",
         "pr_unsticker_loop",
