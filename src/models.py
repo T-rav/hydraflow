@@ -2879,6 +2879,7 @@ class MetricsResponse(BaseModel):
     thresholds: list[ThresholdProposal] = Field(default_factory=list)
     inference_lifetime: dict[str, int] = Field(default_factory=dict)
     inference_session: dict[str, int] = Field(default_factory=dict)
+    repo_metrics: dict[str, Any] = Field(default_factory=dict)
 
 
 class IssueHistoryLink(BaseModel):

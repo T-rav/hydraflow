@@ -82,6 +82,71 @@ function formatTokens(n) {
   return value.toLocaleString()
 }
 
+function formatRate(value) {
+  return `${(Number(value || 0) * 100).toFixed(1)}%`
+}
+
+function formatStageName(stage) {
+  return String(stage || '')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, char => char.toUpperCase())
+}
+
+function RepoMetrics({ data }) {
+  if (!data || Object.keys(data).length === 0) return null
+  const throughput = data.throughput || {}
+  const friction = data.friction || {}
+  const retriesByStage = data.retries_by_stage || {}
+  const throughputEntries = Object.entries(throughput)
+    .filter(([, value]) => Number(value || 0) > 0)
+    .sort(([a], [b]) => a.localeCompare(b))
+  const retryEntries = Object.entries(retriesByStage)
+    .filter(([, value]) => Number(value || 0) > 0)
+    .sort(([a], [b]) => a.localeCompare(b))
+
+  return (
+    <div data-testid="metrics-grid-repo">
+      <div style={styles.repoHeader}>
+        <span style={styles.repoName}>{data.repo || data.repo_slug}</span>
+        <span style={styles.repoSlug}>{data.repo_slug}</span>
+      </div>
+      {throughputEntries.length > 0 && (
+        <>
+          <div style={styles.subheading}>Throughput</div>
+          <div className="metrics-grid">
+            {throughputEntries.map(([stage, value]) => (
+              <StatCard
+                key={stage}
+                label={`${formatStageName(stage)} / hr`}
+                value={Number(value || 0).toFixed(2)}
+                subtle
+              />
+            ))}
+          </div>
+        </>
+      )}
+      <div style={styles.subheading}>Friction</div>
+      <div className="metrics-grid">
+        <StatCard label="Quality Fix Rounds" value={Number(friction.quality_fix_rounds || 0)} subtle />
+        <StatCard label="CI Fix Rounds" value={Number(friction.ci_fix_rounds || 0)} subtle />
+        <StatCard label="HITL Escalations" value={Number(friction.hitl_escalations || 0)} subtle />
+        <StatCard label="Stage Retries" value={Number(friction.stage_retries || 0)} subtle />
+        <StatCard label="Quality Fix Rate" value={formatRate(friction.quality_fix_rate)} subtle />
+        <StatCard label="HITL Escalation Rate" value={formatRate(friction.hitl_escalation_rate)} subtle />
+      </div>
+      {retryEntries.length > 0 && (
+        <div style={styles.retryList}>
+          {retryEntries.map(([stage, value]) => (
+            <span key={stage} style={styles.retryBadge}>
+              {formatStageName(stage)}: {value}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function SectionCard({ title, children, fullWidth = false }) {
   const className = fullWidth ? 'metrics-section-card metrics-section-card--full' : 'metrics-section-card'
   return (
@@ -111,6 +176,7 @@ export function MetricsPanel() {
   const githubOpenIssueTotal = Object.values(openByLabel).reduce((a, b) => a + Number(b || 0), 0)
 
   const timeToMerge = metrics?.time_to_merge || {}
+  const repoMetrics = metrics?.repo_metrics || {}
   const thresholds = metrics?.thresholds || []
   const inferenceLifetime = metrics?.inference_lifetime || {}
   const inferenceSession = metrics?.inference_session || {}
@@ -137,6 +203,11 @@ export function MetricsPanel() {
     sessionImplemented > 0 || sessionReviewed > 0 || mergedCount > 0
   const hasLifetime = useGithubTotals || lifetimeIssuesCompleted > 0 ||
     lifetimePrsMerged > 0
+  const hasRepoMetrics = Object.keys(repoMetrics).length > 0 && (
+    Object.values(repoMetrics.throughput || {}).some(value => Number(value || 0) > 0) ||
+    Object.values(repoMetrics.friction || {}).some(value => Number(value || 0) > 0) ||
+    Object.keys(repoMetrics.time_to_merge || {}).length > 0
+  )
 
   // Extract history data
   const historyData = metricsHistory || {}
@@ -144,7 +215,7 @@ export function MetricsPanel() {
   const current = historyData.current
   const prev = snapshots.length > 0 ? snapshots[snapshots.length - 1] : null
 
-  if (!hasGithub && !hasSession && !hasLifetime && !current) {
+  if (!hasGithub && !hasSession && !hasLifetime && !current && !hasRepoMetrics) {
     return (
       <div style={styles.container} data-testid="metrics-panel-root">
         <div style={styles.empty}>No metrics data available yet.</div>
@@ -248,6 +319,12 @@ export function MetricsPanel() {
       title: 'Time to Merge',
       content: <TimeToMerge data={timeToMerge} dataTestId="metrics-grid-time-to-merge" />,
       shouldRender: Object.keys(timeToMerge).length > 0,
+    },
+    {
+      key: 'repo',
+      title: 'Repo Metrics',
+      content: <RepoMetrics data={repoMetrics} />,
+      shouldRender: hasRepoMetrics,
     },
     {
       key: 'session',
@@ -417,6 +494,44 @@ const styles = {
   thresholdText: {
     fontSize: 12,
     color: theme.textBright,
+  },
+  repoHeader: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: 10,
+    marginBottom: 12,
+    flexWrap: 'wrap',
+  },
+  repoName: {
+    fontSize: 14,
+    fontWeight: 700,
+    color: theme.textBright,
+  },
+  repoSlug: {
+    fontSize: 12,
+    color: theme.textMuted,
+  },
+  subheading: {
+    fontSize: 12,
+    fontWeight: 700,
+    color: theme.text,
+    marginTop: 12,
+    marginBottom: 8,
+    textTransform: 'uppercase',
+  },
+  retryList: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  retryBadge: {
+    fontSize: 12,
+    color: theme.text,
+    background: theme.surfaceInset,
+    border: `1px solid ${theme.border}`,
+    borderRadius: 8,
+    padding: '4px 8px',
   },
   outcomeSummary: {
     display: 'flex',
