@@ -76,6 +76,7 @@ export function BootstrapWizard({ isOpen, onClose }) {
     createOnboardingDraft,
     chatOnboardingDraft,
     draftOnboardingSpec,
+    saveOnboardingSpecDraft,
     draftOnboardingPlan,
     materializeOnboardingDraft,
     selectRepo,
@@ -179,6 +180,20 @@ export function BootstrapWizard({ isOpen, onClose }) {
     return result.draft
   }, [draftOnboardingPlan])
 
+  const saveSpecDraft = useCallback(async (activeDraft) => {
+    const content = (specDraft || '').trim()
+    if (!content) return activeDraft
+    const result = await saveOnboardingSpecDraft?.(activeDraft.id, content)
+    if (!result?.ok) {
+      setDraft(result?.draft || activeDraft)
+      setError(result?.error || 'Spec save failed')
+      return null
+    }
+    setDraft(result.draft)
+    setSpecDraft(result.spec_draft || result.draft?.spec_draft || content)
+    return result.draft
+  }, [saveOnboardingSpecDraft, specDraft])
+
   const handleNext = useCallback(async () => {
     if (step === 0) {
       const created = await ensureDraft()
@@ -194,12 +209,17 @@ export function BootstrapWizard({ isOpen, onClose }) {
       if (!activeDraft) return
       setSubmitting(true)
       setError('')
-      const updated = await generatePlanDraft(activeDraft)
+      const saved = await saveSpecDraft(activeDraft)
+      if (!saved) {
+        setSubmitting(false)
+        return
+      }
+      const updated = await generatePlanDraft(saved)
       setSubmitting(false)
       if (!updated) return
     }
     setStep(prev => Math.min(prev + 1, STEPS.length - 1))
-  }, [ensureDraft, generatePlanDraft, generateSpecDraft, step])
+  }, [ensureDraft, generatePlanDraft, generateSpecDraft, saveSpecDraft, step])
 
   const handleMaterialize = useCallback(async () => {
     const activeDraft = await ensureDraft()

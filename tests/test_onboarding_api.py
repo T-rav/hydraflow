@@ -22,6 +22,7 @@ from onboarding.models import (
     DesignChatRequest,
     DesignRevisionRequest,
     MaterializeRequest,
+    SaveSpecDraftRequest,
 )
 from tests.helpers import find_endpoint, make_dashboard_router
 
@@ -486,6 +487,36 @@ class TestOnboardingDraftRoutes:
         persisted = state.get_onboarding_draft(draft.id)
         assert persisted["spec_draft"] == spec_data["spec_draft"]
         assert persisted["plan_draft"] == plan_data["plan_draft"]
+
+    @pytest.mark.asyncio
+    async def test_manual_spec_edits_are_persisted(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        draft = BootstrapDraft(
+            spec=BootstrapSpec.model_validate(_spec_payload(name="finance-tool")),
+            spec_draft="# finance-tool\n\nOriginal draft",
+        )
+        state.set_onboarding_draft(draft.id, draft.model_dump(mode="json"))
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        endpoint = find_endpoint(
+            router,
+            "/api/onboarding/drafts/{draft_id}/design/spec/save",
+            method="POST",
+        )
+
+        response = await endpoint(
+            draft.id,
+            SaveSpecDraftRequest(
+                spec_draft="# finance-tool\n\nEdited invariant kernel"
+            ),
+        )
+        data = json.loads(response.body)
+
+        assert response.status_code == 200
+        assert data["spec_draft"] == "# finance-tool\n\nEdited invariant kernel"
+        persisted = state.get_onboarding_draft(draft.id)
+        assert persisted["spec_draft"] == "# finance-tool\n\nEdited invariant kernel"
+        assert persisted["events"][-1]["message"] == "wizard spec edits saved"
 
     @pytest.mark.asyncio
     async def test_continue_plan_drafts_next_plan_and_files_find_issues(

@@ -23,6 +23,7 @@ from onboarding.models import (
     DesignChatRequest,
     DesignRevisionRequest,
     MaterializeRequest,
+    SaveSpecDraftRequest,
 )
 from onboarding.templating import MaterializeError, materialize_repository
 
@@ -465,6 +466,22 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
             draft, request.note if request else None
         )
         draft.events.append({"level": "info", "message": "wizard spec drafted"})
+        _persist_draft(ctx, draft)
+        return JSONResponse(
+            {"draft": draft.model_dump(mode="json"), "spec_draft": draft.spec_draft}
+        )
+
+    @router.post("/api/onboarding/drafts/{draft_id}/design/spec/save")
+    async def save_onboarding_spec_draft(
+        draft_id: str, request: SaveSpecDraftRequest
+    ) -> JSONResponse:
+        draft, error_response = _load_draft_response(ctx, draft_id)
+        if error_response is not None:
+            return error_response
+        assert draft is not None
+
+        draft.spec_draft = request.spec_draft
+        draft.events.append({"level": "info", "message": "wizard spec edits saved"})
         _persist_draft(ctx, draft)
         return JSONResponse(
             {"draft": draft.model_dump(mode="json"), "spec_draft": draft.spec_draft}
