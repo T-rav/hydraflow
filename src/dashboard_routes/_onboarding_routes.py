@@ -224,7 +224,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
         if draft is None:
             return JSONResponse({"error": "Draft is invalid"}, status_code=500)
 
-        turn = design_ai.chat(draft, request.message)
+        turn = await design_ai.chat(draft, request.message)
         draft.chat_messages.append({"role": "user", "content": request.message})
         draft.chat_messages.append({"role": "assistant", "content": turn.reply})
         draft.extracted_fields.update(turn.field_updates)
@@ -232,7 +232,14 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
             draft.spec = apply_field_updates(draft.spec, turn.field_updates)
         except ValidationError:
             return JSONResponse({"error": "Design update is invalid"}, status_code=422)
-        draft.events.append({"level": "info", "message": "design chat updated fields"})
+        event_message = "design chat updated fields"
+        if turn.source == "claude":
+            event_message = "claude design chat updated fields"
+        if turn.fallback_reason:
+            event_message = (
+                f"design chat used form-fill fallback: {turn.fallback_reason}"
+            )
+        draft.events.append({"level": "info", "message": event_message})
         _persist_draft(ctx, draft)
         return JSONResponse(
             {
