@@ -98,6 +98,14 @@ def _chat_response_payload(
     }
 
 
+def _operation_event_payload(event: dict[str, object]) -> dict[str, object]:
+    return {"type": "activity", "event": event}
+
+
+def _json_response_payload(response: JSONResponse) -> dict[str, object]:
+    return json.loads(bytes(response.body).decode("utf-8"))
+
+
 def _load_draft_response(
     ctx: RouteContext, draft_id: str
 ) -> tuple[BootstrapDraft | None, JSONResponse | None]:
@@ -697,6 +705,56 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
             }
         )
 
+    @router.post(
+        "/api/onboarding/drafts/{draft_id}/materialize/stream", response_model=None
+    )
+    async def stream_materialize_onboarding_draft(
+        draft_id: str, request: MaterializeRequest | None = None
+    ) -> StreamingResponse | JSONResponse:
+        raw = ctx.state.get_onboarding_draft(draft_id)
+        if raw is None:
+            return JSONResponse({"error": "Draft not found"}, status_code=404)
+        draft = _decode_draft(raw)
+        if draft is None:
+            return JSONResponse({"error": "Draft is invalid"}, status_code=500)
+        initial_event_count = len(draft.events)
+
+        async def generate():
+            yield (
+                json.dumps(
+                    _operation_event_payload(
+                        {"level": "info", "message": "materialize queued"}
+                    )
+                )
+                + "\n"
+            )
+            await asyncio.sleep(0)
+            response = await materialize_onboarding_draft(draft_id, request)
+            payload = _json_response_payload(response)
+            draft_payload = payload.get("draft") if isinstance(payload, dict) else None
+            events = (
+                draft_payload.get("events", [])
+                if isinstance(draft_payload, dict)
+                else []
+            )
+            if isinstance(events, list):
+                for event in events[initial_event_count:]:
+                    yield json.dumps(_operation_event_payload(event)) + "\n"
+                    await asyncio.sleep(0)
+            final_payload = {
+                "type": "final",
+                "ok": response.status_code < 400,
+                "status": response.status_code,
+                **payload,
+            }
+            yield json.dumps(final_payload) + "\n"
+
+        return StreamingResponse(
+            generate(),
+            media_type="application/x-ndjson",
+            headers={"Cache-Control": "no-cache"},
+        )
+
     @router.post("/api/onboarding/drafts/{draft_id}/push")
     async def push_onboarding_draft(draft_id: str) -> JSONResponse:
         raw = ctx.state.get_onboarding_draft(draft_id)
@@ -751,4 +809,52 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
         _persist_draft(ctx, draft)
         return JSONResponse(
             {"draft": draft.model_dump(mode="json"), "repo_url": repo_url}
+        )
+
+    @router.post("/api/onboarding/drafts/{draft_id}/push/stream", response_model=None)
+    async def stream_push_onboarding_draft(
+        draft_id: str,
+    ) -> StreamingResponse | JSONResponse:
+        raw = ctx.state.get_onboarding_draft(draft_id)
+        if raw is None:
+            return JSONResponse({"error": "Draft not found"}, status_code=404)
+        draft = _decode_draft(raw)
+        if draft is None:
+            return JSONResponse({"error": "Draft is invalid"}, status_code=500)
+        initial_event_count = len(draft.events)
+
+        async def generate():
+            yield (
+                json.dumps(
+                    _operation_event_payload(
+                        {"level": "info", "message": "push queued"}
+                    )
+                )
+                + "\n"
+            )
+            await asyncio.sleep(0)
+            response = await push_onboarding_draft(draft_id)
+            payload = _json_response_payload(response)
+            draft_payload = payload.get("draft") if isinstance(payload, dict) else None
+            events = (
+                draft_payload.get("events", [])
+                if isinstance(draft_payload, dict)
+                else []
+            )
+            if isinstance(events, list):
+                for event in events[initial_event_count:]:
+                    yield json.dumps(_operation_event_payload(event)) + "\n"
+                    await asyncio.sleep(0)
+            final_payload = {
+                "type": "final",
+                "ok": response.status_code < 400,
+                "status": response.status_code,
+                **payload,
+            }
+            yield json.dumps(final_payload) + "\n"
+
+        return StreamingResponse(
+            generate(),
+            media_type="application/x-ndjson",
+            headers={"Cache-Control": "no-cache"},
         )

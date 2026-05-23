@@ -97,6 +97,44 @@ function addEvent(state, action) {
   }
 }
 
+async function readNdjsonStream(res, options = {}) {
+  if (!res.body?.getReader) return { ok: false, error: 'Streaming is unavailable' }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let finalPayload = null
+  const handleLine = (line) => {
+    if (!line.trim()) return
+    const event = JSON.parse(line)
+    if (event.type === 'activity') {
+      options?.onActivity?.(event.event)
+    } else if (event.type === 'reply_delta') {
+      options?.onReplyDelta?.(event.text || '')
+    } else if (event.type === 'final') {
+      finalPayload = event
+    }
+  }
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
+    lines.forEach(handleLine)
+  }
+  buffer += decoder.decode()
+  if (buffer.trim()) handleLine(buffer)
+  if (!finalPayload) return { ok: false, error: 'Stream ended without final payload' }
+  if (finalPayload.ok === false) {
+    return {
+      ok: false,
+      error: finalPayload.error || `Request failed (${finalPayload.status || 'stream'})`,
+      draft: finalPayload.draft,
+    }
+  }
+  return { ok: true, ...finalPayload }
+}
+
 function mergeStageIssues(existingIssues, incomingIssues) {
   // Server snapshot is authoritative: items absent from incoming are removed
   // (prevents ghost cards) and incoming fields (including status) override
@@ -1446,38 +1484,14 @@ export function HydraFlowProvider({ children }) {
         const data = await res.json().catch(() => ({}))
         return { ok: false, error: data?.error || `Design chat failed (${res.status})`, draft: data?.draft }
       }
-      if (!res.body?.getReader) return { ok: false, error: 'Design chat streaming is unavailable' }
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let finalPayload = null
-      while (true) {
-        const { value, done } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-        for (const line of lines) {
-          if (!line.trim()) continue
-          const event = JSON.parse(line)
-          if (event.type === 'reply_delta') {
-            options?.onReplyDelta?.(event.text || '')
-          } else if (event.type === 'final') {
-            finalPayload = event
-          }
-        }
+      const streamed = await readNdjsonStream(res, options)
+      if (!streamed.ok && streamed.error === 'Stream ended without final payload') {
+        return { ok: false, error: 'Design chat stream ended without final payload' }
       }
-      buffer += decoder.decode()
-      if (buffer.trim()) {
-        const event = JSON.parse(buffer)
-        if (event.type === 'reply_delta') {
-          options?.onReplyDelta?.(event.text || '')
-        } else if (event.type === 'final') {
-          finalPayload = event
-        }
+      if (!streamed.ok && streamed.error === 'Streaming is unavailable') {
+        return { ok: false, error: 'Design chat streaming is unavailable' }
       }
-      if (!finalPayload) return { ok: false, error: 'Design chat stream ended without final payload' }
-      return { ok: true, ...finalPayload }
+      return streamed
     } catch (err) {
       return { ok: false, error: err?.message || 'Design chat failed' }
     }
@@ -1537,14 +1551,31 @@ export function HydraFlowProvider({ children }) {
     }
   }, [])
 
-  const materializeOnboardingDraft = useCallback(async (draftId, request = {}) => {
+  const materializeOnboardingDraft = useCallback(async (draftId, request = {}, options = {}) => {
     try {
-      const res = await fetch(`/api/onboarding/drafts/${encodeURIComponent(draftId)}/materialize`, {
+      const basePath = `/api/onboarding/drafts/${encodeURIComponent(draftId)}`
+      const fetchOptions = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
-      })
-      const data = await res.json().catch(() => ({}))
+      }
+      let res
+      let data
+      if (typeof ReadableStream === 'undefined' || typeof TextDecoder === 'undefined') {
+        res = await fetch(`${basePath}/materialize`, fetchOptions)
+        data = await res.json().catch(() => ({}))
+      } else {
+        res = await fetch(`${basePath}/materialize/stream`, fetchOptions)
+        if (res.ok && res.body?.getReader) {
+          const streamed = await readNdjsonStream(res, options)
+          data = streamed
+          if (!streamed.ok) {
+            return { ok: false, error: streamed.error || 'Materialize failed', draft: streamed.draft }
+          }
+        } else {
+          data = await res.json().catch(() => ({}))
+        }
+      }
       if (!res.ok) {
         return { ok: false, error: data?.error || `Materialize failed (${res.status})`, draft: data?.draft }
       }
@@ -1575,13 +1606,27 @@ export function HydraFlowProvider({ children }) {
     }
   }, [addRepoByPath])
 
-  const pushOnboardingDraft = useCallback(async (draftId) => {
+  const pushOnboardingDraft = useCallback(async (draftId, options = {}) => {
     if (!draftId) return { ok: false, error: 'Draft id required' }
     try {
-      const res = await fetch(`/api/onboarding/drafts/${encodeURIComponent(draftId)}/push`, {
-        method: 'POST',
-      })
-      const data = await res.json().catch(() => ({}))
+      const basePath = `/api/onboarding/drafts/${encodeURIComponent(draftId)}`
+      let res
+      let data
+      if (typeof ReadableStream === 'undefined' || typeof TextDecoder === 'undefined') {
+        res = await fetch(`${basePath}/push`, { method: 'POST' })
+        data = await res.json().catch(() => ({}))
+      } else {
+        res = await fetch(`${basePath}/push/stream`, { method: 'POST' })
+        if (res.ok && res.body?.getReader) {
+          const streamed = await readNdjsonStream(res, options)
+          data = streamed
+          if (!streamed.ok) {
+            return { ok: false, error: streamed.error || 'Push failed', draft: streamed.draft }
+          }
+        } else {
+          data = await res.json().catch(() => ({}))
+        }
+      }
       if (!res.ok) {
         return { ok: false, error: data?.error || `Push failed (${res.status})`, draft: data?.draft }
       }

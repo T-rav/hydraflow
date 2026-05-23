@@ -248,6 +248,13 @@ export function BootstrapWizard({ isOpen, onClose }) {
     setActivityOpen(false)
     const result = await materializeOnboardingDraft(activeDraft.id, {
       output_dir: form.output_dir.trim() || null,
+    }, {
+      onActivity: (event) => {
+        setDraft(prev => ({
+          ...(prev || activeDraft),
+          events: [...((prev || activeDraft)?.events || []), event],
+        }))
+      },
     })
     setSubmitting(false)
     if (!result?.ok) {

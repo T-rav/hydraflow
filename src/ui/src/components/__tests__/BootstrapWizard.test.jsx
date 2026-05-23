@@ -187,8 +187,89 @@ describe('BootstrapWizard', () => {
     fireEvent.click(screen.getByText('Next'))
     fireEvent.click(screen.getByTestId('materialize-project'))
 
-    await waitFor(() => expect(materializeOnboardingDraft).toHaveBeenCalledWith('draft-1', { output_dir: null }))
+    await waitFor(() => expect(materializeOnboardingDraft).toHaveBeenCalledWith(
+      'draft-1',
+      { output_dir: null },
+      expect.objectContaining({ onActivity: expect.any(Function) })
+    ))
     expect(selectRepo).toHaveBeenCalledWith('finance-tool')
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('drives a third-domain project through the wizard without terminal input', async () => {
+    const createOnboardingDraft = vi.fn().mockImplementation(async (spec) => ({
+      ok: true,
+      draft: { id: 'draft-claims', spec, events: [{ level: 'info', message: 'draft created' }] },
+    }))
+    const draftOnboardingSpec = vi.fn().mockResolvedValue({
+      ok: true,
+      draft: {
+        id: 'draft-claims',
+        spec: { name: 'claims-ledger', owner: 'Acme' },
+        spec_draft: '# Acme claims-ledger',
+      },
+      spec_draft: '# Acme claims-ledger',
+    })
+    const saveOnboardingSpecDraft = vi.fn().mockResolvedValue({
+      ok: true,
+      draft: {
+        id: 'draft-claims',
+        spec: { name: 'claims-ledger', owner: 'Acme' },
+        spec_draft: '# Acme claims-ledger',
+      },
+      spec_draft: '# Acme claims-ledger',
+    })
+    const draftOnboardingPlan = vi.fn().mockResolvedValue({
+      ok: true,
+      draft: {
+        id: 'draft-claims',
+        spec: { name: 'claims-ledger', owner: 'Acme' },
+        plan_draft: ['Create invariant kernel', 'Validate claims workflow'],
+      },
+      plan_draft: ['Create invariant kernel', 'Validate claims workflow'],
+    })
+    const materializeOnboardingDraft = vi.fn().mockResolvedValue({
+      ok: true,
+      draft: {
+        id: 'draft-claims',
+        spec: { name: 'claims-ledger', owner: 'Acme' },
+        events: [{ level: 'info', message: 'materialized invariant kernel' }],
+      },
+      materialized: { path: '/tmp/claims-ledger' },
+    })
+    const selectRepo = vi.fn()
+    const onClose = vi.fn()
+    mockUseHydraFlow.mockReturnValue(makeContext({
+      createOnboardingDraft,
+      draftOnboardingSpec,
+      saveOnboardingSpecDraft,
+      draftOnboardingPlan,
+      materializeOnboardingDraft,
+      selectRepo,
+    }))
+
+    render(<BootstrapWizard isOpen onClose={onClose} />)
+    fireEvent.change(screen.getByDisplayValue('new-project'), { target: { value: 'claims-ledger' } })
+    fireEvent.change(screen.getByDisplayValue('T-rav'), { target: { value: 'Acme' } })
+    fireEvent.change(screen.getByDisplayValue('A HydraFlow-format project bootstrapped from the dashboard.'), {
+      target: { value: 'Claims workflow audit trail for a third-domain repo.' },
+    })
+    fireEvent.click(screen.getByText('Next'))
+    await screen.findByDisplayValue('# Acme claims-ledger')
+    fireEvent.click(screen.getByText('Next'))
+    await screen.findByText('Validate claims workflow')
+    fireEvent.click(screen.getByText('Next'))
+    fireEvent.click(screen.getByTestId('materialize-project'))
+
+    await waitFor(() => expect(createOnboardingDraft).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'claims-ledger', owner: 'Acme' })
+    ))
+    await waitFor(() => expect(materializeOnboardingDraft).toHaveBeenCalledWith(
+      'draft-claims',
+      { output_dir: null },
+      expect.objectContaining({ onActivity: expect.any(Function) })
+    ))
+    expect(selectRepo).toHaveBeenCalledWith('claims-ledger')
     expect(onClose).toHaveBeenCalled()
   })
 
