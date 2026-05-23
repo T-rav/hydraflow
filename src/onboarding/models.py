@@ -85,6 +85,10 @@ class BootstrapDraft(BaseModel):
     created_at: str = Field(default_factory=_utc_now)
     updated_at: str = Field(default_factory=_utc_now)
     events: list[dict[str, str]] = Field(default_factory=list)
+    chat_messages: list[dict[str, str]] = Field(default_factory=list)
+    extracted_fields: dict[str, object] = Field(default_factory=dict)
+    spec_draft: str | None = None
+    plan_draft: list[str] = Field(default_factory=list)
 
     def touch(self) -> None:
         self.updated_at = _utc_now()
@@ -102,6 +106,34 @@ class MaterializeRequest(BaseModel):
     @field_validator("output_dir")
     @classmethod
     def normalize_output_dir(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+
+class DesignChatRequest(BaseModel):
+    """Operator chat turn for onboarding design extraction."""
+
+    message: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("message")
+    @classmethod
+    def normalize_message(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("message is required")
+        return normalized
+
+
+class DesignRevisionRequest(BaseModel):
+    """Optional operator note for regenerating wizard-drafted artifacts."""
+
+    note: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("note")
+    @classmethod
+    def normalize_note(cls, value: str | None) -> str | None:
         if value is None:
             return None
         normalized = value.strip()

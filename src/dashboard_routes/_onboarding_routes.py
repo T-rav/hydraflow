@@ -12,13 +12,21 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from onboarding.models import BootstrapDraft, BootstrapSpec, MaterializeRequest
+from onboarding.design_ai import DesignAIService, apply_field_updates
+from onboarding.models import (
+    BootstrapDraft,
+    BootstrapSpec,
+    DesignChatRequest,
+    DesignRevisionRequest,
+    MaterializeRequest,
+)
 from onboarding.templating import MaterializeError, materialize_repository
 
 if TYPE_CHECKING:
     from dashboard_routes._routes import RouteContext
 
 logger = logging.getLogger("hydraflow.dashboard.onboarding")
+design_ai = DesignAIService()
 
 
 def _decode_draft(raw: dict[str, object]) -> BootstrapDraft | None:
@@ -82,6 +90,76 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
         if draft is None:
             return JSONResponse({"error": "Draft is invalid"}, status_code=500)
         return JSONResponse(draft.model_dump(mode="json"))
+
+    @router.post("/api/onboarding/drafts/{draft_id}/design/chat")
+    async def chat_onboarding_draft(
+        draft_id: str, request: DesignChatRequest
+    ) -> JSONResponse:
+        raw = ctx.state.get_onboarding_draft(draft_id)
+        if raw is None:
+            return JSONResponse({"error": "Draft not found"}, status_code=404)
+        draft = _decode_draft(raw)
+        if draft is None:
+            return JSONResponse({"error": "Draft is invalid"}, status_code=500)
+
+        turn = design_ai.chat(draft, request.message)
+        draft.chat_messages.append({"role": "user", "content": request.message})
+        draft.chat_messages.append({"role": "assistant", "content": turn.reply})
+        draft.extracted_fields.update(turn.field_updates)
+        try:
+            draft.spec = apply_field_updates(draft.spec, turn.field_updates)
+        except ValidationError:
+            return JSONResponse({"error": "Design update is invalid"}, status_code=422)
+        draft.events.append({"level": "info", "message": "design chat updated fields"})
+        _persist_draft(ctx, draft)
+        return JSONResponse(
+            {
+                "draft": draft.model_dump(mode="json"),
+                "reply": turn.reply,
+                "field_updates": turn.field_updates,
+                "clarification": turn.clarification,
+            }
+        )
+
+    @router.post("/api/onboarding/drafts/{draft_id}/design/spec")
+    async def draft_onboarding_spec(
+        draft_id: str, request: DesignRevisionRequest | None = None
+    ) -> JSONResponse:
+        raw = ctx.state.get_onboarding_draft(draft_id)
+        if raw is None:
+            return JSONResponse({"error": "Draft not found"}, status_code=404)
+        draft = _decode_draft(raw)
+        if draft is None:
+            return JSONResponse({"error": "Draft is invalid"}, status_code=500)
+
+        draft.spec_draft = design_ai.draft_spec(
+            draft, request.note if request else None
+        )
+        draft.events.append({"level": "info", "message": "wizard spec drafted"})
+        _persist_draft(ctx, draft)
+        return JSONResponse(
+            {"draft": draft.model_dump(mode="json"), "spec_draft": draft.spec_draft}
+        )
+
+    @router.post("/api/onboarding/drafts/{draft_id}/design/plan")
+    async def draft_onboarding_plan(
+        draft_id: str, request: DesignRevisionRequest | None = None
+    ) -> JSONResponse:
+        raw = ctx.state.get_onboarding_draft(draft_id)
+        if raw is None:
+            return JSONResponse({"error": "Draft not found"}, status_code=404)
+        draft = _decode_draft(raw)
+        if draft is None:
+            return JSONResponse({"error": "Draft is invalid"}, status_code=500)
+
+        draft.plan_draft = design_ai.draft_plan(
+            draft, request.note if request else None
+        )
+        draft.events.append({"level": "info", "message": "wizard plan drafted"})
+        _persist_draft(ctx, draft)
+        return JSONResponse(
+            {"draft": draft.model_dump(mode="json"), "plan_draft": draft.plan_draft}
+        )
 
     @router.post("/api/onboarding/drafts/{draft_id}/materialize")
     async def materialize_onboarding_draft(

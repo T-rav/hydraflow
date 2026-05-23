@@ -42,6 +42,24 @@ function buildSpec(form) {
   }
 }
 
+function formFromSpec(spec, previous = DEFAULT_FORM) {
+  if (!spec) return previous
+  return {
+    ...previous,
+    name: spec.name || previous.name,
+    description: spec.description || previous.description,
+    owner: spec.owner || previous.owner,
+    visibility: spec.visibility || previous.visibility,
+    tech_stack: Array.isArray(spec.tech_stack) ? spec.tech_stack.join(', ') : previous.tech_stack,
+    safety_guards: Array.isArray(spec.safety_guards) ? spec.safety_guards.join(', ') : previous.safety_guards,
+    coverage_floor: spec.coverage_floor ?? previous.coverage_floor,
+    package_name: spec.package_name || previous.package_name,
+    label_prefix: spec.label_prefix || previous.label_prefix,
+    main_branch: spec.main_branch || previous.main_branch,
+    staging_branch: spec.staging_branch || previous.staging_branch,
+  }
+}
+
 function buildPlanItems(spec) {
   return [
     `Create ${spec.name} with HydraFlow invariant-kernel files`,
@@ -56,12 +74,18 @@ function buildPlanItems(spec) {
 export function BootstrapWizard({ isOpen, onClose }) {
   const {
     createOnboardingDraft,
+    chatOnboardingDraft,
+    draftOnboardingSpec,
+    draftOnboardingPlan,
     materializeOnboardingDraft,
     selectRepo,
   } = useHydraFlow()
   const [step, setStep] = useState(0)
   const [form, setForm] = useState(DEFAULT_FORM)
   const [draft, setDraft] = useState(null)
+  const [chatInput, setChatInput] = useState('')
+  const [specDraft, setSpecDraft] = useState('')
+  const [planDraft, setPlanDraft] = useState([])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [activityOpen, setActivityOpen] = useState(false)
@@ -71,6 +95,9 @@ export function BootstrapWizard({ isOpen, onClose }) {
       setStep(0)
       setForm(DEFAULT_FORM)
       setDraft(null)
+      setChatInput('')
+      setSpecDraft('')
+      setPlanDraft([])
       setSubmitting(false)
       setError('')
       setActivityOpen(false)
@@ -101,16 +128,78 @@ export function BootstrapWizard({ isOpen, onClose }) {
       return null
     }
     setDraft(result.draft)
+    setForm(prev => formFromSpec(result.draft?.spec, prev))
+    setSpecDraft(result.draft?.spec_draft || '')
+    setPlanDraft(result.draft?.plan_draft || [])
     return result.draft
   }, [createOnboardingDraft, draft, spec])
+
+  const handleChatSubmit = useCallback(async () => {
+    const message = chatInput.trim()
+    if (!message || submitting) return
+    const activeDraft = await ensureDraft()
+    if (!activeDraft) return
+    setSubmitting(true)
+    setError('')
+    const result = await chatOnboardingDraft?.(activeDraft.id, message)
+    setSubmitting(false)
+    if (!result?.ok) {
+      setDraft(result?.draft || activeDraft)
+      setError(result?.error || 'Design chat failed')
+      return
+    }
+    setChatInput('')
+    setDraft(result.draft)
+    setForm(prev => formFromSpec(result.draft?.spec, prev))
+    setSpecDraft(result.draft?.spec_draft || '')
+    setPlanDraft(result.draft?.plan_draft || [])
+  }, [chatInput, chatOnboardingDraft, ensureDraft, submitting])
+
+  const generateSpecDraft = useCallback(async (activeDraft) => {
+    const result = await draftOnboardingSpec?.(activeDraft.id)
+    if (!result?.ok) {
+      setDraft(result?.draft || activeDraft)
+      setError(result?.error || 'Spec draft failed')
+      return null
+    }
+    setDraft(result.draft)
+    setSpecDraft(result.spec_draft || result.draft?.spec_draft || '')
+    return result.draft
+  }, [draftOnboardingSpec])
+
+  const generatePlanDraft = useCallback(async (activeDraft) => {
+    const result = await draftOnboardingPlan?.(activeDraft.id)
+    if (!result?.ok) {
+      setDraft(result?.draft || activeDraft)
+      setError(result?.error || 'Plan draft failed')
+      return null
+    }
+    setDraft(result.draft)
+    setPlanDraft(result.plan_draft || result.draft?.plan_draft || [])
+    return result.draft
+  }, [draftOnboardingPlan])
 
   const handleNext = useCallback(async () => {
     if (step === 0) {
       const created = await ensureDraft()
       if (!created) return
+      setSubmitting(true)
+      setError('')
+      const updated = await generateSpecDraft(created)
+      setSubmitting(false)
+      if (!updated) return
+    }
+    if (step === 1) {
+      const activeDraft = await ensureDraft()
+      if (!activeDraft) return
+      setSubmitting(true)
+      setError('')
+      const updated = await generatePlanDraft(activeDraft)
+      setSubmitting(false)
+      if (!updated) return
     }
     setStep(prev => Math.min(prev + 1, STEPS.length - 1))
-  }, [ensureDraft, step])
+  }, [ensureDraft, generatePlanDraft, generateSpecDraft, step])
 
   const handleMaterialize = useCallback(async () => {
     const activeDraft = await ensureDraft()
@@ -166,26 +255,55 @@ export function BootstrapWizard({ isOpen, onClose }) {
 
         <div style={styles.body}>
           {step === 0 && (
-            <div style={styles.grid}>
-              <label style={styles.field}>Repo name<input style={styles.input} value={form.name} onChange={updateField('name')} /></label>
-              <label style={styles.field}>Owner<input style={styles.input} value={form.owner} onChange={updateField('owner')} /></label>
-              <label style={styles.fieldWide}>Description<textarea style={styles.textarea} value={form.description} onChange={updateField('description')} /></label>
-              <label style={styles.field}>Visibility<select style={styles.input} value={form.visibility} onChange={updateField('visibility')}><option value="private">Private</option><option value="public">Public</option></select></label>
-              <label style={styles.field}>Coverage floor<input style={styles.input} type="number" min="0" max="100" value={form.coverage_floor} onChange={updateField('coverage_floor')} /></label>
-              <label style={styles.fieldWide}>Tech stack<input style={styles.input} value={form.tech_stack} onChange={updateField('tech_stack')} /></label>
-              <label style={styles.fieldWide}>Safety guards<input style={styles.input} value={form.safety_guards} onChange={updateField('safety_guards')} /></label>
+            <div style={styles.describeLayout}>
+              <div style={styles.chatColumn}>
+                <div style={styles.chatLog} data-testid="design-chat-log">
+                  {(draft?.chat_messages || []).length === 0 ? (
+                    <div style={styles.muted}>Describe the repo, runtime, UI, safety constraints, and coverage target.</div>
+                  ) : draft.chat_messages.map((message, index) => (
+                    <div key={`${message.role}-${index}`} style={message.role === 'assistant' ? styles.assistantMessage : styles.userMessage}>
+                      <span style={styles.messageRole}>{message.role}</span>
+                      <span>{message.content}</span>
+                    </div>
+                  ))}
+                </div>
+                <textarea
+                  style={styles.chatInput}
+                  value={chatInput}
+                  onChange={(event) => setChatInput(event.target.value)}
+                  placeholder="Build finance-tool as a public FastAPI React app with branch protection and 92% coverage."
+                  aria-label="Design chat message"
+                />
+                <button type="button" style={submitting ? styles.primaryDisabled : styles.primary} disabled={submitting || !chatInput.trim()} onClick={handleChatSubmit}>
+                  Send
+                </button>
+              </div>
+              <div style={styles.grid}>
+                <label style={styles.field}>Repo name<input style={styles.input} value={form.name} onChange={updateField('name')} /></label>
+                <label style={styles.field}>Owner<input style={styles.input} value={form.owner} onChange={updateField('owner')} /></label>
+                <label style={styles.fieldWide}>Description<textarea style={styles.textarea} value={form.description} onChange={updateField('description')} /></label>
+                <label style={styles.field}>Visibility<select style={styles.input} value={form.visibility} onChange={updateField('visibility')}><option value="private">Private</option><option value="public">Public</option></select></label>
+                <label style={styles.field}>Coverage floor<input style={styles.input} type="number" min="0" max="100" value={form.coverage_floor} onChange={updateField('coverage_floor')} /></label>
+                <label style={styles.fieldWide}>Tech stack<input style={styles.input} value={form.tech_stack} onChange={updateField('tech_stack')} /></label>
+                <label style={styles.fieldWide}>Safety guards<input style={styles.input} value={form.safety_guards} onChange={updateField('safety_guards')} /></label>
+              </div>
             </div>
           )}
 
           {step === 1 && (
             <div style={styles.specBox}>
-              <pre style={styles.pre}>{JSON.stringify(spec, null, 2)}</pre>
+              <textarea
+                style={styles.specTextarea}
+                value={specDraft || JSON.stringify(spec, null, 2)}
+                onChange={(event) => setSpecDraft(event.target.value)}
+                aria-label="Generated spec draft"
+              />
             </div>
           )}
 
           {step === 2 && (
             <div style={styles.planList}>
-              {planItems.map(item => (
+              {(planDraft.length ? planDraft : planItems).map(item => (
                 <label key={item} style={styles.planItem}>
                   <input type="checkbox" checked readOnly />
                   <span>{item}</span>
@@ -262,12 +380,20 @@ const styles = {
   stepActive: { border: 'none', background: theme.accentSubtle, color: theme.textBright, padding: '10px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer' },
   stepIndex: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 18, height: 18, borderRadius: '50%', border: `1px solid ${theme.border}`, marginRight: 6, fontSize: 10 },
   body: { padding: 16, overflowY: 'auto' },
-  grid: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 },
+  describeLayout: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: 14 },
+  chatColumn: { display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 },
+  chatLog: { background: theme.surfaceInset, border: `1px solid ${theme.border}`, borderRadius: 8, padding: 10, minHeight: 192, maxHeight: 260, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 },
+  userMessage: { alignSelf: 'flex-end', maxWidth: '88%', background: theme.accentSubtle, color: theme.text, borderRadius: 8, padding: '8px 10px', fontSize: 12, lineHeight: 1.4 },
+  assistantMessage: { alignSelf: 'flex-start', maxWidth: '88%', background: theme.surface, color: theme.text, border: `1px solid ${theme.border}`, borderRadius: 8, padding: '8px 10px', fontSize: 12, lineHeight: 1.4 },
+  messageRole: { display: 'block', color: theme.textMuted, fontSize: 10, fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 },
+  chatInput: { background: theme.surfaceInset, border: `1px solid ${theme.border}`, borderRadius: 6, color: theme.text, padding: '8px 10px', fontSize: 12, minHeight: 72, resize: 'vertical' },
+  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: 12 },
   field: { display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11, fontWeight: 600, color: theme.textMuted },
   fieldWide: { display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11, fontWeight: 600, color: theme.textMuted, gridColumn: '1 / -1' },
   input: { background: theme.surfaceInset, border: `1px solid ${theme.border}`, borderRadius: 6, color: theme.text, padding: '8px 10px', fontSize: 12 },
   textarea: { background: theme.surfaceInset, border: `1px solid ${theme.border}`, borderRadius: 6, color: theme.text, padding: '8px 10px', fontSize: 12, minHeight: 76, resize: 'vertical' },
   specBox: { background: theme.surfaceInset, border: `1px solid ${theme.border}`, borderRadius: 8, padding: 12 },
+  specTextarea: { width: '100%', minHeight: 360, boxSizing: 'border-box', background: theme.surfaceInset, border: 'none', color: theme.codeText, fontSize: 12, lineHeight: 1.5, resize: 'vertical', outline: 'none', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' },
   pre: { margin: 0, color: theme.codeText, fontSize: 12, overflowX: 'auto' },
   planList: { display: 'flex', flexDirection: 'column', gap: 10 },
   planItem: { display: 'flex', alignItems: 'center', gap: 8, color: theme.text, fontSize: 12 },

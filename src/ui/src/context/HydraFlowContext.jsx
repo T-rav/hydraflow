@@ -1332,6 +1332,60 @@ export function HydraFlowProvider({ children }) {
     }
   }, [parseApiError])
 
+  const chatOnboardingDraft = useCallback(async (draftId, message) => {
+    if (!draftId) return { ok: false, error: 'Draft id required' }
+    try {
+      const res = await fetch(`/api/onboarding/drafts/${encodeURIComponent(draftId)}/design/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        return { ok: false, error: data?.error || `Design chat failed (${res.status})`, draft: data?.draft }
+      }
+      return { ok: true, ...data }
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Design chat failed' }
+    }
+  }, [])
+
+  const draftOnboardingSpec = useCallback(async (draftId, note = null) => {
+    if (!draftId) return { ok: false, error: 'Draft id required' }
+    try {
+      const res = await fetch(`/api/onboarding/drafts/${encodeURIComponent(draftId)}/design/spec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        return { ok: false, error: data?.error || `Spec draft failed (${res.status})`, draft: data?.draft }
+      }
+      return { ok: true, ...data }
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Spec draft failed' }
+    }
+  }, [])
+
+  const draftOnboardingPlan = useCallback(async (draftId, note = null) => {
+    if (!draftId) return { ok: false, error: 'Draft id required' }
+    try {
+      const res = await fetch(`/api/onboarding/drafts/${encodeURIComponent(draftId)}/design/plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        return { ok: false, error: data?.error || `Plan draft failed (${res.status})`, draft: data?.draft }
+      }
+      return { ok: true, ...data }
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Plan draft failed' }
+    }
+  }, [])
+
   const materializeOnboardingDraft = useCallback(async (draftId, request = {}) => {
     try {
       const res = await fetch(`/api/onboarding/drafts/${encodeURIComponent(draftId)}/materialize`, {
@@ -1843,6 +1897,9 @@ export function HydraFlowProvider({ children }) {
     addRepoBySlug,
     addRepoByPath,
     createOnboardingDraft,
+    chatOnboardingDraft,
+    draftOnboardingSpec,
+    draftOnboardingPlan,
     materializeOnboardingDraft,
     pushOnboardingDraft,
     fetchRepos,

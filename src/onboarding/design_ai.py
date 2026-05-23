@@ -1,0 +1,239 @@
+"""Design-chat extraction for onboarding bootstrap drafts."""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+
+from onboarding.models import BootstrapDraft, BootstrapSpec
+
+_NAME_RE = re.compile(r"\b[a-z][a-z0-9]+(?:-[a-z0-9]+)+\b")
+_OWNER_RE = re.compile(
+    r"\b(?:owner|org|organization)\s+([A-Za-z0-9_.-]{1,100})\b", re.I
+)
+_COVERAGE_RE = re.compile(r"\b(\d{2,3})\s*%\s*(?:coverage|test coverage)\b", re.I)
+
+
+@dataclass(frozen=True)
+class DesignTurn:
+    """Structured output for one onboarding design-chat turn."""
+
+    reply: str
+    field_updates: dict[str, object]
+    clarification: str | None = None
+
+
+def apply_field_updates(
+    spec: BootstrapSpec, updates: dict[str, object]
+) -> BootstrapSpec:
+    """Return a new spec with validated structured updates applied."""
+
+    payload = spec.model_dump()
+    for key, value in updates.items():
+        if value is None or key not in payload:
+            continue
+        payload[key] = value
+    return BootstrapSpec.model_validate(payload)
+
+
+class DesignAIService:
+    """Lightweight design assistant with a Claude-provider seam.
+
+    The deterministic extractor keeps the dashboard usable and testable when no
+    external API key is configured. A production Claude provider can replace
+    ``chat`` behind this interface without changing the route or UI contracts.
+    """
+
+    def chat(self, draft: BootstrapDraft, message: str) -> DesignTurn:
+        updates = self._extract_fields(message, draft.spec)
+        updated = apply_field_updates(draft.spec, updates)
+        clarification = self._clarification_for(message, updated)
+        reply = self._reply_for(updated, updates, clarification)
+        return DesignTurn(
+            reply=reply, field_updates=updates, clarification=clarification
+        )
+
+    def draft_spec(self, draft: BootstrapDraft, note: str | None = None) -> str:
+        spec = draft.spec
+        ui_choice = _ui_choice(spec.tech_stack)
+        backend = _backend_choice(spec.tech_stack)
+        note_line = f"\nRevision note: {note}" if note else ""
+        return (
+            "---\n"
+            "status: wizard-draft\n"
+            "generated_by: hydraflow-wizard\n"
+            "needs_refinement: true\n"
+            "methodology_refs:\n"
+            "  - docs/methodology/onboarding-hydraflow-format-repos.md\n"
+            "---\n\n"
+            f"# {spec.name} Bootstrap Spec\n\n"
+            f"## Name\n{spec.name}\n\n"
+            f"## Description\n{spec.description}\n\n"
+            "## Architecture Overview\n"
+            f"- Backend: {backend}\n"
+            f"- UI: {ui_choice}\n"
+            f"- Owner: {spec.owner}\n"
+            f"- Branches: {spec.main_branch} + {spec.staging_branch}\n\n"
+            "## 10-file Invariant Kernel\n"
+            "1. README.md\n"
+            "2. CLAUDE.md\n"
+            "3. pyproject.toml\n"
+            "4. .env.example\n"
+            "5. .github/workflows/ci.yml\n"
+            "6. .github/ISSUE_TEMPLATE/feature.yml\n"
+            "7. .github/pull_request_template.md\n"
+            "8. docs/adr/0001-record-architecture-baseline.md\n"
+            "9. docs/specs/bootstrap-spec.md\n"
+            "10. docs/plans/plan-01-bootstrap.md\n\n"
+            "## V1 IN\n"
+            f"- {backend} implementation skeleton\n"
+            f"- {spec.coverage_floor}% coverage gate\n"
+            f"- Safety guards: {', '.join(spec.safety_guards) or 'standard HydraFlow guards'}\n\n"
+            "## V1 OUT\n"
+            "- Production credentials\n"
+            "- Deep fleet-wide SHAPE refinement\n"
+            "- Post-bootstrap feature backlog\n"
+            f"{note_line}\n"
+        )
+
+    def draft_plan(self, draft: BootstrapDraft, note: str | None = None) -> list[str]:
+        spec = draft.spec
+        has_ui = _has_ui(spec.tech_stack)
+        tasks = [
+            f"Create the {spec.name} repository shell and invariant kernel",
+            "Write README, CLAUDE.md, and environment template",
+            "Add CI workflow with lint, typecheck, security scan, and tests",
+            f"Set coverage floor to {spec.coverage_floor}%",
+            "Create ADR-0001 and bootstrap spec handoff docs",
+            "Add issue and PR templates with wizard-draft frontmatter",
+            "Add smoke test for generated CLI entry point",
+            "Run local quality gate before GitHub provisioning",
+        ]
+        if has_ui:
+            tasks.insert(3, "Add UI scaffold and browser-smoke placeholder")
+        if any("branch" in guard.lower() for guard in spec.safety_guards):
+            tasks.append("Configure branch-protection expectations and fallback notes")
+        if any("decimal" in guard.lower() for guard in spec.safety_guards):
+            tasks.append("Add decimal-purity guardrail test")
+        tasks.append(
+            "Push wizard-drafted spec and Plan 01 for factory SHAPE refinement"
+        )
+        if note:
+            tasks.append(f"Apply operator revision note: {note}")
+        return tasks
+
+    def _extract_fields(
+        self, message: str, current: BootstrapSpec
+    ) -> dict[str, object]:
+        lowered = message.lower()
+        updates: dict[str, object] = {}
+
+        name_match = _NAME_RE.search(lowered)
+        if name_match:
+            updates["name"] = name_match.group(0)
+
+        owner_match = _OWNER_RE.search(message)
+        if owner_match:
+            updates["owner"] = owner_match.group(1)
+
+        if "public" in lowered:
+            updates["visibility"] = "public"
+        elif "private" in lowered:
+            updates["visibility"] = "private"
+
+        coverage_match = _COVERAGE_RE.search(message)
+        if coverage_match:
+            updates["coverage_floor"] = min(100, max(0, int(coverage_match.group(1))))
+
+        stack = list(current.tech_stack)
+        for keyword, label in (
+            ("fastapi", "FastAPI"),
+            ("django", "Django"),
+            ("flask", "Flask"),
+            ("python", "python"),
+            ("react", "React"),
+            ("next.js", "Next.js"),
+            ("nextjs", "Next.js"),
+            ("sqlite", "SQLite"),
+            ("postgres", "Postgres"),
+            ("postgresql", "Postgres"),
+            ("none ui", "UI=None"),
+            ("no ui", "UI=None"),
+        ):
+            if keyword in lowered and label not in stack:
+                stack.append(label)
+        if stack != current.tech_stack:
+            updates["tech_stack"] = stack
+
+        guards = list(current.safety_guards)
+        for keyword, label in (
+            ("branch protection", "branch-protection"),
+            ("deterministic", "deterministic-tests"),
+            ("decimal", "decimal-purity"),
+            ("quality gate", "quality-gates"),
+            ("quality gates", "quality-gates"),
+            ("adr", "adr-review"),
+        ):
+            if keyword in lowered and label not in guards:
+                guards.append(label)
+        if guards != current.safety_guards:
+            updates["safety_guards"] = guards
+
+        if len(message.strip()) >= 20:
+            updates["description"] = _description_for(message)
+
+        return updates
+
+    def _clarification_for(self, message: str, spec: BootstrapSpec) -> str | None:
+        lowered = message.lower()
+        if "i don't know" in lowered or "not sure" in lowered:
+            return "I can keep the standard Python path unless you want a specific backend or UI."
+        if "ui" in lowered and not _has_ui(spec.tech_stack) and "no ui" not in lowered:
+            return "Do you want React, Next.js, or no UI for the bootstrap?"
+        return None
+
+    def _reply_for(
+        self, spec: BootstrapSpec, updates: dict[str, object], clarification: str | None
+    ) -> str:
+        changed = ", ".join(sorted(updates)) if updates else "no fields"
+        base = (
+            f"Updated {changed}. Current draft is {spec.name} "
+            f"({spec.visibility}) with {_backend_choice(spec.tech_stack)}."
+        )
+        if clarification:
+            return f"{base} {clarification}"
+        return f"{base} Draft the spec when these fields look right."
+
+
+def _description_for(message: str) -> str:
+    normalized = " ".join(message.strip().split())
+    if len(normalized) > 500:
+        normalized = normalized[:497].rstrip() + "..."
+    if len(normalized) < 10:
+        return "HydraFlow-format bootstrap project."
+    return normalized
+
+
+def _has_ui(stack: list[str]) -> bool:
+    lowered = {item.lower() for item in stack}
+    return bool({"react", "next.js", "nextjs"} & lowered) and "ui=none" not in lowered
+
+
+def _ui_choice(stack: list[str]) -> str:
+    lowered = {item.lower() for item in stack}
+    if "next.js" in lowered or "nextjs" in lowered:
+        return "Next.js"
+    if "react" in lowered:
+        return "React"
+    return "None"
+
+
+def _backend_choice(stack: list[str]) -> str:
+    lowered = {item.lower() for item in stack}
+    if "fastapi" in lowered:
+        return "Python 3.11 + FastAPI"
+    if "django" in lowered:
+        return "Python 3.11 + Django"
+    if "flask" in lowered:
+        return "Python 3.11 + Flask"
+    return "Python 3.11"

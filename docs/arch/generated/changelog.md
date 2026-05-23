@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W21
 
+- `091f166` — Refs #8931: add onboarding wizard UI slice *(2026-05-22)*
 - `e439049` — Refs #8930: add onboarding materialize API slice *(2026-05-22)*
 - `e5e3dbd` — Refs #8930: add onboarding draft API foundation *(2026-05-22)*
 - `52784fb` — Fixes #8368: resolve dashboard a11y violations *(2026-05-22)*
@@ -344,4 +345,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `063468b` on 2026-05-23 04:32 UTC. Source last changed at `063468b`. Status: 🟢 fresh._
+_Regenerated from commit `0086490` on 2026-05-23 05:05 UTC. Source last changed at `0086490`. Status: 🟢 fresh._
