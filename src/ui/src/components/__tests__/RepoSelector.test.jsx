@@ -50,6 +50,24 @@ describe('RepoSelector', () => {
     expect(onOpenRegister).toHaveBeenCalledTimes(1)
   })
 
+  it('opens new project wizard from dropdown action', () => {
+    const onOpenNewProject = vi.fn()
+    render(<RepoSelector onOpenNewProject={onOpenNewProject} />)
+    fireEvent.click(screen.getByTestId('repo-selector-trigger'))
+    fireEvent.click(screen.getByText('+ New project'))
+    expect(onOpenNewProject).toHaveBeenCalledTimes(1)
+    expect(screen.queryByTestId('repo-selector-dropdown')).toBeNull()
+  })
+
+  it('shows local-only status for materialized projects', () => {
+    mockUseHydraFlow.mockReturnValue(makeContext({
+      supervisedRepos: [{ slug: 'finance-tool', path: '/tmp/finance-tool', local_only: true }],
+    }))
+    render(<RepoSelector />)
+    fireEvent.click(screen.getByTestId('repo-selector-trigger'))
+    expect(screen.getByText('Local only')).toBeInTheDocument()
+  })
+
   it('disables register button when canRegisterRepos is false', () => {
     mockUseHydraFlow.mockReturnValue(makeContext({ canRegisterRepos: false }))
     render(<RepoSelector />)

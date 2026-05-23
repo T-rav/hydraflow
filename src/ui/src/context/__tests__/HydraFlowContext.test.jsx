@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { render, screen, act } from '@testing-library/react'
+import { render, screen, act, waitFor } from '@testing-library/react'
 import { reducer, getPipelineAction } from '../HydraFlowContext'
 
 const emptyPipeline = {
@@ -2107,8 +2107,10 @@ describe('HydraFlowProvider body[data-connected]', () => {
       )
     })
 
-    expect(document.body.getAttribute('data-connected')).toBe('true')
-    expect(screen.getByTestId('connected').textContent).toBe('true')
+    await waitFor(() => {
+      expect(document.body.getAttribute('data-connected')).toBe('true')
+      expect(screen.getByTestId('connected').textContent).toBe('true')
+    })
   })
 
   it('sets data-connected to false when not connected', async () => {

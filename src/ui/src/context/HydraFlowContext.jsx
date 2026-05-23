@@ -53,6 +53,7 @@ export const initialState = {
   retrospectives: null,
   troubleshooting: null,
   trackedReports: [],
+  localOnlyProjects: [],
   // True when the orchestrator backend is wired to Fake adapters (sandbox tier).
   // Set from /api/control/status. Drives the persistent MOCKWORLD MODE banner.
   mockworldActive: false,
@@ -61,6 +62,23 @@ export const initialState = {
 function normalizeRepoSlug(value) {
   if (value == null) return null
   return String(value).trim().replace(/[\\/]+/g, '-') || null
+}
+
+function mergeLocalOnlyProjects(supervisedRepos, localOnlyProjects) {
+  const repos = Array.isArray(supervisedRepos) ? supervisedRepos : []
+  const local = Array.isArray(localOnlyProjects) ? localOnlyProjects : []
+  const seen = new Set(
+    repos.flatMap(repo => [
+      normalizeRepoSlug(repo?.slug || repo?.repo || repo?.full_name || repo?.path),
+      repo?.path || null,
+    ]).filter(Boolean)
+  )
+  const missingLocal = local.filter(project => {
+    const slug = normalizeRepoSlug(project?.slug || project?.full_name || project?.path)
+    const path = project?.path || null
+    return !seen.has(slug) && (!path || !seen.has(path))
+  })
+  return [...repos, ...missingLocal]
 }
 
 function isDuplicate(state, action) {
@@ -746,6 +764,22 @@ export function reducer(state, action) {
           : [],
       }
 
+    case 'LOCAL_ONLY_PROJECT_ADDED': {
+      const project = action.data
+      if (!project?.slug) return state
+      const existing = state.localOnlyProjects || []
+      const next = [
+        project,
+        ...existing.filter(item => item.slug !== project.slug && item.path !== project.path),
+      ]
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem('hydraflow.localOnlyProjects', JSON.stringify(next))
+        } catch { /* ignore */ }
+      }
+      return { ...state, localOnlyProjects: next }
+    }
+
     case 'SELECT_REPO': {
       const newSlug = normalizeRepoSlug(action.data.slug)
       const changed = newSlug !== state.selectedRepoSlug
@@ -1043,6 +1077,17 @@ export function HydraFlowProvider({ children }) {
     } catch { /* ignore */ }
   }, [])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      const raw = window.localStorage.getItem('hydraflow.localOnlyProjects')
+      const projects = raw ? JSON.parse(raw) : []
+      if (Array.isArray(projects)) {
+        projects.forEach(project => dispatch({ type: 'LOCAL_ONLY_PROJECT_ADDED', data: project }))
+      }
+    } catch { /* ignore */ }
+  }, [])
+
   const parseApiError = useCallback(async (res, fallback) => {
     try {
       const body = await res.json()
@@ -1270,6 +1315,69 @@ export function HydraFlowProvider({ children }) {
       return { ok: false, error: err.message || 'Network error' }
     }
   }, [fetchRepos])
+
+  const createOnboardingDraft = useCallback(async (spec) => {
+    try {
+      const res = await fetch('/api/onboarding/drafts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(spec),
+      })
+      if (!res.ok) {
+        return { ok: false, error: await parseApiError(res, `Draft failed (${res.status})`) }
+      }
+      return { ok: true, draft: await res.json() }
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Draft failed' }
+    }
+  }, [parseApiError])
+
+  const materializeOnboardingDraft = useCallback(async (draftId, request = {}) => {
+    try {
+      const res = await fetch(`/api/onboarding/drafts/${encodeURIComponent(draftId)}/materialize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        return { ok: false, error: data?.error || `Materialize failed (${res.status})`, draft: data?.draft }
+      }
+      const spec = data?.draft?.spec || {}
+      const materializedPath = data?.materialized?.path || ''
+      const project = {
+        slug: spec.name || materializedPath,
+        full_name: spec.name || materializedPath,
+        path: materializedPath,
+        local_only: true,
+        onboarding_draft_id: data?.draft?.id || draftId,
+        onboarding_events: data?.draft?.events || [],
+      }
+      dispatch({ type: 'LOCAL_ONLY_PROJECT_ADDED', data: project })
+      if (materializedPath) {
+        await addRepoByPath(materializedPath)
+      }
+      return { ok: true, ...data }
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Materialize failed' }
+    }
+  }, [addRepoByPath])
+
+  const pushOnboardingDraft = useCallback(async (draftId) => {
+    if (!draftId) return { ok: false, error: 'Draft id required' }
+    try {
+      const res = await fetch(`/api/onboarding/drafts/${encodeURIComponent(draftId)}/push`, {
+        method: 'POST',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        return { ok: false, error: data?.error || `Push failed (${res.status})`, draft: data?.draft }
+      }
+      return { ok: true, ...data }
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Push failed' }
+    }
+  }, [])
 
   const removeRepoShortcut = useCallback((repoSlug) => {
     removeRepo(repoSlug)
@@ -1714,6 +1822,7 @@ export function HydraFlowProvider({ children }) {
   const value = {
     ...state,
     sessions: repoFilteredSessions,
+    supervisedRepos: mergeLocalOnlyProjects(state.supervisedRepos, state.localOnlyProjects),
     stageStatus,
     resetSession,
     submitIntent,
@@ -1733,6 +1842,9 @@ export function HydraFlowProvider({ children }) {
     selectRepo,
     addRepoBySlug,
     addRepoByPath,
+    createOnboardingDraft,
+    materializeOnboardingDraft,
+    pushOnboardingDraft,
     fetchRepos,
     removeRepoShortcut,
     startRuntime,
