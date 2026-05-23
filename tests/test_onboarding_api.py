@@ -63,6 +63,7 @@ class TestOnboardingDraftRoutes:
         assert "/api/onboarding/drafts/{draft_id}/design/spec" in paths
         assert "/api/onboarding/drafts/{draft_id}/design/plan" in paths
         assert "/api/onboarding/drafts/{draft_id}/continue-plan" in paths
+        assert "/api/onboarding/drafts/{draft_id}/upgrade-format" in paths
         assert "/api/onboarding/drafts/{draft_id}/materialize" in paths
         assert "/api/onboarding/drafts/{draft_id}/push" in paths
 
@@ -526,6 +527,94 @@ class TestOnboardingDraftRoutes:
         persisted = state.get_onboarding_draft(draft.id)
         assert persisted["plan_draft"] == data["plan_draft"]
         assert persisted["events"][-1]["message"].startswith("Plan 02 filed")
+
+    @pytest.mark.asyncio
+    async def test_upgrade_format_requires_pushed_repo(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        draft = BootstrapDraft(
+            spec=BootstrapSpec.model_validate(_spec_payload(name="finance-tool")),
+            status="materialized",
+            materialize_status="succeeded",
+        )
+        state.set_onboarding_draft(draft.id, draft.model_dump(mode="json"))
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        endpoint = find_endpoint(
+            router,
+            "/api/onboarding/drafts/{draft_id}/upgrade-format",
+            method="POST",
+        )
+
+        response = await endpoint(draft.id)
+        data = json.loads(response.body)
+
+        assert response.status_code == 409
+        assert (
+            data["error"] == "Draft must be pushed before opening a format upgrade PR"
+        )
+
+    @pytest.mark.asyncio
+    async def test_upgrade_format_opens_staging_pr(
+        self, config, event_bus, state, tmp_path, monkeypatch
+    ) -> None:
+        repo_dir = tmp_path / "generated" / "finance-tool"
+        repo_dir.mkdir(parents=True)
+        draft = BootstrapDraft(
+            spec=BootstrapSpec.model_validate(_spec_payload(name="finance-tool")),
+            status="pushed",
+            materialize_status="succeeded",
+            push_status="succeeded",
+            materialized_path=str(repo_dir),
+            repo_url="https://github.com/T-rav/finance-tool",
+        )
+        state.set_onboarding_draft(draft.id, draft.model_dump(mode="json"))
+        calls: list[tuple[str, ...]] = []
+
+        class Proc:
+            returncode = 0
+
+            def __init__(self, stdout: bytes = b"") -> None:
+                self._stdout = stdout
+
+            async def communicate(self):
+                return self._stdout, b""
+
+            def kill(self) -> None:
+                return None
+
+        async def fake_exec(*cmd, **_kwargs):
+            calls.append(tuple(cmd))
+            if cmd[:3] == ("gh", "pr", "create"):
+                return Proc(b"https://github.com/T-rav/finance-tool/pull/7\n")
+            return Proc()
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        endpoint = find_endpoint(
+            router,
+            "/api/onboarding/drafts/{draft_id}/upgrade-format",
+            method="POST",
+        )
+
+        response = await endpoint(draft.id)
+        data = json.loads(response.body)
+
+        assert response.status_code == 200
+        assert data["status"] == "pr_opened"
+        assert data["pr_url"] == "https://github.com/T-rav/finance-tool/pull/7"
+        assert (repo_dir / ".hydraflow" / "standards-snapshot.json").exists()
+        assert ("git", "fetch", "origin", "staging") in calls
+        assert (
+            "git",
+            "push",
+            "-u",
+            "origin",
+            "hydraflow/format-upgrade",
+            "--force-with-lease",
+        ) in calls
+        assert any(call[:3] == ("gh", "pr", "create") for call in calls)
+        persisted = state.get_onboarding_draft(draft.id)
+        assert persisted["events"][-1]["message"] == "format upgrade PR opened"
 
     @pytest.mark.asyncio
     async def test_materialize_draft_records_failure_for_existing_target(
