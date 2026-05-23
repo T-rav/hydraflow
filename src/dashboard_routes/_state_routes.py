@@ -44,6 +44,30 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             return False
         return orch.pipeline_enabled
 
+    def _repo_pipeline_enabled(rec: Any, runtime: Any | None) -> bool:
+        if runtime is not None:
+            pipeline_enabled = getattr(runtime, "pipeline_enabled", None)
+            if pipeline_enabled is not None:
+                return bool(pipeline_enabled)
+            return bool(getattr(runtime, "running", False))
+        if _is_default_repo(str(getattr(rec, "slug", ""))) or _is_default_repo(
+            str(getattr(rec, "repo", ""))
+        ):
+            return _default_repo_pipeline_running()
+        return False
+
+    def _repo_session_id(runtime: Any | None, pipeline_enabled: bool) -> str | None:
+        if runtime is not None:
+            return (
+                runtime.orchestrator.current_session_id
+                if runtime and runtime.running
+                else None
+            )
+        orch = get_orchestrator()
+        if pipeline_enabled and orch and orch.running:
+            return orch.current_session_id
+        return None
+
     def _list_repo_records() -> list[Any]:
         return ctx.list_repo_records()
 
@@ -104,6 +128,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                     slug=default_slug,
                     repo=config.repo,
                     running=pipeline_active,
+                    pipeline_enabled=pipeline_active,
                     session_id=orch.current_session_id
                     if orch and orch.running
                     else None,
@@ -117,6 +142,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                         slug=rt.slug,
                         repo=rt.config.repo,
                         running=rt.running,
+                        pipeline_enabled=rt.running,
                         session_id=rt.orchestrator.current_session_id
                         if rt.running
                         else None,
@@ -136,6 +162,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                 slug=default_slug,
                 repo=config.repo,
                 running=pipeline_active,
+                pipeline_enabled=pipeline_active,
                 session_id=orch.current_session_id if orch and orch.running else None,
             )
             return JSONResponse(info.model_dump())
@@ -151,6 +178,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             slug=rt.slug,
             repo=rt.config.repo,
             running=rt.running,
+            pipeline_enabled=rt.running,
             session_id=rt.orchestrator.current_session_id if rt.running else None,
             last_error=rt.last_error,
         )
@@ -240,15 +268,15 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             for rec in records:
                 runtime = registry.get(rec.slug) if registry else None
                 safe_slug = rec.slug.replace("/", "-") if rec.slug else rec.slug
+                pipeline_enabled = _repo_pipeline_enabled(rec, runtime)
                 payload.append(
                     {
                         "slug": safe_slug,
                         "repo": rec.repo,
                         "path": rec.path,
                         "running": bool(runtime.running) if runtime else False,
-                        "session_id": runtime.orchestrator.current_session_id
-                        if runtime and runtime.running
-                        else None,
+                        "pipeline_enabled": pipeline_enabled,
+                        "session_id": _repo_session_id(runtime, pipeline_enabled),
                     }
                 )
             return JSONResponse({"repos": payload, "can_register": True})

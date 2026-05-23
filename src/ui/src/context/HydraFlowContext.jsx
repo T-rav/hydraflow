@@ -778,13 +778,16 @@ export function reducer(state, action) {
         return {
           ...state,
           runtimes: state.runtimes.map(rt =>
-            rt.slug === slug ? { ...rt, running } : rt,
+            rt.slug === slug ? { ...rt, running, pipeline_enabled: running } : rt,
           ),
         }
       }
       return {
         ...state,
-        runtimes: [...(state.runtimes || []), { slug, running }],
+        runtimes: [
+          ...(state.runtimes || []),
+          { slug, running, pipeline_enabled: running },
+        ],
       }
     }
 

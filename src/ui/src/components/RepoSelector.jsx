@@ -24,6 +24,14 @@ const statusDotBase = {
 const statusDotRunning = { ...statusDotBase, background: theme.green }
 const statusDotStopped = { ...statusDotBase, background: theme.textMuted }
 
+function isPipelineEnabled(runtime, repo) {
+  return runtime?.pipeline_enabled
+    ?? repo?.pipeline_enabled
+    ?? runtime?.running
+    ?? repo?.running
+    ?? repo?.status === 'running'
+}
+
 export function RepoSelector({ onOpenRegister }) {
   const {
     canRegisterRepos = false,
@@ -57,7 +65,7 @@ export function RepoSelector({ onOpenRegister }) {
       const rawSlug = repo.slug || repo.repo || repo.full_name || repo.path || `repo-${index + 1}`
       const filterSlug = canonicalRepoSlug(rawSlug)
       const runtime = runtimeMap.get(filterSlug)
-      const isRunning = runtime?.running ?? repo.running ?? repo.status === 'running'
+      const isRunning = isPipelineEnabled(runtime, repo)
       return {
         key: `${filterSlug || rawSlug}-${index}`,
         label: buildDisplayName(repo),

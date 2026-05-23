@@ -1365,6 +1365,7 @@ class RepoRuntimeInfo(BaseModel):
     slug: str
     repo: str = ""
     running: bool = False
+    pipeline_enabled: bool = False
     session_id: str | None = None
     uptime_seconds: float = 0.0
     last_error: str | None = None

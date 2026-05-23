@@ -125,6 +125,15 @@ describe('RepoSelector', () => {
     expect(screen.getByText('Running')).toBeInTheDocument()
   })
 
+  it('uses pipeline_enabled over repo.running for enabled repos', () => {
+    mockUseHydraFlow.mockReturnValue(makeContext({
+      supervisedRepos: [{ slug: 'acme/app', running: false, pipeline_enabled: true }],
+    }))
+    render(<RepoSelector />)
+    fireEvent.click(screen.getByTestId('repo-selector-trigger'))
+    expect(screen.getByText('Running')).toBeInTheDocument()
+  })
+
   it('closes dropdown on outside click', () => {
     render(<RepoSelector />)
     fireEvent.click(screen.getByTestId('repo-selector-trigger'))

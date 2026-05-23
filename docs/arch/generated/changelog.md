@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W21
 
+- `90279ad` — Fixes #8651: collapse crowded pipeline dots *(2026-05-22)*
 - `1e94520` — Fixes #8674: refresh arch artifacts before bot push *(2026-05-22)*
 - `700bc6b` — Fixes #8658: update Opus 4.7 pricing *(2026-05-22)*
 - `72fea53` — Fixes #8979: fold epic sweep into monitor *(2026-05-22)*
@@ -338,4 +339,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `f4205af` on 2026-05-23 00:15 UTC. Source last changed at `f4205af`. Status: 🟢 fresh._
+_Regenerated from commit `4d1f3a6` on 2026-05-23 00:33 UTC. Source last changed at `4d1f3a6`. Status: 🟢 fresh._

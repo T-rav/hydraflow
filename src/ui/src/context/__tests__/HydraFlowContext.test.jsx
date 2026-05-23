@@ -1958,7 +1958,11 @@ describe('OPTIMISTIC_RUNTIME reducer', () => {
       data: { slug: 'owner/repo-a', running: true },
     })
     expect(next.runtimes).toHaveLength(2)
-    expect(next.runtimes[0]).toEqual({ slug: 'owner/repo-a', running: true })
+    expect(next.runtimes[0]).toEqual({
+      slug: 'owner/repo-a',
+      running: true,
+      pipeline_enabled: true,
+    })
     expect(next.runtimes[1]).toEqual({ slug: 'owner/repo-b', running: true })
   })
 
@@ -1972,7 +1976,11 @@ describe('OPTIMISTIC_RUNTIME reducer', () => {
       data: { slug: 'owner/repo-b', running: true },
     })
     expect(next.runtimes).toHaveLength(2)
-    expect(next.runtimes[1]).toEqual({ slug: 'owner/repo-b', running: true })
+    expect(next.runtimes[1]).toEqual({
+      slug: 'owner/repo-b',
+      running: true,
+      pipeline_enabled: true,
+    })
   })
 
   it('sets running to false for stop', () => {
@@ -1993,7 +2001,11 @@ describe('OPTIMISTIC_RUNTIME reducer', () => {
       data: { slug: 'owner/repo-a', running: true },
     })
     expect(next.runtimes).toHaveLength(1)
-    expect(next.runtimes[0]).toEqual({ slug: 'owner/repo-a', running: true })
+    expect(next.runtimes[0]).toEqual({
+      slug: 'owner/repo-a',
+      running: true,
+      pipeline_enabled: true,
+    })
   })
 })
 
