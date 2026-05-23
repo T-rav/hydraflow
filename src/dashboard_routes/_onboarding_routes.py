@@ -610,6 +610,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
                 status_code=502,
             )
 
+        draft.current_plan = next_plan
         draft.plan_draft = plan_tasks
         draft.events.append(
             {
