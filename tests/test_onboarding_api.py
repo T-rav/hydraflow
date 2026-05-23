@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -54,6 +55,7 @@ class TestOnboardingDraftRoutes:
         assert "/api/onboarding/drafts/{draft_id}/design/spec" in paths
         assert "/api/onboarding/drafts/{draft_id}/design/plan" in paths
         assert "/api/onboarding/drafts/{draft_id}/materialize" in paths
+        assert "/api/onboarding/drafts/{draft_id}/push" in paths
 
     @pytest.mark.asyncio
     async def test_create_draft_persists_state(
@@ -152,10 +154,131 @@ class TestOnboardingDraftRoutes:
         assert response.status_code == 200
         assert data["draft"]["status"] == "materialized"
         assert data["draft"]["materialize_status"] == "succeeded"
+        assert data["draft"]["materialized_path"].endswith("generated/finance-tool")
         assert data["materialized"]["path"].endswith("generated/finance-tool")
         assert (tmp_path / "generated" / "finance-tool" / "pyproject.toml").exists()
         persisted = state.get_onboarding_draft(draft.id)
         assert persisted["materialize_status"] == "succeeded"
+        assert persisted["materialized_path"].endswith("generated/finance-tool")
+
+    @pytest.mark.asyncio
+    async def test_push_draft_requires_materialized_repo(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        draft = BootstrapDraft(spec=BootstrapSpec.model_validate(_spec_payload()))
+        state.set_onboarding_draft(draft.id, draft.model_dump(mode="json"))
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        endpoint = find_endpoint(
+            router,
+            "/api/onboarding/drafts/{draft_id}/push",
+            method="POST",
+        )
+
+        response = await endpoint(draft.id)
+        data = json.loads(response.body)
+
+        assert response.status_code == 409
+        assert data["error"] == "Draft must be materialized before it can be pushed"
+
+    @pytest.mark.asyncio
+    async def test_push_draft_creates_and_pushes_github_repo(
+        self, config, event_bus, state, tmp_path, monkeypatch
+    ) -> None:
+        repo_dir = tmp_path / "generated" / "finance-tool"
+        repo_dir.mkdir(parents=True)
+        (repo_dir / "README.md").write_text("# finance-tool\n")
+        draft = BootstrapDraft(
+            spec=BootstrapSpec.model_validate(_spec_payload(name="finance-tool")),
+            status="materialized",
+            materialize_status="succeeded",
+            materialized_path=str(repo_dir),
+        )
+        state.set_onboarding_draft(draft.id, draft.model_dump(mode="json"))
+        calls: list[tuple[str, ...]] = []
+
+        class Proc:
+            returncode = 0
+
+            async def communicate(self):
+                return b"", b""
+
+            def kill(self) -> None:
+                return None
+
+        async def fake_exec(*cmd, **_kwargs):
+            calls.append(tuple(cmd))
+            return Proc()
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        endpoint = find_endpoint(
+            router,
+            "/api/onboarding/drafts/{draft_id}/push",
+            method="POST",
+        )
+
+        response = await endpoint(draft.id)
+        data = json.loads(response.body)
+
+        assert response.status_code == 200
+        assert data["draft"]["status"] == "pushed"
+        assert data["draft"]["push_status"] == "succeeded"
+        assert data["repo_url"] == "https://github.com/T-rav/finance-tool"
+        assert (
+            "gh",
+            "repo",
+            "create",
+            "T-rav/finance-tool",
+            "--private",
+            "--description",
+            "A repo for experimenting with observability workflows.",
+        ) in calls
+        assert ("git", "push", "-u", "origin", "main") in calls
+        assert ("git", "push", "-u", "origin", "staging") in calls
+        persisted = state.get_onboarding_draft(draft.id)
+        assert persisted["repo_url"] == "https://github.com/T-rav/finance-tool"
+
+    @pytest.mark.asyncio
+    async def test_push_draft_records_cli_failure(
+        self, config, event_bus, state, tmp_path, monkeypatch
+    ) -> None:
+        repo_dir = tmp_path / "generated" / "finance-tool"
+        repo_dir.mkdir(parents=True)
+        draft = BootstrapDraft(
+            spec=BootstrapSpec.model_validate(_spec_payload(name="finance-tool")),
+            status="materialized",
+            materialize_status="succeeded",
+            materialized_path=str(repo_dir),
+        )
+        state.set_onboarding_draft(draft.id, draft.model_dump(mode="json"))
+
+        class Proc:
+            returncode = 1
+
+            async def communicate(self):
+                return b"", b"gh auth required"
+
+            def kill(self) -> None:
+                return None
+
+        async def fake_exec(*_cmd, **_kwargs):
+            return Proc()
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        endpoint = find_endpoint(
+            router,
+            "/api/onboarding/drafts/{draft_id}/push",
+            method="POST",
+        )
+
+        response = await endpoint(draft.id)
+        data = json.loads(response.body)
+
+        assert response.status_code == 502
+        assert data["draft"]["status"] == "materialized"
+        assert data["draft"]["push_status"] == "failed"
+        assert "gh auth required" in data["draft"]["events"][-1]["message"]
 
     @pytest.mark.asyncio
     async def test_design_chat_persists_conversation_and_field_updates(

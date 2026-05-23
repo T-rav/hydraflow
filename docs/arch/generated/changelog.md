@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W21
 
+- `f4915b8` — Refs #8933: add onboarding dashboard repo slice *(2026-05-22)*
 - `6b74497` — Refs #8932: add onboarding design chat slice *(2026-05-22)*
 - `091f166` — Refs #8931: add onboarding wizard UI slice *(2026-05-22)*
 - `e439049` — Refs #8930: add onboarding materialize API slice *(2026-05-22)*
@@ -346,4 +347,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `5209d6e` on 2026-05-23 05:43 UTC. Source last changed at `5209d6e`. Status: 🟢 fresh._
+_Regenerated from commit `185020f` on 2026-05-23 06:30 UTC. Source last changed at `185020f`. Status: 🟢 fresh._

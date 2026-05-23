@@ -89,6 +89,8 @@ class BootstrapDraft(BaseModel):
     extracted_fields: dict[str, object] = Field(default_factory=dict)
     spec_draft: str | None = None
     plan_draft: list[str] = Field(default_factory=list)
+    materialized_path: str | None = Field(default=None, max_length=1000)
+    repo_url: str | None = Field(default=None, max_length=1000)
 
     def touch(self) -> None:
         self.updated_at = _utc_now()
