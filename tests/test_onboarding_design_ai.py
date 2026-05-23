@@ -1,3 +1,5 @@
+import pytest
+
 from onboarding.design_ai import DesignAIService, apply_field_updates
 from onboarding.models import BootstrapDraft, BootstrapSpec
 
@@ -19,10 +21,11 @@ def _draft(**overrides: object) -> BootstrapDraft:
     return BootstrapDraft(spec=BootstrapSpec.model_validate(payload))
 
 
-def test_design_chat_extracts_six_core_fields() -> None:
+@pytest.mark.asyncio
+async def test_design_chat_extracts_six_core_fields() -> None:
     service = DesignAIService()
 
-    turn = service.chat(
+    turn = await service.chat(
         _draft(),
         (
             "Build ledger-lab as a public FastAPI React app for owner finance-org "

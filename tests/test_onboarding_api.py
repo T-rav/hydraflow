@@ -8,6 +8,12 @@ import json
 import pytest
 from pydantic import ValidationError
 
+from onboarding.design_ai import (
+    AnthropicDesignProvider,
+    DesignAIService,
+    DesignProviderError,
+    DesignTurn,
+)
 from onboarding.models import (
     BootstrapDraft,
     BootstrapSpec,
@@ -282,8 +288,10 @@ class TestOnboardingDraftRoutes:
 
     @pytest.mark.asyncio
     async def test_design_chat_persists_conversation_and_field_updates(
-        self, config, event_bus, state, tmp_path
+        self, config, event_bus, state, tmp_path, monkeypatch
     ) -> None:
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("HYDRAFLOW_ONBOARDING_ANTHROPIC_API_KEY", raising=False)
         draft = BootstrapDraft(spec=BootstrapSpec.model_validate(_spec_payload()))
         state.set_onboarding_draft(draft.id, draft.model_dump(mode="json"))
         router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
@@ -315,6 +323,121 @@ class TestOnboardingDraftRoutes:
         assert state.get_onboarding_draft(draft.id)["extracted_fields"]["name"] == (
             "finance-tool"
         )
+
+    @pytest.mark.asyncio
+    async def test_design_chat_falls_back_when_live_provider_fails(
+        self, config, event_bus, state, tmp_path, monkeypatch
+    ) -> None:
+        class FailingProvider:
+            async def chat(self, _draft, _message):
+                raise DesignProviderError("rate limited")
+
+        import dashboard_routes._onboarding_routes as onboarding_routes
+
+        monkeypatch.setattr(
+            onboarding_routes,
+            "design_ai",
+            DesignAIService(provider=FailingProvider()),
+        )
+        draft = BootstrapDraft(spec=BootstrapSpec.model_validate(_spec_payload()))
+        state.set_onboarding_draft(draft.id, draft.model_dump(mode="json"))
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        endpoint = find_endpoint(
+            router,
+            "/api/onboarding/drafts/{draft_id}/design/chat",
+            method="POST",
+        )
+
+        response = await endpoint(
+            draft.id,
+            DesignChatRequest(message="Build finance-tool with FastAPI and no UI."),
+        )
+        data = json.loads(response.body)
+
+        assert response.status_code == 200
+        assert data["draft"]["spec"]["name"] == "finance-tool"
+        assert data["draft"]["events"][-1]["message"] == (
+            "design chat used form-fill fallback: rate limited"
+        )
+
+    @pytest.mark.asyncio
+    async def test_anthropic_provider_returns_structured_turn(
+        self, monkeypatch
+    ) -> None:
+        requests: list[dict[str, object]] = []
+
+        class Response:
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict[str, object]:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps(
+                                {
+                                    "reply": "I updated the backend and UI.",
+                                    "field_updates": {
+                                        "name": "finance-tool",
+                                        "tech_stack": ["python", "FastAPI", "React"],
+                                        "unknown": "ignored",
+                                    },
+                                    "clarification": None,
+                                }
+                            ),
+                        }
+                    ]
+                }
+
+        class Client:
+            def __init__(self, **_kwargs) -> None:
+                return None
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args) -> None:
+                return None
+
+            async def post(self, url, **kwargs):
+                requests.append({"url": url, **kwargs})
+                return Response()
+
+        import onboarding.design_ai as design_ai_module
+
+        monkeypatch.setattr(design_ai_module.httpx, "AsyncClient", Client)
+        draft = BootstrapDraft(spec=BootstrapSpec.model_validate(_spec_payload()))
+        provider = AnthropicDesignProvider(api_key="sk-test", model="claude-test")
+
+        turn = await provider.chat(draft, "Use FastAPI and React.")
+
+        assert turn.source == "claude"
+        assert turn.reply == "I updated the backend and UI."
+        assert turn.field_updates == {
+            "name": "finance-tool",
+            "tech_stack": ["python", "FastAPI", "React"],
+        }
+        assert requests[0]["url"] == "https://api.anthropic.com/v1/messages"
+        assert requests[0]["headers"]["x-api-key"] == "sk-test"
+
+    @pytest.mark.asyncio
+    async def test_design_service_uses_live_provider_when_configured(self) -> None:
+        class Provider:
+            async def chat(self, _draft, _message):
+                return DesignTurn(
+                    reply="Claude reply",
+                    field_updates={"name": "finance-tool"},
+                    source="claude",
+                )
+
+        draft = BootstrapDraft(spec=BootstrapSpec.model_validate(_spec_payload()))
+        service = DesignAIService(provider=Provider())
+
+        turn = await service.chat(draft, "Build finance-tool.")
+
+        assert turn.source == "claude"
+        assert turn.field_updates == {"name": "finance-tool"}
 
     @pytest.mark.asyncio
     async def test_design_spec_and_plan_are_persisted(

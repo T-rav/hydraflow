@@ -2,10 +2,25 @@
 
 from __future__ import annotations
 
+import json
+import os
 import re
 from dataclasses import dataclass
+from typing import Any
+
+import httpx
+from pydantic import BaseModel, Field, ValidationError
 
 from onboarding.models import BootstrapDraft, BootstrapSpec
+
+METHODOLOGY_PROMPT = (
+    "Use docs/methodology/onboarding-hydraflow-format-repos.md as the canonical "
+    "HydraFlow-format bootstrap methodology. Produce hypothesis-quality wizard "
+    "output only; factory SHAPE will refine it after push."
+)
+ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
+ANTHROPIC_VERSION = "2023-06-01"
+DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6"
 
 _NAME_RE = re.compile(r"\b[a-z][a-z0-9]+(?:-[a-z0-9]+)+\b")
 _OWNER_RE = re.compile(
@@ -21,6 +36,14 @@ class DesignTurn:
     reply: str
     field_updates: dict[str, object]
     clarification: str | None = None
+    source: str = "deterministic"
+    fallback_reason: str | None = None
+
+
+class _ClaudeDesignTurn(BaseModel):
+    reply: str = Field(min_length=1, max_length=2000)
+    field_updates: dict[str, object] = Field(default_factory=dict)
+    clarification: str | None = Field(default=None, max_length=1000)
 
 
 def apply_field_updates(
@@ -44,7 +67,27 @@ class DesignAIService:
     ``chat`` behind this interface without changing the route or UI contracts.
     """
 
-    def chat(self, draft: BootstrapDraft, message: str) -> DesignTurn:
+    def __init__(self, provider: AnthropicDesignProvider | None = None) -> None:
+        self._provider = provider or AnthropicDesignProvider.from_env()
+
+    async def chat(self, draft: BootstrapDraft, message: str) -> DesignTurn:
+        if self._provider is not None:
+            try:
+                return await self._provider.chat(draft, message)
+            except DesignProviderError as exc:
+                fallback = self._deterministic_chat(draft, message)
+                return DesignTurn(
+                    reply=(
+                        f"{fallback.reply} Claude design chat is temporarily "
+                        "unavailable, so I kept form-fill mode active."
+                    ),
+                    field_updates=fallback.field_updates,
+                    clarification=fallback.clarification,
+                    fallback_reason=str(exc),
+                )
+        return self._deterministic_chat(draft, message)
+
+    def _deterministic_chat(self, draft: BootstrapDraft, message: str) -> DesignTurn:
         updates = self._extract_fields(message, draft.spec)
         updated = apply_field_updates(draft.spec, updates)
         clarification = self._clarification_for(message, updated)
@@ -203,6 +246,132 @@ class DesignAIService:
         if clarification:
             return f"{base} {clarification}"
         return f"{base} Draft the spec when these fields look right."
+
+
+class DesignProviderError(RuntimeError):
+    """Raised when the live design provider cannot produce valid output."""
+
+
+class AnthropicDesignProvider:
+    """Claude-backed structured design chat provider."""
+
+    def __init__(self, api_key: str, model: str = DEFAULT_CLAUDE_MODEL) -> None:
+        self.api_key = api_key
+        self.model = model
+
+    @classmethod
+    def from_env(cls) -> AnthropicDesignProvider | None:
+        api_key = (
+            os.environ.get("HYDRAFLOW_ONBOARDING_ANTHROPIC_API_KEY")
+            or os.environ.get("ANTHROPIC_API_KEY")
+            or ""
+        ).strip()
+        if not api_key:
+            return None
+        model = os.environ.get("HYDRAFLOW_ONBOARDING_CLAUDE_MODEL", "").strip()
+        return cls(api_key=api_key, model=model or DEFAULT_CLAUDE_MODEL)
+
+    async def chat(self, draft: BootstrapDraft, message: str) -> DesignTurn:
+        prompt = _build_claude_prompt(draft, message)
+        raw = await self._request(prompt)
+        try:
+            parsed = _parse_claude_turn(raw)
+        except DesignProviderError:
+            raw = await self._request(
+                f"{prompt}\n\nYour previous response was invalid. Return only valid JSON."
+            )
+            parsed = _parse_claude_turn(raw)
+        updates = _sanitize_field_updates(parsed.field_updates)
+        return DesignTurn(
+            reply=parsed.reply,
+            field_updates=updates,
+            clarification=parsed.clarification,
+            source="claude",
+        )
+
+    async def _request(self, prompt: str) -> str:
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "max_tokens": 1200,
+            "temperature": 0,
+            "system": METHODOLOGY_PROMPT,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        headers = {
+            "x-api-key": self.api_key,
+            "anthropic-version": ANTHROPIC_VERSION,
+            "content-type": "application/json",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    ANTHROPIC_MESSAGES_URL, headers=headers, json=payload
+                )
+                response.raise_for_status()
+                data = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            raise DesignProviderError("Claude request failed") from exc
+        return _extract_text_content(data)
+
+
+def _build_claude_prompt(draft: BootstrapDraft, message: str) -> str:
+    conversation = "\n".join(
+        f"{item.get('role', 'unknown')}: {item.get('content', '')}"
+        for item in draft.chat_messages[-12:]
+    )
+    return (
+        "You are HydraFlow's onboarding design assistant.\n"
+        "Return ONLY JSON with this schema:\n"
+        "{"
+        '"reply": "operator-facing response", '
+        '"field_updates": {"name": "...", "description": "...", '
+        '"owner": "...", "visibility": "private|public", '
+        '"tech_stack": ["python", "FastAPI"], '
+        '"safety_guards": ["branch-protection"], "coverage_floor": 85}, '
+        '"clarification": "optional question or null"'
+        "}\n"
+        "Only include field_updates when the operator supplied or revised the field. "
+        "Surface ambiguity as clarification instead of guessing.\n\n"
+        f"Current spec JSON:\n{draft.spec.model_dump_json()}\n\n"
+        f"Recent conversation:\n{conversation or '(none)'}\n\n"
+        f"Operator message:\n{message}"
+    )
+
+
+def _extract_text_content(data: dict[str, Any]) -> str:
+    parts = data.get("content")
+    if not isinstance(parts, list):
+        raise DesignProviderError("Claude response has no text content")
+    text = "".join(
+        str(part.get("text", "")) for part in parts if part.get("type") == "text"
+    ).strip()
+    if not text:
+        raise DesignProviderError("Claude response text is empty")
+    return text
+
+
+def _parse_claude_turn(raw: str) -> _ClaudeDesignTurn:
+    text = raw.strip()
+    if not text.startswith("{"):
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            raise DesignProviderError("Claude response was not JSON")
+        text = text[start : end + 1]
+    try:
+        payload = json.loads(text)
+        return _ClaudeDesignTurn.model_validate(payload)
+    except (json.JSONDecodeError, ValidationError) as exc:
+        raise DesignProviderError("Claude response did not match schema") from exc
+
+
+def _sanitize_field_updates(updates: dict[str, object]) -> dict[str, object]:
+    allowed = set(BootstrapSpec.model_fields)
+    sanitized: dict[str, object] = {}
+    for key, value in updates.items():
+        if key in allowed and value is not None:
+            sanitized[key] = value
+    return sanitized
 
 
 def _description_for(message: str) -> str:
