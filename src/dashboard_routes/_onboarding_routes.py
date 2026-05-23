@@ -12,10 +12,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError
 
-from onboarding.design_ai import DesignAIService, apply_field_updates
+from onboarding.design_ai import DesignAIService, DesignTurn, apply_field_updates
 from onboarding.models import (
     BootstrapDraft,
     BootstrapSpec,
@@ -62,6 +62,40 @@ def _allowed_output_dir(raw_path: str | None, default_parent: Path) -> Path | No
 def _persist_draft(ctx: RouteContext, draft: BootstrapDraft) -> None:
     draft.touch()
     ctx.state.set_onboarding_draft(draft.id, draft.model_dump(mode="json"))
+
+
+async def _apply_design_turn(
+    ctx: RouteContext,
+    draft: BootstrapDraft,
+    request: DesignChatRequest,
+) -> tuple[BootstrapDraft, DesignTurn] | JSONResponse:
+    turn = await design_ai.chat(draft, request.message)
+    draft.chat_messages.append({"role": "user", "content": request.message})
+    draft.chat_messages.append({"role": "assistant", "content": turn.reply})
+    draft.extracted_fields.update(turn.field_updates)
+    try:
+        draft.spec = apply_field_updates(draft.spec, turn.field_updates)
+    except ValidationError:
+        return JSONResponse({"error": "Design update is invalid"}, status_code=422)
+    event_message = "design chat updated fields"
+    if turn.source == "claude":
+        event_message = "claude design chat updated fields"
+    if turn.fallback_reason:
+        event_message = f"design chat used form-fill fallback: {turn.fallback_reason}"
+    draft.events.append({"level": "info", "message": event_message})
+    _persist_draft(ctx, draft)
+    return draft, turn
+
+
+def _chat_response_payload(
+    draft: BootstrapDraft, turn: DesignTurn
+) -> dict[str, object]:
+    return {
+        "draft": draft.model_dump(mode="json"),
+        "reply": turn.reply,
+        "field_updates": turn.field_updates,
+        "clarification": turn.clarification,
+    }
 
 
 def _load_draft_response(
@@ -425,30 +459,47 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
         if draft is None:
             return JSONResponse({"error": "Draft is invalid"}, status_code=500)
 
-        turn = await design_ai.chat(draft, request.message)
-        draft.chat_messages.append({"role": "user", "content": request.message})
-        draft.chat_messages.append({"role": "assistant", "content": turn.reply})
-        draft.extracted_fields.update(turn.field_updates)
-        try:
-            draft.spec = apply_field_updates(draft.spec, turn.field_updates)
-        except ValidationError:
-            return JSONResponse({"error": "Design update is invalid"}, status_code=422)
-        event_message = "design chat updated fields"
-        if turn.source == "claude":
-            event_message = "claude design chat updated fields"
-        if turn.fallback_reason:
-            event_message = (
-                f"design chat used form-fill fallback: {turn.fallback_reason}"
+        result = await _apply_design_turn(ctx, draft, request)
+        if isinstance(result, JSONResponse):
+            return result
+        updated_draft, turn = result
+        return JSONResponse(_chat_response_payload(updated_draft, turn))
+
+    @router.post(
+        "/api/onboarding/drafts/{draft_id}/design/chat/stream", response_model=None
+    )
+    async def stream_onboarding_draft_chat(
+        draft_id: str, request: DesignChatRequest
+    ) -> StreamingResponse | JSONResponse:
+        raw = ctx.state.get_onboarding_draft(draft_id)
+        if raw is None:
+            return JSONResponse({"error": "Draft not found"}, status_code=404)
+        draft = _decode_draft(raw)
+        if draft is None:
+            return JSONResponse({"error": "Draft is invalid"}, status_code=500)
+
+        result = await _apply_design_turn(ctx, draft, request)
+        if isinstance(result, JSONResponse):
+            return result
+        updated_draft, turn = result
+
+        async def generate():
+            reply = turn.reply or ""
+            for index in range(0, len(reply), 32):
+                chunk = reply[index : index + 32]
+                yield json.dumps({"type": "reply_delta", "text": chunk}) + "\n"
+                await asyncio.sleep(0)
+            yield (
+                json.dumps(
+                    {"type": "final", **_chat_response_payload(updated_draft, turn)}
+                )
+                + "\n"
             )
-        draft.events.append({"level": "info", "message": event_message})
-        _persist_draft(ctx, draft)
-        return JSONResponse(
-            {
-                "draft": draft.model_dump(mode="json"),
-                "reply": turn.reply,
-                "field_updates": turn.field_updates,
-                "clarification": turn.clarification,
-            }
+
+        return StreamingResponse(
+            generate(),
+            media_type="application/x-ndjson",
+            headers={"Cache-Control": "no-cache"},
         )
 
     @router.post("/api/onboarding/drafts/{draft_id}/design/spec")

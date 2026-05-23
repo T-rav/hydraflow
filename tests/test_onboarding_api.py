@@ -330,6 +330,41 @@ class TestOnboardingDraftRoutes:
         )
 
     @pytest.mark.asyncio
+    async def test_design_chat_streams_reply_then_final_payload(
+        self, config, event_bus, state, tmp_path, monkeypatch
+    ) -> None:
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("HYDRAFLOW_ONBOARDING_ANTHROPIC_API_KEY", raising=False)
+        draft = BootstrapDraft(spec=BootstrapSpec.model_validate(_spec_payload()))
+        state.set_onboarding_draft(draft.id, draft.model_dump(mode="json"))
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        endpoint = find_endpoint(
+            router,
+            "/api/onboarding/drafts/{draft_id}/design/chat/stream",
+            method="POST",
+        )
+
+        response = await endpoint(
+            draft.id,
+            DesignChatRequest(
+                message=(
+                    "Build finance-tool as a public FastAPI React app with "
+                    "branch protection and 92% coverage."
+                )
+            ),
+        )
+        chunks = [chunk async for chunk in response.body_iterator]
+        events = [json.loads(chunk) for chunk in chunks]
+
+        assert response.media_type == "application/x-ndjson"
+        assert any(event["type"] == "reply_delta" for event in events)
+        assert events[-1]["type"] == "final"
+        assert events[-1]["draft"]["spec"]["name"] == "finance-tool"
+        assert events[-1]["field_updates"]["visibility"] == "public"
+        persisted = state.get_onboarding_draft(draft.id)
+        assert persisted["chat_messages"][-1]["role"] == "assistant"
+
+    @pytest.mark.asyncio
     async def test_design_chat_falls_back_when_live_provider_fails(
         self, config, event_bus, state, tmp_path, monkeypatch
     ) -> None:

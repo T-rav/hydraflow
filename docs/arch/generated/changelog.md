@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W21
 
+- `8728fc2` — Refs #8932: persist wizard spec edits *(2026-05-23)*
 - `9362727` — Refs #8932: harden design chat extraction *(2026-05-23)*
 - `72eae73` — Refs #8933: add repo metrics dashboard payload *(2026-05-23)*
 - `43b1e0a` — Refs #8933: wire onboarding format upgrade *(2026-05-23)*
@@ -353,4 +354,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `c3a9a46` on 2026-05-23 10:53 UTC. Source last changed at `c3a9a46`. Status: 🟢 fresh._
+_Regenerated from commit `d37b2ef` on 2026-05-23 11:32 UTC. Source last changed at `d37b2ef`. Status: 🟢 fresh._
