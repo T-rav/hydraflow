@@ -21,6 +21,9 @@ export const ACTIVE_STATUSES = [
 /** Maximum number of events retained in the frontend event buffer. */
 export const MAX_EVENTS = 5000
 
+/** Collapse pipeline-flow issue dots into a count badge above this per-stage count. */
+export const PIPELINE_FLOW_COLLAPSE_THRESHOLD = 10
+
 /**
  * Canonical pipeline stage definitions.
  * All stage metadata lives here to prevent drift across components.
