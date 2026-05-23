@@ -40,6 +40,18 @@ describe('SessionSidebar last-run summary', () => {
     expect(screen.getByText(/never run/i)).toBeInTheDocument()
   })
 
+  it('uses pipeline_enabled for the repo start button state', () => {
+    mockContext.orchestratorStatus = 'running'
+    mockContext.supervisedRepos = [{
+      slug: 'owner/alpha',
+      path: '/p/alpha',
+      running: false,
+      pipeline_enabled: true,
+    }]
+    render(<SessionSidebar />)
+    expect(screen.getByLabelText('Stop repo')).toBeInTheDocument()
+  })
+
   it('shows "ran Xago · Yduration · N ✓ M ✗" for a completed session with failures', () => {
     mockContext.supervisedRepos = [{ slug: 'owner/beta', path: '/p/beta', running: false }]
     mockContext.sessions = [{

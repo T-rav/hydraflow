@@ -17,6 +17,14 @@ function pickLatestSession(sessions) {
   return latest
 }
 
+function isPipelineEnabled(runtime, repoInfo) {
+  return runtime?.pipeline_enabled
+    ?? repoInfo?.pipeline_enabled
+    ?? runtime?.running
+    ?? repoInfo?.running
+    ?? false
+}
+
 function LastRunLine({ session, repoRunning, stageStatus }) {
   if (!session) {
     return <span style={styles.lastRunMuted}>never run</span>
@@ -157,7 +165,7 @@ export function SessionSidebar() {
         {repoEntries.map(entry => {
           const isRepoSelected = selectedRepoSlug === entry.filterSlug
           const rt = entry.runtime
-          const isRunning = rt?.running ?? entry.info?.running ?? false
+          const isRunning = isPipelineEnabled(rt, entry.info)
           const lastError = rt?.last_error || null
           const orchRunning = orchestratorStatus === 'running'
           const disabled = !orchRunning && !isRunning
