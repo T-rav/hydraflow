@@ -2,6 +2,25 @@ import React, { useCallback, useState } from 'react'
 import { useHydraFlow } from '../context/HydraFlowContext'
 import { theme } from '../theme'
 
+function readPlanProgress(project) {
+  const progress = project?.plan_progress || project?.onboarding_plan_progress
+  if (progress && Number.isFinite(Number(progress.completed)) && Number.isFinite(Number(progress.total))) {
+    return {
+      completed: Number(progress.completed),
+      total: Number(progress.total),
+    }
+  }
+  const planDraft = project?.onboarding_plan_draft || project?.plan_draft
+  if (Array.isArray(planDraft)) {
+    return { completed: 0, total: planDraft.length }
+  }
+  return { completed: 0, total: 0 }
+}
+
+function readCurrentPlan(project) {
+  return project?.current_plan || project?.onboarding_current_plan || project?.plan || 'Plan 01'
+}
+
 export function ProjectView({ project }) {
   const { pushOnboardingDraft } = useHydraFlow()
   const [activityOpen, setActivityOpen] = useState(false)
@@ -22,35 +41,73 @@ export function ProjectView({ project }) {
     setPushState('succeeded')
   }, [project?.onboarding_draft_id, pushOnboardingDraft, pushState])
 
-  if (!project?.local_only) return null
+  if (!project) return null
 
   const events = project.onboarding_events || []
   const canPush = Boolean(project.onboarding_draft_id) && pushState !== 'running'
+  const progress = readPlanProgress(project)
+  const currentPlan = readCurrentPlan(project)
+  const planComplete = progress.total > 0 && progress.completed >= progress.total
+  const showContinue = project.continue_plan_available === true || planComplete
+  const showUpgrade = project.upgrade_available === true || project.format_upgrade_available === true
+  const repoStatus = project.local_only
+    ? pushState === 'failed' ? 'Push failed' : pushState === 'succeeded' ? 'Pushed' : 'Ready locally'
+    : project.status === 'running' || project.running || project.pipeline_enabled ? 'Factory pipeline active' : 'Factory repo selected'
 
   return (
-    <div style={styles.wrapper} data-testid="project-view-local-only">
+    <div style={project.local_only ? styles.wrapperLocal : styles.wrapper} data-testid={project.local_only ? 'project-view-local-only' : 'project-view'}>
       <div style={styles.header}>
         <div style={styles.titleBlock}>
-          <span style={styles.badge}>local only</span>
+          <span style={project.local_only ? styles.badgeLocal : styles.badge}>{project.local_only ? 'local only' : 'selected repo'}</span>
           <span style={styles.name}>{project.full_name || project.slug || project.path}</span>
           {project.path && <span style={styles.path}>{project.path}</span>}
         </div>
-        <button
-          type="button"
-          style={canPush ? styles.pushButton : styles.pushDisabled}
-          disabled={!canPush}
-          onClick={handlePush}
-          title={canPush ? undefined : 'Waiting for onboarding draft state'}
-        >
-          {pushState === 'running' ? 'Pushing...' : 'Push to GitHub'}
-        </button>
+        <div style={styles.actions}>
+          {showContinue && (
+            <button
+              type="button"
+              style={styles.secondaryAction}
+              disabled
+              title="Next-plan execution endpoint is not wired yet"
+            >
+              Continue to next plan
+            </button>
+          )}
+          {showUpgrade && (
+            <button
+              type="button"
+              style={styles.secondaryAction}
+              disabled
+              title="Format upgrade endpoint is not wired yet"
+            >
+              Upgrade format
+            </button>
+          )}
+          {project.local_only && (
+            <button
+              type="button"
+              style={canPush ? styles.pushButton : styles.pushDisabled}
+              disabled={!canPush}
+              onClick={handlePush}
+              title={canPush ? undefined : 'Waiting for onboarding draft state'}
+            >
+              {pushState === 'running' ? 'Pushing...' : 'Push to GitHub'}
+            </button>
+          )}
+        </div>
+      </div>
+      <div style={styles.planRow}>
+        <span style={styles.planPill}>{currentPlan}</span>
+        <span style={styles.planText}>{progress.completed}/{progress.total} issues complete</span>
       </div>
       <div style={styles.statusRow}>
         <span style={pushState === 'failed' ? styles.statusDotFailed : styles.statusDot} />
-        <span>{pushState === 'failed' ? 'Push failed' : pushState === 'succeeded' ? 'Pushed' : 'Ready locally'}</span>
-        <button type="button" style={styles.activityButton} onClick={() => setActivityOpen(prev => !prev)}>
-          Activity {activityOpen ? 'up' : 'down'}
-        </button>
+        <span>{repoStatus}</span>
+        {(project.local_only || events.length > 0) && (
+          <button type="button" style={styles.activityButton} onClick={() => setActivityOpen(prev => !prev)}>
+            Activity {activityOpen ? 'up' : 'down'}
+          </button>
+        )}
       </div>
       {pushError && <div style={styles.error}>{pushError}</div>}
       {activityOpen && (
@@ -70,6 +127,13 @@ export function ProjectView({ project }) {
 
 const styles = {
   wrapper: {
+    border: `1px solid ${theme.border}`,
+    background: theme.surface,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+  },
+  wrapperLocal: {
     border: `1px solid ${theme.orange}`,
     background: theme.orangeSubtle,
     borderRadius: 8,
@@ -89,6 +153,16 @@ const styles = {
     minWidth: 0,
   },
   badge: {
+    alignSelf: 'flex-start',
+    color: theme.accent,
+    border: `1px solid ${theme.accent}`,
+    borderRadius: 999,
+    padding: '2px 7px',
+    fontSize: 10,
+    fontWeight: 700,
+    textTransform: 'uppercase',
+  },
+  badgeLocal: {
     alignSelf: 'flex-start',
     color: theme.orange,
     border: `1px solid ${theme.orange}`,
@@ -134,6 +208,43 @@ const styles = {
     fontWeight: 700,
     cursor: 'not-allowed',
     flexShrink: 0,
+  },
+  actions: {
+    display: 'flex',
+    gap: 8,
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+  },
+  secondaryAction: {
+    border: `1px solid ${theme.border}`,
+    borderRadius: 6,
+    background: theme.surfaceInset,
+    color: theme.textMuted,
+    padding: '7px 10px',
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: 'not-allowed',
+    flexShrink: 0,
+  },
+  planRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 10,
+    flexWrap: 'wrap',
+  },
+  planPill: {
+    border: `1px solid ${theme.border}`,
+    borderRadius: 999,
+    color: theme.textBright,
+    background: theme.surfaceInset,
+    padding: '2px 8px',
+    fontSize: 11,
+    fontWeight: 700,
+  },
+  planText: {
+    color: theme.text,
+    fontSize: 12,
   },
   statusRow: {
     display: 'flex',

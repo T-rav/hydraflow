@@ -1421,19 +1421,25 @@ def create_router(
         return JSONResponse({})
 
     @router.get("/api/events")
-    async def get_events(since: str | None = None) -> JSONResponse:
+    async def get_events(
+        since: str | None = None,
+        repo: RepoSlugParam = None,
+    ) -> JSONResponse:
         """Return event history, optionally filtered by a since timestamp."""
+        bus = event_bus
+        if repo:
+            _cfg, _state, bus, _get_orch = _resolve_runtime(repo)
         if since is not None:
             try:
                 since_dt = datetime.fromisoformat(since)
                 if since_dt.tzinfo is None:
                     since_dt = since_dt.replace(tzinfo=UTC)
-                events = await event_bus.load_events_since(since_dt)
+                events = await bus.load_events_since(since_dt)
                 if events is not None:
                     return JSONResponse([e.model_dump() for e in events])
             except (ValueError, TypeError):
                 pass  # Fall through to in-memory history
-        history = event_bus.get_history()
+        history = bus.get_history()
         return JSONResponse([e.model_dump() for e in history])
 
     @router.get("/api/prs")

@@ -206,6 +206,22 @@ describe('RepoSelector', () => {
     expect(screen.getByText('/home/user/projects/app')).toBeInTheDocument()
   })
 
+  it('shows fleet health summary when repo metadata is available', () => {
+    mockUseHydraFlow.mockReturnValue(makeContext({
+      supervisedRepos: [{
+        slug: 'acme/app',
+        path: '/home/user/projects/app',
+        current_plan: 'Plan 02',
+        plan_progress: { completed: 3, total: 7 },
+        in_flight_issues: 2,
+        last_green_ci: '2026-05-22',
+      }],
+    }))
+    render(<RepoSelector />)
+    fireEvent.click(screen.getByTestId('repo-selector-trigger'))
+    expect(screen.getByText('Plan 02 3/7 | 2 in flight | green 2026-05-22')).toBeInTheDocument()
+  })
+
   it('closes dropdown after selecting a repo', () => {
     mockUseHydraFlow.mockReturnValue(makeContext({
       supervisedRepos: [{ slug: 'acme/app' }],

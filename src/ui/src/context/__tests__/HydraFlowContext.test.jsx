@@ -1585,6 +1585,11 @@ describe('SELECT_REPO reducer', () => {
       reviews: [{ pr: 99, status: 'done' }],
       sessionPrsCount: 1,
       events: [{ type: 'worker_update', timestamp: '2024-01-01T00:00:00Z' }],
+      queueStats: { depth: 2 },
+      metrics: { open_prs: 3 },
+      githubMetrics: { total_merged: 4 },
+      metricsHistory: [{ date: '2026-05-22' }],
+      pipelineStats: { total: 3 },
     }
     const next = reducer(state, {
       type: 'SELECT_REPO',
@@ -1598,6 +1603,11 @@ describe('SELECT_REPO reducer', () => {
     expect(next.reviews).toEqual([])
     expect(next.sessionPrsCount).toBe(0)
     expect(next.events).toEqual([])
+    expect(next.queueStats).toBeNull()
+    expect(next.metrics).toBeNull()
+    expect(next.githubMetrics).toBeNull()
+    expect(next.metricsHistory).toBeNull()
+    expect(next.pipelineStats).toBeNull()
   })
 
   it('does not reset data when selecting the same repo', () => {
