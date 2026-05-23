@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W21
 
+- `e5e3dbd` — Refs #8930: add onboarding draft API foundation *(2026-05-22)*
 - `52784fb` — Fixes #8368: resolve dashboard a11y violations *(2026-05-22)*
 - `3381e36` — Refs #8475: preserve managed repo config models *(2026-05-22)*
 - `22b8cee` — Fixes #8617: expose repo pipeline enabled state *(2026-05-22)*
@@ -342,4 +343,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `f7d0be7` on 2026-05-23 02:08 UTC. Source last changed at `f7d0be7`. Status: 🟢 fresh._
+_Regenerated from commit `9017989` on 2026-05-23 02:51 UTC. Source last changed at `9017989`. Status: 🟢 fresh._

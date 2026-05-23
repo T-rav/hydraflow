@@ -7,7 +7,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from onboarding.models import BootstrapDraft, BootstrapSpec
+from onboarding.models import BootstrapDraft, BootstrapSpec, MaterializeRequest
 from tests.helpers import find_endpoint, make_dashboard_router
 
 
@@ -44,6 +44,7 @@ class TestOnboardingDraftRoutes:
 
         assert "/api/onboarding/drafts" in paths
         assert "/api/onboarding/drafts/{draft_id}" in paths
+        assert "/api/onboarding/drafts/{draft_id}/materialize" in paths
 
     @pytest.mark.asyncio
     async def test_create_draft_persists_state(
@@ -117,3 +118,80 @@ class TestOnboardingDraftRoutes:
             "newer-tool",
             "older-tool",
         ]
+
+    @pytest.mark.asyncio
+    async def test_materialize_draft_writes_repo_and_persists_success(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        draft = BootstrapDraft(
+            spec=BootstrapSpec.model_validate(_spec_payload(name="finance-tool"))
+        )
+        state.set_onboarding_draft(draft.id, draft.model_dump(mode="json"))
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        endpoint = find_endpoint(
+            router,
+            "/api/onboarding/drafts/{draft_id}/materialize",
+            method="POST",
+        )
+
+        response = await endpoint(
+            draft.id,
+            MaterializeRequest(output_dir=str(tmp_path / "generated")),
+        )
+        data = json.loads(response.body)
+
+        assert response.status_code == 200
+        assert data["draft"]["status"] == "materialized"
+        assert data["draft"]["materialize_status"] == "succeeded"
+        assert data["materialized"]["path"].endswith("generated/finance-tool")
+        assert (tmp_path / "generated" / "finance-tool" / "pyproject.toml").exists()
+        persisted = state.get_onboarding_draft(draft.id)
+        assert persisted["materialize_status"] == "succeeded"
+
+    @pytest.mark.asyncio
+    async def test_materialize_draft_records_failure_for_existing_target(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        draft = BootstrapDraft(
+            spec=BootstrapSpec.model_validate(_spec_payload(name="finance-tool"))
+        )
+        state.set_onboarding_draft(draft.id, draft.model_dump(mode="json"))
+        target = tmp_path / "generated" / "finance-tool"
+        target.mkdir(parents=True)
+        (target / "README.md").write_text("existing")
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        endpoint = find_endpoint(
+            router,
+            "/api/onboarding/drafts/{draft_id}/materialize",
+            method="POST",
+        )
+
+        response = await endpoint(
+            draft.id,
+            MaterializeRequest(output_dir=str(tmp_path / "generated")),
+        )
+        data = json.loads(response.body)
+
+        assert response.status_code == 409
+        assert data["draft"]["status"] == "error"
+        assert data["draft"]["materialize_status"] == "failed"
+        assert data["error"] == "Draft could not be materialized"
+        assert "already exists" in data["draft"]["events"][-1]["message"]
+
+    @pytest.mark.asyncio
+    async def test_materialize_draft_rejects_disallowed_output_dir(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        draft = BootstrapDraft(spec=BootstrapSpec.model_validate(_spec_payload()))
+        state.set_onboarding_draft(draft.id, draft.model_dump(mode="json"))
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        endpoint = find_endpoint(
+            router,
+            "/api/onboarding/drafts/{draft_id}/materialize",
+            method="POST",
+        )
+
+        response = await endpoint(draft.id, MaterializeRequest(output_dir="/etc"))
+
+        assert response.status_code == 400
+        assert "output_dir" in json.loads(response.body)["error"]

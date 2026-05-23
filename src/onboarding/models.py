@@ -88,3 +88,21 @@ class BootstrapDraft(BaseModel):
 
     def touch(self) -> None:
         self.updated_at = _utc_now()
+
+
+class MaterializeRequest(BaseModel):
+    """Request body for local draft materialization."""
+
+    output_dir: str | None = Field(
+        default=None,
+        description="Optional parent directory for generated repos.",
+        max_length=1000,
+    )
+
+    @field_validator("output_dir")
+    @classmethod
+    def normalize_output_dir(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
