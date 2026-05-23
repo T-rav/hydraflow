@@ -780,6 +780,32 @@ export function reducer(state, action) {
       return { ...state, localOnlyProjects: next }
     }
 
+    case 'LOCAL_ONLY_PROJECT_PUSHED': {
+      const draftId = action.data?.draftId
+      const repoUrl = action.data?.repoUrl || action.data?.draft?.repo_url || null
+      const draft = action.data?.draft || {}
+      if (!draftId) return state
+      const updateProject = project => {
+        if (project?.onboarding_draft_id !== draftId) return project
+        return {
+          ...project,
+          local_only: false,
+          repo_url: repoUrl,
+          onboarding_events: Array.isArray(draft.events) ? draft.events : project.onboarding_events,
+          push_status: draft.push_status || 'succeeded',
+          status: draft.status || 'pushed',
+        }
+      }
+      const localOnlyProjects = (state.localOnlyProjects || []).map(updateProject)
+      const supervisedRepos = (state.supervisedRepos || []).map(updateProject)
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem('hydraflow.localOnlyProjects', JSON.stringify(localOnlyProjects))
+        } catch { /* ignore */ }
+      }
+      return { ...state, localOnlyProjects, supervisedRepos }
+    }
+
     case 'SELECT_REPO': {
       const newSlug = normalizeRepoSlug(action.data.slug)
       const changed = newSlug !== state.selectedRepoSlug
@@ -1439,6 +1465,10 @@ export function HydraFlowProvider({ children }) {
       if (!res.ok) {
         return { ok: false, error: data?.error || `Push failed (${res.status})`, draft: data?.draft }
       }
+      dispatch({
+        type: 'LOCAL_ONLY_PROJECT_PUSHED',
+        data: { draftId, draft: data?.draft, repoUrl: data?.repo_url },
+      })
       return { ok: true, ...data }
     } catch (err) {
       return { ok: false, error: err?.message || 'Push failed' }

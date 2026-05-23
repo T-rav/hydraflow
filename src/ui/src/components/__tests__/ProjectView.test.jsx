@@ -83,4 +83,20 @@ describe('ProjectView', () => {
     expect(screen.getByText('Push failed')).toBeInTheDocument()
     expect(screen.getByText('Push endpoint unavailable')).toBeInTheDocument()
   })
+
+  it('shows pushed state after push succeeds', async () => {
+    const pushOnboardingDraft = vi.fn().mockResolvedValue({ ok: true, repo_url: 'https://github.com/T-rav/finance-tool' })
+    mockUseHydraFlow.mockReturnValue({ pushOnboardingDraft })
+
+    render(<ProjectView project={{
+      slug: 'finance-tool',
+      local_only: true,
+      onboarding_draft_id: 'draft-1',
+      onboarding_events: [],
+    }} />)
+
+    fireEvent.click(screen.getByText('Push to GitHub'))
+    await waitFor(() => expect(pushOnboardingDraft).toHaveBeenCalledWith('draft-1'))
+    expect(screen.getByText('Pushed')).toBeInTheDocument()
+  })
 })

@@ -81,6 +81,39 @@ describe('HydraFlowContext reducer', () => {
     expect(next.supervisedRepos).toEqual(repos)
   })
 
+  it('LOCAL_ONLY_PROJECT_PUSHED clears local-only state for matching draft', () => {
+    const state = {
+      ...initialState,
+      localOnlyProjects: [
+        { slug: 'finance-tool', local_only: true, onboarding_draft_id: 'draft-1' },
+      ],
+      supervisedRepos: [
+        { slug: 'finance-tool', local_only: true, onboarding_draft_id: 'draft-1' },
+      ],
+    }
+
+    const next = reducer(state, {
+      type: 'LOCAL_ONLY_PROJECT_PUSHED',
+      data: {
+        draftId: 'draft-1',
+        repoUrl: 'https://github.com/T-rav/finance-tool',
+        draft: {
+          status: 'pushed',
+          push_status: 'succeeded',
+          events: [{ level: 'info', message: 'push succeeded' }],
+        },
+      },
+    })
+
+    expect(next.localOnlyProjects[0]).toMatchObject({
+      local_only: false,
+      repo_url: 'https://github.com/T-rav/finance-tool',
+      push_status: 'succeeded',
+      status: 'pushed',
+    })
+    expect(next.supervisedRepos[0].local_only).toBe(false)
+  })
+
   it('GITHUB_METRICS action sets githubMetrics state', () => {
     const data = {
       open_by_label: { 'hydraflow-plan': 3, 'hydraflow-ready': 1 },
