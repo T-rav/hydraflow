@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from unittest.mock import AsyncMock
 
 import pytest
 from pydantic import ValidationError
@@ -17,6 +18,7 @@ from onboarding.design_ai import (
 from onboarding.models import (
     BootstrapDraft,
     BootstrapSpec,
+    ContinuePlanRequest,
     DesignChatRequest,
     DesignRevisionRequest,
     MaterializeRequest,
@@ -60,6 +62,7 @@ class TestOnboardingDraftRoutes:
         assert "/api/onboarding/drafts/{draft_id}/design/chat" in paths
         assert "/api/onboarding/drafts/{draft_id}/design/spec" in paths
         assert "/api/onboarding/drafts/{draft_id}/design/plan" in paths
+        assert "/api/onboarding/drafts/{draft_id}/continue-plan" in paths
         assert "/api/onboarding/drafts/{draft_id}/materialize" in paths
         assert "/api/onboarding/drafts/{draft_id}/push" in paths
 
@@ -482,6 +485,47 @@ class TestOnboardingDraftRoutes:
         persisted = state.get_onboarding_draft(draft.id)
         assert persisted["spec_draft"] == spec_data["spec_draft"]
         assert persisted["plan_draft"] == plan_data["plan_draft"]
+
+    @pytest.mark.asyncio
+    async def test_continue_plan_drafts_next_plan_and_files_find_issues(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        draft = BootstrapDraft(
+            spec=BootstrapSpec.model_validate(
+                _spec_payload(
+                    name="finance-tool",
+                    tech_stack=["python", "FastAPI", "React"],
+                    safety_guards=["branch-protection"],
+                )
+            )
+        )
+        state.set_onboarding_draft(draft.id, draft.model_dump(mode="json"))
+        router, pr_mgr = make_dashboard_router(config, event_bus, state, tmp_path)
+        pr_mgr.create_issue = AsyncMock(side_effect=list(range(501, 520)))  # type: ignore[method-assign]
+        endpoint = find_endpoint(
+            router,
+            "/api/onboarding/drafts/{draft_id}/continue-plan",
+            method="POST",
+        )
+
+        response = await endpoint(
+            draft.id,
+            ContinuePlanRequest(note="prioritize factory registry handoff"),
+        )
+        data = json.loads(response.body)
+
+        assert response.status_code == 200
+        assert data["plan"] == "Plan 02"
+        assert len(data["created_issues"]) == len(data["plan_draft"])
+        assert data["created_issues"][0]["number"] == 501
+        assert pr_mgr.create_issue.await_count == len(data["plan_draft"])
+        first_call = pr_mgr.create_issue.await_args_list[0].kwargs
+        assert first_call["title"].startswith("[Plan 02]")
+        assert first_call["labels"] == ["hydraflow-find"]
+        assert "Target repo: T-rav/finance-tool" in first_call["body"]
+        persisted = state.get_onboarding_draft(draft.id)
+        assert persisted["plan_draft"] == data["plan_draft"]
+        assert persisted["events"][-1]["message"].startswith("Plan 02 filed")
 
     @pytest.mark.asyncio
     async def test_materialize_draft_records_failure_for_existing_target(

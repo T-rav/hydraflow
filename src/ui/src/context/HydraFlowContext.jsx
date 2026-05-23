@@ -806,6 +806,38 @@ export function reducer(state, action) {
       return { ...state, localOnlyProjects, supervisedRepos }
     }
 
+    case 'LOCAL_ONLY_PROJECT_CONTINUED': {
+      const draftId = action.data?.draftId
+      const draft = action.data?.draft || {}
+      const plan = action.data?.plan || 'Plan 02'
+      if (!draftId) return state
+      const updateProject = project => {
+        if (project?.onboarding_draft_id !== draftId) return project
+        const planDraft = Array.isArray(action.data?.planDraft)
+          ? action.data.planDraft
+          : Array.isArray(draft.plan_draft) ? draft.plan_draft : project.onboarding_plan_draft
+        return {
+          ...project,
+          onboarding_current_plan: plan,
+          onboarding_plan_draft: planDraft,
+          onboarding_events: Array.isArray(draft.events) ? draft.events : project.onboarding_events,
+          continue_plan_available: false,
+          plan_progress: {
+            completed: 0,
+            total: Array.isArray(planDraft) ? planDraft.length : 0,
+          },
+        }
+      }
+      const localOnlyProjects = (state.localOnlyProjects || []).map(updateProject)
+      const supervisedRepos = (state.supervisedRepos || []).map(updateProject)
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem('hydraflow.localOnlyProjects', JSON.stringify(localOnlyProjects))
+        } catch { /* ignore */ }
+      }
+      return { ...state, localOnlyProjects, supervisedRepos }
+    }
+
     case 'SELECT_REPO': {
       const newSlug = normalizeRepoSlug(action.data.slug)
       const changed = newSlug !== state.selectedRepoSlug
@@ -1475,6 +1507,34 @@ export function HydraFlowProvider({ children }) {
     }
   }, [])
 
+  const continueOnboardingPlan = useCallback(async (draftId, request = {}) => {
+    if (!draftId) return { ok: false, error: 'Draft id required' }
+    try {
+      const res = await fetch(`/api/onboarding/drafts/${encodeURIComponent(draftId)}/continue-plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        return { ok: false, error: data?.error || `Continue plan failed (${res.status})`, draft: data?.draft }
+      }
+      dispatch({
+        type: 'LOCAL_ONLY_PROJECT_CONTINUED',
+        data: {
+          draftId,
+          draft: data?.draft,
+          plan: data?.plan,
+          planDraft: data?.plan_draft,
+          createdIssues: data?.created_issues,
+        },
+      })
+      return { ok: true, ...data }
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Continue plan failed' }
+    }
+  }, [])
+
   const removeRepoShortcut = useCallback((repoSlug) => {
     removeRepo(repoSlug)
   }, [removeRepo])
@@ -1944,6 +2004,7 @@ export function HydraFlowProvider({ children }) {
     draftOnboardingPlan,
     materializeOnboardingDraft,
     pushOnboardingDraft,
+    continueOnboardingPlan,
     fetchRepos,
     removeRepoShortcut,
     startRuntime,

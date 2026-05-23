@@ -18,6 +18,7 @@ from onboarding.design_ai import DesignAIService, apply_field_updates
 from onboarding.models import (
     BootstrapDraft,
     BootstrapSpec,
+    ContinuePlanRequest,
     DesignChatRequest,
     DesignRevisionRequest,
     MaterializeRequest,
@@ -78,6 +79,35 @@ def _safe_materialized_path(
         if common == str(root):
             return candidate
     return None
+
+
+def _next_plan_label(current_plan: str | None) -> str:
+    if not current_plan:
+        return "Plan 02"
+    digits = "".join(ch for ch in current_plan if ch.isdigit())
+    if not digits:
+        return "Plan 02"
+    return f"Plan {int(digits) + 1:02d}"
+
+
+def _issue_title(plan_label: str, task: str) -> str:
+    return f"[{plan_label}] {task}"[:120]
+
+
+def _issue_body(draft: BootstrapDraft, plan_label: str, task: str, index: int) -> str:
+    spec = draft.spec
+    return (
+        f"HydraFlow onboarding task generated from draft `{draft.id}`.\n\n"
+        f"Plan: {plan_label}\n"
+        f"Sequence: {index}\n"
+        f"Target repo: {spec.owner}/{spec.name}\n\n"
+        "## Task\n"
+        f"{task}\n\n"
+        "## Bootstrap Context\n"
+        f"- Tech stack: {', '.join(spec.tech_stack) or 'unspecified'}\n"
+        f"- Safety guards: {', '.join(spec.safety_guards) or 'standard'}\n"
+        f"- Coverage floor: {spec.coverage_floor}%\n"
+    )
 
 
 async def _run_checked(
@@ -288,6 +318,75 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
         _persist_draft(ctx, draft)
         return JSONResponse(
             {"draft": draft.model_dump(mode="json"), "plan_draft": draft.plan_draft}
+        )
+
+    @router.post("/api/onboarding/drafts/{draft_id}/continue-plan")
+    async def continue_onboarding_plan(
+        draft_id: str, request: ContinuePlanRequest | None = None
+    ) -> JSONResponse:
+        raw = ctx.state.get_onboarding_draft(draft_id)
+        if raw is None:
+            return JSONResponse({"error": "Draft not found"}, status_code=404)
+        draft = _decode_draft(raw)
+        if draft is None:
+            return JSONResponse({"error": "Draft is invalid"}, status_code=500)
+
+        next_plan = _next_plan_label(request.current_plan if request else None)
+        note_parts = [f"Continue onboarding with {next_plan}."]
+        if request and request.note:
+            note_parts.append(request.note)
+        plan_tasks = design_ai.draft_plan(draft, " ".join(note_parts))
+        labels = [f"{draft.spec.label_prefix}-find"]
+        created_issues: list[dict[str, object]] = []
+
+        draft.events.append(
+            {"level": "info", "message": f"{next_plan} issue creation started"}
+        )
+        _persist_draft(ctx, draft)
+
+        try:
+            for index, task in enumerate(plan_tasks, start=1):
+                issue_number = await ctx.pr_manager.create_issue(
+                    title=_issue_title(next_plan, task),
+                    body=_issue_body(draft, next_plan, task, index),
+                    labels=labels,
+                )
+                if issue_number is None:
+                    raise RuntimeError("GitHub issue creation returned no issue number")
+                created_issues.append(
+                    {
+                        "number": issue_number,
+                        "title": _issue_title(next_plan, task),
+                        "task": task,
+                    }
+                )
+        except Exception as exc:  # pragma: no cover - defensive around PRPort impls
+            draft.events.append({"level": "error", "message": str(exc)})
+            _persist_draft(ctx, draft)
+            return JSONResponse(
+                {
+                    "error": "Next plan issues could not be created",
+                    "draft": draft.model_dump(mode="json"),
+                    "created_issues": created_issues,
+                },
+                status_code=502,
+            )
+
+        draft.plan_draft = plan_tasks
+        draft.events.append(
+            {
+                "level": "info",
+                "message": f"{next_plan} filed {len(created_issues)} hydraflow-find issues",
+            }
+        )
+        _persist_draft(ctx, draft)
+        return JSONResponse(
+            {
+                "draft": draft.model_dump(mode="json"),
+                "plan": next_plan,
+                "plan_draft": plan_tasks,
+                "created_issues": created_issues,
+            }
         )
 
     @router.post("/api/onboarding/drafts/{draft_id}/materialize")

@@ -114,6 +114,40 @@ describe('HydraFlowContext reducer', () => {
     expect(next.supervisedRepos[0].local_only).toBe(false)
   })
 
+  it('LOCAL_ONLY_PROJECT_CONTINUED advances draft-backed project metadata', () => {
+    const state = {
+      ...initialState,
+      localOnlyProjects: [
+        {
+          slug: 'finance-tool',
+          onboarding_draft_id: 'draft-1',
+          onboarding_current_plan: 'Plan 01',
+          onboarding_plan_draft: ['old task'],
+          plan_progress: { completed: 1, total: 1 },
+        },
+      ],
+    }
+
+    const next = reducer(state, {
+      type: 'LOCAL_ONLY_PROJECT_CONTINUED',
+      data: {
+        draftId: 'draft-1',
+        plan: 'Plan 02',
+        planDraft: ['next task', 'second task'],
+        draft: {
+          events: [{ level: 'info', message: 'Plan 02 filed 2 hydraflow-find issues' }],
+        },
+      },
+    })
+
+    expect(next.localOnlyProjects[0]).toMatchObject({
+      onboarding_current_plan: 'Plan 02',
+      onboarding_plan_draft: ['next task', 'second task'],
+      continue_plan_available: false,
+      plan_progress: { completed: 0, total: 2 },
+    })
+  })
+
   it('GITHUB_METRICS action sets githubMetrics state', () => {
     const data = {
       open_by_label: { 'hydraflow-plan': 3, 'hydraflow-ready': 1 },
