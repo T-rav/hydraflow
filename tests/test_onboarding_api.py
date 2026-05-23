@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from pydantic import ValidationError
 
+from events import EventBus
 from onboarding.design_ai import (
     AnthropicDesignProvider,
     DesignAIService,
@@ -24,6 +27,8 @@ from onboarding.models import (
     MaterializeRequest,
     SaveSpecDraftRequest,
 )
+from repo_store import RepoRecord, RepoStore
+from tests.conftest import EventFactory
 from tests.helpers import find_endpoint, make_dashboard_router
 
 
@@ -592,6 +597,135 @@ class TestOnboardingDraftRoutes:
         assert "Target repo: T-rav/finance-tool" in first_call["body"]
         persisted = state.get_onboarding_draft(draft.id)
         assert persisted["plan_draft"] == data["plan_draft"]
+        assert persisted["events"][-1]["message"].startswith("Plan 02 filed")
+
+    @pytest.mark.asyncio
+    async def test_third_domain_plan02_is_operable_from_dashboard_surfaces(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        repo_path = tmp_path / "claims-ledger"
+        repo_path.mkdir()
+        repo_config = config.model_copy(update={"repo": "Acme/claims-ledger"})
+        repo_bus = EventBus()
+        repo_store = RepoStore(tmp_path / "repos")
+        repo_store.upsert(
+            RepoRecord(
+                slug=repo_config.repo_slug,
+                repo=repo_config.repo,
+                path=str(repo_path),
+                auto_registered=True,
+            )
+        )
+        runtime = SimpleNamespace(
+            slug=repo_config.repo_slug,
+            config=repo_config,
+            state=state,
+            event_bus=repo_bus,
+            orchestrator=SimpleNamespace(current_session_id="claims-ledger-plan02"),
+            running=True,
+        )
+
+        class Registry:
+            all = [runtime]
+
+            def get(self, slug: str):
+                if slug in {repo_config.repo, repo_config.repo_slug}:
+                    return runtime
+                return None
+
+        draft = BootstrapDraft(
+            spec=BootstrapSpec.model_validate(
+                _spec_payload(
+                    name="claims-ledger",
+                    description="Claims workflow orchestration for audit teams.",
+                    owner="Acme",
+                    tech_stack=["python", "FastAPI", "React"],
+                    coverage_floor=91,
+                )
+            ),
+            status="pushed",
+            materialize_status="succeeded",
+            push_status="succeeded",
+            materialized_path=str(repo_path),
+            repo_url="https://github.com/Acme/claims-ledger",
+            current_plan="Plan 01",
+            plan_draft=["Create invariant kernel", "Add claims workflow API"],
+        )
+        state.set_onboarding_draft(draft.id, draft.model_dump(mode="json"))
+        state.record_issue_completed()
+        state.record_pr_merged()
+        state.record_quality_fix_rounds(1)
+        state.record_merge_duration(300.0)
+        state.reset_session_counters(
+            (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+        )
+        state.increment_session_counter("implemented")
+        state.increment_session_counter("merged")
+        await event_bus.publish(EventFactory.create(data={"repo": "default"}))
+        await repo_bus.publish(
+            EventFactory.create(
+                data={"repo": repo_config.repo, "message": "Plan 02 issue merged"}
+            )
+        )
+
+        router, pr_mgr = make_dashboard_router(
+            config,
+            event_bus,
+            state,
+            tmp_path,
+            registry=Registry(),
+            repo_store=repo_store,
+        )
+        pr_mgr.create_issue = AsyncMock(side_effect=list(range(801, 840)))  # type: ignore[method-assign]
+
+        continue_endpoint = find_endpoint(
+            router,
+            "/api/onboarding/drafts/{draft_id}/continue-plan",
+            method="POST",
+        )
+        continue_response = await continue_endpoint(
+            draft.id,
+            ContinuePlanRequest(
+                current_plan="Plan 01",
+                note="first Plan 02 issue completed by the factory",
+            ),
+        )
+        continue_data = json.loads(continue_response.body)
+
+        assert continue_response.status_code == 200
+        assert continue_data["plan"] == "Plan 02"
+        assert continue_data["created_issues"][0]["number"] == 801
+        assert pr_mgr.create_issue.await_count == len(continue_data["plan_draft"])
+        first_issue = pr_mgr.create_issue.await_args_list[0].kwargs
+        assert first_issue["labels"] == ["hydraflow-find"]
+        assert "Target repo: Acme/claims-ledger" in first_issue["body"]
+
+        repos_endpoint = find_endpoint(router, "/api/repos")
+        repos_response = await repos_endpoint()
+        repos_data = json.loads(repos_response.body)
+        selected_repo = next(
+            repo
+            for repo in repos_data["repos"]
+            if repo["slug"] == repo_config.repo_slug
+        )
+        assert selected_repo["repo"] == "Acme/claims-ledger"
+        assert selected_repo["running"] is True
+
+        events_endpoint = find_endpoint(router, "/api/events")
+        events_response = await events_endpoint(since=None, repo=repo_config.repo_slug)
+        events_data = json.loads(events_response.body)
+        assert [event["data"]["repo"] for event in events_data] == [repo_config.repo]
+
+        metrics_endpoint = find_endpoint(router, "/api/metrics")
+        metrics_response = await metrics_endpoint(repo=repo_config.repo_slug)
+        metrics_data = json.loads(metrics_response.body)
+        assert metrics_data["repo_metrics"]["repo"] == "Acme/claims-ledger"
+        assert metrics_data["repo_metrics"]["throughput"]["implemented"] > 0
+        assert metrics_data["repo_metrics"]["time_to_merge"]["avg"] == 300.0
+        assert metrics_data["repo_metrics"]["friction"]["quality_fix_rounds"] == 1
+
+        persisted = state.get_onboarding_draft(draft.id)
+        assert persisted["current_plan"] == "Plan 02"
         assert persisted["events"][-1]["message"].startswith("Plan 02 filed")
 
     @pytest.mark.asyncio

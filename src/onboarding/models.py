@@ -88,6 +88,7 @@ class BootstrapDraft(BaseModel):
     chat_messages: list[dict[str, str]] = Field(default_factory=list)
     extracted_fields: dict[str, object] = Field(default_factory=dict)
     spec_draft: str | None = None
+    current_plan: str = Field(default="Plan 01", max_length=100)
     plan_draft: list[str] = Field(default_factory=list)
     materialized_path: str | None = Field(default=None, max_length=1000)
     repo_url: str | None = Field(default=None, max_length=1000)
