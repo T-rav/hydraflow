@@ -838,6 +838,30 @@ export function reducer(state, action) {
       return { ...state, localOnlyProjects, supervisedRepos }
     }
 
+    case 'LOCAL_ONLY_PROJECT_UPGRADED': {
+      const draftId = action.data?.draftId
+      const draft = action.data?.draft || {}
+      if (!draftId) return state
+      const updateProject = project => {
+        if (project?.onboarding_draft_id !== draftId) return project
+        return {
+          ...project,
+          onboarding_events: Array.isArray(draft.events) ? draft.events : project.onboarding_events,
+          format_upgrade_available: false,
+          upgrade_available: false,
+          format_upgrade_pr_url: action.data?.prUrl || project.format_upgrade_pr_url,
+        }
+      }
+      const localOnlyProjects = (state.localOnlyProjects || []).map(updateProject)
+      const supervisedRepos = (state.supervisedRepos || []).map(updateProject)
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem('hydraflow.localOnlyProjects', JSON.stringify(localOnlyProjects))
+        } catch { /* ignore */ }
+      }
+      return { ...state, localOnlyProjects, supervisedRepos }
+    }
+
     case 'SELECT_REPO': {
       const newSlug = normalizeRepoSlug(action.data.slug)
       const changed = newSlug !== state.selectedRepoSlug
@@ -1535,6 +1559,26 @@ export function HydraFlowProvider({ children }) {
     }
   }, [])
 
+  const upgradeOnboardingFormat = useCallback(async (draftId) => {
+    if (!draftId) return { ok: false, error: 'Draft id required' }
+    try {
+      const res = await fetch(`/api/onboarding/drafts/${encodeURIComponent(draftId)}/upgrade-format`, {
+        method: 'POST',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        return { ok: false, error: data?.error || `Format upgrade failed (${res.status})`, draft: data?.draft }
+      }
+      dispatch({
+        type: 'LOCAL_ONLY_PROJECT_UPGRADED',
+        data: { draftId, draft: data?.draft, prUrl: data?.pr_url },
+      })
+      return { ok: true, ...data }
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Format upgrade failed' }
+    }
+  }, [])
+
   const removeRepoShortcut = useCallback((repoSlug) => {
     removeRepo(repoSlug)
   }, [removeRepo])
@@ -2005,6 +2049,7 @@ export function HydraFlowProvider({ children }) {
     materializeOnboardingDraft,
     pushOnboardingDraft,
     continueOnboardingPlan,
+    upgradeOnboardingFormat,
     fetchRepos,
     removeRepoShortcut,
     startRuntime,

@@ -14,6 +14,7 @@ describe('ProjectView', () => {
     mockUseHydraFlow.mockReturnValue({
       pushOnboardingDraft: vi.fn().mockResolvedValue({ ok: false, error: 'Push failed (404)' }),
       continueOnboardingPlan: vi.fn().mockResolvedValue({ ok: false, error: 'Continue plan failed (404)' }),
+      upgradeOnboardingFormat: vi.fn().mockResolvedValue({ ok: false, error: 'Format upgrade failed (404)' }),
     })
   })
 
@@ -104,6 +105,38 @@ describe('ProjectView', () => {
     }))
     expect(screen.getByText('Issue creation failed')).toBeInTheDocument()
     expect(screen.getByTestId('project-activity-log')).toHaveTextContent('gh auth failed')
+  })
+
+  it('calls the upgrade endpoint when a draft-backed project has upgrade metadata', async () => {
+    const upgradeOnboardingFormat = vi.fn().mockResolvedValue({ ok: true, pr_url: 'https://github.com/T-rav/finance-tool/pull/7' })
+    mockUseHydraFlow.mockReturnValue({ upgradeOnboardingFormat, continueOnboardingPlan: vi.fn(), pushOnboardingDraft: vi.fn() })
+
+    render(<ProjectView project={{
+      slug: 'finance-tool',
+      onboarding_draft_id: 'draft-1',
+      format_upgrade_available: true,
+    }} />)
+
+    fireEvent.click(screen.getByText('Upgrade format'))
+    await waitFor(() => expect(upgradeOnboardingFormat).toHaveBeenCalledWith('draft-1'))
+    expect(screen.getByText('Upgrade PR opened')).toBeInTheDocument()
+  })
+
+  it('shows format upgrade failure state and opens activity', async () => {
+    const upgradeOnboardingFormat = vi.fn().mockResolvedValue({ ok: false, error: 'PR create failed' })
+    mockUseHydraFlow.mockReturnValue({ upgradeOnboardingFormat, continueOnboardingPlan: vi.fn(), pushOnboardingDraft: vi.fn() })
+
+    render(<ProjectView project={{
+      slug: 'finance-tool',
+      onboarding_draft_id: 'draft-1',
+      upgrade_available: true,
+      onboarding_events: [{ level: 'error', message: 'gh pr create failed' }],
+    }} />)
+
+    fireEvent.click(screen.getByText('Upgrade format'))
+    await waitFor(() => expect(upgradeOnboardingFormat).toHaveBeenCalledWith('draft-1'))
+    expect(screen.getByText('PR create failed')).toBeInTheDocument()
+    expect(screen.getByTestId('project-activity-log')).toHaveTextContent('gh pr create failed')
   })
 
   it('calls the push endpoint and shows failure state', async () => {

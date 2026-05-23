@@ -22,12 +22,14 @@ function readCurrentPlan(project) {
 }
 
 export function ProjectView({ project }) {
-  const { continueOnboardingPlan, pushOnboardingDraft } = useHydraFlow()
+  const { continueOnboardingPlan, pushOnboardingDraft, upgradeOnboardingFormat } = useHydraFlow()
   const [activityOpen, setActivityOpen] = useState(false)
   const [pushState, setPushState] = useState('idle')
   const [pushError, setPushError] = useState('')
   const [continueState, setContinueState] = useState('idle')
   const [continueError, setContinueError] = useState('')
+  const [upgradeState, setUpgradeState] = useState('idle')
+  const [upgradeError, setUpgradeError] = useState('')
 
   const handlePush = useCallback(async () => {
     if (!project?.onboarding_draft_id || pushState === 'running') return
@@ -59,6 +61,20 @@ export function ProjectView({ project }) {
     setContinueState('succeeded')
   }, [continueOnboardingPlan, continueState, project])
 
+  const handleUpgradeFormat = useCallback(async () => {
+    if (!project?.onboarding_draft_id || upgradeState === 'running') return
+    setUpgradeState('running')
+    setUpgradeError('')
+    const result = await upgradeOnboardingFormat?.(project.onboarding_draft_id)
+    if (!result?.ok) {
+      setUpgradeState('failed')
+      setUpgradeError(result?.error || 'Format upgrade failed')
+      setActivityOpen(true)
+      return
+    }
+    setUpgradeState('succeeded')
+  }, [project?.onboarding_draft_id, upgradeOnboardingFormat, upgradeState])
+
   if (!project) return null
 
   const events = project.onboarding_events || []
@@ -69,6 +85,7 @@ export function ProjectView({ project }) {
   const showContinue = project.continue_plan_available === true || planComplete
   const canContinue = Boolean(project.onboarding_draft_id) && continueState !== 'running'
   const showUpgrade = project.upgrade_available === true || project.format_upgrade_available === true
+  const canUpgrade = Boolean(project.onboarding_draft_id) && upgradeState !== 'running'
   const repoStatus = project.local_only
     ? pushState === 'failed' ? 'Push failed' : pushState === 'succeeded' ? 'Pushed' : 'Ready locally'
     : project.status === 'running' || project.running || project.pipeline_enabled ? 'Factory pipeline active' : 'Factory repo selected'
@@ -96,11 +113,12 @@ export function ProjectView({ project }) {
           {showUpgrade && (
             <button
               type="button"
-              style={styles.secondaryDisabled}
-              disabled
-              title="Format upgrade endpoint is not wired yet"
+              style={canUpgrade ? styles.secondaryAction : styles.secondaryDisabled}
+              disabled={!canUpgrade}
+              onClick={handleUpgradeFormat}
+              title={canUpgrade ? undefined : 'Waiting for onboarding draft state'}
             >
-              Upgrade format
+              {upgradeState === 'running' ? 'Upgrading...' : upgradeState === 'succeeded' ? 'Upgrade PR opened' : 'Upgrade format'}
             </button>
           )}
           {project.local_only && (
@@ -131,6 +149,7 @@ export function ProjectView({ project }) {
       </div>
       {pushError && <div style={styles.error}>{pushError}</div>}
       {continueError && <div style={styles.error}>{continueError}</div>}
+      {upgradeError && <div style={styles.error}>{upgradeError}</div>}
       {activityOpen && (
         <div style={styles.activityLog} data-testid="project-activity-log">
           {events.length === 0 ? (

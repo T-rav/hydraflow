@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W21
 
+- `bab9837` — Fixes #8933: wire onboarding continue plan *(2026-05-23)*
 - `553bd1d` — Refs #8932: add Claude design provider fallback *(2026-05-23)*
 - `adbcc6a` — Refs #8931: add onboarding push endpoint *(2026-05-23)*
 - `f4915b8` — Refs #8933: add onboarding dashboard repo slice *(2026-05-22)*
@@ -349,4 +350,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `59db881` on 2026-05-23 07:59 UTC. Source last changed at `59db881`. Status: 🟢 fresh._
+_Regenerated from commit `cdd399f` on 2026-05-23 08:55 UTC. Source last changed at `cdd399f`. Status: 🟢 fresh._

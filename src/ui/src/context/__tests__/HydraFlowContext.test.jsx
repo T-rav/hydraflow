@@ -148,6 +148,36 @@ describe('HydraFlowContext reducer', () => {
     })
   })
 
+  it('LOCAL_ONLY_PROJECT_UPGRADED clears upgrade availability', () => {
+    const state = {
+      ...initialState,
+      localOnlyProjects: [
+        {
+          slug: 'finance-tool',
+          onboarding_draft_id: 'draft-1',
+          format_upgrade_available: true,
+        },
+      ],
+    }
+
+    const next = reducer(state, {
+      type: 'LOCAL_ONLY_PROJECT_UPGRADED',
+      data: {
+        draftId: 'draft-1',
+        prUrl: 'https://github.com/T-rav/finance-tool/pull/7',
+        draft: {
+          events: [{ level: 'info', message: 'format upgrade PR opened' }],
+        },
+      },
+    })
+
+    expect(next.localOnlyProjects[0]).toMatchObject({
+      format_upgrade_available: false,
+      upgrade_available: false,
+      format_upgrade_pr_url: 'https://github.com/T-rav/finance-tool/pull/7',
+    })
+  })
+
   it('GITHUB_METRICS action sets githubMetrics state', () => {
     const data = {
       open_by_label: { 'hydraflow-plan': 3, 'hydraflow-ready': 1 },
