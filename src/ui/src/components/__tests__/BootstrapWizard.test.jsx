@@ -54,6 +54,16 @@ function makeContext(overrides = {}) {
       },
       spec_draft: '# finance-tool\n\n## 10-file Invariant Kernel\n\n## V1 IN',
     }),
+    saveOnboardingSpecDraft: vi.fn().mockResolvedValue({
+      ok: true,
+      draft: {
+        id: 'draft-1',
+        spec: { name: 'finance-tool' },
+        spec_draft: '# finance-tool\n\n## Edited',
+        events: [{ level: 'info', message: 'wizard spec edits saved' }],
+      },
+      spec_draft: '# finance-tool\n\n## Edited',
+    }),
     draftOnboardingPlan: vi.fn().mockResolvedValue({
       ok: true,
       draft: {
@@ -172,6 +182,44 @@ describe('BootstrapWizard', () => {
     await waitFor(() => expect(materializeOnboardingDraft).toHaveBeenCalledWith('draft-1', { output_dir: null }))
     expect(selectRepo).toHaveBeenCalledWith('finance-tool')
     expect(onClose).toHaveBeenCalled()
+  })
+
+  it('persists manual spec edits before generating Plan 01', async () => {
+    const saveOnboardingSpecDraft = vi.fn().mockResolvedValue({
+      ok: true,
+      draft: {
+        id: 'draft-1',
+        spec: { name: 'finance-tool' },
+        spec_draft: '# finance-tool\n\n## Edited invariant kernel',
+        events: [{ level: 'info', message: 'wizard spec edits saved' }],
+      },
+      spec_draft: '# finance-tool\n\n## Edited invariant kernel',
+    })
+    const draftOnboardingPlan = vi.fn().mockResolvedValue({
+      ok: true,
+      draft: {
+        id: 'draft-1',
+        spec: { name: 'finance-tool' },
+        plan_draft: ['Create invariant kernel'],
+        events: [{ level: 'info', message: 'wizard plan drafted' }],
+      },
+      plan_draft: ['Create invariant kernel'],
+    })
+    mockUseHydraFlow.mockReturnValue(makeContext({ saveOnboardingSpecDraft, draftOnboardingPlan }))
+
+    render(<BootstrapWizard isOpen onClose={() => {}} />)
+    fireEvent.click(screen.getByText('Next'))
+    const specEditor = await screen.findByLabelText('Generated spec draft')
+    fireEvent.change(specEditor, {
+      target: { value: '# finance-tool\n\n## Edited invariant kernel' },
+    })
+    fireEvent.click(screen.getByText('Next'))
+
+    await waitFor(() => expect(saveOnboardingSpecDraft).toHaveBeenCalledWith(
+      'draft-1',
+      '# finance-tool\n\n## Edited invariant kernel'
+    ))
+    await waitFor(() => expect(draftOnboardingPlan).toHaveBeenCalledWith('draft-1'))
   })
 
   it('keeps the wizard open and expands activity on materialize failure', async () => {

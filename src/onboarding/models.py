@@ -142,6 +142,20 @@ class DesignRevisionRequest(BaseModel):
         return normalized or None
 
 
+class SaveSpecDraftRequest(BaseModel):
+    """Operator-edited wizard spec draft content."""
+
+    spec_draft: str = Field(min_length=1, max_length=20000)
+
+    @field_validator("spec_draft")
+    @classmethod
+    def normalize_spec_draft(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("spec_draft is required")
+        return normalized
+
+
 class ContinuePlanRequest(BaseModel):
     """Request body for filing the next onboarding plan issue batch."""
 

@@ -1455,6 +1455,24 @@ export function HydraFlowProvider({ children }) {
     }
   }, [])
 
+  const saveOnboardingSpecDraft = useCallback(async (draftId, specDraft) => {
+    if (!draftId) return { ok: false, error: 'Draft id required' }
+    try {
+      const res = await fetch(`/api/onboarding/drafts/${encodeURIComponent(draftId)}/design/spec/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ spec_draft: specDraft }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        return { ok: false, error: data?.error || `Spec save failed (${res.status})`, draft: data?.draft }
+      }
+      return { ok: true, ...data }
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Spec save failed' }
+    }
+  }, [])
+
   const draftOnboardingPlan = useCallback(async (draftId, note = null) => {
     if (!draftId) return { ok: false, error: 'Draft id required' }
     try {
@@ -2045,6 +2063,7 @@ export function HydraFlowProvider({ children }) {
     createOnboardingDraft,
     chatOnboardingDraft,
     draftOnboardingSpec,
+    saveOnboardingSpecDraft,
     draftOnboardingPlan,
     materializeOnboardingDraft,
     pushOnboardingDraft,
