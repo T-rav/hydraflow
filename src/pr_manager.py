@@ -190,10 +190,12 @@ class PRManager:
             logger.info("[dry-run] Would %s branch %s", action, branch)
             return True
 
+        if not await self._refresh_arch_artifacts_before_push(worktree_path, branch):
+            return False
+
         cmd = [
             "git",
             "push",
-            "--no-verify",
         ]
         if force:
             cmd.append("--force-with-lease")
@@ -212,6 +214,63 @@ class PRManager:
             action = "Force-push" if force else "Push"
             logger.warning("%s failed for %s: %s", action, branch, exc)
             return False
+
+    async def _refresh_arch_artifacts_before_push(
+        self, worktree_path: Path, branch: str
+    ) -> bool:
+        """Regenerate and commit architecture artifacts before bot pushes."""
+        try:
+            await run_subprocess(
+                "make",
+                "arch-regen",
+                cwd=worktree_path,
+                gh_token=self._credentials.gh_token,
+            )
+            status = await run_subprocess(
+                "git",
+                "status",
+                "--porcelain",
+                "docs/arch",
+                cwd=worktree_path,
+                gh_token=self._credentials.gh_token,
+            )
+        except RuntimeError as exc:
+            logger.warning(
+                "Architecture regeneration failed before pushing %s: %s",
+                branch,
+                exc,
+            )
+            return False
+
+        if not status.strip():
+            return True
+
+        try:
+            await run_subprocess(
+                "git",
+                "add",
+                "docs/arch",
+                cwd=worktree_path,
+                gh_token=self._credentials.gh_token,
+            )
+            await run_subprocess(
+                "git",
+                "commit",
+                "-m",
+                f"chore: refresh architecture docs before push ({branch})",
+                cwd=worktree_path,
+                gh_token=self._credentials.gh_token,
+            )
+        except RuntimeError as exc:
+            logger.warning(
+                "Could not commit regenerated architecture artifacts for %s: %s",
+                branch,
+                exc,
+            )
+            return False
+
+        logger.info("Committed regenerated architecture artifacts for %s", branch)
+        return True
 
     @staticmethod
     def expected_pr_title(issue_number: int, issue_title: str) -> str:
