@@ -140,3 +140,18 @@ class DesignRevisionRequest(BaseModel):
             return None
         normalized = value.strip()
         return normalized or None
+
+
+class ContinuePlanRequest(BaseModel):
+    """Request body for filing the next onboarding plan issue batch."""
+
+    current_plan: str | None = Field(default=None, max_length=100)
+    note: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("current_plan", "note")
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None

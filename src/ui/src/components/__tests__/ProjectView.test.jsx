@@ -13,6 +13,7 @@ describe('ProjectView', () => {
   beforeEach(() => {
     mockUseHydraFlow.mockReturnValue({
       pushOnboardingDraft: vi.fn().mockResolvedValue({ ok: false, error: 'Push failed (404)' }),
+      continueOnboardingPlan: vi.fn().mockResolvedValue({ ok: false, error: 'Continue plan failed (404)' }),
     })
   })
 
@@ -65,6 +66,44 @@ describe('ProjectView', () => {
 
     expect(screen.getByText('Continue to next plan')).toBeInTheDocument()
     expect(screen.getByText('Upgrade format')).toBeInTheDocument()
+  })
+
+  it('calls the continue endpoint when a completed onboarding plan has a draft id', async () => {
+    const continueOnboardingPlan = vi.fn().mockResolvedValue({ ok: true, plan: 'Plan 02' })
+    mockUseHydraFlow.mockReturnValue({ continueOnboardingPlan, pushOnboardingDraft: vi.fn() })
+
+    render(<ProjectView project={{
+      slug: 'finance-tool',
+      onboarding_draft_id: 'draft-1',
+      onboarding_current_plan: 'Plan 01',
+      plan_progress: { completed: 2, total: 2 },
+    }} />)
+
+    fireEvent.click(screen.getByText('Continue to next plan'))
+    await waitFor(() => expect(continueOnboardingPlan).toHaveBeenCalledWith('draft-1', {
+      current_plan: 'Plan 01',
+    }))
+    expect(screen.getByText('Plan continued')).toBeInTheDocument()
+  })
+
+  it('shows continue failure state and opens activity', async () => {
+    const continueOnboardingPlan = vi.fn().mockResolvedValue({ ok: false, error: 'Issue creation failed' })
+    mockUseHydraFlow.mockReturnValue({ continueOnboardingPlan, pushOnboardingDraft: vi.fn() })
+
+    render(<ProjectView project={{
+      slug: 'finance-tool',
+      onboarding_draft_id: 'draft-1',
+      onboarding_current_plan: 'Plan 01',
+      plan_progress: { completed: 1, total: 1 },
+      onboarding_events: [{ level: 'error', message: 'gh auth failed' }],
+    }} />)
+
+    fireEvent.click(screen.getByText('Continue to next plan'))
+    await waitFor(() => expect(continueOnboardingPlan).toHaveBeenCalledWith('draft-1', {
+      current_plan: 'Plan 01',
+    }))
+    expect(screen.getByText('Issue creation failed')).toBeInTheDocument()
+    expect(screen.getByTestId('project-activity-log')).toHaveTextContent('gh auth failed')
   })
 
   it('calls the push endpoint and shows failure state', async () => {

@@ -22,10 +22,12 @@ function readCurrentPlan(project) {
 }
 
 export function ProjectView({ project }) {
-  const { pushOnboardingDraft } = useHydraFlow()
+  const { continueOnboardingPlan, pushOnboardingDraft } = useHydraFlow()
   const [activityOpen, setActivityOpen] = useState(false)
   const [pushState, setPushState] = useState('idle')
   const [pushError, setPushError] = useState('')
+  const [continueState, setContinueState] = useState('idle')
+  const [continueError, setContinueError] = useState('')
 
   const handlePush = useCallback(async () => {
     if (!project?.onboarding_draft_id || pushState === 'running') return
@@ -41,6 +43,22 @@ export function ProjectView({ project }) {
     setPushState('succeeded')
   }, [project?.onboarding_draft_id, pushOnboardingDraft, pushState])
 
+  const handleContinuePlan = useCallback(async () => {
+    if (!project?.onboarding_draft_id || continueState === 'running') return
+    setContinueState('running')
+    setContinueError('')
+    const result = await continueOnboardingPlan?.(project.onboarding_draft_id, {
+      current_plan: readCurrentPlan(project),
+    })
+    if (!result?.ok) {
+      setContinueState('failed')
+      setContinueError(result?.error || 'Continue plan failed')
+      setActivityOpen(true)
+      return
+    }
+    setContinueState('succeeded')
+  }, [continueOnboardingPlan, continueState, project])
+
   if (!project) return null
 
   const events = project.onboarding_events || []
@@ -49,6 +67,7 @@ export function ProjectView({ project }) {
   const currentPlan = readCurrentPlan(project)
   const planComplete = progress.total > 0 && progress.completed >= progress.total
   const showContinue = project.continue_plan_available === true || planComplete
+  const canContinue = Boolean(project.onboarding_draft_id) && continueState !== 'running'
   const showUpgrade = project.upgrade_available === true || project.format_upgrade_available === true
   const repoStatus = project.local_only
     ? pushState === 'failed' ? 'Push failed' : pushState === 'succeeded' ? 'Pushed' : 'Ready locally'
@@ -66,17 +85,18 @@ export function ProjectView({ project }) {
           {showContinue && (
             <button
               type="button"
-              style={styles.secondaryAction}
-              disabled
-              title="Next-plan execution endpoint is not wired yet"
+              style={canContinue ? styles.secondaryAction : styles.secondaryDisabled}
+              disabled={!canContinue}
+              onClick={handleContinuePlan}
+              title={canContinue ? undefined : 'Waiting for onboarding draft state'}
             >
-              Continue to next plan
+              {continueState === 'running' ? 'Continuing...' : continueState === 'succeeded' ? 'Plan continued' : 'Continue to next plan'}
             </button>
           )}
           {showUpgrade && (
             <button
               type="button"
-              style={styles.secondaryAction}
+              style={styles.secondaryDisabled}
               disabled
               title="Format upgrade endpoint is not wired yet"
             >
@@ -110,6 +130,7 @@ export function ProjectView({ project }) {
         )}
       </div>
       {pushError && <div style={styles.error}>{pushError}</div>}
+      {continueError && <div style={styles.error}>{continueError}</div>}
       {activityOpen && (
         <div style={styles.activityLog} data-testid="project-activity-log">
           {events.length === 0 ? (
@@ -216,6 +237,17 @@ const styles = {
     justifyContent: 'flex-end',
   },
   secondaryAction: {
+    border: `1px solid ${theme.accent}`,
+    borderRadius: 6,
+    background: theme.surface,
+    color: theme.accent,
+    padding: '7px 10px',
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: 'pointer',
+    flexShrink: 0,
+  },
+  secondaryDisabled: {
     border: `1px solid ${theme.border}`,
     borderRadius: 6,
     background: theme.surfaceInset,
