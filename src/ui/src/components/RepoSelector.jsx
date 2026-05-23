@@ -32,6 +32,41 @@ function isPipelineEnabled(runtime, repo) {
     ?? repo?.status === 'running'
 }
 
+function readPlanProgress(repo) {
+  const progress = repo?.plan_progress || repo?.onboarding_plan_progress
+  if (progress && Number.isFinite(Number(progress.completed)) && Number.isFinite(Number(progress.total))) {
+    return {
+      completed: Number(progress.completed),
+      total: Number(progress.total),
+    }
+  }
+  const planDraft = repo?.onboarding_plan_draft || repo?.plan_draft
+  if (Array.isArray(planDraft)) {
+    return { completed: 0, total: planDraft.length }
+  }
+  return null
+}
+
+function buildRepoSummary(repo, runtime) {
+  const pieces = []
+  const plan = repo?.current_plan || repo?.onboarding_current_plan || runtime?.current_plan
+  const progress = readPlanProgress(repo)
+  const inFlight = repo?.in_flight_issues ?? runtime?.in_flight_issues
+  const lastGreen = repo?.last_green_ci ?? runtime?.last_green_ci
+
+  if (plan) {
+    const progressText = progress ? ` ${progress.completed}/${progress.total}` : ''
+    pieces.push(`${plan}${progressText}`)
+  }
+  if (Number.isFinite(Number(inFlight)) && Number(inFlight) > 0) {
+    pieces.push(`${Number(inFlight)} in flight`)
+  }
+  if (lastGreen) {
+    pieces.push(`green ${lastGreen}`)
+  }
+  return pieces.join(' | ')
+}
+
 export function RepoSelector({ onOpenRegister, onOpenNewProject }) {
   const {
     canRegisterRepos = false,
@@ -66,10 +101,11 @@ export function RepoSelector({ onOpenRegister, onOpenNewProject }) {
       const filterSlug = canonicalRepoSlug(rawSlug)
       const runtime = runtimeMap.get(filterSlug)
       const isRunning = isPipelineEnabled(runtime, repo)
+      const summary = buildRepoSummary(repo, runtime)
       return {
         key: `${filterSlug || rawSlug}-${index}`,
         label: buildDisplayName(repo),
-        subLabel: repo.path || runtime?.repo || '',
+        subLabel: summary || repo.path || runtime?.repo || '',
         filterSlug,
         rawSlug,
         isRunning,

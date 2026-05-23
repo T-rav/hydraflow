@@ -43,4 +43,4 @@ graph LR
     src_runners -- "1" --> src_preflight
 ```
 
-_Regenerated from commit `0086490` on 2026-05-23 05:05 UTC. Source last changed at `0086490`. Status: 🟢 fresh._
+_Regenerated from commit `5209d6e` on 2026-05-23 05:43 UTC. Source last changed at `5209d6e`. Status: 🟢 fresh._

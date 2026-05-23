@@ -795,6 +795,11 @@ export function reducer(state, action) {
           reviews: [],
           sessionPrsCount: 0,
           events: [],
+          queueStats: null,
+          metrics: null,
+          githubMetrics: null,
+          metricsHistory: null,
+          pipelineStats: null,
         }),
       }
     }
@@ -1406,6 +1411,13 @@ export function HydraFlowProvider({ children }) {
         local_only: true,
         onboarding_draft_id: data?.draft?.id || draftId,
         onboarding_events: data?.draft?.events || [],
+        onboarding_current_plan: 'Plan 01',
+        onboarding_spec_draft: data?.draft?.spec_draft || '',
+        onboarding_plan_draft: Array.isArray(data?.draft?.plan_draft) ? data.draft.plan_draft : [],
+        plan_progress: {
+          completed: 0,
+          total: Array.isArray(data?.draft?.plan_draft) ? data.draft.plan_draft.length : 0,
+        },
       }
       dispatch({ type: 'LOCAL_ONLY_PROJECT_ADDED', data: project })
       if (materializedPath) {
@@ -1708,7 +1720,7 @@ export function HydraFlowProvider({ children }) {
       fetchRepos()
       fetchRuntimes()
       if (lastEventTsRef.current) {
-        fetch(`/api/events?since=${encodeURIComponent(lastEventTsRef.current)}`)
+        fetchWithRepo(`/api/events?since=${encodeURIComponent(lastEventTsRef.current)}`)
           .then(r => r.json())
           .then(events => dispatch({ type: 'BACKFILL_EVENTS', data: events }))
           .catch(() => {})
