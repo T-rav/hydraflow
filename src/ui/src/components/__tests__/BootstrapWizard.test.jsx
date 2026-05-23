@@ -15,9 +15,54 @@ function makeContext(overrides = {}) {
       ok: true,
       draft: {
         id: 'draft-1',
-        spec: { name: 'finance-tool' },
+        spec: { name: 'finance-tool', tech_stack: ['python'], safety_guards: [] },
         events: [{ level: 'info', message: 'draft created' }],
       },
+    }),
+    chatOnboardingDraft: vi.fn().mockResolvedValue({
+      ok: true,
+      draft: {
+        id: 'draft-1',
+        spec: {
+          name: 'finance-tool',
+          description: 'Finance automation',
+          owner: 'T-rav',
+          visibility: 'public',
+          tech_stack: ['python', 'FastAPI', 'React'],
+          safety_guards: ['branch-protection'],
+          coverage_floor: 92,
+          label_prefix: 'hydraflow',
+          main_branch: 'main',
+          staging_branch: 'staging',
+        },
+        chat_messages: [
+          { role: 'user', content: 'Build finance-tool with FastAPI and React' },
+          { role: 'assistant', content: 'I updated the project fields.' },
+        ],
+        events: [{ level: 'info', message: 'design chat updated fields' }],
+      },
+      reply: 'I updated the project fields.',
+      field_updates: { name: 'finance-tool' },
+    }),
+    draftOnboardingSpec: vi.fn().mockResolvedValue({
+      ok: true,
+      draft: {
+        id: 'draft-1',
+        spec: { name: 'finance-tool' },
+        spec_draft: '# finance-tool\n\n## 10-file Invariant Kernel\n\n## V1 IN',
+        events: [{ level: 'info', message: 'wizard spec drafted' }],
+      },
+      spec_draft: '# finance-tool\n\n## 10-file Invariant Kernel\n\n## V1 IN',
+    }),
+    draftOnboardingPlan: vi.fn().mockResolvedValue({
+      ok: true,
+      draft: {
+        id: 'draft-1',
+        spec: { name: 'finance-tool' },
+        plan_draft: ['Create invariant kernel', 'Build UI scaffold'],
+        events: [{ level: 'info', message: 'wizard plan drafted' }],
+      },
+      plan_draft: ['Create invariant kernel', 'Build UI scaffold'],
     }),
     materializeOnboardingDraft: vi.fn().mockResolvedValue({
       ok: true,
@@ -48,13 +93,63 @@ describe('BootstrapWizard', () => {
       ok: true,
       draft: { id: 'draft-2', spec: { name: 'new-project' }, events: [] },
     })
-    mockUseHydraFlow.mockReturnValue(makeContext({ createOnboardingDraft }))
+    const draftOnboardingSpec = vi.fn().mockResolvedValue({
+      ok: true,
+      draft: { id: 'draft-2', spec: { name: 'new-project' }, spec_draft: '# new-project' },
+      spec_draft: '# new-project',
+    })
+    mockUseHydraFlow.mockReturnValue(makeContext({ createOnboardingDraft, draftOnboardingSpec }))
 
     render(<BootstrapWizard isOpen onClose={() => {}} />)
     fireEvent.click(screen.getByText('Next'))
 
     await waitFor(() => expect(createOnboardingDraft).toHaveBeenCalled())
-    expect(screen.getByText(/"name": "new-project"/)).toBeInTheDocument()
+    await waitFor(() => expect(draftOnboardingSpec).toHaveBeenCalledWith('draft-2'))
+    expect(screen.getByDisplayValue('# new-project')).toBeInTheDocument()
+  })
+
+  it('uses design chat to auto-fill fields while keeping them editable', async () => {
+    const chatOnboardingDraft = vi.fn().mockResolvedValue({
+      ok: true,
+      draft: {
+        id: 'draft-1',
+        spec: {
+          name: 'finance-tool',
+          description: 'Finance automation',
+          owner: 'T-rav',
+          visibility: 'public',
+          tech_stack: ['python', 'FastAPI', 'React'],
+          safety_guards: ['branch-protection'],
+          coverage_floor: 92,
+          label_prefix: 'hydraflow',
+          main_branch: 'main',
+          staging_branch: 'staging',
+        },
+        chat_messages: [
+          { role: 'user', content: 'Build finance-tool with FastAPI and React' },
+          { role: 'assistant', content: 'I updated the project fields.' },
+        ],
+        events: [{ level: 'info', message: 'design chat updated fields' }],
+      },
+      reply: 'I updated the project fields.',
+      field_updates: { name: 'finance-tool' },
+    })
+    mockUseHydraFlow.mockReturnValue(makeContext({ chatOnboardingDraft }))
+
+    render(<BootstrapWizard isOpen onClose={() => {}} />)
+    fireEvent.change(screen.getByLabelText('Design chat message'), {
+      target: { value: 'Build finance-tool as a public FastAPI React app with 92% coverage' },
+    })
+    fireEvent.click(screen.getByText('Send'))
+
+    await waitFor(() => expect(chatOnboardingDraft).toHaveBeenCalledWith(
+      'draft-1',
+      'Build finance-tool as a public FastAPI React app with 92% coverage'
+    ))
+    expect(screen.getByDisplayValue('finance-tool')).toBeInTheDocument()
+    expect(screen.getByLabelText('Visibility')).toHaveValue('public')
+    fireEvent.change(screen.getByDisplayValue('finance-tool'), { target: { value: 'ledger-lab' } })
+    expect(screen.getByDisplayValue('ledger-lab')).toBeInTheDocument()
   })
 
   it('materializes the active draft and selects the generated repo', async () => {
@@ -68,8 +163,9 @@ describe('BootstrapWizard', () => {
 
     render(<BootstrapWizard isOpen onClose={onClose} />)
     fireEvent.click(screen.getByText('Next'))
-    await screen.findByText(/"name": "new-project"/)
+    await screen.findByDisplayValue(/10-file Invariant Kernel/)
     fireEvent.click(screen.getByText('Next'))
+    await screen.findByText('Build UI scaffold')
     fireEvent.click(screen.getByText('Next'))
     fireEvent.click(screen.getByTestId('materialize-project'))
 
@@ -93,8 +189,9 @@ describe('BootstrapWizard', () => {
 
     render(<BootstrapWizard isOpen onClose={() => {}} />)
     fireEvent.click(screen.getByText('Next'))
-    await screen.findByText(/"name": "new-project"/)
+    await screen.findByDisplayValue(/10-file Invariant Kernel/)
     fireEvent.click(screen.getByText('Next'))
+    await screen.findByText('Build UI scaffold')
     fireEvent.click(screen.getByText('Next'))
     fireEvent.click(screen.getByTestId('materialize-project'))
 

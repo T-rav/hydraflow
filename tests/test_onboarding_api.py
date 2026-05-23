@@ -7,7 +7,13 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from onboarding.models import BootstrapDraft, BootstrapSpec, MaterializeRequest
+from onboarding.models import (
+    BootstrapDraft,
+    BootstrapSpec,
+    DesignChatRequest,
+    DesignRevisionRequest,
+    MaterializeRequest,
+)
 from tests.helpers import find_endpoint, make_dashboard_router
 
 
@@ -44,6 +50,9 @@ class TestOnboardingDraftRoutes:
 
         assert "/api/onboarding/drafts" in paths
         assert "/api/onboarding/drafts/{draft_id}" in paths
+        assert "/api/onboarding/drafts/{draft_id}/design/chat" in paths
+        assert "/api/onboarding/drafts/{draft_id}/design/spec" in paths
+        assert "/api/onboarding/drafts/{draft_id}/design/plan" in paths
         assert "/api/onboarding/drafts/{draft_id}/materialize" in paths
 
     @pytest.mark.asyncio
@@ -147,6 +156,86 @@ class TestOnboardingDraftRoutes:
         assert (tmp_path / "generated" / "finance-tool" / "pyproject.toml").exists()
         persisted = state.get_onboarding_draft(draft.id)
         assert persisted["materialize_status"] == "succeeded"
+
+    @pytest.mark.asyncio
+    async def test_design_chat_persists_conversation_and_field_updates(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        draft = BootstrapDraft(spec=BootstrapSpec.model_validate(_spec_payload()))
+        state.set_onboarding_draft(draft.id, draft.model_dump(mode="json"))
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        endpoint = find_endpoint(
+            router,
+            "/api/onboarding/drafts/{draft_id}/design/chat",
+            method="POST",
+        )
+
+        response = await endpoint(
+            draft.id,
+            DesignChatRequest(
+                message=(
+                    "Build finance-tool as a public Python FastAPI React app "
+                    "with Postgres, branch protection, deterministic tests, and 92% coverage."
+                )
+            ),
+        )
+        data = json.loads(response.body)
+
+        assert response.status_code == 200
+        assert data["draft"]["spec"]["name"] == "finance-tool"
+        assert data["draft"]["spec"]["visibility"] == "public"
+        assert data["draft"]["spec"]["coverage_floor"] == 92
+        assert "FastAPI" in data["draft"]["spec"]["tech_stack"]
+        assert "React" in data["draft"]["spec"]["tech_stack"]
+        assert "branch-protection" in data["draft"]["spec"]["safety_guards"]
+        assert data["draft"]["chat_messages"][-1]["role"] == "assistant"
+        assert state.get_onboarding_draft(draft.id)["extracted_fields"]["name"] == (
+            "finance-tool"
+        )
+
+    @pytest.mark.asyncio
+    async def test_design_spec_and_plan_are_persisted(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        draft = BootstrapDraft(
+            spec=BootstrapSpec.model_validate(
+                _spec_payload(
+                    name="finance-tool",
+                    tech_stack=["python", "FastAPI", "React"],
+                    safety_guards=["branch-protection", "decimal-purity"],
+                )
+            )
+        )
+        state.set_onboarding_draft(draft.id, draft.model_dump(mode="json"))
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        spec_endpoint = find_endpoint(
+            router,
+            "/api/onboarding/drafts/{draft_id}/design/spec",
+            method="POST",
+        )
+        plan_endpoint = find_endpoint(
+            router,
+            "/api/onboarding/drafts/{draft_id}/design/plan",
+            method="POST",
+        )
+
+        spec_response = await spec_endpoint(
+            draft.id, DesignRevisionRequest(note="include v1 boundaries")
+        )
+        plan_response = await plan_endpoint(draft.id, DesignRevisionRequest())
+        spec_data = json.loads(spec_response.body)
+        plan_data = json.loads(plan_response.body)
+
+        assert spec_response.status_code == 200
+        assert "10-file Invariant Kernel" in spec_data["spec_draft"]
+        assert "V1 IN" in spec_data["spec_draft"]
+        assert plan_response.status_code == 200
+        assert len(plan_data["plan_draft"]) >= 10
+        assert any("UI scaffold" in task for task in plan_data["plan_draft"])
+        assert any("decimal-purity" in task for task in plan_data["plan_draft"])
+        persisted = state.get_onboarding_draft(draft.id)
+        assert persisted["spec_draft"] == spec_data["spec_draft"]
+        assert persisted["plan_draft"] == plan_data["plan_draft"]
 
     @pytest.mark.asyncio
     async def test_materialize_draft_records_failure_for_existing_target(
