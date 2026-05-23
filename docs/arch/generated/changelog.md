@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W21
 
+- `3381e36` — Refs #8475: preserve managed repo config models *(2026-05-22)*
 - `22b8cee` — Fixes #8617: expose repo pipeline enabled state *(2026-05-22)*
 - `90279ad` — Fixes #8651: collapse crowded pipeline dots *(2026-05-22)*
 - `1e94520` — Fixes #8674: refresh arch artifacts before bot push *(2026-05-22)*
@@ -340,4 +341,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `f1e28d2` on 2026-05-23 01:14 UTC. Source last changed at `f1e28d2`. Status: 🟢 fresh._
+_Regenerated from commit `8794262` on 2026-05-23 01:41 UTC. Source last changed at `8794262`. Status: 🟢 fresh._
