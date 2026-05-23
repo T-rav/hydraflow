@@ -24,9 +24,13 @@ DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6"
 
 _NAME_RE = re.compile(r"\b[a-z][a-z0-9]+(?:-[a-z0-9]+)+\b")
 _OWNER_RE = re.compile(
-    r"\b(?:owner|org|organization)\s+([A-Za-z0-9_.-]{1,100})\b", re.I
+    r"\b(?:owner|org|organization)(?:\s+is|\s*:)?\s+([A-Za-z0-9_.-]{1,100})\b"
+    r"|\bowned\s+by\s+([A-Za-z0-9_.-]{1,100})\b"
+    r"|\bunder\s+(?:the\s+)?(?:org|organization)\s+([A-Za-z0-9_.-]{1,100})\b",
+    re.I,
 )
 _COVERAGE_RE = re.compile(r"\b(\d{2,3})\s*%\s*(?:coverage|test coverage)\b", re.I)
+_REVISION_CUES = ("actually", "instead", "switch", "change", "use", "prefer")
 
 
 @dataclass(frozen=True)
@@ -177,11 +181,15 @@ class DesignAIService:
 
         owner_match = _OWNER_RE.search(message)
         if owner_match:
-            updates["owner"] = owner_match.group(1)
+            updates["owner"] = next(
+                group for group in owner_match.groups() if group is not None
+            )
 
-        if "public" in lowered:
+        if (
+            "public" in lowered or "open source" in lowered or "open-source" in lowered
+        ) and "not public" not in lowered:
             updates["visibility"] = "public"
-        elif "private" in lowered:
+        elif "private" in lowered or "internal" in lowered or "not public" in lowered:
             updates["visibility"] = "private"
 
         coverage_match = _COVERAGE_RE.search(message)
@@ -189,6 +197,43 @@ class DesignAIService:
             updates["coverage_floor"] = min(100, max(0, int(coverage_match.group(1))))
 
         stack = list(current.tech_stack)
+        revising = any(cue in lowered for cue in _REVISION_CUES)
+        if "no ui" in lowered or "none ui" in lowered or "ui none" in lowered:
+            stack = [
+                item
+                for item in stack
+                if item.lower() not in {"react", "next.js", "nextjs"}
+            ]
+        elif revising and (
+            "react" in lowered or "next.js" in lowered or "nextjs" in lowered
+        ):
+            stack = [item for item in stack if item.lower() != "ui=none"]
+            if "next.js" in lowered or "nextjs" in lowered:
+                stack = [item for item in stack if item.lower() != "react"]
+            if (
+                "react" in lowered
+                and "next.js" not in lowered
+                and "nextjs" not in lowered
+            ):
+                stack = [
+                    item for item in stack if item.lower() not in {"next.js", "nextjs"}
+                ]
+        if "sqlite" in lowered and revising:
+            stack = [item for item in stack if item.lower() != "postgres"]
+        if ("postgres" in lowered or "postgresql" in lowered) and revising:
+            stack = [item for item in stack if item.lower() != "sqlite"]
+        skip_stack_labels: set[str] = set()
+        instead_of = (
+            lowered.split("instead of", 1)[1] if "instead of" in lowered else ""
+        )
+        if "postgres" in instead_of or "not postgres" in lowered:
+            skip_stack_labels.add("Postgres")
+        if "react" in instead_of or "not react" in lowered:
+            skip_stack_labels.add("React")
+        if "sqlite" in instead_of or "not sqlite" in lowered:
+            skip_stack_labels.add("SQLite")
+        if "next.js" in instead_of or "nextjs" in instead_of or "not next" in lowered:
+            skip_stack_labels.add("Next.js")
         for keyword, label in (
             ("fastapi", "FastAPI"),
             ("django", "Django"),
@@ -202,8 +247,13 @@ class DesignAIService:
             ("postgresql", "Postgres"),
             ("none ui", "UI=None"),
             ("no ui", "UI=None"),
+            ("ui none", "UI=None"),
         ):
-            if keyword in lowered and label not in stack:
+            if (
+                keyword in lowered
+                and label not in stack
+                and label not in skip_stack_labels
+            ):
                 stack.append(label)
         if stack != current.tech_stack:
             updates["tech_stack"] = stack
