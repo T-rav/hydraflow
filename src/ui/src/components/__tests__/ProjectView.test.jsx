@@ -151,7 +151,10 @@ describe('ProjectView', () => {
     }} />)
 
     fireEvent.click(screen.getByText('Push to GitHub'))
-    await waitFor(() => expect(pushOnboardingDraft).toHaveBeenCalledWith('draft-1'))
+    await waitFor(() => expect(pushOnboardingDraft).toHaveBeenCalledWith(
+      'draft-1',
+      expect.objectContaining({ onActivity: expect.any(Function) })
+    ))
     expect(screen.getByText('Push failed')).toBeInTheDocument()
     expect(screen.getByText('Push endpoint unavailable')).toBeInTheDocument()
   })
@@ -168,7 +171,31 @@ describe('ProjectView', () => {
     }} />)
 
     fireEvent.click(screen.getByText('Push to GitHub'))
-    await waitFor(() => expect(pushOnboardingDraft).toHaveBeenCalledWith('draft-1'))
+    await waitFor(() => expect(pushOnboardingDraft).toHaveBeenCalledWith(
+      'draft-1',
+      expect.objectContaining({ onActivity: expect.any(Function) })
+    ))
     expect(screen.getByText('Pushed')).toBeInTheDocument()
+  })
+
+  it('streams push activity into the expanded log while running', async () => {
+    const pushOnboardingDraft = vi.fn().mockImplementation(async (_draftId, options) => {
+      options?.onActivity?.({ level: 'info', message: 'push started' })
+      options?.onActivity?.({ level: 'info', message: 'push succeeded' })
+      return { ok: true, repo_url: 'https://github.com/T-rav/finance-tool' }
+    })
+    mockUseHydraFlow.mockReturnValue({ pushOnboardingDraft })
+
+    render(<ProjectView project={{
+      slug: 'finance-tool',
+      local_only: true,
+      onboarding_draft_id: 'draft-1',
+      onboarding_events: [],
+    }} />)
+
+    fireEvent.click(screen.getByText('Activity down'))
+    fireEvent.click(screen.getByText('Push to GitHub'))
+    await waitFor(() => expect(screen.getByTestId('project-activity-log')).toHaveTextContent('push started'))
+    expect(screen.getByTestId('project-activity-log')).toHaveTextContent('push succeeded')
   })
 })

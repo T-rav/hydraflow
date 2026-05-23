@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W21
 
+- `9dc0a8d` — Refs #8933: validate third-domain onboarding dashboard flow *(2026-05-23)*
 - `01b5854` — docs: refresh architecture artifacts *(2026-05-23)*
 - `66a1b1f` — Refs #8932: stream onboarding design chat *(2026-05-23)*
 - `8728fc2` — Refs #8932: persist wizard spec edits *(2026-05-23)*
@@ -356,4 +357,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `4e72c6f` on 2026-05-23 12:18 UTC. Source last changed at `4e72c6f`. Status: 🟢 fresh._
+_Regenerated from commit `dd2f945` on 2026-05-23 13:06 UTC. Source last changed at `dd2f945`. Status: 🟢 fresh._

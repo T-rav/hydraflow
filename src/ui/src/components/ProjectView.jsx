@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useHydraFlow } from '../context/HydraFlowContext'
 import { theme } from '../theme'
 
@@ -30,12 +30,21 @@ export function ProjectView({ project }) {
   const [continueError, setContinueError] = useState('')
   const [upgradeState, setUpgradeState] = useState('idle')
   const [upgradeError, setUpgradeError] = useState('')
+  const [activityEvents, setActivityEvents] = useState(project?.onboarding_events || [])
+
+  useEffect(() => {
+    setActivityEvents(project?.onboarding_events || [])
+  }, [project?.onboarding_events])
 
   const handlePush = useCallback(async () => {
     if (!project?.onboarding_draft_id || pushState === 'running') return
     setPushState('running')
     setPushError('')
-    const result = await pushOnboardingDraft?.(project.onboarding_draft_id)
+    const result = await pushOnboardingDraft?.(project.onboarding_draft_id, {
+      onActivity: (event) => {
+        setActivityEvents(prev => [...prev, event])
+      },
+    })
     if (!result?.ok) {
       setPushState('failed')
       setPushError(result?.error || 'Push failed')
@@ -77,7 +86,7 @@ export function ProjectView({ project }) {
 
   if (!project) return null
 
-  const events = project.onboarding_events || []
+  const events = activityEvents || []
   const canPush = Boolean(project.onboarding_draft_id) && pushState !== 'running'
   const progress = readPlanProgress(project)
   const currentPlan = readCurrentPlan(project)

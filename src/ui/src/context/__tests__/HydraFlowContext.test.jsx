@@ -684,6 +684,145 @@ describe('HydraFlowProvider', () => {
     )
     expect(screen.getByText('Test Child')).toBeInTheDocument()
   })
+
+  it('materializeOnboardingDraft consumes streamed activity and final payload', async () => {
+    vi.resetModules()
+    const activity = []
+    const makeStream = (lines) => new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder()
+        lines.forEach(line => controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`)))
+        controller.close()
+      },
+    })
+    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url === '/api/onboarding/drafts/draft-1/materialize/stream') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          body: makeStream([
+            { type: 'activity', event: { level: 'info', message: 'materialize started' } },
+            {
+              type: 'final',
+              ok: true,
+              status: 200,
+              draft: {
+                id: 'draft-1',
+                spec: { name: 'finance-tool' },
+                events: [{ level: 'info', message: 'materialize started' }],
+              },
+              materialized: { path: '/tmp/finance-tool' },
+            },
+          ]),
+        })
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ repos: [] }),
+      })
+    })
+
+    const { HydraFlowProvider, useHydraFlow } = await import('../HydraFlowContext')
+    let capturedState = null
+    function StateCapture() {
+      capturedState = useHydraFlow()
+      return <div>ready</div>
+    }
+
+    await act(async () => {
+      render(
+        <HydraFlowProvider>
+          <StateCapture />
+        </HydraFlowProvider>
+      )
+    })
+
+    let result
+    await act(async () => {
+      result = await capturedState.materializeOnboardingDraft('draft-1', {}, {
+        onActivity: (event) => activity.push(event.message),
+      })
+    })
+
+    expect(fetchSpy).toHaveBeenCalledWith('/api/onboarding/drafts/draft-1/materialize/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    expect(result.ok).toBe(true)
+    expect(activity).toEqual(['materialize started'])
+  })
+
+  it('pushOnboardingDraft consumes streamed activity and final payload', async () => {
+    vi.resetModules()
+    const activity = []
+    const makeStream = (lines) => new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder()
+        lines.forEach(line => controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`)))
+        controller.close()
+      },
+    })
+    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url === '/api/onboarding/drafts/draft-1/push/stream') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          body: makeStream([
+            { type: 'activity', event: { level: 'info', message: 'push started' } },
+            {
+              type: 'final',
+              ok: true,
+              status: 200,
+              draft: {
+                id: 'draft-1',
+                status: 'pushed',
+                push_status: 'succeeded',
+                events: [{ level: 'info', message: 'push succeeded' }],
+              },
+              repo_url: 'https://github.com/T-rav/finance-tool',
+            },
+          ]),
+        })
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ repos: [] }),
+      })
+    })
+
+    const { HydraFlowProvider, useHydraFlow } = await import('../HydraFlowContext')
+    let capturedState = null
+    function StateCapture() {
+      capturedState = useHydraFlow()
+      return <div>ready</div>
+    }
+
+    await act(async () => {
+      render(
+        <HydraFlowProvider>
+          <StateCapture />
+        </HydraFlowProvider>
+      )
+    })
+
+    let result
+    await act(async () => {
+      result = await capturedState.pushOnboardingDraft('draft-1', {
+        onActivity: (event) => activity.push(event.message),
+      })
+    })
+
+    expect(fetchSpy).toHaveBeenCalledWith('/api/onboarding/drafts/draft-1/push/stream', {
+      method: 'POST',
+    })
+    expect(result.ok).toBe(true)
+    expect(activity).toEqual(['push started'])
+  })
 })
 
 describe('startRuntime compatibility flow', () => {
