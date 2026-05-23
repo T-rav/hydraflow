@@ -32,7 +32,7 @@ function isPipelineEnabled(runtime, repo) {
     ?? repo?.status === 'running'
 }
 
-export function RepoSelector({ onOpenRegister }) {
+export function RepoSelector({ onOpenRegister, onOpenNewProject }) {
   const {
     canRegisterRepos = false,
     supervisedRepos = [],
@@ -73,6 +73,7 @@ export function RepoSelector({ onOpenRegister }) {
         filterSlug,
         rawSlug,
         isRunning,
+        localOnly: repo.local_only === true,
       }
     })
     entries.sort((a, b) => a.label.localeCompare(b.label))
@@ -137,10 +138,22 @@ export function RepoSelector({ onOpenRegister }) {
                     {opt.subLabel && <span style={styles.optionSubLabel}>{opt.subLabel}</span>}
                   </span>
                 </span>
-                <span style={styles.optionStatus}>{opt.isRunning ? 'Running' : 'Stopped'}</span>
+                <span style={opt.localOnly ? styles.optionLocalOnly : styles.optionStatus}>
+                  {opt.localOnly ? 'Local only' : opt.isRunning ? 'Running' : 'Stopped'}
+                </span>
               </button>
             ))}
           </div>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false)
+              onOpenNewProject?.()
+            }}
+            style={styles.newProjectBtn}
+          >
+            + New project
+          </button>
           <button
             type="button"
             disabled={!canRegisterRepos}
@@ -240,6 +253,12 @@ const styles = {
     color: theme.textMuted,
     flexShrink: 0,
   },
+  optionLocalOnly: {
+    fontSize: 11,
+    color: theme.orange,
+    flexShrink: 0,
+    fontWeight: 700,
+  },
   divider: {
     height: 1,
     background: theme.border,
@@ -258,6 +277,16 @@ const styles = {
     fontSize: 12,
     fontWeight: 600,
     color: theme.accent,
+    cursor: 'pointer',
+  },
+  newProjectBtn: {
+    border: 'none',
+    borderTop: `1px solid ${theme.border}`,
+    background: theme.surfaceInset,
+    padding: '8px 10px',
+    fontSize: 12,
+    fontWeight: 600,
+    color: theme.orange,
     cursor: 'pointer',
   },
   registerBtnDisabled: {
