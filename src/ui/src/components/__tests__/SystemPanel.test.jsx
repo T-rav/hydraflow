@@ -381,6 +381,12 @@ describe('SystemPanel', () => {
       expect(screen.queryByText('Event Log')).not.toBeInTheDocument()
     })
 
+    it('wraps System sub-tabs in a tablist', () => {
+      render(<SystemPanel backgroundWorkers={[]} />)
+      const tablist = screen.getByRole('tablist', { name: 'System sections' })
+      expect(within(tablist).getAllByRole('tab')).toHaveLength(6)
+    })
+
     it('Workers sub-tab is active by default showing background worker content', () => {
       render(<SystemPanel backgroundWorkers={[]} />)
       expect(screen.getByText('Repo Health')).toBeInTheDocument()
@@ -391,6 +397,14 @@ describe('SystemPanel', () => {
       fireEvent.click(screen.getByText('Livestream'))
       expect(screen.getByText('Waiting for events...')).toBeInTheDocument()
       expect(screen.queryByText('Repo Health')).not.toBeInTheDocument()
+    })
+
+    it('activates System sub-tabs from the keyboard', () => {
+      render(<SystemPanel backgroundWorkers={[]} />)
+      fireEvent.keyDown(screen.getByText('Livestream'), { key: 'Enter' })
+      expect(screen.getByText('Waiting for events...')).toBeInTheDocument()
+      fireEvent.keyDown(screen.getByText('Workers'), { key: ' ' })
+      expect(screen.getByText('Repo Health')).toBeInTheDocument()
     })
 
     it('clicking Workers sub-tab returns to worker content', () => {
@@ -577,6 +591,33 @@ describe('SystemPanel', () => {
       // Log stream must also render alongside error details (not suppressed)
       const retroCard = screen.getByTestId('worker-card-retrospective')
       expect(within(retroCard).getByTestId('worker-log-stream')).toBeInTheDocument()
+    })
+  })
+
+  describe('Accessibility names', () => {
+    it('names the PR unstick batch select', () => {
+      render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
+      expect(screen.getByLabelText('Maximum PRs to unstick per cycle')).toBeInTheDocument()
+    })
+
+    it('labels staging promotion config inputs', () => {
+      const workers = [
+        { name: 'staging_promotion', status: 'ok', enabled: true, last_run: null, details: {} },
+      ]
+      mockUseHydraFlow.mockReturnValue(defaultMockContext({
+        orchestratorStatus: 'running',
+        backgroundWorkers: workers,
+        config: {
+          staging_enabled: true,
+          main_branch: 'main',
+          staging_branch: 'staging',
+          rc_cadence_hours: 4,
+        },
+      }))
+      render(<SystemPanel backgroundWorkers={workers} />)
+      expect(screen.getByLabelText('Main branch')).toBeInTheDocument()
+      expect(screen.getByLabelText('Staging branch')).toBeInTheDocument()
+      expect(screen.getByLabelText('RC cadence (hours)')).toBeInTheDocument()
     })
   })
 })
@@ -929,5 +970,4 @@ describe('StagingPromotionSettingsPanel', () => {
     expect(call[1].method).toBe('POST')
   })
 })
-
 
