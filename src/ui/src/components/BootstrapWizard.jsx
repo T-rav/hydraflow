@@ -140,9 +140,28 @@ export function BootstrapWizard({ isOpen, onClose }) {
     if (!message || submitting) return
     const activeDraft = await ensureDraft()
     if (!activeDraft) return
+    const streamingDraft = {
+      ...activeDraft,
+      chat_messages: [
+        ...(activeDraft.chat_messages || []),
+        { role: 'user', content: message },
+        { role: 'assistant', content: '' },
+      ],
+    }
+    setDraft(streamingDraft)
     setSubmitting(true)
     setError('')
-    const result = await chatOnboardingDraft?.(activeDraft.id, message)
+    const result = await chatOnboardingDraft?.(activeDraft.id, message, {
+      onReplyDelta: (text) => {
+        setDraft(prev => {
+          const messages = [...(prev?.chat_messages || streamingDraft.chat_messages)]
+          const last = messages[messages.length - 1]
+          if (!last || last.role !== 'assistant') return prev
+          messages[messages.length - 1] = { ...last, content: `${last.content || ''}${text}` }
+          return { ...(prev || streamingDraft), chat_messages: messages }
+        })
+      },
+    })
     setSubmitting(false)
     if (!result?.ok) {
       setDraft(result?.draft || activeDraft)

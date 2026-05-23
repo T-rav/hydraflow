@@ -1419,19 +1419,65 @@ export function HydraFlowProvider({ children }) {
     }
   }, [parseApiError])
 
-  const chatOnboardingDraft = useCallback(async (draftId, message) => {
+  const chatOnboardingDraft = useCallback(async (draftId, message, options = {}) => {
     if (!draftId) return { ok: false, error: 'Draft id required' }
     try {
-      const res = await fetch(`/api/onboarding/drafts/${encodeURIComponent(draftId)}/design/chat`, {
+      const draftPath = `/api/onboarding/drafts/${encodeURIComponent(draftId)}`
+      const request = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message }),
-      })
-      const data = await res.json().catch(() => ({}))
+      }
+      if (typeof ReadableStream === 'undefined' || typeof TextDecoder === 'undefined') {
+        const fallbackRes = await fetch(`${draftPath}/design/chat`, request)
+        const data = await fallbackRes.json().catch(() => ({}))
+        if (!fallbackRes.ok) {
+          return {
+            ok: false,
+            error: data?.error || `Design chat failed (${fallbackRes.status})`,
+            draft: data?.draft,
+          }
+        }
+        return { ok: true, ...data }
+      }
+
+      const res = await fetch(`${draftPath}/design/chat/stream`, request)
       if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
         return { ok: false, error: data?.error || `Design chat failed (${res.status})`, draft: data?.draft }
       }
-      return { ok: true, ...data }
+      if (!res.body?.getReader) return { ok: false, error: 'Design chat streaming is unavailable' }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let finalPayload = null
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          if (!line.trim()) continue
+          const event = JSON.parse(line)
+          if (event.type === 'reply_delta') {
+            options?.onReplyDelta?.(event.text || '')
+          } else if (event.type === 'final') {
+            finalPayload = event
+          }
+        }
+      }
+      buffer += decoder.decode()
+      if (buffer.trim()) {
+        const event = JSON.parse(buffer)
+        if (event.type === 'reply_delta') {
+          options?.onReplyDelta?.(event.text || '')
+        } else if (event.type === 'final') {
+          finalPayload = event
+        }
+      }
+      if (!finalPayload) return { ok: false, error: 'Design chat stream ended without final payload' }
+      return { ok: true, ...finalPayload }
     } catch (err) {
       return { ok: false, error: err?.message || 'Design chat failed' }
     }

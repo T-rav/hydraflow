@@ -119,31 +119,37 @@ describe('BootstrapWizard', () => {
   })
 
   it('uses design chat to auto-fill fields while keeping them editable', async () => {
-    const chatOnboardingDraft = vi.fn().mockResolvedValue({
-      ok: true,
-      draft: {
-        id: 'draft-1',
-        spec: {
-          name: 'finance-tool',
-          description: 'Finance automation',
-          owner: 'T-rav',
-          visibility: 'public',
-          tech_stack: ['python', 'FastAPI', 'React'],
-          safety_guards: ['branch-protection'],
-          coverage_floor: 92,
-          label_prefix: 'hydraflow',
-          main_branch: 'main',
-          staging_branch: 'staging',
-        },
-        chat_messages: [
-          { role: 'user', content: 'Build finance-tool with FastAPI and React' },
-          { role: 'assistant', content: 'I updated the project fields.' },
-        ],
-        events: [{ level: 'info', message: 'design chat updated fields' }],
-      },
-      reply: 'I updated the project fields.',
-      field_updates: { name: 'finance-tool' },
-    })
+    const chatOnboardingDraft = vi
+      .fn()
+      .mockImplementation(async (_draftId, _message, options) => {
+        options?.onReplyDelta?.('I updated ')
+        options?.onReplyDelta?.('the project fields.')
+        return {
+          ok: true,
+          draft: {
+            id: 'draft-1',
+            spec: {
+              name: 'finance-tool',
+              description: 'Finance automation',
+              owner: 'T-rav',
+              visibility: 'public',
+              tech_stack: ['python', 'FastAPI', 'React'],
+              safety_guards: ['branch-protection'],
+              coverage_floor: 92,
+              label_prefix: 'hydraflow',
+              main_branch: 'main',
+              staging_branch: 'staging',
+            },
+            chat_messages: [
+              { role: 'user', content: 'Build finance-tool with FastAPI and React' },
+              { role: 'assistant', content: 'I updated the project fields.' },
+            ],
+            events: [{ level: 'info', message: 'design chat updated fields' }],
+          },
+          reply: 'I updated the project fields.',
+          field_updates: { name: 'finance-tool' },
+        }
+      })
     mockUseHydraFlow.mockReturnValue(makeContext({ chatOnboardingDraft }))
 
     render(<BootstrapWizard isOpen onClose={() => {}} />)
@@ -154,8 +160,10 @@ describe('BootstrapWizard', () => {
 
     await waitFor(() => expect(chatOnboardingDraft).toHaveBeenCalledWith(
       'draft-1',
-      'Build finance-tool as a public FastAPI React app with 92% coverage'
+      'Build finance-tool as a public FastAPI React app with 92% coverage',
+      expect.objectContaining({ onReplyDelta: expect.any(Function) })
     ))
+    expect(screen.getByTestId('design-chat-log')).toHaveTextContent('I updated the project fields.')
     expect(screen.getByDisplayValue('finance-tool')).toBeInTheDocument()
     expect(screen.getByLabelText('Visibility')).toHaveValue('public')
     fireEvent.change(screen.getByDisplayValue('finance-tool'), { target: { value: 'ledger-lab' } })
