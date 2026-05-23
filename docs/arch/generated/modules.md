@@ -15,6 +15,7 @@ graph LR
     src_mockworld["src.mockworld"]
     src_mockworld_fakes["src.mockworld.fakes"]
     src_observability["src.observability"]
+    src_onboarding["src.onboarding"]
     src_preflight["src.preflight"]
     src_review_phase["src.review_phase"]
     src_runners["src.runners"]
@@ -31,6 +32,7 @@ graph LR
     src -- "7" --> src_telemetry
     src_arch_extractors -- "7" --> src_arch
     src_arch_generators -- "11" --> src_arch
+    src_dashboard_routes -- "1" --> src_onboarding
     src_dashboard_routes -- "1" --> src_preflight
     src_dashboard_routes -- "1" --> src_state
     src_mockworld_fakes -- "25" --> src_mockworld
@@ -41,4 +43,4 @@ graph LR
     src_runners -- "1" --> src_preflight
 ```
 
-_Regenerated from commit `8794262` on 2026-05-23 01:41 UTC. Source last changed at `8794262`. Status: 🟢 fresh._
+_Regenerated from commit `f7d0be7` on 2026-05-23 02:08 UTC. Source last changed at `f7d0be7`. Status: 🟢 fresh._

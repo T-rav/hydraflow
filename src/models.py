@@ -1863,6 +1863,7 @@ class StateData(BaseModel):
         default_factory=dict
     )
     diagnosis_severities: dict[str, str] = Field(default_factory=dict)
+    onboarding_drafts: dict[str, dict[str, object]] = Field(default_factory=dict)
     sentry_creation_attempts: dict[str, int] = Field(default_factory=dict)
     trace_runs: TraceRunsContainer = Field(default_factory=TraceRunsContainer)
     # StagingBisectLoop state (spec §4.3 + §8). Written by StagingPromotionLoop

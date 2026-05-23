@@ -1823,6 +1823,11 @@ def create_router(
 
     _register_state(router, ctx)
 
+    # --- Headless onboarding draft routes ---
+    from dashboard_routes._onboarding_routes import register as _register_onboarding
+
+    _register_onboarding(router, ctx)
+
     @router.post("/api/intent")
     async def submit_intent(request: IntentRequest) -> JSONResponse:
         """Create a GitHub issue from a user intent typed in the dashboard."""
