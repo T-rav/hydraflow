@@ -283,21 +283,38 @@ class TestSystemWorkersEndpoint:
 
         response = await endpoint()
         data = json.loads(response.body)
-        assert len(data["workers"]) == 23
+        assert len(data["workers"]) >= 40
         names = [w["name"] for w in data["workers"]]
-        assert names == [
+        assert names[:4] == [
             "triage",
             "plan",
             "implement",
             "review",
+        ]
+        for expected in [
             "memory_sync",
             "retrospective",
             "review_insights",
             "pipeline_poller",
             "pr_unsticker",
             "report_issue",
+            "epic_monitor",
             "adr_reviewer",
-            # Trust fleet (ADR-0045)
+            "merge_state_watcher",
+            "workspace_gc",
+            "runs_gc",
+            "health_monitor",
+            "dependabot_merge",
+            "staging_promotion",
+            "stale_issue",
+            "github_cache",
+            "sentry_ingest",
+            "stale_issue_gc",
+            "ci_monitor",
+            "security_patch",
+            "code_grooming",
+            "repo_wiki",
+            "diagnostic",
             "corpus_learning",
             "contract_refresh",
             "staging_bisect",
@@ -305,13 +322,24 @@ class TestSystemWorkersEndpoint:
             "flake_tracker",
             "skill_prompt_eval",
             "fake_coverage_auditor",
+            "adr_touchpoint_auditor",
+            "memory_backlog",
             "rc_budget",
             "wiki_rot_detector",
             "trust_fleet_sanity",
-            # Caretaking — daily upstream pricing refresh
+            "label_drift_watcher",
+            "auto_agent_preflight",
+            "sandbox_failure_fixer",
+            "diagram_loop",
             "pricing_refresh",
             "cost_budget_watcher",
-        ]
+            "term_proposer",
+            "term_pruner",
+            "edge_proposer",
+            "entry_evidence",
+            "live_corpus_replay",
+        ]:
+            assert expected in names
         assert all(
             isinstance(w["description"], str) and w["description"]
             for w in data["workers"]
@@ -375,6 +403,22 @@ class TestSystemWorkersEndpoint:
         assert ms["status"] == "ok"
         assert ms["last_run"] == "2026-02-20T10:00:00Z"
         assert ms["details"]["count"] == 7
+
+    @pytest.mark.asyncio
+    async def test_returns_saved_enabled_and_interval_without_orchestrator(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        state.set_disabled_workers({"entry_evidence"})
+        state.set_worker_intervals({"entry_evidence": 7200})
+
+        router = self._make_router(config, event_bus, state, tmp_path, orch=None)
+        endpoint = self._find_endpoint(router, "/api/system/workers")
+        response = await endpoint()
+        data = json.loads(response.body)
+
+        worker = next(w for w in data["workers"] if w["name"] == "entry_evidence")
+        assert worker["enabled"] is False
+        assert worker["interval_seconds"] == 7200
 
 
 class TestMetricsEndpoint:
@@ -591,7 +635,7 @@ class TestSystemWorkersEndpointIntervals:
         assert unsticker["interval_seconds"] == config.pr_unstick_interval
 
     @pytest.mark.asyncio
-    async def test_event_driven_workers_have_no_interval(
+    async def test_event_driven_workers_have_no_interval_except_retrospective(
         self, config, event_bus: EventBus, tmp_path: Path
     ) -> None:
         from orchestrator import HydraFlowOrchestrator
@@ -603,7 +647,7 @@ class TestSystemWorkersEndpointIntervals:
         data = json.loads(response.body)
 
         retro = next(w for w in data["workers"] if w["name"] == "retrospective")
-        assert retro["interval_seconds"] is None
+        assert retro["interval_seconds"] == config.retrospective_interval
 
         ri = next(w for w in data["workers"] if w["name"] == "review_insights")
         assert ri["interval_seconds"] is None

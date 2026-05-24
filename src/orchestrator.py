@@ -168,6 +168,7 @@ class HydraFlowOrchestrator:
             "staging_promotion": svc.staging_promotion_loop,
             "staging_bisect": svc.staging_bisect_loop,
             "stale_issue": svc.stale_issue_loop,
+            "github_cache": svc.github_cache_loop,
             "sentry_ingest": svc.sentry_loop,
             "stale_issue_gc": svc.stale_issue_gc_loop,
             "ci_monitor": svc.ci_monitor_loop,
@@ -196,6 +197,7 @@ class HydraFlowOrchestrator:
             "term_proposer": svc.term_proposer_loop,
             "term_pruner": svc.term_pruner_loop,
             "edge_proposer": svc.edge_proposer_loop,
+            "entry_evidence": svc.entry_evidence_loop,
             "live_corpus_replay": svc.live_corpus_replay_loop,
         }
         self._bg_workers = BGWorkerManager(config, self._state, bg_loop_registry)
@@ -1021,6 +1023,7 @@ class HydraFlowOrchestrator:
             ("term_proposer", self._svc.term_proposer_loop.run),
             ("term_pruner", self._svc.term_pruner_loop.run),
             ("edge_proposer", self._svc.edge_proposer_loop.run),
+            ("entry_evidence", self._svc.entry_evidence_loop.run),
             ("live_corpus_replay", self._svc.live_corpus_replay_loop.run),
         ]
 

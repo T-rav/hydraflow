@@ -27,23 +27,15 @@ SRC = Path(__file__).resolve().parent.parent / "src"
 # These are either non-caretaker pipeline workers, or workers whose intervals
 # are managed through a different mechanism (e.g. not dashboard-editable).
 # ---------------------------------------------------------------------------
-_INTERVAL_BOUNDS_SKIP: set[str] = {
-    "github_cache",
-}
+_INTERVAL_BOUNDS_SKIP: set[str] = set()
 
 # Loops that intentionally aren't in the orchestrator bg_loop_registry
 # (e.g. GitHubCacheLoop is started separately).
-_ORCHESTRATOR_SKIP: set[str] = {
-    "github_cache",
-}
+_ORCHESTRATOR_SKIP: set[str] = set()
 
 # Loops that intentionally aren't in BACKGROUND_WORKERS in constants.js
 # (e.g. internal loops not shown in the dashboard).
-_CONSTANTS_JS_SKIP: set[str] = {
-    "github_cache",
-    "epic_monitor",
-    "runs_gc",
-}
+_CONSTANTS_JS_SKIP: set[str] = set()
 
 
 def _discover_loops() -> dict[str, str]:
@@ -61,17 +53,24 @@ def _discover_loops() -> dict[str, str]:
     # a regex that didn't match would yield zero entries for that loop and
     # the test would pass without enforcing any of the four wiring sites.
     # See PR #8449 (PricingRefreshLoop) for the catch.
-    worker_re = re.compile(r'worker_name\s*=\s*["\']([\w-]+)["\']')
+    worker_re = re.compile(r'worker_name\s*=\s*(?:["\']([\w-]+)["\']|_WORKER_NAME)')
+    worker_const_re = re.compile(r'_WORKER_NAME\s*=\s*["\']([\w-]+)["\']')
 
     for path in loop_files:
         text = path.read_text()
         class_match = class_re.search(text)
         worker_match = worker_re.search(text)
         if class_match and worker_match:
+            raw_worker_name = worker_match.group(1)
+            if raw_worker_name is None:
+                const_match = worker_const_re.search(text)
+                raw_worker_name = const_match.group(1) if const_match else None
+            if raw_worker_name is None:
+                continue
             # Normalise hyphens → underscores so callers can match against
             # the underscore-canonical registry keys regardless of which
             # convention a particular loop adopted in its worker_name.
-            worker_name = worker_match.group(1).replace("-", "_")
+            worker_name = raw_worker_name.replace("-", "_")
             result[worker_name] = class_match.group(1)
 
     return result
@@ -202,7 +201,7 @@ def _parse_loop_factories() -> set[str]:
     text = (SRC / "orchestrator.py").read_text()
     # Match lines like:  ("diagnostic", self._svc.diagnostic_loop.run),
     # or:                ("triage", self._triage_loop),
-    return set(re.findall(r'\(\s*"(\w+)"\s*,\s*self[._]', text))
+    return set(re.findall(r'\(\s*"(\w+)"\s*,\s*self(?:\.|_)', text))
 
 
 class TestLoopFactories:

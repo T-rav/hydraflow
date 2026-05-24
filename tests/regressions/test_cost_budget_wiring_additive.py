@@ -37,7 +37,7 @@ def test_cost_budget_watcher_in_constants_js() -> None:
 
 
 def test_cost_budget_watcher_in_bg_worker_defaults() -> None:
-    text = (SRC / "bg_worker_manager.py").read_text()
+    text = (SRC / "worker_catalog.py").read_text()
     assert '"cost_budget_watcher": 300' in text
 
 
@@ -48,8 +48,7 @@ def test_cost_budget_watcher_in_functional_areas_yaml() -> None:
 
 def test_cost_budget_watcher_in_simplenamespace() -> None:
     text = (
-        Path(__file__).resolve().parents[1]
-        / "orchestrator_integration_utils.py"
+        Path(__file__).resolve().parents[1] / "orchestrator_integration_utils.py"
     ).read_text()
     assert "services.cost_budget_watcher_loop = FakeBackgroundLoop()" in text
 

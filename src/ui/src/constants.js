@@ -252,7 +252,7 @@ export const WORKER_PRESETS = {
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'code_grooming', 'sentry_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'workspace_gc', 'adr_reviewer', 'epic_monitor', 'runs_gc', 'health_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'stale_issue_gc', 'security_patch', 'ci_monitor', 'code_grooming', 'repo_wiki', 'diagnostic', 'sentry_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'sandbox_failure_fixer', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'term_proposer', 'term_pruner', 'edge_proposer', 'entry_evidence'])
 
 /**
  * Default intervals (in seconds) for system workers.
@@ -265,15 +265,19 @@ export const SYSTEM_WORKER_INTERVALS = {
   merge_state_watcher: 600,
   memory_sync: 3600,
   report_issue: 30,
-  worktree_gc: 1800,
+  workspace_gc: 1800,
   adr_reviewer: 86400,
+  health_monitor: 7200,
   dependabot_merge: 3600,
   staging_promotion: 300,
   staging_bisect: 600,
   stale_issue: 86400,
+  stale_issue_gc: 3600,
   security_patch: 21600,
   ci_monitor: 1800,
   code_grooming: 86400,
+  repo_wiki: 3600,
+  diagnostic: 30,
   retrospective: 1800,
   principles_audit: 604800,
   flake_tracker: 14400,
@@ -288,6 +292,7 @@ export const SYSTEM_WORKER_INTERVALS = {
   corpus_learning: 3600,
   live_corpus_replay: 900,
   auto_agent_preflight: 120,
+  sandbox_failure_fixer: 600,
   diagram_loop: 14400,
   pricing_refresh: 86400,
   cost_budget_watcher: 300,
@@ -295,6 +300,11 @@ export const SYSTEM_WORKER_INTERVALS = {
   github_cache: 30,
   runs_gc: 3600,
   label_drift_watcher: 600,
+  sentry_ingest: 600,
+  term_proposer: 14400,
+  term_pruner: 86400,
+  edge_proposer: 86400,
+  entry_evidence: 86400,
 }
 
 /**

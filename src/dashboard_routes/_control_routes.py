@@ -35,6 +35,7 @@ from models import (
 from prompt_telemetry import PromptTelemetry
 from route_types import ControlStatusConfig, ControlStatusResponse, RepoSlugParam
 from update_check import load_cached_update_result
+from worker_catalog import WORKER_DISPLAY_DEFS, default_worker_interval
 
 if TYPE_CHECKING:
     from pr_manager import PRManager
@@ -55,145 +56,10 @@ def _safe_error_message(exc: ValidationError) -> str:
 
 
 # Known workers with human-friendly labels (pipeline loops + background)
-_bg_worker_defs = [
-    (
-        "triage",
-        "Triage",
-        "Classifies freshly discovered issues and routes them into the pipeline.",
-    ),
-    (
-        "plan",
-        "Plan",
-        "Builds implementation plans for triaged issues that are ready to execute.",
-    ),
-    (
-        "implement",
-        "Implement",
-        "Runs coding agents to implement planned issues and open pull requests.",
-    ),
-    (
-        "review",
-        "Review",
-        "Reviews PRs, applies fixes, and merges approved work when checks pass.",
-    ),
-    (
-        "memory_sync",
-        "Memory Manager",
-        "Ingests memory and transcript issues into durable learnings and proposals.",
-    ),
-    (
-        "retrospective",
-        "Retrospective",
-        "Captures post-merge outcomes and identifies recurring delivery patterns.",
-    ),
-    (
-        "review_insights",
-        "Review Insights",
-        "Aggregates recurring review feedback into improvement opportunities.",
-    ),
-    (
-        "pipeline_poller",
-        "Pipeline Poller",
-        "Refreshes live pipeline snapshots for dashboard queue/status rendering.",
-    ),
-    (
-        "pr_unsticker",
-        "PR Unsticker",
-        "Requeues stalled HITL PRs by validating requirements and reopening flow.",
-    ),
-    (
-        "report_issue",
-        "Report Issue",
-        "Processes queued bug reports into GitHub issues via the configured agent.",
-    ),
-    (
-        "adr_reviewer",
-        "ADR Reviewer",
-        "Reviews proposed ADRs via a 3-judge council and routes to accept, reject, or escalate.",
-    ),
-    # --- Trust fleet (ADR-0045) ---
-    (
-        "corpus_learning",
-        "Corpus Learning",
-        "Synthesizes adversarial cases from skill/discover/shape escape signals and opens corpus-update PRs.",
-    ),
-    (
-        "contract_refresh",
-        "Contract Refresh",
-        "Re-records fake-adapter cassettes and opens refresh PRs when committed cassettes drift from live behavior.",
-    ),
-    (
-        "staging_bisect",
-        "Staging Bisect",
-        "Bisects RC red between last-green and current-red; opens auto-revert PRs and watches the next RC.",
-    ),
-    (
-        "principles_audit",
-        "Principles Audit",
-        "Weekly ADR-0044 audit of HydraFlow-self plus managed repos; blocks onboarding on P1–P5 fails.",
-    ),
-    (
-        "flake_tracker",
-        "Flake Tracker",
-        "Detects persistently flaky tests across recent RC runs and files flake-tracker issues.",
-    ),
-    (
-        "skill_prompt_eval",
-        "Skill Prompt Eval",
-        "Weekly adversarial-corpus gate against built-in skills; flags PASS→FAIL regressions.",
-    ),
-    (
-        "fake_coverage_auditor",
-        "Fake Coverage Auditor",
-        "Flags fake-adapter methods without cassettes and scenario helpers nobody calls.",
-    ),
-    (
-        "rc_budget",
-        "RC Budget",
-        "Detects RC wall-clock bloat via rolling-median + spike signals across recent runs.",
-    ),
-    (
-        "wiki_rot_detector",
-        "Wiki Rot Detector",
-        "Scans per-repo wikis for citations whose source code has moved or vanished.",
-    ),
-    (
-        "trust_fleet_sanity",
-        "Trust Fleet Sanity",
-        "Meta-observer — watches the 9 trust loops for stalls, escalation spam, dedup growth, errors, cost spikes.",
-    ),
-    (
-        "pricing_refresh",
-        "Pricing Refresh",
-        "Daily upstream-pricing refresh caretaker — fetches LiteLLM JSON, opens PR on drift; bounds-guarded, always human-reviewed.",
-    ),
-    (
-        "cost_budget_watcher",
-        "Cost Budget Watcher",
-        "Polls rolling-24h LLM spend; disables caretaker loops when daily cap exceeded. Default unlimited.",
-    ),
-]
+_bg_worker_defs = WORKER_DISPLAY_DEFS
 
 # Workers that have independent configurable intervals
-_INTERVAL_WORKERS = {
-    "memory_sync",
-    "pr_unsticker",
-    "pipeline_poller",
-    "report_issue",
-    # Trust fleet (ADR-0045): every loop's interval is operator-tunable.
-    "corpus_learning",
-    "contract_refresh",
-    "staging_bisect",
-    "principles_audit",
-    "flake_tracker",
-    "skill_prompt_eval",
-    "fake_coverage_auditor",
-    "rc_budget",
-    "wiki_rot_detector",
-    "trust_fleet_sanity",
-    "pricing_refresh",
-    "cost_budget_watcher",
-}
+_INTERVAL_WORKERS = set(_INTERVAL_BOUNDS)
 # Pipeline loops share poll_interval (read-only display)
 _PIPELINE_WORKERS = {"triage", "plan", "implement", "review"}
 _WORKER_SOURCE_ALIASES: dict[str, tuple[str, ...]] = {
@@ -517,27 +383,32 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         orch = _get_orch()
         bg_states = orch.get_bg_worker_states() if orch else {}
         persisted_states: dict[str, BackgroundWorkerState] = {}
+        disabled_workers: set[str] = set()
+        saved_intervals: dict[str, int] = {}
         if not orch:
             try:
                 persisted_states = _state.get_bg_worker_states()
+                disabled_workers = _state.get_disabled_workers()
+                saved_intervals = _state.get_worker_intervals()
             except Exception:  # pragma: no cover - defensive guard
                 logger.exception("Failed to load persisted bg worker states")
         inference_by_worker = _build_system_worker_inference_stats()
         workers = []
         for name, label, description in _bg_worker_defs:
-            enabled = orch.is_bg_worker_enabled(name) if orch else True
+            enabled = (
+                orch.is_bg_worker_enabled(name)
+                if orch
+                else name not in disabled_workers
+            )
 
             # Determine interval for this worker
             interval: int | None = None
             if name in _INTERVAL_WORKERS and orch:
                 interval = orch.get_bg_worker_interval(name)
             elif name in _INTERVAL_WORKERS:
-                if name == "memory_sync":
-                    interval = _cfg.memory_sync_interval
-                elif name == "pr_unsticker":
-                    interval = _cfg.pr_unstick_interval
-                elif name == "pipeline_poller":
-                    interval = 5
+                interval = saved_intervals.get(name) or default_worker_interval(
+                    _cfg, name
+                )
             elif name in _PIPELINE_WORKERS:
                 interval = _cfg.poll_interval
 

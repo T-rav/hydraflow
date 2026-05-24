@@ -479,6 +479,7 @@ def build_scripted_services(
     services.staging_promotion_loop = FakeBackgroundLoop()
     services.staging_bisect_loop = FakeBackgroundLoop()
     services.stale_issue_loop = FakeBackgroundLoop()
+    services.github_cache_loop = FakeBackgroundLoop()
     services.sentry_loop = FakeBackgroundLoop()
     services.stale_issue_gc_loop = FakeBackgroundLoop()
     services.ci_monitor_loop = FakeBackgroundLoop()
@@ -508,6 +509,7 @@ def build_scripted_services(
     services.term_proposer_loop = FakeBackgroundLoop()
     services.term_pruner_loop = FakeBackgroundLoop()
     services.edge_proposer_loop = FakeBackgroundLoop()
+    services.entry_evidence_loop = FakeBackgroundLoop()
     services.live_corpus_replay_loop = None
     services.repo_wiki_store = SimpleNamespace(
         is_ingested=MagicMock(return_value=False),
