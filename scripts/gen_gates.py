@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 from scripts.gates.contract import Contract, load_gates
+from scripts.gates.coverage import unsatisfied_dimensions
 from scripts.gates.docs_table import render_docs_table
 from scripts.gates.resolve import render_ruleset
 from scripts.gates.validate import validate
@@ -59,6 +60,12 @@ def main() -> int:
 
     contract = load_gates(CONTRACT)
     violations = validate(contract, index_workflow_jobs(WORKFLOWS))
+    for branch in contract.branches:
+        for dim in unsatisfied_dimensions(contract, branch):
+            violations.append(
+                f"branch {branch!r}: dimension {dim!r} has no bindable active gate "
+                f"for the [repo] profile (language/capability mismatch)"
+            )
     artifacts = _artifacts(contract)
 
     if args.check:

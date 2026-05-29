@@ -5,9 +5,15 @@
 # Regenerate with `make gen-gates`; CI fails on drift via `make gen-gates-check`.
 # See docs/adr/<declarative-gate-contract> and ADR-0042 (two-tier branch model).
 #
-# Each [[gate]] is one (dimension, binding) pair. In this slice the binding is
-# fixed (python + GHAS, as today); `languages`/`requires_capability` are carried
-# for the capability-aware resolution that a later slice adds, not yet consumed.
+# Each [[gate]] is one (dimension, binding) pair. Resolution filters gates by
+# the [repo] profile below: a gate applies only when its `languages` intersect
+# the repo's and its `requires_capability` are all present. For a new repo this
+# profile is populated by detect_languages + detect_capabilities at init time.
+
+# This repo: Python with GitHub Advanced Security (CodeQL available).
+[repo]
+languages = ["python"]
+capabilities = ["ghas"]
 
 [branch.main]
 allowed_merge_methods = ["merge"]

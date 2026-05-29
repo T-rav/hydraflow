@@ -4,17 +4,32 @@ from __future__ import annotations
 
 from typing import Any
 
-from scripts.gates.contract import Contract
+from scripts.gates.contract import Contract, Gate, RepoProfile
 
 _REF = {"main": "~DEFAULT_BRANCH", "staging": "refs/heads/staging"}
 
 
+def gate_applies(gate: Gate, repo: RepoProfile | None) -> bool:
+    """Whether ``gate`` is bindable for ``repo`` (language + capability match).
+
+    ``repo is None`` means "do not filter" (the pre-profile behavior). A gate
+    with an empty ``languages`` applies to any language.
+    """
+    if repo is None:
+        return True
+    if gate.languages and not (set(gate.languages) & set(repo.languages)):
+        return False
+    return set(gate.requires_capability) <= set(repo.capabilities)
+
+
 def resolve_contexts(contract: Contract, branch: str) -> list[str]:
-    """Active gate contexts required on ``branch``, in contract order."""
+    """Active gate contexts required on ``branch``, bindable for this repo."""
     return [
         g.name
         for g in contract.gates
-        if g.status == "active" and branch in g.required_on
+        if g.status == "active"
+        and branch in g.required_on
+        and gate_applies(g, contract.repo)
     ]
 
 
@@ -53,7 +68,9 @@ def render_ruleset(contract: Contract, branch: str) -> dict[str, Any]:
                 "parameters": {"severity": env.code_quality_severity},
             }
         )
-    if env.code_scanning:
+    repo = contract.repo
+    ghas = repo is None or "ghas" in repo.capabilities
+    if env.code_scanning and ghas:
         rules.append(
             {
                 "type": "code_scanning",
