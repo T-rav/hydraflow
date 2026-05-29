@@ -91,6 +91,18 @@ def _existing_rulesets(repo: str) -> dict[str, dict[str, Any]]:
     return out
 
 
+def _list_branch_names(repo: str) -> set[str]:
+    """All branch names for ``repo``, following pagination.
+
+    ``gh api --paginate`` walks every page; ``--jq '.[].name'`` emits one name
+    per line across all pages. Without pagination, a repo with more than one
+    page of branches (30 per page by default) reads ``staging`` as missing when
+    it sits past the first page.
+    """
+    out = _gh("api", "--paginate", f"/repos/{repo}/branches", "--jq", ".[].name")
+    return {line for line in out.splitlines() if line}
+
+
 def _diff(canonical: dict[str, Any], live: dict[str, Any]) -> list[str]:
     """Return human-readable lines of differences (empty list = clean)."""
     diffs: list[str] = []
@@ -154,11 +166,11 @@ def _diff(canonical: dict[str, Any], live: dict[str, Any]) -> list[str]:
 
 def _ensure_staging_branch(repo: str, default_branch: str, *, apply: bool) -> str:
     """Return action description; create the branch if --apply and missing."""
-    branches = json.loads(_gh("api", f"/repos/{repo}/branches"))
-    names = {b["name"] for b in branches}
+    names = _list_branch_names(repo)
     if "staging" in names:
         return "  staging branch: already present, no change"
-    head_sha = next(b["commit"]["sha"] for b in branches if b["name"] == default_branch)
+    head = json.loads(_gh("api", f"/repos/{repo}/branches/{default_branch}"))
+    head_sha = head["commit"]["sha"]
     if not apply:
         return f"  staging branch: WOULD create from {default_branch}@{head_sha[:8]}"
     _gh(
@@ -245,7 +257,7 @@ def _audit(
         drift = True
     else:
         print("  ✓ allow_auto_merge=true")
-    branches = {b["name"] for b in json.loads(_gh("api", f"/repos/{repo}/branches"))}
+    branches = _list_branch_names(repo)
     if "staging" not in branches:
         print("  ✗ staging branch missing")
         drift = True
