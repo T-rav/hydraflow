@@ -92,6 +92,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0079 | `src.adr_reviewer`, `src.adr_reviewer_loop` |
 | ADR-0080 | `src.epic`, `src.epic_monitor_loop` |
 | ADR-0081 | `src.epic`, `src.epic_sweeper_loop` |
+| ADR-0082 | — |
 
 ## Module → ADRs
 
