@@ -306,6 +306,17 @@ audit-json:
 	@cd $(HYDRAFLOW_DIR) && $(UV) python -m scripts.hydraflow_audit $(or $(DIR),.) --json
 
 # --------------------------------------------------------------------------
+# Branch-protection gates — generate rulesets + README table from gates.toml.
+#   make gen-gates                         # regenerate artifacts
+#   make gen-gates-check                   # CI: fail on drift (no writes)
+# --------------------------------------------------------------------------
+gen-gates:
+	@cd $(HYDRAFLOW_DIR) && $(UV) python -m scripts.gen_gates
+
+gen-gates-check:
+	@cd $(HYDRAFLOW_DIR) && $(UV) python -m scripts.gen_gates --check
+
+# --------------------------------------------------------------------------
 # Adoption plan — reads the audit report, emits a superpowers-chained prompt.
 #   make init                              # stdout, current dir, mode auto-detected
 #   make init DIR=../new-repo              # target a different repo
