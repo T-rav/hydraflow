@@ -57,6 +57,22 @@ STAGE_REVIEW = IssueStoreStage.REVIEW
 STAGE_HITL = IssueStoreStage.HITL
 STAGE_MERGED = IssueStoreStage.MERGED
 
+# Backend stage keys → frontend stage names.  Lives here (not in
+# dashboard_routes/_common.py) so the routing layer imports it FROM issue_store
+# rather than the reverse — avoiding a layering inversion.  Keys are
+# IssueStoreStage values; mirrors GET /api/pipeline's mapping exactly so WS
+# pushes and REST polls are byte-identical (modulo seq).
+STAGE_NAME_MAP: dict[str, str] = {
+    IssueStoreStage.FIND: "triage",
+    IssueStoreStage.DISCOVER: "discover",
+    IssueStoreStage.SHAPE: "shape",
+    IssueStoreStage.PLAN: "plan",
+    IssueStoreStage.READY: "implement",
+    IssueStoreStage.REVIEW: "review",
+    IssueStoreStage.HITL: "hitl",
+    IssueStoreStage.MERGED: "merged",
+}
+
 # Priority order — higher index = further along in the pipeline.
 # When an issue has multiple HydraFlow labels, it is routed to the
 # most advanced stage (highest priority).
@@ -91,6 +107,18 @@ class IssueStore:
         # Strong refs for fire-and-forget publish tasks (#6513) so GC doesn't
         # collect the Task before it completes.
         self._pending_publish: set[asyncio.Task[None]] = set()
+
+        # Real-time PIPELINE_SNAPSHOT push (PR3): coalesce the QUEUE_UPDATE
+        # storm into a single debounced full-snapshot emit. seq is a monotonic
+        # emit counter (per-instance; resets on restart) — used for emit
+        # observability and the coalescing tests, NOT (yet) a frontend guard:
+        # ordering relies on EventBus FIFO delivery + full-snapshot idempotency,
+        # with the REST poll as the reconnect re-sync. A seq-based stale-frame
+        # guard is deferred to the reconnect-resilience work (WS-RT PR5).
+        self._snapshot_seq = 0
+        self._snapshot_dirty = False
+        self._snapshot_flush_task: asyncio.Task[None] | None = None
+        self._snapshot_debounce_s = 0.1
 
         # Per-stage queues (FIFO)
         self._queues: dict[IssueStoreStage, deque[Task]] = {
@@ -218,6 +246,9 @@ class IssueStore:
                 data=stats.model_dump(),
             )
         )
+        # Re-routing may have changed pipeline membership — schedule a
+        # coalesced full-snapshot push for the dashboard board (PR3).
+        self._mark_pipeline_dirty()
 
     def _compute_stage_map(
         self, tasks: list[Task]
@@ -558,6 +589,10 @@ class IssueStore:
         """
         for tid in issue_numbers:
             self._in_flight.pop(tid, None)
+        # Releasing in-flight items changes pipeline membership but was
+        # previously silent — schedule a coalesced snapshot so the board
+        # reflects the release in real time (PR3).
+        self._mark_pipeline_dirty()
 
     def clear_active(self) -> None:
         """Clear all active issue tracking (used during reset)."""
@@ -584,6 +619,64 @@ class IssueStore:
         self._pending_publish.add(task)
         task.add_done_callback(self._pending_publish.discard)
         task.add_done_callback(_log_publish_failure)
+
+        # A queue update implies the pipeline membership changed — schedule a
+        # coalesced full-snapshot push for the dashboard board (PR3).
+        self._mark_pipeline_dirty()
+
+    def _mark_pipeline_dirty(self) -> None:
+        """Mark the pipeline dirty and single-flight-schedule a snapshot flush.
+
+        No-op when there is no running event loop (mirrors
+        ``_publish_queue_update_nowait``), so synchronous test setup and
+        non-async callers don't raise.  A single in-flight flush task coalesces
+        every mutation that lands within the debounce window into one emit.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._snapshot_dirty = True
+        if (
+            self._snapshot_flush_task is not None
+            and not self._snapshot_flush_task.done()
+        ):
+            return
+        task = loop.create_task(self._flush_pipeline_snapshot())
+        self._snapshot_flush_task = task
+        self._pending_publish.add(task)
+        task.add_done_callback(self._pending_publish.discard)
+        task.add_done_callback(_log_publish_failure)
+
+    async def _flush_pipeline_snapshot(self) -> None:
+        """Debounce, then publish full PIPELINE_SNAPSHOTs until quiescent.
+
+        Loops rather than publishing once: a mutation that lands DURING the
+        ``await self._bus.publish(...)`` sets ``_snapshot_dirty`` but cannot
+        re-arm a flush (``_mark_pipeline_dirty`` sees this task is not yet
+        ``.done()`` and returns early), so a single-shot flush would silently
+        drop that final state until some unrelated future mutation — an
+        indefinite-staleness tail on a quiescent pipeline. Re-checking the
+        dirty flag after each publish closes that lost-update window. Dirty is
+        cleared BEFORE the (synchronous, no-await) snapshot build, so a mutation
+        arriving during the publish re-dirties and is captured next iteration.
+        """
+        while True:
+            await asyncio.sleep(self._snapshot_debounce_s)
+            if not self._snapshot_dirty:
+                return
+            self._snapshot_dirty = False
+            self._snapshot_seq += 1
+            stages = {
+                STAGE_NAME_MAP.get(k, k): v
+                for k, v in self.get_pipeline_snapshot().items()
+            }
+            await self._bus.publish(
+                HydraFlowEvent(
+                    type=EventType.PIPELINE_SNAPSHOT,
+                    data={"seq": self._snapshot_seq, "stages": stages},
+                )
+            )
 
     # ------------------------------------------------------------------
     # Stats

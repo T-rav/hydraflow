@@ -624,6 +624,141 @@ class TestEventPublishing:
         assert after_events[-1].data["queue_depth"]["plan"] == 1
 
 
+# ── Pipeline snapshot push (PR3) ─────────────────────────────────────
+
+
+async def _drain_snapshot_flush(store: IssueStore) -> None:
+    """Await the coalesced snapshot flush task (debounce + publish)."""
+    task = store._snapshot_flush_task
+    if task is not None:
+        await task
+
+
+def _snapshots(event_bus: EventBus):
+    return [e for e in event_bus.get_history() if e.type == EventType.PIPELINE_SNAPSHOT]
+
+
+class TestPipelineSnapshotPush:
+    """PIPELINE_SNAPSHOT events push a full pipeline snapshot over the bus."""
+
+    @pytest.mark.asyncio
+    async def test_transition_publishes_pipeline_snapshot(self, event_bus) -> None:
+        store = _make_store(event_bus=event_bus)
+        issue = TaskFactory.create(id=101, tags=["hydraflow-find"])
+        store._route_issues([issue])
+
+        store.enqueue_transition(issue, "plan")
+        await _drain_snapshot_flush(store)
+
+        assert len(_snapshots(event_bus)) >= 1
+
+    @pytest.mark.asyncio
+    async def test_payload_shape_uses_frontend_stage_keys(self, event_bus) -> None:
+        store = _make_store(event_bus=event_bus)
+        issue = TaskFactory.create(id=202, tags=["hydraflow-find"])
+        store._route_issues([issue])
+
+        store.enqueue_transition(issue, "ready")
+        await _drain_snapshot_flush(store)
+
+        snap = _snapshots(event_bus)[-1]
+        assert isinstance(snap.data["seq"], int)
+        stages = snap.data["stages"]
+        assert isinstance(stages, dict)
+        # Frontend names, not backend IssueStoreStage values.
+        assert "implement" in stages
+        assert "ready" not in stages
+        entry = stages["implement"][0]
+        assert set(entry).issuperset({"issue_number", "title", "url", "status"})
+
+    @pytest.mark.asyncio
+    async def test_rapid_mutations_coalesce_into_one_snapshot(self, event_bus) -> None:
+        store = _make_store(event_bus=event_bus)
+        issues = [
+            TaskFactory.create(id=300 + i, tags=["hydraflow-find"]) for i in range(5)
+        ]
+        store._route_issues(issues)
+
+        # Five mutations within one debounce window → exactly one snapshot.
+        for issue in issues:
+            store.enqueue_transition(issue, "plan")
+        await _drain_snapshot_flush(store)
+
+        first = _snapshots(event_bus)
+        assert len(first) == 1
+        assert first[0].data["seq"] == 1
+
+        # A sixth mutation after the window → a second snapshot, seq increases.
+        store.enqueue_transition(issues[0], "ready")
+        await _drain_snapshot_flush(store)
+
+        second = _snapshots(event_bus)
+        assert len(second) == 2
+        assert second[1].data["seq"] == 2
+        assert second[1].data["seq"] > first[0].data["seq"]
+
+    def test_mark_dirty_without_running_loop_is_noop(self) -> None:
+        store = _make_store()
+        # No running loop: must not raise and must not publish.
+        store._mark_pipeline_dirty()
+        assert store._snapshot_flush_task is None
+        assert _snapshots(store._bus) == []  # type: ignore[attr-defined]
+
+    @pytest.mark.asyncio
+    async def test_release_in_flight_emits_snapshot(self, event_bus) -> None:
+        store = _make_store(event_bus=event_bus)
+        store._in_flight[404] = STAGE_READY
+
+        store.release_in_flight({404})
+        await _drain_snapshot_flush(store)
+
+        assert len(_snapshots(event_bus)) >= 1
+
+    @pytest.mark.asyncio
+    async def test_mutation_during_publish_emits_second_snapshot(self) -> None:
+        # S1 regression: a mutation landing DURING the publish-await must not be
+        # lost. _mark_pipeline_dirty() sees the flush task is not yet .done() and
+        # returns after only setting _snapshot_dirty, so a single-shot flush would
+        # silently drop the final state until some unrelated future mutation. The
+        # re-check loop in _flush_pipeline_snapshot closes that window.
+        class _MidPublishMutatingBus(EventBus):
+            def __init__(self) -> None:
+                super().__init__()
+                self.store: IssueStore | None = None
+                self._mutated = False
+
+            async def publish(self, event) -> None:
+                await super().publish(event)
+                # Simulate a membership mutation racing the FIRST snapshot's
+                # publish-await: re-dirty the store from inside publish(), which
+                # is exactly the state-loss window the re-check loop guards.
+                if (
+                    event.type == EventType.PIPELINE_SNAPSHOT
+                    and not self._mutated
+                    and self.store is not None
+                ):
+                    self._mutated = True
+                    self.store._mark_pipeline_dirty()
+
+        bus = _MidPublishMutatingBus()
+        store = _make_store(event_bus=bus)
+        bus.store = store
+        issue = TaskFactory.create(id=505, tags=["hydraflow-find"])
+        store._route_issues([issue])
+
+        store.enqueue_transition(issue, "plan")
+        await _drain_snapshot_flush(store)
+
+        snaps = _snapshots(bus)
+        assert len(snaps) >= 2, (
+            "mid-publish mutation was lost; re-check loop did not re-emit"
+        )
+        seqs = [s.data["seq"] for s in snaps]
+        assert seqs == sorted(seqs) and len(set(seqs)) == len(seqs), (
+            f"snapshot seq must be strictly increasing; got {seqs}"
+        )
+
+
 # ── Lifecycle ────────────────────────────────────────────────────────
 
 

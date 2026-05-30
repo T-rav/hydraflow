@@ -71,6 +71,7 @@ class EventType(StrEnum):
     METRICS_UPDATE = "metrics_update"
     BACKGROUND_WORKER_STATUS = "background_worker_status"
     QUEUE_UPDATE = "queue_update"
+    PIPELINE_SNAPSHOT = "pipeline_snapshot"
     SYSTEM_ALERT = "system_alert"
     VERIFICATION_JUDGE = "verification_judge"
     TRANSCRIPT_SUMMARY = "transcript_summary"

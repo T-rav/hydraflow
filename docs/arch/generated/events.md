@@ -32,6 +32,7 @@ Every `EventType` published or subscribed in `src/`. Events with no subscribers 
 | **METRICS_UPDATE** ⚠️ | `src.metrics_manager:MetricsManager.sync` | — |
 | **ORCHESTRATOR_STATUS** ⚠️ | `src.dashboard_routes._control_routes:register.start_orchestrator`<br>`src.orchestrator:HydraFlowOrchestrator._publish_status` | — |
 | **PHASE_CHANGE** ⚠️ | `src.server:_run_with_dashboard` | — |
+| **PIPELINE_SNAPSHOT** ⚠️ | `src.issue_store:IssueStore._flush_pipeline_snapshot` | — |
 | **PIPELINE_STATS** ⚠️ | `src.orchestrator:HydraFlowOrchestrator.emit_pipeline_stats` | — |
 | **PLANNER_UPDATE** ⚠️ | `src.planner:PlannerRunner._emit_status` | — |
 | **PR_CREATED** ⚠️ | `src.pr_manager:PRManager.create_pr`<br>`src.pr_manager:PRManager.create_promotion_pr` | — |
@@ -52,4 +53,4 @@ Every `EventType` published or subscribed in `src/`. Events with no subscribers 
 | **VISUAL_GATE** ⚠️ | `src.post_merge_handler:PostMergeHandler._run_visual_gate`<br>`src.review_phase._phase:ReviewPhase._emit_visual_gate_telemetry`<br>`src.review_phase._phase:ReviewPhase.check_visual_gate` | — |
 | **WORKER_UPDATE** ⚠️ | `src.agent:AgentRunner._emit_status` | — |
 
-_Regenerated from commit `40473a4` on 2026-05-30 11:42 UTC. Source last changed at `40473a4`. Status: 🟢 fresh._
+_Regenerated from commit `5ada680` on 2026-05-30 21:52 UTC. Source last changed at `5ada680`. Status: 🟢 fresh._
