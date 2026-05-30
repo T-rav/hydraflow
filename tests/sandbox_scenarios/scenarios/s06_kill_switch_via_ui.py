@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from mockworld.seed import MockWorldSeed
 
 NAME = "s06_kill_switch_via_ui"
@@ -17,11 +15,18 @@ def seed() -> MockWorldSeed:
 
 
 async def assert_outcome(api, page) -> None:
-    # Skipped 2026-05-19: /api/state no longer exposes a `worker_health`
-    # key — that field was renamed/moved during the bg-worker-manager
-    # refactor. The kill-switch contract (ADR-0049) is exercised by
-    # `tests/test_kill_switch_*.py` unit tests; this end-to-end UI
-    # scenario needs its `/api/state` probe updated to the current
-    # shape before it can re-engage. Filing as follow-up rather than
-    # gating every rc/* PR.
-    pytest.skip("worker_health field removed from /api/state — needs probe update")
+    await page.goto("/")
+    await page.click("text=System")
+
+    card = page.locator("[data-testid='worker-card-dependabot_merge']")
+    await card.wait_for(timeout=10_000)
+    await card.get_by_role("button", name="On").click()
+
+    state = await api.wait_until(
+        "/api/state",
+        lambda payload: "dependabot_merge" in payload.get("disabled_workers", []),
+        timeout=30.0,
+    )
+    assert "dependabot_merge" in state["disabled_workers"]
+
+    await card.get_by_role("button", name="Off").wait_for(timeout=10_000)

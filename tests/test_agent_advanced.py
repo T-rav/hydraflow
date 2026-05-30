@@ -344,7 +344,7 @@ class TestBuildPromptFallbackAndTruncation:
 
 
 class TestBuildPromptFencesUntrustedText:
-    """ADR-0082 trust boundary: attacker-controlled issue text is fenced, not raw."""
+    """ADR-0084 trust boundary: attacker-controlled issue text is fenced, not raw."""
 
     @pytest.mark.asyncio
     async def test_title_and_body_are_fenced_with_preamble(

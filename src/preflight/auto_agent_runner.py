@@ -4,7 +4,7 @@ Spec §3.1 / ADR-0050. Inherits BaseSubprocessRunner[PreflightSpawn] for
 the load-bearing conventions (auth-retry, reraise_on_credit_or_bug,
 telemetry, never-raises). Auto-agent-specific concerns:
 
-- restricted-mode hardening (ADR-0082): the auto-agent runs on
+- restricted-mode hardening (ADR-0084): the auto-agent runs on
   attacker-reachable input (issue body/comments, sentry, wiki), so its
   command is built with ``restricted=True`` by default — claude drops
   ``bypassPermissions`` for ``acceptEdits`` + an explicit tool allowlist and
@@ -32,7 +32,7 @@ from runners.base_subprocess_runner import (
 logger = logging.getLogger("hydraflow.preflight.auto_agent_runner")
 
 
-# Spec §5.2 / ADR-0082 — tools the auto-agent must NOT use.
+# Spec §5.2 / ADR-0084 — tools the auto-agent must NOT use.
 #
 # `WebFetch` (and, in restricted mode, `WebSearch`) are disabled because the
 # auto-agent should reason from the context the loop gathered (wiki + sentry +
@@ -55,7 +55,7 @@ class AutoAgentRunner(BaseSubprocessRunner[PreflightSpawn]):
 
     def _build_command(self, prompt: str, worktree: Path) -> list[str]:
         # The auto-agent operates on attacker-reachable input, so it MUST be
-        # hardened by default (ADR-0082): restricted=True drops bypassPermissions
+        # hardened by default (ADR-0084): restricted=True drops bypassPermissions
         # for acceptEdits + a tool allowlist (claude) / the network-blocked
         # workspace-write sandbox (codex). agent_unrestricted_tools is the
         # operator escape hatch back to the legacy unrestricted mode.
@@ -80,7 +80,7 @@ class AutoAgentRunner(BaseSubprocessRunner[PreflightSpawn]):
         # post-hoc CI restrain egress. Warn so the operator knows.
         if self._config.implementation_tool not in ("claude", "codex"):
             logger.warning(
-                "auto-agent: restricted-mode tool hardening (ADR-0082) is only "
+                "auto-agent: restricted-mode tool hardening (ADR-0084) is only "
                 "CLI-enforced for the claude/codex backends; current "
                 "implementation_tool=%s — egress restriction is honor-system + "
                 "post-hoc CI for this run",

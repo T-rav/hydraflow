@@ -133,8 +133,11 @@ def _build_retrospective(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 def _build_adr_reviewer(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from adr_reviewer_loop import ADRReviewerLoop  # noqa: PLC0415
 
-    adr_reviewer = ports.get("adr_reviewer") or MagicMock()
-    ports.setdefault("adr_reviewer", adr_reviewer)
+    adr_reviewer = ports.get("adr_reviewer")
+    if adr_reviewer is None:
+        adr_reviewer = MagicMock()
+        adr_reviewer.review_proposed_adrs = AsyncMock(return_value={"reviewed": 0})
+        ports["adr_reviewer"] = adr_reviewer
     return ADRReviewerLoop(config=config, adr_reviewer=adr_reviewer, deps=deps)
 
 
@@ -200,10 +203,17 @@ def _build_report_issue(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 def _build_epic_sweeper(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from epic_sweeper_loop import EpicSweeperLoop  # noqa: PLC0415
 
-    fetcher = ports.get("issue_fetcher") or MagicMock()
-    state = ports.get("epic_sweeper_state") or MagicMock()
-    ports.setdefault("issue_fetcher", fetcher)
-    ports.setdefault("epic_sweeper_state", state)
+    fetcher = ports.get("issue_fetcher")
+    if fetcher is None:
+        fetcher = MagicMock()
+        fetcher.fetch_issues_by_labels = AsyncMock(return_value=[])
+        fetcher.fetch_issue_by_number = AsyncMock(return_value=None)
+        ports["issue_fetcher"] = fetcher
+    state = ports.get("epic_sweeper_state")
+    if state is None:
+        state = MagicMock()
+        state.get_epic_state.return_value = None
+        ports["epic_sweeper_state"] = state
     return EpicSweeperLoop(
         config=config,
         fetcher=fetcher,
@@ -237,8 +247,13 @@ def _build_stale_issue(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 def _build_epic_monitor(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from epic_monitor_loop import EpicMonitorLoop  # noqa: PLC0415
 
-    epic_manager = ports.get("epic_manager") or MagicMock()
-    ports.setdefault("epic_manager", epic_manager)
+    epic_manager = ports.get("epic_manager")
+    if epic_manager is None:
+        epic_manager = MagicMock()
+        epic_manager.check_stale_epics = AsyncMock(return_value=[])
+        epic_manager.refresh_cache = AsyncMock(return_value=None)
+        epic_manager.get_all_progress.return_value = {}
+        ports["epic_manager"] = epic_manager
     return EpicMonitorLoop(config=config, epic_manager=epic_manager, deps=deps)
 
 
@@ -591,6 +606,45 @@ def _build_adr_touchpoint_auditor(ports: dict[str, Any], config: Any, deps: Any)
         loop._reconcile_closed_escalations = reconcile  # type: ignore[method-assign]
 
     return loop
+
+
+def _build_branch_protection_auditor(
+    ports: dict[str, Any], config: Any, deps: Any
+) -> Any:
+    """Build BranchProtectionAuditorLoop for scenarios (ADR-0082).
+
+    Tests pre-seed:
+    * ``branch_protection_audit`` → an async auditor returning an ``AuditReport``
+      (replaces the gh-backed live-vs-canonical audit).
+
+    ``dedup`` defaults to a clean-slate MagicMock; override via
+    ``branch_protection_dedup``.
+    """
+    from branch_protection_audit import AuditReport  # noqa: PLC0415
+    from branch_protection_auditor_loop import (  # noqa: PLC0415
+        BranchProtectionAuditorLoop,
+    )
+
+    dedup = ports.get("branch_protection_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["branch_protection_dedup"] = dedup
+
+    auditor = ports.get("branch_protection_audit")
+    if auditor is None:
+        auditor = AsyncMock(return_value=AuditReport(repo="o/r", drifts=[]))
+        ports["branch_protection_audit"] = auditor
+
+    pr_manager = ports.get("pr_manager") or ports["github"]
+
+    return BranchProtectionAuditorLoop(
+        config=config,
+        pr_manager=pr_manager,
+        dedup=dedup,
+        deps=deps,
+        auditor=auditor,
+    )
 
 
 def _build_memory_backlog(ports: dict[str, Any], config: Any, deps: Any) -> Any:
@@ -1257,6 +1311,7 @@ def _build_triage_retry(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 _BUILDERS: dict[str, Any] = {
     # phase 1
     "ci_monitor": _build_ci_monitor,
+    "branch_protection_auditor": _build_branch_protection_auditor,
     "stale_issue_gc": _build_stale_issue_gc,
     "dependabot_merge": _build_dependabot_merge,
     "pr_unsticker": _build_pr_unsticker,

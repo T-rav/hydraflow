@@ -92,7 +92,9 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0079 | `src.adr_reviewer`, `src.adr_reviewer_loop` |
 | ADR-0080 | `src.epic`, `src.epic_monitor_loop` |
 | ADR-0081 | `src.epic`, `src.epic_sweeper_loop` |
-| ADR-0082 | `src.agent`, `src.preflight.runner`, `src.untrusted_text` |
+| ADR-0082 | `src.branch_protection_audit`, `src.branch_protection_auditor_loop` |
+| ADR-0083 | — |
+| ADR-0084 | `src.agent`, `src.preflight.runner`, `src.untrusted_text` |
 
 ## Module → ADRs
 
@@ -105,13 +107,15 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.adr_touchpoint_auditor_loop` | ADR-0056 |
 | `src.adversarial_labels` | ADR-0064 |
 | `src.adversarial_retry_loop` | ADR-0064 |
-| `src.agent` | ADR-0024, ADR-0027, ADR-0066, ADR-0082 |
+| `src.agent` | ADR-0024, ADR-0027, ADR-0066, ADR-0084 |
 | `src.agent_cli` | ADR-0004 |
 | `src.assumption_surfacer` | ADR-0064 |
 | `src.auto_agent_preflight_loop` | ADR-0050, ADR-0063 |
 | `src.base_background_loop` | ADR-0049, ADR-0055 |
 | `src.base_runner` | ADR-0004, ADR-0032, ADR-0055, ADR-0066 |
 | `src.bg_worker_manager` | ADR-0049 |
+| `src.branch_protection_audit` | ADR-0082 |
+| `src.branch_protection_auditor_loop` | ADR-0082 |
 | `src.caching_issue_store` | ADR-0041 |
 | `src.cli` | ADR-0036 |
 | `src.code_grooming_loop` | ADR-0065 |
@@ -181,7 +185,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.preflight.auto_agent_runner` | ADR-0050 |
 | `src.preflight.context` | ADR-0050 |
 | `src.preflight.decision` | ADR-0050 |
-| `src.preflight.runner` | ADR-0050, ADR-0082 |
+| `src.preflight.runner` | ADR-0050, ADR-0084 |
 | `src.pricing_refresh_diff` | ADR-0078 |
 | `src.pricing_refresh_loop` | ADR-0078 |
 | `src.principles_audit_loop` | ADR-0045 |
@@ -234,7 +238,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.triage_phase` | ADR-0014, ADR-0017, ADR-0031, ADR-0039, ADR-0063 |
 | `src.trust_fleet_sanity_loop` | ADR-0045, ADR-0046 |
 | `src.ubiquitous_language` | ADR-0054, ADR-0057, ADR-0058, ADR-0059 |
-| `src.untrusted_text` | ADR-0082 |
+| `src.untrusted_text` | ADR-0084 |
 | `src.visual_validation` | ADR-0015 |
 | `src.wiki_carryover` | ADR-0064 |
 | `src.wiki_compiler` | ADR-0032 |
@@ -243,4 +247,4 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.workspace_gc_loop` | ADR-0069 |
 | `src.worktree` | ADR-0003, ADR-0009, ADR-0010 |
 
-_Regenerated from commit `83c941d` on 2026-05-30 05:40 UTC. Source last changed at `83c941d`. Status: 🟢 fresh._
+_Regenerated from commit `78b3aa1` on 2026-05-30 11:19 UTC. Source last changed at `78b3aa1`. Status: 🟢 fresh._

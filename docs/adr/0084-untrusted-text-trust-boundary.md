@@ -1,4 +1,4 @@
-# ADR-0082 — Untrusted-text trust boundary for agent prompts
+# ADR-0084 — Untrusted-text trust boundary for agent prompts
 
 **Status:** Accepted
 **Date:** 2026-05-29

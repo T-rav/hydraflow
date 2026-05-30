@@ -7,7 +7,7 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test/setup.js'],
-    // e2e/*.spec.js files run under Playwright (see `npm run screenshot`),
+    // Browser scenario specs run under Playwright via `make scenario-browser`,
     // never via vitest. Expanding this glob if we add subdirs is intentional.
     exclude: ['e2e/**/*.spec.js', 'node_modules/**'],
   },

@@ -37,7 +37,7 @@ const mockBgWorkers = [
   { name: 'plan', status: 'ok', enabled: true, last_run: null, details: {} },
   { name: 'implement', status: 'ok', enabled: true, last_run: null, details: {} },
   { name: 'review', status: 'ok', enabled: true, last_run: null, details: {} },
-  { name: 'memory_sync', status: 'ok', enabled: true, last_run: new Date().toISOString(), details: { item_count: 12, digest_chars: 2400 } },
+  { name: 'pr_unsticker', status: 'ok', enabled: true, last_run: new Date().toISOString(), details: { item_count: 12, digest_chars: 2400 } },
   { name: 'retrospective', status: 'error', enabled: true, last_run: '2026-02-20T10:28:00Z', details: { last_issue: 42 } },
   { name: 'health_monitor', status: 'ok', enabled: true, last_run: '2026-02-20T10:25:00Z', details: {} },
   { name: 'dependabot_merge', status: 'ok', enabled: false, last_run: null, details: {} },
@@ -102,7 +102,7 @@ describe('SystemPanel', () => {
     it('shows correct status dot color for ok workers when orchestrator running', () => {
       mockUseHydraFlow.mockReturnValue(defaultMockContext({ orchestratorStatus: 'running' }))
       render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
-      const dot = screen.getByTestId('dot-memory_sync')
+      const dot = screen.getByTestId('dot-pr_unsticker')
       expect(dot.style.background).toBe('var(--green)')
     })
 
@@ -137,7 +137,7 @@ describe('SystemPanel', () => {
         orchestratorStatus: 'running',
       }))
       render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
-      const okDot = screen.getByTestId('dot-memory_sync')
+      const okDot = screen.getByTestId('dot-pr_unsticker')
       expect(okDot.style.background).toBe('var(--green)')
       const errDot = screen.getByTestId('dot-retrospective')
       expect(errDot.style.background).toBe('var(--red)')
@@ -173,7 +173,7 @@ describe('SystemPanel', () => {
 
     it('shows inference/pruning details from worker payloads', () => {
       const workers = mockBgWorkers.map(worker => (
-        worker.name === 'memory_sync'
+        worker.name === 'pr_unsticker'
           ? {
               ...worker,
               details: {
@@ -205,8 +205,8 @@ describe('SystemPanel', () => {
     it('shows system badge on system workers', () => {
       mockUseHydraFlow.mockReturnValue(defaultMockContext({ orchestratorStatus: 'running' }))
       render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
-      // memory_sync is a system worker — its card should contain a system badge
-      const memCard = screen.getByTestId('worker-card-memory_sync')
+      // pr_unsticker is a system worker — its card should contain a system badge
+      const memCard = screen.getByTestId('worker-card-pr_unsticker')
       expect(within(memCard).getByText('system')).toBeInTheDocument()
     })
 
@@ -258,7 +258,7 @@ describe('SystemPanel', () => {
       mockUseHydraFlow.mockReturnValue(defaultMockContext({ orchestratorStatus: 'running', backgroundWorkers: mockBgWorkers }))
       render(<SystemPanel backgroundWorkers={mockBgWorkers} onToggleBgWorker={() => {}} />)
       expect(screen.getByText('Pipeline Poller')).toBeInTheDocument()
-      expect(screen.getByText('Memory Manager')).toBeInTheDocument()
+      expect(screen.getByText('PR Unsticker')).toBeInTheDocument()
       expect(screen.getByText('Health Monitor')).toBeInTheDocument()
       // Count On/Off buttons — non-system bg workers
       const allToggleButtons = [...screen.getAllByText('On'), ...screen.getAllByText('Off')]
@@ -478,8 +478,8 @@ describe('SystemPanel', () => {
       mockUseHydraFlow.mockReturnValue(defaultMockContext({
         orchestratorStatus: 'running',
         events: [
-          { timestamp: '2026-02-20T10:00:01Z', type: 'background_worker_status', data: { worker: 'memory_sync', status: 'ok', details: { items: 5 } } },
-          { timestamp: '2026-02-20T10:00:00Z', type: 'background_worker_status', data: { worker: 'memory_sync', status: 'ok', details: { items: 3 } } },
+          { timestamp: '2026-02-20T10:00:01Z', type: 'background_worker_status', data: { worker: 'pr_unsticker', status: 'ok', details: { items: 5 } } },
+          { timestamp: '2026-02-20T10:00:00Z', type: 'background_worker_status', data: { worker: 'pr_unsticker', status: 'ok', details: { items: 3 } } },
         ],
       }))
       render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
@@ -510,7 +510,7 @@ describe('SystemPanel', () => {
       mockUseHydraFlow.mockReturnValue(defaultMockContext({
         orchestratorStatus: 'running',
         events: [
-          { timestamp: '2026-02-20T10:00:00Z', type: 'background_worker_status', data: { worker: 'memory_sync', status: 'ok', details: { items: 5 } } },
+          { timestamp: '2026-02-20T10:00:00Z', type: 'background_worker_status', data: { worker: 'pr_unsticker', status: 'ok', details: { items: 5 } } },
         ],
       }))
       render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
@@ -523,18 +523,18 @@ describe('SystemPanel', () => {
       mockUseHydraFlow.mockReturnValue(defaultMockContext({
         orchestratorStatus: 'running',
         events: [
-          { timestamp: '2026-02-20T10:00:02Z', type: 'background_worker_status', data: { worker: 'memory_sync', status: 'ok', details: { items: 5 } } },
+          { timestamp: '2026-02-20T10:00:02Z', type: 'background_worker_status', data: { worker: 'pr_unsticker', status: 'ok', details: { items: 5 } } },
           { timestamp: '2026-02-20T10:00:01Z', type: 'background_worker_status', data: { worker: 'metrics', status: 'ok', details: { cpu: 42 } } },
-          { timestamp: '2026-02-20T10:00:00Z', type: 'background_worker_status', data: { worker: 'memory_sync', status: 'ok', details: { items: 3 } } },
+          { timestamp: '2026-02-20T10:00:00Z', type: 'background_worker_status', data: { worker: 'pr_unsticker', status: 'ok', details: { items: 3 } } },
         ],
       }))
       render(<SystemPanel backgroundWorkers={mockBgWorkers} />)
-      const memorySyncCard = screen.getByTestId('worker-card-memory_sync')
-      const memorySyncStream = within(memorySyncCard).getByTestId('worker-log-stream')
-      // memory_sync card should contain its own events but not metrics events
-      expect(memorySyncStream.textContent).toContain('items: 5')
-      expect(memorySyncStream.textContent).toContain('items: 3')
-      expect(memorySyncStream.textContent).not.toContain('cpu: 42')
+      const prUnstickerCard = screen.getByTestId('worker-card-pr_unsticker')
+      const prUnstickerStream = within(prUnstickerCard).getByTestId('worker-log-stream')
+      // pr_unsticker card should contain its own events but not metrics events
+      expect(prUnstickerStream.textContent).toContain('items: 5')
+      expect(prUnstickerStream.textContent).toContain('items: 3')
+      expect(prUnstickerStream.textContent).not.toContain('cpu: 42')
     })
 
     it('Pipeline Poller shows log stream but no stats/details', () => {
@@ -651,11 +651,11 @@ describe('BackgroundWorkerCard schedule display', () => {
 
   it('shows schedule when interval_seconds is present', () => {
     const bgWorkers = [
-      { name: 'memory_sync', status: 'ok', enabled: true, last_run: '2026-02-20T10:00:00Z', interval_seconds: 3600, details: {} },
+      { name: 'epic_sweeper', status: 'ok', enabled: true, last_run: '2026-02-20T10:00:00Z', interval_seconds: 3600, details: {} },
     ]
     render(<SystemPanel backgroundWorkers={bgWorkers} />)
-    expect(screen.getByTestId('schedule-memory_sync')).toBeInTheDocument()
-    expect(screen.getByTestId('schedule-memory_sync').textContent).toMatch(/Runs every 1h/)
+    expect(screen.getByTestId('schedule-epic_sweeper')).toBeInTheDocument()
+    expect(screen.getByTestId('schedule-epic_sweeper').textContent).toMatch(/Runs every 1h/)
   })
 
   it('does not show schedule when interval_seconds is null for non-editable worker', () => {
@@ -668,19 +668,19 @@ describe('BackgroundWorkerCard schedule display', () => {
 
   it('shows edit link for editable workers', () => {
     const bgWorkers = [
-      { name: 'memory_sync', status: 'ok', enabled: true, last_run: null, interval_seconds: 3600, details: {} },
+      { name: 'epic_sweeper', status: 'ok', enabled: true, last_run: null, interval_seconds: 3600, details: {} },
     ]
     render(<SystemPanel backgroundWorkers={bgWorkers} onUpdateInterval={() => {}} />)
-    expect(screen.getByTestId('edit-interval-memory_sync')).toBeInTheDocument()
+    expect(screen.getByTestId('edit-interval-epic_sweeper')).toBeInTheDocument()
   })
 
   it('shows interval editor when edit is clicked', () => {
     const bgWorkers = [
-      { name: 'memory_sync', status: 'ok', enabled: true, last_run: null, interval_seconds: 3600, details: {} },
+      { name: 'epic_sweeper', status: 'ok', enabled: true, last_run: null, interval_seconds: 3600, details: {} },
     ]
     render(<SystemPanel backgroundWorkers={bgWorkers} onUpdateInterval={() => {}} />)
-    fireEvent.click(screen.getByTestId('edit-interval-memory_sync'))
-    expect(screen.getByTestId('interval-editor-memory_sync')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('edit-interval-epic_sweeper'))
+    expect(screen.getByTestId('interval-editor-epic_sweeper')).toBeInTheDocument()
     expect(screen.getByTestId('preset-1h')).toBeInTheDocument()
     expect(screen.getByTestId('preset-2h')).toBeInTheDocument()
   })
@@ -688,12 +688,12 @@ describe('BackgroundWorkerCard schedule display', () => {
   it('calls onUpdateInterval when preset is clicked', () => {
     const onUpdate = vi.fn()
     const bgWorkers = [
-      { name: 'memory_sync', status: 'ok', enabled: true, last_run: null, interval_seconds: 3600, details: {} },
+      { name: 'epic_sweeper', status: 'ok', enabled: true, last_run: null, interval_seconds: 3600, details: {} },
     ]
     render(<SystemPanel backgroundWorkers={bgWorkers} onUpdateInterval={onUpdate} />)
-    fireEvent.click(screen.getByTestId('edit-interval-memory_sync'))
+    fireEvent.click(screen.getByTestId('edit-interval-epic_sweeper'))
     fireEvent.click(screen.getByTestId('preset-2h'))
-    expect(onUpdate).toHaveBeenCalledWith('memory_sync', 7200)
+    expect(onUpdate).toHaveBeenCalledWith('epic_sweeper', 7200)
   })
 
   it('shows schedule for pipeline_poller from SYSTEM_WORKER_INTERVALS fallback', () => {
@@ -731,11 +731,11 @@ describe('BackgroundWorkerCard schedule display', () => {
     expect(scheduleRow.textContent).toMatch(/Next/)
   })
 
-  it('shows schedule for memory_sync from fallback when no backend state', () => {
+  it('shows schedule for epic_sweeper from fallback when no backend state', () => {
     mockUseHydraFlow.mockReturnValue(defaultMockContext({ orchestratorStatus: 'running' }))
     render(<SystemPanel backgroundWorkers={[]} />)
-    expect(screen.getByTestId('schedule-memory_sync')).toBeInTheDocument()
-    expect(screen.getByTestId('schedule-memory_sync').textContent).toMatch(/Runs every 1h/)
+    expect(screen.getByTestId('schedule-epic_sweeper')).toBeInTheDocument()
+    expect(screen.getByTestId('schedule-epic_sweeper').textContent).toMatch(/Runs every 1h/)
   })
 
   it('shows edit link for pr_unsticker when onUpdateInterval provided', () => {

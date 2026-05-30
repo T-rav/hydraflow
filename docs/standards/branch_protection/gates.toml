@@ -1,0 +1,240 @@
+# Source of truth for HydraFlow branch-protection gates.
+#
+# GENERATED ARTIFACTS -- do not hand-edit: main_ruleset.json, staging_ruleset.json,
+# and the gate table inside the generated block in README.md.
+# Regenerate with `make gen-gates`; CI fails on drift via `make gen-gates-check`.
+# See docs/adr/<declarative-gate-contract> and ADR-0042 (two-tier branch model).
+#
+# Each [[gate]] is one (dimension, binding) pair. Resolution filters gates by
+# the [repo] profile below: a gate applies only when its `languages` intersect
+# the repo's and its `requires_capability` are all present. For a new repo this
+# profile is populated by detect_languages + detect_capabilities at init time.
+
+# This repo: Python with GitHub Advanced Security (CodeQL available).
+[repo]
+languages = ["python"]
+capabilities = ["ghas"]
+
+[branch.main]
+allowed_merge_methods = ["merge"]
+required_approving_review_count = 0
+code_quality_severity = "errors"
+[[branch.main.code_scanning]]
+tool = "CodeQL"
+security_alerts_threshold = "high_or_higher"
+alerts_threshold = "errors"
+
+[branch.staging]
+allowed_merge_methods = ["squash", "merge"]
+required_approving_review_count = 0
+
+# --- core gates (required on main) ---
+[[gate]]
+name = "Tests"
+dimension = "unit-tests"
+make_target = "test"
+tier = "core"
+required_on = ["main"]
+runs_on = ["staging", "rc"]
+languages = ["python"]
+requires_capability = []
+status = "active"
+workflow = "ci.yml"
+job = "test"
+
+[[gate]]
+name = "Lint & Format"
+dimension = "lint"
+make_target = "lint-check"
+tier = "core"
+required_on = ["main"]
+runs_on = ["staging", "rc"]
+languages = ["python"]
+requires_capability = []
+status = "active"
+workflow = "ci.yml"
+job = "lint"
+
+[[gate]]
+name = "Type Check"
+dimension = "types"
+make_target = "typecheck"
+tier = "core"
+required_on = ["main"]
+runs_on = ["staging", "rc"]
+languages = ["python"]
+requires_capability = []
+status = "active"
+workflow = "ci.yml"
+job = "typecheck"
+
+[[gate]]
+name = "Security Scan"
+dimension = "sast"
+make_target = "security"
+tier = "core"
+required_on = ["main"]
+runs_on = ["staging", "rc"]
+languages = ["python"]
+requires_capability = []
+status = "active"
+workflow = "ci.yml"
+job = "security"
+
+[[gate]]
+name = "Smoke Tests"
+dimension = "smoke"
+make_target = "smoke"
+tier = "core"
+required_on = ["main"]
+runs_on = ["staging", "rc"]
+languages = ["python"]
+requires_capability = []
+status = "active"
+workflow = "ci.yml"
+job = "smoke"
+
+[[gate]]
+name = "Scenario Tests"
+dimension = "scenario"
+make_target = ""
+tier = "core"
+required_on = ["main"]
+runs_on = ["staging", "rc"]
+languages = ["python"]
+requires_capability = []
+status = "active"
+workflow = "ci.yml"
+job = "scenario"
+
+[[gate]]
+name = "Regression Tests"
+dimension = "regression"
+make_target = ""
+tier = "core"
+required_on = ["main"]
+runs_on = ["staging", "rc"]
+languages = ["python"]
+requires_capability = []
+status = "active"
+workflow = "ci.yml"
+job = "regression"
+
+[[gate]]
+name = "Principles Audit"
+dimension = "principles"
+make_target = "audit"
+tier = "core"
+required_on = ["main"]
+runs_on = ["staging", "rc"]
+languages = ["python"]
+requires_capability = []
+status = "active"
+workflow = "ci.yml"
+job = "audit"
+
+[[gate]]
+name = "quality (.)"
+dimension = "quality"
+make_target = "quality"
+tier = "core"
+required_on = ["main"]
+runs_on = ["staging", "rc"]
+languages = ["python"]
+requires_capability = []
+status = "active"
+workflow = "quality.yml"
+job = "quality"
+
+[[gate]]
+name = "quality (src/ui)"
+dimension = "quality"
+make_target = "quality"
+tier = "core"
+required_on = ["main"]
+runs_on = ["staging", "rc"]
+languages = ["python"]
+requires_capability = []
+status = "active"
+workflow = "quality.yml"
+job = "quality"
+
+# --- staging baseline (always-on, path-filter safe) ---
+[[gate]]
+name = "Detect Changes"
+dimension = "change-detect"
+make_target = ""
+tier = "core"
+required_on = ["staging"]
+runs_on = ["staging"]
+languages = ["python"]
+requires_capability = []
+status = "active"
+workflow = "ci.yml"
+job = "changes"
+
+[[gate]]
+name = "discover-projects"
+dimension = "project-discover"
+make_target = ""
+tier = "core"
+required_on = ["staging"]
+runs_on = ["staging"]
+languages = ["python"]
+requires_capability = []
+status = "active"
+workflow = "quality.yml"
+job = "discover-projects"
+
+# --- extras (rc/* -> main promotion only) ---
+[[gate]]
+name = "Resolve RC PR"
+dimension = "rc-resolve"
+make_target = ""
+tier = "extra"
+required_on = ["main"]
+runs_on = ["rc"]
+languages = ["python"]
+requires_capability = []
+status = "active"
+workflow = "rc-promotion-scenario.yml"
+job = "gate"
+
+[[gate]]
+name = "Browser Scenarios"
+dimension = "browser-e2e"
+make_target = ""
+tier = "extra"
+required_on = ["main"]
+runs_on = ["rc"]
+languages = ["python"]
+requires_capability = []
+status = "active"
+workflow = "rc-promotion-scenario.yml"
+job = "scenario-browser"
+
+[[gate]]
+name = "Trust Gate (adversarial corpus, fixture mode)"
+dimension = "trust"
+make_target = ""
+tier = "extra"
+required_on = ["main"]
+runs_on = ["rc"]
+languages = ["python"]
+requires_capability = []
+status = "active"
+workflow = "rc-promotion-scenario.yml"
+job = "trust"
+
+[[gate]]
+name = "Sandbox (rc/* promotion PR full suite)"
+dimension = "sandbox-e2e"
+make_target = ""
+tier = "extra"
+required_on = ["main"]
+runs_on = ["rc"]
+languages = ["python"]
+requires_capability = []
+status = "active"
+workflow = "ci.yml"
+job = "sandbox-full"

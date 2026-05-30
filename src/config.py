@@ -142,6 +142,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("stale_issue_gc_interval", "HYDRAFLOW_STALE_ISSUE_GC_INTERVAL", 3600),
     ("stale_issue_threshold_days", "HYDRAFLOW_STALE_ISSUE_THRESHOLD_DAYS", 14),
     ("ci_monitor_interval", "HYDRAFLOW_CI_MONITOR_INTERVAL", 300),
+    (
+        "branch_protection_auditor_interval",
+        "HYDRAFLOW_BRANCH_PROTECTION_AUDITOR_INTERVAL",
+        604800,
+    ),
     ("rc_cadence_hours", "HYDRAFLOW_RC_CADENCE_HOURS", 4),
     ("staging_promotion_interval", "HYDRAFLOW_STAGING_PROMOTION_INTERVAL", 300),
     ("staging_rc_retention_days", "HYDRAFLOW_STAGING_RC_RETENTION_DAYS", 7),
@@ -391,6 +396,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     ("ci_monitor_loop_enabled", "HYDRAFLOW_CI_MONITOR_LOOP_ENABLED", True),
+    (
+        "branch_protection_auditor_loop_enabled",
+        "HYDRAFLOW_BRANCH_PROTECTION_AUDITOR_LOOP_ENABLED",
+        True,
+    ),
     ("contract_refresh_loop_enabled", "HYDRAFLOW_CONTRACT_REFRESH_LOOP_ENABLED", True),
     ("corpus_learning_loop_enabled", "HYDRAFLOW_CORPUS_LEARNING_LOOP_ENABLED", True),
     (
@@ -661,7 +671,7 @@ class HydraFlowConfig(BaseModel):
     agent_unrestricted_tools: bool = Field(
         default=False,
         description=(
-            "Escape hatch (ADR-0082): when True, issue-derived implementer/auto-agent "
+            "Escape hatch (ADR-0084): when True, issue-derived implementer/auto-agent "
             "spawns use the legacy bypassPermissions/danger-full-access mode instead of "
             "the hardened acceptEdits + tool-allowlist + WebFetch/WebSearch-disallow "
             "mode. Leave False unless the restricted allowlist breaks a backend."
@@ -961,6 +971,15 @@ class HydraFlowConfig(BaseModel):
         ge=60,
         le=86400,
         description="CI health monitor loop interval in seconds (default 5 min)",
+    )
+    branch_protection_auditor_interval: int = Field(
+        default=604800,
+        ge=3600,
+        le=2592000,
+        description=(
+            "BranchProtectionAuditorLoop interval in seconds (default 7 days); "
+            "audits live branch protection against the canonical rulesets (ADR-0082)"
+        ),
     )
     collaborator_check_enabled: bool = Field(
         default=True,
@@ -2577,6 +2596,10 @@ class HydraFlowConfig(BaseModel):
     ci_monitor_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for CIMonitorLoop.",
+    )
+    branch_protection_auditor_loop_enabled: bool = Field(
+        default=True,
+        description="Deploy-time kill-switch for BranchProtectionAuditorLoop.",
     )
     contract_refresh_loop_enabled: bool = Field(
         default=True,

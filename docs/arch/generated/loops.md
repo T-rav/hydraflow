@@ -9,6 +9,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **ADRReviewerLoop** | `src.adr_reviewer_loop` | 86400 | — | — | — |
 | **AdrTouchpointAuditorLoop** | `src.adr_touchpoint_auditor_loop` | 14400 | — | — | ADR-0056 |
 | **AutoAgentPreflightLoop** | `src.auto_agent_preflight_loop` | 120 | — | — | — |
+| **BranchProtectionAuditorLoop** | `src.branch_protection_auditor_loop` | 604800 | — | — | ADR-0029, ADR-0049, ADR-0082 |
 | **CIMonitorLoop** | `src.ci_monitor_loop` | 300 | — | — | — |
 | **ContractRefreshLoop** | `src.contract_refresh_loop` | 604800 | — | — | — |
 | **CorpusLearningLoop** | `src.corpus_learning_loop` | 3600 | — | — | — |
@@ -51,4 +52,4 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **WikiRotDetectorLoop** | `src.wiki_rot_detector_loop` | 604800 | — | — | — |
 | **WorkspaceGCLoop** | `src.workspace_gc_loop` | 1800 | — | — | — |
 
-_Regenerated from commit `83c941d` on 2026-05-30 05:40 UTC. Source last changed at `83c941d`. Status: 🟢 fresh._
+_Regenerated from commit `78b3aa1` on 2026-05-30 11:19 UTC. Source last changed at `78b3aa1`. Status: 🟢 fresh._

@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W22
 
+- `a62f093` — fix(security): harden untrusted-text fence + restrict auto-agent (WS-7 fixes) *(2026-05-29)*
 - `83c941d` — docs(adr): ADR-0082 untrusted-text trust boundary + fix numbering (WS-7.4) *(2026-05-29)*
 
 ## 2026-W21
@@ -381,4 +382,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `7c6fe67` — Fixes #1634: add ADR-0009 for multi-repo process-per-repo model (#1679) (#1679) *(2026-03-01)*
 
 
-_Regenerated from commit `83c941d` on 2026-05-30 05:40 UTC. Source last changed at `83c941d`. Status: 🟢 fresh._
+_Regenerated from commit `78b3aa1` on 2026-05-30 11:19 UTC. Source last changed at `78b3aa1`. Status: 🟢 fresh._

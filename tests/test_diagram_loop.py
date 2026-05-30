@@ -28,7 +28,7 @@ def test_constructor_sets_worker_name(loop_deps):
     config = MagicMock()
     pr_manager = MagicMock()
     loop = DiagramLoop(config=config, pr_manager=pr_manager, deps=loop_deps)
-    assert loop._worker_name == "diagram-loop"
+    assert loop._worker_name == "diagram_loop"
 
 
 def test_default_interval_is_four_hours(loop_deps):

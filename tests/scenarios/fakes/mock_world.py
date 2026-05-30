@@ -676,11 +676,13 @@ class MockWorld:
                 "workspace": self._workspace,
                 "sentry": self._sentry,
                 "clock": self._clock,
+                "state": self._harness.state,
             }
         else:
             # Keep fakes up-to-date (cheap; they're the same objects)
             self._loop_ports["github"] = self._github
             self._loop_ports["workspace"] = self._workspace
+            self._loop_ports["state"] = self._harness.state
 
         loop_instances = []
         for name in loops:

@@ -5,7 +5,7 @@
 - **Supersedes:** none
 - **Superseded by:** none
 - **Related:** [ADR-0029](0029-caretaker-loop-pattern.md), [ADR-0042](0042-two-tier-branch-release-promotion.md), [ADR-0049](0049-trust-loop-kill-switch-convention.md), [ADR-0050](0050-auto-agent-hitl-preflight.md), [ADR-0051](0051-iterative-production-readiness-review.md)
-- **Enforced by:** `tests/test_mockworld_fakes_conformance.py` (Port↔Fake signature parity), `.github/workflows/ci.yml` `sandbox` job (CI gate).
+- **Enforced by:** `tests/test_mockworld_fakes_conformance.py` (Port↔Fake signature parity), `tests/test_sandbox_scenario_contract.py` (scenario catalog contract), `.github/workflows/ci.yml` `sandbox` job (CI gate).
 
 ## Context
 
@@ -18,7 +18,7 @@ That gap was closed by the human in the loop. Removing the human means moving th
 Two test tiers backed by the same MockWorld substrate (`src/mockworld/fakes/`):
 
 - **Tier 1 (in-process, every PR):** existing `tests/scenarios/` suite. ~30 scenarios, ~0.1s each.
-- **Tier 2 (sandbox, PR B/C):** new `tests/sandbox_scenarios/` suite. ~12 curated scenarios that boot HydraFlow inside `docker-compose.sandbox.yml`, swap MockWorld at the boundary, drive the UI via Playwright, assert end-to-end. ~30–60s each.
+- **Tier 2 (sandbox, PR B/C):** `tests/sandbox_scenarios/` suite. Curated scenarios that boot HydraFlow inside `docker-compose.sandbox.yml`, swap MockWorld at the boundary, drive the UI via Playwright, assert end-to-end. ~30–60s each.
 
 **MockWorld is always-on infrastructure**, not a configurable mode. Selection between Fake and real adapters happens at the **entrypoint level**: production runs the `hydraflow` console script (`server:main`); sandbox runs `python -m mockworld.sandbox_main`. `build_services()` and `HydraFlowOrchestrator.__init__` accept optional adapter overrides; production never passes them.
 
@@ -30,7 +30,7 @@ Two test tiers backed by the same MockWorld substrate (`src/mockworld/fakes/`):
 2. **Fakes ship in `src/mockworld/fakes/`,** treated as production code (ruff, pyright, bandit). They are not test fixtures — they are alternative adapters.
 3. **Every sandbox scenario has a Tier-1 parity test** (`tests/scenarios/test_sandbox_parity.py`). If only Tier 2 fails, the bug is in container/wiring/UI; if both fail, it's in scenario logic. Triage starts with Tier 1.
 4. **The dashboard renders a persistent MOCKWORLD MODE banner** when the injected `PRPort` carries the `_is_fake_adapter` marker. Duck-typed; not config-driven.
-5. **CI gate (PR C):** all 12 sandbox scenarios must pass on the rc/* promotion PR before staging→main merge. Failures auto-dispatch the auto-agent self-fix loop (`SandboxFailureFixerLoop`).
+5. **CI gate (PR C):** every runnable sandbox scenario must pass on the rc/* promotion PR before staging→main merge. Failures auto-dispatch the auto-agent self-fix loop (`SandboxFailureFixerLoop`). Placeholder scenarios are prohibited by ADR-0083.
 
 ## Sandbox carve-outs (preserving the air-gap)
 
@@ -50,7 +50,7 @@ Both are real production-relevant findings the sandbox tier surfaced — exactly
 - Cross-tier alignment via shared Fake substrate eliminates "in-process passes, container fails" surprises.
 
 **Negative:**
-- Sandbox tier adds ~30–60s per scenario. ~12 scenarios = ~10 min full-suite run.
+- Sandbox tier adds ~30–60s per scenario, so the full-suite runtime scales with catalog size.
 - New caretaker loop (`SandboxFailureFixerLoop`, lands in PR C) adds ~400 LOC of code to maintain.
 - Dockerfile.agent must `COPY` `tests/` until `src/contract_diff.py` is refactored away from importing `tests.trust.contracts._schema`.
 
@@ -69,5 +69,5 @@ Both are real production-relevant findings the sandbox tier surfaced — exactly
 - `src/mockworld/sandbox_main.py` — the sandbox entrypoint.
 - `src/mockworld/fakes/` — the always-loaded Fake adapter set.
 - `docker-compose.sandbox.yml` — the air-gapped sandbox stack.
-- `tests/sandbox_scenarios/` — the Tier-2 scenarios (s01 in PR B; s02–s12 in PR C).
+- `tests/sandbox_scenarios/` — the Tier-2 scenario catalog.
 - `.github/workflows/ci.yml` `sandbox` job — the CI gate.
