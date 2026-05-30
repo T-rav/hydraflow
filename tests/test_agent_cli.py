@@ -28,6 +28,38 @@ class TestBuildAgentCommand:
         assert "--permission-mode" in cmd
         assert cmd[cmd.index("--permission-mode") + 1] == "bypassPermissions"
 
+    def test_claude_restricted_hardens_against_injection(self) -> None:
+        """ADR-0066: restricted mode drops bypassPermissions and blocks egress tools."""
+        cmd = build_agent_command(tool="claude", model="opus", restricted=True)
+        assert cmd[cmd.index("--permission-mode") + 1] == "acceptEdits"
+        assert "bypassPermissions" not in cmd
+        assert "--allowedTools" in cmd
+        allow = cmd[cmd.index("--allowedTools") + 1]
+        assert "Bash" in allow and "Edit" in allow and "Write" in allow
+        assert "--disallowedTools" in cmd
+        disallow = cmd[cmd.index("--disallowedTools") + 1]
+        assert "WebFetch" in disallow
+        assert "WebSearch" in disallow
+
+    def test_claude_restricted_preserves_extra_disallowed(self) -> None:
+        cmd = build_agent_command(
+            tool="claude", model="opus", restricted=True, disallowed_tools="Foo"
+        )
+        disallow = cmd[cmd.index("--disallowedTools") + 1]
+        assert "Foo" in disallow
+        assert "WebFetch" in disallow
+
+    def test_codex_restricted_uses_network_blocked_sandbox(self) -> None:
+        cmd = build_agent_command(tool="codex", model="gpt", restricted=True)
+        assert cmd[cmd.index("--sandbox") + 1] == "workspace-write"
+        assert "danger-full-access" not in cmd
+        assert "--dangerously-bypass-approvals-and-sandbox" not in cmd
+
+    def test_codex_default_unchanged(self) -> None:
+        cmd = build_agent_command(tool="codex", model="gpt")
+        assert cmd[cmd.index("--sandbox") + 1] == "danger-full-access"
+        assert "--dangerously-bypass-approvals-and-sandbox" in cmd
+
     def test_codex_command_structure(self) -> None:
         """Codex command should include exec, --json, --model, --sandbox, etc."""
         cmd = build_agent_command(tool="codex", model="o4-mini")
