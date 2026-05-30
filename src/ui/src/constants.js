@@ -30,6 +30,16 @@ export const MAX_EVENTS = 5000
 export const PIPELINE_POLL_SAFETY_NET_MS = 30_000
 
 /**
+ * WebSocket reconnect backoff (PR5). A flapping socket previously re-ran the
+ * heavy onopen fan-out (10+ fetches + history replay) every fixed 2s. We now
+ * back off exponentially with full jitter — delay = random(0, min(BASE * 2**n,
+ * MAX)) — capped at MAX, and reset the attempt counter on a successful open.
+ * Jitter spreads reconnect storms across many tabs/clients.
+ */
+export const WS_RECONNECT_BASE_MS = 1_000
+export const WS_RECONNECT_MAX_MS = 30_000
+
+/**
  * Canonical pipeline stage definitions.
  * All stage metadata lives here to prevent drift across components.
  * Components derive their own views (uppercase labels, filtered subsets, etc.) from this array.

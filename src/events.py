@@ -106,6 +106,21 @@ class EventType(StrEnum):
     SHIPPED_WITH_KNOWN_GAP = "shipped_with_known_gap"
 
 
+#: Event types delivered live-only — fanned out to connected subscribers but
+#: never retained in the in-memory history nor persisted to the on-disk log.
+#:
+#: PIPELINE_SNAPSHOT is a full board snapshot that is fully reconstructable via
+#: ``GET /api/pipeline`` (the frontend already re-syncs it on every WS reconnect).
+#: Retaining/replaying it added zero recoverable information while introducing a
+#: stale-snapshot-clobber vector: a historical snapshot replayed during the
+#: connect-time history drain could land *after* the fresh REST sync and
+#: overwrite current board state (worst on an idle pipeline). Excluding it from
+#: history + disk removes that vector at the source. Live ordering is unaffected
+#: (EventBus fans out FIFO within a connection), so no frontend seq-guard is
+#: needed. See PR5 stale-snapshot analysis.
+EPHEMERAL_EVENT_TYPES: frozenset[EventType] = frozenset({EventType.PIPELINE_SNAPSHOT})
+
+
 _T = TypeVar("_T")
 
 #: The type used for ``HydraFlowEvent.data``.
@@ -343,10 +358,16 @@ class EventBus:
             event.session_id = self._active_session_id
         if self._active_repo and event.repo is None:
             event.repo = self._active_repo
-        async with self._history_lock:
-            self._history.append(event)
-            if len(self._history) > self._max_history:
-                self._history = self._history[-self._max_history :]
+        ephemeral = event.type in EPHEMERAL_EVENT_TYPES
+        # Ephemeral events (e.g. PIPELINE_SNAPSHOT) are NOT retained in history,
+        # so they never enter the WS connect-time replay (get_history()) where a
+        # stale frame could clobber fresh board state. Live fan-out below stays
+        # unconditional so connected clients still receive them in real time.
+        if not ephemeral:
+            async with self._history_lock:
+                self._history.append(event)
+                if len(self._history) > self._max_history:
+                    self._history = self._history[-self._max_history :]
         for queue in list(self._subscribers):
             try:
                 queue.put_nowait(event)
@@ -369,7 +390,7 @@ class EventBus:
         except Exception:  # noqa: BLE001
             pass
 
-        if self._event_log is not None:
+        if self._event_log is not None and not ephemeral:
             task = asyncio.create_task(self._persist_event(event))
             self._pending_persists.add(task)
             task.add_done_callback(self._pending_persists.discard)
@@ -403,10 +424,17 @@ class EventBus:
             return
         events = await self._event_log.load(max_events=self._max_history)
         async with self._history_lock:
-            self._history = events
             if events:
+                # Advance past the highest historical ID using the FULL loaded
+                # set (incl. any legacy ephemeral rows) so new events never
+                # collide with a persisted ID under the frontend's dedup.
                 max_id = max(e.id for e in events)
                 _event_counter.advance(max_id + 1)
+            # Ephemeral types (e.g. PIPELINE_SNAPSHOT) must never enter in-memory
+            # history — not even legacy rows persisted by an older build before
+            # the type was made ephemeral. Filtering on load (not just publish)
+            # keeps the "never replayed on WS reconnect" invariant unconditional.
+            self._history = [e for e in events if e.type not in EPHEMERAL_EVENT_TYPES]
 
     async def load_events_since(self, since: datetime) -> list[HydraFlowEvent] | None:
         """Load persisted events from disk since *since*.

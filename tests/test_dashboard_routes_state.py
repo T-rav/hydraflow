@@ -651,6 +651,40 @@ class TestGetEventsEndpoint:
         data = json.loads(response.body)
         assert isinstance(data, list)
 
+    @pytest.mark.asyncio
+    async def test_events_scoped_to_requested_repo_bus(
+        self, config, state, tmp_path
+    ) -> None:
+        """/api/events?repo=X must resolve repo X's per-repo bus, not the
+        module-level default bus. In a multi-repo deployment the reconnect
+        backfill otherwise returns the wrong repo's events."""
+        from tests.conftest import EventFactory
+
+        default_bus = EventBus()
+        repo_bus = EventBus()
+        await default_bus.publish(EventFactory.create(data={"repo": "default"}))
+        await repo_bus.publish(EventFactory.create(data={"repo": "other"}))
+
+        runtime = SimpleNamespace(
+            config=config.model_copy(),
+            event_bus=repo_bus,
+            state=MagicMock(),
+            orchestrator=None,
+        )
+        registry = MagicMock()
+        registry.get.return_value = runtime
+        router, _ = make_dashboard_router(
+            config, default_bus, state, tmp_path, registry=registry
+        )
+        endpoint = next(
+            r for r in router.routes if getattr(r, "path", "") == "/api/events"
+        )
+
+        response = await endpoint.endpoint(since=None, repo="org-other")
+        data = json.loads(response.body)
+        assert len(data) == 1
+        assert data[0]["data"]["repo"] == "other"
+
 
 # ---------------------------------------------------------------------------
 # GET /api/prs

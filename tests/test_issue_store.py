@@ -634,8 +634,35 @@ async def _drain_snapshot_flush(store: IssueStore) -> None:
         await task
 
 
-def _snapshots(event_bus: EventBus):
-    return [e for e in event_bus.get_history() if e.type == EventType.PIPELINE_SNAPSHOT]
+class _SnapshotCapture:
+    """Capture PIPELINE_SNAPSHOT events via a real subscriber queue.
+
+    PIPELINE_SNAPSHOT is an ephemeral, live-only event (PR5): it is fanned out
+    to subscribers but deliberately NOT retained in ``get_history()`` nor
+    persisted to disk, so a stale historical frame can't clobber the board on
+    reconnect. Tests therefore assert against live delivery — a subscriber
+    queue — rather than ``get_history()``. Subscribe BEFORE the store mutates
+    so no live frame is missed.
+    """
+
+    def __init__(self, event_bus: EventBus) -> None:
+        self._queue = event_bus.subscribe()
+        self._seen: list = []
+
+    def snapshots(self) -> list:
+        """Drain newly-delivered frames and return the cumulative list.
+
+        Accumulates across calls so a test can assert the running total of
+        snapshots emitted so far (mirrors the prior get_history()-based helper).
+        """
+        while True:
+            try:
+                event = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if event.type == EventType.PIPELINE_SNAPSHOT:
+                self._seen.append(event)
+        return list(self._seen)
 
 
 class TestPipelineSnapshotPush:
@@ -644,24 +671,26 @@ class TestPipelineSnapshotPush:
     @pytest.mark.asyncio
     async def test_transition_publishes_pipeline_snapshot(self, event_bus) -> None:
         store = _make_store(event_bus=event_bus)
+        capture = _SnapshotCapture(event_bus)
         issue = TaskFactory.create(id=101, tags=["hydraflow-find"])
         store._route_issues([issue])
 
         store.enqueue_transition(issue, "plan")
         await _drain_snapshot_flush(store)
 
-        assert len(_snapshots(event_bus)) >= 1
+        assert len(capture.snapshots()) >= 1
 
     @pytest.mark.asyncio
     async def test_payload_shape_uses_frontend_stage_keys(self, event_bus) -> None:
         store = _make_store(event_bus=event_bus)
+        capture = _SnapshotCapture(event_bus)
         issue = TaskFactory.create(id=202, tags=["hydraflow-find"])
         store._route_issues([issue])
 
         store.enqueue_transition(issue, "ready")
         await _drain_snapshot_flush(store)
 
-        snap = _snapshots(event_bus)[-1]
+        snap = capture.snapshots()[-1]
         assert isinstance(snap.data["seq"], int)
         stages = snap.data["stages"]
         assert isinstance(stages, dict)
@@ -674,6 +703,7 @@ class TestPipelineSnapshotPush:
     @pytest.mark.asyncio
     async def test_rapid_mutations_coalesce_into_one_snapshot(self, event_bus) -> None:
         store = _make_store(event_bus=event_bus)
+        capture = _SnapshotCapture(event_bus)
         issues = [
             TaskFactory.create(id=300 + i, tags=["hydraflow-find"]) for i in range(5)
         ]
@@ -684,7 +714,7 @@ class TestPipelineSnapshotPush:
             store.enqueue_transition(issue, "plan")
         await _drain_snapshot_flush(store)
 
-        first = _snapshots(event_bus)
+        first = capture.snapshots()
         assert len(first) == 1
         assert first[0].data["seq"] == 1
 
@@ -692,27 +722,29 @@ class TestPipelineSnapshotPush:
         store.enqueue_transition(issues[0], "ready")
         await _drain_snapshot_flush(store)
 
-        second = _snapshots(event_bus)
+        second = capture.snapshots()
         assert len(second) == 2
         assert second[1].data["seq"] == 2
         assert second[1].data["seq"] > first[0].data["seq"]
 
     def test_mark_dirty_without_running_loop_is_noop(self) -> None:
         store = _make_store()
+        capture = _SnapshotCapture(store._bus)  # type: ignore[attr-defined]
         # No running loop: must not raise and must not publish.
         store._mark_pipeline_dirty()
         assert store._snapshot_flush_task is None
-        assert _snapshots(store._bus) == []  # type: ignore[attr-defined]
+        assert capture.snapshots() == []
 
     @pytest.mark.asyncio
     async def test_release_in_flight_emits_snapshot(self, event_bus) -> None:
         store = _make_store(event_bus=event_bus)
+        capture = _SnapshotCapture(event_bus)
         store._in_flight[404] = STAGE_READY
 
         store.release_in_flight({404})
         await _drain_snapshot_flush(store)
 
-        assert len(_snapshots(event_bus)) >= 1
+        assert len(capture.snapshots()) >= 1
 
     @pytest.mark.asyncio
     async def test_mutation_during_publish_emits_second_snapshot(self) -> None:
@@ -743,13 +775,14 @@ class TestPipelineSnapshotPush:
         bus = _MidPublishMutatingBus()
         store = _make_store(event_bus=bus)
         bus.store = store
+        capture = _SnapshotCapture(bus)
         issue = TaskFactory.create(id=505, tags=["hydraflow-find"])
         store._route_issues([issue])
 
         store.enqueue_transition(issue, "plan")
         await _drain_snapshot_flush(store)
 
-        snaps = _snapshots(bus)
+        snaps = capture.snapshots()
         assert len(snaps) >= 2, (
             "mid-publish mutation was lost; re-check loop did not re-emit"
         )
