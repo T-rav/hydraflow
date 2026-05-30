@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio as _asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -100,13 +100,8 @@ class TestWikiRotDetectorScenario:
         fake_wiki_store.list_repos.return_value = [_SLUG]
         fake_wiki_store.repo_dir.return_value = wiki_dir
 
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=42)
-
         _seed_ports(
             world,
-            github=fake_pr,
-            pr_manager=fake_pr,
             wiki_rot_state=fake_state,
             wiki_rot_dedup=fake_dedup,
             wiki_store=fake_wiki_store,
@@ -125,17 +120,16 @@ class TestWikiRotDetectorScenario:
         assert stats["wiki_rot_detector"]["issues_filed"] >= 1, stats
         assert stats["wiki_rot_detector"]["escalations"] == 0, stats
 
-        fake_pr.create_issue.assert_awaited()
-        title = fake_pr.create_issue.await_args.args[0]
-        body = fake_pr.create_issue.await_args.args[1]
-        labels = fake_pr.create_issue.await_args.args[2]
+        issues = await world.github.list_issues_by_label("wiki-rot")
+        assert len(issues) == 1
+        issue = world.github.issue(issues[0]["number"])
 
-        assert "src/foo.py:bar" in title
-        assert "hydraflow-find" in labels
-        assert "wiki-rot" in labels
+        assert "src/foo.py:bar" in issue.title
+        assert "hydraflow-find" in issue.labels
+        assert "wiki-rot" in issue.labels
         # Fuzzy suggestion surfaces — ``bar`` ↔ ``other`` via difflib 0.6 cutoff
         # OR the loop's first-symbol fallback when no close match clears.
-        assert "Did you mean" in body
+        assert "Did you mean" in issue.body
 
     async def test_no_fire_when_cite_resolves(
         self,
@@ -163,13 +157,8 @@ class TestWikiRotDetectorScenario:
         fake_wiki_store.list_repos.return_value = [_SLUG]
         fake_wiki_store.repo_dir.return_value = wiki_dir
 
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=0)
-
         _seed_ports(
             world,
-            github=fake_pr,
-            pr_manager=fake_pr,
             wiki_rot_state=fake_state,
             wiki_rot_dedup=fake_dedup,
             wiki_store=fake_wiki_store,
@@ -184,4 +173,4 @@ class TestWikiRotDetectorScenario:
 
         assert stats["wiki_rot_detector"]["status"] == "noop", stats
         assert stats["wiki_rot_detector"]["issues_filed"] == 0, stats
-        fake_pr.create_issue.assert_not_awaited()
+        assert await world.github.list_issues_by_label("wiki-rot") == []

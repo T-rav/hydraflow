@@ -64,14 +64,11 @@ class TestRCBudgetScenario:
     async def test_files_issue_on_spike(self, tmp_path) -> None:
         """Current run at 900s vs ~300s history → spike signal fires."""
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=4242)
 
         runs = _make_runs(current_duration_s=900)
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             rc_budget_fetch_runs=AsyncMock(return_value=runs),
             rc_budget_fetch_jobs=AsyncMock(return_value=[]),
             rc_budget_fetch_junit=AsyncMock(return_value=[]),
@@ -82,24 +79,21 @@ class TestRCBudgetScenario:
 
         assert stats["rc_budget"]["status"] == "ok", stats
         assert stats["rc_budget"]["filed"] >= 1, stats
-        assert fake_pr.create_issue.await_count >= 1
-        title = fake_pr.create_issue.await_args.args[0]
-        labels = fake_pr.create_issue.await_args.args[2]
-        assert "RC gate duration regression" in title
-        assert "hydraflow-find" in labels
-        assert "rc-duration-regression" in labels
+        issues = await world.github.list_issues_by_label("rc-duration-regression")
+        assert len(issues) >= 1
+        issue = world.github.issue(issues[0]["number"])
+        assert "RC gate duration regression" in issue.title
+        assert "hydraflow-find" in issue.labels
+        assert "rc-duration-regression" in issue.labels
 
     async def test_no_file_when_within_budget(self, tmp_path) -> None:
         """Current run matches history baseline → no signal, no file."""
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=0)
 
         runs = _make_runs(current_duration_s=300)
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             rc_budget_fetch_runs=AsyncMock(return_value=runs),
             rc_budget_fetch_jobs=AsyncMock(return_value=[]),
             rc_budget_fetch_junit=AsyncMock(return_value=[]),
@@ -111,4 +105,4 @@ class TestRCBudgetScenario:
         assert stats["rc_budget"]["status"] == "ok", stats
         assert stats["rc_budget"]["filed"] == 0, stats
         assert stats["rc_budget"]["escalated"] == 0, stats
-        fake_pr.create_issue.assert_not_awaited()
+        assert await world.github.list_issues_by_label("rc-duration-regression") == []

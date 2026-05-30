@@ -146,6 +146,34 @@ The gap is that ADR-0047 being "Proposed" means the contract testing pattern doe
 
 ---
 
+## 2026-05-30 Addendum — Production-Port Dry-Run Standard
+
+A follow-up senior review of the RC budget loop found a recurring MockWorld
+scenario weakness: several loop scenarios replaced GitHub side effects with raw
+`AsyncMock` objects even though `FakeGitHub` already implements the relevant
+PRPort surface. That proved that a loop attempted to file or comment, but did
+not prove the fake adapter accepted the call or preserved the production
+title/body/labels.
+
+The new standard is:
+
+- Use `FakeGitHub` for issue/comment/label side effects by default.
+- Assert on stored fake state: issue title, body, labels, comments, PR metadata,
+  or CI scripts.
+- Mock only the external boundary that MockWorld cannot model yet, such as
+  `gh run download`, `git bisect`, or an LLM corpus subprocess.
+- Add focused unit tests for parser/enrichment branches hidden behind those
+  mocked external boundaries.
+
+The RC budget loop is the reference implementation: its MockWorld scenario now
+files through `FakeGitHub`, while unit tests cover job breakdown parsing, JUnit
+artifact parsing, and regression issue-body enrichment. The same conversion was
+applied to high-signal loop scenarios for flake tracking, skill prompt eval,
+fake coverage auditing, staging bisect no-op/escalation paths, and ADR
+touchpoint rollups.
+
+---
+
 ## Files Examined
 
 - `src/mockworld/__init__.py`, `seed.py`, `sandbox_main.py`

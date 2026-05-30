@@ -87,9 +87,6 @@ class TestPrinciplesAuditScenario:
 
         world = MockWorld(tmp_path)
 
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=101)
-
         # Current audit: one P1 FAIL + one passing hydraflow-self check.
         failing_report = {
             "findings": [
@@ -111,7 +108,6 @@ class TestPrinciplesAuditScenario:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             principles_audit_state=state,
             principles_audit_run_audit=run_audit,
             principles_audit_refresh_checkout=refresh_checkout,
@@ -126,26 +122,15 @@ class TestPrinciplesAuditScenario:
         assert state._store.get("acme/widget") == "blocked"
 
         # The loop filed at least the onboarding issue. Find it by label.
-        assert fake_pr.create_issue.await_count >= 1
-        onboarding_calls = [
-            call
-            for call in fake_pr.create_issue.await_args_list
-            if "onboarding-blocked" in (call.kwargs.get("labels") or [])
-        ]
-        assert len(onboarding_calls) == 1, (
-            "expected exactly one onboarding-blocked issue, got "
-            f"{[c.kwargs for c in fake_pr.create_issue.await_args_list]}"
-        )
-        labels = onboarding_calls[0].kwargs["labels"]
+        issues = await world.github.list_issues_by_label("onboarding-blocked")
+        assert len(issues) == 1
+        labels = world.github.issue(issues[0]["number"]).labels
         assert "hydraflow-find" in labels
         assert "onboarding-blocked" in labels
 
     async def test_drift_regression_files_find_issue(self, tmp_path) -> None:
         """Hydraflow-self was green; current audit fails one check → drift issue filed."""
         world = MockWorld(tmp_path)
-
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=202)
 
         # State: hydraflow-self was all-green last tick.
         state = MagicMock()
@@ -170,7 +155,6 @@ class TestPrinciplesAuditScenario:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             principles_audit_state=state,
             principles_audit_run_audit=run_audit,
             # No managed_repos → only hydraflow-self audits.
@@ -186,14 +170,14 @@ class TestPrinciplesAuditScenario:
         assert stats["principles_audit"]["escalations_filed"] == 0, stats
 
         # Exactly one issue filed with the drift label set.
-        assert fake_pr.create_issue.await_count == 1
-        call = fake_pr.create_issue.await_args
-        title, _body, labels = call.args[:3]
-        assert "P1.1" in title
-        assert "hydraflow-self" in title
-        assert "hydraflow-find" in labels
-        assert "principles-drift" in labels
-        assert "check-P1.1" in labels
+        issues = await world.github.list_issues_by_label("principles-drift")
+        assert len(issues) == 1
+        issue = world.github.issue(issues[0]["number"])
+        assert "P1.1" in issue.title
+        assert "hydraflow-self" in issue.title
+        assert "hydraflow-find" in issue.labels
+        assert "principles-drift" in issue.labels
+        assert "check-P1.1" in issue.labels
 
     async def test_reconcile_closed_escalations_via_pr_port(self, tmp_path) -> None:
         """Closing a principles-stuck issue clears the attempt counter via PRPort.
@@ -204,14 +188,14 @@ class TestPrinciplesAuditScenario:
         """
         world = MockWorld(tmp_path)
 
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=0)
         # One closed principles-stuck issue whose title encodes (slug, check_id).
-        fake_pr.list_closed_issues_by_label = AsyncMock(
-            return_value=[
-                {"title": "Principles drift stuck: P3.2 in acme/widget"},
-            ]
+        world.github.add_issue(
+            77,
+            "Principles drift stuck: P3.2 in acme/widget",
+            "",
+            labels=["principles-stuck"],
         )
+        await world.github.close_issue(77)
 
         state = _stateful_onboarding_mock()
         # Simulate that the escalation counter was previously incremented.
@@ -226,7 +210,6 @@ class TestPrinciplesAuditScenario:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             principles_audit_state=state,
             principles_audit_run_audit=run_audit,
             principles_audit_managed_repos=[],
@@ -234,9 +217,5 @@ class TestPrinciplesAuditScenario:
 
         await world.run_with_loops(["principles_audit"], cycles=1)
 
-        # Port was called with the correct label — no subprocess spawned.
-        fake_pr.list_closed_issues_by_label.assert_awaited_once_with(
-            "principles-stuck", limit=100
-        )
         # Counter reset for the parsed (slug, check_id) pair.
         state.reset_drift_attempts.assert_called_once_with("acme/widget", "P3.2")

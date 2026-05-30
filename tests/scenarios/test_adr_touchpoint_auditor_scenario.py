@@ -55,10 +55,6 @@ class TestAdrTouchpointAuditor:
         from adr_index import ADRIndex  # noqa: PLC0415
 
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=2001)
-        fake_pr.update_issue_body = AsyncMock(return_value=None)
-        fake_pr.close_issue = AsyncMock(return_value=None)
 
         repo = tmp_path / "repo"
         adr_dir = repo / "docs" / "adr"
@@ -87,7 +83,6 @@ class TestAdrTouchpointAuditor:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             adr_touchpoint_state=state,
             adr_touchpoint_index=adr_index,
             adr_touchpoint_list_merged_prs=list_merged_prs,
@@ -96,23 +91,20 @@ class TestAdrTouchpointAuditor:
 
         await world.run_with_loops(["adr_touchpoint_auditor"], cycles=1)
 
-        assert fake_pr.create_issue.await_count == 1
-        title, body, labels = fake_pr.create_issue.await_args.args
-        assert "ADR-0024" in title
-        assert "1 PR" in title
-        assert "#8473" in body
-        assert "hydraflow-find" in labels
-        assert "hydraflow-adr-drift" in labels
+        issues = await world.github.list_issues_by_label("hydraflow-adr-drift")
+        assert len(issues) == 1
+        issue = world.github.issue(issues[0]["number"])
+        assert "ADR-0024" in issue.title
+        assert "1 PR" in issue.title
+        assert "#8473" in issue.body
+        assert "hydraflow-find" in issue.labels
+        assert "hydraflow-adr-drift" in issue.labels
 
     async def test_three_prs_drifting_same_adr_one_rollup(self, tmp_path) -> None:
         """3 PRs drifting the same ADR file ONE rollup with all PRs in body."""
         from adr_index import ADRIndex  # noqa: PLC0415
 
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=2010)
-        fake_pr.update_issue_body = AsyncMock(return_value=None)
-        fake_pr.close_issue = AsyncMock(return_value=None)
 
         repo = tmp_path / "repo"
         adr_dir = repo / "docs" / "adr"
@@ -149,7 +141,6 @@ class TestAdrTouchpointAuditor:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             adr_touchpoint_state=state,
             adr_touchpoint_index=adr_index,
             adr_touchpoint_list_merged_prs=list_merged_prs,
@@ -158,8 +149,9 @@ class TestAdrTouchpointAuditor:
 
         await world.run_with_loops(["adr_touchpoint_auditor"], cycles=1)
 
-        assert fake_pr.create_issue.await_count == 1
-        body = fake_pr.create_issue.await_args.args[1]
+        issues = await world.github.list_issues_by_label("hydraflow-adr-drift")
+        assert len(issues) == 1
+        body = world.github.issue(issues[0]["number"]).body
         for n in (8501, 8502, 8503):
             assert f"#{n}" in body
 
@@ -168,10 +160,6 @@ class TestAdrTouchpointAuditor:
         from adr_index import ADRIndex  # noqa: PLC0415
 
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=2002)
-        fake_pr.update_issue_body = AsyncMock(return_value=None)
-        fake_pr.close_issue = AsyncMock(return_value=None)
 
         repo = tmp_path / "repo"
         adr_dir = repo / "docs" / "adr"
@@ -201,7 +189,6 @@ class TestAdrTouchpointAuditor:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             adr_touchpoint_state=state,
             adr_touchpoint_index=adr_index,
             adr_touchpoint_list_merged_prs=list_merged_prs,
@@ -210,7 +197,7 @@ class TestAdrTouchpointAuditor:
 
         await world.run_with_loops(["adr_touchpoint_auditor"], cycles=1)
 
-        fake_pr.create_issue.assert_not_awaited()
+        assert await world.github.list_issues_by_label("hydraflow-adr-drift") == []
 
     async def test_third_strike_files_hitl_escalation(self, tmp_path) -> None:
         """Third consecutive drift tick against an open rollup triggers HITL escalation.
@@ -233,11 +220,6 @@ class TestAdrTouchpointAuditor:
         from config import HydraFlowConfig  # noqa: PLC0415
 
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        # The escalation issue gets number 3001.
-        fake_pr.create_issue = AsyncMock(return_value=3001)
-        fake_pr.update_issue_body = AsyncMock(return_value=None)
-        fake_pr.close_issue = AsyncMock(return_value=None)
 
         repo = tmp_path / "repo"
         adr_dir = repo / "docs" / "adr"
@@ -246,6 +228,12 @@ class TestAdrTouchpointAuditor:
         adr_index = ADRIndex(adr_dir)
 
         # Open rollup from two prior ticks.
+        world.github.add_issue(
+            2999,
+            "ADR drift rollup: ADR-0024",
+            "prior rollup",
+            labels=["hydraflow-adr-drift"],
+        )
         state = MagicMock()
         state.get_adr_audit_cursor.return_value = "2026-05-01T00:00:00Z"
         state.get_adr_rollup.return_value = {
@@ -267,7 +255,6 @@ class TestAdrTouchpointAuditor:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             adr_touchpoint_state=state,
             adr_touchpoint_index=adr_index,
             adr_touchpoint_list_merged_prs=list_merged_prs,
@@ -277,20 +264,21 @@ class TestAdrTouchpointAuditor:
         await world.run_with_loops(["adr_touchpoint_auditor"], cycles=1)
 
         # Exactly one issue filed — the HITL escalation (no new rollup).
-        assert fake_pr.create_issue.await_count == 1
-        title, body, labels = fake_pr.create_issue.await_args.args
+        issues = await world.github.list_issues_by_label("hydraflow-adr-drift-stuck")
+        assert len(issues) == 1
+        issue = world.github.issue(issues[0]["number"])
 
         # Title identifies the rollup key and attempt count.
-        assert "HITL" in title
-        assert "ADR-0024" in title
-        assert "3" in title
+        assert "HITL" in issue.title
+        assert "ADR-0024" in issue.title
+        assert "3" in issue.title
 
         # Body mentions the dedup key so a human can correlate with the rollup.
-        assert "ADR-0024" in body
+        assert "ADR-0024" in issue.body
 
         # Required labels: hitl-escalation + adr-drift-stuck.
-        assert "hydraflow-hitl-escalation" in labels
-        assert "hydraflow-adr-drift-stuck" in labels
+        assert "hydraflow-hitl-escalation" in issue.labels
+        assert "hydraflow-adr-drift-stuck" in issue.labels
 
         # ADR-0050 preflight reachability: hydraflow-adr-drift-stuck must NOT
         # be in the auto-agent deny list, so AutoAgentPreflightLoop can pick
