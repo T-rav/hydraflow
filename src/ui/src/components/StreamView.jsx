@@ -12,6 +12,19 @@ import {
   WORKSTREAM_SIDE_INSET_PX,
 } from '../styles/sectionStyles'
 
+// No-role stages (role: null) share the worker-less rendering branches, but each
+// carries its own semantics. 'merged' is success (green, "{N} merged"); 'hitl' is
+// an escalation bucket (yellow, "{N} needs human") and must NOT read as success.
+// Keyed by stage.key so adding a no-role stage is one map entry, not a conditional.
+const NO_ROLE_COUNT_LABELS = {
+  merged: 'merged',
+  hitl: 'needs human',
+}
+const NO_ROLE_DOT_COLORS = {
+  merged: theme.green,
+  hitl: theme.yellow,
+}
+
 function PendingIntentCard({ intent }) {
   return (
     <div style={styles.pendingCard}>
@@ -160,7 +173,7 @@ function StageSection({ stage, issues, workerCount, workerCap, queuedCount, inte
               </span>
             </>
           ) : (
-            <span>{issues.length} merged</span>
+            <span>{issues.length} {NO_ROLE_COUNT_LABELS[stage.key] ?? 'merged'}</span>
           )}
         </span>
         <span
@@ -485,7 +498,7 @@ export function StreamView({ intents, expandedStages, onToggleStage, onRequestCh
         const workerCap = stage.role ? (stageStatus.workerCaps?.[stage.key] ?? null) : null
         let dotColor
         if (!stage.role) {
-          dotColor = theme.green
+          dotColor = NO_ROLE_DOT_COLORS[stage.key] ?? theme.green
         } else if (!enabled) {
           dotColor = theme.red
         } else if (workerCount > 0) {

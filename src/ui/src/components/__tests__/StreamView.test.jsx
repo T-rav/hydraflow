@@ -75,6 +75,26 @@ describe('HITL issues are rendered in the workstream (WS-RT)', () => {
     expect(screen.getByTestId('stream-card-77')).toBeTruthy()
     expect(screen.getByText('Escalated issue')).toBeTruthy()
   })
+
+  it('labels the hitl bucket as needs-human, not merged, with a yellow dot', () => {
+    // The hitl stage has role:null like merged, so it shares the worker-less
+    // rendering branches. Those branches must stay stage-aware: a "Needs Human"
+    // escalation bucket reading "merged" + green (success) is a mislabel.
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      pipelineIssues: {
+        hitl: [{ issue_number: 77, title: 'Escalated issue', status: 'hitl' }],
+      },
+    }))
+    render(<StreamView {...defaultProps} />)
+
+    const header = screen.getByTestId('stage-header-hitl')
+    expect(header.textContent).not.toContain('merged')
+    expect(header.textContent).toContain('needs human')
+
+    const dot = screen.getByTestId('stage-dot-hitl')
+    expect(dot.style.background).not.toBe('var(--green)')
+    expect(dot.style.background).toBe('var(--yellow)')
+  })
 })
 
 describe('StreamView stage indicators', () => {
