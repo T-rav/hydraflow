@@ -172,6 +172,7 @@ class HydraFlowOrchestrator:
             "sentry_ingest": svc.sentry_loop,
             "stale_issue_gc": svc.stale_issue_gc_loop,
             "ci_monitor": svc.ci_monitor_loop,
+            "branch_protection_auditor": svc.branch_protection_auditor_loop,
             "security_patch": svc.security_patch_loop,
             "repo_wiki": svc.repo_wiki_loop,
             "diagnostic": svc.diagnostic_loop,
@@ -998,6 +999,10 @@ class HydraFlowOrchestrator:
             ("pipeline_stats", self._pipeline_stats_loop),
             ("diagnostic", self._svc.diagnostic_loop.run),
             ("ci_monitor", self._svc.ci_monitor_loop.run),
+            (
+                "branch_protection_auditor",
+                self._svc.branch_protection_auditor_loop.run,
+            ),
             ("repo_wiki", self._svc.repo_wiki_loop.run),
             ("security_patch", self._svc.security_patch_loop.run),
             ("stale_issue_gc", self._svc.stale_issue_gc_loop.run),
