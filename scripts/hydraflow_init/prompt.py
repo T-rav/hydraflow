@@ -21,6 +21,7 @@ def render(
     mode: Mode,
     principle_filter: str | None,
     skip_brainstorm: bool,
+    gates_section: list[str] | None = None,
 ) -> str:
     actionable = [f for f in findings if f.get("status") in _BAD_STATUSES]
     if principle_filter:
@@ -29,6 +30,8 @@ def render(
     lines: list[str] = []
     lines.extend(_header(target, summary, mode, principle_filter))
     lines.extend(_instructions(mode, skip_brainstorm))
+    if gates_section:
+        lines.extend(gates_section)
     lines.extend(_remediations(actionable))
     lines.extend(_closing())
     return "\n".join(lines) + "\n"

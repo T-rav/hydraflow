@@ -6,7 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W22
 
-- `53226f9` — test: enforce non-ignored sandbox coverage *(2026-05-29)*
+- `8642f7b` — test: enforce non-ignored sandbox coverage *(2026-05-29)*
 
 ## 2026-W21
 
@@ -381,4 +381,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `7c6fe67` — Fixes #1634: add ADR-0009 for multi-repo process-per-repo model (#1679) (#1679) *(2026-03-01)*
 
 
-_Regenerated from commit `53226f9` on 2026-05-30 03:23 UTC. Source last changed at `53226f9`. Status: 🟢 fresh._
+_Regenerated from commit `8642f7b` on 2026-05-30 03:38 UTC. Source last changed at `8642f7b`. Status: 🟢 fresh._

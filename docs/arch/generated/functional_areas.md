@@ -38,6 +38,7 @@ flowchart LR
         caretaking_WorkspaceGCLoop([WorkspaceGCLoop])
     end
     subgraph quality_gates["Quality Gates"]
+        quality_gates_BranchProtectionAuditorLoop([BranchProtectionAuditorLoop])
         quality_gates_CIMonitorLoop([CIMonitorLoop])
     end
     subgraph trust_fleet["Trust Fleet"]
@@ -129,9 +130,10 @@ Runtime CI/test monitoring loops that catch regressions and watch external check
 
 **Loops**
 
+- `BranchProtectionAuditorLoop` — `src.branch_protection_auditor_loop`
 - `CIMonitorLoop` — `src.ci_monitor_loop`
 
-**Related ADRs:** `ADR-0023`, `ADR-0035`, `ADR-0044`
+**Related ADRs:** `ADR-0023`, `ADR-0035`, `ADR-0044`, `ADR-0082`
 
 
 ## Trust Fleet
@@ -277,4 +279,4 @@ The plan→implement→review pipeline driving each issue from hydraflow-ready t
 **Related ADRs:** `ADR-0001`, `ADR-0004`, `ADR-0011`, `ADR-0012`, `ADR-0029`
 
 
-_Regenerated from commit `53226f9` on 2026-05-30 03:23 UTC. Source last changed at `53226f9`. Status: 🟢 fresh._
+_Regenerated from commit `8642f7b` on 2026-05-30 03:38 UTC. Source last changed at `8642f7b`. Status: 🟢 fresh._
