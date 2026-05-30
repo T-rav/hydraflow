@@ -137,13 +137,14 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         sub_labels = sorted(labels - {"hitl-escalation"})
         sub_label = sub_labels[0] if sub_labels else "_default"
 
-        # Sub-label deny-list (recursion safety, dark-factory §2.7). The skip-list
-        # is unprefixed (e.g. "principles-stuck") while escalation labels carry the
-        # `hydraflow-` prefix, so compare on the prefix-stripped form — otherwise
-        # the guard never matches and the auto-agent acts on the very escalations
-        # (principles/cultural) it must defer to a human. Check EVERY sub-label,
-        # not just sub_labels[0], so a deny-listed label can't slip through by
-        # losing the alphabetical sort.
+        # Sub-label deny-list (recursion safety, dark-factory §2.7). The real gap:
+        # producers file the deny-listed label ALONGSIDE others — e.g.
+        # principles_audit_loop files ["principles-stuck", "check-<id>"], and
+        # "check-<id>" sorts first, so the old sub_labels[0]-only check missed the
+        # deny-listed label and the auto-agent acted on a principles escalation it
+        # must defer to a human. Check EVERY sub-label. removeprefix is defensive
+        # for the config-default labels that carry the `hydraflow-` prefix (the
+        # skip-list is unprefixed); it's a no-op for the unprefixed producers.
         denied = next(
             (
                 s
