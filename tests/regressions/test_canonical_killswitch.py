@@ -1,11 +1,15 @@
-"""Regression: all 6 non-canonical kill-switch loops now respect _enabled_cb.
+"""Regression: every non-canonical kill-switch loop respects the _enabled_cb gate.
 
 Per ADR-0049, every loop's _do_work must check self._enabled_cb(self._worker_name)
-at the top. Before this fix the 6 loops below used raw env-var or static config
-checks instead, so the operator UI toggle could not disable them at runtime.
+as its FIRST statement. These loops previously used only a raw env-var or static
+config check, so the operator's UI toggle could not disable them at runtime — the
+WS-1 kill-switch-integrity fix added the in-body gate to cost_budget_watcher,
+diagram, pricing_refresh, and entry_evidence. The auto-discovery enforcer is
+tests/test_loop_kill_switch_completeness.py.
 
-Each test: instantiate with an enabled_cb that returns False, assert _do_work
-returns {"status": "disabled"} without entering the loop body.
+Each test: instantiate with an enabled_cb that returns False while leaving the
+static config gate OPEN, then assert _do_work returns {"status": "disabled"} —
+proving the cb gate (not the config gate) is what disabled the loop.
 """
 
 from __future__ import annotations
@@ -37,12 +41,13 @@ def _disabled_deps() -> LoopDeps:
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="needs AsyncMock conversion in deps setup (staging-level test fixture drift)", strict=False)
 async def test_cost_budget_watcher_disabled_by_enabled_cb() -> None:
     from cost_budget_watcher_loop import CostBudgetWatcherLoop
 
+    config = MagicMock()
+    config.cost_budget_watcher_loop_enabled = True  # static gate open; cb gate closed
     loop = CostBudgetWatcherLoop(
-        config=MagicMock(),
+        config=config,
         pr_manager=MagicMock(),
         state=MagicMock(),
         deps=_disabled_deps(),
@@ -57,12 +62,13 @@ async def test_cost_budget_watcher_disabled_by_enabled_cb() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="needs AsyncMock conversion in deps setup (staging-level test fixture drift)", strict=False)
 async def test_diagram_loop_disabled_by_enabled_cb() -> None:
     from diagram_loop import DiagramLoop
 
+    config = MagicMock()
+    config.diagram_loop_enabled = True  # static gate open; cb gate closed
     loop = DiagramLoop(
-        config=MagicMock(),
+        config=config,
         pr_manager=MagicMock(),
         deps=_disabled_deps(),
     )
@@ -76,14 +82,38 @@ async def test_diagram_loop_disabled_by_enabled_cb() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="needs AsyncMock conversion in deps setup (staging-level test fixture drift)", strict=False)
 async def test_pricing_refresh_loop_disabled_by_enabled_cb() -> None:
     from pricing_refresh_loop import PricingRefreshLoop
 
+    config = MagicMock()
+    config.pricing_refresh_loop_enabled = True  # static gate open; cb gate closed
     loop = PricingRefreshLoop(
-        config=MagicMock(),
+        config=config,
         pr_manager=MagicMock(),
         deps=_disabled_deps(),
+    )
+    result = await loop._do_work()
+    assert result == {"status": "disabled"}
+
+
+# ---------------------------------------------------------------------------
+# EntryEvidenceLoop
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_entry_evidence_loop_disabled_by_enabled_cb(tmp_path: Path) -> None:
+    from entry_evidence_loop import EntryEvidenceLoop
+
+    config = MagicMock()
+    config.entry_evidence_enabled = True  # static gate is open; cb gate is closed
+    loop = EntryEvidenceLoop(
+        config=config,
+        deps=_disabled_deps(),
+        llm=MagicMock(),
+        pr_port=MagicMock(),
+        repo_root=tmp_path,
+        dedup_path=tmp_path / "dedup.json",
     )
     result = await loop._do_work()
     assert result == {"status": "disabled"}
