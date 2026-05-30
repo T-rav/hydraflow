@@ -59,7 +59,7 @@ class DiagramLoop(BaseBackgroundLoop):
         deps: LoopDeps,
     ) -> None:
         super().__init__(
-            worker_name="diagram-loop",
+            worker_name="diagram_loop",
             config=config,
             deps=deps,
         )
@@ -75,6 +75,9 @@ class DiagramLoop(BaseBackgroundLoop):
         return 14400
 
     async def _do_work(self) -> WorkCycleResult:
+        # ADR-0049 in-body kill-switch (UI toggle, System tab). Must be FIRST.
+        if not self._enabled_cb(self._worker_name):
+            return {"status": "disabled"}
         if not self._config.diagram_loop_enabled:
             return {"status": "config_disabled"}
         # Kill-switch (ADR-0049). Belt and suspenders.

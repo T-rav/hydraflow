@@ -93,6 +93,9 @@ class EntryEvidenceLoop(BaseBackgroundLoop):
         return self._config.entry_evidence_interval
 
     async def _do_work(self) -> dict[str, Any] | None:
+        # ADR-0049 in-body kill-switch (UI toggle, System tab). Must be FIRST.
+        if not self._enabled_cb(self._worker_name):
+            return {"status": "disabled"}
         if not self._config.entry_evidence_enabled:
             return {"status": "disabled"}
 
