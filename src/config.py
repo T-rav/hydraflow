@@ -668,6 +668,15 @@ class HydraFlowConfig(BaseModel):
         description="CLI backend for implementation agents",
     )
     model: str = Field(default="opus", description="Model for implementation agents")
+    agent_unrestricted_tools: bool = Field(
+        default=False,
+        description=(
+            "Escape hatch (ADR-0084): when True, issue-derived implementer/auto-agent "
+            "spawns use the legacy bypassPermissions/danger-full-access mode instead of "
+            "the hardened acceptEdits + tool-allowlist + WebFetch/WebSearch-disallow "
+            "mode. Leave False unless the restricted allowlist breaks a backend."
+        ),
+    )
 
     # Review configuration
     review_tool: Literal["claude", "codex", "gemini", "pi"] = Field(

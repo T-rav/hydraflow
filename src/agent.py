@@ -34,6 +34,7 @@ from skill_registry import (  # noqa: F401
     get_skills,
 )
 from task_graph import extract_phases, has_task_graph, topological_sort
+from untrusted_text import UNTRUSTED_DATA_PREAMBLE, fence_untrusted
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -655,7 +656,9 @@ Run through this checklist before your final commit:
             ]
             formatted = "\n".join(f"- {c}" for c in compact_comments)
             builder.record_history("Discussion", "".join(other_comments), formatted)
-            comments_section = f"\n\n## Discussion\n{formatted}"
+            comments_section = (
+                f"\n\n## Discussion\n{fence_untrusted('issue_comments', formatted)}"
+            )
             if len(other_comments) > max_comments:
                 comments_section += f"\n- ... ({len(other_comments) - max_comments} more comments omitted)"
 
@@ -739,9 +742,14 @@ Run through this checklist before your final commit:
 
         prompt = f"""You are implementing GitHub issue #{issue.id}.
 
-## Issue: {issue.title}
+{UNTRUSTED_DATA_PREAMBLE}
+## Issue #{issue.id}
 
-{body}{plan_section}{review_feedback_section}{prior_failure_section}{comments_section}{memory_section}{log_section}
+### Title
+{fence_untrusted("issue_title", issue.title)}
+
+### Description
+{fence_untrusted("issue_body", body)}{plan_section}{review_feedback_section}{prior_failure_section}{comments_section}{memory_section}{log_section}
 
 ## Instructions — Test-Driven Development
 

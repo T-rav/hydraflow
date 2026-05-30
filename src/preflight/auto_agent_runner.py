@@ -4,8 +4,14 @@ Spec §3.1 / ADR-0050. Inherits BaseSubprocessRunner[PreflightSpawn] for
 the load-bearing conventions (auth-retry, reraise_on_credit_or_bug,
 telemetry, never-raises). Auto-agent-specific concerns:
 
-- tool restrictions (`--disallowedTools=WebFetch` per spec §5.2)
-- backend-mismatch warning when implementation_tool != "claude"
+- restricted-mode hardening (ADR-0084): the auto-agent runs on
+  attacker-reachable input (issue body/comments, sentry, wiki), so its
+  command is built with ``restricted=True`` by default — claude drops
+  ``bypassPermissions`` for ``acceptEdits`` + an explicit tool allowlist and
+  disallows the WebFetch/WebSearch egress tools; codex switches to its
+  network-blocked ``workspace-write`` sandbox. The ``agent_unrestricted_tools``
+  escape hatch reverts to the legacy unrestricted mode.
+- backend-mismatch warning when implementation_tool not in ("claude", "codex")
 - wall-clock cap override (auto_agent_wall_clock_cap_s)
 - result shape: PreflightSpawn (with output_text + tokens fields)
 """
@@ -26,12 +32,15 @@ from runners.base_subprocess_runner import (
 logger = logging.getLogger("hydraflow.preflight.auto_agent_runner")
 
 
-# Spec §5.2 — tools the auto-agent must NOT use.
+# Spec §5.2 / ADR-0084 — tools the auto-agent must NOT use.
 #
-# `WebFetch` is disabled because the auto-agent should reason from the
-# context the loop gathered (wiki + sentry + recent commits + escalation
-# context), not chase arbitrary external URLs that could leak issue
-# content or pull in malicious instructions.
+# `WebFetch` (and, in restricted mode, `WebSearch`) are disabled because the
+# auto-agent should reason from the context the loop gathered (wiki + sentry +
+# recent commits + escalation context), not chase arbitrary external URLs that
+# could leak issue content or pull in malicious instructions. In restricted
+# mode build_agent_command additionally unions the egress tools
+# (WebFetch/WebSearch) onto the disallow list, so this constant is the
+# auto-agent-specific extra rather than the whole egress guard.
 _AUTO_AGENT_DISALLOWED_TOOLS = "WebFetch"
 
 
@@ -45,10 +54,16 @@ class AutoAgentRunner(BaseSubprocessRunner[PreflightSpawn]):
         return "auto_agent_preflight"
 
     def _build_command(self, prompt: str, worktree: Path) -> list[str]:
+        # The auto-agent operates on attacker-reachable input, so it MUST be
+        # hardened by default (ADR-0084): restricted=True drops bypassPermissions
+        # for acceptEdits + a tool allowlist (claude) / the network-blocked
+        # workspace-write sandbox (codex). agent_unrestricted_tools is the
+        # operator escape hatch back to the legacy unrestricted mode.
         return build_agent_command(
             tool=self._config.implementation_tool,
             model=self._config.model,
             disallowed_tools=_AUTO_AGENT_DISALLOWED_TOOLS,
+            restricted=not self._config.agent_unrestricted_tools,
         )
 
     def _default_timeout_s(self) -> int:
@@ -57,15 +72,18 @@ class AutoAgentRunner(BaseSubprocessRunner[PreflightSpawn]):
         )
 
     def _pre_spawn_hook(self, prompt: str) -> None:
-        # `--disallowedTools=WebFetch` is silently dropped by build_agent_command
-        # for codex/gemini backends. Warn so the operator knows the CLI-level
-        # guard isn't active for that backend — the path-level honor-system
-        # in the prompt envelope is the only remaining restriction layer.
-        if self._config.implementation_tool != "claude":
+        # The claude backend gets the full restricted hardening (acceptEdits +
+        # tool allowlist + WebFetch/WebSearch disallow). codex gets a real
+        # network-egress block via its workspace-write sandbox. Other backends
+        # (e.g. gemini) have no CLI-level allow/disallow surface, so restricted
+        # mode is a no-op there and only the prompt-envelope honor-system +
+        # post-hoc CI restrain egress. Warn so the operator knows.
+        if self._config.implementation_tool not in ("claude", "codex"):
             logger.warning(
-                "auto-agent: --disallowedTools is only enforced for the claude "
-                "backend; current implementation_tool=%s — WebFetch restriction "
-                "is honor-system + post-hoc CI for this run",
+                "auto-agent: restricted-mode tool hardening (ADR-0084) is only "
+                "CLI-enforced for the claude/codex backends; current "
+                "implementation_tool=%s — egress restriction is honor-system + "
+                "post-hoc CI for this run",
                 self._config.implementation_tool,
             )
 

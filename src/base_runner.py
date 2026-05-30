@@ -483,6 +483,9 @@ class BaseRunner:
         return build_agent_command(
             tool=self._config.implementation_tool,
             model=self._config.model,
+            # Issue-derived implementer / auto-agent: harden against prompt
+            # injection (ADR-0084) unless an operator opts out via config.
+            restricted=not self._config.agent_unrestricted_tools,
         )
 
     async def _verify_quality(self, worktree_path: Path) -> LoopResult:
