@@ -80,6 +80,7 @@ from pr_unsticker_loop import PRUnstickerLoop
 from precondition_gate import PreconditionGate
 from preflight.audit import PreflightAuditStore
 from pricing_refresh_loop import PricingRefreshLoop  # noqa: TCH001
+from principles_audit_loop import PrinciplesAuditLoop
 from rc_budget_loop import RCBudgetLoop
 from repo_wiki import RepoWikiStore
 from repo_wiki_loop import RepoWikiLoop  # noqa: TCH001
@@ -199,6 +200,7 @@ class ServiceRegistry:
     diagnostic_loop: DiagnosticLoop
     retrospective_loop: RetrospectiveLoop
     retrospective_queue: RetrospectiveQueue
+    principles_audit_loop: PrinciplesAuditLoop
     flake_tracker_loop: FlakeTrackerLoop
     skill_prompt_eval_loop: SkillPromptEvalLoop
     fake_coverage_auditor_loop: FakeCoverageAuditorLoop
@@ -1044,6 +1046,12 @@ def build_services(
         queue=retrospective_queue,
         prs=prs,
     )
+    principles_audit_loop = PrinciplesAuditLoop(
+        config=config,
+        state=state,
+        pr_manager=prs,
+        deps=loop_deps,
+    )
     flake_tracker_dedup = DedupStore(
         "flake_tracker",
         config.data_root / "dedup" / "flake_tracker.json",
@@ -1369,6 +1377,7 @@ def build_services(
         diagnostic_loop=diagnostic_loop,
         retrospective_loop=retrospective_loop,
         retrospective_queue=retrospective_queue,
+        principles_audit_loop=principles_audit_loop,
         flake_tracker_loop=flake_tracker_loop,
         skill_prompt_eval_loop=skill_prompt_eval_loop,
         fake_coverage_auditor_loop=fake_coverage_auditor_loop,

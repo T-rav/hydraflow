@@ -133,6 +133,7 @@ class TestInterval:
             "corpus_learning": cfg.corpus_learning_interval,
             "contract_refresh": cfg.contract_refresh_interval,
             "staging_bisect": cfg.staging_bisect_interval,
+            "principles_audit": cfg.principles_audit_interval,
             "flake_tracker": cfg.flake_tracker_interval,
             "skill_prompt_eval": cfg.skill_prompt_eval_interval,
             "rc_budget": cfg.rc_budget_interval,

@@ -238,7 +238,7 @@ export const WORKER_PRESETS = {
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'sentry_ingest', 'retrospective', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'sentry_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry'])
 
 /**
  * Default intervals (in seconds) for system workers.
@@ -260,6 +260,7 @@ export const SYSTEM_WORKER_INTERVALS = {
   security_patch: 21600,
   ci_monitor: 1800,
   retrospective: 1800,
+  principles_audit: 604800,
   flake_tracker: 14400,
   skill_prompt_eval: 604800,
   fake_coverage_auditor: 604800,
@@ -321,6 +322,7 @@ export const BACKGROUND_WORKERS = [
   { key: 'security_patch', label: 'Security Patch', description: 'Polls Dependabot alerts and files issues for fixable vulnerabilities.', color: theme.red, group: 'repo_health', tags: ['security'] },
   { key: 'repo_wiki', label: 'Repo Wiki', description: 'Lints and maintains per-repo knowledge wikis compiled from plan/implement/review cycles.', color: theme.purple, group: 'learning', tags: ['knowledge'] },
   { key: 'diagnostic', label: 'Diagnostic Agent', description: 'Analyzes escalated issues, classifies severity, and attempts targeted fixes before HITL.', color: theme.blue, system: true, group: 'operations', tags: ['recovery'] },
+  { key: 'principles_audit', label: 'Principles Audit', description: 'Weekly audit of managed repos and HydraFlow-self against ADR-0044 principles. Gates onboarding and detects drift regressions.', color: theme.purple, group: 'governance', tags: ['audit', 'compliance'] },
   { key: 'flake_tracker', label: 'Flake Tracker', description: 'Detects persistently flaky tests across the last 20 RC runs and files fix-or-quarantine issues.', color: theme.yellow, group: 'repo_health', tags: ['quality'] },
   { key: 'skill_prompt_eval', label: 'Skill Prompt Eval', description: 'Runs the full adversarial skill corpus weekly and files drift + weak-case issues.', color: theme.blue, group: 'learning', tags: ['quality'] },
   { key: 'fake_coverage_auditor', label: 'Fake Coverage Auditor', description: 'Flags un-cassetted fake adapter methods and un-exercised test helpers.', color: theme.accent, group: 'learning', tags: ['quality'] },

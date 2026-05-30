@@ -46,6 +46,7 @@ _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
     "staging_promotion": (60, 86400),
     "staging_bisect": (60, 86400),
     "retrospective": (60, 86400),
+    "principles_audit": (3600, 2_592_000),  # 1h min, 30d max
     "flake_tracker": (3600, 2_592_000),  # 1h min, 30d max
     "skill_prompt_eval": (86400, 2_592_000),  # 1d min, 30d max
     "fake_coverage_auditor": (86400, 2_592_000),  # 1d min, 30d max

@@ -435,7 +435,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ),
     ("pr_unsticker_loop_enabled", "HYDRAFLOW_PR_UNSTICKER_LOOP_ENABLED", True),
     ("pricing_refresh_loop_enabled", "HYDRAFLOW_PRICING_REFRESH_LOOP_ENABLED", True),
-    ("principles_audit_loop_enabled", "HYDRAFLOW_PRINCIPLES_AUDIT_LOOP_ENABLED", True),
+    ("principles_audit_loop_enabled", "HYDRAFLOW_PRINCIPLES_AUDIT_LOOP_ENABLED", False),
     ("rc_budget_loop_enabled", "HYDRAFLOW_RC_BUDGET_LOOP_ENABLED", True),
     ("repo_wiki_loop_enabled", "HYDRAFLOW_REPO_WIKI_LOOP_ENABLED", True),
     ("report_issue_loop_enabled", "HYDRAFLOW_REPORT_ISSUE_LOOP_ENABLED", True),
@@ -2670,8 +2670,13 @@ class HydraFlowConfig(BaseModel):
         description="Deploy-time kill-switch for PricingRefreshLoop.",
     )
     principles_audit_loop_enabled: bool = Field(
-        default=True,
-        description="Deploy-time kill-switch for PrinciplesAuditLoop.",
+        default=False,
+        description=(
+            "Deploy-time opt-in switch for PrinciplesAuditLoop. Disabled by "
+            "default because the weekly audit is noisy and can file low-signal "
+            "quality issues; set HYDRAFLOW_PRINCIPLES_AUDIT_LOOP_ENABLED=true "
+            "to re-enable it."
+        ),
     )
     rc_budget_loop_enabled: bool = Field(
         default=True,

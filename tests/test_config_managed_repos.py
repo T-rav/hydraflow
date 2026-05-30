@@ -42,3 +42,8 @@ def test_hydraflow_managed_repos_json_env_override():
 def test_hydraflow_principles_audit_interval_default():
     cfg = HydraFlowConfig()
     assert cfg.principles_audit_interval == 604800
+
+
+def test_hydraflow_principles_audit_loop_disabled_by_default():
+    cfg = HydraFlowConfig()
+    assert cfg.principles_audit_loop_enabled is False
