@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field  # noqa: TCH002
 
+from file_util import atomic_write
+
 if TYPE_CHECKING:
     from config import HydraFlowConfig
     from ports import ObservabilityPort
@@ -278,12 +280,16 @@ def load_known_patterns(memory_dir: Path) -> dict[str, KnownLogPattern]:
 
 
 def save_known_patterns(memory_dir: Path, patterns: dict[str, KnownLogPattern]) -> None:
-    """Persist known patterns to ``log_patterns.jsonl``."""
+    """Persist known patterns to ``log_patterns.jsonl``.
+
+    Uses an atomic temp-file + ``os.replace`` write (#8080) so a crash
+    mid-write can't truncate the file and force every known pattern to be
+    re-filed as novel on the next restart.
+    """
     try:
-        memory_dir.mkdir(parents=True, exist_ok=True)
         path = memory_dir / _LOG_PATTERNS_FILE
         lines = [p.model_dump_json() for p in patterns.values()]
-        path.write_text("\n".join(lines) + "\n" if lines else "", encoding="utf-8")
+        atomic_write(path, "\n".join(lines) + "\n" if lines else "")
     except OSError:
         logger.warning("Failed to save known log patterns", exc_info=True)
 

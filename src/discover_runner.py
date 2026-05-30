@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
+from discover_expander import expand_research_brief, format_queries_for_prompt
 from exception_classify import reraise_on_credit_or_bug
 from models import DiscoverResult
 from plugin_skill_registry import (
@@ -33,6 +34,64 @@ _JSON_BLOCK_RE = re.compile(r"```json\s*\n(.*?)\n```", re.DOTALL)
 
 # Evaluator skill (§4.10)
 _SKILL_NAME = "discover-completeness"
+
+
+def _consume_mockworld_discover_script(
+    runner: DiscoverRunner, issue_number: int
+) -> tuple[bool, str, list[str]] | None:
+    """Consume one scripted DiscoverRunner coherence outcome, if present.
+
+    Returns ``(passed, summary, findings)`` matching the
+    ``parse_discover_completeness_result`` shape, or ``None`` when no
+    MockWorld scripting is active for *issue_number*. When the scripted
+    outcome carries ``queries_required``, those queries are stashed in a
+    per-task buffer that ``_dispatch_expander`` drains for the next call
+    so the expander returns the scripted queries instead of dispatching
+    a real subagent.
+    """
+    fake_llm = getattr(runner, "_mockworld_fake_llm", None)
+    if fake_llm is None or not getattr(fake_llm, "_is_fake_adapter", False):
+        return None
+    if not hasattr(fake_llm, "pop_discover_script"):
+        return None
+    scripted = fake_llm.pop_discover_script(issue_number)
+    if scripted is None:
+        return None
+    # Stash queries for the next _dispatch_expander call. The runner owns
+    # the buffer (not FakeLLM) because the expander dispatch is keyed by
+    # the (issue, attempt) pair in the bounded retry loop and the buffer
+    # is short-lived — one entry per scripted failure.
+    if scripted.queries_required:
+        buf = getattr(runner, "_mockworld_pending_queries", None)
+        if buf is None:
+            buf = {}
+            runner._mockworld_pending_queries = buf  # type: ignore[attr-defined]
+        buf.setdefault(issue_number, []).extend(scripted.queries_required)
+    summary = scripted.summary or (
+        "All five rubric criteria pass"
+        if scripted.coherent
+        else "scripted coherence rejection"
+    )
+    return scripted.coherent, summary, list(scripted.findings)
+
+
+def _take_mockworld_pending_queries(
+    runner: DiscoverRunner, issue_number: int
+) -> list[str] | None:
+    """Pop the scripted expander queries for *issue_number*, if any.
+
+    Returns ``None`` when the runner is not in MockWorld mode. Returns an
+    empty list when the scenario scripted a coherence failure WITHOUT
+    queries (expander surfaced nothing — same as the real expander
+    returning [] from a low-confidence subagent).
+    """
+    fake_llm = getattr(runner, "_mockworld_fake_llm", None)
+    if fake_llm is None or not getattr(fake_llm, "_is_fake_adapter", False):
+        return None
+    buf = getattr(runner, "_mockworld_pending_queries", None)
+    if not buf:
+        return []
+    return buf.pop(issue_number, [])
 
 
 class DiscoverRunner(BaseRunner):
@@ -67,6 +126,15 @@ class DiscoverRunner(BaseRunner):
         RETRY it re-runs discovery up to the budget, then escalates via
         ``hitl-escalation`` / ``discover-stuck`` and returns the last
         (best-available) brief so the phase can still post a comment.
+
+        ADR-0063 W3a — discover-expander. On the FIRST coherence-failure
+        within the bounded retry loop the runner dispatches the
+        ``discover-expander`` subagent (capped by
+        ``config.max_discover_expansions``, default 1) to propose new
+        research queries; those queries are injected into the next
+        attempt's prompt before re-running discovery. One expansion per
+        issue by default — further coherence failures fall through to
+        normal retry + escalation.
         """
         result = DiscoverResult(issue_number=task.id)
         if self._config.dry_run:
@@ -76,10 +144,15 @@ class DiscoverRunner(BaseRunner):
 
         max_attempts = max(1, self._config.max_discover_attempts or 1)
         evaluator_enabled = self._config.max_discover_attempts > 0
+        max_expansions = max(0, int(self._config.max_discover_expansions or 0))
+        expansions_used = 0
+        expanded_queries: list[str] = []
         last_summary = ""
         last_findings: list[str] = []
         for attempt in range(1, max_attempts + 1):
-            result = await self._run_discovery_once(task, attempt)
+            result = await self._run_discovery_once(
+                task, attempt, expanded_queries=expanded_queries
+            )
             if not evaluator_enabled:
                 return result
             passed, summary, findings = await self._evaluate_brief(
@@ -95,14 +168,91 @@ class DiscoverRunner(BaseRunner):
                 max_attempts,
                 summary,
             )
+            # ADR-0063 W3a — on the first coherence failure, dispatch
+            # the discover-expander before the next attempt. Bounded by
+            # ``max_discover_expansions`` (default 1). When the
+            # expander returns no queries we still proceed to the next
+            # attempt (no harm), but we do not consume another expansion
+            # slot — there was nothing to inject.
+            should_expand = expansions_used < max_expansions and attempt < max_attempts
+            if should_expand:
+                new_queries = await self._dispatch_expander(
+                    task=task,
+                    original_brief=result.research_brief,
+                    coherence_failure_reason=summary,
+                    failure_findings=findings,
+                )
+                if new_queries:
+                    expansions_used += 1
+                    # Accumulate: queries from successive expansions all
+                    # feed forward so the next attempt sees the union.
+                    expanded_queries = expanded_queries + new_queries
+                    logger.info(
+                        "discover-expander injected %d new queries for #%d "
+                        "(expansion %d/%d)",
+                        len(new_queries),
+                        task.id,
+                        expansions_used,
+                        max_expansions,
+                    )
         await self._escalate_stuck(task, last_summary, last_findings, max_attempts)
         return result
 
-    async def _run_discovery_once(self, task: Task, attempt: int) -> DiscoverResult:
+    async def _dispatch_expander(
+        self,
+        *,
+        task: Task,
+        original_brief: str,
+        coherence_failure_reason: str,
+        failure_findings: list[str],
+    ) -> list[str]:
+        """Dispatch the discover-expander subagent (ADR-0063 W3a).
+
+        Thin wrapper that supplies the runner's CLI command, working
+        directory, and ``_execute`` callable to the pure expander helper.
+        Returns the parsed expansion queries (possibly empty).
+
+        MockWorld bypass: when the scenario scripted the prior coherence
+        failure with ``queries_required`` via
+        :meth:`FakeLLM.script_discover`, the queries surface here via a
+        per-task buffer the bypass-aware ``_evaluate_brief`` populated
+        before raising the coherence flag. This skips the expander
+        subprocess entirely for sandbox scenarios.
+        """
+        scripted_queries = _take_mockworld_pending_queries(self, task.id)
+        if scripted_queries is not None:
+            return scripted_queries
+
+        try:
+            return await expand_research_brief(
+                task=task,
+                original_brief=original_brief,
+                coherence_failure_reason=coherence_failure_reason,
+                failure_findings=failure_findings,
+                executor=self._execute,
+                cmd=self._build_command(),
+                cwd=self._config.repo_root,
+            )
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.warning("discover-expander wrapper failed for #%d: %s", task.id, exc)
+            return []
+
+    async def _run_discovery_once(
+        self,
+        task: Task,
+        attempt: int,
+        *,
+        expanded_queries: list[str] | None = None,
+    ) -> DiscoverResult:
         """Run a single discovery pass — produces one :class:`DiscoverResult`.
 
         Factored from the original single-shot ``discover`` body so the
-        outer loop can invoke it once per attempt.
+        outer loop can invoke it once per attempt. ``expanded_queries``
+        (ADR-0063 W3a) carries research queries the discover-expander
+        subagent produced after a prior coherence failure; when present
+        they are appended to the prompt so the next brief explicitly
+        addresses each one.
         """
         result = DiscoverResult(issue_number=task.id)
         transcript = ""
@@ -123,6 +273,13 @@ class DiscoverRunner(BaseRunner):
                     f"in what the team already knows."
                     f"{memory_section}"
                 )
+
+            # ADR-0063 W3a — inject any expanded research queries from a
+            # prior discover-expander dispatch so this attempt's brief
+            # answers them explicitly.
+            expansion_section = format_queries_for_prompt(expanded_queries or [])
+            if expansion_section:
+                prompt = f"{prompt}\n\n{expansion_section}"
 
             def _check_complete(accumulated: str) -> bool:
                 if _DISCOVER_END in accumulated:
@@ -183,7 +340,18 @@ class DiscoverRunner(BaseRunner):
 
         A missing skill (registry disabled) fails open so this extension
         never blocks discovery on its own absence.
+
+        MockWorld bypass: when the instance carries a ``_mockworld_fake_llm``
+        sentinel attribute and the scenario has scripted a coherence verdict
+        via :meth:`FakeLLM.script_discover`, the scripted outcome is returned
+        in lieu of dispatching the read-only subprocess. This lets sandbox
+        scenarios drive the ADR-0063 W3a recovery branch without producing
+        a synthetic ``DISCOVER_COMPLETENESS_RESULT`` transcript.
         """
+        scripted = _consume_mockworld_discover_script(self, task.id)
+        if scripted is not None:
+            return scripted
+
         skill = next((s for s in BUILTIN_SKILLS if s.name == _SKILL_NAME), None)
         if skill is None:
             return True, f"{_SKILL_NAME} not registered — fail open", []

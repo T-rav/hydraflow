@@ -166,10 +166,6 @@ describe('INTERVAL_PRESETS', () => {
 })
 
 describe('EDITABLE_INTERVAL_WORKERS', () => {
-  it('includes memory_sync', () => {
-    expect(EDITABLE_INTERVAL_WORKERS.has('memory_sync')).toBe(true)
-  })
-
   it('includes report_issue', () => {
     expect(EDITABLE_INTERVAL_WORKERS.has('report_issue')).toBe(true)
   })
@@ -233,7 +229,7 @@ describe('EDITABLE_INTERVAL_WORKERS includes dependabot_merge', () => {
 
 describe('WORKER_PRESETS', () => {
   it('has exactly the expected worker keys', () => {
-    expect(Object.keys(WORKER_PRESETS).sort()).toEqual(['adr_reviewer', 'ci_monitor', 'code_grooming', 'dependabot_merge', 'pipeline_poller', 'report_issue', 'security_patch', 'sentry_ingest', 'stale_issue'])
+    expect(Object.keys(WORKER_PRESETS).sort()).toEqual(['adr_reviewer', 'ci_monitor', 'dependabot_merge', 'pipeline_poller', 'report_issue', 'security_patch', 'sentry_ingest', 'stale_issue'])
   })
 
   it('maps pipeline_poller to PIPELINE_POLLER_PRESETS', () => {

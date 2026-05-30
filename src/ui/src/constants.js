@@ -216,16 +216,6 @@ export const CI_MONITOR_PRESETS = [
   { label: '6h', seconds: 21600 },
 ]
 
-/**
- * Preset interval options for the code_grooming worker.
- */
-export const CODE_GROOMING_PRESETS = [
-  { label: '12h', seconds: 43200 },
-  { label: '24h', seconds: 86400 },
-  { label: '3d', seconds: 259200 },
-  { label: '7d', seconds: 604800 },
-]
-
 const SENTRY_INGEST_PRESETS = [
   { label: '30m', seconds: 1800 },
   { label: '1h', seconds: 3600 },
@@ -245,14 +235,13 @@ export const WORKER_PRESETS = {
   stale_issue: STALE_ISSUE_PRESETS,
   security_patch: SECURITY_PATCH_PRESETS,
   ci_monitor: CI_MONITOR_PRESETS,
-  code_grooming: CODE_GROOMING_PRESETS,
   sentry_ingest: SENTRY_INGEST_PRESETS,
 }
 
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['memory_sync', 'pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'code_grooming', 'sentry_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'worktree_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'sentry_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry'])
 
 /**
  * Default intervals (in seconds) for system workers.
@@ -263,17 +252,16 @@ export const SYSTEM_WORKER_INTERVALS = {
   pipeline_poller: 5,
   pr_unsticker: 3600,
   merge_state_watcher: 600,
-  memory_sync: 3600,
   report_issue: 30,
   worktree_gc: 1800,
   adr_reviewer: 86400,
+  epic_sweeper: 3600,
   dependabot_merge: 3600,
   staging_promotion: 300,
   staging_bisect: 600,
   stale_issue: 86400,
   security_patch: 21600,
   ci_monitor: 1800,
-  code_grooming: 86400,
   retrospective: 1800,
   principles_audit: 604800,
   flake_tracker: 14400,
@@ -295,6 +283,7 @@ export const SYSTEM_WORKER_INTERVALS = {
   github_cache: 30,
   runs_gc: 3600,
   label_drift_watcher: 600,
+  triage_retry: 86400,
 }
 
 /**
@@ -317,13 +306,13 @@ export const CRATE_STATUSES = ['open', 'closed']
 export const BACKGROUND_WORKERS = [
   { key: 'retrospective', label: 'Retrospective', description: 'Periodic analysis of delivery patterns and review feedback. Runs pattern detection, proposal verification, and improvement filing.', color: theme.purple, group: 'learning', tags: ['insights'] },
   { key: 'pipeline_poller', label: 'Pipeline Poller', description: 'Refreshes live pipeline snapshots for queue and status visibility.', color: theme.textMuted, system: true, group: 'operations', tags: ['infra'] },
-  { key: 'memory_sync',     label: 'Memory Manager', description: 'Ingests memory and transcript issues into durable learnings.', color: theme.accent, system: true, group: 'intake', tags: ['memory'] },
   { key: 'pr_unsticker',    label: 'PR Unsticker',   description: 'Requeues stalled HITL PRs once requirements are actionable.', color: theme.orange, system: true, group: 'operations', tags: ['recovery'] },
   { key: 'merge_state_watcher', label: 'Merge State Watcher', description: 'Auto-rebases or HITL-escalates open PRs flagged mergeable=CONFLICTING (RC, dependabot, agent).', color: theme.orange, system: true, group: 'operations', tags: ['recovery'] },
   { key: 'report_issue',   label: 'Report Issue',   description: 'Processes queued bug reports into GitHub issues.', color: theme.red, group: 'intake', tags: ['issues'] },
   { key: 'workspace_gc',   label: 'Workspace GC',   description: 'Garbage-collects stale workspaces and orphaned branches.', color: theme.textMuted, system: true, group: 'repo_health', tags: ['hygiene'] },
   { key: 'adr_reviewer',   label: 'ADR Reviewer',   description: 'Reviews proposed ADRs via a 3-judge council and routes to accept, reject, or escalate.', color: theme.accent, group: 'intake', tags: ['review'] },
   { key: 'review_advisor', label: 'Review Advisor', description: 'Event-driven post-verify second-opinion gate on PR review APPROVE verdicts. Vetoes hand back transcripts to the executor for bounded retries; exhaustion escalates to HITL. Per-PR sessions logged to review_logs/{pr}/advisor_session.jsonl; OTel metrics under review_advisor_*. See docs/superpowers/specs/2026-05-08-advisor-pattern-self-repairing-review-design.md.', color: theme.accent, group: 'intake', tags: ['review'] },
+  { key: 'epic_sweeper',    label: 'Epic Sweeper',    description: 'Periodically sweeps open epics and auto-closes those with all sub-issues resolved.', color: theme.purple, system: true, group: 'operations', tags: ['lifecycle'] },
   { key: 'dependabot_merge', label: 'Dependabot Merge', description: 'Auto-merges dependency update PRs from configured bots after CI passes.', color: theme.green, group: 'repo_health', tags: ['security'] },
   { key: 'staging_promotion', label: 'Staging Promotion', description: 'Cuts release-candidate snapshots from staging and auto-promotes them to main on green CI. See ADR-0042.', color: theme.accent, group: 'release', tags: ['release'] },
   { key: 'staging_bisect', label: 'Staging Bisect', description: 'Bisects the culprit PR on RC-red, files auto-revert + retry issue, watchdogs the next RC. See ADR-0042 §4.3.', color: theme.red, group: 'release', tags: ['release', 'recovery'] },
@@ -332,8 +321,8 @@ export const BACKGROUND_WORKERS = [
   { key: 'sentry_ingest', label: 'Sentry Ingest', description: 'Polls Sentry for unresolved errors and files them as GitHub issues for the pipeline.', color: theme.red, group: 'intake', tags: ['errors'] },
   { key: 'stale_issue_gc', label: 'Stale HITL Issue GC', description: 'Auto-closes stale HITL escalation issues — posts a farewell comment, capped at 10/cycle. Distinct from Stale General Issue Cleanup, which excludes HF lifecycle labels.', color: theme.textMuted, group: 'repo_health', tags: ['hygiene'] },
   { key: 'ci_monitor', label: 'CI Monitor', description: 'Detects failing CI on main and files/auto-closes issues.', color: theme.yellow, group: 'repo_health', tags: ['quality'] },
+  { key: 'branch_protection_auditor', label: 'Branch Protection Auditor', description: 'Audits live GitHub branch protection against the canonical rulesets generated from gates.toml; files an issue on drift. See ADR-0082.', color: theme.purple, system: true, group: 'governance', tags: ['audit', 'drift'] },
   { key: 'security_patch', label: 'Security Patch', description: 'Polls Dependabot alerts and files issues for fixable vulnerabilities.', color: theme.red, group: 'repo_health', tags: ['security'] },
-  { key: 'code_grooming', label: 'Code Grooming', description: 'Runs periodic audit scans and files issues for critical findings.', color: theme.accent, group: 'repo_health', tags: ['quality'] },
   { key: 'repo_wiki', label: 'Repo Wiki', description: 'Lints and maintains per-repo knowledge wikis compiled from plan/implement/review cycles.', color: theme.purple, group: 'learning', tags: ['knowledge'] },
   { key: 'diagnostic', label: 'Diagnostic Agent', description: 'Analyzes escalated issues, classifies severity, and attempts targeted fixes before HITL.', color: theme.blue, system: true, group: 'operations', tags: ['recovery'] },
   { key: 'principles_audit', label: 'Principles Audit', description: 'Weekly audit of managed repos and HydraFlow-self against ADR-0044 principles. Gates onboarding and detects drift regressions.', color: theme.purple, group: 'governance', tags: ['audit', 'compliance'] },
@@ -353,6 +342,7 @@ export const BACKGROUND_WORKERS = [
   { key: 'corpus_learning', label: 'Corpus Learning', description: 'Grows the adversarial skill corpus from production escape signals; synthesizes + self-validates before/after cases and files PRs under tests/trust/adversarial/cases/. See spec §4.1 v2.', color: theme.purple, group: 'learning', tags: ['insights'] },
   { key: 'live_corpus_replay', label: 'Live Corpus Replay', description: 'Diffs fresh shadow-corpus samples against fake-adapter outputs to catch value-level drift between real and fake adapters; files one hydraflow-find issue per unique drift signature. See #8786 / ADR-0045.', color: theme.accent, group: 'governance', tags: ['audit', 'drift'] },
   { key: 'auto_agent_preflight', label: 'Auto-Agent Pre-Flight', description: 'Intercepts hitl-escalation issues; runs an emulated-engineer subprocess to attempt autonomous resolution before the issue surfaces to a human (spec §1–§11; ADR-0050).', color: theme.purple, group: 'autonomy', tags: ['hitl', 'autonomy'] },
+  { key: 'triage_retry', label: 'Triage Retry', description: 'Re-runs parked-issue triage every 24h with the original parking reason as context. Caps at 3 retries before escalating to HITL with the triage-retry-exhausted sub-label. Closes the only factory phase with no autonomous re-entry path. See ADR-0063 W2.', color: theme.purple, group: 'autonomy', tags: ['recovery', 'autonomy'] },
   { key: 'sandbox_failure_fixer', label: 'Sandbox Failure Fixer', description: 'Auto-fixes promotion PRs failing sandbox CI by dispatching the auto-agent', color: theme.purple, group: 'autonomy', tags: ['scaffold'] },
   { key: 'diagram_loop', label: 'Diagram Loop (L24)', description: 'Self-documenting architecture caretaker. Walks src/, tests/, docs/adr/ every 4h; emits regenerated docs/arch/generated/ markdown + opens a PR when the live truth has drifted. Per ADR-0029 (caretaker pattern) and the Architecture Knowledge System spec.', color: theme.cyan, group: 'governance', tags: ['drift'] },
   { key: 'pricing_refresh', label: 'Pricing Refresh', description: 'Daily upstream-pricing refresh caretaker. Fetches LiteLLM\'s structured pricing JSON, diffs against src/assets/model_pricing.json, opens a PR if upstream has new or changed Claude models. Bounds-guard rejects suspicious price moves (>+100% or <-50%). Always human-reviewed; never auto-merges.', color: theme.cyan, group: 'learning', tags: ['cost'] },

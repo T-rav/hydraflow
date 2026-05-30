@@ -18,10 +18,11 @@ from auto_agent_preflight_loop import AutoAgentPreflightLoop
 from base_background_loop import LoopDeps
 from baseline_policy import BaselinePolicy
 from beads_manager import BeadsManager
+from branch_protection_audit import AuditReport, audit_repo, gh_fetch_rulesets
+from branch_protection_auditor_loop import BranchProtectionAuditorLoop  # noqa: TCH001
 from bug_reproducer import BugReproducer
 from caching_issue_store import CachingIssueStore
 from ci_monitor_loop import CIMonitorLoop  # noqa: TCH001
-from code_grooming_loop import CodeGroomingLoop  # noqa: TCH001
 from config import Credentials, HydraFlowConfig
 from contract_refresh_loop import ContractRefreshLoop
 from corpus_learning_loop import CorpusLearningLoop
@@ -62,6 +63,7 @@ from models import StatusCallback
 from observability.sentry_adapter import SentryObservabilityAdapter
 from plan_phase import PlanPhase
 from plan_reviewer import PlanReviewer
+from plan_touchpoint_expander import PlanTouchpointExpander
 from planner import PlannerRunner
 from ports import (
     IssueFetcherPort,
@@ -108,6 +110,7 @@ from term_pruner_loop import TermPrunerLoop
 from transcript_summarizer import TranscriptSummarizer
 from triage import TriageRunner
 from triage_phase import TriagePhase
+from triage_retry_loop import TriageRetryLoop
 from troubleshooting_store import TroubleshootingPatternStore
 from trust_fleet_sanity_loop import TrustFleetSanityLoop
 from verification_judge import VerificationJudge
@@ -188,8 +191,8 @@ class ServiceRegistry:
     sentry_loop: SentryLoop
     stale_issue_gc_loop: StaleIssueGCLoop
     ci_monitor_loop: CIMonitorLoop
+    branch_protection_auditor_loop: BranchProtectionAuditorLoop
     security_patch_loop: SecurityPatchLoop
-    code_grooming_loop: CodeGroomingLoop
     repo_wiki_store: RepoWikiStore
     repo_wiki_loop: RepoWikiLoop
     diagnostic_loop: DiagnosticLoop
@@ -217,6 +220,7 @@ class ServiceRegistry:
     edge_proposer_loop: EdgeProposerLoop
     entry_evidence_loop: EntryEvidenceLoop
     live_corpus_replay_loop: LiveCorpusReplayLoop
+    triage_retry_loop: TriageRetryLoop
 
     # Optional integrations
 
@@ -538,12 +542,11 @@ def build_services(
     beads_mgr = BeadsManager()
 
     # Phase coordinators
-    # Local JSONL issue cache — append-only mirror of GitHub issue state.
-    # See src/issue_cache.py and issue #6422.
-    issue_cache = IssueCache(
-        config.data_path("cache"),
-        enabled=config.issue_cache_enabled,
-    )
+    # NOTE: reuse the single `issue_cache` constructed above (#8790 F1).
+    # A second construction here would give the read-through CachingIssueStore
+    # decorator and the phase coordinators *separate* IssueCache instances over
+    # the same directory — splitting the in-memory index mirror and per-issue
+    # version locks, which can corrupt versioned-write serialization.
 
     # Route-back coordinator + precondition gate (#6423). The coordinator
     # ties label swap + cache record + counter + escalation. The gate
@@ -641,6 +644,18 @@ def build_services(
     from expert_council import ExpertCouncil  # noqa: PLC0415
 
     shape_phase._council = ExpertCouncil(config, event_bus)
+
+    # Earlier-adversarial pipeline (ADR-0064). Always-on baseline; the
+    # ComplexityGate wiring is colocated here because it only depends on
+    # ``discover_phase``; the full AgentLike wiring for plan/discover/shape
+    # happens after ``planner_phase`` is constructed (below).
+    from complexity_gate import ComplexityGate  # noqa: PLC0415
+
+    # ``llm=None`` falls back to label + keyword heuristics; the gate
+    # defaults to LOAD_BEARING when uncertain, so a heuristic-only gate
+    # is safe (it never silently skips real work).
+    discover_phase.attach_complexity_gate(ComplexityGate(llm=None))
+
     planner_phase = PlanPhase(
         config,
         state,
@@ -659,6 +674,62 @@ def build_services(
         issue_cache=issue_cache,
         plan_reviewer=plan_reviewer,
     )
+
+    # Earlier-adversarial pipeline AgentLike wiring (ADR-0064).
+    #
+    # Attach ``SubprocessAgentRunner`` adapters to every adversarial-stage
+    # slot across plan, discover, and shape phases. Each adapter is
+    # stateless (the per-call ``system_prompt`` differentiates a surfacer
+    # from a council voter), so a single instance is shared across all
+    # slots.
+    #
+    # Why one shared instance: the AgentLike contract is
+    # ``run(system_prompt, user_message) -> str``. The adapter holds
+    # only the SubprocessRunner + model/tool config — no per-stage state.
+    # Sharing keeps the factory small; tests verify each slot is
+    # non-None per-phase.
+    from adversarial_agent_runner import SubprocessAgentRunner  # noqa: PLC0415
+
+    adversarial_agent = SubprocessAgentRunner(
+        runner=subprocess_runner,
+        tool=config.implementation_tool,
+        credentials=credentials,
+    )
+
+    planner_phase.attach_adversarial_agents(
+        surfacer_agent=adversarial_agent,
+        council_agents={
+            "builder": adversarial_agent,
+            "tester": adversarial_agent,
+            "risk_skeptic": adversarial_agent,
+        },
+        spec_ac_agent=adversarial_agent,
+        spec_judge_agent=adversarial_agent,
+    )
+    # ADR-0063 W3b: the plan touchpoint-expander shares the same
+    # AgentLike contract. Wired post-construction (mirrors
+    # ``attach_adversarial_agents``) so the field default stays ``None``
+    # for tests that build PlanPhase directly without the factory.
+    planner_phase._touchpoint_expander = PlanTouchpointExpander(
+        agent=adversarial_agent,
+    )
+    discover_phase.attach_adversarial_agents(
+        surfacer_agent=adversarial_agent,
+        council_agents={
+            "problem_sharpener": adversarial_agent,
+            "existing_solution_hunter": adversarial_agent,
+            "cheapest_test_advocate": adversarial_agent,
+        },
+    )
+    shape_phase.attach_adversarial_agents(
+        challenger_agent=adversarial_agent,
+        council_agents={
+            "user_advocate": adversarial_agent,
+            "tech_lead": adversarial_agent,
+            "product_strategist": adversarial_agent,
+        },
+    )
+
     hitl_phase = HITLPhase(
         config,
         state,
@@ -672,6 +743,22 @@ def build_services(
         active_issues_cb=active_issues_cb,
     )
     run_recorder = RunRecorder(config)
+
+    # ADR-0063 W5: wire the spec-compliance reviewer when the kill-switch
+    # is on. The adapter reuses the AgentRunner's subprocess plumbing so
+    # the reviewer shares tracing/auth-retry behavior with the implementer.
+    spec_reviewer = None
+    if config.implement_two_stage_review_enabled:
+        from implement_spec_reviewer import (  # noqa: PLC0415
+            AgentSubagentRunnerAdapter,
+            DefaultSpecComplianceReviewer,
+        )
+
+        spec_reviewer = DefaultSpecComplianceReviewer(
+            AgentSubagentRunnerAdapter(agents, config),
+            model=config.review_model,
+        )
+
     implementer = ImplementPhase(
         config,
         state,
@@ -686,6 +773,7 @@ def build_services(
         active_issues_cb=active_issues_cb,
         transcript_summarizer=summarizer,
         precondition_gate=precondition_gate,
+        spec_reviewer=spec_reviewer,
     )
 
     from metrics_manager import MetricsManager
@@ -869,6 +957,12 @@ def build_services(
         deps=loop_deps,
         observability=observability,
     )
+    triage_retry_loop = TriageRetryLoop(
+        config=config,
+        state=state,
+        pr_manager=prs,
+        deps=loop_deps,
+    )
     gh_cache_loop = GitHubCacheLoop(config, gh_cache, deps=loop_deps)  # noqa: F841
     from dedup_store import DedupStore  # noqa: PLC0415
 
@@ -900,12 +994,6 @@ def build_services(
         config=config,
         pr_manager=prs,
         deps=loop_deps,
-    )
-    code_grooming_loop = CodeGroomingLoop(  # noqa: F841
-        config=config,
-        pr_manager=prs,
-        deps=loop_deps,
-        credentials=credentials,
     )
     repo_wiki_loop = RepoWikiLoop(
         config=config,
@@ -1000,6 +1088,29 @@ def build_services(
         dedup=adr_touchpoint_auditor_dedup,
         adr_index=ADRIndex(config.repo_root / "docs" / "adr"),
         deps=loop_deps,
+    )
+
+    branch_protection_auditor_dedup = DedupStore(
+        "branch_protection_auditor",
+        config.data_root / "dedup" / "branch_protection_auditor.json",
+    )
+    _bp_canonical_dir = config.repo_root / "docs" / "standards" / "branch_protection"
+
+    async def _branch_protection_audit() -> AuditReport:
+        # Offload the blocking gh calls so the event loop is not stalled.
+        return await asyncio.to_thread(
+            audit_repo,
+            config.repo,
+            _bp_canonical_dir,
+            fetch_rulesets=gh_fetch_rulesets,
+        )
+
+    branch_protection_auditor_loop = BranchProtectionAuditorLoop(  # noqa: F841
+        config=config,
+        pr_manager=prs,
+        dedup=branch_protection_auditor_dedup,
+        deps=loop_deps,
+        auditor=_branch_protection_audit,
     )
 
     memory_backlog_dedup = DedupStore(
@@ -1249,8 +1360,8 @@ def build_services(
         sentry_loop=sentry_loop,
         stale_issue_gc_loop=stale_issue_gc_loop,
         ci_monitor_loop=ci_monitor_loop,
+        branch_protection_auditor_loop=branch_protection_auditor_loop,
         security_patch_loop=security_patch_loop,
-        code_grooming_loop=code_grooming_loop,
         repo_wiki_store=repo_wiki_store,
         repo_wiki_loop=repo_wiki_loop,
         diagnostic_loop=diagnostic_loop,
@@ -1278,4 +1389,5 @@ def build_services(
         edge_proposer_loop=edge_proposer_loop,
         entry_evidence_loop=entry_evidence_loop,
         live_corpus_replay_loop=_live_corpus_replay_loop,
+        triage_retry_loop=triage_retry_loop,
     )

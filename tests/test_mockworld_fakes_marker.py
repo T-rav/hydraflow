@@ -19,6 +19,7 @@ import pytest
 
 from mockworld.fakes import (
     FakeBeads,
+    FakeBotPR,
     FakeClock,
     FakeDocker,
     FakeFS,
@@ -28,6 +29,7 @@ from mockworld.fakes import (
     FakeIssueFetcher,
     FakeIssueStore,
     FakeLLM,
+    FakeReviewInsightStore,
     FakeSentry,
     FakeSubprocessRunner,
     FakeWikiCompiler,
@@ -40,6 +42,7 @@ from mockworld.fakes import (
 # generated MockWorld map to surface it.
 _FAKE_CLASSES = [
     FakeBeads,
+    FakeBotPR,
     FakeClock,
     FakeDocker,
     FakeFS,
@@ -49,6 +52,7 @@ _FAKE_CLASSES = [
     FakeIssueFetcher,
     FakeIssueStore,
     FakeLLM,
+    FakeReviewInsightStore,
     FakeSentry,
     FakeSubprocessRunner,
     FakeWikiCompiler,

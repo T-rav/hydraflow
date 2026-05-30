@@ -77,11 +77,6 @@ _bg_worker_defs = [
         "Reviews PRs, applies fixes, and merges approved work when checks pass.",
     ),
     (
-        "memory_sync",
-        "Memory Manager",
-        "Ingests memory and transcript issues into durable learnings and proposals.",
-    ),
-    (
         "retrospective",
         "Retrospective",
         "Captures post-merge outcomes and identifies recurring delivery patterns.",
@@ -176,7 +171,6 @@ _bg_worker_defs = [
 
 # Workers that have independent configurable intervals
 _INTERVAL_WORKERS = {
-    "memory_sync",
     "pr_unsticker",
     "pipeline_poller",
     "report_issue",
@@ -532,9 +526,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             if name in _INTERVAL_WORKERS and orch:
                 interval = orch.get_bg_worker_interval(name)
             elif name in _INTERVAL_WORKERS:
-                if name == "memory_sync":
-                    interval = _cfg.memory_sync_interval
-                elif name == "pr_unsticker":
+                if name == "pr_unsticker":
                     interval = _cfg.pr_unstick_interval
                 elif name == "pipeline_poller":
                     interval = 5
@@ -850,36 +842,4 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         except ValueError:
             return JSONResponse({"error": "Invalid settings"}, status_code=400)
         ctx.state.set_ci_monitor_settings(new_settings)
-        return JSONResponse({"status": "ok", **new_settings.model_dump()})
-
-    # --- Code Grooming Settings ---
-
-    @router.get("/api/code-grooming/settings")
-    async def get_code_grooming_settings() -> JSONResponse:
-        """Return current code grooming settings."""
-        settings = ctx.state.get_code_grooming_settings()
-        return JSONResponse(settings.model_dump())
-
-    @router.post("/api/code-grooming/settings")
-    async def set_code_grooming_settings(body: dict[str, Any]) -> JSONResponse:
-        """Update code grooming settings."""
-        current = ctx.state.get_code_grooming_settings()
-        update = current.model_dump()
-        for key in (
-            "max_issues_per_cycle",
-            "min_priority",
-            "enabled_audits",
-            "dry_run",
-        ):
-            if key in body:
-                update[key] = body[key]
-        try:
-            from models import CodeGroomingSettings  # noqa: PLC0415
-
-            new_settings = CodeGroomingSettings(**update)
-        except ValidationError as exc:
-            return JSONResponse({"error": _safe_error_message(exc)}, status_code=400)
-        except ValueError:
-            return JSONResponse({"error": "Invalid settings"}, status_code=400)
-        ctx.state.set_code_grooming_settings(new_settings)
         return JSONResponse({"status": "ok", **new_settings.model_dump()})

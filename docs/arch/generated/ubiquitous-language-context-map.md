@@ -6,16 +6,47 @@
 graph LR
   subgraph builder
     AgentRunner["AgentRunner<br/><i>runner</i>"]
+    ReportIssueLoop["ReportIssueLoop<br/><i>loop</i>"]
     Task["Task<br/><i>entity</i>"]
   end
+  subgraph caretaker
+    ADRReviewerLoop["ADRReviewerLoop<br/><i>loop</i>"]
+    AdrTouchpointAuditorLoop["AdrTouchpointAuditorLoop<br/><i>loop</i>"]
+    CIMonitorLoop["CIMonitorLoop<br/><i>loop</i>"]
+    ContractRefreshLoop["ContractRefreshLoop<br/><i>loop</i>"]
+    CorpusLearningLoop["CorpusLearningLoop<br/><i>loop</i>"]
+    DependabotMergeLoop["DependabotMergeLoop<br/><i>loop</i>"]
+    DiagnosticLoop["DiagnosticLoop<br/><i>loop</i>"]
+    DiagramLoop["DiagramLoop<br/><i>loop</i>"]
+    EdgeProposerLoop["EdgeProposerLoop<br/><i>loop</i>"]
+    EntryEvidenceLoop["EntryEvidenceLoop<br/><i>loop</i>"]
+    FakeCoverageAuditorLoop["FakeCoverageAuditorLoop<br/><i>loop</i>"]
+    FlakeTrackerLoop["FlakeTrackerLoop<br/><i>loop</i>"]
+    GitHubCacheLoop["GitHubCacheLoop<br/><i>loop</i>"]
+    MergeStateWatcherLoop["MergeStateWatcherLoop<br/><i>loop</i>"]
+    PricingRefreshLoop["PricingRefreshLoop<br/><i>loop</i>"]
+    PRUnstickerLoop["PRUnstickerLoop<br/><i>loop</i>"]
+    RCBudgetLoop["RCBudgetLoop<br/><i>loop</i>"]
+    SentryLoop["SentryLoop<br/><i>loop</i>"]
+    SkillPromptEvalLoop["SkillPromptEvalLoop<br/><i>loop</i>"]
+    StaleIssueGCLoop["StaleIssueGCLoop<br/><i>loop</i>"]
+    TermPrunerLoop["TermPrunerLoop<br/><i>loop</i>"]
+    WikiRotDetectorLoop["WikiRotDetectorLoop<br/><i>loop</i>"]
+    WorkspaceGCLoop["WorkspaceGCLoop<br/><i>loop</i>"]
+  end
   subgraph shared-kernel
+    AgentPort["AgentPort<br/><i>port</i>"]
     BaseBackgroundLoop["BaseBackgroundLoop<br/><i>loop</i>"]
     BotPRPort["BotPRPort<br/><i>port</i>"]
     EventBus["EventBus<br/><i>service</i>"]
     HydraFlowConfig["HydraFlowConfig<br/><i>aggregate</i>"]
+    IssueFetcherPort["IssueFetcherPort<br/><i>port</i>"]
     IssueStorePort["IssueStorePort<br/><i>port</i>"]
+    ObservabilityPort["ObservabilityPort<br/><i>port</i>"]
     PRPort["PRPort<br/><i>port</i>"]
     RepoWikiStore["RepoWikiStore<br/><i>service</i>"]
+    ReviewInsightStorePort["ReviewInsightStorePort<br/><i>port</i>"]
+    RouteBackCounterPort["RouteBackCounterPort<br/><i>port</i>"]
     StateTracker["StateTracker<br/><i>service</i>"]
     WorkspacePort["WorkspacePort<br/><i>port</i>"]
   end
@@ -30,6 +61,7 @@ graph LR
   BaseBackgroundLoop -->|depends_on| HydraFlowConfig
   BotPRPort -->|depends_on| HydraFlowConfig
   BotPRPort -->|depends_on| BaseBackgroundLoop
+  IssueFetcherPort -->|depends_on| IssueStorePort
   IssueStorePort -->|depends_on| Task
   PRPort -->|depends_on| Task
   WorkspacePort -->|depends_on| Task

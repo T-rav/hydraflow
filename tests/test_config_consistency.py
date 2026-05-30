@@ -33,6 +33,11 @@ _INTERVAL_BOUNDS_SKIP: set[str] = {
     "sentry_poll_interval",
     # Dark-launched; the StagingPromotionLoop is not yet wired (flag-gated).
     "staging_promotion_interval",
+    # Retained-but-inert: the memory_sync worker was removed from the UI/control
+    # surface (#8585, post-Hindsight #8389). The config field is kept (harmless;
+    # extra=ignore tolerates stale .env), but it no longer has an _INTERVAL_BOUNDS
+    # entry because the worker is no longer operator-controllable.
+    "memory_sync_interval",
 }
 
 
@@ -129,13 +134,12 @@ class TestIntervalFieldsHaveBounds:
         # Convention: remove the _interval suffix to get the worker name,
         # but some have custom mappings.
         _FIELD_TO_BOUNDS_KEY: dict[str, str] = {
-            "memory_sync_interval": "memory_sync",
             "pr_unstick_interval": "pr_unsticker",
             "adr_review_interval": "adr_reviewer",
             "stale_issue_gc_interval": "stale_issue_gc",
             "ci_monitor_interval": "ci_monitor",
             "security_patch_interval": "security_patch",
-            "code_grooming_interval": "code_grooming",
+            "epic_sweep_interval": "epic_sweeper",
         }
 
         missing = set()

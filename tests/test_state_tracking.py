@@ -51,8 +51,6 @@ class TestInitialization:
             "dependabot_merge_settings",
             "ci_monitor_settings",
             "ci_monitor_tracked_failures",
-            "code_grooming_filed",
-            "code_grooming_settings",
             "cost_budget_killed_workers",
             "disabled_workers",
             "epic_states",
@@ -105,6 +103,7 @@ class TestInitialization:
             "auto_reverts_successful",
             "fake_coverage_attempts",
             "fake_coverage_last_known",
+            "fake_coverage_rollup_issues",
             "flake_attempts",
             "flake_counts",
             "flake_reruns_total",
@@ -138,8 +137,17 @@ class TestInitialization:
             # AdrTouchpointAuditorLoop (ADR-0056)
             "adr_audit_cursor",
             "adr_audit_attempts",
+            # Per-ADR rollup tracking (#8987) — see ADR-0056 amendment.
+            "adr_rollup_issues",
             # MemoryBacklogLoop (ADR-0057)
             "memory_backlog_attempts",
+            # TriageRetryLoop (ADR-0063 W2)
+            "triage_retry_attempts",
+            "triage_retry_last_attempt",
+            # Earlier-adversarial pipeline (#8953) — pulled in by the
+            # rebase; the enumeration needs the entry so set-equality
+            # holds against the live StateData.
+            "adversarial_states",
         }
         assert set(d.keys()) == expected_keys
 

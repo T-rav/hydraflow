@@ -7,7 +7,9 @@ Hexagonal boundaries. Each `*Port` Protocol with its concrete adapter(s) and fak
 ```mermaid
 graph LR
     AgentPort --> AgentRunner
+    AgentPort -.-> FakeAgent
     BotPRPort --> OpenAutoPRBotPRPort
+    BotPRPort -.-> FakeBotPR
     IssueFetcherPort --> IssueFetcher
     IssueFetcherPort -.-> FakeIssueFetcher
     IssueStorePort --> IssueStore
@@ -17,7 +19,9 @@ graph LR
     PRPort --> PRManager
     PRPort -.-> FakePR
     ReviewInsightStorePort --> ReviewInsightStore
+    ReviewInsightStorePort -.-> FakeReviewInsightStore
     RouteBackCounterPort --> RouteBackStateMixin
+    RouteBackCounterPort -.-> FakeRouteBackCounter
     WorkspacePort --> WorkspaceManager
     WorkspacePort -.-> FakeWorkspace
 ```
@@ -30,7 +34,7 @@ graph LR
 - Methods: `build_command`, `execute`, `verify_result`
 - Adapters:
   - `AgentRunner` (`src.agent`)
-- Fake: ⚠️ no fake (every Port needs a fake per ADR-0047)
+- Fake: `FakeAgent` (`mockworld.fakes.fake_agent`)
 
 ### BotPRPort
 
@@ -38,7 +42,7 @@ graph LR
 - Methods: `open_bot_pr`
 - Adapters:
   - `OpenAutoPRBotPRPort` (`src.term_proposer_runtime`)
-- Fake: ⚠️ no fake (every Port needs a fake per ADR-0047)
+- Fake: `FakeBotPR` (`mockworld.fakes.fake_bot_pr`)
 
 ### IssueFetcherPort
 
@@ -67,7 +71,7 @@ graph LR
 ### PRPort
 
 - Module: `src.ports`
-- Methods: `add_labels`, `add_pr_labels`, `branch_has_diff_from_main`, `close_issue`, `close_task`, `create_issue`, `create_pr`, `create_promotion_pr`, `create_rc_branch`, `create_task`, `delete_branch`, `expected_pr_title`, `fetch_ci_failure_logs`, `fetch_code_scanning_alerts`, `find_existing_issue`, `find_label_drift`, `find_open_pr_for_branch`, `find_open_promotion_pr`, `get_dependabot_alerts`, `get_issue_state`, `get_issue_updated_at`, `get_latest_ci_status`, `get_pr_approvers`, `get_pr_diff`, `get_pr_diff_names`, `get_pr_head_sha`, `get_pr_mergeable`, `list_closed_issues_by_label`, `list_conflicting_prs`, `list_hitl_items`, `list_issue_comments`, `list_issues_by_label`, `list_prs_by_label`, `list_rc_branches`, `merge_pr`, `merge_promotion_pr`, `post_comment`, `post_pr_comment`, `pull_main`, `push_branch`, `push_synthetic_commit`, `remove_label`, `remove_pr_label`, `submit_review`, `swap_pipeline_labels`, `transition`, `update_issue_body`, `update_pr_base`, `update_pr_branch`, `update_pr_title`, `upload_screenshot`, `wait_for_ci`
+- Methods: `add_labels`, `add_pr_labels`, `branch_has_diff_from_main`, `close_issue`, `close_task`, `create_issue`, `create_pr`, `create_promotion_pr`, `create_rc_branch`, `create_task`, `delete_branch`, `expected_pr_title`, `fetch_ci_failure_logs`, `fetch_code_scanning_alerts`, `find_existing_issue`, `find_label_drift`, `find_open_pr_for_branch`, `find_open_promotion_pr`, `get_dependabot_alerts`, `get_issue_state`, `get_issue_updated_at`, `get_latest_ci_status`, `get_pr_approvers`, `get_pr_diff`, `get_pr_diff_names`, `get_pr_head_sha`, `get_pr_mergeable`, `get_pr_recent_commit_diffs`, `list_closed_issues_by_label`, `list_conflicting_prs`, `list_hitl_items`, `list_issue_comments`, `list_issues_by_label`, `list_prs_by_label`, `list_rc_branches`, `merge_pr`, `merge_promotion_pr`, `post_comment`, `post_pr_comment`, `pull_main`, `push_branch`, `push_synthetic_commit`, `remove_label`, `remove_pr_label`, `submit_review`, `swap_pipeline_labels`, `transition`, `update_issue_body`, `update_pr_base`, `update_pr_branch`, `update_pr_title`, `upload_screenshot`, `wait_for_ci`
 - Adapters:
   - `PRManager` (`src.pr_manager`)
 - Fake: `FakePR` (`mockworld.fakes.fake_github`)
@@ -78,7 +82,7 @@ graph LR
 - Methods: `append_review`, `get_proposed_categories`, `load_proposal_metadata`, `load_recent`, `mark_category_proposed`, `record_proposal`, `update_proposal_verified`
 - Adapters:
   - `ReviewInsightStore` (`src.review_insights`)
-- Fake: ⚠️ no fake (every Port needs a fake per ADR-0047)
+- Fake: `FakeReviewInsightStore` (`mockworld.fakes.fake_review_insight_store`)
 
 ### RouteBackCounterPort
 
@@ -86,7 +90,7 @@ graph LR
 - Methods: `decrement_route_back_count`, `get_route_back_count`, `increment_route_back_count`
 - Adapters:
   - `RouteBackStateMixin` (`src.state._route_back`)
-- Fake: ⚠️ no fake (every Port needs a fake per ADR-0047)
+- Fake: `FakeRouteBackCounter` (`mockworld.fakes.fake_route_back_counter`)
 
 ### WorkspacePort
 
@@ -96,4 +100,4 @@ graph LR
   - `WorkspaceManager` (`src.workspace`)
 - Fake: `FakeWorkspace` (`mockworld.fakes.fake_workspace`)
 
-_Regenerated from commit `dd2f945` on 2026-05-23 13:06 UTC. Source last changed at `dd2f945`. Status: 🟢 fresh._
+_Regenerated from commit `3242dd2` on 2026-05-30 06:45 UTC. Source last changed at `3242dd2`. Status: 🟢 fresh._

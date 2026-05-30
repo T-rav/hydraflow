@@ -1000,20 +1000,33 @@ compounds rather than stagnating at whatever was cassetted on day one.
    - **Test-facing helpers**: a helper is covered if at least one
      scenario test under `tests/scenarios/` calls it (grep-based
      search against the method name).
-4. For each uncovered method in either set, file a `hydraflow-find`:
-   - Title: `Un-cassetted adapter method: {Fake}.{method}` or
-     `Un-exercised test helper: {Fake}.{method}`.
-   - Body: method signature, which method set, suggested interaction
-     shape for recording (real-adapter) or suggested scenario to
-     invoke it (test-facing).
+4. For each `(fake_class, gap_kind)` with one or more uncovered
+   methods, file (or update) **one rollup** `hydraflow-find` issue —
+   see issue #8986 for the rationale (per-method filing produced
+   O(N) triage cost; 154 noise issues closed manually on 2026-05-19):
+   - Title: `Fake coverage gap: {Fake} adapter surface (N methods)`
+     or `Fake coverage gap: {Fake} test helpers (N methods)`.
+   - Body: bulleted list of every currently-uncovered method, plus a
+     "Recently recovered" strikethrough section for methods that
+     appeared as uncovered last tick but have since gained coverage.
    - Labels: `hydraflow-find`, `fake-coverage-gap`,
      `{adapter-surface|test-helper}`.
+   - Dedup key: `fake_coverage_auditor:{Fake}:{gap_kind}` (no method
+     component). The rollup-issue number is persisted in
+     ``StateData.fake_coverage_rollup_issues`` so subsequent ticks
+     call ``PRPort.update_issue_body`` instead of refiling.
+   - Closed-by-human reset: if state holds a rollup-issue number but
+     no matching open title is found at tick start, the auditor
+     drops the stale state and re-files cleanly.
 5. Factory dispatches implementer; standard repair path records a new
    cassette (real-adapter) or adds a scenario call (test-facing)
-   and commits.
+   and commits. Each merge shrinks the rollup body on the next tick.
 
-**Escalation.** After 3 repair attempts, `hitl-escalation`,
-`fake-coverage-stuck`.
+**Escalation.** After 3 repair attempts at the **rollup** granularity
+(`{Fake}:{gap_kind}`, not `{Fake}.{method}:{gap_kind}`),
+`hitl-escalation`, `fake-coverage-stuck`. Attempt counter keys live in
+``StateData.fake_coverage_attempts`` under the `{Fake}:{gap_kind}`
+shape.
 
 **Five-checkpoint wiring**. Config `fake_coverage_auditor_interval`,
 default `604800`.

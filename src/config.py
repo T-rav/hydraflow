@@ -117,6 +117,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("max_test_adequacy_attempts", "HYDRAFLOW_MAX_TEST_ADEQUACY_ATTEMPTS", 1),
     ("max_plan_compliance_attempts", "HYDRAFLOW_MAX_PLAN_COMPLIANCE_ATTEMPTS", 1),
     ("max_discover_attempts", "HYDRAFLOW_MAX_DISCOVER_ATTEMPTS", 3),
+    ("max_discover_expansions", "HYDRAFLOW_MAX_DISCOVER_EXPANSIONS", 1),
     ("max_shape_attempts", "HYDRAFLOW_MAX_SHAPE_ATTEMPTS", 3),
     ("max_review_fix_attempts", "HYDRAFLOW_MAX_REVIEW_FIX_ATTEMPTS", 2),
     ("min_review_findings", "HYDRAFLOW_MIN_REVIEW_FINDINGS", 3),
@@ -136,10 +137,16 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("report_issue_interval", "HYDRAFLOW_REPORT_ISSUE_INTERVAL", 30),
     ("stale_report_threshold_hours", "HYDRAFLOW_STALE_REPORT_THRESHOLD_HOURS", 6),
     ("epic_monitor_interval", "HYDRAFLOW_EPIC_MONITOR_INTERVAL", 1800),
+    ("epic_sweep_interval", "HYDRAFLOW_EPIC_SWEEP_INTERVAL", 3600),
     ("workspace_gc_interval", "HYDRAFLOW_WORKTREE_GC_INTERVAL", 1800),
     ("stale_issue_gc_interval", "HYDRAFLOW_STALE_ISSUE_GC_INTERVAL", 3600),
     ("stale_issue_threshold_days", "HYDRAFLOW_STALE_ISSUE_THRESHOLD_DAYS", 14),
     ("ci_monitor_interval", "HYDRAFLOW_CI_MONITOR_INTERVAL", 300),
+    (
+        "branch_protection_auditor_interval",
+        "HYDRAFLOW_BRANCH_PROTECTION_AUDITOR_INTERVAL",
+        604800,
+    ),
     ("rc_cadence_hours", "HYDRAFLOW_RC_CADENCE_HOURS", 4),
     ("staging_promotion_interval", "HYDRAFLOW_STAGING_PROMOTION_INTERVAL", 300),
     ("staging_rc_retention_days", "HYDRAFLOW_STAGING_RC_RETENTION_DAYS", 7),
@@ -205,11 +212,12 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("health_monitor_interval", "HYDRAFLOW_HEALTH_MONITOR_INTERVAL", 7200),
     ("wiki_freshness_stale_days", "HYDRAFLOW_WIKI_FRESHNESS_STALE_DAYS", 7),
     ("stale_issue_interval", "HYDRAFLOW_STALE_ISSUE_INTERVAL", 86400),
+    ("triage_retry_interval", "HYDRAFLOW_TRIAGE_RETRY_INTERVAL", 86400),
+    ("triage_retry_max_attempts", "HYDRAFLOW_TRIAGE_RETRY_MAX_ATTEMPTS", 3),
     ("sentry_poll_interval", "SENTRY_POLL_INTERVAL", 600),
     ("sentry_min_events", "SENTRY_MIN_EVENTS", 2),
     ("sentry_max_creation_attempts", "SENTRY_MAX_CREATION_ATTEMPTS", 3),
     ("security_patch_interval", "HYDRAFLOW_SECURITY_PATCH_INTERVAL", 3600),
-    ("code_grooming_interval", "HYDRAFLOW_CODE_GROOMING_INTERVAL", 86400),
     ("repo_wiki_interval", "HYDRAFLOW_REPO_WIKI_INTERVAL", 3600),
     ("max_repo_wiki_chars", "HYDRAFLOW_MAX_REPO_WIKI_CHARS", 15_000),
     ("diagnostic_interval", "HYDRAFLOW_DIAGNOSTIC_INTERVAL", 30),
@@ -337,7 +345,6 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_PRECONDITION_GATE_ENABLED",
         False,
     ),
-    ("code_grooming_enabled", "HYDRAFLOW_CODE_GROOMING_ENABLED", False),
     ("docker_read_only_root", "HYDRAFLOW_DOCKER_READ_ONLY_ROOT", True),
     ("docker_no_new_privileges", "HYDRAFLOW_DOCKER_NO_NEW_PRIVILEGES", True),
     (
@@ -371,6 +378,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         False,
     ),
     ("auto_agent_preflight_enabled", "HYDRAFLOW_AUTO_AGENT_PREFLIGHT_ENABLED", True),
+    (
+        "implement_two_stage_review_enabled",
+        "HYDRAFLOW_IMPLEMENT_TWO_STAGE_REVIEW_ENABLED",
+        True,
+    ),
     ("staging_enabled", "HYDRAFLOW_STAGING_ENABLED", False),
     ("otel_enabled", "HYDRAFLOW_OTEL_ENABLED", False),
     ("term_proposer_enabled", "HYDRAFLOW_TERM_PROPOSER_ENABLED", True),
@@ -384,6 +396,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     ("ci_monitor_loop_enabled", "HYDRAFLOW_CI_MONITOR_LOOP_ENABLED", True),
+    (
+        "branch_protection_auditor_loop_enabled",
+        "HYDRAFLOW_BRANCH_PROTECTION_AUDITOR_LOOP_ENABLED",
+        True,
+    ),
     ("contract_refresh_loop_enabled", "HYDRAFLOW_CONTRACT_REFRESH_LOOP_ENABLED", True),
     ("corpus_learning_loop_enabled", "HYDRAFLOW_CORPUS_LEARNING_LOOP_ENABLED", True),
     (
@@ -396,6 +413,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("diagram_loop_enabled", "HYDRAFLOW_DIAGRAM_LOOP_ENABLED", True),
     ("entry_evidence_enabled", "HYDRAFLOW_ENTRY_EVIDENCE_ENABLED", True),
     ("epic_monitor_loop_enabled", "HYDRAFLOW_EPIC_MONITOR_LOOP_ENABLED", True),
+    ("epic_sweeper_loop_enabled", "HYDRAFLOW_EPIC_SWEEPER_LOOP_ENABLED", True),
     (
         "fake_coverage_auditor_loop_enabled",
         "HYDRAFLOW_FAKE_COVERAGE_AUDITOR_LOOP_ENABLED",
@@ -432,6 +450,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ),
     ("stale_issue_gc_loop_enabled", "HYDRAFLOW_STALE_ISSUE_GC_LOOP_ENABLED", True),
     ("stale_issue_loop_enabled", "HYDRAFLOW_STALE_ISSUE_LOOP_ENABLED", True),
+    ("triage_retry_loop_enabled", "HYDRAFLOW_TRIAGE_RETRY_LOOP_ENABLED", True),
     (
         "trust_fleet_sanity_loop_enabled",
         "HYDRAFLOW_TRUST_FLEET_SANITY_LOOP_ENABLED",
@@ -523,7 +542,6 @@ _ENV_COMBO_OVERRIDES: list[tuple[str, str, str]] = [
     ),
     ("HYDRAFLOW_WIKI_COMPILATION", "wiki_compilation_tool", "wiki_compilation_model"),
     ("HYDRAFLOW_SENTRY", "sentry_tool", "sentry_model"),
-    ("HYDRAFLOW_CODE_GROOMING", "code_grooming_tool", "code_grooming_model"),
     ("HYDRAFLOW_ADR_REVIEW", "adr_review_tool", "adr_review_model"),
     ("HYDRAFLOW_REPORT_ISSUE", "report_issue_tool", "report_issue_model"),
 ]
@@ -713,6 +731,15 @@ class HydraFlowConfig(BaseModel):
         le=5,
         description="Max Discover-brief evaluator retries before HITL escalation (0 = disabled)",
     )
+    max_discover_expansions: int = Field(
+        default=1,
+        ge=0,
+        le=3,
+        description=(
+            "Max discover-expander subagent dispatches per issue before "
+            "falling through to HITL escalation (ADR-0063 W3a; 0 = disabled)"
+        ),
+    )
     max_shape_attempts: int = Field(
         default=3,
         ge=0,
@@ -800,6 +827,13 @@ class HydraFlowConfig(BaseModel):
     parked_label: list[str] = Field(
         default=["hydraflow-parked"],
         description="Labels for issues parked awaiting author clarification (OR logic)",
+    )
+    triage_retry_exhausted_label: list[str] = Field(
+        default=["triage-retry-exhausted"],
+        description=(
+            "Sub-label applied alongside hitl-escalation when TriageRetryLoop "
+            "exhausts its retry budget on a parked issue (ADR-0063 W2)."
+        ),
     )
     diagnose_label: list[str] = Field(
         default=["hydraflow-diagnose"],
@@ -919,15 +953,15 @@ class HydraFlowConfig(BaseModel):
     )
     staging_rc_red_post_revert_red_label: list[str] = Field(
         default=["hydraflow-rc-red-post-revert-red"],
-        description="Labels for post-revert red RC escalations",
+        description="Labels for RC-red post-revert red escalations",
     )
     staging_rc_red_verify_timeout_label: list[str] = Field(
         default=["hydraflow-rc-red-verify-timeout"],
-        description="Labels for RC verification timeout escalations",
+        description="Labels for RC-red verification timeout escalations",
     )
     staging_rc_red_retry_label: list[str] = Field(
         default=["hydraflow-rc-red-retry"],
-        description="Labels for staging retry issues filed after auto-reverts",
+        description="Labels for RC-red retry PRs",
     )
     max_diagnosticians: int = Field(
         default=1,
@@ -971,6 +1005,12 @@ class HydraFlowConfig(BaseModel):
         default=1800,
         description="Epic monitor loop interval in seconds (default 30 min)",
     )
+    epic_sweep_interval: int = Field(
+        default=3600,
+        ge=600,
+        le=86400,
+        description="Epic sweeper loop interval in seconds (default 1 hour)",
+    )
     workspace_gc_interval: int = Field(
         default=1800,
         ge=300,
@@ -996,6 +1036,25 @@ class HydraFlowConfig(BaseModel):
         le=604800,
         description="Stale issue check interval (seconds)",
     )
+    triage_retry_interval: int = Field(
+        default=86400,
+        ge=3600,
+        le=604800,
+        description=(
+            "TriageRetryLoop tick interval in seconds (default 24h, ADR-0063 W2). "
+            "Re-runs parked-issue triage with the original parking reason as context."
+        ),
+    )
+    triage_retry_max_attempts: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description=(
+            "Maximum number of autonomous retries before TriageRetryLoop escalates "
+            "the parked issue to HITL via the triage_retry_exhausted_label "
+            "sub-label (ADR-0063 W2)."
+        ),
+    )
     stale_issue_threshold_days: int = Field(
         default=14,
         ge=1,
@@ -1007,6 +1066,15 @@ class HydraFlowConfig(BaseModel):
         ge=60,
         le=86400,
         description="CI health monitor loop interval in seconds (default 5 min)",
+    )
+    branch_protection_auditor_interval: int = Field(
+        default=604800,
+        ge=3600,
+        le=2592000,
+        description=(
+            "BranchProtectionAuditorLoop interval in seconds (default 7 days); "
+            "audits live branch protection against the canonical rulesets (ADR-0082)"
+        ),
     )
     collaborator_check_enabled: bool = Field(
         default=True,
@@ -1463,22 +1531,6 @@ class HydraFlowConfig(BaseModel):
         ),
     )
 
-    # Code grooming
-    code_grooming_enabled: bool = Field(
-        default=False,
-        description=(
-            "Enable the daily code grooming audit worker. Defaults to "
-            "False because the audit tends to surface noisy, low-signal "
-            "findings; operators opt in explicitly when they want it."
-        ),
-    )
-    code_grooming_interval: int = Field(
-        default=86400,
-        ge=3600,
-        le=604800,
-        description="Seconds between code grooming audit cycles",
-    )
-
     # Repo wiki
     repo_wiki_interval: int = Field(
         default=3600,
@@ -1734,14 +1786,6 @@ class HydraFlowConfig(BaseModel):
     sentry_model: str = Field(
         default="sonnet",
         description="Model for sentry_loop ingestion worker (issue triage + filing from Sentry events) — sonnet is sufficient; the task is stack-trace parsing + issue filing, not deep reasoning. Opus was 4-5× the cost for no measurable quality win.",
-    )
-    code_grooming_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
-        default="claude",
-        description="CLI backend for code_grooming_loop audit worker",
-    )
-    code_grooming_model: str = Field(
-        default="sonnet",
-        description="Model for code_grooming_loop audit worker (daily code-quality scan)",
     )
     report_issue_interval: int = Field(
         default=30,
@@ -2470,6 +2514,17 @@ class HydraFlowConfig(BaseModel):
         default=True,
         description="UI kill-switch for AutoAgentPreflightLoop (ADR-0049).",
     )
+    implement_two_stage_review_enabled: bool = Field(
+        default=True,
+        description=(
+            "Kill-switch for the ImplementPhase two-stage spec-compliance "
+            "review (ADR-0063 W5). When enabled, a spec-compliance reviewer "
+            "subagent runs after each failed implementation attempt and the "
+            "gaps it surfaces are fed into the next attempt's prior_failure "
+            "context. Disable to revert to the pre-W5 retry-with-error-only "
+            "behavior."
+        ),
+    )
     auto_agent_preflight_interval: int = Field(
         default=120,
         ge=60,
@@ -2640,6 +2695,10 @@ class HydraFlowConfig(BaseModel):
         default=True,
         description="Deploy-time kill-switch for CIMonitorLoop.",
     )
+    branch_protection_auditor_loop_enabled: bool = Field(
+        default=True,
+        description="Deploy-time kill-switch for BranchProtectionAuditorLoop.",
+    )
     contract_refresh_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for ContractRefreshLoop.",
@@ -2667,6 +2726,10 @@ class HydraFlowConfig(BaseModel):
     epic_monitor_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for EpicMonitorLoop.",
+    )
+    epic_sweeper_loop_enabled: bool = Field(
+        default=True,
+        description="Deploy-time kill-switch for EpicSweeperLoop.",
     )
     fake_coverage_auditor_loop_enabled: bool = Field(
         default=True,
@@ -2748,6 +2811,13 @@ class HydraFlowConfig(BaseModel):
         default=True,
         description="Deploy-time kill-switch for StaleIssueLoop.",
     )
+    triage_retry_loop_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for TriageRetryLoop "
+            "(ADR-0063 W2 — autonomous re-triage of parked issues)."
+        ),
+    )
     trust_fleet_sanity_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for TrustFleetSanityLoop.",
@@ -2780,37 +2850,7 @@ class HydraFlowConfig(BaseModel):
         "diagnose_label",
         "memory_backlog_label",
         "memory_backlog_stuck_label",
-        "hitl_escalation_label",
-        "fake_coverage_gap_label",
-        "adapter_surface_label",
-        "test_helper_label",
-        "fake_coverage_stuck_label",
-        "flaky_test_label",
-        "flaky_test_stuck_label",
-        "fake_drift_label",
-        "fake_repair_stuck_label",
-        "corpus_learning_stuck_label",
-        "trust_loop_anomaly_label",
-        "rc_duration_regression_label",
-        "rc_duration_stuck_label",
-        "wiki_rot_label",
-        "wiki_rot_stuck_label",
-        "skill_prompt_case_weak_label",
-        "skill_prompt_stuck_label",
-        "discover_stuck_label",
-        "shape_stuck_label",
-        "shadow_drift_label",
-        "shadow_drift_stuck_label",
-        "principles_drift_label",
-        "principles_stuck_label",
-        "cultural_check_label",
-        "staging_revert_conflict_label",
-        "staging_bisect_harness_failure_label",
-        "staging_rc_red_bisect_exhausted_label",
-        "staging_retry_lineage_exhausted_label",
-        "staging_rc_red_post_revert_red_label",
-        "staging_rc_red_verify_timeout_label",
-        "staging_rc_red_retry_label",
+        "triage_retry_exhausted_label",
     )
     @classmethod
     def labels_must_not_be_empty(cls, v: list[str]) -> list[str]:
@@ -3044,7 +3084,6 @@ def _apply_profile_overrides(config: HydraFlowConfig) -> None:
             "transcript_summary_tool",
             "report_issue_tool",
             "sentry_tool",
-            "code_grooming_tool",
             "adr_review_tool",
         ):
             _apply_if_default(field, config.background_tool)
@@ -3055,7 +3094,6 @@ def _apply_profile_overrides(config: HydraFlowConfig) -> None:
             "transcript_summary_model",
             "report_issue_model",
             "sentry_model",
-            "code_grooming_model",
             "adr_review_model",
         ):
             _apply_if_default(field, config.background_model)
@@ -3130,7 +3168,6 @@ def _harmonize_tool_model_defaults(config: HydraFlowConfig) -> None:
         ),
         ("report_issue", config.report_issue_tool, config.report_issue_model),
         ("sentry", config.sentry_tool, config.sentry_model),
-        ("code_grooming", config.code_grooming_tool, config.code_grooming_model),
         ("adr_review", config.adr_review_tool, config.adr_review_model),
     ]
 

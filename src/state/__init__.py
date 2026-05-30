@@ -23,9 +23,9 @@ from file_util import atomic_write, rotate_backups
 from models import IssueOutcomeType, StateData, ThresholdProposal
 
 from ._adr_audit import AdrAuditStateMixin
+from ._adversarial import AdversarialStateMixin
 from ._auto_agent import AutoAgentStateMixin
 from ._ci_monitor import CIMonitorStateMixin
-from ._code_grooming import CodeGroomingStateMixin
 from ._contract_refresh import ContractRefreshStateMixin
 from ._corpus_learning import CorpusLearningStateMixin
 from ._dependabot_merge import DependabotMergeStateMixin
@@ -53,6 +53,7 @@ from ._skill_prompt_eval import SkillPromptEvalStateMixin
 from ._staging_bisect import StagingBisectStateMixin
 from ._stale_issue import StaleIssueStateMixin
 from ._trace_runs import TraceRunsMixin
+from ._triage_retry import TriageRetryStateMixin
 from ._trust_fleet_sanity import TrustFleetSanityStateMixin
 from ._wiki_rot_detector import WikiRotDetectorStateMixin
 from ._worker import WorkerStateMixin
@@ -85,7 +86,6 @@ class StateTracker(
     StagingBisectStateMixin,
     SecurityPatchStateMixin,
     CIMonitorStateMixin,
-    CodeGroomingStateMixin,
     DiagnosticStateMixin,
     SentryStateMixin,
     TraceRunsMixin,
@@ -101,6 +101,8 @@ class StateTracker(
     AutoAgentStateMixin,
     SandboxFailureFixerStateMixin,
     AdrAuditStateMixin,
+    AdversarialStateMixin,
+    TriageRetryStateMixin,
 ):
     """JSON-file backed state for crash recovery.
 

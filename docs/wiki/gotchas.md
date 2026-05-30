@@ -647,7 +647,7 @@ Example: `logger.error("%s", path)` not `logger.error(path)` (if path contains `
 
 ## Per-worker model overrides via HYDRAFLOW_*_MODEL env vars
 
-Each background worker has its own `HYDRAFLOW_<NAME>_MODEL` env var (e.g., HYDRAFLOW_REPORT_ISSUE_MODEL). Defaults: report_issue=opus, code_grooming=sonnet, others=haiku.
+Each background worker has its own `HYDRAFLOW_<NAME>_MODEL` env var (e.g., HYDRAFLOW_REPORT_ISSUE_MODEL). Defaults: report_issue=opus, sentry=sonnet, others=haiku.
 
 Example: `export HYDRAFLOW_REPORT_ISSUE_MODEL=sonnet` to override defaults.
 

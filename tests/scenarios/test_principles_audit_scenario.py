@@ -10,7 +10,7 @@ Two scenarios cover the loop's ends-of-the-world:
   all-green on the prior tick (``state.get_last_green_audit`` returns
   a snapshot with ``P1.1: PASS``) but the current audit reports
   ``P1.1: FAIL``. The loop must file one ``hydraflow-find`` +
-  ``hydraflow-principles-drift`` issue.
+  ``principles-drift`` + ``check-P1.1`` issue.
 
 The loop's external surface — ``_run_audit`` (``make audit-json``
 subprocess) and ``_refresh_checkout`` (``git clone``/``git fetch``) —
@@ -192,4 +192,51 @@ class TestPrinciplesAuditScenario:
         assert "P1.1" in title
         assert "hydraflow-self" in title
         assert "hydraflow-find" in labels
-        assert "hydraflow-principles-drift" in labels
+        assert "principles-drift" in labels
+        assert "check-P1.1" in labels
+
+    async def test_reconcile_closed_escalations_via_pr_port(self, tmp_path) -> None:
+        """Closing a principles-stuck issue clears the attempt counter via PRPort.
+
+        Verifies the advisor-0dmd fix: _reconcile_closed_escalations now routes
+        through PRPort.list_closed_issues_by_label instead of spawning a raw
+        ``gh`` subprocess. MockWorld can stub the port; no real process needed.
+        """
+        world = MockWorld(tmp_path)
+
+        fake_pr = AsyncMock()
+        fake_pr.create_issue = AsyncMock(return_value=0)
+        # One closed principles-stuck issue whose title encodes (slug, check_id).
+        fake_pr.list_closed_issues_by_label = AsyncMock(
+            return_value=[
+                {"title": "Principles drift stuck: P3.2 in acme/widget"},
+            ]
+        )
+
+        state = _stateful_onboarding_mock()
+        # Simulate that the escalation counter was previously incremented.
+        state.reset_drift_attempts = MagicMock()
+
+        # All-green audit so no regressions are filed — keeps scenario focused
+        # on the reconcile path alone.
+        all_green_report = {
+            "findings": [_finding(check_id="P3.2", status="PASS", principle="P3")]
+        }
+        run_audit = AsyncMock(return_value=all_green_report)
+
+        _seed_ports(
+            world,
+            pr_manager=fake_pr,
+            principles_audit_state=state,
+            principles_audit_run_audit=run_audit,
+            principles_audit_managed_repos=[],
+        )
+
+        await world.run_with_loops(["principles_audit"], cycles=1)
+
+        # Port was called with the correct label — no subprocess spawned.
+        fake_pr.list_closed_issues_by_label.assert_awaited_once_with(
+            "principles-stuck", limit=100
+        )
+        # Counter reset for the parsed (slug, check_id) pair.
+        state.reset_drift_attempts.assert_called_once_with("acme/widget", "P3.2")

@@ -8,7 +8,9 @@ All Fake adapters under `src/mockworld/fakes/` (classes with ``_is_fake_adapter 
 
 | Fake | Implements | Used in scenarios |
 |---|---|---|
-| **FakeBeads** | `BeadsPort` | `tests/scenarios/fakes/test_fake_beads.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_bead_workflow.py` |
+| **FakeAgent** | `AgentPort` | — |
+| **FakeBeads** | `BeadsPort` | `tests/scenarios/fakes/test_fake_beads.py`<br>`tests/scenarios/fakes/test_fake_docker.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_bead_workflow.py` |
+| **FakeBotPR** | `BotPRPort` | — |
 | **FakeClock** | `ClockPort` | `tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/fakes/test_fake_clock.py`<br>`tests/scenarios/fakes/test_supporting_fakes.py`<br>`tests/scenarios/test_fidelity.py` |
 | **FakeDocker** | `DockerPort` | `tests/scenarios/fakes/test_fake_docker.py`<br>`tests/scenarios/fakes/test_fake_subprocess_runner.py` |
 | **FakeFS** | `FSPort` | `tests/scenarios/fakes/test_fake_fs.py` |
@@ -18,6 +20,8 @@ All Fake adapters under `src/mockworld/fakes/` (classes with ``_is_fake_adapter 
 | **FakeIssueFetcher** | `IssueFetcherPort` | — |
 | **FakeIssueStore** | `IssueStorePort` | — |
 | **FakeLLM** | `LLMPort` | `tests/scenarios/behaviors/test_quota.py`<br>`tests/scenarios/fakes/test_fake_llm.py`<br>`tests/scenarios/fakes/test_fake_llm_streaming.py`<br>`tests/scenarios/fakes/test_prior_failure_propagation.py`<br>`tests/scenarios/test_fidelity.py` |
+| **FakeReviewInsightStore** | `ReviewInsightStorePort` | — |
+| **FakeRouteBackCounter** | `RouteBackCounterPort` | — |
 | **FakeSentry** | `SentryPort` | `tests/scenarios/fakes/test_supporting_fakes.py` |
 | **FakeSubprocessRunner** | `SubprocessRunnerPort` | `tests/scenarios/fakes/test_fake_subprocess_runner.py` |
 | **FakeWikiCompiler** | `WikiCompilerPort` | `tests/scenarios/test_wiki_evolution_scenarios.py` |
@@ -27,10 +31,12 @@ All Fake adapters under `src/mockworld/fakes/` (classes with ``_is_fake_adapter 
 
 ```mermaid
 graph LR
+    FakeAgent -.-> AgentPort
     FakeBeads -.-> BeadsPort
     tests_scenarios_fakes_test_fake_beads_py([tests/scenarios/fakes/test_fake_beads.py]) --> FakeBeads
+    tests_scenarios_fakes_test_fake_docker_py([tests/scenarios/fakes/test_fake_docker.py]) --> FakeBeads
     tests_scenarios_fakes_test_mock_world_py([tests/scenarios/fakes/test_mock_world.py]) --> FakeBeads
-    tests_scenarios_fuzz_test_invariants_py([tests/scenarios/fuzz/test_invariants.py]) --> FakeBeads
+    FakeBotPR -.-> BotPRPort
     FakeClock -.-> ClockPort
     tests_scenarios_behaviors_test_latency_py([tests/scenarios/behaviors/test_latency.py]) --> FakeClock
     tests_scenarios_fakes_test_fake_clock_py([tests/scenarios/fakes/test_fake_clock.py]) --> FakeClock
@@ -56,6 +62,8 @@ graph LR
     tests_scenarios_behaviors_test_quota_py([tests/scenarios/behaviors/test_quota.py]) --> FakeLLM
     tests_scenarios_fakes_test_fake_llm_py([tests/scenarios/fakes/test_fake_llm.py]) --> FakeLLM
     tests_scenarios_fakes_test_fake_llm_streaming_py([tests/scenarios/fakes/test_fake_llm_streaming.py]) --> FakeLLM
+    FakeReviewInsightStore -.-> ReviewInsightStorePort
+    FakeRouteBackCounter -.-> RouteBackCounterPort
     FakeSentry -.-> SentryPort
     tests_scenarios_fakes_test_supporting_fakes_py([tests/scenarios/fakes/test_supporting_fakes.py]) --> FakeSentry
     FakeSubprocessRunner -.-> SubprocessRunnerPort
@@ -66,4 +74,4 @@ graph LR
     tests_scenarios_fakes_test_supporting_fakes_py([tests/scenarios/fakes/test_supporting_fakes.py]) --> FakeWorkspace
 ```
 
-_Regenerated from commit `dd2f945` on 2026-05-23 13:06 UTC. Source last changed at `dd2f945`. Status: 🟢 fresh._
+_Regenerated from commit `3242dd2` on 2026-05-30 06:45 UTC. Source last changed at `3242dd2`. Status: 🟢 fresh._

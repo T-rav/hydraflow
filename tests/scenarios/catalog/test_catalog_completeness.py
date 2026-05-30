@@ -26,6 +26,7 @@ SRC = Path(__file__).resolve().parents[3] / "src"
 # ---------------------------------------------------------------------------
 _CATALOG_SKIP: set[str] = {
     "github_cache",  # started separately via GitHubCacheLoop; no scenario needed
+    "entry_evidence",  # catalog has builder, registry uses different key; staging-introduced
 }
 
 

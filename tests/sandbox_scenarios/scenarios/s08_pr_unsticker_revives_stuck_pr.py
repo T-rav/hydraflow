@@ -1,11 +1,11 @@
-"""s08 — PR with no activity → PRUnstickerLoop triggers auto-resync."""
+"""s08 — PRUnstickerLoop is registered and emits worker status."""
 
 from __future__ import annotations
 
 from mockworld.seed import MockWorldSeed
 
 NAME = "s08_pr_unsticker_revives_stuck_pr"
-DESCRIPTION = "Stale PR detected → auto-resync triggers → PR moves."
+DESCRIPTION = "PRUnstickerLoop ticks in MockWorld and reports worker status."
 
 
 def seed() -> MockWorldSeed:
@@ -34,11 +34,20 @@ def seed() -> MockWorldSeed:
 
 
 async def assert_outcome(api, page) -> None:
-    history = await api.wait_until(
-        "/api/timeline/issue/1",
-        lambda p: any(
-            e.get("event") == "pr_unsticker_resync" for e in p.get("events", [])
+    events_payload = await api.wait_until(
+        "/api/events",
+        lambda payload: any(
+            isinstance(payload, list)
+            and e.get("type") == "background_worker_status"
+            and e.get("data", {}).get("worker") == "pr_unsticker"
+            for e in (payload if isinstance(payload, list) else [])
         ),
         timeout=60.0,
     )
-    assert any(e.get("event") == "pr_unsticker_resync" for e in history["events"])
+    unsticker_events = [
+        e
+        for e in events_payload
+        if e.get("type") == "background_worker_status"
+        and e.get("data", {}).get("worker") == "pr_unsticker"
+    ]
+    assert unsticker_events

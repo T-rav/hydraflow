@@ -14,11 +14,15 @@ import asyncio
 import os
 import signal
 import sys
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
+from types import MethodType
 from typing import cast
 
 from dashboard import HydraFlowDashboard
 from events import EventBus
+from github_cache_loop import CacheSnapshot
 from mockworld.fakes import (
     FakeGitHub,
     FakeIssueFetcher,
@@ -31,6 +35,7 @@ from mockworld.fakes.fake_subprocess_runner import FakeSubprocessRunner
 from mockworld.seed import MockWorldSeed
 from orchestrator import HydraFlowOrchestrator
 from ports import IssueFetcherPort, IssueStorePort, PRPort, WorkspacePort
+from repo_store import RepoRecord, RepoRegistryStore
 from runtime_config import load_runtime_config
 from service_registry import (
     WorkerRegistryCallbacks,
@@ -49,8 +54,115 @@ def _load_seed() -> MockWorldSeed:
     return MockWorldSeed.from_json(Path(path).read_text())
 
 
+def _load_phase_script(
+    fake_llm: FakeLLM, phase_name: str, issue_number: int, payload: object
+) -> None:
+    """Translate one seed.phase_scripts entry into FakeLLM.script_* calls.
+
+    Each phase has a different inner shape (see ``MockWorldSeed.phase_scripts``
+    docstring). This loader is the single point where the JSON shapes are
+    decoded; the FakeLLM ``script_*`` methods themselves take typed kwargs.
+
+    Unknown phase names log a warning and are skipped — sandbox scenarios
+    cannot regress the seed loader by misnaming a phase, but they also can't
+    silently land an unwired phase that looks correct.
+    """
+    if phase_name == "discover":
+        assert isinstance(payload, list)
+        for entry in payload:
+            fake_llm.script_discover(
+                issue_number,
+                coherent=bool(entry.get("coherent", True)),
+                queries_required=list(entry.get("queries_required", []) or []),
+                summary=str(entry.get("summary", "") or ""),
+                findings=list(entry.get("findings", []) or []),
+            )
+    elif phase_name == "plan_review":
+        assert isinstance(payload, list)
+        for entry in payload:
+            fake_llm.script_plan_review(
+                issue_number,
+                verdict=entry["verdict"],
+                gaps=list(entry.get("gaps", []) or []),
+            )
+    elif phase_name == "shape_council":
+        assert isinstance(payload, dict)
+        # Inner keys are round numbers; from_json coerces them to int.
+        fake_llm.script_shape_council(issue_number, payload)
+    elif phase_name == "implement_spec_review":
+        assert isinstance(payload, list)
+        for entry in payload:
+            fake_llm.script_implement_spec_review(
+                issue_number,
+                compliant=bool(entry.get("compliant", True)),
+                gaps=list(entry.get("gaps", []) or []),
+                reasoning=str(entry.get("reasoning", "") or ""),
+            )
+    else:
+        # Unknown phase name — log and skip so a typo can't silently break.
+        import logging  # noqa: PLC0415
+
+        logging.getLogger("hydraflow.sandbox_main").warning(
+            "Unknown phase_scripts phase %r for issue #%d — ignored",
+            phase_name,
+            issue_number,
+        )
+
+
+def _build_caretaker_enabled_cb(
+    loops_enabled: list[str] | None,
+) -> Callable[[str], bool]:
+    """Build the kill-switch gate for caretaker loops (ADR-0049).
+
+    Semantics of ``MockWorldSeed.loops_enabled``:
+
+    - ``None`` — no caretaker loops enabled. Sandbox scenarios must opt into
+      cadence-driven loops explicitly so phase-flow scenarios do not start
+      unrelated GitHub/uv/docker workers inside the isolated container.
+    - ``[]`` — no caretaker loops enabled (universal kill-switch — proves
+      ADR-0049 wiring; phase orchestrators are unaffected because they
+      consult ``BGWorkerManager.is_enabled`` via the orchestrator's own
+      ``is_bg_worker_enabled``, not this callback).
+    - ``["name1", "name2", ...]`` — only those caretakers are enabled.
+      Names match the keys in ``HydraFlowOrchestrator._bg_loop_registry``
+      (e.g. ``"workspace_gc"``, ``"dependabot_merge"``, ``"ci_monitor"``).
+
+    This callback is fed into ``WorkerRegistryCallbacks.is_enabled`` and
+    becomes each caretaker's ``LoopDeps.enabled_cb`` — the in-body
+    ``self._enabled_cb(self._worker_name)`` gate every
+    ``BaseBackgroundLoop`` subclass checks per ADR-0049. Phase
+    orchestrators (``_triage_loop``, ``_discover_loop``, ``_shape_loop``,
+    ``_plan_loop``, ``_implement_loop``, ``_review_loop``, ``_hitl_loop``)
+    use a different gate (``orchestrator.is_bg_worker_enabled`` →
+    ``BGWorkerManager``) and so are not affected here. That's the
+    per-triage-comment-on-#8483 contract: the kill-switch suppresses
+    cadence-driven loops, not work-driven phase orchestrators.
+    """
+    if loops_enabled is None:
+        return lambda *_a, **_kw: False
+    allowed = frozenset(loops_enabled)
+    return lambda name, *_a, **_kw: name in allowed
+
+
+def _build_seed_repo_store(seed: MockWorldSeed, data_root: Path) -> RepoRegistryStore:
+    """Populate the sandbox repo registry from ``MockWorldSeed.repos``."""
+    repo_store = RepoRegistryStore(data_root)
+    for slug, path in seed.repos:
+        repo_store.upsert(RepoRecord(slug=slug, repo=slug, path=path))
+    return repo_store
+
+
 async def main() -> None:
-    config = load_runtime_config()
+    sandbox_repo_root = Path(
+        os.environ.get("HYDRAFLOW_SANDBOX_REPO_ROOT", "/opt/hydraflow")
+    )
+    config = load_runtime_config(
+        overrides={
+            "repo_root": sandbox_repo_root,
+            "data_root": Path("/workspace/.hydraflow"),
+            "workspace_base": Path("/workspace/worktrees"),
+        }
+    )
     # Sandbox-specific config overrides — disable downstream code paths
     # that spawn real `claude` subprocesses. The sandbox is `internal: true`
     # per docker-compose.sandbox.yml, so these subprocesses hang for ~30s
@@ -70,6 +182,7 @@ async def main() -> None:
     config.transcript_summarization_enabled = False  # type: ignore[misc]
     config.research_enabled = False  # type: ignore[misc]
     seed = _load_seed()
+    repo_store = _build_seed_repo_store(seed, config.data_root)
     event_bus = EventBus()
     state = build_state_tracker(config)
     stop_event = asyncio.Event()
@@ -113,15 +226,26 @@ async def main() -> None:
         for role, results in by_role.items():
             fake_llm.script_advisor(issue_number, role, results)
 
+    # ADR-0063 phase-level scripts (W3a/W3b/W4/W5). Each phase entry maps
+    # to a distinct FakeLLM.script_* call. Empty for pre-W3a/W3b/W4/W5
+    # scenarios so existing seeds carry no payload here.
+    for phase_name, by_issue in seed.phase_scripts.items():
+        for issue_number, payload in by_issue.items():
+            _load_phase_script(fake_llm, phase_name, int(issue_number), payload)
+
     # Every async-touched ``subprocess.run`` site in production code now
     # specifies ``timeout=`` (PRs #8454, #8456, #8468 — enforced by
     # ``tests/regressions/test_async_subprocess_timeouts.py``), so caretaker
     # loops that try to call out under air-gap fail fast instead of hanging
     # the dashboard's uvicorn bind. No sandbox-specific carve-out is needed.
+    # ADR-0049 universal kill-switch wiring (#8483). ``seed.loops_enabled``
+    # gates caretaker-loop ``enabled_cb`` only; phase orchestrators consult
+    # ``BGWorkerManager.is_enabled`` and are unaffected. See
+    # ``_build_caretaker_enabled_cb`` docstring for full semantics.
     callbacks = WorkerRegistryCallbacks(
         update_status=lambda *_a, **_kw: None,
-        is_enabled=lambda *_a, **_kw: True,
-        get_interval=lambda *_a, **_kw: 60,
+        is_enabled=_build_caretaker_enabled_cb(seed.loops_enabled),
+        get_interval=lambda *_a, **_kw: 1,
     )
 
     # FakeSubprocessRunner short-circuits every remaining shell-out to
@@ -149,6 +273,21 @@ async def main() -> None:
         subprocess_runner=fake_subprocess_runner,
     )
 
+    async def _mock_contract_recordings(
+        _self: object, _tmp_root: Path
+    ) -> dict[str, list[Path]]:
+        return {}
+
+    svc.contract_refresh_loop._record_all = MethodType(  # type: ignore[method-assign]
+        _mock_contract_recordings,
+        svc.contract_refresh_loop,
+    )
+    if seed.prs:
+        svc.github_cache._open_prs = CacheSnapshot(  # type: ignore[attr-defined]
+            data=await shared_github.list_open_prs([]),
+            fetched_at=datetime.now(UTC),
+        )
+
     # Attach the advisor-routing sentinel — mirrors
     # tests/scenarios/fakes/mock_world.py::_wire_targets so
     # ReviewPhase._build_post_verify_runner's ``_PostVerifyRunner.run``
@@ -164,6 +303,24 @@ async def main() -> None:
     # carries the assignment cleanly.
     svc.reviewers._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
 
+    # ADR-0063 sentinel wiring (W3a/W3b/W4/W5). Each runner consults the
+    # sentinel via ``getattr(self, "_mockworld_fake_llm", None)`` in its
+    # subprocess-dispatch method; setting the attribute here lets sandbox
+    # scenarios drive failure-path recovery without producing synthetic
+    # subprocess transcripts.
+    discover_runner = getattr(svc.discover_phase, "_runner", None)
+    if discover_runner is not None:
+        discover_runner._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    plan_reviewer = getattr(svc.planner_phase, "_plan_reviewer", None)
+    if plan_reviewer is not None:
+        plan_reviewer._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    expert_council = getattr(svc.shape_phase, "_council", None)
+    if expert_council is not None:
+        expert_council._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    spec_reviewer = getattr(svc.implementer, "_spec_reviewer", None)
+    if spec_reviewer is not None:
+        spec_reviewer._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+
     orch = HydraFlowOrchestrator(
         config,
         event_bus=event_bus,
@@ -176,6 +333,8 @@ async def main() -> None:
         event_bus=event_bus,
         state=state,
         orchestrator=orch,
+        repo_store=repo_store,
+        list_repos_cb=repo_store.list,
     )
     await dashboard.start()
 

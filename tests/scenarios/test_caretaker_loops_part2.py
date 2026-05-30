@@ -58,64 +58,6 @@ def _make_loop_deps(tmp_path, **config_overrides):
 
 
 # ---------------------------------------------------------------------------
-# L14: code_grooming — disabled path and dry-run path
-# ---------------------------------------------------------------------------
-
-
-class TestL14CodeGrooming:
-    """L14: CodeGroomingLoop returns expected stats when disabled or dry-run.
-
-    Pattern B: direct loop instantiation so we can control config flags
-    (code_grooming_enabled, dry_run) without fighting run_with_loops' config.
-    """
-
-    async def test_disabled_returns_skipped(self, tmp_path):
-        """When code_grooming_enabled is False, loop returns {"skipped": "disabled"}."""
-        from code_grooming_loop import CodeGroomingLoop  # noqa: PLC0415
-
-        config, deps = _make_loop_deps(tmp_path, code_grooming_enabled=False)
-        prs = MagicMock()
-        loop = CodeGroomingLoop(config=config, pr_manager=prs, deps=deps)
-
-        result = await loop._do_work()
-
-        assert result == {"skipped": "disabled"}
-
-    async def test_dry_run_returns_none(self, tmp_path):
-        """When dry_run is True, _do_work short-circuits and returns None."""
-        from code_grooming_loop import CodeGroomingLoop  # noqa: PLC0415
-
-        config, deps = _make_loop_deps(tmp_path, dry_run=True)
-        prs = MagicMock()
-        loop = CodeGroomingLoop(config=config, pr_manager=prs, deps=deps)
-
-        result = await loop._do_work()
-
-        assert result is None
-
-    async def test_enabled_no_findings_returns_stats_shape(self, tmp_path):
-        """When enabled but audit subprocess fails, stats still have the right keys.
-
-        Smoke: _run_audit calls stream_claude_process which is not wired; the
-        exception is caught and returns {"filed": 0, "error": True}.
-        We assert on the stats shape rather than exact values.
-        """
-        from code_grooming_loop import CodeGroomingLoop  # noqa: PLC0415
-
-        config, deps = _make_loop_deps(tmp_path, code_grooming_enabled=True)
-        prs = MagicMock()
-        loop = CodeGroomingLoop(config=config, pr_manager=prs, deps=deps)
-
-        result = await loop._do_work()
-
-        # Either {"filed": 0, "error": True} (subprocess missing) or real stats —
-        # in both cases the "filed" key must exist and be an int.
-        assert result is not None
-        assert "filed" in result
-        assert isinstance(result["filed"], int)
-
-
-# ---------------------------------------------------------------------------
 # L15: diagnostic — no issues and one-issue paths
 # ---------------------------------------------------------------------------
 

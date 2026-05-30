@@ -4,8 +4,18 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W22
+
+- `3242dd2` — merge main into rc promotion *(2026-05-29)*
+- `bb088ee` — fix(gates): assign BranchProtectionAuditorLoop to a functional area + orchestrator test double *(2026-05-29)*
+- `5962bdb` — fix(gates): address grumpy-principal review across all slices *(2026-05-29)*
+- `3c87f71` — feat(gates): branch-protection drift caretaker loop (Slice 4) *(2026-05-29)*
+- `79a1ada` — docs(adr): ADR-0082 declarative gate contract (extends ADR-0042 enforcement) *(2026-05-29)*
+- `0afd876` — feat(gates): gen-gates CLI + make targets; generate README table; scrub stale prose *(2026-05-29)*
+
 ## 2026-W21
 
+- `1d9c95f` — Fixes #8931: stream onboarding activity in dashboard *(2026-05-23)*
 - `9dc0a8d` — Refs #8933: validate third-domain onboarding dashboard flow *(2026-05-23)*
 - `01b5854` — docs: refresh architecture artifacts *(2026-05-23)*
 - `66a1b1f` — Refs #8932: stream onboarding design chat *(2026-05-23)*
@@ -30,6 +40,55 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `72fea53` — Fixes #8979: fold epic sweep into monitor *(2026-05-22)*
 - `527bea0` — Fixes #8928: make issue creation failure explicit *(2026-05-22)*
 - `e7d4296` — Fixes #8481: register caretaker escalation labels *(2026-05-22)*
+- `60d07b4` — feat(mockworld): FakeDocker bd-CLI emulation for bead lifecycle coverage (closes #8367) (#9053) (#9053) *(2026-05-21)*
+- `4afc722` — chore(arch): regen post-rebase against staging *(2026-05-20)*
+- `2efdbb1` — chore(arch): regen post-rebase against staging *(2026-05-20)*
+- `fecc6a8` — chore(arch): regen post-rebase against staging *(2026-05-20)*
+- `10e9737` — chore(arch): regen post-rebase against staging *(2026-05-20)*
+- `81ce3ea` — chore(arch): regen post-rebase against staging *(2026-05-20)*
+- `ffd5f38` — chore(arch): regen post-rebase against staging *(2026-05-20)*
+- `049ec06` — test(sandbox): ADR-0063 W3a/W3b/W4/W5 recovery-path scenarios (s36/s37/s39/s40 rewrite) *(2026-05-20)*
+- `23def6e` — feat(mockworld): FakeLLM scripting hooks for discover/plan-review/shape-council/spec-review failure paths *(2026-05-20)*
+- `3b9ea23` — test(sandbox): ADR-0063 workstream e2e coverage (s35-s40) *(2026-05-20)*
+- `6981598` — chore(arch): regen post-rebase round 3 *(2026-05-20)*
+- `21b59db` — chore(arch): regen post-rebase round 2 *(2026-05-20)*
+- `0b33086` — chore(arch): regen post-rebase + ADR renumber *(2026-05-20)*
+- `9843c52` — chore(arch): regen after lint pass *(2026-05-20)*
+- `6da9a75` — docs(wiki+standards+adr): bulk backfill 3 — 12 wiki terms, standards wiring, 2 ADR drafts *(2026-05-20)*
+- `cd44f14` — chore(arch): regen post-rebase round 2 *(2026-05-20)*
+- `d483b28` — chore(arch): regen post-rebase *(2026-05-20)*
+- `cda3bd4` — chore(arch): regenerate arch artifacts post-backfill *(2026-05-20)*
+- `e788dcb` — docs(standards,adr): backfill standards refs and ADR drafts for 9 ports/loops *(2026-05-20)*
+- `ac80bb8` — docs(wiki): backfill missing wiki entries for 8 ports/loops *(2026-05-20)*
+- `75ad1a4` — chore(arch): regen after rebase against staging *(2026-05-20)*
+- `a8e86d7` — chore: ruff format + arch-regen refresh *(2026-05-20)*
+- `4ff3f88` — chore(arch): regen after rebase against staging *(2026-05-20)*
+- `d15e32a` — style(trust-fleet-sanity): ruff lint + format fixes on breach-path tests *(2026-05-20)*
+- `18041e1` — feat(adversarial): remove the switch — adversarial pipeline always on (#9036) (#9036) *(2026-05-19)*
+- `31313f7` — feat(adversarial): flip pipeline ON by default (#9025) (#9025) *(2026-05-19)*
+- `6d6ed95` — test+docs(coverage): final cleanup wave — 6 sandbox scenarios + 1 ADR draft *(2026-05-19)*
+- `cb8508c` — test(scenarios): bulk coverage backfill C (9 beads) *(2026-05-19)*
+- `c32919f` — test(scenarios): coverage backfill for 10 loops (bulk B) *(2026-05-19)*
+- `2cc3d81` — chore(arch): regen after UL lint updates generated views *(2026-05-19)*
+- `7e4fc62` — docs(wiki+standards+adr): backfill 19 coverage-gap beads (batch 2) *(2026-05-19)*
+- `52a6c17` — test(flake-tracker): cover _download_junit paths (closes advisor-q08q) *(2026-05-19)*
+- `007c86c` — fix(tests): import AgentPort + FakeAgent in conformance test *(2026-05-19)*
+- `1a5b156` — test(contracts): FakeHoneycomb contract test (closes ADR-0047 gap for fake #5 of 11) *(2026-05-19)*
+- `d5f127d` — fix(tests): import AgentPort + FakeAgent in conformance test *(2026-05-19)*
+- `d566f5d` — feat(triage): TriageRetryLoop (ADR-0063 W2, closes advisor-vz1l) *(2026-05-19)*
+- `7a958b0` — feat(mockworld): FakeReviewInsightStore satisfies ReviewInsightStorePort (ADR-0047, closes advisor-luab) *(2026-05-19)*
+- `4cd8a62` — feat(mockworld): FakeObservability satisfies ObservabilityPort (ADR-0047, closes advisor-ddje) *(2026-05-19)*
+- `0546b35` — style(tests): ruff format test_fake_bot_pr.py — collapse short kwarg calls *(2026-05-19)*
+- `1c2daf7` — feat(mockworld): FakeBotPR satisfies BotPRPort Protocol (ADR-0047, closes advisor-25fr) *(2026-05-19)*
+- `c4e5906` — chore(arch): refresh generated artifacts against b688225 *(2026-05-19)*
+- `66440b0` — refactor(mockworld): move InMemoryRouteBackCounter → FakeRouteBackCounter under src/mockworld/fakes/ (ADR-0047) *(2026-05-19)*
+- `3d939a9` — feat(mockworld): FakeAgent satisfies AgentPort Protocol (ADR-0047, closes advisor-ayw5) *(2026-05-19)*
+- `dc49678` — fix(fake-coverage-auditor): roll up to 1 issue per (fake, gap_kind) (#8986) (#8994) (#8994) *(2026-05-19)*
+- `ce53f28` — fix(adr_touchpoint_auditor): roll up to 1 issue per ADR (#8987) (#8993) (#8993) *(2026-05-19)*
+- `1e70cc0` — fix(retrospective): dedup [HITL] Stale review insight filings (#8988) (#8992) (#8992) *(2026-05-19)*
+- `dbe6f17` — feat(loops): remove CodeGroomingLoop (#8984) (#8995) (#8995) *(2026-05-19)*
+- `6d7319a` — feat(adversarial): earlier-adversarial pipeline — Discovery + Shape + Plan dissent stages (#8953) (#8953) *(2026-05-19)*
+- `35d0308` — test(sandbox): bump scenario timeouts past observed pipeline duration (#8989) (#8989) *(2026-05-19)*
 - `8c85c14` — fix(sandbox): wire FakeSubprocessRunner — the actual claude bypass (#8965) (#8965) *(2026-05-18)*
 - `5f762b0` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
 - `119279f` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
@@ -350,11 +409,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `522e013` — Fixes #1701: ADR-0009 epic release creation architecture (#1739) (#1739) *(2026-03-01)*
 - `961b141` — Fixes #1677: add ADR-0009 for worktree and path isolation architecture (#1683) (#1683) *(2026-03-01)*
 - `7c6fe67` — Fixes #1634: add ADR-0009 for multi-repo process-per-repo model (#1679) (#1679) *(2026-03-01)*
-- `35aa37a` — docs: add ADR-0008 for multi-repo dashboard architecture (#1648) (#1648) *(2026-02-28)*
-- `780b17c` — docs: add ADR-0007 for dashboard API multi-repo scoping (#1647) (#1647) *(2026-02-28)*
-- `83730be` — docs: add ADR-0006 for RepoRuntime isolation architecture (#1646) (#1646) *(2026-02-28)*
-- `bbc273d` — docs: add ADR-0005 for PR recovery and zero-diff branch handling (#1307) (#1307) *(2026-02-26)*
-- `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `dd2f945` on 2026-05-23 13:06 UTC. Source last changed at `dd2f945`. Status: 🟢 fresh._
+_Regenerated from commit `3242dd2` on 2026-05-30 06:45 UTC. Source last changed at `3242dd2`. Status: 🟢 fresh._

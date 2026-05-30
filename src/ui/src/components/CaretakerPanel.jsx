@@ -9,7 +9,7 @@ import { useHydraFlow } from '../context/HydraFlowContext'
  */
 const CARETAKER_KEYS = new Set([
   'stale_issue_gc', 'ci_monitor', 'dependabot_merge', 'worktree_gc',
-  'health_monitor', 'security_patch', 'code_grooming',
+  'health_monitor', 'epic_sweeper', 'security_patch',
 ])
 
 const CARETAKER_WORKERS = BACKGROUND_WORKERS.filter(w => CARETAKER_KEYS.has(w.key))

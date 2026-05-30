@@ -12,7 +12,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from ci_monitor_loop import CIMonitorLoop
-from code_grooming_loop import CodeGroomingLoop
 from security_patch_loop import SecurityPatchLoop
 from service_registry import ServiceRegistry
 from stale_issue_gc_loop import StaleIssueGCLoop
@@ -33,7 +32,6 @@ class TestServiceRegistryFields:
         ("stale_issue_gc_loop", StaleIssueGCLoop),
         ("ci_monitor_loop", CIMonitorLoop),
         ("security_patch_loop", SecurityPatchLoop),
-        ("code_grooming_loop", CodeGroomingLoop),
     ]
 
     @pytest.mark.parametrize(
@@ -73,7 +71,6 @@ class TestServiceRegistryInstantiation:
         ("stale_issue_gc_loop", StaleIssueGCLoop),
         ("ci_monitor_loop", CIMonitorLoop),
         ("security_patch_loop", SecurityPatchLoop),
-        ("code_grooming_loop", CodeGroomingLoop),
     ]
 
     @pytest.mark.parametrize(
@@ -107,7 +104,6 @@ class TestBGLoopRegistryKeys:
         ("stale_issue_gc", "stale_issue_gc_loop"),
         ("ci_monitor", "ci_monitor_loop"),
         ("security_patch", "security_patch_loop"),
-        ("code_grooming", "code_grooming_loop"),
     ]
 
     @pytest.mark.parametrize(
@@ -145,7 +141,6 @@ class TestDefaultIntervals:
         ("stale_issue_gc_loop", "stale_issue_gc_interval"),
         ("ci_monitor_loop", "ci_monitor_interval"),
         ("security_patch_loop", "security_patch_interval"),
-        ("code_grooming_loop", "code_grooming_interval"),
     ]
 
     @pytest.mark.parametrize(

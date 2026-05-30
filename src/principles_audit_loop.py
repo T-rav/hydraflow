@@ -289,7 +289,7 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
 
     async def _file_drift_issue(
         self, slug: str, finding: dict[str, Any], last_status: str
-    ) -> int | None:
+    ) -> int:
         """File a ``hydraflow-find`` + ``principles-drift`` issue for one regression."""
         check_id = finding["check_id"]
         title = f"Principles drift: {check_id} regressed in {slug}"
@@ -305,10 +305,12 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
             f"Filed by PrinciplesAuditLoop (spec §4.4)."
         )
         labels = [
-            self._config.find_label[0],
-            self._config.principles_drift_label[0],
+            "hydraflow-find",
+            "principles-drift",
+            f"check-{check_id}",
         ]
-        return await self._pr.create_issue(title, body, labels)
+        issue_number = await self._pr.create_issue(title, body, labels)
+        return int(issue_number or 0)
 
     async def _maybe_escalate(self, slug: str, check_id: str, severity: str) -> bool:
         """Fire exactly one hitl-escalation when the attempt counter reaches threshold.
@@ -338,19 +340,13 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
             f"Closing this issue clears the attempt counter (§3.2 lifecycle)."
         )
         labels = [
-            self._config.hitl_escalation_label[0],
-            self._config.principles_stuck_label[0],
+            "hitl-escalation",
+            "principles-stuck",
+            f"check-{check_id}",
         ]
         if severity == "CULTURAL":
-            labels.append(self._config.cultural_check_label[0])
-        issue_number = await self._pr.create_issue(title, body, labels)
-        if issue_number is None:
-            logger.warning(
-                "principles audit: failed to file escalation for %s/%s",
-                slug,
-                check_id,
-            )
-            return False
+            labels.append("cultural-check")
+        await self._pr.create_issue(title, body, labels)
         return True
 
     async def _reconcile_closed_escalations(self) -> None:
@@ -362,30 +358,15 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
         (slug, check_id) pair from the title, and calls
         ``reset_drift_attempts``. Close-to-clear latency is bounded by the
         loop interval.
+
+        Routes through ``self._pr.list_closed_issues_by_label`` so
+        MockWorld scenarios can stub this call without spawning real
+        subprocesses (advisor-0dmd).
         """
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "gh",
-                "issue",
-                "list",
-                "--repo",
-                self._config.repo,
-                "--state",
-                "closed",
-                "--label",
-                self._config.principles_stuck_label[0],
-                "--json",
-                "title",
-                "--limit",
-                "100",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            issues = await self._pr.list_closed_issues_by_label(
+                "principles-stuck", limit=100
             )
-            out, _ = await proc.communicate()
-            if proc.returncode != 0:
-                logger.debug("reconcile: gh issue list failed")
-                return
-            issues = json.loads(out or b"[]")
         except Exception as exc:  # noqa: BLE001
             reraise_on_credit_or_bug(exc)
             logger.debug("reconcile: skipped", exc_info=True)
@@ -456,7 +437,7 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
         mr: ManagedRepo,
         fails: list[str],
         report: dict[str, Any],
-    ) -> int | None:
+    ) -> int:
         findings_by_id = {f["check_id"]: f for f in report.get("findings", [])}
         bullets = "\n".join(
             f"- **{cid}** ({findings_by_id[cid]['severity']}): "
@@ -472,11 +453,12 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
             f"reports all P1–P5 as PASS. Run `make audit DIR=<checkout>` "
             f"locally to reproduce."
         )
-        return await self._pr.create_issue(
+        issue_number = await self._pr.create_issue(
             title,
             body,
             labels=["hydraflow-find", "onboarding-blocked"],
         )
+        return int(issue_number or 0)
 
     async def _reconcile_onboarding(self) -> int:
         """For every managed_repos entry, ensure onboarding status is set."""

@@ -4,20 +4,67 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import subprocess
 import sys
 from pathlib import Path
 
+from scripts.gates.bootstrap import build_repo_profile, gates_plan_section
+from scripts.gates.contract import load_gates
 from scripts.hydraflow_audit import observability  # self-instrumentation per P7.6
 
 from .modes import decide
 from .prompt import render
+
+_CONTRACT = (
+    Path(__file__).resolve().parents[2] / "docs/standards/branch_protection/gates.toml"
+)
 
 
 def _audit_report_path(target: Path, override: Path | None) -> Path:
     if override is not None:
         return override
     return target / ".hydraflow" / "audit-report.json"
+
+
+def _repo_slug(target: Path) -> str | None:
+    """owner/name from the target's git remote, or None if undetectable."""
+    try:
+        url = subprocess.check_output(
+            ["git", "-C", str(target), "remote", "get-url", "origin"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    for prefix in ("https://github.com/", "git@github.com:"):
+        if url.startswith(prefix):
+            slug = url[len(prefix) :]
+            return slug[:-4] if slug.endswith(".git") else slug
+    return None
+
+
+def _gates_section(target: Path) -> list[str] | None:
+    """Adoption-plan gates section for the target, or None if unavailable.
+
+    Best-effort: never let gate bootstrapping crash the adoption plan. Falls
+    back to languages-only if capability detection (a network call) fails.
+    """
+    if not _CONTRACT.exists():
+        return None
+    try:
+        contract = load_gates(_CONTRACT)
+        slug = _repo_slug(target)
+        try:
+            profile = build_repo_profile(target, slug)
+        except Exception:  # noqa: BLE001 — capability probe is best-effort
+            profile = build_repo_profile(target, None)
+        return gates_plan_section(profile, contract)
+    except Exception:  # noqa: BLE001 — the section is additive, never fatal
+        logging.getLogger("hydraflow.init").debug(
+            "gates adoption-plan section skipped (non-fatal)", exc_info=True
+        )
+        return None
 
 
 def _ensure_report(target: Path, report_path: Path) -> None:
@@ -65,6 +112,7 @@ def main(argv: list[str] | None = None) -> int:
             mode=mode,
             principle_filter=args.principle,
             skip_brainstorm=args.skip_brainstorm,
+            gates_section=_gates_section(target_root),
         )
 
         if args.out is not None:

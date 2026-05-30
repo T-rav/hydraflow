@@ -233,3 +233,197 @@ async def test_kill_switch_short_circuits_do_work(loop_env) -> None:
     assert stats == {"status": "disabled"}
     loop._reconcile_closed_escalations.assert_not_awaited()
     pr.create_issue.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# _download_junit — unit tests
+# ---------------------------------------------------------------------------
+
+
+def _make_loop(loop_env) -> FlakeTrackerLoop:
+    cfg, state, pr, dedup = loop_env
+    stop = asyncio.Event()
+    return FlakeTrackerLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+
+_GOOD_XML = b"""<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+  <testsuite name="pytest">
+    <testcase classname="tests.a" name="test_one" />
+    <testcase classname="tests.a" name="test_two">
+      <failure message="boom"/>
+    </testcase>
+  </testsuite>
+</testsuites>
+"""
+
+
+async def test_download_junit_missing_database_id_returns_empty(loop_env) -> None:
+    """Run dict without databaseId → {} without calling subprocess."""
+    loop = _make_loop(loop_env)
+    result = await loop._download_junit({})
+    assert result == {}
+
+
+async def test_download_junit_missing_database_id_explicit_none(loop_env) -> None:
+    """Run dict with databaseId=None → {} without calling subprocess."""
+    loop = _make_loop(loop_env)
+    result = await loop._download_junit({"databaseId": None})
+    assert result == {}
+
+
+async def test_download_junit_gh_failure_returns_empty(loop_env, monkeypatch) -> None:
+    """Non-zero returncode from gh run download → {} (artifact not present)."""
+    loop = _make_loop(loop_env)
+
+    class _FailProc:
+        returncode = 1
+
+        async def communicate(self):
+            return b"", b"no artifact named junit-scenario"
+
+    monkeypatch.setattr(
+        asyncio, "create_subprocess_exec", AsyncMock(return_value=_FailProc())
+    )
+    result = await loop._download_junit({"databaseId": 99})
+    assert result == {}
+
+
+async def test_download_junit_no_xml_files_returns_empty(loop_env, monkeypatch) -> None:
+    """gh succeeds but writes no *.xml files → {}."""
+    loop = _make_loop(loop_env)
+
+    class _OkProc:
+        returncode = 0
+
+        async def communicate(self):
+            return b"", b""
+
+    # The subprocess writes nothing; the temp dir remains empty.
+    monkeypatch.setattr(
+        asyncio, "create_subprocess_exec", AsyncMock(return_value=_OkProc())
+    )
+    result = await loop._download_junit({"databaseId": 7})
+    assert result == {}
+
+
+async def test_download_junit_valid_xml_returns_parsed_results(
+    loop_env, monkeypatch
+) -> None:
+    """gh succeeds and writes a valid JUnit XML → parsed pass/fail dict."""
+    loop = _make_loop(loop_env)
+    captured_dir: list[str] = []
+
+    class _OkProc:
+        returncode = 0
+
+        async def communicate(self):
+            # Plant the XML in the directory that the loop passed via --dir.
+            (Path(captured_dir[0]) / "results.xml").write_bytes(_GOOD_XML)
+            return b"", b""
+
+    async def _fake_exec(*args, **kwargs):
+        # args[0] is the full command list; --dir <path> is the last two elements.
+        cmd = list(args)
+        dir_idx = cmd.index("--dir")
+        captured_dir.append(cmd[dir_idx + 1])
+        return _OkProc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+    result = await loop._download_junit({"databaseId": 42})
+    assert result == {
+        "tests.a.test_one": "pass",
+        "tests.a.test_two": "fail",
+    }
+
+
+async def test_download_junit_malformed_xml_skipped(loop_env, monkeypatch) -> None:
+    """ET.ParseError on a single file → that file is skipped; valid files still parsed."""
+    loop = _make_loop(loop_env)
+    captured_dir: list[str] = []
+
+    class _OkProc:
+        returncode = 0
+
+        async def communicate(self):
+            d = Path(captured_dir[0])
+            (d / "bad.xml").write_bytes(b"<<< not xml >>>")
+            (d / "good.xml").write_bytes(_GOOD_XML)
+            return b"", b""
+
+    async def _fake_exec(*args, **kwargs):
+        cmd = list(args)
+        dir_idx = cmd.index("--dir")
+        captured_dir.append(cmd[dir_idx + 1])
+        return _OkProc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+    result = await loop._download_junit({"databaseId": 5})
+    # bad.xml triggers ET.ParseError → skipped; good.xml is parsed normally.
+    assert "tests.a.test_one" in result
+    assert "tests.a.test_two" in result
+
+
+async def test_download_junit_multiple_xml_files_merged(loop_env, monkeypatch) -> None:
+    """Multiple *.xml files in the artifact dir → results merged into one dict."""
+    loop = _make_loop(loop_env)
+    captured_dir: list[str] = []
+
+    second_xml = b"""<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+  <testsuite name="pytest">
+    <testcase classname="tests.b" name="test_three">
+      <failure message="oops"/>
+    </testcase>
+  </testsuite>
+</testsuites>
+"""
+
+    class _OkProc:
+        returncode = 0
+
+        async def communicate(self):
+            d = Path(captured_dir[0])
+            (d / "first.xml").write_bytes(_GOOD_XML)
+            (d / "second.xml").write_bytes(second_xml)
+            return b"", b""
+
+    async def _fake_exec(*args, **kwargs):
+        cmd = list(args)
+        dir_idx = cmd.index("--dir")
+        captured_dir.append(cmd[dir_idx + 1])
+        return _OkProc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+    result = await loop._download_junit({"databaseId": 13})
+    assert result["tests.a.test_one"] == "pass"
+    assert result["tests.a.test_two"] == "fail"
+    assert result["tests.b.test_three"] == "fail"
+
+
+async def test_download_junit_only_malformed_xml_returns_empty(
+    loop_env, monkeypatch
+) -> None:
+    """All XML files malformed → {} (every file triggers ET.ParseError and is skipped)."""
+    loop = _make_loop(loop_env)
+    captured_dir: list[str] = []
+
+    class _OkProc:
+        returncode = 0
+
+        async def communicate(self):
+            d = Path(captured_dir[0])
+            (d / "broken.xml").write_bytes(b"<not><valid xml")
+            return b"", b""
+
+    async def _fake_exec(*args, **kwargs):
+        cmd = list(args)
+        dir_idx = cmd.index("--dir")
+        captured_dir.append(cmd[dir_idx + 1])
+        return _OkProc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+    result = await loop._download_junit({"databaseId": 3})
+    assert result == {}

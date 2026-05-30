@@ -385,8 +385,6 @@ class ConfigFactory:
         hindsight_timeout: int = 30,
         security_patch_interval: int = 3600,
         security_patch_severity_threshold: str = "high",
-        code_grooming_interval: int = 86400,
-        code_grooming_enabled: bool = False,
         sandbox_failure_fixer_interval: int = 3600,
         # Helper default mirrors the production-eager static-config default
         # (config.py ships with `False`). Unit tests that need the loop to
@@ -404,6 +402,7 @@ class ConfigFactory:
             "leaves regression tests, doesn't over-engineer."
         ),
         auto_agent_preflight_enabled: bool = True,
+        implement_two_stage_review_enabled: bool = True,
     ):
         """Create a HydraFlowConfig with test-friendly defaults."""
         from config import HydraFlowConfig
@@ -627,8 +626,6 @@ class ConfigFactory:
                 hindsight_timeout=hindsight_timeout,
                 security_patch_interval=security_patch_interval,
                 security_patch_severity_threshold=security_patch_severity_threshold,
-                code_grooming_interval=code_grooming_interval,
-                code_grooming_enabled=code_grooming_enabled,
                 sandbox_failure_fixer_interval=sandbox_failure_fixer_interval,
                 sandbox_failure_fixer_enabled=sandbox_failure_fixer_enabled,
                 auto_agent_preflight_interval=auto_agent_preflight_interval,
@@ -641,6 +638,7 @@ class ConfigFactory:
                 else ["hydraflow-principles-stuck", "hydraflow-cultural-check"],
                 auto_agent_persona=auto_agent_persona,
                 auto_agent_preflight_enabled=auto_agent_preflight_enabled,
+                implement_two_stage_review_enabled=implement_two_stage_review_enabled,
             )
 
 
@@ -692,6 +690,7 @@ class PipelineHarness:
         from issue_store import IssueStore
         from plan_phase import PlanPhase
         from post_merge_handler import PostMergeHandler
+        from review_insights import ReviewInsightStore
         from review_phase import ReviewPhase
         from state import StateTracker
         from triage_phase import TriagePhase
@@ -804,6 +803,7 @@ class PipelineHarness:
             store=self.store,
             conflict_resolver=self._conflict_resolver,
             post_merge=self.post_merge,
+            review_insights=ReviewInsightStore(self.config.memory_dir),
             event_bus=self.bus,
         )
         self.hitl_phase = HITLPhase(
@@ -1143,6 +1143,7 @@ def make_implement_phase(
     success=True,
     push_return=True,
     create_pr_return=None,
+    spec_reviewer=None,
 ):
     """Build an ImplementPhase with standard mocks.
 
@@ -1248,6 +1249,7 @@ def make_implement_phase(
         prs=mock_prs,
         store=mock_store,
         stop_event=stop_event,
+        spec_reviewer=spec_reviewer,
     )
 
     return phase, mock_wt, mock_prs
@@ -1282,6 +1284,7 @@ class ImplementPhaseMockBuilder:
         self._success: bool = True
         self._prs_overrides: dict[str, object] = {}
         self._wt_overrides: dict[str, object] = {}
+        self._spec_reviewer: object | None = None
 
     def with_issues(self, issues: list[object]) -> ImplementPhaseMockBuilder:
         """Set the issues to be returned by get_implementable."""
@@ -1330,6 +1333,11 @@ class ImplementPhaseMockBuilder:
         self._wt_overrides[name] = mock
         return self
 
+    def with_spec_reviewer(self, reviewer: object) -> ImplementPhaseMockBuilder:
+        """Attach a SpecComplianceReviewer (ADR-0063 W5)."""
+        self._spec_reviewer = reviewer
+        return self
+
     def build(self) -> tuple[Any, Any, Any]:
         """Build and return ``(phase, mock_wt, mock_prs)``."""
         create_pr_kwarg: dict[str, Any] = (
@@ -1343,6 +1351,7 @@ class ImplementPhaseMockBuilder:
             agent_run=self._agent_run,
             success=self._success,
             push_return=self._push_return,
+            spec_reviewer=self._spec_reviewer,
             **create_pr_kwarg,
         )
         for name, mock in self._prs_overrides.items():
@@ -1598,6 +1607,7 @@ def make_review_phase(
     from issue_store import IssueStore
     from merge_conflict_resolver import MergeConflictResolver
     from post_merge_handler import PostMergeHandler
+    from review_insights import ReviewInsightStore
     from review_phase import ReviewPhase
     from state import StateTracker
 
@@ -1654,6 +1664,7 @@ def make_review_phase(
         store=mock_store,
         conflict_resolver=conflict_resolver,
         post_merge=post_merge,
+        review_insights=ReviewInsightStore(config.memory_dir),
         event_bus=bus,
         baseline_policy=baseline_policy,
     )
@@ -1722,7 +1733,6 @@ def mock_fetcher_noop(orch: Any) -> None:
     for loop_attr in (
         "adr_reviewer_loop",
         "ci_monitor_loop",
-        "code_grooming_loop",
         "dependabot_merge_loop",
         "diagnostic_loop",
         "epic_monitor_loop",
@@ -1794,39 +1804,8 @@ def make_pr_manager(config: Any, event_bus: Any) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# Route-back counter stub (#6423)
+# Route-back counter stub (#6423) — canonical location: mockworld/fakes/
 # ---------------------------------------------------------------------------
 
-
-class InMemoryRouteBackCounter:
-    """In-memory ``RouteBackCounterPort`` implementation for tests.
-
-    Mirrors ``state._route_back.RouteBackStateMixin`` semantics: get
-    starts at 0, increment returns the new value, decrement-to-zero
-    clears the entry, decrement-below-zero is a no-op. Used by
-    ``tests/test_route_back.py`` and ``tests/test_precondition_gate.py``
-    so the counter shape stays consistent across both files instead
-    of drifting between two parallel stubs.
-    """
-
-    def __init__(self) -> None:
-        self._counts: dict[int, int] = {}
-
-    def get_route_back_count(self, issue_id: int) -> int:
-        return self._counts.get(issue_id, 0)
-
-    def increment_route_back_count(self, issue_id: int) -> int:
-        new = self._counts.get(issue_id, 0) + 1
-        self._counts[issue_id] = new
-        return new
-
-    def decrement_route_back_count(self, issue_id: int) -> int:
-        current = self._counts.get(issue_id, 0)
-        if current <= 0:
-            return 0
-        new = current - 1
-        if new == 0:
-            self._counts.pop(issue_id, None)
-        else:
-            self._counts[issue_id] = new
-        return new
+# Re-exported under the old name for backward compatibility.  New code should
+# import FakeRouteBackCounter from mockworld.fakes directly.

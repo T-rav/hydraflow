@@ -31,6 +31,8 @@ from pydantic.alias_generators import (
 )
 from typing_extensions import TypedDict
 
+from src.pending_concerns import AdversarialState
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -883,8 +885,6 @@ class LabelDrift(BaseModel):
         - ``pr_ahead_of_issue``: issue labelled ``hydraflow-ready`` /
           ``hydraflow-plan`` while the PR is at ``hydraflow-review`` /
           ``hydraflow-fixed`` / ``hydraflow-hitl`` with commits.
-        - ``pr_behind_issue``: PR at ``hydraflow-ready`` /
-          ``hydraflow-plan`` while issue is at ``hydraflow-review``.
         - ``pr_at_pre_pr_stage``: PR labelled ``hydraflow-ready`` /
           ``hydraflow-plan`` / ``hydraflow-find`` while it has commits
           (PR-stage labels are review/hitl/fixed only).
@@ -895,7 +895,7 @@ class LabelDrift(BaseModel):
     pr_commits: int = Field(ge=0, description="Number of commits on the PR")
     issue_label: str = Field(description="Current pipeline label on the issue")
     pr_label: str = Field(description="Current pipeline label on the PR")
-    kind: Literal["pr_ahead_of_issue", "pr_behind_issue", "pr_at_pre_pr_stage"] = Field(
+    kind: Literal["pr_ahead_of_issue", "pr_at_pre_pr_stage"] = Field(
         description="Drift category — see ADR-0056"
     )
     detected_at: datetime = Field(
@@ -1715,17 +1715,6 @@ class CIMonitorSettings(BaseModel):
     create_issue: bool = True
 
 
-class CodeGroomingSettings(BaseModel):
-    """Configuration for the code grooming worker."""
-
-    max_issues_per_cycle: int = Field(default=5, ge=1, le=50)
-    min_priority: Literal["P0", "P1", "P2", "P3"] = "P1"
-    enabled_audits: list[str] = Field(
-        default_factory=lambda: ["lint", "complexity", "dead_code"]
-    )
-    dry_run: bool = False
-
-
 class ActiveTraceRun(BaseModel):
     """A single in-progress trace run stored in ``trace_runs["active"]``."""
 
@@ -1744,6 +1733,22 @@ class TraceRunsContainer(BaseModel):
 
     active: dict[str, ActiveTraceRun] = Field(default_factory=dict)
     next_run_id: dict[str, int] = Field(default_factory=dict)
+
+
+class RcBudgetDurationEntry(BaseModel):
+    """One RC-pipeline run recorded by RCBudgetLoop (spec §4.8).
+
+    Mirrors the dict shape written by ``rc_budget_loop.py`` so that old
+    on-disk JSON (plain dicts with these four keys) is auto-coerced by
+    Pydantic v2 on load.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    run_id: int
+    created_at: str
+    duration_s: int
+    conclusion: str
 
 
 class StateData(BaseModel):
@@ -1822,12 +1827,10 @@ class StateData(BaseModel):
     route_back_counts: dict[str, int] = Field(default_factory=dict)
     ci_monitor_settings: CIMonitorSettings = Field(default_factory=CIMonitorSettings)
     ci_monitor_tracked_failures: dict[str, str] = Field(default_factory=dict)
-    code_grooming_settings: CodeGroomingSettings = Field(
-        default_factory=CodeGroomingSettings
-    )
-    code_grooming_filed: list[str] = Field(default_factory=list)
     # Trust fleet — RCBudgetLoop (spec §4.8)
-    rc_budget_duration_history: list[dict[str, Any]] = Field(default_factory=list)
+    rc_budget_duration_history: list[RcBudgetDurationEntry] = Field(
+        default_factory=list
+    )
     rc_budget_attempts: dict[str, int] = Field(default_factory=dict)
     # Trust fleet — WikiRotDetectorLoop (spec §4.9)
     wiki_rot_attempts: dict[str, int] = Field(default_factory=dict)
@@ -1851,17 +1854,31 @@ class StateData(BaseModel):
     skill_prompt_attempts: dict[str, int] = Field(default_factory=dict)
     fake_coverage_last_known: dict[str, list[str]] = Field(default_factory=dict)
     fake_coverage_attempts: dict[str, int] = Field(default_factory=dict)
+    # #8986 — rollup issue tracking: maps "{Fake}:{gap_kind}" → open GH issue
+    # number. Lets the auditor `update_issue_body` instead of filing N parallel
+    # issues per uncovered method. See `_handle_rollup` in
+    # `fake_coverage_auditor_loop.py`.
+    fake_coverage_rollup_issues: dict[str, int] = Field(default_factory=dict)
     # AdrTouchpointAuditorLoop (ADR-0056) — cursor is ISO-8601 of last-scanned merged PR.
     adr_audit_cursor: str = Field(default="")
     adr_audit_attempts: dict[str, int] = Field(default_factory=dict)
+    # Per-ADR rollup tracking (#8987). Keyed by "ADR-NNNN"; value carries the
+    # rollup issue number + the set of PR numbers currently listed in the body.
+    # Used so subsequent ticks update the body in-place rather than re-filing.
+    adr_rollup_issues: dict[str, dict] = Field(default_factory=dict)
     memory_backlog_attempts: dict[str, int] = Field(default_factory=dict)
+    # TriageRetryLoop (ADR-0063 W2) — per-issue retry counters and the
+    # ISO-8601 timestamp of the last retry attempt, used to honour the
+    # 24h-between-retries gate so a slow loop tick doesn't double-fire.
+    # Keys are the GitHub issue number as a string. Counter is cleared
+    # on the underlying issue closing (reconciled via gh issue list).
+    triage_retry_attempts: dict[str, int] = Field(default_factory=dict)
+    triage_retry_last_attempt: dict[str, str] = Field(default_factory=dict)
     # LiveCorpusReplayLoop (#8786 Phase 3) — per-drift-signature attempt
     # counters for the 3-attempt escalation chain.
     live_corpus_drift_attempts: dict[str, int] = Field(default_factory=dict)
-    escalation_contexts: dict[str, dict[str, object]] = Field(default_factory=dict)
-    diagnostic_attempts: dict[str, list[dict[str, object]]] = Field(
-        default_factory=dict
-    )
+    escalation_contexts: dict[str, EscalationContext] = Field(default_factory=dict)
+    diagnostic_attempts: dict[str, list[AttemptRecord]] = Field(default_factory=dict)
     diagnosis_severities: dict[str, str] = Field(default_factory=dict)
     onboarding_drafts: dict[str, dict[str, object]] = Field(default_factory=dict)
     sentry_creation_attempts: dict[str, int] = Field(default_factory=dict)
@@ -1898,6 +1915,13 @@ class StateData(BaseModel):
     # (spec §4.1 v2 step 5). At 3 consecutive failures on the same escape
     # issue the loop files `hitl-escalation` + `corpus-learning-stuck`.
     corpus_learning_validation_attempts: dict[str, int] = Field(default_factory=dict)
+    # Earlier-adversarial pipeline (ADR-pending). One AdversarialState per
+    # issue, persisted across phases so implement_phase can read carryover
+    # concerns surfaced during plan_phase without re-running the stages.
+    # Keyed by str(issue_id) for JSON-compat with the rest of StateData.
+    # Default empty dict — schema-evolution safe: legacy state files load
+    # cleanly because Pydantic fills the default.
+    adversarial_states: dict[str, AdversarialState] = Field(default_factory=dict)
     last_updated: str | None = None
 
 
@@ -2616,6 +2640,76 @@ class TriageUpdatePayload(TypedDict, total=False):
     role: str
 
 
+# --- Earlier-adversarial pipeline event payloads (ADR pending) -----------
+#
+# These power dashboard observability for the new adversarial stages
+# (DiscoveryCouncil, PlanCouncil, SpecJudge, ShapeChallenger,
+# ShapeExpertCouncil, AssumptionSurfacer). Emitted by
+# ``AdversarialRetryLoop`` and by post-merge wiki carryover.
+
+
+class AdversarialStageStartedPayload(TypedDict):
+    """Payload for ``EventType.ADVERSARIAL_STAGE_STARTED``."""
+
+    issue_id: int
+    phase: str
+    stage: str
+    retry_count: int
+
+
+class AdversarialStageConvergedPayload(TypedDict, total=False):
+    """Payload for ``EventType.ADVERSARIAL_STAGE_CONVERGED``."""
+
+    issue_id: int
+    phase: str
+    stage: str
+    retries: int
+    concerns_raised: int
+    concerns_forwarded: int  # default 0
+
+
+class AdversarialStageExhaustedPayload(TypedDict):
+    """Payload for ``EventType.ADVERSARIAL_STAGE_EXHAUSTED``."""
+
+    issue_id: int
+    phase: str
+    stage: str
+    retries: int
+    concerns_forwarded: int
+
+
+class ConcernForwardedPayload(TypedDict):
+    """Payload for ``EventType.CONCERN_FORWARDED``."""
+
+    issue_id: int
+    concern_id: str
+    from_stage: str
+    to_stage: str
+    severity: str
+
+
+class ConcernAddressedPayload(TypedDict):
+    """Payload for ``EventType.CONCERN_ADDRESSED``."""
+
+    issue_id: int
+    concern_id: str
+    addressed_by_stage: str
+    resolution_kind: str
+
+
+class ShippedWithKnownGapPayload(TypedDict):
+    """Payload for ``EventType.SHIPPED_WITH_KNOWN_GAP``.
+
+    ``surviving_concerns`` is a list of serialized ``Concern`` dicts —
+    each entry is the output of ``Concern.model_dump(mode="json")`` so
+    the payload is JSON-safe for ``EventLog`` persistence.
+    """
+
+    issue_id: int
+    pr_number: int
+    surviving_concerns: list[dict[str, object]]
+
+
 class GitHubIssueSummary(TypedDict):
     """Lightweight issue dict returned by ``PRPort.list_issues_by_label``."""
 
@@ -2652,6 +2746,12 @@ class WorkerResultMeta(TypedDict, total=False):
     duration_seconds: float
     error: str | None
     commits: int
+    # ADR-0063 W5: spec-compliance gaps captured by the two-stage reviewer
+    # after a failed implementation attempt. Prepended to the next attempt's
+    # ``prior_failure`` context so the agent sees concrete gaps, not just
+    # the prior error string. Empty/absent means no review ran or no gaps
+    # were found.
+    spec_review_gaps: str
 
 
 class TimelineStageMetadata(TypedDict, total=False):

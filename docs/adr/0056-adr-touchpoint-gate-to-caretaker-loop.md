@@ -27,9 +27,10 @@ The loop runs on a configurable interval (default: 4 hours). On each tick it:
 
 1. Walks merged PRs since the last cursor (`state.adr_audit_cursor`, ISO-8601 of the most-recently-scanned merge).
 2. For each merged PR, computes the file-diff and intersects it with the citation table from `ADRIndex` (Accepted ADRs whose `Related:` line names a `src/...` module).
-3. For each ADR whose cited module changed *without* the ADR file being in the same diff, files a `hydraflow-find` issue with title `ADR drift: ADR-NNNN cited modules changed in PR #NNNN`. Labels: `find_label`, `adr_drift_label` (`hydraflow-adr-drift`).
-4. Dedup key `adr_touchpoint_auditor:{pr}:{adr}` prevents re-filing the same drift across re-scans (e.g. cursor rewind during incident response).
-5. After 3 unresolved attempts on the same key, escalates to `hitl_escalation_label` + `adr_drift_stuck_label` (`hydraflow-adr-drift-stuck`). Closing the escalation issue clears the dedup key and attempt counter (same reconcile pattern as `FakeCoverageAuditorLoop`).
+3. For each ADR whose cited module changed *without* the ADR file being in the same diff, files **one rollup `hydraflow-find` issue per ADR** with title `ADR drift: ADR-NNNN cited modules drifted across N PRs` and a body listing every contributing PR (#NNNN, mergedAt, changed cited paths). Labels: `find_label`, `adr_drift_label` (`hydraflow-adr-drift`). (Amended 2026-05-19 by #8987 — was previously one issue per `(PR, ADR)` tuple; the per-tuple shape produced 57 noise issues in a single grooming sweep.)
+4. Dedup key `adr_touchpoint_auditor:ADR-NNNN` (per ADR, no PR component) prevents re-filing the same rollup across re-scans (e.g. cursor rewind during incident response). On subsequent ticks, an open rollup for the same ADR is **updated in place** via `PRPort.update_issue_body` — new drifting PRs are appended, PRs that have gained ADR coverage are dropped.
+5. When any PR diff this tick includes the ADR's own markdown file, the rollup is **closed automatically** — drift is considered resolved by that PR.
+6. After 3 unresolved attempts on the same per-ADR rollup, escalates to `hitl_escalation_label` + `adr_drift_stuck_label` (`hydraflow-adr-drift-stuck`). Closing the escalation issue clears the dedup key, the per-ADR attempt counter, and the rollup state (same reconcile pattern as `FakeCoverageAuditorLoop`).
 
 The loop honors the [ADR-0049](0049-trust-loop-kill-switch-convention.md) in-body kill-switch:
 
@@ -63,6 +64,7 @@ async def _do_work(self) -> dict[str, Any] | None:
 **Migration:**
 - The gate workflow + script are deleted in PR #8484.
 - The first deploy after this ADR lands seeds `adr_audit_cursor` to "now"; pre-existing merged PRs are *not* retroactively scanned. Operators who want a backfill can manually rewind the cursor in `.hydraflow/.../state.json`.
+- **#8987 rollup migration:** Existing per-tuple dedup keys (`adr_touchpoint_auditor:PR-N:ADR-N`) and per-tuple attempt counters are **silently ignored** by the new code path — they become dead weight in the dedup store but are harmless. The 57 noise issues filed under the old shape were closed on 2026-05-19 and need no further action. A future cleanup pass may prune the dead keys; until then, they cost a few KB of state and are not re-filed.
 
 ## Notes for future ADRs
 

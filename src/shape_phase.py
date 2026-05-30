@@ -25,6 +25,12 @@ from phase_utils import (
     store_lifecycle,
 )
 from shape_runner import ShapeRunner  # noqa: TCH001
+from src.adversarial_agents import AgentLike
+from src.adversarial_retry_loop import AdversarialRetryLoop
+from src.pending_concerns import AdversarialState, StageRun
+from src.shape_challenger import ChallengerOutput, ShapeChallenger
+from src.shape_expert_council import CouncilTally as ShapeCouncilTally
+from src.shape_expert_council import ShapeExpertCouncil
 from state import StateTracker
 from task_source import TaskTransitioner
 from whatsapp_bridge import WhatsAppBridge  # noqa: TCH001
@@ -101,6 +107,146 @@ class ShapePhase:
                 self._prs,  # type: ignore[arg-type]
                 _build_hitl_dedup(config),
             )
+        # Earlier-adversarial pipeline agents (ADR-pending). Optional —
+        # the factory wires them in when feature-enabled; legacy paths
+        # leave them None and the adversarial stages are skipped. See
+        # ``attach_adversarial_agents`` for the production entry point.
+        self._challenger_agent: AgentLike | None = None
+        self._shape_council_agents: dict[str, AgentLike] | None = None
+        self._adversarial_budget: int = 3
+
+    # ------------------------------------------------------------------
+    # Earlier-adversarial pipeline wiring (ADR-pending)
+    # ------------------------------------------------------------------
+
+    def attach_adversarial_agents(
+        self,
+        *,
+        challenger_agent: AgentLike | None = None,
+        council_agents: dict[str, AgentLike] | None = None,
+        budget: int = 3,
+    ) -> None:
+        """Wire the two Shape-phase adversarial agents onto this phase.
+
+        Called by the factory once on construction (or by tests). Each
+        agent is independently optional — when ``None``, that stage is
+        skipped, the rest of the pipeline runs unchanged. Both together
+        enable the full Challenger → ExpertCouncil sequence around the
+        existing ShapeRunner.
+
+        ``council_agents`` must contain keys ``user_advocate``,
+        ``tech_lead``, ``product_strategist`` (per
+        :class:`ShapeExpertCouncil`'s contract).
+        """
+        self._challenger_agent = challenger_agent
+        self._shape_council_agents = council_agents
+        self._adversarial_budget = budget
+
+    def _has_any_adversarial_agent(self) -> bool:
+        return (
+            self._challenger_agent is not None or self._shape_council_agents is not None
+        )
+
+    def _persist_adversarial_state(self, issue: Task, adv: AdversarialState) -> None:
+        """Persist *adv* into state.json under the issue's key.
+
+        Per contract: every adversarial stage persists before returning
+        so the next stage (and plan_phase) can read the accumulated
+        pending concerns.
+        """
+        self._state.set_adversarial_state(issue.id, adv)
+
+    async def _run_shape_challenger(
+        self, issue: Task, adv: AdversarialState, shape_content: str
+    ) -> None:
+        """Stage A: ShapeChallenger surfaces concerns about the proposal.
+
+        One-shot — the challenger is a read-only critic. Concerns are
+        appended to ``adv.pending_concerns`` and the state is persisted
+        before returning.
+        """
+        if self._challenger_agent is None:
+            return
+        challenger = ShapeChallenger(agent=self._challenger_agent)
+        out: ChallengerOutput = await challenger.run(
+            shape_content=shape_content,
+            carryover_concerns=list(adv.pending_concerns),
+        )
+        adv.pending_concerns.extend(out.findings)
+        adv.current_stage = "shape_challenger"
+        adv.stage_history.append(
+            StageRun(
+                stage="shape_challenger",
+                phase="shape",
+                retries=0,
+                converged=True,
+                concerns_raised=len(out.findings),
+                concerns_forwarded=len(out.findings),
+                oscillation_detected=False,
+                duration_ms=0,
+            )
+        )
+        self._persist_adversarial_state(issue, adv)
+
+    async def _run_shape_expert_council(
+        self,
+        issue: Task,
+        adv: AdversarialState,
+        shape_content: str,
+    ) -> None:
+        """Stage B: ShapeExpertCouncil tight-loop around the shape proposal.
+
+        Wired via :class:`AdversarialRetryLoop` with the configured
+        budget. Because the ShapeRunner has already produced its
+        proposal and we don't currently re-invoke it on Council retry,
+        the loop runs the Council with a no-op ``retry`` step so
+        unresolved concerns forward rather than block. Honors the
+        dark-factory contract: never deadlock; surface, persist, forward.
+        """
+        if self._shape_council_agents is None:
+            return
+        council = ShapeExpertCouncil(agents=self._shape_council_agents)
+
+        async def _critic(_ctx: str) -> ShapeCouncilTally:
+            return await council.deliberate(
+                shape_content=_ctx, pending_concerns=list(adv.pending_concerns)
+            )
+
+        async def _retry(_findings: ShapeCouncilTally, ctx: str) -> str:
+            # The shape text is unchanged on retry — we do not currently
+            # re-invoke the ShapeRunner from inside the council loop.
+            # Forward findings (dark-factory contract) once budget is
+            # exhausted.
+            return ctx
+
+        def _converged(t: ShapeCouncilTally) -> bool:
+            return not t.should_retry
+
+        loop: AdversarialRetryLoop[str, ShapeCouncilTally] = AdversarialRetryLoop(
+            budget=self._adversarial_budget,
+            event_bus=self._bus,
+            issue_id=issue.id,
+            phase="shape",
+            stage="shape_expert_council",
+        )
+        _ctx_out, unresolved, metrics = await loop.run_with_metrics(
+            shape_content, _critic, _retry, _converged
+        )
+        adv.pending_concerns.extend(unresolved)
+        adv.current_stage = "shape_expert_council"
+        adv.stage_history.append(
+            StageRun(
+                stage="shape_expert_council",
+                phase="shape",
+                retries=metrics.retries,
+                converged=not bool(unresolved),
+                concerns_raised=metrics.total_concerns_raised,
+                concerns_forwarded=len(unresolved),
+                oscillation_detected=metrics.oscillation_detected,
+                duration_ms=0,
+            )
+        )
+        self._persist_adversarial_state(issue, adv)
 
     async def shape_issues(self) -> bool:
         """Process shape-labeled issues. Returns True if work was done."""
@@ -213,6 +359,35 @@ class ShapePhase:
         self._truncate_old_turns(conv)
         self._state.set_shape_conversation(issue.id, conv)
 
+        # Earlier-adversarial pipeline stages around the shape proposal.
+        # Both run only when an AgentLike adversarial agent is attached
+        # (legacy paths skip these entirely). Per dark-factory contract:
+        # never deadlock — concerns persist + forward, even on exhaustion.
+        if self._has_any_adversarial_agent():
+            adv = self._state.get_adversarial_state(issue.id) or AdversarialState(
+                phase="shape"
+            )
+            if self._challenger_agent is not None:
+                try:
+                    await self._run_shape_challenger(issue, adv, result.content)
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "ShapeChallenger failed for issue #%d — "
+                        "forwarding concerns unchanged",
+                        issue.id,
+                        exc_info=True,
+                    )
+            if self._shape_council_agents is not None:
+                try:
+                    await self._run_shape_expert_council(issue, adv, result.content)
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "ShapeExpertCouncil failed for issue #%d — "
+                        "forwarding concerns unchanged",
+                        issue.id,
+                        exc_info=True,
+                    )
+
         if result.is_final or conv.status == "finalizing":
             await self._process_finalization(issue, conv, result.content)
             conv.status = "done"
@@ -244,24 +419,33 @@ class ShapePhase:
     async def _run_council_vote(
         self, issue: Task, conv: ShapeConversation, directions_content: str
     ) -> int | None:
-        """Run expert council vote with up to 2 rounds before human escalation.
+        """Run expert council vote with up to 3 rounds before human escalation.
 
-        Round 1: Each expert votes independently.
-        Round 2 (if split): Experts see each other's votes and reasoning,
-                then revote with the full context — often reaches consensus.
-        If still split after 2 rounds: escalate to human.
+        Round 1: Each standard expert (User Advocate, Tech Lead,
+                 Product Strategist) votes independently.
+        Round 2 (if split): Mediator synthesizes the disagreement, then the
+                same standard experts revote with the synthesis in context.
+                Often reaches consensus.
+        Round 3 (if still split, ADR-0063 W4): A *diversified-persona*
+                panel votes instead of the standard one (Dissenter,
+                Consensus-Seeker, Regret-in-6-Months). These personas
+                attack the question from angles the standard panel shares
+                too much in common to surface, and frequently unblock
+                deadlocks where the same three roles re-anchor on the
+                same disagreement.
+        If still split after round 3: escalate to human.
 
         Returns 1 if consensus reached and issue transitioned to plan.
-        Returns None if no consensus after 2 rounds.
+        Returns None if no consensus after 3 rounds.
         """
         assert self._council is not None  # guaranteed by caller
-        max_rounds = 2
+        max_rounds = 3
         prev_result: CouncilResult | None = None
 
         for round_num in range(1, max_rounds + 1):
             if round_num == 1 or prev_result is None:
                 council_result = await self._council.vote(issue, directions_content)
-            else:
+            elif round_num == 2:
                 # Mediate: synthesize the disagreement before revoting
                 mediation = await self._council.mediate(
                     issue, prev_result, directions_content
@@ -306,6 +490,35 @@ class ShapePhase:
                     f"should take priority."
                 )
                 council_result = await self._council.vote(issue, enriched_directions)
+            else:
+                # Round 3 (ADR-0063 W4): diversified-persona panel.
+                # The standard experts have now voted twice; the same three
+                # roles re-anchoring on the same disagreement is the
+                # signature failure this round is built to break. Pass the
+                # prior split as context so each diversified persona sees
+                # which option leads and which experts hold which positions.
+                round_3_directions = (
+                    f"{directions_content}\n\n"
+                    f"## Prior Council Vote (Round {round_num - 1})\n\n"
+                    f"{prev_result.format_summary()}\n\n"
+                    f"The standard council (User Advocate, Technical Lead, "
+                    f"Product Strategist) split after two rounds of voting "
+                    f"and mediation. You are a different panel — bring your "
+                    f"persona's distinct angle to break the deadlock."
+                )
+                await self._bus.publish(
+                    HydraFlowEvent(
+                        type=EventType.SHAPE_UPDATE,
+                        data={
+                            "issue": issue.id,
+                            "action": "council_diversified_round",
+                            "round": round_num,
+                        },
+                    )
+                )
+                council_result = await self._council.vote_diversified(
+                    issue, round_3_directions
+                )
 
             # Post vote summary
             round_label = f" (Round {round_num})" if max_rounds > 1 else ""
@@ -372,7 +585,11 @@ class ShapePhase:
                 )
                 return 1
 
-            # Split — save for next round context
+            # Split — save for next round context. Without this assignment
+            # the next iteration's mediation/diversified-persona prompt would
+            # have no prior vote to anchor against, defeating the point of
+            # multi-round escalation.
+            prev_result = council_result
             logger.info(
                 "Issue #%d shape — council split in round %d",
                 issue.id,

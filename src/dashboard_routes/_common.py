@@ -19,10 +19,9 @@ from issue_store import IssueStoreStage
 _SAFE_SLUG_COMPONENT = re.compile(r"^[A-Za-z0-9_.\-]+$")
 
 # Interval bounds per editable worker.
-# memory_sync, metrics, pr_unsticker, adr_reviewer bounds must match config.py Field constraints.
+# metrics, pr_unsticker, adr_reviewer bounds must match config.py Field constraints.
 # pipeline_poller has no config Field; 5s minimum matches the hardcoded default.
 _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
-    "memory_sync": (10, 14400),
     "metrics": (30, 14400),
     "pr_unsticker": (60, 86400),
     "merge_state_watcher": (60, 86400),  # 1m min, 1d max (default 10m)
@@ -32,13 +31,14 @@ _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
     "stale_issue": (300, 86400),
     "stale_issue_gc": (300, 86400),
     "ci_monitor": (60, 86400),
+    "branch_protection_auditor": (3600, 2_592_000),
     "security_patch": (300, 86400),
-    "code_grooming": (3600, 604800),
     "repo_wiki": (300, 604800),
     "diagnostic": (10, 3600),
     "sentry_ingest": (60, 86400),
     "report_issue": (10, 3600),
     "epic_monitor": (60, 86400),
+    "epic_sweeper": (600, 86400),
     "workspace_gc": (300, 86400),
     "runs_gc": (300, 86400),
     "health_monitor": (60, 86400),
@@ -69,6 +69,7 @@ _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
     "entry_evidence": (3600, 604800),  # 1h min, 7d max (default 24h, ADR-0062)
     "live_corpus_replay": (60, 86400),  # 1m min, 1d max (default 15m, ADR-0045 / #8786)
     "github_cache": (10, 3600),  # 10s min, 1h max (single-poller cache)
+    "triage_retry": (3600, 604800),  # 1h min, 7d max (default 24h, ADR-0063 W2)
 }
 
 # Internal pipeline labels that must not be treated as epic names in the history panel.

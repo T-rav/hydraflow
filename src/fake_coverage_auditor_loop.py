@@ -12,10 +12,14 @@ Spec: `docs/superpowers/specs/2026-04-22-trust-architecture-hardening-design.md`
   scenario test under ``tests/scenarios/`` that calls the helper.
 
 Files ``find_label`` + ``fake_coverage_gap_label`` + one of
-``adapter_surface_label`` | ``test_helper_label`` per uncovered method.
-Escalates after 3 attempts to ``hitl_escalation_label`` +
-``fake_coverage_stuck_label``. All five label fields are registered in
-``HYDRAFLOW_LABELS`` so ``make ensure-labels`` provisions them.
+``adapter_surface_label`` | ``test_helper_label`` per **rollup** —
+one issue per ``(fake_class, gap_kind)`` listing all uncovered methods
+in the body (issue #8986). Subsequent ticks update the body via
+``PRPort.update_issue_body``: append newly-uncovered methods, strike
+through methods that gained coverage. Escalates after 3 attempts at the
+rollup granularity to ``hitl_escalation_label`` + ``fake_coverage_stuck_label``.
+All five label fields are registered in ``HYDRAFLOW_LABELS`` so
+``make ensure-labels`` provisions them.
 """
 
 from __future__ import annotations
@@ -218,18 +222,98 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
         # rg exits 0 on match, 1 on no-match, 2+ on error.
         return proc.returncode == 0 and bool(stdout.strip())
 
-    async def _file_surface_gap(self, fake: str, method: str) -> int | None:
-        title = f"Un-cassetted adapter method: {fake}.{method}"
+    def _render_surface_body(
+        self,
+        fake: str,
+        uncovered: list[str],
+        recovered: list[str],
+    ) -> str:
+        """Build the rollup-issue body for an adapter-surface gap.
+
+        ``uncovered`` is the live list of methods missing cassettes;
+        ``recovered`` is methods that previously appeared in the body but
+        have since gained a cassette — rendered as strikethrough so the
+        history of the rollup is visible to a human triager.
+        """
         subdir = _FAKE_TO_CASSETTE_DIR.get(fake, "?")
-        body = (
-            f"## Fake coverage gap — adapter surface\n\n"
-            f"Fake class `{fake}` exposes a public method `{method}` with no "
-            f"matching cassette under "
-            f"`tests/trust/contracts/cassettes/{subdir}/`.\n\n"
-            f"**Repair:** record a cassette that exercises the real-adapter "
-            f"counterpart and commit. Spec §4.7; filed by `fake_coverage_auditor`."
+        lines = [
+            "## Fake coverage gap — adapter surface",
+            "",
+            f"Fake class `{fake}` exposes public methods with no matching "
+            f"cassette under `tests/trust/contracts/cassettes/{subdir}/`.",
+            "",
+            f"**Uncovered methods ({len(uncovered)}):**",
+            "",
+        ]
+        if uncovered:
+            lines.extend(f"- `{method}`" for method in sorted(uncovered))
+        else:
+            lines.append("_(none — auditor should close this issue on next tick)_")
+        if recovered:
+            lines.extend(
+                [
+                    "",
+                    "**Recently recovered (gained coverage):**",
+                    "",
+                ]
+            )
+            lines.extend(f"- ~~`{method}`~~" for method in sorted(recovered))
+        lines.extend(
+            [
+                "",
+                "**Repair:** record a cassette exercising each real-adapter "
+                "counterpart and commit. Spec §4.7; filed by "
+                "`fake_coverage_auditor` (#8986 rollup).",
+            ]
         )
-        return await self._pr.create_issue(
+        return "\n".join(lines)
+
+    def _render_helper_body(
+        self,
+        fake: str,
+        uncovered: list[str],
+        recovered: list[str],
+    ) -> str:
+        """Build the rollup-issue body for a test-helper gap."""
+        lines = [
+            "## Fake coverage gap — test helper",
+            "",
+            f"Fake class `{fake}` exposes helpers that no scenario under "
+            f"`tests/scenarios/` invokes (grep-based search).",
+            "",
+            f"**Unexercised helpers ({len(uncovered)}):**",
+            "",
+        ]
+        if uncovered:
+            lines.extend(f"- `{method}`" for method in sorted(uncovered))
+        else:
+            lines.append("_(none — auditor should close this issue on next tick)_")
+        if recovered:
+            lines.extend(
+                [
+                    "",
+                    "**Recently recovered (gained a scenario caller):**",
+                    "",
+                ]
+            )
+            lines.extend(f"- ~~`{method}`~~" for method in sorted(recovered))
+        lines.extend(
+            [
+                "",
+                "**Repair:** add a scenario that calls each helper so it is "
+                "part of the working contract. Spec §4.7; filed by "
+                "`fake_coverage_auditor` (#8986 rollup).",
+            ]
+        )
+        return "\n".join(lines)
+
+    async def _file_surface_gap(
+        self, fake: str, uncovered: list[str], recovered: list[str] | None = None
+    ) -> int:
+        """File the adapter-surface rollup issue for ``fake``. (#8986 rollup.)"""
+        title = f"Fake coverage gap: {fake} adapter surface ({len(uncovered)} methods)"
+        body = self._render_surface_body(fake, uncovered, recovered or [])
+        issue_number = await self._pr.create_issue(
             title,
             body,
             [
@@ -238,17 +322,15 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
                 *self._config.adapter_surface_label,
             ],
         )
+        return int(issue_number or 0)
 
-    async def _file_helper_gap(self, fake: str, method: str) -> int | None:
-        title = f"Un-exercised test helper: {fake}.{method}"
-        body = (
-            f"## Fake coverage gap — test helper\n\n"
-            f"Fake class `{fake}` exposes helper `{method}` but no scenario "
-            f"under `tests/scenarios/` invokes it (grep-based search).\n\n"
-            f"**Repair:** add a scenario that calls `{method}` so the helper "
-            f"is part of the working contract. Spec §4.7."
-        )
-        return await self._pr.create_issue(
+    async def _file_helper_gap(
+        self, fake: str, uncovered: list[str], recovered: list[str] | None = None
+    ) -> int:
+        """File the test-helper rollup issue for ``fake``. (#8986 rollup.)"""
+        title = f"Fake coverage gap: {fake} test helpers ({len(uncovered)} methods)"
+        body = self._render_helper_body(fake, uncovered, recovered or [])
+        issue_number = await self._pr.create_issue(
             title,
             body,
             [
@@ -257,15 +339,16 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
                 *self._config.test_helper_label,
             ],
         )
+        return int(issue_number or 0)
 
-    async def _file_escalation(self, key: str, attempts: int) -> int | None:
+    async def _file_escalation(self, key: str, attempts: int) -> int:
         title = f"HITL: fake coverage gap {key} unresolved after {attempts}"
         body = (
             f"`fake_coverage_auditor` has re-filed the `{key}` gap "
             f"{attempts} times without closure. Human review needed.\n\n"
             f"_Spec §3.2: closing this issue clears the dedup key._"
         )
-        return await self._pr.create_issue(
+        issue_number = await self._pr.create_issue(
             title,
             body,
             [
@@ -273,9 +356,17 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
                 *self._config.fake_coverage_stuck_label,
             ],
         )
+        return int(issue_number or 0)
 
     async def _reconcile_closed_escalations(self) -> None:
-        """Clear dedup keys for closed fake-coverage-stuck escalations."""
+        """Clear dedup keys for closed fake-coverage-stuck escalations.
+
+        Escalations are now filed at rollup granularity (``{Fake}:{kind}``),
+        so the title-substring match works against the new key shape. Old
+        per-method dedup keys (pre-#8986) carry a ``.method`` segment and
+        will simply not match any open escalation title — they age out
+        silently on the next non-escalated tick.
+        """
         cmd = [
             "gh",
             "issue",
@@ -326,8 +417,62 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
         if keep != current:
             self._dedup.set_all(keep)
 
+    async def _list_open_rollup_titles(self) -> set[str]:
+        """Return the set of titles of currently-open rollup issues we filed.
+
+        Used to detect "issue closed-by-human between ticks" so we don't
+        leak a stale rollup-issue-number in state. We look up open issues
+        with ``fake-coverage-gap`` label and snapshot their titles; if the
+        title we expect for ``(fake, kind)`` is missing, treat the rollup
+        as closed and re-file on this tick (zombie-state guard).
+        """
+        cmd = [
+            "gh",
+            "issue",
+            "list",
+            "--repo",
+            self._config.repo,
+            "--state",
+            "open",
+            "--author",
+            "@me",
+            "--limit",
+            "200",
+            "--json",
+            "title",
+        ]
+        for label in self._config.fake_coverage_gap_label:
+            cmd.extend(["--label", label])
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode != 0:
+                return set()
+            data = json.loads(stdout.decode() or "[]")
+        except (OSError, json.JSONDecodeError):
+            return set()
+        return {entry.get("title", "") for entry in data}
+
+    def _rollup_title_prefix(self, fake: str, kind: str) -> str:
+        """Stable prefix for matching an existing rollup title regardless of
+        the trailing ``(N methods)`` count."""
+        if kind == "adapter-surface":
+            return f"Fake coverage gap: {fake} adapter surface"
+        return f"Fake coverage gap: {fake} test helpers"
+
     async def _do_work(self) -> WorkCycleResult:
-        """Scan fakes, compare to cassettes + scenario grep, file gaps."""
+        """Scan fakes, compare to cassettes + scenario grep, file rollup gaps.
+
+        Per #8986 the loop files **one rollup issue per ``(fake, kind)``**
+        instead of one issue per ``(fake, method)`` — drastically reducing
+        triage cost. Subsequent ticks update the rollup body via
+        ``PRPort.update_issue_body``. 3-strikes escalation moves to
+        ``(fake, kind)`` granularity.
+        """
         if not self._enabled_cb(self._worker_name):
             return {"status": "disabled"}
         if not self._config.fake_coverage_auditor_loop_enabled:
@@ -343,7 +488,15 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
         if not catalog:
             return {"status": "no_fakes", "filed": 0}
 
+        # Snapshot of open rollup-issue titles — used to detect
+        # closed-by-human rollups and re-file cleanly (zombie-state guard).
+        open_titles = await self._list_open_rollup_titles()
+        # Methods we previously reported but now have coverage — rendered
+        # as strikethrough so the rollup body shows the trajectory.
+        last_known = self._state.get_fake_coverage_last_known()
+
         filed = 0
+        updated = 0
         escalated = 0
         dedup = self._dedup.get()
         all_known: dict[str, list[str]] = {}
@@ -354,49 +507,83 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
             cassetted = catalog_cassette_methods(cassette_subdir)
 
             covered: list[str] = []
+            uncovered_surface: list[str] = []
             for method in surface_methods:
                 if method in cassetted:
                     covered.append(method)
-                    continue
-                key = f"fake_coverage_auditor:{fake}.{method}:adapter-surface"
-                if key in dedup:
-                    continue
-                attempts = self._state.inc_fake_coverage_attempts(
-                    f"{fake}.{method}:adapter-surface"
-                )
-                if attempts >= _MAX_ATTEMPTS:
-                    await self._file_escalation(
-                        f"{fake}.{method}:adapter-surface", attempts
-                    )
-                    escalated += 1
                 else:
-                    await self._file_surface_gap(fake, method)
-                    filed += 1
-                dedup.add(key)
-                self._dedup.set_all(dedup)
+                    uncovered_surface.append(method)
 
+            uncovered_helpers: list[str] = []
             for method in helper_methods:
                 if await self._grep_scenario_for_helper(method):
                     covered.append(method)
-                    continue
-                key = f"fake_coverage_auditor:{fake}.{method}:test-helper"
-                if key in dedup:
-                    continue
-                attempts = self._state.inc_fake_coverage_attempts(
-                    f"{fake}.{method}:test-helper"
-                )
-                if attempts >= _MAX_ATTEMPTS:
-                    await self._file_escalation(
-                        f"{fake}.{method}:test-helper", attempts
-                    )
-                    escalated += 1
                 else:
-                    await self._file_helper_gap(fake, method)
+                    uncovered_helpers.append(method)
+
+            # Strikethrough = methods that were uncovered last tick but
+            # are now covered. ``last_known`` persists last tick's
+            # uncovered set under sentinel keys ``__uncovered__:{fake}:{kind}``.
+            prior_uncovered_surface = set(
+                last_known.get(f"__uncovered__:{fake}:adapter-surface", [])
+            )
+            prior_uncovered_helpers = set(
+                last_known.get(f"__uncovered__:{fake}:test-helper", [])
+            )
+            recovered_surface = sorted(prior_uncovered_surface - set(uncovered_surface))
+            recovered_helpers = sorted(prior_uncovered_helpers - set(uncovered_helpers))
+
+            # --- adapter-surface rollup ---
+            if uncovered_surface:
+                action, _did_file = await self._handle_rollup(
+                    fake=fake,
+                    kind="adapter-surface",
+                    uncovered=uncovered_surface,
+                    recovered=recovered_surface,
+                    open_titles=open_titles,
+                    dedup=dedup,
+                )
+                if action == "escalated":
+                    escalated += 1
+                elif action == "filed":
                     filed += 1
-                dedup.add(key)
-                self._dedup.set_all(dedup)
+                elif action == "updated":
+                    updated += 1
+            else:
+                # Gap closed — clear attempts + drop the rollup mapping so
+                # the next regression re-files cleanly.
+                await self._clear_rollup_state(
+                    fake, "adapter-surface", dedup, recovered=recovered_surface
+                )
+
+            # --- test-helper rollup ---
+            if uncovered_helpers:
+                action, _did_file = await self._handle_rollup(
+                    fake=fake,
+                    kind="test-helper",
+                    uncovered=uncovered_helpers,
+                    recovered=recovered_helpers,
+                    open_titles=open_titles,
+                    dedup=dedup,
+                )
+                if action == "escalated":
+                    escalated += 1
+                elif action == "filed":
+                    filed += 1
+                elif action == "updated":
+                    updated += 1
+            else:
+                await self._clear_rollup_state(
+                    fake, "test-helper", dedup, recovered=recovered_helpers
+                )
 
             all_known[fake] = sorted(covered)
+            # Persist this tick's uncovered set under sentinel keys so the
+            # next tick can compute strikethrough.
+            all_known[f"__uncovered__:{fake}:adapter-surface"] = sorted(
+                uncovered_surface
+            )
+            all_known[f"__uncovered__:{fake}:test-helper"] = sorted(uncovered_helpers)
 
         self._state.set_fake_coverage_last_known(all_known)
 
@@ -411,10 +598,126 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
         return {
             "status": "ok",
             "filed": filed,
+            "updated": updated,
             "escalated": escalated,
             "fakes_seen": len(catalog),
             "retirement_filed": retirement_filed,
         }
+
+    async def _handle_rollup(
+        self,
+        *,
+        fake: str,
+        kind: str,
+        uncovered: list[str],
+        recovered: list[str],
+        open_titles: set[str],
+        dedup: set[str],
+    ) -> tuple[str, bool]:
+        """Drive the per-``(fake, kind)`` rollup: file/update or escalate.
+
+        Returns ``(action, did_file)`` where ``action`` is one of
+        ``"filed"``, ``"updated"``, ``"escalated"``, or ``"skipped"``.
+        """
+        # Shared ``{fake}:{kind}`` key for the attempt counter and the
+        # rollup-issue-number mapping; the dedup set uses a namespaced
+        # variant. Three independent keys, one logical identity.
+        key = f"{fake}:{kind}"
+        dedup_key = f"fake_coverage_auditor:{fake}:{kind}"
+
+        # If we already have a tracked open rollup, *always* update it —
+        # subsequent ticks must keep the body fresh even though the
+        # dedup key is set.
+        tracked_number = self._state.get_fake_coverage_rollup_issue(key)
+        prefix = self._rollup_title_prefix(fake, kind)
+        still_open = any(title.startswith(prefix) for title in open_titles)
+        if tracked_number and still_open:
+            if kind == "adapter-surface":
+                body = self._render_surface_body(fake, uncovered, recovered)
+            else:
+                body = self._render_helper_body(fake, uncovered, recovered)
+            await self._pr.update_issue_body(tracked_number, body)
+            # Bump the attempt counter once per tick the gap remains open
+            # so 3-strikes escalation still fires. Fire escalation exactly
+            # once — when the counter crosses ``_MAX_ATTEMPTS`` — not every
+            # subsequent tick (which would file a fresh HITL issue per
+            # tick until a human acts).
+            attempts = self._state.inc_fake_coverage_attempts(key)
+            if attempts == _MAX_ATTEMPTS:
+                await self._file_escalation(key, attempts)
+                return ("escalated", False)
+            return ("updated", False)
+
+        # Closed-by-human zombie: drop the stale state and re-file fresh.
+        if tracked_number and not still_open:
+            self._state.clear_fake_coverage_rollup_issue(key)
+            # Also reset the attempt counter so the human's "close" is
+            # treated as a real reset, not a partial step toward escalation.
+            self._state.clear_fake_coverage_attempts(key)
+            dedup.discard(dedup_key)
+            self._dedup.set_all(dedup)
+
+        # No tracked rollup yet on this tick. Either it's a brand-new gap
+        # or the dedup key is set from a prior tick where we already filed
+        # but lost the number (shouldn't happen post-#8986, but be defensive).
+        if dedup_key in dedup and not tracked_number:
+            # Defensive: dedup key present but no tracked issue number.
+            # Treat as fresh file so the rollup gets re-established.
+            dedup.discard(dedup_key)
+            self._dedup.set_all(dedup)
+
+        attempts = self._state.inc_fake_coverage_attempts(key)
+        if attempts == _MAX_ATTEMPTS:
+            # Fire once when the counter crosses the threshold. Subsequent
+            # ticks fall through to a fresh rollup file via the path below
+            # (or skip if dedup_key was set earlier), which avoids the
+            # tick-per-tick escalation storm.
+            await self._file_escalation(key, attempts)
+            dedup.add(dedup_key)
+            self._dedup.set_all(dedup)
+            return ("escalated", False)
+
+        if kind == "adapter-surface":
+            number = await self._file_surface_gap(fake, uncovered, recovered)
+        else:
+            number = await self._file_helper_gap(fake, uncovered, recovered)
+        if number:
+            self._state.set_fake_coverage_rollup_issue(key, number)
+        dedup.add(dedup_key)
+        self._dedup.set_all(dedup)
+        return ("filed", True)
+
+    async def _clear_rollup_state(
+        self,
+        fake: str,
+        kind: str,
+        dedup: set[str],
+        recovered: list[str] | None = None,
+    ) -> None:
+        """Reset rollup tracking when the gap closes (no uncovered methods).
+
+        Drops the attempt counter, dedup key, and rollup-issue mapping so
+        a future regression re-files cleanly. When the previous tick had
+        an actual gap (``recovered`` is non-empty) AND a rollup issue is
+        tracked, repaint the body with the "all covered" view first so
+        humans looking at the open issue see the resolution rather than
+        a stale list of methods. The issue itself is left open for humans
+        to close.
+        """
+        key = f"{fake}:{kind}"  # shared key for attempts + rollup mapping
+        dedup_key = f"fake_coverage_auditor:{fake}:{kind}"
+        tracked_number = self._state.get_fake_coverage_rollup_issue(key)
+        if tracked_number and recovered:
+            if kind == "adapter-surface":
+                body = self._render_surface_body(fake, [], recovered)
+            else:
+                body = self._render_helper_body(fake, [], recovered)
+            await self._pr.update_issue_body(tracked_number, body)
+        self._state.clear_fake_coverage_attempts(key)
+        self._state.clear_fake_coverage_rollup_issue(key)
+        if dedup_key in dedup:
+            dedup.discard(dedup_key)
+            self._dedup.set_all(dedup)
 
     async def _audit_retirement(self, cassette_root: Path) -> int:
         """Find baseline_only cassettes covered by live dispatchers; file
@@ -456,12 +759,9 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
             "cassette-retirement-ready",
         ]
         try:
-            issue_number = await self._pr.create_issue(title, body, labels)
+            await self._pr.create_issue(title, body, labels)
         except Exception:  # noqa: BLE001 — issue filing failure ≠ loop failure
             logger.exception("retirement audit: create_issue failed")
-            issue_number = None
-        if issue_number is None:
-            logger.warning("retirement audit: create_issue failed; not marking dedup")
             return 0
         seen = self._dedup.get()
         seen.add(dedup_key)

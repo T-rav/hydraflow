@@ -16,7 +16,7 @@ import logging
 import re
 import time
 from collections.abc import Callable, Coroutine
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -138,6 +138,14 @@ from ._common import (
 
 logger = logging.getLogger("hydraflow.review_phase")
 
+# Mirrors ``retrospective_loop._HITL_DEDUP_WINDOW``. Two PR reviews
+# completing back-to-back for the same stale category could otherwise
+# both call ``find_existing_issue`` before either write is indexed by
+# GitHub search, and both file. The window is intentionally identical
+# between sites so behavior is uniform whether the loop or the fallback
+# fires (#8988).
+_HITL_DEDUP_WINDOW = timedelta(hours=1)
+
 
 class ReviewPhase:
     """Runs reviewer agents on PRs, merging approved ones inline."""
@@ -153,9 +161,9 @@ class ReviewPhase:
         store: IssueStorePort,
         conflict_resolver: MergeConflictResolver,
         post_merge: PostMergeHandler,
+        review_insights: ReviewInsightStorePort,
         event_bus: EventBus | None = None,
         harness_insights: HarnessInsightStore | None = None,
-        review_insights: ReviewInsightStorePort | None = None,
         update_bg_worker_status: StatusCallback | None = None,
         baseline_policy: BaselinePolicy | None = None,
         active_issues_cb: Callable[[], None] | None = None,
@@ -181,14 +189,15 @@ class ReviewPhase:
         self._wiki_compiler = wiki_compiler
         self._update_bg_worker_status = update_bg_worker_status
         self._harness_insights = harness_insights
-        if review_insights is not None:
-            self._insights = review_insights
-        else:
-            from review_insights import ReviewInsightStore  # noqa: PLC0415
-
-            self._insights = ReviewInsightStore(config.memory_dir)
+        self._insights: ReviewInsightStorePort = review_insights
         self._active_issues_cb = active_issues_cb
         self._active_issues: set[int] = set()
+        # In-memory window guard for the stale-HITL fallback branch
+        # (mirror of ``RetrospectiveLoop._hitl_filed_at``). Two PR
+        # reviews completing back-to-back for the same stale category
+        # could otherwise both call ``find_existing_issue`` before
+        # either write is indexed by GitHub search, and both file.
+        self._hitl_filed_at: dict[str, datetime] = {}
         self._active_issues_lock = asyncio.Lock()
         self._conflict_resolver = conflict_resolver
         self._post_merge = post_merge
@@ -746,21 +755,31 @@ class ReviewPhase:
         # DependabotMergeLoop, ADR-0054 / ADR-0057 / ADR-0058 / ADR-0062).
         # All four loops open auto-merging bot PRs whose content is purely
         # generated; the agent pipeline must not route them.
+        #
+        # Also skip PRs carrying adversarial-pipeline transient labels
+        # (Task 10 of earlier-adversarial-pipeline). These labels are
+        # intra-stage issue markers, not review work — if one ever leaks
+        # onto a PR, the agent reviewer should not process it.
         from edge_proposer_loop import EDGE_PROPOSER_PR_LABEL  # noqa: PLC0415
         from entry_evidence_loop import ENTRY_EVIDENCE_PR_LABEL  # noqa: PLC0415
+        from src.adversarial_labels import (  # noqa: PLC0415
+            LABELS_ADVERSARIAL_TRANSIENT,
+        )
         from term_proposer_loop import TERM_PROPOSER_PR_LABEL  # noqa: PLC0415
         from term_pruner_loop import TERM_PRUNER_PR_LABEL  # noqa: PLC0415
 
-        _ul_bot_labels = {
+        _skip_pr_labels = {
             TERM_PROPOSER_PR_LABEL,
             TERM_PRUNER_PR_LABEL,
             EDGE_PROPOSER_PR_LABEL,
             ENTRY_EVIDENCE_PR_LABEL,
-        }
-        prs = [pr for pr in prs if not (set(pr.labels or []) & _ul_bot_labels)]
+        } | set(LABELS_ADVERSARIAL_TRANSIENT)
+        prs = [pr for pr in prs if not (set(pr.labels or []) & _skip_pr_labels)]
         if not prs:
             logger.debug(
-                "review_phase: all PRs filtered out (term-proposer/pruner/edge-proposer/entry-evidence candidates)"
+                "review_phase: all PRs filtered out "
+                "(term-proposer/pruner/edge-proposer/entry-evidence "
+                "or adversarial-transient candidates)"
             )
             return []
 
@@ -3211,9 +3230,39 @@ class ReviewPhase:
                     self._insights.record_proposal(category, pre_count=count)
 
                 stale = verify_proposals(self._insights, recent)
+                # Dedup mirror of RetrospectiveLoop._handle_verify_proposals
+                # (#8988). This fallback branch fires only when no
+                # retrospective_queue is wired, but it MUST avoid filing a
+                # duplicate `[HITL] Stale review insight: <category>` when
+                # one is already open — same anti-pattern as the loop site.
+                now_hitl = datetime.now(UTC)
                 for category in stale:
                     desc = CATEGORY_DESCRIPTIONS.get(category, category)
                     title = f"[HITL] Stale review insight: {desc}"
+                    hitl_labels = list(self._config.hitl_label)
+                    # Window guard — protects against back-to-back PR
+                    # reviews racing the GitHub search index, same shape
+                    # as ``RetrospectiveLoop._handle_verify_proposals``.
+                    last = self._hitl_filed_at.get(category)
+                    if last is not None and (now_hitl - last) < _HITL_DEDUP_WINDOW:
+                        continue
+                    existing = await self._prs.find_existing_issue(title)
+                    if existing:
+                        await self._prs.post_comment(
+                            existing,
+                            (
+                                f"Still stale — pattern frequency for "
+                                f"**{category}** ({desc}) has not decreased "
+                                f"after {_PROPOSAL_STALE_DAYS}+ days. "
+                                f"Recurring tick from `ReviewPhase` fallback "
+                                f"(retrospective queue not wired); the "
+                                f"underlying escalation remains open.\n\n"
+                                f"_Auto-comment by HydraFlow review insight "
+                                f"verification._"
+                            ),
+                        )
+                        self._hitl_filed_at[category] = now_hitl
+                        continue
                     body = (
                         f"## Stale Improvement Proposal\n\n"
                         f"The improvement proposal for **{category}** ({desc}) "
@@ -3222,8 +3271,12 @@ class ReviewPhase:
                         f"required to resolve this recurring feedback loop.\n\n"
                         f"---\n*Auto-escalated by HydraFlow review insight verification.*"
                     )
-                    hitl_labels = list(self._config.hitl_label)
-                    await self._transitioner.create_task(title, body, hitl_labels)
+                    self._hitl_filed_at[category] = now_hitl
+                    try:
+                        await self._transitioner.create_task(title, body, hitl_labels)
+                    except Exception:
+                        self._hitl_filed_at.pop(category, None)
+                        raise
         except (RuntimeError, OSError):
             status = "error"
             details["error"] = "review insight recording failed"

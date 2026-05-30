@@ -53,8 +53,10 @@ class TestBuildServices:
 
         registry = build_services(config, bus, state, stop_event, callbacks)
 
-        # hindsight is None when not configured — that's expected.
-        optional_fields = {"hindsight", "hindsight_wal"}
+        # hindsight is None when not configured — that's expected
+        # live_corpus_replay_loop is None when shadow_corpus_enabled is off
+        # (default) — see service_registry.py and #8786 Phase 2.
+        optional_fields = {"hindsight", "hindsight_wal", "live_corpus_replay_loop"}
         for field_name in ServiceRegistry.__dataclass_fields__:
             if field_name in optional_fields:
                 continue
@@ -319,3 +321,92 @@ class TestWorkerRegistryCallbacks:
 
         registry = build_services(config, bus, state, stop_event, callbacks)
         assert isinstance(registry, ServiceRegistry)
+
+
+class TestAdversarialPipelineWiring:
+    """Factory wiring for the earlier-adversarial pipeline (ADR-0064).
+
+    The pipeline is now unconditional: ``DiscoverPhase`` always gets a
+    ``ComplexityGate`` attached AND all three phases (plan, discover,
+    shape) always get ``SubprocessAgentRunner`` adapters wired into
+    every adversarial-stage slot. No config flag, no opt-out.
+    """
+
+    @staticmethod
+    def _build(config: HydraFlowConfig) -> ServiceRegistry:
+        bus = EventBus()
+        state = StateTracker(config.state_file)
+        stop_event = asyncio.Event()
+        callbacks = _make_callbacks()
+        return build_services(config, bus, state, stop_event, callbacks)
+
+    def test_complexity_gate_attached(self, config: HydraFlowConfig) -> None:
+        """DiscoverPhase gets a heuristic-only ComplexityGate."""
+        from complexity_gate import ComplexityGate
+
+        registry = self._build(config)
+        gate = registry.discover_phase._complexity_gate
+        assert gate is not None
+        assert isinstance(gate, ComplexityGate)
+        # Heuristic-only — no LLM callable. The gate falls back to
+        # LOAD_BEARING on uncertainty so this is safe.
+        assert gate.llm is None
+
+    def test_plan_phase_adversarial_agents_attached(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """All four PlanPhase adversarial slots get SubprocessAgentRunner adapters."""
+        from adversarial_agent_runner import SubprocessAgentRunner
+
+        registry = self._build(config)
+        plan_phase = registry.planner_phase
+
+        assert isinstance(plan_phase._surfacer_agent, SubprocessAgentRunner)
+        assert plan_phase._council_agents is not None
+        assert set(plan_phase._council_agents.keys()) == {
+            "builder",
+            "tester",
+            "risk_skeptic",
+        }
+        for voter in plan_phase._council_agents.values():
+            assert isinstance(voter, SubprocessAgentRunner)
+        assert isinstance(plan_phase._spec_ac_agent, SubprocessAgentRunner)
+        assert isinstance(plan_phase._spec_judge_agent, SubprocessAgentRunner)
+
+    def test_discover_phase_adversarial_agents_attached(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """DiscoverPhase surfacer + three-voter council both wired."""
+        from adversarial_agent_runner import SubprocessAgentRunner
+
+        registry = self._build(config)
+        discover_phase = registry.discover_phase
+
+        assert isinstance(discover_phase._surfacer_agent, SubprocessAgentRunner)
+        assert discover_phase._council_agents is not None
+        assert set(discover_phase._council_agents.keys()) == {
+            "problem_sharpener",
+            "existing_solution_hunter",
+            "cheapest_test_advocate",
+        }
+        for voter in discover_phase._council_agents.values():
+            assert isinstance(voter, SubprocessAgentRunner)
+
+    def test_shape_phase_adversarial_agents_attached(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """ShapePhase challenger + three-voter council both wired."""
+        from adversarial_agent_runner import SubprocessAgentRunner
+
+        registry = self._build(config)
+        shape_phase = registry.shape_phase
+
+        assert isinstance(shape_phase._challenger_agent, SubprocessAgentRunner)
+        assert shape_phase._shape_council_agents is not None
+        assert set(shape_phase._shape_council_agents.keys()) == {
+            "user_advocate",
+            "tech_lead",
+            "product_strategist",
+        }
+        for voter in shape_phase._shape_council_agents.values():
+            assert isinstance(voter, SubprocessAgentRunner)

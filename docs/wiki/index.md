@@ -1,6 +1,6 @@
 # Wiki Index: T-rav/hydraflow
 
-**300 entries** | Last updated: 2026-05-12T00:00:00.000000+00:00
+**309 entries** | Last updated: 2026-05-19T20:00:00.000000+00:00
 
 ## Terms — Ubiquitous Language
 
@@ -10,6 +10,16 @@ term. The rendered glossary is at
 the context map at
 [`../arch/generated/ubiquitous-language-context-map.md`](../arch/generated/ubiquitous-language-context-map.md).
 See [ADR-0053](../adr/0053-ubiquitous-language-as-living-artifact.md).
+
+New terms added 2026-05-19 (wiki-gap backfill):
+- [`AgentPort`](terms/agent-port.md) — port for `AgentRunner` operations (dependency injection boundary for infra modules)
+- [`IssueFetcherPort`](terms/issue-fetcher-port.md) — port for GitHub issue fetching (two-method surface for domain code)
+- [`ObservabilityPort`](terms/observability-port.md) — observability boundary (capture_exception, breadcrumb, set_measurement)
+- [`ReviewInsightStorePort`](terms/review-insight-store-port.md) — port for reviewer-feedback pattern persistence
+- [`RouteBackCounterPort`](terms/route-back-counter-port.md) — port for the per-issue route-back counter (decouples RouteBackCoordinator from StateTracker)
+- [`TermPrunerLoop`](terms/term-pruner-loop.md) — caretaker that deprecates terms with broken code anchors (ADR-0057)
+- [`WikiRotDetectorLoop`](terms/wiki-rot-detector-loop.md) — trust-fleet loop detecting broken code cites in wiki entries (ADR-0045 §4.9)
+- [`WorkspaceGCLoop`](terms/workspace-gc-loop.md) — caretaker that GCs stale worktrees and orphaned branches
 
 ## Architecture (33)
 
@@ -73,6 +83,8 @@ See [ADR-0053](../adr/0053-ubiquitous-language-as-living-artifact.md).
 - Multiple backend skills: use marker-based checks, not strict structure
 - Two-file consolidation: Pydantic model and JSONL persistence must sync
 - Operator review gates dynamic skills due to prompt injection risk
+- Pending concerns forwarding contract — tight loop, wide loop, wiki carryover
+- Complexity gate routing — bypass adversarial stages for trivial issues
 - Advisor pattern layers Opus reviewer over Sonnet executor on review surfaces
 - Advisor uses Claude Code subagent dispatch — never the Anthropic SDK directly
 - EpicMonitorLoop — stale epic detection, completion sweep, and progress refresh
@@ -307,6 +319,7 @@ See [ADR-0053](../adr/0053-ubiquitous-language-as-living-artifact.md).
 - Worktree workflow and conventions
 - Run and dev commands
 - Why memory/observation is harnessed, not autonomous
+- AdversarialRetryLoop pattern — shared contract for dissent stages
 
 ## Testing (34)
 

@@ -6,7 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from adr_drift import DriftFinding, _adr_file_in_diff, compute_drift
+from adr_drift import (
+    AdrRollupEntry,
+    DriftFinding,
+    _adr_file_in_diff,
+    compute_drift,
+    compute_drift_by_adr,
+)
 from adr_index import ADR, ADRIndex
 
 
@@ -142,3 +148,60 @@ def test_drift_finding_is_immutable() -> None:
     )
     with pytest.raises(AttributeError):  # frozen dataclass
         f.pr_number = 2  # type: ignore[misc]
+
+
+def test_compute_drift_by_adr_groups_multiple_prs(adr_index: ADRIndex) -> None:
+    """#8987 — 3 PRs drifting the same ADR collapse into one rollup entry."""
+    rollups = compute_drift_by_adr(
+        adr_index,
+        [
+            (10, ["src/alpha.py"]),
+            (11, ["src/alpha.py", "tests/x.py"]),
+            (12, ["src/alpha.py"]),
+        ],
+    )
+    assert len(rollups) == 1
+    entry = rollups[0]
+    assert entry.adr.number == 1
+    assert entry.pr_numbers == (10, 11, 12)
+    assert len(entry.contributors) == 3
+
+
+def test_compute_drift_by_adr_one_pr_n_adrs(adr_index: ADRIndex) -> None:
+    """#8987 — one PR drifting two ADRs yields two rollup entries."""
+    rollups = compute_drift_by_adr(
+        adr_index,
+        [(99, ["src/alpha.py", "src/beta.py"])],
+    )
+    assert [e.adr.number for e in rollups] == [1, 2]
+    for entry in rollups:
+        assert entry.pr_numbers == (99,)
+
+
+def test_compute_drift_by_adr_skips_prs_with_adr_in_diff(adr_index: ADRIndex) -> None:
+    """A PR whose diff includes the ADR file is silently skipped for that ADR."""
+    rollups = compute_drift_by_adr(
+        adr_index,
+        [
+            (10, ["src/alpha.py"]),
+            (11, ["src/alpha.py", "docs/adr/0001-alpha.md"]),
+        ],
+    )
+    assert len(rollups) == 1
+    assert rollups[0].pr_numbers == (10,)
+
+
+def test_compute_drift_by_adr_empty_input(adr_index: ADRIndex) -> None:
+    assert compute_drift_by_adr(adr_index, []) == []
+
+
+def test_adr_rollup_entry_is_immutable(adr_index: ADRIndex) -> None:
+    adr = next(a for a in adr_index.adrs() if a.number == 1)
+    entry = AdrRollupEntry(
+        adr=adr,
+        contributors=(
+            DriftFinding(adr=adr, pr_number=1, changed_cited_files=("src/alpha.py",)),
+        ),
+    )
+    with pytest.raises(AttributeError):  # frozen dataclass
+        entry.adr = adr  # type: ignore[misc]

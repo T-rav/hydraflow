@@ -45,17 +45,15 @@ architecture, and the spec at
 | s03_review_retry_then_pass | Review fails attempt 1, passes attempt 2 |
 | s04_ci_red_then_fixed | PR with red CI → ci-fix runner → green CI → merged |
 | s05_hitl_after_review_exhaustion | 3 review failures → HITL surfaces |
-| s06_kill_switch_via_ui | UI toggle disables loop → no further ticks |
-| s07_workspace_gc_reaps_dead_worktree | Orphan worktree → reaped |
 | s08_pr_unsticker_revives_stuck_pr | Stale PR → auto-resync triggers |
 | s09_dependabot_auto_merge | Dependabot PR + green CI → auto-merged |
-| s10_kill_switch_universal | All loops disabled → no ticks |
-| s11_credit_exhaustion_suspends_ticking | CreditExhaustedError → suspension |
 | s12_trust_fleet_three_repos_independent | 3 repos process independently |
+| s15-s41 | Additional runnable loop-specific smoke and recovery scenarios |
+| s_advisor_full_loop | Advisor full-loop sandbox scenario |
 
 ## CI
 
-The new sandbox-{fast,full,nightly} CI jobs run scenarios at 3 cadences:
-- **fast** (PR→staging): s01, s10, s11 only
-- **full** (rc/* promotion PR): all 12, with auto-fix label routing on failure
-- **nightly** (03:00 UTC schedule): all 12, opens hydraflow-find issue on failure
+The sandbox-{fast,full,nightly} CI jobs run only executable scenarios:
+- **fast** (PR→staging): s01, s08, s09
+- **full** (rc/* promotion PR): every discovered scenario module
+- **nightly** (03:00 UTC schedule): every discovered scenario module, opens hydraflow-find issue on failure

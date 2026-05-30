@@ -546,7 +546,7 @@ async def test_kill_switch_short_circuits_do_work(loop_env) -> None:
 @pytest.mark.asyncio
 async def test_maybe_escalate_fires_once_at_threshold(loop_env) -> None:
     """After the first escalation, repeat ticks at the same attempt count
-    must not re-file the hydraflow-hitl-escalation issue (ADR-0045 §3.2 lifecycle)."""
+    must not re-file the hitl-escalation issue (ADR-0045 §3.2 lifecycle)."""
     cfg, state, pr = loop_env
     stop = asyncio.Event()
     # Simulate: first call returns 3 (hits structural threshold), subsequent
@@ -574,10 +574,14 @@ async def test_maybe_escalate_fires_once_at_threshold(loop_env) -> None:
 
 @pytest.mark.asyncio
 async def test_reconcile_closed_escalations_resets_counter(
-    loop_env, monkeypatch
+    loop_env,
 ) -> None:
-    """Closing a `hydraflow-principles-stuck` issue triggers reset_drift_attempts
-    with the (slug, check_id) parsed from the title."""
+    """Closing a `principles-stuck` issue triggers reset_drift_attempts
+    with the (slug, check_id) parsed from the title.
+
+    Routes through PRPort.list_closed_issues_by_label (advisor-0dmd fix)
+    so no real subprocess is spawned.
+    """
     cfg, state, pr = loop_env
     stop = asyncio.Event()
     deps = LoopDeps(
@@ -588,19 +592,12 @@ async def test_reconcile_closed_escalations_resets_counter(
     )
     loop = PrinciplesAuditLoop(config=cfg, state=state, pr_manager=pr, deps=deps)
 
-    class FakeProc:
-        returncode = 0
-
-        async def communicate(self):
-            return (
-                b'[{"title": "Principles drift stuck: P2.3 in hydra/widgets"}]',
-                b"",
-            )
-
-    async def fake_subproc(*args, **kwargs):
-        return FakeProc()
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subproc)
+    pr.list_closed_issues_by_label = AsyncMock(
+        return_value=[{"title": "Principles drift stuck: P2.3 in hydra/widgets"}]
+    )
 
     await loop._reconcile_closed_escalations()
+    pr.list_closed_issues_by_label.assert_awaited_once_with(
+        "principles-stuck", limit=100
+    )
     state.reset_drift_attempts.assert_called_once_with("hydra/widgets", "P2.3")

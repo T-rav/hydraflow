@@ -176,17 +176,19 @@ def _build_diagnostic(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     )
 
 
-def _build_code_grooming(ports: dict[str, Any], config: Any, deps: Any) -> Any:
-    from code_grooming_loop import CodeGroomingLoop  # noqa: PLC0415
-
-    return CodeGroomingLoop(config=config, pr_manager=ports["github"], deps=deps)
-
-
 def _build_report_issue(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from report_issue_loop import ReportIssueLoop  # noqa: PLC0415
 
-    state = ports.get("report_issue_state") or MagicMock()
-    ports.setdefault("report_issue_state", state)
+    state = ports.get("report_issue_state")
+    if state is None:
+        state = MagicMock()
+        # Return None from peek_report so _do_work takes the empty-queue path
+        # without constructing a report object whose MagicMock attributes cause
+        # TypeError in scan_base64_for_secrets (parity test safety).
+        state.peek_report.return_value = None
+        state.get_pending_reports.return_value = []
+        state.get_filed_reports.return_value = []
+        ports["report_issue_state"] = state
     return ReportIssueLoop(
         config=config,
         state=state,
@@ -202,10 +204,17 @@ def _build_security_patch(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 
 
 def _build_stale_issue(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    from models import StaleIssueSettings  # noqa: PLC0415
     from stale_issue_loop import StaleIssueLoop  # noqa: PLC0415
 
-    state = ports.get("stale_issue_state") or MagicMock()
-    ports.setdefault("stale_issue_state", state)
+    state = ports.get("stale_issue_state")
+    if state is None:
+        state = MagicMock()
+        # Provide a real StaleIssueSettings so staleness_days is an int, not
+        # a MagicMock — prevents TypeError in timedelta() during parity tests.
+        state.get_stale_issue_settings.return_value = StaleIssueSettings()
+        state.get_stale_issue_closed.return_value = set()
+        ports["stale_issue_state"] = state
     return StaleIssueLoop(config=config, prs=ports["github"], state=state, deps=deps)
 
 
@@ -481,6 +490,9 @@ def _build_fake_coverage_auditor(ports: dict[str, Any], config: Any, deps: Any) 
         # Default < _MAX_ATTEMPTS=3 so gap-filing path is taken; escalation
         # tests override explicitly via ``fake_coverage_state``.
         state.inc_fake_coverage_attempts.return_value = 1
+        # #8986 rollup tracking: default to no tracked rollup so the first
+        # tick files a fresh issue (the typical scenario start state).
+        state.get_fake_coverage_rollup_issue.return_value = None
         ports["fake_coverage_state"] = state
 
     dedup = ports.get("fake_coverage_dedup")
@@ -506,6 +518,14 @@ def _build_fake_coverage_auditor(ports: dict[str, Any], config: Any, deps: Any) 
     grep = ports.get("fake_coverage_grep")
     if grep is not None:
         loop._grep_scenario_for_helper = grep  # type: ignore[method-assign]
+    # #8986 — the rollup-existence probe also shells out to ``gh``; default
+    # to "no open rollups" so scenarios don't need to seed it unless they
+    # specifically test the closed-by-human / update-existing paths.
+    list_titles = ports.get("fake_coverage_list_open_titles")
+    if list_titles is None:
+        list_titles = AsyncMock(return_value=set())
+        ports["fake_coverage_list_open_titles"] = list_titles
+    loop._list_open_rollup_titles = list_titles  # type: ignore[method-assign]
 
     return loop
 
@@ -563,6 +583,45 @@ def _build_adr_touchpoint_auditor(ports: dict[str, Any], config: Any, deps: Any)
         loop._reconcile_closed_escalations = reconcile  # type: ignore[method-assign]
 
     return loop
+
+
+def _build_branch_protection_auditor(
+    ports: dict[str, Any], config: Any, deps: Any
+) -> Any:
+    """Build BranchProtectionAuditorLoop for scenarios (ADR-0082).
+
+    Tests pre-seed:
+    * ``branch_protection_audit`` → an async auditor returning an ``AuditReport``
+      (replaces the gh-backed live-vs-canonical audit).
+
+    ``dedup`` defaults to a clean-slate MagicMock; override via
+    ``branch_protection_dedup``.
+    """
+    from branch_protection_audit import AuditReport  # noqa: PLC0415
+    from branch_protection_auditor_loop import (  # noqa: PLC0415
+        BranchProtectionAuditorLoop,
+    )
+
+    dedup = ports.get("branch_protection_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["branch_protection_dedup"] = dedup
+
+    auditor = ports.get("branch_protection_audit")
+    if auditor is None:
+        auditor = AsyncMock(return_value=AuditReport(repo="o/r", drifts=[]))
+        ports["branch_protection_audit"] = auditor
+
+    pr_manager = ports.get("pr_manager") or ports["github"]
+
+    return BranchProtectionAuditorLoop(
+        config=config,
+        pr_manager=pr_manager,
+        dedup=dedup,
+        deps=deps,
+        auditor=auditor,
+    )
 
 
 def _build_memory_backlog(ports: dict[str, Any], config: Any, deps: Any) -> Any:
@@ -646,6 +705,9 @@ def _build_staging_bisect(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     run_pipeline = ports.get("staging_bisect_run_pipeline")
     if run_pipeline is not None:
         loop._run_full_bisect_pipeline = run_pipeline  # type: ignore[method-assign]
+    pending_watchdog = ports.get("staging_bisect_pending_watchdog")
+    if pending_watchdog is not None:
+        loop._pending_watchdog = pending_watchdog  # type: ignore[attr-defined]
 
     return loop
 
@@ -995,6 +1057,49 @@ def _build_edge_proposer(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     )
 
 
+def _build_entry_evidence(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build EntryEvidenceLoop for scenarios (ADR-0062).
+
+    The loop's external surface — ``LLMClient.complete_structured`` and
+    ``BotPRPort.open_bot_pr`` — cannot run inside a scenario. Tests seed:
+
+    * ``entry_evidence_llm`` — an LLMClient duck-type; defaults to a
+      MagicMock whose ``complete_structured`` resolves to ``{"term_ids": []}``.
+    * ``entry_evidence_pr_port`` — a BotPRPort duck-type; defaults to a
+      MagicMock whose ``open_bot_pr`` resolves to ``0``.
+    * ``entry_evidence_repo_root`` — ``Path``; defaults to ``config.repo_root``.
+
+    Mirrors the ``_build_edge_proposer`` / ``_build_term_proposer`` pattern.
+    """
+    from entry_evidence_loop import EntryEvidenceLoop  # noqa: PLC0415
+
+    llm = ports.get("entry_evidence_llm")
+    if llm is None:
+        llm = MagicMock()
+        llm.complete_structured = AsyncMock(return_value={"term_ids": []})
+        ports["entry_evidence_llm"] = llm
+
+    pr_port = ports.get("entry_evidence_pr_port")
+    if pr_port is None:
+        pr_port = MagicMock()
+        pr_port.open_bot_pr = AsyncMock(return_value=0)
+        ports["entry_evidence_pr_port"] = pr_port
+
+    repo_root = ports.get("entry_evidence_repo_root") or config.repo_root
+    dedup_path = ports.get("entry_evidence_dedup_path") or (
+        config.repo_root / ".entry_evidence_dedup.json"
+    )
+
+    return EntryEvidenceLoop(
+        config=config,
+        deps=deps,
+        llm=llm,
+        pr_port=pr_port,
+        repo_root=repo_root,
+        dedup_path=dedup_path,
+    )
+
+
 def _build_label_drift_watcher(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build LabelDriftWatcherLoop for scenarios (ADR-0056).
 
@@ -1145,9 +1250,45 @@ def _build_pricing_refresh_loop(ports: dict[str, Any], config: Any, deps: Any) -
     return loop
 
 
+def _build_triage_retry(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build TriageRetryLoop for scenarios (ADR-0063 W2).
+
+    The loop polls parked issues via ``PRPort.list_issues_by_label`` and
+    re-dispatches them by swapping the parked label back to find. Tests
+    seed a FakeGitHub via ``ports['github']``; the optional
+    ``triage_retry_state`` port lets a scenario inject a pre-built
+    StateTracker mock when it needs to assert on the attempt counter.
+    """
+    from triage_retry_loop import TriageRetryLoop  # noqa: PLC0415
+
+    state = ports.get("triage_retry_state")
+    if state is None:
+        state = MagicMock()
+        state.get_triage_retry_attempts.return_value = 0
+        state.inc_triage_retry_attempts.return_value = 1
+        state.get_triage_retry_last_attempt.return_value = ""
+        state.set_triage_retry_last_attempt.return_value = None
+        state.clear_triage_retry_attempts.return_value = None
+        # ``_reconcile_closed_parked`` reads from ``state._data`` directly.
+        data = MagicMock()
+        data.triage_retry_attempts = {}
+        state._data = data
+        ports["triage_retry_state"] = state
+
+    pr_manager = ports.get("pr_manager") or ports["github"]
+
+    return TriageRetryLoop(
+        config=config,
+        state=state,
+        pr_manager=pr_manager,
+        deps=deps,
+    )
+
+
 _BUILDERS: dict[str, Any] = {
     # phase 1
     "ci_monitor": _build_ci_monitor,
+    "branch_protection_auditor": _build_branch_protection_auditor,
     "stale_issue_gc": _build_stale_issue_gc,
     "dependabot_merge": _build_dependabot_merge,
     "pr_unsticker": _build_pr_unsticker,
@@ -1162,7 +1303,6 @@ _BUILDERS: dict[str, Any] = {
     "repo_wiki": _build_repo_wiki,
     "sentry_ingest": _build_sentry_ingest,
     "diagnostic": _build_diagnostic,
-    "code_grooming": _build_code_grooming,
     "report_issue": _build_report_issue,
     "security_patch": _build_security_patch,
     "stale_issue": _build_stale_issue,
@@ -1193,14 +1333,17 @@ _BUILDERS: dict[str, Any] = {
     # auto-agent (spec §1–§11; ADR-0050)
     "auto_agent_preflight": _build_auto_agent_preflight,
     "sandbox_failure_fixer": _build_sandbox_failure_fixer,
-    # ubiquitous-language (ADR-0054 + ADR-0057 + ADR-0058)
+    # ubiquitous-language (ADR-0054 + ADR-0057 + ADR-0058 + ADR-0062)
     "edge_proposer": _build_edge_proposer,
+    "entry_evidence": _build_entry_evidence,
     "term_proposer": _build_term_proposer,
     "term_pruner": _build_term_pruner,
     # label drift (ADR-0056)
     "label_drift_watcher": _build_label_drift_watcher,
     # staging promotion (ADR-0042)
     "staging_promotion": _build_staging_promotion,
+    # factory-phase drift mitigation (ADR-0063 W2)
+    "triage_retry": _build_triage_retry,
 }
 
 

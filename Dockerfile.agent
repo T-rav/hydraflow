@@ -149,6 +149,9 @@ COPY --chown=hydraflow:hydraflow src /opt/hydraflow/src
 COPY --chown=hydraflow:hydraflow tests /opt/hydraflow/tests
 COPY --chown=hydraflow:hydraflow templates /opt/hydraflow/templates
 COPY --chown=hydraflow:hydraflow static /opt/hydraflow/static
+COPY --chown=hydraflow:hydraflow pyproject.toml uv.lock Makefile AGENTS.md /opt/hydraflow/
+COPY --chown=hydraflow:hydraflow docs /opt/hydraflow/docs
+COPY --chown=hydraflow:hydraflow scripts /opt/hydraflow/scripts
 ENV PYTHONPATH=/opt/hydraflow/src:/opt/hydraflow
 
 CMD ["bash"]

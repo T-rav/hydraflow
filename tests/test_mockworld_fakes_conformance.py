@@ -28,16 +28,22 @@ from typing import Any
 
 import pytest
 
+from mockworld.fakes.fake_agent import FakeAgent
+from mockworld.fakes.fake_bot_pr import FakeBotPR
 from mockworld.fakes.fake_github import FakeGitHub
 from mockworld.fakes.fake_workspace import FakeWorkspace
+from ports import AgentPort
+from term_proposer_loop import BotPRPort
 from tests.scenarios.ports import PRPort, WorkspacePort
 
 # Hand-maintained Port↔Fake pair list. Add new pairs as Fakes are
 # introduced. (Auto-discovery via convention ``Fake<PortStem>`` is YAGNI
 # at this scale; ~3 pairs total.)
 _PORT_FAKE_PAIRS: list[tuple[type, type]] = [
+    (AgentPort, FakeAgent),
     (PRPort, FakeGitHub),
     (WorkspacePort, FakeWorkspace),
+    (BotPRPort, FakeBotPR),
     # IssueStorePort: no Fake; covered separately by tests/test_ports.py
     # against the real IssueStore adapter.
 ]

@@ -12,8 +12,12 @@ import pytest
 
 from tests.sandbox_scenarios.runner.loader import load_all_scenarios
 
-# Filter out s00_smoke — that's parity-only (no assert_outcome).
-_SCENARIOS = [s for s in load_all_scenarios() if hasattr(s, "assert_outcome")]
+# Filter out s00_smoke — that's parity-only (no assert_outcome). When the
+# harness selects one scenario, filter parametrization before collection so
+# pytest does not report the rest of the catalog as skipped tests.
+_ALL_SCENARIOS = [s for s in load_all_scenarios() if hasattr(s, "assert_outcome")]
+_ONLY = os.environ.get("SCENARIO_NAME")
+_SCENARIOS = [s for s in _ALL_SCENARIOS if not _ONLY or s.NAME == _ONLY]
 
 
 if _SCENARIOS:
@@ -22,16 +26,12 @@ if _SCENARIOS:
     @pytest.mark.asyncio
     async def test_scenario(scenario, api, page) -> None:
         """Run scenario.assert_outcome with the API client + Playwright page."""
-        # Optional env override: SCENARIO_NAME=sNN runs only that scenario.
-        only = os.environ.get("SCENARIO_NAME")
-        if only and only != scenario.NAME:
-            pytest.skip(f"SCENARIO_NAME={only!r} doesn't match {scenario.NAME}")
         await scenario.assert_outcome(api, page)
 
 else:
 
-    @pytest.mark.skip(
-        reason="No Tier-2 scenarios with assert_outcome yet (s01 lands in Task 2.5)"
-    )
-    def test_scenario_placeholder() -> None:
-        """Placeholder while no scenarios define assert_outcome."""
+    def test_scenario_catalog_selection_is_valid() -> None:
+        """Fail loudly when the sandbox catalog or SCENARIO_NAME is empty."""
+        if _ONLY:
+            raise AssertionError(f"SCENARIO_NAME={_ONLY!r} did not match any scenario")
+        raise AssertionError("No Tier-2 scenarios with assert_outcome were discovered")

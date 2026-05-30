@@ -401,10 +401,10 @@ HydraFlow uses **OpenTelemetry → Honeycomb** for distributed tracing (per-phas
 
 | Ruleset | ID | Target | Allowed merge methods | Required status checks |
 |---|---|---|---|---|
-| `main protect` | `15468404` | `~DEFAULT_BRANCH` (`main`) | `["merge"]` only — squash is rejected (ADR-0042 §Decision: squash from a long-lived integration branch produces a growing-diff regression). RC promotion uses `gh pr merge --merge`. | Full standard CI set + RC promotion gate: `Tests`, `Lint & Format`, `Type Check`, `Security Scan`, `Smoke Tests`, `Scenario Tests`, `Regression Tests`, `Principles Audit`, `ADR gate`, `quality (.)`, `quality (src/ui)`, **`Resolve RC PR`**, **`Browser Scenarios`**, **`Trust Gate (adversarial corpus, fixture mode)`**, **`Sandbox (rc/* promotion PR full suite)`**. The bold four are the MockWorld + e2e gate that only applies to `rc/* → main` PRs. |
-| `staging protect` | `16066429` | `refs/heads/staging` | `["squash", "merge"]` — agent PRs squash by default; merges accepted for cross-branch fixups. | **3 always-on checks**: `ADR gate`, `Detect Changes`, `discover-projects`. Heavy CI (`Tests`, `Lint`, `Type Check`, etc.) is path-filtered to SKIPPED for docs-only PRs and would block forever if required. Failures still appear in the PR rollup for visible-but-not-enforced gating. **Follow-up:** a single umbrella "Quality Gate" job (`if: always()`, depends on all conditional jobs, aggregates) would let us require strict gating without the path-filter problem. |
+| `main protect` | `15468404` | `~DEFAULT_BRANCH` (`main`) | `["merge"]` only — squash is rejected (ADR-0042 §Decision: squash from a long-lived integration branch produces a growing-diff regression). RC promotion uses `gh pr merge --merge`. | Full standard CI set + RC promotion gate: `Tests`, `Lint & Format`, `Type Check`, `Security Scan`, `Smoke Tests`, `Scenario Tests`, `Regression Tests`, `Principles Audit`, `quality (.)`, `quality (src/ui)`, **`Resolve RC PR`**, **`Browser Scenarios`**, **`Trust Gate (adversarial corpus, fixture mode)`**, **`Sandbox (rc/* promotion PR full suite)`**. The bold four are the MockWorld + e2e gate that only applies to `rc/* → main` PRs. (Source of truth: [`gates.toml`](../standards/branch_protection/gates.toml); this list is generated.) |
+| `staging protect` | `16066429` | `refs/heads/staging` | `["squash", "merge"]` — agent PRs squash by default; merges accepted for cross-branch fixups. | **2 always-on checks**: `Detect Changes`, `discover-projects`. (ADR enforcement is no longer a required check; it moved to the `adr_touchpoint_auditor` caretaker loop, ADR-0056.) Heavy CI (`Tests`, `Lint`, `Type Check`, etc.) is path-filtered to SKIPPED for docs-only PRs and would block forever if required. Failures still appear in the PR rollup for visible-but-not-enforced gating. The `CI Gate` umbrella job (`ci.yml`, `if: always()`, `needs:` all conditional jobs) now aggregates these path-filter-safe; it runs visibly and can be promoted to the single required context (see `docs/standards/branch_protection/ADDING-A-GATE.md`). |
 
-Both rulesets also enforce: no deletion, no force-push, PR required (no direct pushes), code-quality severity=`errors`, code-scanning CodeQL high-or-higher.
+Both rulesets also enforce: no deletion, no force-push, PR required (no direct pushes). `main protect` additionally enforces code-quality severity=`errors` and code-scanning CodeQL high-or-higher; `staging protect` does NOT (staging is fast integration, and the CodeQL/code-quality gate is enforced on the `rc/* → main` promotion PR instead).
 
 Repo-level settings:
 - `default_branch=main` (release reference; integration is `staging`)
@@ -429,4 +429,28 @@ Canonical rulesets are versioned JSON at [`docs/standards/branch_protection/`](.
 
 ```json:entry
 {"id":"01KQRULESET2026B0PHASE2002","title":"Branch protection — rulesets that enforce the two-tier model (ADR-0042)","topic":null,"source_type":"compiled","source_issue":null,"source_repo":null,"created_at":"2026-05-07T03:55:00.000000+00:00","updated_at":"2026-05-07T03:55:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+```
+
+
+## AdversarialRetryLoop pattern — shared contract for dissent stages
+
+The earlier-adversarial pipeline (ADR-0064) routes every dissent stage — `AssumptionSurfacer`, `DiscoveryCouncil`, `PlanCouncil`, pre-impl `SpecJudge`, and the retrofitted Shape `Challenger`/`ExpertCouncil` — through a single shared retry primitive: `src/adversarial_retry_loop.py:AdversarialRetryLoop`.
+
+The contract is uniform:
+
+1. **Three-retry budget per stage.** Voter surfaces concerns → host agent (planner / surfacer / Shape-runner) re-runs with concerns attached → re-vote. Repeat up to 3 retries.
+2. **Oscillation detection.** If round N+1's concerns are structurally equal to round N's (`Concern.fingerprint()` equality), short-circuit as `OscillationDetected` — don't burn the full budget on a fixed-point disagreement.
+3. **Wide-loop forwarding fallback.** Budget exhaustion or oscillation doesn't gate the issue forever. Unresolved `Concern`s are written to `AdversarialState.pending_concerns` and the wider lifecycle (Plan Reviewer, downstream stages) sees them as `must_address_by` constraints. Carryover concerns that survive to merge emit `ShippedWithKnownGap` and become wiki entries via `src/wiki_carryover.py`.
+
+**Use this pattern when:** adding a new adversarial voter, a new contrarian judge, or any agent whose role is to *surface dissent the host can't see by itself*. Don't reinvent the retry-with-budget-plus-fallback wheel; instantiate `AdversarialRetryLoop` and pass the voter + host as callables.
+
+**Don't use this pattern when:** the agent is a normal validator with a yes/no contract (use a plain assertion or gate), or when the operation must block until resolved (the wide-loop fallback is load-bearing — without it the dark factory deadlocks).
+
+Observability: `run_with_metrics()` returns per-invocation metrics that flow through the `AdversarialStageStarted` / `AdversarialStageCompleted` / `AdversarialRetryExhausted` / `OscillationDetected` EventBus events.
+
+**Why:** A uniform contract means once you understand one adversarial stage, you understand all of them. Adding a new voter is a localised change — write the voter, plug it into `AdversarialRetryLoop`, register the events. No bespoke retry logic per stage.
+
+
+```json:entry
+{"id":"01KRADV2026B0PHASE0001","title":"AdversarialRetryLoop pattern — shared contract for dissent stages","topic":null,"source_type":"compiled","source_issue":null,"source_repo":null,"created_at":"2026-05-17T00:00:00.000000+00:00","updated_at":"2026-05-17T00:00:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
 ```
