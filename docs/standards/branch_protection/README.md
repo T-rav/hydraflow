@@ -84,6 +84,14 @@ python scripts/setup_branch_protection.py --repo owner/name --audit
 `--audit` exits non-zero if any field on the live ruleset diverges from the canonical JSON.
 Wire this into a periodic CI job (or a HydraFlow caretaker loop) to catch silent drift.
 
+## Adding a gate
+
+See [`ADDING-A-GATE.md`](ADDING-A-GATE.md). A new required check must exist and
+be green on the base branch before it is marked required, or the introducing PR
+self-blocks. Prefer requiring the single `CI Gate` umbrella aggregator over many
+path-filtered checks (a path-filtered SKIPPED check otherwise reads as "not
+passed" and blocks docs-only PRs forever).
+
 ## Rationale
 
 See [ADR-0042 §Enforcement](../../adr/0042-two-tier-branch-release-promotion.md#enforcement)

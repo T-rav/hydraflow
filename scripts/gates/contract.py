@@ -43,9 +43,18 @@ class BranchEnvelope:
 
 
 @dataclass(frozen=True)
+class RepoProfile:
+    """What a repo is and can do: drives capability/language gate selection."""
+
+    languages: list[str]
+    capabilities: list[str]
+
+
+@dataclass(frozen=True)
 class Contract:
     gates: list[Gate]
     branches: dict[str, BranchEnvelope]
+    repo: RepoProfile | None = None
 
 
 def load_gates(path: Path) -> Contract:
@@ -83,4 +92,10 @@ def load_gates(path: Path) -> Contract:
                 for t in b.get("code_scanning", [])
             ],
         )
-    return Contract(gates=gates, branches=branches)
+    repo: RepoProfile | None = None
+    if "repo" in raw:
+        repo = RepoProfile(
+            languages=list(raw["repo"].get("languages", [])),
+            capabilities=list(raw["repo"].get("capabilities", [])),
+        )
+    return Contract(gates=gates, branches=branches, repo=repo)

@@ -39,6 +39,13 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CANONICAL_DIR = REPO_ROOT / "docs/standards/branch_protection"
 
+# Share one drift-detection core with BranchProtectionAuditorLoop (ADR-0082).
+sys.path.insert(0, str(REPO_ROOT))
+from src.branch_protection_audit import (  # noqa: E402
+    diff_ruleset,
+    load_canonical,
+)
+
 
 def _gh(*args: str, input_data: str | None = None) -> str:
     """Run ``gh`` and return stdout. Raises on non-zero."""
@@ -76,9 +83,7 @@ def _detect_repo() -> str:
 
 
 def _load_canonical() -> dict[str, dict[str, Any]]:
-    main_cfg = json.loads((CANONICAL_DIR / "main_ruleset.json").read_text())
-    staging_cfg = json.loads((CANONICAL_DIR / "staging_ruleset.json").read_text())
-    return {"main protect": main_cfg, "staging protect": staging_cfg}
+    return load_canonical(CANONICAL_DIR)
 
 
 def _existing_rulesets(repo: str) -> dict[str, dict[str, Any]]:
@@ -104,64 +109,12 @@ def _list_branch_names(repo: str) -> set[str]:
 
 
 def _diff(canonical: dict[str, Any], live: dict[str, Any]) -> list[str]:
-    """Return human-readable lines of differences (empty list = clean)."""
-    diffs: list[str] = []
+    """Human-readable drift lines (empty = clean).
 
-    def _normalize(node: Any) -> Any:
-        """Strip None, empty list, empty dict, and explicit-default values
-        so canonical and live render equivalently. GitHub's response includes
-        defaulted fields (``required_reviewers: []``,
-        ``strict_required_status_checks_policy: false``,
-        ``required_review_thread_resolution: false``, etc.) that operators
-        don't write into the canonical JSON. Treating these as no-ops in both
-        sides removes false-positive drift."""
-        _DEFAULTS_TO_STRIP = {
-            "required_reviewers": [],
-            "strict_required_status_checks_policy": False,
-            "required_review_thread_resolution": False,
-            "dismiss_stale_reviews_on_push": False,
-            "require_code_owner_review": False,
-            "require_last_push_approval": False,
-            "do_not_enforce_on_create": False,
-        }
-        if isinstance(node, dict):
-            out: dict[str, Any] = {}
-            for k, v in sorted(node.items()):
-                if v is None or v in ([], {}):
-                    continue
-                if k in _DEFAULTS_TO_STRIP and v == _DEFAULTS_TO_STRIP[k]:
-                    continue
-                out[k] = _normalize(v)
-            return out
-        if isinstance(node, list):
-            return [_normalize(item) for item in node]
-        return node
-
-    def _sort_rules(node: Any) -> Any:
-        """Sort top-level ``rules`` list by ``type`` so order from the
-        GitHub API doesn't cause false drift."""
-        if isinstance(node, dict) and isinstance(node.get("rules"), list):
-            node["rules"] = sorted(node["rules"], key=lambda r: r.get("type", ""))
-        return node
-
-    canon_norm = _sort_rules(_normalize(canonical))
-    live_norm = _sort_rules(
-        {
-            k: _normalize(v)
-            for k, v in live.items()
-            if k in {"name", "target", "enforcement", "conditions", "rules"}
-        }
-    )
-    canon_norm_picked = {
-        k: v
-        for k, v in canon_norm.items()
-        if k in {"name", "target", "enforcement", "conditions", "rules"}
-    }
-    if canon_norm_picked != live_norm:
-        diffs.append("DRIFT: canonical and live differ.")
-        diffs.append(f"  canonical: {json.dumps(canon_norm_picked, indent=2)}")
-        diffs.append(f"  live:      {json.dumps(live_norm, indent=2)}")
-    return diffs
+    Delegates to the shared core in ``src.branch_protection_audit`` so the CLI
+    and ``BranchProtectionAuditorLoop`` use one drift-detection implementation.
+    """
+    return diff_ruleset(canonical, live)
 
 
 def _ensure_staging_branch(repo: str, default_branch: str, *, apply: bool) -> str:
