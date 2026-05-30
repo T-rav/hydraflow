@@ -40,6 +40,17 @@ def test_plan_stuck_playbook_specialises() -> None:
     assert "touchpoint" in pb.persona.lower() or "adr" in pb.persona.lower()
 
 
+def test_prefixed_escalation_label_routes_to_specialist() -> None:
+    # Real escalation labels carry the `hydraflow-` prefix (e.g.
+    # `hydraflow-plan-stuck`), but the registry keys are unprefixed. Before the
+    # prefix-strip fix every prefixed label fell through to `_default`, so the
+    # entire specialist registry was dead. removeprefix must route the prefixed
+    # label to the same specialist as the bare key.
+    assert get_playbook("hydraflow-plan-stuck").name == "plan-stuck"
+    assert get_playbook("hydraflow-plan-stuck").name == get_playbook("plan-stuck").name
+    assert get_playbook("hydraflow-plan-stuck").persona != DEFAULT_PERSONA
+
+
 def test_implement_stuck_playbook_specialises() -> None:
     pb = get_playbook("implement-stuck")
     assert pb.name == "implement-stuck"

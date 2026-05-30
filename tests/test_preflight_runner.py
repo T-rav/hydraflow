@@ -49,6 +49,33 @@ def test_default_fallback_for_unknown_sub_label() -> None:
     assert "Default Playbook" in out
 
 
+def test_prefixed_sublabel_routes_to_specialist_file() -> None:
+    # Real escalation labels are prefixed (e.g. ``hydraflow-flaky-test-stuck``)
+    # but the prompt files are unprefixed. Before the fix the prefixed label
+    # missed ``flaky-test-stuck.md`` and fell through to ``_default.md``, silently
+    # killing every file-based specialist playbook.
+    fields = {
+        "persona": "x",
+        "issue_number": 1,
+        "repo_slug": "r/s",
+        "worktree_path": "/tmp",
+        "issue_body": "b",
+        "issue_comments_block": "x",
+        "escalation_context_block": "x",
+        "wiki_excerpts_block": "x",
+        "sentry_events_block": "x",
+        "recent_commits_block": "x",
+        "prior_attempts_block": "x",
+    }
+    prefixed = render_prompt(sub_label="hydraflow-flaky-test-stuck", **fields)
+    # Routed to flaky-test-stuck.md, NOT the generic default playbook (the
+    # "Default Playbook" marker lives only in _default.md).
+    assert "Default Playbook" not in prefixed
+    # And a genuinely unknown prefixed label still falls through to _default.
+    unknown = render_prompt(sub_label="hydraflow-no-such-playbook", **fields)
+    assert "Default Playbook" in unknown
+
+
 def test_explicit_prompt_template_overrides_sub_label_lookup() -> None:
     """ADR-0063 W1: PreflightPlaybook.prompt_template lets the registry pick
     a prompt file independent of the sub-label string. Sub-label

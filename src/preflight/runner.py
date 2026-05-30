@@ -39,7 +39,15 @@ def render_prompt(
             file route to a specialist persona + the ``_default`` template,
             or vice versa.
     """
-    template_stem = prompt_template if prompt_template is not None else sub_label
+    # Strip the `hydraflow-` label prefix from the file-fallback stem: the prompt
+    # files (flaky-test-stuck.md, wiki-rot-stuck.md, ...) are unprefixed, but the
+    # sub-label arrives prefixed, so without this every unregistered specialist
+    # fell through to _default.md — ADR-0063's file-fallback was dead for them.
+    template_stem = (
+        prompt_template
+        if prompt_template is not None
+        else sub_label.removeprefix("hydraflow-")
+    )
     prompt_path = _PROMPT_DIR / f"{template_stem}.md"
     if not prompt_path.exists():
         prompt_path = _PROMPT_DIR / "_default.md"
