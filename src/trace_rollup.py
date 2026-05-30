@@ -6,6 +6,7 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from file_util import append_jsonl
 from models import (
     SubprocessTrace,
     TraceSkillProfile,
@@ -258,5 +259,6 @@ def _append_factory_metric(
         "crashed": summary.crashed,
     }
 
-    with open(metrics_path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(event) + "\n")
+    # append_jsonl gives crash-safe fsync + secret scrubbing (ADR-0085); the
+    # factory_metrics.jsonl cost time-series is the canonical dashboard source.
+    append_jsonl(metrics_path, json.dumps(event))
