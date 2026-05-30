@@ -95,6 +95,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0082 | `src.branch_protection_audit`, `src.branch_protection_auditor_loop` |
 | ADR-0083 | — |
 | ADR-0084 | `src.agent`, `src.preflight.runner`, `src.untrusted_text` |
+| ADR-0085 | `src.secret_scrub` |
 
 ## Module → ADRs
 
@@ -208,6 +209,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.run_recorder` | ADR-0073 |
 | `src.runs_gc_loop` | ADR-0073 |
 | `src.screenshot_scanner` | ADR-0018 |
+| `src.secret_scrub` | ADR-0085 |
 | `src.sentry.reverse_lookup` | ADR-0050 |
 | `src.server` | ADR-0038, ADR-0055 |
 | `src.service_registry` | ADR-0045 |
@@ -247,4 +249,4 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.workspace_gc_loop` | ADR-0069 |
 | `src.worktree` | ADR-0003, ADR-0009, ADR-0010 |
 
-_Regenerated from commit `40473a4` on 2026-05-30 11:42 UTC. Source last changed at `40473a4`. Status: 🟢 fresh._
+_Regenerated from commit `bca7775` on 2026-05-30 15:10 UTC. Source last changed at `bca7775`. Status: 🟢 fresh._
