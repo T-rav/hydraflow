@@ -108,6 +108,9 @@ class CostBudgetWatcherLoop(BaseBackgroundLoop):
         return 300
 
     async def _do_work(self) -> WorkCycleResult:  # noqa: PLR0911
+        # ADR-0049 in-body kill-switch (UI toggle, System tab). Must be FIRST.
+        if not self._enabled_cb(self._worker_name):
+            return {"status": "disabled"}
         if not self._config.cost_budget_watcher_loop_enabled:
             return {"status": "config_disabled"}
         if os.environ.get(_KILL_SWITCH_ENV) == "1":
