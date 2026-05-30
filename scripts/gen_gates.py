@@ -21,13 +21,14 @@ from scripts.gates.contract import Contract, load_gates
 from scripts.gates.coverage import unsatisfied_dimensions
 from scripts.gates.docs_table import render_docs_table
 from scripts.gates.resolve import render_ruleset
-from scripts.gates.validate import validate
+from scripts.gates.validate import validate, validate_make_targets
 from scripts.gates.workflow_jobs import index_workflow_jobs
 
 BP = Path("docs/standards/branch_protection")
 CONTRACT = BP / "gates.toml"
 README = BP / "README.md"
 WORKFLOWS = Path(".github/workflows")
+MAKEFILE = Path("Makefile")
 BEGIN = "<!-- generated:gates -->"
 END = "<!-- /generated:gates -->"
 
@@ -60,6 +61,8 @@ def main() -> int:
 
     contract = load_gates(CONTRACT)
     violations = validate(contract, index_workflow_jobs(WORKFLOWS))
+    if MAKEFILE.exists():
+        violations.extend(validate_make_targets(contract, MAKEFILE.read_text()))
     for branch in contract.branches:
         for dim in unsatisfied_dimensions(contract, branch):
             violations.append(

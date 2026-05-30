@@ -965,7 +965,7 @@ class HydraFlowConfig(BaseModel):
     )
     branch_protection_auditor_interval: int = Field(
         default=604800,
-        ge=60,
+        ge=3600,
         le=2592000,
         description=(
             "BranchProtectionAuditorLoop interval in seconds (default 7 days); "

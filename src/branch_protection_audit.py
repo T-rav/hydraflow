@@ -39,7 +39,12 @@ def _normalize(node: Any) -> Any:
             out[k] = _normalize(v)
         return out
     if isinstance(node, list):
-        return [_normalize(item) for item in node]
+        items = [_normalize(item) for item in node]
+        # Sort required-status-check context dicts so GitHub's ordering (web UI
+        # edits, API order) does not read as drift against the canonical order.
+        if items and all(isinstance(i, dict) and set(i) == {"context"} for i in items):
+            return sorted(items, key=lambda i: i["context"])
+        return items
     return node
 
 
@@ -85,7 +90,13 @@ def audit_repo(
     *,
     fetch_rulesets: Callable[[str], dict[str, dict[str, Any]]],
 ) -> AuditReport:
-    """Compare each canonical ruleset to live; collect human-readable drift."""
+    """Compare each canonical ruleset to live; collect human-readable drift.
+
+    Scope: **ruleset drift only**. The ``setup_branch_protection.py`` CLI's
+    ``_audit`` additionally checks ``allow_auto_merge`` and the presence of the
+    ``staging`` branch; those are setup concerns the CLI reconciles on
+    ``--apply`` and are intentionally outside this ruleset-focused audit.
+    """
     canonical = load_canonical(canonical_dir)
     live = fetch_rulesets(repo)
     drifts: list[str] = []

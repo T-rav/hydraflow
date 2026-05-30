@@ -44,6 +44,17 @@ def test_diff_ruleset_detects_changed_context() -> None:
     assert diff_ruleset(cfg, live) != []
 
 
+def test_reordered_required_checks_is_not_drift() -> None:
+    # GitHub may return the required-status-check contexts in a different order
+    # than canonical; that must NOT read as drift (else the loop false-files).
+    cfg = json.loads((CANONICAL_DIR / "main_ruleset.json").read_text())
+    live = json.loads(json.dumps(cfg))
+    for rule in live["rules"]:
+        if rule["type"] == "required_status_checks":
+            rule["parameters"]["required_status_checks"].reverse()
+    assert diff_ruleset(cfg, live) == []
+
+
 def test_audit_repo_clean() -> None:
     canonical = load_canonical(CANONICAL_DIR)
 

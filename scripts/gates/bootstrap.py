@@ -63,8 +63,15 @@ def gates_plan_section(profile: RepoProfile, contract: Contract) -> list[str]:
         f"Detected for this repo: languages {profile.languages or '[none]'}, "
         f"capabilities {profile.capabilities or '[none]'}.",
         "",
-        "Required checks resolved from the gate contract:",
     ]
+    if not profile.languages:
+        lines += [
+            "WARNING: no languages were detected, so every (language-scoped) gate "
+            "resolves to empty below. Re-run detection or set the `[repo]` "
+            "languages explicitly before applying protection.",
+            "",
+        ]
+    lines.append("Required checks resolved from the gate contract:")
     for branch in sorted(resolved.branches):
         contexts = resolve_contexts(resolved, branch)
         joined = ", ".join(f"`{c}`" for c in contexts) or "(none)"

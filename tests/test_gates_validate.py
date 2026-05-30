@@ -3,11 +3,17 @@
 from pathlib import Path
 
 from scripts.gates.contract import BranchEnvelope, Contract, Gate, load_gates
-from scripts.gates.validate import validate
+from scripts.gates.validate import validate, validate_make_targets
 from scripts.gates.workflow_jobs import index_workflow_jobs
 
 
-def _gate(name: str, workflow: str, job: str, status: str = "active") -> Gate:
+def _gate(
+    name: str,
+    workflow: str,
+    job: str,
+    status: str = "active",
+    make_target: str = "",
+) -> Gate:
     return Gate(
         name=name,
         dimension="d",
@@ -19,7 +25,7 @@ def _gate(name: str, workflow: str, job: str, status: str = "active") -> Gate:
         status=status,
         workflow=workflow,
         job=job,
-        make_target="",
+        make_target=make_target,
     )
 
 
@@ -58,3 +64,24 @@ def test_real_contract_has_no_orphans() -> None:
     contract = load_gates(Path("docs/standards/branch_protection/gates.toml"))
     index = index_workflow_jobs(Path(".github/workflows"))
     assert validate(contract, index) == []
+
+
+def test_make_target_must_exist_in_makefile() -> None:
+    contract = _contract([_gate("Tests", "ci.yml", "test", make_target="ghost")])
+    assert validate_make_targets(contract, "real:\n\techo hi\n") != []
+    assert validate_make_targets(contract, "ghost:\n\techo hi\n") == []
+
+
+def test_make_target_empty_or_planned_is_skipped() -> None:
+    contract = _contract(
+        [
+            _gate("Active", "ci.yml", "test"),  # empty make_target
+            _gate("Planned", "ci.yml", "test", status="planned", make_target="ghost"),
+        ]
+    )
+    assert validate_make_targets(contract, "") == []
+
+
+def test_real_contract_make_targets_exist() -> None:
+    contract = load_gates(Path("docs/standards/branch_protection/gates.toml"))
+    assert validate_make_targets(contract, Path("Makefile").read_text()) == []

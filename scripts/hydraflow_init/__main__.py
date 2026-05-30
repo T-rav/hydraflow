@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import subprocess
 import sys
 from pathlib import Path
@@ -60,6 +61,9 @@ def _gates_section(target: Path) -> list[str] | None:
             profile = build_repo_profile(target, None)
         return gates_plan_section(profile, contract)
     except Exception:  # noqa: BLE001 — the section is additive, never fatal
+        logging.getLogger("hydraflow.init").debug(
+            "gates adoption-plan section skipped (non-fatal)", exc_info=True
+        )
         return None
 
 

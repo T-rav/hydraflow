@@ -52,7 +52,11 @@ def _issue_body(report: AuditReport) -> str:
 
 
 class BranchProtectionAuditorLoop(BaseBackgroundLoop):
-    """Files an issue when live branch protection drifts from the contract."""
+    """Files an issue when live branch protection drifts from the contract.
+
+    Caretaker loop for ADR-0082 (declarative gate contract); follows ADR-0029
+    (caretaker pattern) and ADR-0049 (kill-switch convention).
+    """
 
     def __init__(
         self,

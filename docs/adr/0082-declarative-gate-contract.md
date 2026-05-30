@@ -13,7 +13,7 @@ Before this ADR, a gate was implied across three uncoordinated places: prose in 
 
 ## Decision
 
-A single hand-authored contract, `docs/standards/branch_protection/gates.toml`, is the source of truth for branch-protection gates. Each `[[gate]]` record is one (dimension, binding) pair carrying its check context name, the `tier` (core or extra), the branches it is `required_on`, the PR flows it `runs_on`, its `languages` and `requires_capability`, its `status` (active or planned), and the `(workflow, job)` that produces it. Per-branch `[branch.*]` tables carry the non-status-check ruleset rules (merge methods, code-quality, code-scanning).
+A single hand-authored contract, `docs/standards/branch_protection/gates.toml`, is the source of truth for branch-protection gates. Each `[[gate]]` record is one (dimension, binding) pair carrying its check context name, the `tier` (core or extra), the branches it is `required_on`, the PR flows it `runs_on`, its `languages` and `requires_capability`, its `status` (active or planned), and the `(workflow, job)` that produces it. Per-branch `[branch.*]` tables carry the non-status-check ruleset rules (merge methods, code-quality, code-scanning). Resolution is driven by `status`, `required_on`, `languages`, and `requires_capability`; `tier` and `runs_on` are descriptive metadata (they render in the docs table) and do not currently affect which contexts are emitted. `make_target` is validated to exist in the Makefile (local == CI entry point).
 
 From this contract:
 

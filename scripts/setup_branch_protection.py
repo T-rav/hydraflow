@@ -1,13 +1,14 @@
 """Apply HydraFlow's standard branch-protection rulesets to a GitHub repo.
 
-The rulesets encode ADR-0042's two-tier branch model:
-- ``main protect`` (targets ``~DEFAULT_BRANCH``): merge-commit only, 15
-  required checks including the RC promotion + MockWorld + e2e gate.
-- ``staging protect`` (targets ``refs/heads/staging``): squash or merge,
-  12 required checks (full standard set + the staging-fast sandbox).
+The rulesets encode ADR-0042's two-tier branch model (counts are generated
+from ``gates.toml``; see the README's generated gate table, not this prose):
+- ``main protect`` (targets ``~DEFAULT_BRANCH``): merge-commit only, with the
+  full standard CI set plus the RC promotion + MockWorld + e2e gate.
+- ``staging protect`` (targets ``refs/heads/staging``): squash or merge, with
+  the always-on baseline checks (heavy jobs run but are path-filter-safe).
 
-Canonical configs live at ``docs/standards/branch_protection/*.json`` and
-are version-controlled. This script is the apply-er — idempotent: ``PUT``
+Canonical configs live at ``docs/standards/branch_protection/*.json``, are
+generated from ``gates.toml`` (ADR-0082), and are version-controlled. This script is the apply-er — idempotent: ``PUT``
 on a ruleset that already exists by name, ``POST`` if absent.
 
 Usage::
