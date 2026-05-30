@@ -41,10 +41,13 @@ def render_prompt(
             file route to a specialist persona + the ``_default`` template,
             or vice versa.
     """
-    # Strip the `hydraflow-` label prefix from the file-fallback stem: the prompt
-    # files (flaky-test-stuck.md, wiki-rot-stuck.md, ...) are unprefixed, but the
-    # sub-label arrives prefixed, so without this every unregistered specialist
-    # fell through to _default.md — ADR-0063's file-fallback was dead for them.
+    # Strip the `hydraflow-` label prefix from the file-fallback stem. The
+    # config-default escalation labels (fake_coverage_stuck_label =
+    # `hydraflow-fake-coverage-stuck`, adr_drift_stuck_label,
+    # memory_backlog_stuck_label) are prefixed, but their prompt files
+    # (fake-coverage-stuck.md, ...) are unprefixed — so without this strip a
+    # prefixed label falls through to _default.md instead of its specialist
+    # file. Unprefixed producer labels are a no-op here.
     template_stem = (
         prompt_template
         if prompt_template is not None

@@ -76,6 +76,29 @@ def test_prefixed_sublabel_routes_to_specialist_file() -> None:
     assert "Default Playbook" in unknown
 
 
+def test_prefixed_config_default_label_routes_to_specialist_file() -> None:
+    # The real production case this PR fixes: ``fake_coverage_stuck_label``
+    # defaults to the PREFIXED ``hydraflow-fake-coverage-stuck`` (config.py) and
+    # ``fake-coverage-stuck.md`` exists. The file-fallback prefix-strip routes it
+    # to that specialist file; before the fix it fell through to ``_default.md``.
+    fields = {
+        "persona": "x",
+        "issue_number": 1,
+        "repo_slug": "r/s",
+        "worktree_path": "/tmp",
+        "issue_body": "b",
+        "issue_comments_block": "x",
+        "escalation_context_block": "x",
+        "wiki_excerpts_block": "x",
+        "sentry_events_block": "x",
+        "recent_commits_block": "x",
+        "prior_attempts_block": "x",
+    }
+    out = render_prompt(sub_label="hydraflow-fake-coverage-stuck", **fields)
+    assert "Default Playbook" not in out
+    assert "fake-coverage" in out
+
+
 def test_explicit_prompt_template_overrides_sub_label_lookup() -> None:
     """ADR-0063 W1: PreflightPlaybook.prompt_template lets the registry pick
     a prompt file independent of the sub-label string. Sub-label
