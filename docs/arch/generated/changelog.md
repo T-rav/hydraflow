@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W21
 
+- `231a6c5` — fix: surface all background worker loops *(2026-05-24)*
 - `1d9c95f` — Fixes #8931: stream onboarding activity in dashboard *(2026-05-23)*
 - `9dc0a8d` — Refs #8933: validate third-domain onboarding dashboard flow *(2026-05-23)*
 - `01b5854` — docs: refresh architecture artifacts *(2026-05-23)*
@@ -351,11 +352,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `522e013` — Fixes #1701: ADR-0009 epic release creation architecture (#1739) (#1739) *(2026-03-01)*
 - `961b141` — Fixes #1677: add ADR-0009 for worktree and path isolation architecture (#1683) (#1683) *(2026-03-01)*
 - `7c6fe67` — Fixes #1634: add ADR-0009 for multi-repo process-per-repo model (#1679) (#1679) *(2026-03-01)*
-- `35aa37a` — docs: add ADR-0008 for multi-repo dashboard architecture (#1648) (#1648) *(2026-02-28)*
-- `780b17c` — docs: add ADR-0007 for dashboard API multi-repo scoping (#1647) (#1647) *(2026-02-28)*
-- `83730be` — docs: add ADR-0006 for RepoRuntime isolation architecture (#1646) (#1646) *(2026-02-28)*
-- `bbc273d` — docs: add ADR-0005 for PR recovery and zero-diff branch handling (#1307) (#1307) *(2026-02-26)*
-- `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `6320e58` on 2026-05-24 15:25 UTC. Source last changed at `6320e58`. Status: 🟢 fresh._
+_Regenerated from commit `231a6c5` on 2026-05-30 03:03 UTC. Source last changed at `231a6c5`. Status: 🟢 fresh._

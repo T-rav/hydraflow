@@ -28,18 +28,40 @@ from typing import Any
 
 import pytest
 
+from mockworld.fakes.fake_docker import FakeDocker
+from mockworld.fakes.fake_fs import FakeFS
+from mockworld.fakes.fake_git import FakeGit
 from mockworld.fakes.fake_github import FakeGitHub
+from mockworld.fakes.fake_http import FakeHTTP
+from mockworld.fakes.fake_issue_fetcher import FakeIssueFetcher
+from mockworld.fakes.fake_issue_store import FakeIssueStore
+from mockworld.fakes.fake_sentry import FakeSentry
 from mockworld.fakes.fake_workspace import FakeWorkspace
-from tests.scenarios.ports import PRPort, WorkspacePort
+from tests.scenarios.ports import (
+    DockerPort,
+    FSPort,
+    GitPort,
+    HTTPPort,
+    IssueFetcherPort,
+    IssueStorePort,
+    PRPort,
+    SentryPort,
+    WorkspacePort,
+)
 
 # Hand-maintained Port↔Fake pair list. Add new pairs as Fakes are
 # introduced. (Auto-discovery via convention ``Fake<PortStem>`` is YAGNI
 # at this scale; ~3 pairs total.)
 _PORT_FAKE_PAIRS: list[tuple[type, type]] = [
+    (DockerPort, FakeDocker),
+    (FSPort, FakeFS),
+    (GitPort, FakeGit),
+    (HTTPPort, FakeHTTP),
+    (IssueFetcherPort, FakeIssueFetcher),
+    (IssueStorePort, FakeIssueStore),
     (PRPort, FakeGitHub),
+    (SentryPort, FakeSentry),
     (WorkspacePort, FakeWorkspace),
-    # IssueStorePort: no Fake; covered separately by tests/test_ports.py
-    # against the real IssueStore adapter.
 ]
 
 

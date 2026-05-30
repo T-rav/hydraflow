@@ -72,7 +72,13 @@ A feature merges into `staging` when ALL three layers exist for it. Specifically
 - Each scenario file exports `NAME`, `DESCRIPTION`, `seed() -> MockWorldSeed`, `async def assert_outcome(api, page) -> None`
 - Run via `python scripts/sandbox_scenario.py run <NAME>` inside the docker stack (CI path: `Sandbox (PR→staging fast subset)` / `Sandbox (rc/* promotion PR full suite)` / `Sandbox (nightly regression)`)
 - The `assert_outcome` body uses the dashboard API (`api.get("/api/state")`) and Playwright (`page.click(...)`) to verify production-shaped behavior
-- **Scenarios must `import pytest` only inside function bodies** — the sandbox runner imports each scenario module in an environment that does not have pytest as a runtime dep. A top-level `import pytest` crashes the import.
+- **Scenarios must not call `pytest.skip` or `pytest.xfail`.** A sandbox scenario
+  either asserts a real runtime contract or it is removed from the runnable
+  catalog until the harness can support it.
+- **Do not use screenshot or pixel-baseline assertions as automated quality
+  gates.** Browser and sandbox coverage should assert semantic DOM state,
+  accessibility roles, dashboard API state, emitted events, and user-observable
+  behavior. Operator bug-report screenshots are product data, not test oracles.
 
 ## Anti-patterns
 
@@ -80,9 +86,20 @@ A feature merges into `staging` when ALL three layers exist for it. Specifically
 
 - **Asserting against state shapes that don't exist.** Scenarios authored against fields that aren't in `StateData` will pass at write-time (Python dicts are tolerant) but fail in CI when the missing key raises `KeyError`. Always `grep` the source-of-truth model file for the field name before asserting on it.
 
-- **Importing pytest at module level in sandbox scenarios.** The sandbox runner doesn't have pytest available; module-level `import pytest` crashes the import. Use `pytest.skip` only inside `assert_outcome`, with `import pytest` also done lazily inside that function.
+- **Importing pytest or skipping at runtime in sandbox scenarios.** The sandbox
+  runner doesn't have pytest available for scenario modules as a product
+  dependency, and skip/xfail hides a broken contract. Remove the scenario from
+  the runnable catalog until it can assert real behavior.
+
+- **Placeholder sandbox scenarios.** Printing "tracking issue" and returning
+  success is an ignored test by another name. File the follow-up in `bd`; do not
+  keep a green scenario file without a load-bearing assertion.
 
 - **Scenario tests that just unit-test through a fake.** Pattern B is fine when the loop's reaction surface is what matters — but if the test could equivalently be written as a unit test of one method, it's not really a scenario test.
+
+- **Screenshot or pixel-baseline regression tests.** They are noisy and
+  low-signal for HydraFlow's UI. Prefer role/text/state/API assertions that
+  explain the broken contract directly.
 
 ## Discoverability
 

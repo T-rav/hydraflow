@@ -717,12 +717,12 @@ uv run pytest tests/scenarios/test_base_branch_autoretarget_scenario.py -m scena
 
 Expected: pass.
 
-### Task 13: Sandbox e2e placeholder
+### Task 13: Sandbox e2e contract
 
 **Files:**
 - Create: `tests/sandbox_scenarios/scenarios/s14_base_branch_autoretarget.py`
 
-- [ ] **Step 1: Write placeholder scenario per s10/s11/s13 pattern (soft-pass + stderr note + #8483 link)**
+- [ ] **Step 1: Write an executable sandbox scenario with real assertions, or leave this as a tracked coverage gap per ADR-0065**
 
 ### Task 14: Commit + push + PR β
 

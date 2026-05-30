@@ -620,12 +620,12 @@ Twelve scenarios, each chosen because **breakage produces a silent stall in the 
 | 8 | `s08_pr_unsticker_revives_stuck_pr` | PR with no activity for >threshold → PRUnstickerLoop triggers auto-resync → PR moves. |
 | 9 | `s09_dependabot_auto_merge` | Dependabot PR with green CI → DependabotMergeLoop auto-merges without a human touch. |
 
-**Dark-factory invariants (2) — "the load-bearing conventions still hold"**
+**Dark-factory invariants**
 
-| # | NAME | What it proves |
-|---|------|----------------|
-| 10 | `s10_kill_switch_universal` | Disable EVERY loop via static config → no loop ticks for 5 cycles. (Proves ADR-0049's universal in-body gate.) |
-| 11 | `s11_credit_exhaustion_suspends_ticking` | FakeLLM raises `CreditExhaustedError` → outer loop suspends, surfaces in System tab alert. (Proves `reraise_on_credit_or_bug` propagates correctly through `BaseSubprocessRunner`.) |
+ADR-0065 removed non-working placeholder scenarios from the runnable catalog.
+Former `s10_kill_switch_universal` and
+`s11_credit_exhaustion_suspends_ticking` are coverage gaps until they can assert
+real behavior.
 
 **Trust fleet & wiki (1) — "multi-repo + knowledge layer alive"**
 
@@ -635,7 +635,7 @@ Twelve scenarios, each chosen because **breakage produces a silent stall in the 
 
 **Selection rationale:** every Critical bug caught in fresh-eyes review of recent feature builds (#8390, #8431, #8439) maps to one of these scenarios. They are not "test the framework" — they are "test the parts of the dark factory that, if broken, produce silent stalls instead of loud errors."
 
-**Out of scope for the dozen:** Sentry capture (verified in-process), wiki-rot detection (in-process is sufficient), report pipeline (separate test track), product-discovery flow (covered by s01's UI assertion). These can grow into the catalog over time without changing the architecture.
+**Out of scope for the catalog:** Sentry capture (verified in-process), wiki-rot detection (in-process is sufficient), report pipeline (separate test track), product-discovery flow (covered by s01's UI assertion). These can grow into the catalog over time without changing the architecture.
 
 ### Component 7 — Maintenance & alignment story
 
@@ -716,7 +716,7 @@ Three sequential PRs. Same staging discipline as the dark-factory infra hardenin
 - **Add `SandboxFailureFixerLoop`** — a new caretaker loop scaffolded via `scripts/scaffold_loop.py` (per the dark-factory infra hardening track) that polls open PRs labeled `sandbox-fail-auto-fix`, dispatches `AutoAgentRunner` with the new `prompts/auto_agent/sandbox_fix.md` prompt envelope, applies the proposed fix to the rc/* branch, and tracks per-PR attempt counts in `StateData.sandbox_autofix_attempts`. Cap at 3 attempts; on cap-hit, swap labels (`sandbox-fail-auto-fix` → `sandbox-hitl`).
 - **Add `/api/sandbox-hitl` endpoint** in `src/dashboard_routes/_hitl_routes.py` that returns the open PRs labeled `sandbox-hitl` (via `PRPort.list_prs_by_label("sandbox-hitl")` — added in PR A). Add a small Frontend extension to the System tab's HITL panel to read both `/api/hitl` (existing — issues) and `/api/sandbox-hitl` (new — PRs) and render them in a merged list with a type indicator. Keeping the endpoints separate (rather than contaminating `/api/hitl`'s issue-shaped payload) preserves the existing endpoint's contract.
 - Add `tests/sandbox_scenarios/README.md` documenting "how to add a scenario."
-- Update `docs/wiki/dark-factory.md` §3 (the convergence-loop section) with sandbox-tier expectations: "substantial features require all 12 sandbox scenarios green before promotion-PR merge to main."
+- Update `docs/wiki/dark-factory.md` §3 (the convergence-loop section) with sandbox-tier expectations: "substantial features require every runnable sandbox scenario green before promotion-PR merge to main."
 - **Risk:** medium. The catalog (s02–s12) is each independently low-risk and tolerates partial landings. The new caretaker loop is medium-risk because it commits to PR branches and triggers CI — the standard caretaker-loop conventions (kill-switch via `enabled_cb`, attempt cap, never-raises subprocess wrapper from `BaseSubprocessRunner`) provide the safety envelope. Mitigation: ship `SandboxFailureFixerLoop` as kill-switched-OFF by default, enable explicitly via static config + dashboard once one or two real fix-cycles have been observed.
 - **Estimated PR size:** ~1900 LOC. Breakdown: ~1400 LOC scenarios + parity tests, ~400 LOC `SandboxFailureFixerLoop` (per typical scaffold-loop output), ~100 LOC CI workflow expansion.
 
@@ -727,7 +727,7 @@ Three sequential PRs. Same staging discipline as the dark-factory infra hardenin
 The sandbox suite earns its "release with confidence" claim by running at three points in the development lifecycle, with a self-fix loop on the highest-confidence gate:
 
 **Trigger 1 — PR → staging (fast feedback, every PR)**
-- Runs a curated 3-scenario subset: `s01_happy_single_issue`, `s10_kill_switch_universal`, `s11_credit_exhaustion_suspends_ticking`. These are the fastest scenarios that collectively cover the highest-blast-radius regressions.
+- Runs a curated 3-scenario subset: `s01_happy_single_issue`, `s06_kill_switch_via_ui`, `s07_workspace_gc_reaps_dead_worktree`. These are fast scenarios that collectively cover pipeline, UI control, and background-loop wiring.
 - Wall-clock budget: ~90 seconds.
 - Path triggers: any change to `src/service_registry.py`, `src/orchestrator.py`, `src/mockworld/`, `Dockerfile*`, `docker-compose*`, `tests/sandbox_scenarios/`, or `src/ui/`.
 - On failure: PR cannot merge to `staging` until green. **No auto-fix at this stage** — the PR author is alive in the loop and the failure is informative.

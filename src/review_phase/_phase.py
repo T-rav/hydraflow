@@ -2972,21 +2972,25 @@ class ReviewPhase:
         issue: Task,  # noqa: ARG002
         worker_id: int,  # noqa: ARG002
     ) -> tuple[str, dict[str, str], str]:
-        """Invoke the external visual validation service.
+        """Invoke a configured visual validation service.
 
         Returns (verdict, artifacts, reason).
         Override or mock this method in tests to exercise fail paths.
-        In production this will call an external visual validation service.
 
-        WARNING: This is a placeholder stub. With visual_gate_enabled=True the
-        gate will always pass until this method is connected to a real service.
+        The default implementation intentionally fails closed. HydraFlow does
+        not trust screenshot/pixel-baseline tests as a merge oracle, so enabling
+        the visual gate without wiring a real semantic validator must block.
         """
-        logger.warning(
-            "PR #%d: _invoke_visual_pipeline is a stub — visual gate is not connected "
-            "to a real validation service; verdict will always be 'pass'",
-            pr.number,
+        reason = (
+            "visual gate is enabled but no semantic visual validation service "
+            "is configured"
         )
-        return "pass", {}, "visual validation passed"
+        logger.error(
+            "PR #%d: %s; blocking merge",
+            pr.number,
+            reason,
+        )
+        return "fail", {}, reason
 
     async def _run_ci_wait_attempt(
         self, pr: PRInfo, attempt: int, worker_id: int
