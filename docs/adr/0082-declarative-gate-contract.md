@@ -43,8 +43,11 @@ Subsequent slices, sequenced in the implementing plan, extend the contract witho
 
 - [ADR-0042](0042-two-tier-branch-release-promotion.md) — two-tier branch model; this ADR extends its Enforcement section
 - [ADR-0056](0056-adr-touchpoint-gate-to-caretaker-loop.md) — ADR enforcement moved from a CI gate to the `adr_touchpoint_auditor` loop
-- [ADR-0029](0029-caretaker-loop-pattern.md) — caretaker loop pattern (the future drift-reconciliation loop)
+- [ADR-0029](0029-caretaker-loop-pattern.md) — caretaker loop pattern (the drift-reconciliation loop)
 - `docs/standards/branch_protection/gates.toml` — the contract
 - `scripts/gates/` — loader, resolver, docs-table renderer, validator
 - `scripts/gen_gates.py` — generator CLI; `make gen-gates` / `make gen-gates-check`
 - `.github/workflows/gates-drift.yml` — drift check on every PR
+- `src/branch_protection_auditor_loop.py:BranchProtectionAuditorLoop` — the caretaker loop that audits live protection against the contract and files an issue on drift
+- `src/branch_protection_audit.py:audit_repo` — shared live-vs-canonical audit core (used by the loop and the `setup_branch_protection.py` CLI)
+- `scripts/gates/bootstrap.py` — init-time gate bootstrap (detect profile, resolve, plan section)

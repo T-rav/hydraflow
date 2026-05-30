@@ -351,3 +351,29 @@ jobs:
           path: /tmp/sandbox-results/
           retention-days: 14
 
+  # Umbrella aggregator (ADR-0082 / add-a-gate runbook). One check that rolls up
+  # every conditional CI job. `if: always()` + `needs:` means a path-filtered
+  # SKIPPED job is treated as "passed", so requiring ONLY this single context in
+  # branch protection gives strict gating without the path-filter footgun (a
+  # skipped required check otherwise reads as "not passed" and blocks forever).
+  # Not yet a required check: it must land on the base branch before being
+  # required (see docs/standards/branch_protection/ADDING-A-GATE.md).
+  ci-gate:
+    name: CI Gate
+    runs-on: ubuntu-latest
+    needs: [changes, lint, typecheck, security, test, smoke, scenario, regression, audit, ui-build]
+    if: always()
+    steps:
+      - name: Require all CI jobs to have passed or been skipped
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Upstream job results: $RESULTS"
+          for r in $RESULTS; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              echo "::error::A required CI job did not pass (result=$r)."
+              exit 1
+            fi
+          done
+          echo "All required CI jobs passed or were skipped (path-filtered)."
+

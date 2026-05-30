@@ -593,6 +593,45 @@ def _build_adr_touchpoint_auditor(ports: dict[str, Any], config: Any, deps: Any)
     return loop
 
 
+def _build_branch_protection_auditor(
+    ports: dict[str, Any], config: Any, deps: Any
+) -> Any:
+    """Build BranchProtectionAuditorLoop for scenarios (ADR-0082).
+
+    Tests pre-seed:
+    * ``branch_protection_audit`` → an async auditor returning an ``AuditReport``
+      (replaces the gh-backed live-vs-canonical audit).
+
+    ``dedup`` defaults to a clean-slate MagicMock; override via
+    ``branch_protection_dedup``.
+    """
+    from branch_protection_audit import AuditReport  # noqa: PLC0415
+    from branch_protection_auditor_loop import (  # noqa: PLC0415
+        BranchProtectionAuditorLoop,
+    )
+
+    dedup = ports.get("branch_protection_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["branch_protection_dedup"] = dedup
+
+    auditor = ports.get("branch_protection_audit")
+    if auditor is None:
+        auditor = AsyncMock(return_value=AuditReport(repo="o/r", drifts=[]))
+        ports["branch_protection_audit"] = auditor
+
+    pr_manager = ports.get("pr_manager") or ports["github"]
+
+    return BranchProtectionAuditorLoop(
+        config=config,
+        pr_manager=pr_manager,
+        dedup=dedup,
+        deps=deps,
+        auditor=auditor,
+    )
+
+
 def _build_memory_backlog(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build MemoryBacklogLoop for scenarios (ADR-0057).
 
@@ -1257,6 +1296,7 @@ def _build_triage_retry(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 _BUILDERS: dict[str, Any] = {
     # phase 1
     "ci_monitor": _build_ci_monitor,
+    "branch_protection_auditor": _build_branch_protection_auditor,
     "stale_issue_gc": _build_stale_issue_gc,
     "dependabot_merge": _build_dependabot_merge,
     "pr_unsticker": _build_pr_unsticker,
