@@ -97,7 +97,7 @@ class TestCrashVsNoIssueDistinguishable:
         _track(state, report_a)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "Agent finished — nothing to report."
             result_no_issue = await loop._do_work()
@@ -108,7 +108,7 @@ class TestCrashVsNoIssueDistinguishable:
         _track(state, report_b)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.side_effect = RuntimeError("unexpected crash in agent")
             result_crash = await loop._do_work()
@@ -141,7 +141,7 @@ class TestCrashVsNoIssueDistinguishable:
         _track(state, report)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.side_effect = ValueError("boom")
             result = await loop._do_work()
@@ -175,7 +175,7 @@ class TestCrashVsNoIssueDistinguishable:
         _track(state, report)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "All clear, nothing to file."
             result = await loop._do_work()

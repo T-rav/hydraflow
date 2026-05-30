@@ -519,7 +519,7 @@ class TestGenerate:
         transcript = _make_transcript()
 
         with patch(
-            "acceptance_criteria.stream_claude_process",
+            "runner_utils.stream_claude_process",
             new_callable=AsyncMock,
             return_value=transcript,
         ) as mock_stream:
@@ -560,7 +560,7 @@ class TestGenerate:
 
         with (
             patch(
-                "acceptance_criteria.stream_claude_process",
+                "runner_utils.stream_claude_process",
                 new_callable=AsyncMock,
                 side_effect=RuntimeError("subprocess died"),
             ),
@@ -583,7 +583,7 @@ class TestGenerate:
         issue = IssueFactory.create()
 
         with patch(
-            "acceptance_criteria.stream_claude_process",
+            "runner_utils.stream_claude_process",
             new_callable=AsyncMock,
             return_value="No markers in this output.",
         ):
@@ -612,7 +612,7 @@ class TestGenerate:
             return _make_transcript()
 
         with patch(
-            "acceptance_criteria.stream_claude_process",
+            "runner_utils.stream_claude_process",
             side_effect=capture_prompt,
         ):
             await gen.generate(
@@ -712,7 +712,7 @@ class TestRunPrecheckContext:
 
         # Call the captured execute closure
         with patch(
-            "acceptance_criteria.stream_claude_process",
+            "runner_utils.stream_claude_process",
             new_callable=AsyncMock,
             return_value="transcript",
         ) as mock_stream:
@@ -756,7 +756,7 @@ class TestRunPrecheckContext:
         assert captured_debug["fn"] is not None, "execute_debug must be passed"
 
         with patch(
-            "acceptance_criteria.stream_claude_process",
+            "runner_utils.stream_claude_process",
             new_callable=AsyncMock,
             return_value="debug transcript",
         ) as mock_stream:

@@ -80,7 +80,7 @@ class TestReportIssueLoopDoWork:
         state.enqueue_report(report)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "https://github.com/acme/repo/issues/77"
             result = await loop._do_work()
@@ -106,7 +106,7 @@ class TestReportIssueLoopDoWork:
         state.enqueue_report(report)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "https://github.com/acme/repo/issues/101"
             await loop._do_work()
@@ -123,7 +123,7 @@ class TestReportIssueLoopDoWork:
         state.enqueue_report(report)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "https://github.com/acme/repo/issues/102"
             await loop._do_work()
@@ -141,7 +141,7 @@ class TestReportIssueLoopDoWork:
         state.enqueue_report(report)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.side_effect = RuntimeError("agent died")
             result = await loop._do_work()
@@ -167,7 +167,7 @@ class TestReportIssueLoopDoWork:
         state.enqueue_report(report)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "no url in output"
             result = await loop._do_work()
@@ -202,7 +202,7 @@ class TestReportIssueLoopDoWork:
         state.enqueue_report(report)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "https://github.com/acme/repo/issues/103"
             await loop._do_work()
@@ -220,7 +220,7 @@ class TestReportIssueLoopDoWork:
         state.enqueue_report(report)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "https://github.com/acme/repo/issues/104"
             await loop._do_work()
@@ -241,7 +241,7 @@ class TestReportIssueLoopDoWork:
         state.enqueue_report(report)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "https://github.com/acme/repo/issues/105"
             await loop._do_work()
@@ -262,7 +262,7 @@ class TestReportIssueLoopDoWork:
         state.enqueue_report(report)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "https://github.com/acme/repo/issues/110"
             await loop._do_work()
@@ -283,7 +283,7 @@ class TestReportIssueLoopDoWork:
         state.enqueue_report(report)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "https://github.com/acme/repo/issues/88"
             result = await loop._do_work()
@@ -309,7 +309,7 @@ class TestReportIssueLoopDoWork:
         state.enqueue_report(report)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "https://github.com/acme/repo/issues/99"
             result = await loop._do_work()
@@ -332,7 +332,7 @@ class TestReportIssueLoopDoWork:
         state.enqueue_report(report)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "https://github.com/acme/repo/issues/89"
             result = await loop._do_work()
@@ -356,7 +356,7 @@ class TestReportIssueLoopDoWork:
         state.enqueue_report(report)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "https://github.com/acme/repo/issues/106"
             result = await loop._do_work()
@@ -383,7 +383,7 @@ class TestReportIssueLoopDoWork:
         state.enqueue_report(report)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "https://github.com/acme/repo/issues/107"
             await loop._do_work()
@@ -409,7 +409,7 @@ class TestReportStatusTransitions:
         )
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "https://github.com/acme/repo/issues/42"
             result = await loop._do_work()
@@ -448,7 +448,7 @@ class TestReportStatusTransitions:
             return original_update(report_id, **kwargs)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "https://github.com/acme/repo/issues/55"
             with patch.object(
@@ -468,7 +468,7 @@ class TestReportRetryAndEscalation:
         state.enqueue_report(report)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "no url"
             await loop._do_work()
@@ -486,7 +486,7 @@ class TestReportRetryAndEscalation:
         state.enqueue_report(report)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "no url"
             await loop._do_work()
@@ -511,7 +511,7 @@ class TestReportRetryAndEscalation:
             state.fail_report(report.id)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "no url"
             result = await loop._do_work()
@@ -541,7 +541,7 @@ class TestReportRetryAndEscalation:
         state.fail_report(report.id)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "https://github.com/acme/repo/issues/99"
             result = await loop._do_work()
@@ -565,7 +565,7 @@ class TestReportRetryAndEscalation:
             state.fail_report(report.id)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "no url"
             await loop._do_work()
@@ -600,7 +600,7 @@ class TestHfIssueSkillPrompt:
         state.enqueue_report(report)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "https://github.com/acme/repo/issues/108"
             await loop._do_work()
@@ -621,7 +621,7 @@ class TestHfIssueSkillPrompt:
         state.enqueue_report(report)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "https://github.com/acme/repo/issues/109"
             await loop._do_work()
@@ -650,7 +650,7 @@ class TestHfIssueSkillPrompt:
             return "https://github.com/acme/repo/issues/111"
 
         with patch(
-            "report_issue_loop.stream_claude_process",
+            "runner_utils.stream_claude_process",
             side_effect=capture_prompt,
         ):
             await loop._do_work()
@@ -667,7 +667,7 @@ class TestHfIssueSkillPrompt:
 
         with (
             patch(
-                "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+                "runner_utils.stream_claude_process", new_callable=AsyncMock
             ) as mock_stream,
             patch(
                 "report_issue_loop.build_agent_command",
@@ -693,7 +693,7 @@ class TestHfIssueSkillPrompt:
         state.enqueue_report(report)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.side_effect = RuntimeError("agent died")
             result = await loop._do_work()
@@ -823,7 +823,7 @@ class TestTrackedReportStatusTransitions:
             return "https://github.com/acme/repo/issues/200"
 
         with patch(
-            "report_issue_loop.stream_claude_process",
+            "runner_utils.stream_claude_process",
             side_effect=check_status_during_processing,
         ):
             await loop._do_work()
@@ -835,7 +835,7 @@ class TestTrackedReportStatusTransitions:
         report = _enqueue_with_tracking(state)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "https://github.com/acme/repo/issues/201"
             await loop._do_work()
@@ -851,7 +851,7 @@ class TestTrackedReportStatusTransitions:
         report = _enqueue_with_tracking(state)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "https://github.com/acme/repo/issues/202"
             await loop._do_work()
@@ -872,7 +872,7 @@ class TestTrackedReportStatusTransitions:
             state.fail_report(report.id)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "no url"
             await loop._do_work()
@@ -890,7 +890,7 @@ class TestTrackedReportStatusTransitions:
         report = _enqueue_with_tracking(state)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "no url"
             await loop._do_work()
@@ -906,7 +906,7 @@ class TestTrackedReportStatusTransitions:
         report = _enqueue_with_tracking(state)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "https://github.com/acme/repo/issues/203"
             await loop._do_work()
@@ -924,7 +924,7 @@ class TestTrackedReportStatusTransitions:
         report = _enqueue_with_tracking(state)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "no url"
             await loop._do_work()
@@ -944,7 +944,7 @@ class TestTrackedReportStatusTransitions:
             state.fail_report(report.id)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "no url"
             await loop._do_work()
@@ -964,7 +964,7 @@ class TestTrackedReportStatusTransitions:
         state.enqueue_report(report)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "https://github.com/acme/repo/issues/204"
             result = await loop._do_work()
@@ -983,7 +983,7 @@ class TestTrackedReportStatusTransitions:
         state.enqueue_report(report)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "no url"
             result = await loop._do_work()
@@ -1004,7 +1004,7 @@ class TestTrackedReportStatusTransitions:
         report = _enqueue_with_tracking(state)
 
         with patch(
-            "report_issue_loop.stream_claude_process",
+            "runner_utils.stream_claude_process",
             side_effect=RuntimeError("agent crashed"),
         ):
             result = await loop._do_work()
@@ -1048,7 +1048,7 @@ class TestStartupDrain:
             return f"https://github.com/acme/repo/issues/{100 + len(processed)}"
 
         with patch(
-            "report_issue_loop.stream_claude_process",
+            "runner_utils.stream_claude_process",
             side_effect=fake_stream,
         ):
             # We need super().run() to exit — set stop after drain
@@ -1080,7 +1080,7 @@ class TestStartupDrain:
 
         with (
             patch(
-                "report_issue_loop.stream_claude_process",
+                "runner_utils.stream_claude_process",
                 side_effect=fake_stream,
             ),
             patch.object(loop.__class__.__bases__[0], "run", AsyncMock()),
@@ -1477,7 +1477,7 @@ class TestReportEventPublishing:
             await original_publish(event)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "https://github.com/acme/repo/issues/50"
             with patch.object(loop._bus, "publish", side_effect=capture_publish):
@@ -1510,7 +1510,7 @@ class TestReportEventPublishing:
             await original_publish(event)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "https://github.com/acme/repo/issues/77"
             with patch.object(loop._bus, "publish", side_effect=capture_publish):
@@ -1544,7 +1544,7 @@ class TestReportEventPublishing:
             await original_publish(event)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "no url"
             with patch.object(loop._bus, "publish", side_effect=capture_publish):
@@ -1582,7 +1582,7 @@ class TestReportEventPublishing:
             await original_publish(event)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.return_value = "no url"
             with patch.object(loop._bus, "publish", side_effect=capture_publish):
