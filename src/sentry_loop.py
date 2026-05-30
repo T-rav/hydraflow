@@ -368,7 +368,10 @@ class SentryLoop(BaseBackgroundLoop):
 
         from agent_cli import build_agent_command  # noqa: PLC0415
         from models import TranscriptEventData  # noqa: PLC0415
-        from runner_utils import StreamConfig, stream_claude_process  # noqa: PLC0415
+        from runner_utils import (  # noqa: PLC0415
+            StreamConfig,
+            stream_claude_with_telemetry,
+        )
 
         cmd = build_agent_command(
             tool=self._config.sentry_tool,
@@ -379,7 +382,8 @@ class SentryLoop(BaseBackgroundLoop):
         event_data: TranscriptEventData = {"source": "sentry_ingest"}
 
         try:
-            transcript = await stream_claude_process(
+            transcript = await stream_claude_with_telemetry(
+                config=self._config,
                 cmd=cmd,
                 prompt=prompt,
                 cwd=self._config.repo_root,
@@ -387,7 +391,7 @@ class SentryLoop(BaseBackgroundLoop):
                 event_bus=self._bus,
                 event_data=event_data,
                 logger=logger,
-                config=StreamConfig(
+                stream_config=StreamConfig(
                     runner=self._runner,
                     gh_token=self._credentials.gh_token,
                 ),

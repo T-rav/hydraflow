@@ -12,7 +12,7 @@ from agent_cli import build_agent_command
 from execution import get_default_runner
 from models import VerificationCriteria
 from precheck import run_precheck_context
-from runner_utils import StreamConfig, stream_claude_process, terminate_processes
+from runner_utils import StreamConfig, terminate_processes
 
 if TYPE_CHECKING:
     from config import Credentials, HydraFlowConfig
@@ -84,7 +84,10 @@ class AcceptanceCriteriaGenerator:
         )
         cmd = self._build_command()
 
-        transcript = await stream_claude_process(
+        from runner_utils import stream_claude_with_telemetry  # noqa: PLC0415
+
+        transcript = await stream_claude_with_telemetry(
+            config=self._config,
             cmd=cmd,
             prompt=prompt,
             cwd=self._config.repo_root,
@@ -96,11 +99,13 @@ class AcceptanceCriteriaGenerator:
                 "source": "ac_generator",
             },
             logger=logger,
-            config=StreamConfig(
+            stream_config=StreamConfig(
                 timeout=self._config.agent_timeout,
                 runner=self._runner,
                 gh_token=self._credentials.gh_token,
             ),
+            issue_number=issue_number,
+            pr_number=pr_number,
         )
 
         criteria = self._extract_criteria(transcript, issue_number, pr_number)
@@ -213,6 +218,8 @@ Diff summary:
             issue, issue_number, pr_number, diff_summary
         )
 
+        from runner_utils import stream_claude_with_telemetry  # noqa: PLC0415
+
         _cfg = StreamConfig(
             timeout=self._config.agent_timeout,
             runner=self._runner,
@@ -220,7 +227,8 @@ Diff summary:
         )
 
         async def execute(cmd: list[str], p: str) -> str:
-            return await stream_claude_process(
+            return await stream_claude_with_telemetry(
+                config=self._config,
                 cmd=cmd,
                 prompt=p,
                 cwd=self._config.repo_root,
@@ -232,11 +240,14 @@ Diff summary:
                     "source": "ac_precheck",
                 },
                 logger=logger,
-                config=_cfg,
+                stream_config=_cfg,
+                issue_number=issue_number,
+                pr_number=pr_number,
             )
 
         async def execute_debug(cmd: list[str], p: str) -> str:
-            return await stream_claude_process(
+            return await stream_claude_with_telemetry(
+                config=self._config,
                 cmd=cmd,
                 prompt=p,
                 cwd=self._config.repo_root,
@@ -248,7 +259,9 @@ Diff summary:
                     "source": "ac_precheck_debug",
                 },
                 logger=logger,
-                config=_cfg,
+                stream_config=_cfg,
+                issue_number=issue_number,
+                pr_number=pr_number,
             )
 
         return await run_precheck_context(
