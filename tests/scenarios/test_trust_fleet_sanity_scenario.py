@@ -41,14 +41,13 @@ def _fresh_heartbeat(now: _dt.datetime) -> dict[str, object]:
 
 
 def _healthy_heartbeats(now: _dt.datetime) -> dict[str, dict[str, object]]:
-    """All nine §4.1–§4.9 trust loops reporting fresh heartbeats."""
+    """All active trust loops reporting fresh heartbeats."""
     return {
         name: _fresh_heartbeat(now)
         for name in (
             "corpus_learning",
             "contract_refresh",
             "staging_bisect",
-            "principles_audit",
             "flake_tracker",
             "skill_prompt_eval",
             "fake_coverage_auditor",

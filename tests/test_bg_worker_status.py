@@ -283,7 +283,7 @@ class TestSystemWorkersEndpoint:
 
         response = await endpoint()
         data = json.loads(response.body)
-        assert len(data["workers"]) == 22
+        assert len(data["workers"]) == 21
         names = [w["name"] for w in data["workers"]]
         assert names == [
             "triage",
@@ -300,7 +300,6 @@ class TestSystemWorkersEndpoint:
             "corpus_learning",
             "contract_refresh",
             "staging_bisect",
-            "principles_audit",
             "flake_tracker",
             "skill_prompt_eval",
             "fake_coverage_auditor",

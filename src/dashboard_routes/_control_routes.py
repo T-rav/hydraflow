@@ -123,11 +123,6 @@ _bg_worker_defs = [
         "Bisects RC red between last-green and current-red; opens auto-revert PRs and watches the next RC.",
     ),
     (
-        "principles_audit",
-        "Principles Audit",
-        "Weekly ADR-0044 audit of HydraFlow-self plus managed repos; blocks onboarding on P1–P5 fails.",
-    ),
-    (
         "flake_tracker",
         "Flake Tracker",
         "Detects persistently flaky tests across recent RC runs and files flake-tracker issues.",
@@ -155,7 +150,7 @@ _bg_worker_defs = [
     (
         "trust_fleet_sanity",
         "Trust Fleet Sanity",
-        "Meta-observer — watches the 9 trust loops for stalls, escalation spam, dedup growth, errors, cost spikes.",
+        "Meta-observer — watches trust loops for stalls, escalation spam, dedup growth, errors, cost spikes.",
     ),
     (
         "pricing_refresh",
@@ -178,7 +173,6 @@ _INTERVAL_WORKERS = {
     "corpus_learning",
     "contract_refresh",
     "staging_bisect",
-    "principles_audit",
     "flake_tracker",
     "skill_prompt_eval",
     "fake_coverage_auditor",

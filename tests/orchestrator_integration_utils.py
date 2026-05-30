@@ -489,7 +489,6 @@ def build_scripted_services(
     services.diagnostic_loop = FakeBackgroundLoop()
     services.retrospective_loop = FakeBackgroundLoop()
     # Trust-arch-hardening loops (spec §4.1–§4.9 + §12.1)
-    services.principles_audit_loop = FakeBackgroundLoop()
     services.flake_tracker_loop = FakeBackgroundLoop()
     services.skill_prompt_eval_loop = FakeBackgroundLoop()
     services.fake_coverage_auditor_loop = FakeBackgroundLoop()

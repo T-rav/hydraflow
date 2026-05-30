@@ -17,13 +17,12 @@ from trust_fleet_anomaly_detectors import (
 )
 
 
-def test_trust_loop_workers_contains_nine_spec_workers() -> None:
+def test_trust_loop_workers_contains_expected_spec_workers() -> None:
     """Sanity: the hard-coded watched-worker tuple matches spec §12.2."""
     expected = {
         "corpus_learning",
         "contract_refresh",
         "staging_bisect",
-        "principles_audit",
         "flake_tracker",
         "skill_prompt_eval",
         "fake_coverage_auditor",
