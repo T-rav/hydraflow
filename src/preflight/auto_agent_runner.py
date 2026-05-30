@@ -11,7 +11,7 @@ telemetry, never-raises). Auto-agent-specific concerns:
   disallows the WebFetch/WebSearch egress tools; codex switches to its
   network-blocked ``workspace-write`` sandbox. The ``agent_unrestricted_tools``
   escape hatch reverts to the legacy unrestricted mode.
-- backend-mismatch warning when implementation_tool != "claude"
+- backend-mismatch warning when implementation_tool not in ("claude", "codex")
 - wall-clock cap override (auto_agent_wall_clock_cap_s)
 - result shape: PreflightSpawn (with output_text + tokens fields)
 """
