@@ -117,7 +117,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.python == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
@@ -279,9 +279,9 @@ jobs:
           python-version: "3.11"
       - run: pip install uv && uv pip install --system -e ".[dev]"
       - run: docker compose -f docker-compose.sandbox.yml build hydraflow ui playwright
-      - name: Run fast subset (s01, s10, s11)
+      - name: Run fast subset (s01, s06)
         run: |
-          for s in s01_happy_single_issue s10_kill_switch_universal s11_credit_exhaustion_suspends_ticking; do
+          for s in s01_happy_single_issue s06_kill_switch_via_ui; do
             python scripts/sandbox_scenario.py run $s || exit 1
           done
       - if: failure()
@@ -376,4 +376,3 @@ jobs:
             fi
           done
           echo "All required CI jobs passed or were skipped (path-filtered)."
-

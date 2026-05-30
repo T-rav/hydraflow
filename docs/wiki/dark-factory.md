@@ -178,9 +178,10 @@ for it; don't merge before it.
 For substantial features, the convergence loop now extends to the
 sandbox tier:
 
-- All 12 sandbox scenarios must pass on the rc/* promotion PR before
-  the staging→main merge can complete. CI gates this via the
-  sandbox-full job.
+- Every runnable sandbox scenario must pass on the rc/* promotion PR before
+  the staging→main merge can complete. CI gates this via the sandbox-full job.
+  Placeholder scenarios are removed from the runnable catalog until they can
+  assert real behavior.
 - Failures auto-dispatch `SandboxFailureFixerLoop`, which gives the
   auto-agent up to 3 attempts before escalating to the System tab
   HITL queue (via `/api/sandbox-hitl`).

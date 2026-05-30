@@ -113,6 +113,7 @@ ADR and that named test files actually exist.
 | [0080](0080-epic-monitor-loop.md) | EpicMonitorLoop: Autonomous Stale-Epic Detection and Progress Refresh | Proposed |
 | [0081](0081-epic-sweeper-loop.md) | EpicSweeperLoop: Autonomous Completion-Based Epic Auto-Close | Proposed |
 | [0082](0082-declarative-gate-contract.md) | Declarative Gate Contract for Branch Protection | Proposed |
+| [0083](0083-no-ignored-test-gates.md) | No ignored automated test gates | Accepted |
 
 ## Adding a new ADR
 
