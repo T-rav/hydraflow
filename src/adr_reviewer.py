@@ -15,7 +15,13 @@ from adr_utils import ADR_FILE_RE
 from agent_cli import build_lightweight_command
 from file_util import append_jsonl
 from models import ADRCouncilResult, CouncilVerdict, CouncilVote
-from subprocess_util import make_clean_env
+from subprocess_util import (
+    AuthenticationError,
+    CreditExhaustedError,
+    is_credit_exhaustion,
+    make_clean_env,
+    parse_credit_resume_time,
+)
 
 if TYPE_CHECKING:
     from config import Credentials, HydraFlowConfig
@@ -167,6 +173,14 @@ class ADRCouncilReviewer:
                 stats["reviewed"] += 1
                 stats["rounds_total"] += result.rounds_needed
                 await self._route_result(result, adr_path, adr_dir, stats)
+            except (AuthenticationError, CreditExhaustedError):
+                # Dark-factory contract: a fatal billing/auth signal raised
+                # mid-review must propagate out of review_proposed_adrs so
+                # BaseBackgroundLoop._execute_cycle's dedicated handler can
+                # pause the loop on the signal. (Ordinary per-item failures —
+                # routing bugs, parse errors — are still swallowed below so one
+                # bad ADR does not halt the whole batch.)
+                raise
             except Exception:
                 logger.exception(
                     "ADR-%04d: per-item review failed, continuing", adr_number
@@ -491,6 +505,17 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
                 input=cmd_input,
                 timeout=self._config.agent_timeout,
             )
+            # Dark-factory contract: run_simple surfaces credit-out as rc!=0
+            # (often with a "usage limit reached" blob) without raising.
+            # Convert to CreditExhaustedError so it reaches the loop's
+            # dedicated credit handler instead of degrading to None and
+            # burning attempt budget. Mirrors adversarial_agent_runner.py.
+            for blob in (result.stdout or "", result.stderr or ""):
+                if blob and is_credit_exhaustion(blob):
+                    raise CreditExhaustedError(
+                        "ADR council orchestrator signaled credit exhaustion",
+                        resume_at=parse_credit_resume_time(blob),
+                    )
             if result.returncode != 0:
                 logger.warning(
                     "ADR council orchestrator failed (rc=%d): %s",
