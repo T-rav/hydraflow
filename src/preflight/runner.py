@@ -10,6 +10,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from untrusted_text import UNTRUSTED_DATA_PREAMBLE, fence_untrusted
+
 _PROMPT_DIR = Path(__file__).parent.parent.parent / "prompts" / "auto_agent"
 
 
@@ -51,14 +53,17 @@ def render_prompt(
     envelope = envelope_path.read_text(encoding="utf-8")
     content = content.replace("{{> _envelope.md}}", envelope)
 
-    # Substitute fields
-    return content.format(
+    # Substitute fields. issue_body is attacker-controllable → fence it; the
+    # *_block values are already fenced by render_blocks. Prepend the standing
+    # untrusted-data preamble so the agent treats every <untrusted_*> region as
+    # data, not instructions (ADR-0066).
+    rendered = content.format(
         persona=persona,
         issue_number=issue_number,
         sub_label=sub_label,
         repo_slug=repo_slug,
         worktree_path=worktree_path,
-        issue_body=issue_body,
+        issue_body=fence_untrusted("issue_body", issue_body),
         issue_comments_block=issue_comments_block,
         escalation_context_block=escalation_context_block,
         wiki_excerpts_block=wiki_excerpts_block,
@@ -66,6 +71,7 @@ def render_prompt(
         recent_commits_block=recent_commits_block,
         prior_attempts_block=prior_attempts_block,
     )
+    return f"{UNTRUSTED_DATA_PREAMBLE}\n{rendered}"
 
 
 def render_blocks(
@@ -78,12 +84,22 @@ def render_blocks(
     prior_attempts: list,
 ) -> dict[str, str]:
     """Render the structured-block strings injected into the prompt."""
+    # Attacker-reachable blocks are fenced as untrusted data (ADR-0066). The
+    # escalation context and prior-attempts blocks are system-generated.
     return {
-        "issue_comments_block": _render_comments(issue_comments),
+        "issue_comments_block": fence_untrusted(
+            "issue_comments", _render_comments(issue_comments)
+        ),
         "escalation_context_block": _render_escalation_context(escalation_context),
-        "wiki_excerpts_block": wiki_excerpts or "(no relevant wiki entries found)",
-        "sentry_events_block": _render_sentry(sentry_events),
-        "recent_commits_block": _render_commits(recent_commits),
+        "wiki_excerpts_block": fence_untrusted(
+            "wiki_excerpts", wiki_excerpts or "(no relevant wiki entries found)"
+        ),
+        "sentry_events_block": fence_untrusted(
+            "sentry_events", _render_sentry(sentry_events)
+        ),
+        "recent_commits_block": fence_untrusted(
+            "recent_commits", _render_commits(recent_commits)
+        ),
         "prior_attempts_block": _render_prior_attempts(prior_attempts),
     }
 
