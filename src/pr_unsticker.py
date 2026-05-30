@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agent_cli import build_lightweight_command
+from exception_classify import reraise_on_credit_or_bug
 from models import ConflictResolutionResult, HITLUpdatePayload, PRInfo
 from phase_utils import MemorySuggester
 from prompt_stats import build_prompt_stats, truncate_with_notice
@@ -189,6 +190,22 @@ class PRUnsticker:
         tasks = [asyncio.create_task(_fix_one(item)) for item in batch]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
+        # Dark-factory contract: ``return_exceptions=True`` collects fatal
+        # billing/auth signals alongside ordinary unstick failures. A
+        # CreditExhaustedError (or AuthenticationError) must NOT be folded
+        # into ``stats["failed"]`` — it has to propagate out of ``unstick``
+        # so BaseBackgroundLoop._execute_cycle's dedicated handler can pause
+        # the loop instead of burning attempt budget against an exhausted
+        # signal.
+        from subprocess_util import (  # noqa: PLC0415
+            AuthenticationError,
+            CreditExhaustedError,
+        )
+
+        for result in results:
+            if isinstance(result, AuthenticationError | CreditExhaustedError):
+                raise result
+
         for result in results:
             stats["processed"] += 1
             if isinstance(result, BaseException):
@@ -349,7 +366,12 @@ class PRUnsticker:
                 )
                 return False
 
-        except (OSError, RuntimeError, ValueError, asyncio.CancelledError):
+        except (OSError, RuntimeError, ValueError, asyncio.CancelledError) as exc:
+            # Dark-factory contract: CreditExhaustedError is a RuntimeError and
+            # would otherwise be swallowed here as a recoverable unstick failure,
+            # burning attempt budget against an exhausted billing signal. Reraise
+            # credit/auth/likely-bug so the outer loop can pause.
+            reraise_on_credit_or_bug(exc)
             logger.exception("PR Unsticker failed for issue #%d", issue_number)
             await self._release_back_to_hitl(
                 issue_number,
@@ -465,6 +487,9 @@ class PRUnsticker:
             )
             return False
         except (OSError, RuntimeError, ValueError, asyncio.CancelledError) as exc:
+            # CreditExhaustedError subclasses RuntimeError — reraise it (plus
+            # auth/likely-bug) instead of soft-failing the CI fix attempt.
+            reraise_on_credit_or_bug(exc)
             logger.error(
                 "Unsticker CI fix agent failed for issue #%d: %s",
                 issue_number,
@@ -640,6 +665,10 @@ diff — you may catch things `make quality` won't.
                     verify.summary[:200] if verify.summary else "",
                 )
             except (OSError, RuntimeError, ValueError, asyncio.CancelledError) as exc:
+                # CreditExhaustedError subclasses RuntimeError — reraise it (plus
+                # auth/likely-bug) so the loop pauses instead of burning the
+                # remaining timeout-fix attempts against an exhausted signal.
+                reraise_on_credit_or_bug(exc)
                 logger.error(
                     "Unsticker CI timeout agent failed for issue #%d (attempt %d): %s",
                     issue_number,
@@ -702,6 +731,11 @@ diff — you may catch things `make quality` won't.
                     issue_number,
                 )
         except (RuntimeError, OSError, ImportError) as exc:
+            # CreditExhaustedError (raised by _reflect_on_fix when the cheap
+            # reflection model signals credit-out) subclasses RuntimeError —
+            # reraise it (plus auth/likely-bug) so the billing signal is not
+            # buried under "failed to persist troubleshooting pattern".
+            reraise_on_credit_or_bug(exc)
             logger.warning(
                 "Failed to persist troubleshooting pattern for issue #%d: %s",
                 issue_number,
@@ -765,7 +799,12 @@ TROUBLESHOOTING_PATTERN_END
 
 If nothing novel, output exactly: NO_NEW_PATTERN"""
 
-        from subprocess_util import make_clean_env
+        from subprocess_util import (
+            CreditExhaustedError,
+            is_credit_exhaustion,
+            make_clean_env,
+            parse_credit_resume_time,
+        )
 
         tool = self._config.background_tool
         if tool == "inherit":
@@ -785,6 +824,17 @@ If nothing novel, output exactly: NO_NEW_PATTERN"""
                 input=cmd_input,
                 timeout=60.0,
             )
+            # Dark-factory contract: the lightweight run_simple path surfaces
+            # credit-out as rc!=0 (sometimes with a "usage limit reached" blob)
+            # without raising. Convert that to CreditExhaustedError so the outer
+            # loop pauses on the billing signal instead of silently degrading
+            # reflection to None. Mirrors adversarial_agent_runner.py.
+            for blob in (result.stdout or "", result.stderr or ""):
+                if blob and is_credit_exhaustion(blob):
+                    raise CreditExhaustedError(
+                        "PR unsticker reflection model signaled credit exhaustion",
+                        resume_at=parse_credit_resume_time(blob),
+                    )
             if result.returncode != 0:
                 logger.debug(
                     "Troubleshooting reflection model failed (rc=%d)",

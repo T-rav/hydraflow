@@ -5,6 +5,8 @@ import pytest
 from src.pending_concerns import Concern
 from src.plan_council import CouncilTally, PlanCouncil
 
+from subprocess_util import AuthenticationError, CreditExhaustedError
+
 
 class _ScriptedAgent:
     """Returns a fixed JSON payload and records the user_message it was called with."""
@@ -173,3 +175,64 @@ async def test_pending_concerns_propagate_to_voter_prompts():
         assert "scope unclear" in msg
         assert "PLAN-ASSUMP-002" in msg
         assert "runner must be async" in msg
+
+
+class _RaisingAgent:
+    """An agent whose ``run`` raises a fixed exception."""
+
+    def __init__(self, exc: BaseException):
+        self.exc = exc
+
+    async def run(self, system_prompt: str, user_message: str) -> str:
+        raise self.exc
+
+
+@pytest.mark.asyncio
+async def test_deliberate_reraises_voter_credit_exhaustion():
+    """A voter's CreditExhaustedError must propagate out of deliberate, not be
+    swallowed as a 'crashed voter contributing zero findings'."""
+    council = PlanCouncil(
+        agents={
+            "builder": _ScriptedAgent(_empty_payload()),
+            "tester": _RaisingAgent(
+                CreditExhaustedError("usage limit reached", resume_at=None)
+            ),
+            "risk_skeptic": _ScriptedAgent(_empty_payload()),
+        }
+    )
+
+    with pytest.raises(CreditExhaustedError, match="usage limit reached"):
+        await council.deliberate(plan_text="any plan", pending_concerns=[])
+
+
+@pytest.mark.asyncio
+async def test_deliberate_reraises_voter_authentication_error():
+    """A voter's AuthenticationError must propagate out of deliberate too."""
+    council = PlanCouncil(
+        agents={
+            "builder": _RaisingAgent(AuthenticationError("token expired")),
+            "tester": _ScriptedAgent(_empty_payload()),
+            "risk_skeptic": _ScriptedAgent(_empty_payload()),
+        }
+    )
+
+    with pytest.raises(AuthenticationError, match="token expired"):
+        await council.deliberate(plan_text="any plan", pending_concerns=[])
+
+
+@pytest.mark.asyncio
+async def test_deliberate_still_soft_fails_generic_voter_crash():
+    """A plain RuntimeError from a voter is still swallowed (zero findings),
+    so the council does not over-correct by propagating every error."""
+    council = PlanCouncil(
+        agents={
+            "builder": _ScriptedAgent(_empty_payload()),
+            "tester": _RaisingAgent(RuntimeError("flaky voter")),
+            "risk_skeptic": _ScriptedAgent(_empty_payload()),
+        }
+    )
+
+    tally = await council.deliberate(plan_text="any plan", pending_concerns=[])
+
+    assert tally.should_retry is False
+    assert tally.findings == []

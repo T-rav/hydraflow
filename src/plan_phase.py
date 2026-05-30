@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from analysis import PlanAnalyzer
 from config import HydraFlowConfig
 from events import EventBus
+from exception_classify import reraise_on_credit_or_bug
 from harness_insights import FailureCategory, HarnessInsightStore
 from models import (
     EpicGapReview,
@@ -555,7 +556,13 @@ class PlanPhase:
             )
             try:
                 await self._run_spec_ac_and_judge(issue, adv, result.plan)
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
+                # Dark-factory contract: credit-exhaustion / auth / likely-bug
+                # exceptions MUST propagate so the outer loop pauses on the
+                # billing signal instead of swallowing it and marching the
+                # issue toward 'ready'. Everything else soft-fails (concerns
+                # forward unchanged).
+                reraise_on_credit_or_bug(exc)
                 logger.warning(
                     "SpecAC/Judge stage failed for issue #%d — forwarding "
                     "concerns unchanged",
@@ -1219,7 +1226,11 @@ class PlanPhase:
                             await self._run_assumption_surfacer(
                                 issue, adv, research_context
                             )
-                        except Exception:  # noqa: BLE001
+                        except Exception as exc:  # noqa: BLE001
+                            # Dark-factory contract: credit/auth/likely-bug from
+                            # the surfacer agent must propagate so the loop
+                            # pauses rather than marching the issue forward.
+                            reraise_on_credit_or_bug(exc)
                             logger.warning(
                                 "AssumptionSurfacer failed for issue #%d — "
                                 "forwarding to planner unchanged",
@@ -1272,7 +1283,13 @@ class PlanPhase:
                     ):
                         try:
                             await self._run_plan_council(issue, adv, result.plan)
-                        except Exception:  # noqa: BLE001
+                        except Exception as exc:  # noqa: BLE001
+                            # Dark-factory contract: a voter that exhausted
+                            # credit (re-raised by PlanCouncil.deliberate and
+                            # propagated by AdversarialRetryLoop) MUST surface
+                            # so the loop pauses on the billing signal instead
+                            # of forwarding a half-empty tally toward 'ready'.
+                            reraise_on_credit_or_bug(exc)
                             logger.warning(
                                 "PlanCouncil failed for issue #%d — forwarding "
                                 "concerns unchanged",

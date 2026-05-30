@@ -14,6 +14,7 @@ from config import HydraFlowConfig
 from epic import EpicCompletionChecker
 from events import EventBus, EventType, HydraFlowEvent
 from knowledge_metrics import metrics as _metrics
+from subprocess_util import AuthenticationError, CreditExhaustedError
 
 if TYPE_CHECKING:
     from epic import EpicManager
@@ -490,6 +491,16 @@ class PostMergeHandler:
         try:
             return await coro
         except (RuntimeError, OSError, ValueError) as exc:
+            # CreditExhaustedError / AuthenticationError are RuntimeErrors — let
+            # them propagate so a credit-out during a post-merge hook (e.g.
+            # acceptance-criteria generation, which runs on every merged PR)
+            # pauses the pipeline instead of being recorded as a benign hook
+            # failure and re-spawning against an exhausted billing signal
+            # (dark-factory §2.2). Other failures stay soft: _safe_hook is
+            # deliberately failure-soft for bugs (see
+            # test_safe_hook_still_catches_value_error).
+            if isinstance(exc, CreditExhaustedError | AuthenticationError):
+                raise
             error_msg = str(exc)[:500]
             logger.warning(
                 "%s failed for issue #%d",

@@ -262,6 +262,26 @@ class TestDiagnosticRunner:
         assert "crashed" in result.root_cause.lower()
 
     @pytest.mark.asyncio
+    async def test_diagnose_propagates_credit_exhaustion(
+        self, runner, monkeypatch
+    ) -> None:
+        """A credit-out during diagnosis must propagate, not be swallowed into a
+        graceful DiagnosisResult — otherwise the loop keeps ticking against an
+        exhausted billing signal (dark-factory §2.2)."""
+        from subprocess_util import CreditExhaustedError
+
+        ctx = EscalationContext(cause="CI failed", origin_phase="review")
+
+        async def credit_out(*args, **kwargs):
+            raise CreditExhaustedError("usage limit reached")
+
+        monkeypatch.setattr(runner, "_execute", credit_out)
+        with pytest.raises(CreditExhaustedError):
+            await runner.diagnose(
+                issue_number=42, issue_title="Bug", issue_body="Fix it", context=ctx
+            )
+
+    @pytest.mark.asyncio
     async def test_diagnose_returns_partial_on_validation_failure(
         self, runner, monkeypatch
     ) -> None:

@@ -552,6 +552,24 @@ class TestPostMergeHandler:
         assert result is None
 
     @pytest.mark.asyncio
+    async def test_safe_hook_propagates_credit_exhaustion(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """A credit-out inside a post-merge hook (e.g. acceptance-criteria
+        generation, which runs on every merged PR) must propagate, not be recorded
+        as a benign hook failure — otherwise the pipeline keeps spending against an
+        exhausted billing signal (dark-factory §2.2)."""
+        from subprocess_util import CreditExhaustedError
+
+        handler = _make_handler(config)
+
+        async def _credit_out() -> str:
+            raise CreditExhaustedError("usage limit reached")
+
+        with pytest.raises(CreditExhaustedError):
+            await handler._safe_hook("ac-gen", _credit_out(), issue_number=1)
+
+    @pytest.mark.asyncio
     async def test_safe_hook_logs_warning_on_failure(
         self, config: HydraFlowConfig, caplog: pytest.LogCaptureFixture
     ) -> None:

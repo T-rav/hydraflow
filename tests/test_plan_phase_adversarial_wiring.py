@@ -498,6 +498,96 @@ class TestHitlEscalationClearsAdversarialState:
         assert state.get_adversarial_state(99) is None
 
 
+class TestPlanPhaseCreditExhaustionPropagates:
+    """Dark-factory contract: a credit-out anywhere in the adversarial
+    pipeline must propagate out of ``plan_issues`` so the outer loop can
+    pause on the billing signal — NOT be swallowed and march the issue
+    toward 'ready'. Regression for W2MS-02.
+    """
+
+    @pytest.mark.asyncio
+    async def test_spec_judge_credit_exhaustion_propagates(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """A CreditExhaustedError from the spec-judge agent must propagate."""
+        from subprocess_util import CreditExhaustedError
+
+        rec, agents = _make_recording_agents()
+
+        async def _judge_credit_out(_system: str, _user: str) -> str:
+            raise CreditExhaustedError("usage limit reached", resume_at=None)
+
+        agents["spec_judge"].run = _judge_credit_out
+
+        phase, _state, planners, _prs, store, _stop = make_plan_phase(config)
+        phase.attach_adversarial_agents(
+            surfacer_agent=agents["surfacer"],
+            council_agents={
+                "builder": agents["council_builder"],
+                "tester": agents["council_tester"],
+                "risk_skeptic": agents["council_risk_skeptic"],
+            },
+            spec_ac_agent=agents["spec_ac"],
+            spec_judge_agent=agents["spec_judge"],
+        )
+
+        async def _planner_plan(*_args, **_kwargs):
+            return PlanResultFactory.create(
+                issue_number=42,
+                success=True,
+                plan="Step 1: Do the thing\nStep 2: Verify",
+                summary="Done",
+                use_defaults=True,
+            )
+
+        planners.plan = _planner_plan
+        store.get_plannable = supply_once([TaskFactory.create(id=42)])
+
+        with pytest.raises(CreditExhaustedError, match="usage limit reached"):
+            await phase.plan_issues()
+
+    @pytest.mark.asyncio
+    async def test_council_voter_credit_exhaustion_propagates(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """A CreditExhaustedError from a PlanCouncil voter must propagate."""
+        from subprocess_util import CreditExhaustedError
+
+        _rec, agents = _make_recording_agents()
+
+        async def _voter_credit_out(_system: str, _user: str) -> str:
+            raise CreditExhaustedError("usage limit reached", resume_at=None)
+
+        agents["council_tester"].run = _voter_credit_out
+
+        phase, _state, planners, _prs, store, _stop = make_plan_phase(config)
+        phase.attach_adversarial_agents(
+            surfacer_agent=agents["surfacer"],
+            council_agents={
+                "builder": agents["council_builder"],
+                "tester": agents["council_tester"],
+                "risk_skeptic": agents["council_risk_skeptic"],
+            },
+            spec_ac_agent=agents["spec_ac"],
+            spec_judge_agent=agents["spec_judge"],
+        )
+
+        async def _planner_plan(*_args, **_kwargs):
+            return PlanResultFactory.create(
+                issue_number=43,
+                success=True,
+                plan="Step 1: Do the thing\nStep 2: Verify",
+                summary="Done",
+                use_defaults=True,
+            )
+
+        planners.plan = _planner_plan
+        store.get_plannable = supply_once([TaskFactory.create(id=43)])
+
+        with pytest.raises(CreditExhaustedError, match="usage limit reached"):
+            await phase.plan_issues()
+
+
 # Avoid pytest collection warning by referencing asyncio so the
 # `from asyncio` import does not appear unused on some pytest versions.
 _ = asyncio
