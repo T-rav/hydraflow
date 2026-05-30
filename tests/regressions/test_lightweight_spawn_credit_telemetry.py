@@ -150,10 +150,13 @@ class TestTermProposerCreditDetection:
 
 
 class TestCostRollupCountsEstimatedSpend:
-    """WS-2.2 self-review S2: the cost-cap rollup re-prices from token counts, so a
-    char-estimated lightweight row (0 actual tokens) must fall back to the stored
-    estimated_cost_usd — otherwise lightweight spend re-prices to $0 and never
-    counts toward the daily cost cap."""
+    """WS-2.2 self-review S2: the cost-cap rollup re-prices from token counts, so any
+    row whose actual token usage was unavailable at record time (0 actual tokens) must
+    fall back to the stored estimated_cost_usd — otherwise that spend re-prices to $0
+    and never counts toward the daily cost cap. Live data shows this is dominated by
+    heavy pipeline runners (planner/researcher/implementer/reviewer/...), not just the
+    lightweight run_simple path, so the fallback keys on tokens + stored estimate with
+    no source filter."""
 
     def test_char_estimated_row_counts_via_stored_estimate(self, tmp_path) -> None:
         import json
@@ -174,6 +177,18 @@ class TestCostRollupCountsEstimatedSpend:
                 "input_tokens": 0,
                 "output_tokens": 0,
                 "estimated_cost_usd": 0.05,
+            },
+            # char-estimated HEAVY PIPELINE row (planner): also 0 actual tokens with a
+            # stored estimate > 0. Live data shows the bulk of estimated-token rows are
+            # pipeline runners, not the lightweight path, so the fallback must count
+            # them too — no source filter.
+            {
+                "timestamp": "2026-05-30T12:02:00+00:00",
+                "model": "claude-sonnet-4-5",
+                "source": "planner",
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "estimated_cost_usd": 0.12,
             },
             # genuinely-zero row: no actual tokens AND no stored estimate -> stays 0
             {
@@ -196,9 +211,16 @@ class TestCostRollupCountsEstimatedSpend:
         )
 
         costs = sorted(r["cost_usd"] for r in priced)
-        assert costs == [0.0, 0.05], (
-            "char-estimated row must contribute its stored estimate to the cost cap; "
-            f"got {costs}"
+        assert costs == [0.0, 0.05, 0.12], (
+            "char-estimated rows (both lightweight and heavy-pipeline sources) must "
+            f"contribute their stored estimate to the cost cap; got {costs}"
+        )
+
+        # The heavy-pipeline planner row specifically must re-price to its estimate.
+        planner = next(r for r in priced if r.get("source") == "planner")
+        assert planner["cost_usd"] == 0.12, (
+            "a heavy-pipeline (planner) char-estimated row must fall back to its "
+            f"stored estimate, not re-price to $0; got {planner['cost_usd']}"
         )
 
 

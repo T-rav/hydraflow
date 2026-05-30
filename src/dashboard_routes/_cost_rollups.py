@@ -136,9 +136,11 @@ def iter_priced_inferences(
                     cache_read_tokens=int(rec.get("cache_read_input_tokens", 0) or 0),
                 )
                 priced = round(cost, 6) if cost is not None else 0.0
-                # Char-estimated rows (the run_simple lightweight spawn path)
-                # carry no actual token counts, so re-pricing from tokens yields
-                # 0. Fall back to the stored char-based estimate so that spend
+                # Rows whose actual token usage was unavailable at record time
+                # (token_source=estimated) re-price to 0 from tokens. This is
+                # dominated by heavy pipeline runners (planner/researcher/
+                # implementer/reviewer/...), not just the lightweight run_simple
+                # path. Fall back to the stored char-based estimate so that spend
                 # still counts toward the daily cost cap (WS-2.2 self-review S2).
                 if priced == 0.0 and input_tok == 0 and output_tok == 0:
                     stored = rec.get("estimated_cost_usd")

@@ -20,6 +20,7 @@ from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import Credentials, HydraFlowConfig
 from dedup_store import DedupStore
 from exception_classify import reraise_on_credit_or_bug
+from subprocess_util import AuthenticationError, CreditExhaustedError
 
 if TYPE_CHECKING:
     from execution import SubprocessRunner
@@ -118,6 +119,13 @@ class SentryLoop(BaseBackgroundLoop):
                     created, skipped = await self._process_issue(
                         issue, project["slug"], min_events
                     )
+                except (AuthenticationError, CreditExhaustedError):
+                    # Billing/auth -> propagate so the supervised loop pauses
+                    # (BaseBackgroundLoop). This per-issue loop is the resilience
+                    # boundary: malformed per-issue data (e.g. a non-numeric event
+                    # count, issue #6963) must stay tolerated below, NOT crash the
+                    # tick — so reraise credit/auth ONLY, not all likely-bugs.
+                    raise
                 except Exception:  # noqa: BLE001
                     logger.warning(
                         "Sentry issue processing failed — skipping: %s",
