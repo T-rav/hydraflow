@@ -593,6 +593,9 @@ class TestVisualGate:
         phase = make_review_phase(cfg, default_mocks=True)
         phase._bus.publish = AsyncMock()
         phase._prs.post_pr_comment = AsyncMock()
+        phase._invoke_visual_pipeline = AsyncMock(
+            return_value=("pass", {}, "semantic checks passed")
+        )
         pr = PRInfoFactory.create()
         issue = TaskFactory.create()
         result = ReviewResultFactory.create()
@@ -616,6 +619,9 @@ class TestVisualGate:
         phase = make_review_phase(cfg, default_mocks=True)
         phase._bus.publish = AsyncMock()
         phase._prs.post_pr_comment = AsyncMock()
+        phase._invoke_visual_pipeline = AsyncMock(
+            return_value=("pass", {}, "semantic checks passed")
+        )
         pr = PRInfoFactory.create()
         issue = TaskFactory.create()
         result = ReviewResultFactory.create()
@@ -628,6 +634,35 @@ class TestVisualGate:
         assert "verdict" in event_data
         assert "retries" in event_data
         assert event_data["verdict"] == "pass"
+
+    @pytest.mark.asyncio
+    async def test_enabled_without_pipeline_fails_closed(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """A bare enabled visual gate must block instead of trusting a stub."""
+        cfg = ConfigFactory.create(
+            visual_gate_enabled=True,
+            visual_gate_bypass=False,
+            repo_root=config.repo_root,
+            workspace_base=config.workspace_base,
+            state_file=config.state_file,
+        )
+        phase = make_review_phase(cfg, default_mocks=True)
+        phase._bus.publish = AsyncMock()
+        phase._prs.post_pr_comment = AsyncMock()
+        phase._escalate_to_hitl = AsyncMock()
+        pr = PRInfoFactory.create()
+        issue = TaskFactory.create()
+        result = ReviewResultFactory.create()
+
+        ok = await phase.check_visual_gate(pr, issue, result, worker_id=0)
+
+        assert ok is False
+        assert result.visual_passed is False
+        phase._escalate_to_hitl.assert_awaited_once()
+        event_data = phase._bus.publish.call_args.args[0].data
+        assert event_data["verdict"] == "fail"
+        assert "no semantic visual validation service" in event_data["reason"]
 
     @pytest.mark.asyncio
     async def test_handle_approved_merge_passes_visual_gate_fn(

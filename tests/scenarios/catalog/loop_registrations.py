@@ -133,8 +133,11 @@ def _build_retrospective(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 def _build_adr_reviewer(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from adr_reviewer_loop import ADRReviewerLoop  # noqa: PLC0415
 
-    adr_reviewer = ports.get("adr_reviewer") or MagicMock()
-    ports.setdefault("adr_reviewer", adr_reviewer)
+    adr_reviewer = ports.get("adr_reviewer")
+    if adr_reviewer is None:
+        adr_reviewer = MagicMock()
+        adr_reviewer.review_proposed_adrs = AsyncMock(return_value={"reviewed": 0})
+        ports["adr_reviewer"] = adr_reviewer
     return ADRReviewerLoop(config=config, adr_reviewer=adr_reviewer, deps=deps)
 
 
@@ -200,10 +203,17 @@ def _build_report_issue(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 def _build_epic_sweeper(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from epic_sweeper_loop import EpicSweeperLoop  # noqa: PLC0415
 
-    fetcher = ports.get("issue_fetcher") or MagicMock()
-    state = ports.get("epic_sweeper_state") or MagicMock()
-    ports.setdefault("issue_fetcher", fetcher)
-    ports.setdefault("epic_sweeper_state", state)
+    fetcher = ports.get("issue_fetcher")
+    if fetcher is None:
+        fetcher = MagicMock()
+        fetcher.fetch_issues_by_labels = AsyncMock(return_value=[])
+        fetcher.fetch_issue_by_number = AsyncMock(return_value=None)
+        ports["issue_fetcher"] = fetcher
+    state = ports.get("epic_sweeper_state")
+    if state is None:
+        state = MagicMock()
+        state.get_epic_state.return_value = None
+        ports["epic_sweeper_state"] = state
     return EpicSweeperLoop(
         config=config,
         fetcher=fetcher,
@@ -237,8 +247,13 @@ def _build_stale_issue(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 def _build_epic_monitor(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from epic_monitor_loop import EpicMonitorLoop  # noqa: PLC0415
 
-    epic_manager = ports.get("epic_manager") or MagicMock()
-    ports.setdefault("epic_manager", epic_manager)
+    epic_manager = ports.get("epic_manager")
+    if epic_manager is None:
+        epic_manager = MagicMock()
+        epic_manager.check_stale_epics = AsyncMock(return_value=[])
+        epic_manager.refresh_cache = AsyncMock(return_value=None)
+        epic_manager.get_all_progress.return_value = {}
+        ports["epic_manager"] = epic_manager
     return EpicMonitorLoop(config=config, epic_manager=epic_manager, deps=deps)
 
 

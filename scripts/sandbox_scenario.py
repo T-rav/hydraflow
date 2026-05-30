@@ -174,12 +174,9 @@ def cmd_run_all() -> int:
     """Iterate every scenario; print summary; exit nonzero on any failure."""
     from tests.sandbox_scenarios.runner.loader import load_all_scenarios
 
-    scenarios = load_all_scenarios()
+    scenarios = [s for s in load_all_scenarios() if hasattr(s, "assert_outcome")]
     results: list[tuple[str, int, float]] = []
     for s in scenarios:
-        if s.NAME == "s00_smoke":
-            print(f"SKIPPED {s.NAME} (parity-only, no Tier-2 implementation)")
-            continue
         start = time.monotonic()
         rc = cmd_run(s.NAME)
         elapsed = time.monotonic() - start

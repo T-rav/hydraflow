@@ -45,7 +45,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `SentryLoop` | ✅ [0055] | ✅ [sentry-loop.md] | ❌ | ✅ README.md | ✅ `test_sentry_loop.py` | ❌ | ❌ |
 | `SkillPromptEvalLoop` | ✅ [0045] | ✅ [skill-prompt-eval-loop.md] | ❌ | ✅ README.md | ✅ `test_skill_prompt_eval_loop.py` | ✅ in catalog | ✅ `s17_skill_prompt_eval_clean_corpus.py` |
 | `StagingBisectLoop` | ✅ [0045, 0048, 0063] | ✅ [architecture.md] | ❌ | ✅ README.md | ✅ `test_staging_bisect_loop.py` | ✅ in catalog | ❌ |
-| `StagingPromotionLoop` | ✅ [0042] | ✅ [patterns.md] | ❌ | ✅ README.md | ✅ `test_staging_promotion_loop.py` | ✅ in catalog | ✅ `s13_rc_rebase_recovery.py` |
+| `StagingPromotionLoop` | ✅ [0042] | ✅ [patterns.md] | ❌ | ✅ README.md | ✅ `test_staging_promotion_loop.py` | ✅ in catalog | ❌ |
 | `StaleIssueGCLoop` | ✅ [0029, 0072] | ✅ [gotchas.md, stale-issue-gc-loop.md] | ❌ | ✅ README.md | ✅ `test_stale_issue_gc_loop.py` | ✅ in catalog | ❌ |
 | `StaleIssueLoop` | ✅ [0072] | ✅ [gotchas.md, stale-issue-gc-loop.md] | ❌ | ✅ README.md | ✅ `test_stale_issue_loop.py` | ✅ in catalog | ✅ `s16_stale_issue_scan.py` |
 | `TermProposerLoop` | ✅ [0054, 0057, 0060, 0061, 0062, 0068] | ✅ [bot-pr-port.md, entry-evidence-loop.md, task.md, term-pruner-loop.md] | ❌ | ✅ README.md | ✅ `test_term_proposer_loop.py` | ✅ in catalog | ❌ |
@@ -53,7 +53,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `TriageRetryLoop` | ✅ [0063] | ❌ | ❌ | ✅ README.md | ✅ `test_triage_retry_loop.py` | ✅ in catalog | ❌ |
 | `TrustFleetSanityLoop` | ✅ [0045, 0046] | ✅ [testing.md] | ❌ | ✅ README.md | ✅ `test_trust_fleet_sanity_loop.py` | ✅ in catalog | ❌ |
 | `WikiRotDetectorLoop` | ✅ [0045, 0056, 0057] | ✅ [wiki-rot-detector-loop.md] | ❌ | ✅ README.md | ✅ `test_wiki_rot_detector_loop.py` | ✅ in catalog | ❌ |
-| `WorkspaceGCLoop` | ✅ [0069] | ✅ [workspace-gc-loop.md] | ❌ | ✅ README.md | ✅ `test_workspace_gc_loop.py` | ⚠️ in catalog (no scenario file) | ✅ `s07_workspace_gc_reaps_dead_worktree.py` |
+| `WorkspaceGCLoop` | ✅ [0069] | ✅ [workspace-gc-loop.md] | ❌ | ✅ README.md | ✅ `test_workspace_gc_loop.py` | ⚠️ in catalog (no scenario file) | ❌ |
 ## Section 2: Ports
 
 Cassette and Contract columns are N/A for all ports (ADR-0047 contracts are
@@ -77,4 +77,4 @@ HITL trigger). It is not regenerable from source and is maintained in
 `docs/arch/coverage_matrix.md` (the hand-curated baseline document).
 
 
-_Regenerated from commit `2efdbb1` on 2026-05-20 19:59 UTC. Source last changed at `2efdbb1`. Status: 🟢 fresh._
+_Regenerated from commit `53226f9` on 2026-05-30 03:23 UTC. Source last changed at `53226f9`. Status: 🟢 fresh._

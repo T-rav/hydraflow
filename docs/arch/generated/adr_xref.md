@@ -92,6 +92,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0079 | `src.adr_reviewer`, `src.adr_reviewer_loop` |
 | ADR-0080 | `src.epic`, `src.epic_monitor_loop` |
 | ADR-0081 | `src.epic`, `src.epic_sweeper_loop` |
+| ADR-0083 | — |
 
 ## Module → ADRs
 
@@ -241,4 +242,4 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.workspace_gc_loop` | ADR-0069 |
 | `src.worktree` | ADR-0003, ADR-0009, ADR-0010 |
 
-_Regenerated from commit `2efdbb1` on 2026-05-20 19:59 UTC. Source last changed at `2efdbb1`. Status: 🟢 fresh._
+_Regenerated from commit `53226f9` on 2026-05-30 03:23 UTC. Source last changed at `53226f9`. Status: 🟢 fresh._

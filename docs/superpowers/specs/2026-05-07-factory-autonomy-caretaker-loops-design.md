@@ -190,7 +190,9 @@ If the heuristic is uncertain, default to NEEDS_REVIEW. False negatives (auto-ap
 | `BaseBranchAutoRetargeter` | `tests/test_base_branch_autoretarget_loop.py` | `tests/scenarios/test_base_branch_autoretarget_scenario.py` | `tests/sandbox_scenarios/scenarios/sNN_base_branch_retarget.py` |
 | `SkipADRAdvisor` | `tests/test_skip_adr_advisor_loop.py` (incl. classifier) | `tests/scenarios/test_skip_adr_advisor_scenario.py` | `tests/sandbox_scenarios/scenarios/sNN_skip_adr_advisor.py` |
 
-Sandbox scenarios may ship as placeholders if the harness needs work (per the s10/s11/s13 pattern), with a `hydraflow-find` issue for the harness gap.
+Sandbox scenarios may not ship as placeholders. ADR-0083 requires removing
+non-working sandbox scenarios from the runnable catalog until they can assert
+real behavior.
 
 ## 5. Data Flow
 
@@ -249,7 +251,7 @@ Cadence: every 300s = 12 ticks/hour = 288 ticks/day per loop. Most ticks find ze
 | # | Decision | Rationale |
 |---|---|---|
 | D1 | Three separate loops, not one combined `FactoryAutonomyLoop` | Each has different trigger sources, different test surfaces, different kill-switches. Combining would conflate observability. |
-| D2 | Sandbox e2e tests OK to ship as placeholders | Per s10/s11/s13 precedent; harness gaps tracked as find-issues; loop coverage at unit + scenario layers is the safety bar. |
+| D2 | Sandbox e2e tests must be executable contracts | ADR-0083 supersedes the old placeholder precedent; harness gaps are tracked as issues, not green tests. |
 | D3 | Touchpoint classifier defaults to NEEDS_REVIEW | False negatives (auto-bypass when human should review) violate the autonomy directive's escape hatch ("when in doubt, escalate"). |
 | D4 | Process markers are GitHub labels, not state-tracker entries | Labels are visible in the GitHub UI, survive orchestrator restart, easy for humans to remove for re-processing. |
 | D5 | Defer `LessonsCaretakerLoop` to follow-up spec | These three give us 4 weeks of mining-source data first. Build the meta-loop on evidence. |

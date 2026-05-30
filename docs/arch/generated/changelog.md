@@ -4,8 +4,14 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W22
+
+- `53226f9` — test: enforce non-ignored sandbox coverage *(2026-05-29)*
+
 ## 2026-W21
 
+- `60d07b4` — feat(mockworld): FakeDocker bd-CLI emulation for bead lifecycle coverage (closes #8367) (#9053) (#9053) *(2026-05-21)*
+- `4afc722` — chore(arch): regen post-rebase against staging *(2026-05-20)*
 - `2efdbb1` — chore(arch): regen post-rebase against staging *(2026-05-20)*
 - `fecc6a8` — chore(arch): regen post-rebase against staging *(2026-05-20)*
 - `10e9737` — chore(arch): regen post-rebase against staging *(2026-05-20)*
@@ -373,11 +379,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `522e013` — Fixes #1701: ADR-0009 epic release creation architecture (#1739) (#1739) *(2026-03-01)*
 - `961b141` — Fixes #1677: add ADR-0009 for worktree and path isolation architecture (#1683) (#1683) *(2026-03-01)*
 - `7c6fe67` — Fixes #1634: add ADR-0009 for multi-repo process-per-repo model (#1679) (#1679) *(2026-03-01)*
-- `35aa37a` — docs: add ADR-0008 for multi-repo dashboard architecture (#1648) (#1648) *(2026-02-28)*
-- `780b17c` — docs: add ADR-0007 for dashboard API multi-repo scoping (#1647) (#1647) *(2026-02-28)*
-- `83730be` — docs: add ADR-0006 for RepoRuntime isolation architecture (#1646) (#1646) *(2026-02-28)*
-- `bbc273d` — docs: add ADR-0005 for PR recovery and zero-diff branch handling (#1307) (#1307) *(2026-02-26)*
-- `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `2efdbb1` on 2026-05-20 19:59 UTC. Source last changed at `2efdbb1`. Status: 🟢 fresh._
+_Regenerated from commit `53226f9` on 2026-05-30 03:23 UTC. Source last changed at `53226f9`. Status: 🟢 fresh._
