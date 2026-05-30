@@ -134,6 +134,23 @@ class TestBuildCommand:
         assert "--skip-git-repo-check" in cmd
         assert "--ask-for-approval" not in cmd
 
+    def test_build_command_claude_restricted_against_injection(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """ADR-0082 / W7-TA-2: the implementer is an issue-derived spawn, so the
+        default claude command goes through the real runner._build_command in
+        restricted mode — --permission-mode acceptEdits, an --allowedTools
+        allowlist, and NO bypassPermissions. Symmetric with the codex
+        runner-level test above.
+        """
+        runner = AgentRunner(config, event_bus)
+        cmd = runner._build_command(tmp_path)
+        assert cmd[0] == "claude"
+        assert "--permission-mode" in cmd
+        assert cmd[cmd.index("--permission-mode") + 1] == "acceptEdits"
+        assert "bypassPermissions" not in cmd
+        assert "--allowedTools" in cmd
+
 
 # ---------------------------------------------------------------------------
 # AgentRunner._build_prompt_with_stats

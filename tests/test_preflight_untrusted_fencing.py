@@ -18,8 +18,10 @@ def test_render_blocks_fences_untrusted_sources() -> None:
     assert "<untrusted_wiki_excerpts>" in blocks["wiki_excerpts_block"]
     assert "<untrusted_sentry_events>" in blocks["sentry_events_block"]
     assert "<untrusted_recent_commits>" in blocks["recent_commits_block"]
-    # System-generated blocks are not fenced.
-    assert "<untrusted_" not in blocks["escalation_context_block"]
+    # W7FR-3: the escalation context carries attacker-derived agent_transcript
+    # and ci_logs, so the whole rendered block is fenced now.
+    assert "<untrusted_escalation_context>" in blocks["escalation_context_block"]
+    # The prior-attempts block is fully system-generated and stays unfenced.
     assert "<untrusted_" not in blocks["prior_attempts_block"]
 
 

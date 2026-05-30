@@ -85,12 +85,17 @@ def render_blocks(
 ) -> dict[str, str]:
     """Render the structured-block strings injected into the prompt."""
     # Attacker-reachable blocks are fenced as untrusted data (ADR-0082). The
-    # escalation context and prior-attempts blocks are system-generated.
+    # escalation context is fenced too: cause/origin_phase/pr_number are
+    # system-set, but agent_transcript and ci_logs are attacker-derived, so the
+    # whole rendered block is wrapped (W7FR-3). The prior-attempts block is
+    # system-generated and stays unfenced.
     return {
         "issue_comments_block": fence_untrusted(
             "issue_comments", _render_comments(issue_comments)
         ),
-        "escalation_context_block": _render_escalation_context(escalation_context),
+        "escalation_context_block": fence_untrusted(
+            "escalation_context", _render_escalation_context(escalation_context)
+        ),
         "wiki_excerpts_block": fence_untrusted(
             "wiki_excerpts", wiki_excerpts or "(no relevant wiki entries found)"
         ),
