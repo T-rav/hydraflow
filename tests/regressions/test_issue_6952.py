@@ -53,15 +53,15 @@ class TestFixPropagatesAuthErrors:
     """Issue #6952 — AuthenticationError must not be swallowed by fix()."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6952 — fix not yet landed", strict=False)
     async def test_fix_propagates_authentication_error(
         self, runner, sample_diagnosis, monkeypatch
     ) -> None:
         """When ``_execute`` raises ``AuthenticationError``, ``fix()`` must
         let it propagate instead of returning ``(False, "Fix agent crashed")``.
 
-        RED today — the except-Exception block at diagnostic_runner.py:187
-        catches ``AuthenticationError`` (a ``RuntimeError`` subclass).
+        Hard-asserts the #6952 fix: the except-Exception block in
+        ``DiagnosticRunner.fix`` must re-raise ``AuthenticationError`` (a
+        ``RuntimeError`` subclass), not swallow it.
         """
 
         async def raise_auth(*_args, **_kwargs):
@@ -79,14 +79,14 @@ class TestFixPropagatesAuthErrors:
             )
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6952 — fix not yet landed", strict=False)
     async def test_fix_propagates_credit_exhausted_error(
         self, runner, sample_diagnosis, monkeypatch
     ) -> None:
         """When ``_execute`` raises ``CreditExhaustedError``, ``fix()`` must
         let it propagate instead of returning ``(False, "Fix agent crashed")``.
 
-        RED today — same catch-all swallows ``CreditExhaustedError``.
+        Hard-asserts the #6952 fix: the same catch-all must re-raise
+        ``CreditExhaustedError`` rather than swallow it.
         """
 
         async def raise_credits(*_args, **_kwargs):
@@ -105,16 +105,15 @@ class TestFixPropagatesAuthErrors:
 
 
 class TestDiagnosePropagatesAuthErrors:
-    """Issue #6952 — diagnose() has the same pattern; verify it's also broken."""
+    """Issue #6952 — diagnose() must re-raise auth/credit errors too."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6952 — fix not yet landed", strict=False)
     async def test_diagnose_propagates_authentication_error(
         self, runner, monkeypatch
     ) -> None:
-        """``diagnose()`` also has ``except Exception`` that swallows auth errors.
+        """``diagnose()`` must also re-raise auth errors, not swallow them.
 
-        RED today — diagnostic_runner.py:121-124 has the same bug.
+        Hard-asserts the #6952 fix on the ``diagnose()`` catch-all.
         """
         from models import EscalationContext
 
@@ -134,13 +133,12 @@ class TestDiagnosePropagatesAuthErrors:
             )
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6952 — fix not yet landed", strict=False)
     async def test_diagnose_propagates_credit_exhausted_error(
         self, runner, monkeypatch
     ) -> None:
-        """``diagnose()`` also swallows ``CreditExhaustedError``.
+        """``diagnose()`` must re-raise ``CreditExhaustedError``.
 
-        RED today — same catch-all pattern.
+        Hard-asserts the #6952 fix on the ``diagnose()`` catch-all.
         """
         from models import EscalationContext
 
