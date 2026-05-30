@@ -1787,6 +1787,7 @@ class StateData(BaseModel):
     metrics_last_synced: str | None = None
     worker_intervals: dict[str, int] = Field(default_factory=dict)
     disabled_workers: list[str] = Field(default_factory=list)
+    default_disabled_workers_seeded: list[str] = Field(default_factory=list)
     cost_budget_killed_workers: list[str] = Field(
         default_factory=list,
         description=(

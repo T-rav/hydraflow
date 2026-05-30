@@ -461,6 +461,11 @@ class TestWorkerStateMixin:
         t.set_disabled_workers({"loop_a", "loop_b"})
         assert t.get_disabled_workers() == {"loop_a", "loop_b"}
 
+    def test_default_disabled_workers_seeded(self, tmp_path: Path) -> None:
+        t = make_tracker(tmp_path)
+        t.set_default_disabled_workers_seeded({"principles_audit"})
+        assert t.get_default_disabled_workers_seeded() == {"principles_audit"}
+
     def test_worker_heartbeat(self, tmp_path: Path) -> None:
         t = make_tracker(tmp_path)
         t.set_worker_heartbeat(

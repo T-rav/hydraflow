@@ -517,9 +517,19 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             except Exception:  # pragma: no cover - defensive guard
                 logger.exception("Failed to load persisted bg worker states")
         inference_by_worker = _build_system_worker_inference_stats()
+        disabled_workers: set[str] = set()
+        if not orch:
+            try:
+                disabled_workers = _state.get_disabled_workers()
+            except Exception:  # pragma: no cover - defensive guard
+                logger.exception("Failed to load persisted disabled workers")
         workers = []
         for name, label, description in _bg_worker_defs:
-            enabled = orch.is_bg_worker_enabled(name) if orch else True
+            enabled = (
+                orch.is_bg_worker_enabled(name)
+                if orch
+                else name not in disabled_workers
+            )
 
             # Determine interval for this worker
             interval: int | None = None
