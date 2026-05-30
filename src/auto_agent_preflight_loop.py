@@ -137,10 +137,25 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         sub_labels = sorted(labels - {"hitl-escalation"})
         sub_label = sub_labels[0] if sub_labels else "_default"
 
-        # Sub-label deny-list.
-        if sub_label in self._config.auto_agent_skip_sublabels:
+        # Sub-label deny-list (recursion safety, dark-factory §2.7). The skip-list
+        # is unprefixed (e.g. "principles-stuck") while escalation labels carry the
+        # `hydraflow-` prefix, so compare on the prefix-stripped form — otherwise
+        # the guard never matches and the auto-agent acts on the very escalations
+        # (principles/cultural) it must defer to a human. Check EVERY sub-label,
+        # not just sub_labels[0], so a deny-listed label can't slip through by
+        # losing the alphabetical sort.
+        denied = next(
+            (
+                s
+                for s in sub_labels
+                if s.removeprefix("hydraflow-")
+                in self._config.auto_agent_skip_sublabels
+            ),
+            None,
+        )
+        if denied is not None:
             await self._prs.add_labels(issue_number, ["human-required"])
-            self._audit_store.append(_skip_audit(issue_number, sub_label, "deny_list"))
+            self._audit_store.append(_skip_audit(issue_number, denied, "deny_list"))
             return {"status": "skipped_deny_list"}
 
         # Attempt-cap check.
