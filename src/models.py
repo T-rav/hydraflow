@@ -2628,6 +2628,10 @@ class MergeUpdatePayload(TypedDict, total=False):
     pr: int
     status: str
     title: str
+    # Issue the merged PR resolves. Required for the dashboard to move the card
+    # review -> merged in real time: the frontend's optimistic getPipelineAction
+    # returns null without it, so the move was dead code until WS-RT populated it.
+    issue: int
 
 
 class TriageUpdatePayload(TypedDict, total=False):
