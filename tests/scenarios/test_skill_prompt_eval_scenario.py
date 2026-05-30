@@ -8,7 +8,7 @@ Two scenarios covering the dual role of the loop:
 * ``test_weak_case_sampling_files_issue`` — weak-case role. 10
   ``provenance: learning-loop`` cases all PASS while the expected catcher
   is the same skill that passed them. The sampled 10% surface at least
-  one ``corpus-case-weak`` issue.
+  one ``hydraflow-corpus-case-weak`` issue.
 
 The loop's external surface (``_run_corpus``, ``_reconcile_closed_escalations``)
 is stubbed via scenario-seeded ports ``skill_corpus_runner`` /
@@ -118,6 +118,6 @@ class TestSkillPromptEval:
         weak_calls = [
             c
             for c in fake_pr.create_issue.await_args_list
-            if len(c.args) > 2 and "corpus-case-weak" in c.args[2]
+            if len(c.args) > 2 and "hydraflow-corpus-case-weak" in c.args[2]
         ]
         assert len(weak_calls) >= 1

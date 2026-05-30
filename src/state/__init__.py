@@ -38,6 +38,7 @@ from ._issue import IssueStateMixin
 from ._lifetime import LifetimeStatsMixin
 from ._live_corpus_replay import LiveCorpusReplayStateMixin
 from ._memory_backlog import MemoryBacklogStateMixin
+from ._onboarding import OnboardingStateMixin
 from ._principles_audit import PrinciplesAuditStateMixin
 from ._rc_budget import RCBudgetStateMixin
 from ._report import ReportStateMixin
@@ -75,6 +76,7 @@ class StateTracker(
     LifetimeStatsMixin,
     SessionStateMixin,
     WorkerStateMixin,
+    OnboardingStateMixin,
     PrinciplesAuditStateMixin,
     CorpusLearningStateMixin,
     ReportStateMixin,

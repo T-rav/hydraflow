@@ -380,39 +380,21 @@ All LLM invocations from HydraFlow runtime (advisor included) go through Claude 
 ```
 
 
-## EpicMonitorLoop — stale epic detection and progress refresh
+## EpicMonitorLoop — stale epic detection, completion sweep, and progress refresh
 
-`EpicMonitorLoop` is a caretaker background loop (tick default 30 min, `HYDRAFLOW_EPIC_MONITOR_INTERVAL`) that detects stale epics and refreshes the in-memory progress cache. Each cycle it calls `EpicManager.check_stale_epics()` to flag epics with no recent child-issue movement, then `EpicManager.refresh_cache()` to pull current state for all tracked epics. The result dict exposes `stale_count` and `tracked_epics` for telemetry.
+`EpicMonitorLoop` is a caretaker background loop (tick default 30 min, `HYDRAFLOW_EPIC_MONITOR_INTERVAL`) that detects stale epics, auto-closes completed epics, and refreshes the in-memory progress cache. Each cycle it calls `EpicManager.check_stale_epics()` to flag epics with no recent child-issue movement, then `EpicManager.sweep_completed_epics()` to collect formal `EpicState.child_issues` entries and checkbox-style `#NNN` body refs, verify every referenced sub-issue is closed, check remaining boxes, post an auto-close comment, optionally add the `fixed_label`, and close the epic. It then calls `EpicManager.refresh_cache()` to pull current state for all tracked epics. The result dict exposes `stale_count`, `tracked_epics`, `checked`, `swept`, and `total_open_epics` for telemetry.
 
 **When it runs:** Every `epic_monitor_interval` seconds (default 1800). Honoured by the ADR-0049 kill-switch gate at the top of `_do_work`; set `HYDRAFLOW_EPIC_MONITOR_ENABLED=false` for deploy-time disable.
 
-**What it produces:** No label mutations or GitHub API writes — this loop is read-only. It updates the in-memory `EpicManager` cache that `EpicSweeperLoop` and the dashboard epic-progress route rely on.
+**What it produces:** Stale-warning comments and system alerts for stale epics; GitHub mutations for completed epics including updated checkboxes, a comment, optional fixed label, and issue closure. It also updates the in-memory `EpicManager` cache that dashboard epic-progress routes rely on.
 
-**How it interacts:** Feeds the `EpicSweeperLoop` indirectly via the shared `EpicManager` cache. The sweeper decides whether to close; the monitor decides whether to mark stale. Separating them means stale detection can run twice as often as the heavier sweep operation.
+**How it interacts:** Centralizes stale detection, completion sweep, and progress refresh through `EpicManager`, so epic lifecycle reads and writes share the same state/cache invalidation path.
 
-**Gotchas:** `refresh_cache()` is async; forgetting the `await` returns an unawaited coroutine with no error, silently leaving the cache stale. The loop does not publish events — dashboard consumers poll `EpicManager.get_all_progress()` directly.
-
-
-```json:entry
-{"id":"01KRBX2N4QP7VW8FGH3J5YD0M1","title":"EpicMonitorLoop — stale epic detection and progress refresh","topic":null,"source_type":"compiled","source_issue":8764,"source_repo":null,"created_at":"2026-05-12T00:00:00.000000+00:00","updated_at":"2026-05-12T00:00:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
-```
-
-
-## EpicSweeperLoop — auto-close completed epics
-
-`EpicSweeperLoop` is a caretaker background loop (tick default 1 h, `HYDRAFLOW_EPIC_SWEEP_INTERVAL`) that auto-closes epics whose every sub-issue is resolved. Each cycle it fetches up to 50 open issues carrying the `epic_label`, collects sub-issue refs from two sources — formal `EpicState.child_issues` entries and `#NNN` checkbox refs parsed from the body — then verifies each ref is closed. If all are closed it checks all checkboxes, posts an auto-close comment, optionally adds the `fixed_label`, and closes the epic via `PRPort`.
-
-**When it runs:** Every `epic_sweep_interval` seconds (600–86400 range; default 3600). ADR-0049 kill-switch gate at top of `_do_work`.
-
-**What it produces:** GitHub API mutations — updated epic body, a comment, optional label addition, and issue close. Returns `{checked, swept, total_open_epics}` for telemetry.
-
-**How it interacts:** Reads `StateTracker.get_epic_state()` for formal children and calls `parse_epic_sub_issues()` (from `epic.py`) for body refs. Uses `IssueFetcherPort.fetch_issue_by_number()` to verify each sub-issue state and `PRPort` for all mutations.
-
-**Gotchas / limits:** The 50-issue fetch cap is intentional but logged as a warning when hit — if a repo has more than 50 open epics, some will be skipped each cycle. A stale body ref (sub-issue deleted from GitHub) causes the sweep to skip that epic with a warning rather than closing it. Remove stale refs from the body to unblock auto-close. Per-epic exceptions are caught and logged; one bad epic does not abort the whole sweep.
+**Gotchas:** The completion sweep fetches up to 50 open epics and logs a warning if that cap is hit. A stale body ref whose issue no longer exists skips that epic with a warning rather than closing it. `refresh_cache()` is async; forgetting the `await` returns an unawaited coroutine with no error, silently leaving the cache stale.
 
 
 ```json:entry
-{"id":"01KRBX2N4QP7VW8FGH3J5YD0M2","title":"EpicSweeperLoop — auto-close completed epics","topic":null,"source_type":"compiled","source_issue":8765,"source_repo":null,"created_at":"2026-05-12T00:00:00.000000+00:00","updated_at":"2026-05-12T00:00:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+{"id":"01KRBX2N4QP7VW8FGH3J5YD0M1","title":"EpicMonitorLoop — stale epic detection, completion sweep, and progress refresh","topic":null,"source_type":"compiled","source_issue":8764,"source_repo":null,"created_at":"2026-05-12T00:00:00.000000+00:00","updated_at":"2026-05-12T00:00:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
 ```
 
 

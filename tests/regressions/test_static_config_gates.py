@@ -183,19 +183,6 @@ def _epic_monitor_loop(tmp_path: Path):
     )
 
 
-def _epic_sweeper_loop(tmp_path: Path):
-    from epic_sweeper_loop import EpicSweeperLoop
-
-    d = _deps(tmp_path, "epic_sweeper_loop_enabled")
-    return EpicSweeperLoop(
-        config=d.config,
-        fetcher=MagicMock(),
-        prs=MagicMock(),
-        state=MagicMock(),
-        deps=d.loop_deps,
-    )
-
-
 def _fake_coverage_auditor_loop(tmp_path: Path):
     from fake_coverage_auditor_loop import FakeCoverageAuditorLoop
 
@@ -463,7 +450,6 @@ _LOOP_FACTORIES = [
     ("DiagnosticLoop", _diagnostic_loop),
     ("DiagramLoop", _diagram_loop),
     ("EpicMonitorLoop", _epic_monitor_loop),
-    ("EpicSweeperLoop", _epic_sweeper_loop),
     ("FakeCoverageAuditorLoop", _fake_coverage_auditor_loop),
     ("FlakeTrackerLoop", _flake_tracker_loop),
     ("GitHubCacheLoop", _github_cache_loop),

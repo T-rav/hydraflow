@@ -261,7 +261,7 @@ class StagingBisectLoop(BaseBackgroundLoop):
             issue = await self._escalate_harness_failure(
                 red_sha,
                 green_sha,
-                "bisect-harness-failure",
+                self._config.staging_bisect_harness_failure_label[0],
                 "bisect exceeded runtime cap",
             )
             return {
@@ -280,7 +280,7 @@ class StagingBisectLoop(BaseBackgroundLoop):
             issue = await self._escalate_harness_failure(
                 red_sha,
                 green_sha,
-                "bisect-harness-failure",
+                self._config.staging_bisect_harness_failure_label[0],
                 str(exc),
             )
             return {
@@ -332,6 +332,8 @@ class StagingBisectLoop(BaseBackgroundLoop):
             )
             retry_issue = 0
 
+        retry_issue_number = retry_issue or 0
+
         # 6. Revert PR
         try:
             revert_pr, _branch = await self._create_revert_pr(
@@ -340,7 +342,7 @@ class StagingBisectLoop(BaseBackgroundLoop):
                 failing_tests=failing_tests,
                 rc_pr_url=rc_pr_url,
                 bisect_log=bisect_log,
-                retry_issue_number=retry_issue,
+                retry_issue_number=retry_issue_number,
             )
         except RevertConflictError as exc:
             issue = await self._prs.create_issue(
@@ -353,7 +355,10 @@ class StagingBisectLoop(BaseBackgroundLoop):
                     "subsequent PRs likely depend on the culprit.\n\n"
                     f"```\n{exc}\n```"
                 ),
-                ["hitl-escalation", "revert-conflict"],
+                [
+                    self._config.hitl_escalation_label[0],
+                    self._config.staging_revert_conflict_label[0],
+                ],
             )
             return {"status": "revert_conflict", "escalation_issue": issue}
 
@@ -380,7 +385,7 @@ class StagingBisectLoop(BaseBackgroundLoop):
         green_sha: str,
         label: str,
         detail: str,
-    ) -> int:
+    ) -> int | None:
         """Common escalation for bisect-harness-class failures."""
         title = f"hitl: StagingBisectLoop {label} ({red_sha[:12]})"
         body = (
@@ -389,7 +394,9 @@ class StagingBisectLoop(BaseBackgroundLoop):
             f"- Failure class: `{label}`\n\n"
             f"```\n{detail[:3000]}\n```"
         )
-        return await self._prs.create_issue(title, body, ["hitl-escalation", label])
+        return await self._prs.create_issue(
+            title, body, [self._config.hitl_escalation_label[0], label]
+        )
 
     def _parse_failing_tests(self, probe_output: str) -> str:
         """Heuristic extraction of failing test identifiers from probe output."""
@@ -641,8 +648,17 @@ class StagingBisectLoop(BaseBackgroundLoop):
             "### Bisect log\n\n"
             f"```\n{bisect_log[:5000]}\n```"
         )
-        labels = ["hitl-escalation", "rc-red-bisect-exhausted"]
+        labels = [
+            self._config.hitl_escalation_label[0],
+            self._config.staging_rc_red_bisect_exhausted_label[0],
+        ]
         issue = await self._prs.create_issue(title, body, labels)
+        if issue is None:
+            logger.error(
+                "StagingBisectLoop: guardrail tripped but escalation issue "
+                "creation failed"
+            )
+            return {"status": "guardrail_escalation_failed", "error": True}
         logger.error("StagingBisectLoop: guardrail tripped — escalated #%d", issue)
         return {"status": "guardrail_escalated", "escalation_issue": issue}
 
@@ -835,7 +851,7 @@ class StagingBisectLoop(BaseBackgroundLoop):
         failing_tests: str,
         bisect_log: str,
         revert_pr_url: str,
-    ) -> int:
+    ) -> int | None:
         """File a retry issue, OR a `retry-lineage-exhausted` escalation
         when this work item's lineage has been retried too many times.
 
@@ -879,7 +895,10 @@ class StagingBisectLoop(BaseBackgroundLoop):
             return await self._prs.create_issue(
                 title,
                 body,
-                ["hitl-escalation", "retry-lineage-exhausted"],
+                [
+                    self._config.hitl_escalation_label[0],
+                    self._config.staging_retry_lineage_exhausted_label[0],
+                ],
             )
 
         title = f"Retry: {culprit_pr_title or f'PR #{culprit_pr}'}"
@@ -898,7 +917,9 @@ class StagingBisectLoop(BaseBackgroundLoop):
             "the standard implement/review pipeline._"
         )
         return await self._prs.create_issue(
-            title, body, ["hydraflow-find", "rc-red-retry"]
+            title,
+            body,
+            [self._config.find_label[0], self._config.staging_rc_red_retry_label[0]],
         )
 
     async def _check_pending_watchdog(self) -> dict[str, Any] | None:
@@ -944,13 +965,18 @@ class StagingBisectLoop(BaseBackgroundLoop):
                     "The revert stays in place per spec §4.3 step 8 — "
                     "a human must disambiguate."
                 ),
-                ["hitl-escalation", "rc-red-post-revert-red"],
+                [
+                    self._config.hitl_escalation_label[0],
+                    self._config.staging_rc_red_post_revert_red_label[0],
+                ],
             )
-            self._pending_watchdog = None
-            return {
-                "status": "watchdog_still_red",
-                "escalation_issue": issue,
-            }
+            result: dict[str, Any] = {"status": "watchdog_still_red"}
+            if issue is None:
+                result["error"] = True
+            else:
+                self._pending_watchdog = None
+                result["escalation_issue"] = issue
+            return result
 
         # Timeout: deadline elapsed without a green or a new red
         if time.time() >= wd["deadline_ts"]:
@@ -964,10 +990,18 @@ class StagingBisectLoop(BaseBackgroundLoop):
                     "or 8-hour window after the auto-revert.\n\n"
                     "The RC pipeline may be stalled for unrelated reasons."
                 ),
-                ["hitl-escalation", "rc-red-verify-timeout"],
+                [
+                    self._config.hitl_escalation_label[0],
+                    self._config.staging_rc_red_verify_timeout_label[0],
+                ],
             )
-            self._pending_watchdog = None
-            return {"status": "watchdog_timeout", "escalation_issue": issue}
+            result = {"status": "watchdog_timeout"}
+            if issue is None:
+                result["error"] = True
+            else:
+                self._pending_watchdog = None
+                result["escalation_issue"] = issue
+            return result
 
         # Still waiting
         return None

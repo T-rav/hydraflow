@@ -197,22 +197,6 @@ def _build_report_issue(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     )
 
 
-def _build_epic_sweeper(ports: dict[str, Any], config: Any, deps: Any) -> Any:
-    from epic_sweeper_loop import EpicSweeperLoop  # noqa: PLC0415
-
-    fetcher = ports.get("issue_fetcher") or MagicMock()
-    state = ports.get("epic_sweeper_state") or MagicMock()
-    ports.setdefault("issue_fetcher", fetcher)
-    ports.setdefault("epic_sweeper_state", state)
-    return EpicSweeperLoop(
-        config=config,
-        fetcher=fetcher,
-        prs=ports["github"],
-        state=state,
-        deps=deps,
-    )
-
-
 def _build_security_patch(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from security_patch_loop import SecurityPatchLoop  # noqa: PLC0415
 
@@ -237,7 +221,15 @@ def _build_stale_issue(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 def _build_epic_monitor(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from epic_monitor_loop import EpicMonitorLoop  # noqa: PLC0415
 
-    epic_manager = ports.get("epic_manager") or MagicMock()
+    epic_manager = ports.get("epic_manager")
+    if epic_manager is None:
+        epic_manager = MagicMock()
+        epic_manager.check_stale_epics = AsyncMock(return_value=[])
+        epic_manager.sweep_completed_epics = AsyncMock(
+            return_value={"checked": 0, "swept": 0, "total_open_epics": 0}
+        )
+        epic_manager.refresh_cache = AsyncMock(return_value=None)
+        epic_manager.get_all_progress.return_value = []
     ports.setdefault("epic_manager", epic_manager)
     return EpicMonitorLoop(config=config, epic_manager=epic_manager, deps=deps)
 
@@ -1312,7 +1304,6 @@ _BUILDERS: dict[str, Any] = {
     "sentry_ingest": _build_sentry_ingest,
     "diagnostic": _build_diagnostic,
     "report_issue": _build_report_issue,
-    "epic_sweeper": _build_epic_sweeper,
     "security_patch": _build_security_patch,
     "stale_issue": _build_stale_issue,
     "epic_monitor": _build_epic_monitor,

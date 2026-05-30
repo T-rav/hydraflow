@@ -53,6 +53,7 @@ export const initialState = {
   retrospectives: null,
   troubleshooting: null,
   trackedReports: [],
+  localOnlyProjects: [],
   // True when the orchestrator backend is wired to Fake adapters (sandbox tier).
   // Set from /api/control/status. Drives the persistent MOCKWORLD MODE banner.
   mockworldActive: false,
@@ -61,6 +62,23 @@ export const initialState = {
 function normalizeRepoSlug(value) {
   if (value == null) return null
   return String(value).trim().replace(/[\\/]+/g, '-') || null
+}
+
+function mergeLocalOnlyProjects(supervisedRepos, localOnlyProjects) {
+  const repos = Array.isArray(supervisedRepos) ? supervisedRepos : []
+  const local = Array.isArray(localOnlyProjects) ? localOnlyProjects : []
+  const seen = new Set(
+    repos.flatMap(repo => [
+      normalizeRepoSlug(repo?.slug || repo?.repo || repo?.full_name || repo?.path),
+      repo?.path || null,
+    ]).filter(Boolean)
+  )
+  const missingLocal = local.filter(project => {
+    const slug = normalizeRepoSlug(project?.slug || project?.full_name || project?.path)
+    const path = project?.path || null
+    return !seen.has(slug) && (!path || !seen.has(path))
+  })
+  return [...repos, ...missingLocal]
 }
 
 function isDuplicate(state, action) {
@@ -77,6 +95,44 @@ function addEvent(state, action) {
     lastSeenId: eventId !== -1 ? eventId : state.lastSeenId,
     events: [event, ...state.events].slice(0, MAX_EVENTS),
   }
+}
+
+async function readNdjsonStream(res, options = {}) {
+  if (!res.body?.getReader) return { ok: false, error: 'Streaming is unavailable' }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let finalPayload = null
+  const handleLine = (line) => {
+    if (!line.trim()) return
+    const event = JSON.parse(line)
+    if (event.type === 'activity') {
+      options?.onActivity?.(event.event)
+    } else if (event.type === 'reply_delta') {
+      options?.onReplyDelta?.(event.text || '')
+    } else if (event.type === 'final') {
+      finalPayload = event
+    }
+  }
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
+    lines.forEach(handleLine)
+  }
+  buffer += decoder.decode()
+  if (buffer.trim()) handleLine(buffer)
+  if (!finalPayload) return { ok: false, error: 'Stream ended without final payload' }
+  if (finalPayload.ok === false) {
+    return {
+      ok: false,
+      error: finalPayload.error || `Request failed (${finalPayload.status || 'stream'})`,
+      draft: finalPayload.draft,
+    }
+  }
+  return { ok: true, ...finalPayload }
 }
 
 function mergeStageIssues(existingIssues, incomingIssues) {
@@ -746,6 +802,104 @@ export function reducer(state, action) {
           : [],
       }
 
+    case 'LOCAL_ONLY_PROJECT_ADDED': {
+      const project = action.data
+      if (!project?.slug) return state
+      const existing = state.localOnlyProjects || []
+      const next = [
+        project,
+        ...existing.filter(item => item.slug !== project.slug && item.path !== project.path),
+      ]
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem('hydraflow.localOnlyProjects', JSON.stringify(next))
+        } catch { /* ignore */ }
+      }
+      return { ...state, localOnlyProjects: next }
+    }
+
+    case 'LOCAL_ONLY_PROJECT_PUSHED': {
+      const draftId = action.data?.draftId
+      const repoUrl = action.data?.repoUrl || action.data?.draft?.repo_url || null
+      const draft = action.data?.draft || {}
+      if (!draftId) return state
+      const updateProject = project => {
+        if (project?.onboarding_draft_id !== draftId) return project
+        return {
+          ...project,
+          local_only: false,
+          repo_url: repoUrl,
+          onboarding_events: Array.isArray(draft.events) ? draft.events : project.onboarding_events,
+          push_status: draft.push_status || 'succeeded',
+          status: draft.status || 'pushed',
+        }
+      }
+      const localOnlyProjects = (state.localOnlyProjects || []).map(updateProject)
+      const supervisedRepos = (state.supervisedRepos || []).map(updateProject)
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem('hydraflow.localOnlyProjects', JSON.stringify(localOnlyProjects))
+        } catch { /* ignore */ }
+      }
+      return { ...state, localOnlyProjects, supervisedRepos }
+    }
+
+    case 'LOCAL_ONLY_PROJECT_CONTINUED': {
+      const draftId = action.data?.draftId
+      const draft = action.data?.draft || {}
+      const plan = action.data?.plan || 'Plan 02'
+      if (!draftId) return state
+      const updateProject = project => {
+        if (project?.onboarding_draft_id !== draftId) return project
+        const planDraft = Array.isArray(action.data?.planDraft)
+          ? action.data.planDraft
+          : Array.isArray(draft.plan_draft) ? draft.plan_draft : project.onboarding_plan_draft
+        return {
+          ...project,
+          onboarding_current_plan: plan,
+          onboarding_plan_draft: planDraft,
+          onboarding_events: Array.isArray(draft.events) ? draft.events : project.onboarding_events,
+          continue_plan_available: false,
+          plan_progress: {
+            completed: 0,
+            total: Array.isArray(planDraft) ? planDraft.length : 0,
+          },
+        }
+      }
+      const localOnlyProjects = (state.localOnlyProjects || []).map(updateProject)
+      const supervisedRepos = (state.supervisedRepos || []).map(updateProject)
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem('hydraflow.localOnlyProjects', JSON.stringify(localOnlyProjects))
+        } catch { /* ignore */ }
+      }
+      return { ...state, localOnlyProjects, supervisedRepos }
+    }
+
+    case 'LOCAL_ONLY_PROJECT_UPGRADED': {
+      const draftId = action.data?.draftId
+      const draft = action.data?.draft || {}
+      if (!draftId) return state
+      const updateProject = project => {
+        if (project?.onboarding_draft_id !== draftId) return project
+        return {
+          ...project,
+          onboarding_events: Array.isArray(draft.events) ? draft.events : project.onboarding_events,
+          format_upgrade_available: false,
+          upgrade_available: false,
+          format_upgrade_pr_url: action.data?.prUrl || project.format_upgrade_pr_url,
+        }
+      }
+      const localOnlyProjects = (state.localOnlyProjects || []).map(updateProject)
+      const supervisedRepos = (state.supervisedRepos || []).map(updateProject)
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem('hydraflow.localOnlyProjects', JSON.stringify(localOnlyProjects))
+        } catch { /* ignore */ }
+      }
+      return { ...state, localOnlyProjects, supervisedRepos }
+    }
+
     case 'SELECT_REPO': {
       const newSlug = normalizeRepoSlug(action.data.slug)
       const changed = newSlug !== state.selectedRepoSlug
@@ -761,6 +915,11 @@ export function reducer(state, action) {
           reviews: [],
           sessionPrsCount: 0,
           events: [],
+          queueStats: null,
+          metrics: null,
+          githubMetrics: null,
+          metricsHistory: null,
+          pipelineStats: null,
         }),
       }
     }
@@ -778,13 +937,16 @@ export function reducer(state, action) {
         return {
           ...state,
           runtimes: state.runtimes.map(rt =>
-            rt.slug === slug ? { ...rt, running } : rt,
+            rt.slug === slug ? { ...rt, running, pipeline_enabled: running } : rt,
           ),
         }
       }
       return {
         ...state,
-        runtimes: [...(state.runtimes || []), { slug, running }],
+        runtimes: [
+          ...(state.runtimes || []),
+          { slug, running, pipeline_enabled: running },
+        ],
       }
     }
 
@@ -1040,6 +1202,17 @@ export function HydraFlowProvider({ children }) {
     } catch { /* ignore */ }
   }, [])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      const raw = window.localStorage.getItem('hydraflow.localOnlyProjects')
+      const projects = raw ? JSON.parse(raw) : []
+      if (Array.isArray(projects)) {
+        projects.forEach(project => dispatch({ type: 'LOCAL_ONLY_PROJECT_ADDED', data: project }))
+      }
+    } catch { /* ignore */ }
+  }, [])
+
   const parseApiError = useCallback(async (res, fallback) => {
     try {
       const body = await res.json()
@@ -1267,6 +1440,253 @@ export function HydraFlowProvider({ children }) {
       return { ok: false, error: err.message || 'Network error' }
     }
   }, [fetchRepos])
+
+  const createOnboardingDraft = useCallback(async (spec) => {
+    try {
+      const res = await fetch('/api/onboarding/drafts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(spec),
+      })
+      if (!res.ok) {
+        return { ok: false, error: await parseApiError(res, `Draft failed (${res.status})`) }
+      }
+      return { ok: true, draft: await res.json() }
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Draft failed' }
+    }
+  }, [parseApiError])
+
+  const chatOnboardingDraft = useCallback(async (draftId, message, options = {}) => {
+    if (!draftId) return { ok: false, error: 'Draft id required' }
+    try {
+      const draftPath = `/api/onboarding/drafts/${encodeURIComponent(draftId)}`
+      const request = {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message }),
+      }
+      if (typeof ReadableStream === 'undefined' || typeof TextDecoder === 'undefined') {
+        const fallbackRes = await fetch(`${draftPath}/design/chat`, request)
+        const data = await fallbackRes.json().catch(() => ({}))
+        if (!fallbackRes.ok) {
+          return {
+            ok: false,
+            error: data?.error || `Design chat failed (${fallbackRes.status})`,
+            draft: data?.draft,
+          }
+        }
+        return { ok: true, ...data }
+      }
+
+      const res = await fetch(`${draftPath}/design/chat/stream`, request)
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        return { ok: false, error: data?.error || `Design chat failed (${res.status})`, draft: data?.draft }
+      }
+      const streamed = await readNdjsonStream(res, options)
+      if (!streamed.ok && streamed.error === 'Stream ended without final payload') {
+        return { ok: false, error: 'Design chat stream ended without final payload' }
+      }
+      if (!streamed.ok && streamed.error === 'Streaming is unavailable') {
+        return { ok: false, error: 'Design chat streaming is unavailable' }
+      }
+      return streamed
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Design chat failed' }
+    }
+  }, [])
+
+  const draftOnboardingSpec = useCallback(async (draftId, note = null) => {
+    if (!draftId) return { ok: false, error: 'Draft id required' }
+    try {
+      const res = await fetch(`/api/onboarding/drafts/${encodeURIComponent(draftId)}/design/spec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        return { ok: false, error: data?.error || `Spec draft failed (${res.status})`, draft: data?.draft }
+      }
+      return { ok: true, ...data }
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Spec draft failed' }
+    }
+  }, [])
+
+  const saveOnboardingSpecDraft = useCallback(async (draftId, specDraft) => {
+    if (!draftId) return { ok: false, error: 'Draft id required' }
+    try {
+      const res = await fetch(`/api/onboarding/drafts/${encodeURIComponent(draftId)}/design/spec/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ spec_draft: specDraft }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        return { ok: false, error: data?.error || `Spec save failed (${res.status})`, draft: data?.draft }
+      }
+      return { ok: true, ...data }
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Spec save failed' }
+    }
+  }, [])
+
+  const draftOnboardingPlan = useCallback(async (draftId, note = null) => {
+    if (!draftId) return { ok: false, error: 'Draft id required' }
+    try {
+      const res = await fetch(`/api/onboarding/drafts/${encodeURIComponent(draftId)}/design/plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        return { ok: false, error: data?.error || `Plan draft failed (${res.status})`, draft: data?.draft }
+      }
+      return { ok: true, ...data }
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Plan draft failed' }
+    }
+  }, [])
+
+  const materializeOnboardingDraft = useCallback(async (draftId, request = {}, options = {}) => {
+    try {
+      const basePath = `/api/onboarding/drafts/${encodeURIComponent(draftId)}`
+      const fetchOptions = {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      }
+      let res
+      let data
+      if (typeof ReadableStream === 'undefined' || typeof TextDecoder === 'undefined') {
+        res = await fetch(`${basePath}/materialize`, fetchOptions)
+        data = await res.json().catch(() => ({}))
+      } else {
+        res = await fetch(`${basePath}/materialize/stream`, fetchOptions)
+        if (res.ok && res.body?.getReader) {
+          const streamed = await readNdjsonStream(res, options)
+          data = streamed
+          if (!streamed.ok) {
+            return { ok: false, error: streamed.error || 'Materialize failed', draft: streamed.draft }
+          }
+        } else {
+          data = await res.json().catch(() => ({}))
+        }
+      }
+      if (!res.ok) {
+        return { ok: false, error: data?.error || `Materialize failed (${res.status})`, draft: data?.draft }
+      }
+      const spec = data?.draft?.spec || {}
+      const materializedPath = data?.materialized?.path || ''
+      const project = {
+        slug: spec.name || materializedPath,
+        full_name: spec.name || materializedPath,
+        path: materializedPath,
+        local_only: true,
+        onboarding_draft_id: data?.draft?.id || draftId,
+        onboarding_events: data?.draft?.events || [],
+        onboarding_current_plan: 'Plan 01',
+        onboarding_spec_draft: data?.draft?.spec_draft || '',
+        onboarding_plan_draft: Array.isArray(data?.draft?.plan_draft) ? data.draft.plan_draft : [],
+        plan_progress: {
+          completed: 0,
+          total: Array.isArray(data?.draft?.plan_draft) ? data.draft.plan_draft.length : 0,
+        },
+      }
+      dispatch({ type: 'LOCAL_ONLY_PROJECT_ADDED', data: project })
+      if (materializedPath) {
+        await addRepoByPath(materializedPath)
+      }
+      return { ok: true, ...data }
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Materialize failed' }
+    }
+  }, [addRepoByPath])
+
+  const pushOnboardingDraft = useCallback(async (draftId, options = {}) => {
+    if (!draftId) return { ok: false, error: 'Draft id required' }
+    try {
+      const basePath = `/api/onboarding/drafts/${encodeURIComponent(draftId)}`
+      let res
+      let data
+      if (typeof ReadableStream === 'undefined' || typeof TextDecoder === 'undefined') {
+        res = await fetch(`${basePath}/push`, { method: 'POST' })
+        data = await res.json().catch(() => ({}))
+      } else {
+        res = await fetch(`${basePath}/push/stream`, { method: 'POST' })
+        if (res.ok && res.body?.getReader) {
+          const streamed = await readNdjsonStream(res, options)
+          data = streamed
+          if (!streamed.ok) {
+            return { ok: false, error: streamed.error || 'Push failed', draft: streamed.draft }
+          }
+        } else {
+          data = await res.json().catch(() => ({}))
+        }
+      }
+      if (!res.ok) {
+        return { ok: false, error: data?.error || `Push failed (${res.status})`, draft: data?.draft }
+      }
+      dispatch({
+        type: 'LOCAL_ONLY_PROJECT_PUSHED',
+        data: { draftId, draft: data?.draft, repoUrl: data?.repo_url },
+      })
+      return { ok: true, ...data }
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Push failed' }
+    }
+  }, [])
+
+  const continueOnboardingPlan = useCallback(async (draftId, request = {}) => {
+    if (!draftId) return { ok: false, error: 'Draft id required' }
+    try {
+      const res = await fetch(`/api/onboarding/drafts/${encodeURIComponent(draftId)}/continue-plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        return { ok: false, error: data?.error || `Continue plan failed (${res.status})`, draft: data?.draft }
+      }
+      dispatch({
+        type: 'LOCAL_ONLY_PROJECT_CONTINUED',
+        data: {
+          draftId,
+          draft: data?.draft,
+          plan: data?.plan,
+          planDraft: data?.plan_draft,
+          createdIssues: data?.created_issues,
+        },
+      })
+      return { ok: true, ...data }
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Continue plan failed' }
+    }
+  }, [])
+
+  const upgradeOnboardingFormat = useCallback(async (draftId) => {
+    if (!draftId) return { ok: false, error: 'Draft id required' }
+    try {
+      const res = await fetch(`/api/onboarding/drafts/${encodeURIComponent(draftId)}/upgrade-format`, {
+        method: 'POST',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        return { ok: false, error: data?.error || `Format upgrade failed (${res.status})`, draft: data?.draft }
+      }
+      dispatch({
+        type: 'LOCAL_ONLY_PROJECT_UPGRADED',
+        data: { draftId, draft: data?.draft, prUrl: data?.pr_url },
+      })
+      return { ok: true, ...data }
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Format upgrade failed' }
+    }
+  }, [])
 
   const removeRepoShortcut = useCallback((repoSlug) => {
     removeRepo(repoSlug)
@@ -1543,7 +1963,7 @@ export function HydraFlowProvider({ children }) {
       fetchRepos()
       fetchRuntimes()
       if (lastEventTsRef.current) {
-        fetch(`/api/events?since=${encodeURIComponent(lastEventTsRef.current)}`)
+        fetchWithRepo(`/api/events?since=${encodeURIComponent(lastEventTsRef.current)}`)
           .then(r => r.json())
           .then(events => dispatch({ type: 'BACKFILL_EVENTS', data: events }))
           .catch(() => {})
@@ -1711,6 +2131,7 @@ export function HydraFlowProvider({ children }) {
   const value = {
     ...state,
     sessions: repoFilteredSessions,
+    supervisedRepos: mergeLocalOnlyProjects(state.supervisedRepos, state.localOnlyProjects),
     stageStatus,
     resetSession,
     submitIntent,
@@ -1730,6 +2151,15 @@ export function HydraFlowProvider({ children }) {
     selectRepo,
     addRepoBySlug,
     addRepoByPath,
+    createOnboardingDraft,
+    chatOnboardingDraft,
+    draftOnboardingSpec,
+    saveOnboardingSpecDraft,
+    draftOnboardingPlan,
+    materializeOnboardingDraft,
+    pushOnboardingDraft,
+    continueOnboardingPlan,
+    upgradeOnboardingFormat,
     fetchRepos,
     removeRepoShortcut,
     startRuntime,

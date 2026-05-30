@@ -173,7 +173,10 @@ def get_playbook(sub_label: str) -> PreflightPlaybook:
     ``prompts/auto_agent/_default.md`` (or a sub-label-specific prompt file
     if one exists, via the runner's existing lookup) with the default persona.
     """
-    return _REGISTRY.get(sub_label, _DEFAULT_PLAYBOOK)
+    return _REGISTRY.get(
+        sub_label,
+        _REGISTRY.get(sub_label.removeprefix("hydraflow-"), _DEFAULT_PLAYBOOK),
+    )
 
 
 def iter_playbooks() -> tuple[PreflightPlaybook, ...]:

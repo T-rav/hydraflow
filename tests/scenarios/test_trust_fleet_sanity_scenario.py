@@ -58,10 +58,16 @@ def _healthy_heartbeats(now: _dt.datetime) -> dict[str, dict[str, object]]:
     }
 
 
-@pytest.mark.xfail(
-    reason="bg_workers MagicMock doesn't support await; needs AsyncMock conversion (staging-level test bug)",
-    strict=False,
-)
+def _empty_event_bus() -> EventBus:
+    bus = EventBus()
+
+    async def _load_events_since(_since: _dt.datetime) -> list[HydraFlowEvent]:
+        return []
+
+    bus.load_events_since = _load_events_since  # type: ignore[method-assign]
+    return bus
+
+
 class TestTrustFleetSanityScenario:
     """§12.1 — meta-observability MockWorld scenarios."""
 
@@ -82,6 +88,7 @@ class TestTrustFleetSanityScenario:
             world,
             pr_manager=fake_pr,
             trust_fleet_sanity_state=state,
+            event_bus=_empty_event_bus(),
         )
 
         stats = await world.run_with_loops(["trust_fleet_sanity"], cycles=1)
@@ -123,6 +130,7 @@ class TestTrustFleetSanityScenario:
             pr_manager=fake_pr,
             trust_fleet_sanity_state=state,
             trust_fleet_sanity_bg_workers=bg_workers,
+            event_bus=_empty_event_bus(),
         )
 
         stats = await world.run_with_loops(["trust_fleet_sanity"], cycles=1)
@@ -132,8 +140,8 @@ class TestTrustFleetSanityScenario:
         assert fake_pr.create_issue.await_count >= 1
 
         labels = fake_pr.create_issue.await_args.args[2]
-        assert "hitl-escalation" in labels
-        assert "trust-loop-anomaly" in labels
+        assert "hydraflow-hitl-escalation" in labels
+        assert "hydraflow-trust-loop-anomaly" in labels
 
 
 # ---------------------------------------------------------------------------
@@ -206,8 +214,8 @@ class TestTrustFleetSanityBreachScenario:
         assert "issues_per_hour" in title
 
         labels = fake_pr.create_issue.await_args.args[2]
-        assert "hitl-escalation" in labels
-        assert "trust-loop-anomaly" in labels
+        assert "hydraflow-hitl-escalation" in labels
+        assert "hydraflow-trust-loop-anomaly" in labels
 
     async def test_tick_error_ratio_breach_files_escalation(self, tmp_path) -> None:
         """corpus_learning with 80% errored ticks -> tick_error_ratio escalation.

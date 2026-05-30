@@ -12,7 +12,7 @@ from preflight.runner import (
 
 def test_persona_and_fields_substituted() -> None:
     out = render_prompt(
-        sub_label="flaky-test-stuck",
+        sub_label="hydraflow-flaky-test-stuck",
         persona="Travis",
         issue_number=42,
         repo_slug="acme/widget",

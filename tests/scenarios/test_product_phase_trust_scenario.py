@@ -4,7 +4,7 @@ Covers the upstream half of the lights-off pipeline: a vague issue flows
 through :class:`DiscoverPhase` (which exercises the retry path — evaluator
 returns RETRY on the first brief, OK on the second) and then through
 :class:`ShapePhase` (which finalizes on the first turn), and must land on
-the next pipeline label (``hydraflow-plan``) with no ``hitl-escalation``
+the next pipeline label (``hydraflow-plan``) with no ``hydraflow-hitl-escalation``
 filed.
 
 Unlike the existing scenarios that drive :class:`PipelineHarness`'s
@@ -304,17 +304,19 @@ class TestProductPhaseTrustScenario:
         labels_after_shape = world.github.issue(501).labels
         assert "hydraflow-plan" in labels_after_shape, labels_after_shape
 
-        # No escalation issues filed (no hitl-escalation label anywhere).
+        # No escalation issues filed (no hydraflow-hitl-escalation label anywhere).
         escalations = [
-            i for i in world.github._issues.values() if "hitl-escalation" in i.labels
+            i
+            for i in world.github._issues.values()
+            if "hydraflow-hitl-escalation" in i.labels
         ]
         assert not escalations, (
-            f"unexpected hitl-escalation issues filed: "
+            f"unexpected hydraflow-hitl-escalation issues filed: "
             f"{[(i.number, i.title, i.labels) for i in escalations]}"
         )
 
     async def test_discover_exhaustion_files_escalation(self, tmp_path) -> None:
-        """Sad path: max_discover_attempts RETRYs → hitl-escalation filed."""
+        """Sad path: max_discover_attempts RETRYs → hydraflow-hitl-escalation filed."""
         world = MockWorld(tmp_path)
 
         world.add_issue(
@@ -356,14 +358,15 @@ class TestProductPhaseTrustScenario:
 
         await discover_phase.discover_issues()
 
-        # Escalation issue filed with hitl-escalation + discover-stuck labels.
+        # Escalation issue filed with hydraflow-hitl-escalation + hydraflow-discover-stuck labels.
         escalations = [
             i
             for i in world.github._issues.values()
-            if "hitl-escalation" in i.labels and "discover-stuck" in i.labels
+            if "hydraflow-hitl-escalation" in i.labels
+            and "hydraflow-discover-stuck" in i.labels
         ]
         assert len(escalations) == 1, (
-            f"expected one hitl-escalation/discover-stuck issue, got "
+            f"expected one hydraflow-hitl-escalation/hydraflow-discover-stuck issue, got "
             f"{[(i.number, i.title, i.labels) for i in escalations]}"
         )
         assert "#502" in escalations[0].title
@@ -430,7 +433,9 @@ class TestProductPhaseTrustScenario:
         labels_after = world.github.issue(601).labels
         assert "hydraflow-shape" in labels_after, labels_after
         escalations = [
-            i for i in world.github._issues.values() if "hitl-escalation" in i.labels
+            i
+            for i in world.github._issues.values()
+            if "hydraflow-hitl-escalation" in i.labels
         ]
         assert not escalations, (
             f"discover-expander recovery should have prevented escalation; "

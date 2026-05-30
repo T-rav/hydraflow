@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { render, screen, act } from '@testing-library/react'
+import { render, screen, act, waitFor } from '@testing-library/react'
 import { reducer, getPipelineAction } from '../HydraFlowContext'
 
 const emptyPipeline = {
@@ -79,6 +79,103 @@ describe('HydraFlowContext reducer', () => {
     const repos = [{ slug: 'demo', path: '/tmp/demo' }]
     const next = reducer(initialState, { type: 'SET_REPOS', data: { repos } })
     expect(next.supervisedRepos).toEqual(repos)
+  })
+
+  it('LOCAL_ONLY_PROJECT_PUSHED clears local-only state for matching draft', () => {
+    const state = {
+      ...initialState,
+      localOnlyProjects: [
+        { slug: 'finance-tool', local_only: true, onboarding_draft_id: 'draft-1' },
+      ],
+      supervisedRepos: [
+        { slug: 'finance-tool', local_only: true, onboarding_draft_id: 'draft-1' },
+      ],
+    }
+
+    const next = reducer(state, {
+      type: 'LOCAL_ONLY_PROJECT_PUSHED',
+      data: {
+        draftId: 'draft-1',
+        repoUrl: 'https://github.com/T-rav/finance-tool',
+        draft: {
+          status: 'pushed',
+          push_status: 'succeeded',
+          events: [{ level: 'info', message: 'push succeeded' }],
+        },
+      },
+    })
+
+    expect(next.localOnlyProjects[0]).toMatchObject({
+      local_only: false,
+      repo_url: 'https://github.com/T-rav/finance-tool',
+      push_status: 'succeeded',
+      status: 'pushed',
+    })
+    expect(next.supervisedRepos[0].local_only).toBe(false)
+  })
+
+  it('LOCAL_ONLY_PROJECT_CONTINUED advances draft-backed project metadata', () => {
+    const state = {
+      ...initialState,
+      localOnlyProjects: [
+        {
+          slug: 'finance-tool',
+          onboarding_draft_id: 'draft-1',
+          onboarding_current_plan: 'Plan 01',
+          onboarding_plan_draft: ['old task'],
+          plan_progress: { completed: 1, total: 1 },
+        },
+      ],
+    }
+
+    const next = reducer(state, {
+      type: 'LOCAL_ONLY_PROJECT_CONTINUED',
+      data: {
+        draftId: 'draft-1',
+        plan: 'Plan 02',
+        planDraft: ['next task', 'second task'],
+        draft: {
+          events: [{ level: 'info', message: 'Plan 02 filed 2 hydraflow-find issues' }],
+        },
+      },
+    })
+
+    expect(next.localOnlyProjects[0]).toMatchObject({
+      onboarding_current_plan: 'Plan 02',
+      onboarding_plan_draft: ['next task', 'second task'],
+      continue_plan_available: false,
+      plan_progress: { completed: 0, total: 2 },
+    })
+  })
+
+  it('LOCAL_ONLY_PROJECT_UPGRADED clears upgrade availability', () => {
+    const state = {
+      ...initialState,
+      localOnlyProjects: [
+        {
+          slug: 'finance-tool',
+          onboarding_draft_id: 'draft-1',
+          format_upgrade_available: true,
+        },
+      ],
+    }
+
+    const next = reducer(state, {
+      type: 'LOCAL_ONLY_PROJECT_UPGRADED',
+      data: {
+        draftId: 'draft-1',
+        prUrl: 'https://github.com/T-rav/finance-tool/pull/7',
+        draft: {
+          events: [{ level: 'info', message: 'format upgrade PR opened' }],
+        },
+      },
+    })
+
+    expect(next.localOnlyProjects[0]).toMatchObject({
+      format_upgrade_available: false,
+      upgrade_available: false,
+      format_upgrade_pr_url: 'https://github.com/T-rav/finance-tool/pull/7',
+    })
   })
 
   it('GITHUB_METRICS action sets githubMetrics state', () => {
@@ -586,6 +683,145 @@ describe('HydraFlowProvider', () => {
       </HydraFlowProvider>
     )
     expect(screen.getByText('Test Child')).toBeInTheDocument()
+  })
+
+  it('materializeOnboardingDraft consumes streamed activity and final payload', async () => {
+    vi.resetModules()
+    const activity = []
+    const makeStream = (lines) => new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder()
+        lines.forEach(line => controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`)))
+        controller.close()
+      },
+    })
+    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url === '/api/onboarding/drafts/draft-1/materialize/stream') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          body: makeStream([
+            { type: 'activity', event: { level: 'info', message: 'materialize started' } },
+            {
+              type: 'final',
+              ok: true,
+              status: 200,
+              draft: {
+                id: 'draft-1',
+                spec: { name: 'finance-tool' },
+                events: [{ level: 'info', message: 'materialize started' }],
+              },
+              materialized: { path: '/tmp/finance-tool' },
+            },
+          ]),
+        })
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ repos: [] }),
+      })
+    })
+
+    const { HydraFlowProvider, useHydraFlow } = await import('../HydraFlowContext')
+    let capturedState = null
+    function StateCapture() {
+      capturedState = useHydraFlow()
+      return <div>ready</div>
+    }
+
+    await act(async () => {
+      render(
+        <HydraFlowProvider>
+          <StateCapture />
+        </HydraFlowProvider>
+      )
+    })
+
+    let result
+    await act(async () => {
+      result = await capturedState.materializeOnboardingDraft('draft-1', {}, {
+        onActivity: (event) => activity.push(event.message),
+      })
+    })
+
+    expect(fetchSpy).toHaveBeenCalledWith('/api/onboarding/drafts/draft-1/materialize/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    expect(result.ok).toBe(true)
+    expect(activity).toEqual(['materialize started'])
+  })
+
+  it('pushOnboardingDraft consumes streamed activity and final payload', async () => {
+    vi.resetModules()
+    const activity = []
+    const makeStream = (lines) => new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder()
+        lines.forEach(line => controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`)))
+        controller.close()
+      },
+    })
+    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url === '/api/onboarding/drafts/draft-1/push/stream') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          body: makeStream([
+            { type: 'activity', event: { level: 'info', message: 'push started' } },
+            {
+              type: 'final',
+              ok: true,
+              status: 200,
+              draft: {
+                id: 'draft-1',
+                status: 'pushed',
+                push_status: 'succeeded',
+                events: [{ level: 'info', message: 'push succeeded' }],
+              },
+              repo_url: 'https://github.com/T-rav/finance-tool',
+            },
+          ]),
+        })
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ repos: [] }),
+      })
+    })
+
+    const { HydraFlowProvider, useHydraFlow } = await import('../HydraFlowContext')
+    let capturedState = null
+    function StateCapture() {
+      capturedState = useHydraFlow()
+      return <div>ready</div>
+    }
+
+    await act(async () => {
+      render(
+        <HydraFlowProvider>
+          <StateCapture />
+        </HydraFlowProvider>
+      )
+    })
+
+    let result
+    await act(async () => {
+      result = await capturedState.pushOnboardingDraft('draft-1', {
+        onActivity: (event) => activity.push(event.message),
+      })
+    })
+
+    expect(fetchSpy).toHaveBeenCalledWith('/api/onboarding/drafts/draft-1/push/stream', {
+      method: 'POST',
+    })
+    expect(result.ok).toBe(true)
+    expect(activity).toEqual(['push started'])
   })
 })
 
@@ -1585,6 +1821,11 @@ describe('SELECT_REPO reducer', () => {
       reviews: [{ pr: 99, status: 'done' }],
       sessionPrsCount: 1,
       events: [{ type: 'worker_update', timestamp: '2024-01-01T00:00:00Z' }],
+      queueStats: { depth: 2 },
+      metrics: { open_prs: 3 },
+      githubMetrics: { total_merged: 4 },
+      metricsHistory: [{ date: '2026-05-22' }],
+      pipelineStats: { total: 3 },
     }
     const next = reducer(state, {
       type: 'SELECT_REPO',
@@ -1598,6 +1839,11 @@ describe('SELECT_REPO reducer', () => {
     expect(next.reviews).toEqual([])
     expect(next.sessionPrsCount).toBe(0)
     expect(next.events).toEqual([])
+    expect(next.queueStats).toBeNull()
+    expect(next.metrics).toBeNull()
+    expect(next.githubMetrics).toBeNull()
+    expect(next.metricsHistory).toBeNull()
+    expect(next.pipelineStats).toBeNull()
   })
 
   it('does not reset data when selecting the same repo', () => {
@@ -1958,7 +2204,11 @@ describe('OPTIMISTIC_RUNTIME reducer', () => {
       data: { slug: 'owner/repo-a', running: true },
     })
     expect(next.runtimes).toHaveLength(2)
-    expect(next.runtimes[0]).toEqual({ slug: 'owner/repo-a', running: true })
+    expect(next.runtimes[0]).toEqual({
+      slug: 'owner/repo-a',
+      running: true,
+      pipeline_enabled: true,
+    })
     expect(next.runtimes[1]).toEqual({ slug: 'owner/repo-b', running: true })
   })
 
@@ -1972,7 +2222,11 @@ describe('OPTIMISTIC_RUNTIME reducer', () => {
       data: { slug: 'owner/repo-b', running: true },
     })
     expect(next.runtimes).toHaveLength(2)
-    expect(next.runtimes[1]).toEqual({ slug: 'owner/repo-b', running: true })
+    expect(next.runtimes[1]).toEqual({
+      slug: 'owner/repo-b',
+      running: true,
+      pipeline_enabled: true,
+    })
   })
 
   it('sets running to false for stop', () => {
@@ -1993,7 +2247,11 @@ describe('OPTIMISTIC_RUNTIME reducer', () => {
       data: { slug: 'owner/repo-a', running: true },
     })
     expect(next.runtimes).toHaveLength(1)
-    expect(next.runtimes[0]).toEqual({ slug: 'owner/repo-a', running: true })
+    expect(next.runtimes[0]).toEqual({
+      slug: 'owner/repo-a',
+      running: true,
+      pipeline_enabled: true,
+    })
   })
 })
 
@@ -2095,8 +2353,10 @@ describe('HydraFlowProvider body[data-connected]', () => {
       )
     })
 
-    expect(document.body.getAttribute('data-connected')).toBe('true')
-    expect(screen.getByTestId('connected').textContent).toBe('true')
+    await waitFor(() => {
+      expect(document.body.getAttribute('data-connected')).toBe('true')
+      expect(screen.getByTestId('connected').textContent).toBe('true')
+    })
   })
 
   it('sets data-connected to false when not connected', async () => {

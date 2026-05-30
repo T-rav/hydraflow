@@ -624,7 +624,7 @@ class TestGetEventsEndpoint:
     ) -> None:
         router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
         endpoint = find_endpoint(router, "/api/events")
-        response = await endpoint(since=None)
+        response = await endpoint(since=None, repo=None)
         data = json.loads(response.body)
         assert data == []
 
@@ -637,7 +637,7 @@ class TestGetEventsEndpoint:
         await event_bus.publish(EventFactory.create(data={"msg": "hello"}))
         router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
         endpoint = find_endpoint(router, "/api/events")
-        response = await endpoint(since=None)
+        response = await endpoint(since=None, repo=None)
         data = json.loads(response.body)
         assert len(data) >= 1
 
@@ -647,9 +647,41 @@ class TestGetEventsEndpoint:
     ) -> None:
         router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
         endpoint = find_endpoint(router, "/api/events")
-        response = await endpoint(since="not-a-date")
+        response = await endpoint(since="not-a-date", repo=None)
         data = json.loads(response.body)
         assert isinstance(data, list)
+
+    @pytest.mark.asyncio
+    async def test_repo_query_uses_repo_runtime_event_bus(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        from unittest.mock import MagicMock
+
+        from events import EventBus
+        from tests.conftest import EventFactory
+
+        repo_bus = EventBus()
+        await event_bus.publish(EventFactory.create(data={"msg": "default"}))
+        await repo_bus.publish(EventFactory.create(data={"msg": "selected"}))
+        runtime = MagicMock()
+        runtime.config = config
+        runtime.state = state
+        runtime.event_bus = repo_bus
+        runtime.orchestrator = None
+        registry = MagicMock()
+        registry.get.return_value = runtime
+
+        router, _ = make_dashboard_router(
+            config,
+            event_bus,
+            state,
+            tmp_path,
+            registry=registry,
+        )
+        endpoint = find_endpoint(router, "/api/events")
+        response = await endpoint(since=None, repo="acme/widgets")
+        data = json.loads(response.body)
+        assert [item["data"]["msg"] for item in data] == ["selected"]
 
 
 # ---------------------------------------------------------------------------

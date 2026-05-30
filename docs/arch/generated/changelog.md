@@ -4,8 +4,44 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W22
+
+- `3242dd2` — merge main into rc promotion *(2026-05-29)*
+- `bb088ee` — fix(gates): assign BranchProtectionAuditorLoop to a functional area + orchestrator test double *(2026-05-29)*
+- `5962bdb` — fix(gates): address grumpy-principal review across all slices *(2026-05-29)*
+- `3c87f71` — feat(gates): branch-protection drift caretaker loop (Slice 4) *(2026-05-29)*
+- `79a1ada` — docs(adr): ADR-0082 declarative gate contract (extends ADR-0042 enforcement) *(2026-05-29)*
+- `0afd876` — feat(gates): gen-gates CLI + make targets; generate README table; scrub stale prose *(2026-05-29)*
+
 ## 2026-W21
 
+- `1d9c95f` — Fixes #8931: stream onboarding activity in dashboard *(2026-05-23)*
+- `9dc0a8d` — Refs #8933: validate third-domain onboarding dashboard flow *(2026-05-23)*
+- `01b5854` — docs: refresh architecture artifacts *(2026-05-23)*
+- `66a1b1f` — Refs #8932: stream onboarding design chat *(2026-05-23)*
+- `8728fc2` — Refs #8932: persist wizard spec edits *(2026-05-23)*
+- `9362727` — Refs #8932: harden design chat extraction *(2026-05-23)*
+- `72eae73` — Refs #8933: add repo metrics dashboard payload *(2026-05-23)*
+- `43b1e0a` — Refs #8933: wire onboarding format upgrade *(2026-05-23)*
+- `bab9837` — Fixes #8933: wire onboarding continue plan *(2026-05-23)*
+- `553bd1d` — Refs #8932: add Claude design provider fallback *(2026-05-23)*
+- `adbcc6a` — Refs #8931: add onboarding push endpoint *(2026-05-23)*
+- `f4915b8` — Refs #8933: add onboarding dashboard repo slice *(2026-05-22)*
+- `6b74497` — Refs #8932: add onboarding design chat slice *(2026-05-22)*
+- `091f166` — Refs #8931: add onboarding wizard UI slice *(2026-05-22)*
+- `e439049` — Refs #8930: add onboarding materialize API slice *(2026-05-22)*
+- `e5e3dbd` — Refs #8930: add onboarding draft API foundation *(2026-05-22)*
+- `52784fb` — Fixes #8368: resolve dashboard a11y violations *(2026-05-22)*
+- `3381e36` — Refs #8475: preserve managed repo config models *(2026-05-22)*
+- `22b8cee` — Fixes #8617: expose repo pipeline enabled state *(2026-05-22)*
+- `90279ad` — Fixes #8651: collapse crowded pipeline dots *(2026-05-22)*
+- `1e94520` — Fixes #8674: refresh arch artifacts before bot push *(2026-05-22)*
+- `700bc6b` — Fixes #8658: update Opus 4.7 pricing *(2026-05-22)*
+- `72fea53` — Fixes #8979: fold epic sweep into monitor *(2026-05-22)*
+- `527bea0` — Fixes #8928: make issue creation failure explicit *(2026-05-22)*
+- `e7d4296` — Fixes #8481: register caretaker escalation labels *(2026-05-22)*
+- `60d07b4` — feat(mockworld): FakeDocker bd-CLI emulation for bead lifecycle coverage (closes #8367) (#9053) (#9053) *(2026-05-21)*
+- `4afc722` — chore(arch): regen post-rebase against staging *(2026-05-20)*
 - `2efdbb1` — chore(arch): regen post-rebase against staging *(2026-05-20)*
 - `fecc6a8` — chore(arch): regen post-rebase against staging *(2026-05-20)*
 - `10e9737` — chore(arch): regen post-rebase against staging *(2026-05-20)*
@@ -373,11 +409,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `522e013` — Fixes #1701: ADR-0009 epic release creation architecture (#1739) (#1739) *(2026-03-01)*
 - `961b141` — Fixes #1677: add ADR-0009 for worktree and path isolation architecture (#1683) (#1683) *(2026-03-01)*
 - `7c6fe67` — Fixes #1634: add ADR-0009 for multi-repo process-per-repo model (#1679) (#1679) *(2026-03-01)*
-- `35aa37a` — docs: add ADR-0008 for multi-repo dashboard architecture (#1648) (#1648) *(2026-02-28)*
-- `780b17c` — docs: add ADR-0007 for dashboard API multi-repo scoping (#1647) (#1647) *(2026-02-28)*
-- `83730be` — docs: add ADR-0006 for RepoRuntime isolation architecture (#1646) (#1646) *(2026-02-28)*
-- `bbc273d` — docs: add ADR-0005 for PR recovery and zero-diff branch handling (#1307) (#1307) *(2026-02-26)*
-- `a76b946` — feat: adopt craft patterns — AGENTS.md, ports, property tests, ADRs (#1239) (#1239) *(2026-02-26)*
 
 
-_Regenerated from commit `2efdbb1` on 2026-05-20 19:59 UTC. Source last changed at `2efdbb1`. Status: 🟢 fresh._
+_Regenerated from commit `3242dd2` on 2026-05-30 06:45 UTC. Source last changed at `3242dd2`. Status: 🟢 fresh._

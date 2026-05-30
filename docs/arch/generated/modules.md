@@ -15,6 +15,7 @@ graph LR
     src_mockworld["src.mockworld"]
     src_mockworld_fakes["src.mockworld.fakes"]
     src_observability["src.observability"]
+    src_onboarding["src.onboarding"]
     src_preflight["src.preflight"]
     src_preflight_playbooks["src.preflight.playbooks"]
     src_review_phase["src.review_phase"]
@@ -28,10 +29,11 @@ graph LR
     src -- "1" --> src_observability
     src -- "12" --> src_preflight
     src -- "1" --> src_review_phase
-    src -- "47" --> src_state
+    src -- "46" --> src_state
     src -- "7" --> src_telemetry
     src_arch_extractors -- "7" --> src_arch
     src_arch_generators -- "11" --> src_arch
+    src_dashboard_routes -- "3" --> src_onboarding
     src_dashboard_routes -- "1" --> src_preflight
     src_dashboard_routes -- "1" --> src_state
     src_mockworld_fakes -- "28" --> src_mockworld
@@ -44,4 +46,4 @@ graph LR
     src_state -- "1" --> src
 ```
 
-_Regenerated from commit `2efdbb1` on 2026-05-20 19:59 UTC. Source last changed at `2efdbb1`. Status: 🟢 fresh._
+_Regenerated from commit `3242dd2` on 2026-05-30 06:45 UTC. Source last changed at `3242dd2`. Status: 🟢 fresh._

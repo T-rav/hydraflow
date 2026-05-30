@@ -111,7 +111,9 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             logger.warning("trust-adversarial non-JSON response")
             return []
 
-    async def _file_drift_issue(self, case: dict[str, Any], last_status: str) -> int:
+    async def _file_drift_issue(
+        self, case: dict[str, Any], last_status: str
+    ) -> int | None:
         title = (
             f"Skill prompt drift: {case.get('skill', '?')} "
             f"missed {case.get('case_id', '?')}"
@@ -130,7 +132,7 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             title, body, ["hydraflow-find", "skill-prompt-drift"]
         )
 
-    async def _file_weak_case_issue(self, case: dict[str, Any]) -> int:
+    async def _file_weak_case_issue(self, case: dict[str, Any]) -> int | None:
         title = (
             f"Weak corpus case: {case.get('case_id')} "
             f"bypassed {case.get('expected_catcher')}"
@@ -145,10 +147,12 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             f"_Spec §4.6 — filed by `skill_prompt_eval` loop._"
         )
         return await self._pr.create_issue(
-            title, body, ["hydraflow-find", "corpus-case-weak"]
+            title,
+            body,
+            [self._config.find_label[0], self._config.skill_prompt_case_weak_label[0]],
         )
 
-    async def _file_escalation(self, case_id: str, attempts: int) -> int:
+    async def _file_escalation(self, case_id: str, attempts: int) -> int | None:
         title = f"HITL: skill prompt drift {case_id} unresolved after {attempts}"
         body = (
             f"`skill_prompt_eval` filed `skill-prompt-drift` for `{case_id}` "
@@ -156,7 +160,12 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             f"_Spec §3.2: closing this issue clears the dedup key._"
         )
         return await self._pr.create_issue(
-            title, body, ["hitl-escalation", "skill-prompt-stuck"]
+            title,
+            body,
+            [
+                self._config.hitl_escalation_label[0],
+                self._config.skill_prompt_stuck_label[0],
+            ],
         )
 
     async def _reconcile_closed_escalations(self) -> None:
@@ -170,9 +179,9 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             "--state",
             "closed",
             "--label",
-            "hitl-escalation",
+            self._config.hitl_escalation_label[0],
             "--label",
-            "skill-prompt-stuck",
+            self._config.skill_prompt_stuck_label[0],
             "--author",
             "@me",
             "--limit",

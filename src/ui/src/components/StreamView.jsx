@@ -2,7 +2,12 @@ import React, { useMemo, useCallback, useState } from 'react'
 import { theme } from '../theme'
 import { useHydraFlow } from '../context/HydraFlowContext'
 import { StreamCard } from './StreamCard'
-import { PIPELINE_STAGES, PRODUCT_TRACK_KEYS, PULSE_ANIMATION } from '../constants'
+import {
+  PIPELINE_FLOW_COLLAPSE_THRESHOLD,
+  PIPELINE_STAGES,
+  PRODUCT_TRACK_KEYS,
+  PULSE_ANIMATION,
+} from '../constants'
 import { STAGE_KEYS } from '../hooks/useTimeline'
 import {
   sectionHeaderStyles,
@@ -33,12 +38,26 @@ function PipelineFlow({ stageGroups }) {
     return { mergedCount: merged, failedCount: failed }
   }, [stageGroups])
 
+  const renderFlowIssueCount = (group) => {
+    const activeCount = group.issues.filter(issue => issue.overallStatus === 'active').length
+    const displayCount = activeCount || group.issues.length
+    return (
+      <span
+        style={flowCountBadgeStyles[group.stage.key]}
+        title={`${group.issues.length} issues in ${group.stage.label}, ${activeCount} active`}
+        data-testid={`flow-count-${group.stage.key}`}
+      >
+        {displayCount}
+      </span>
+    )
+  }
+
   const renderFlowStage = (group) => (
     <div style={styles.flowStage} key={group.stage.key}>
       <span style={flowLabelStyles[group.stage.key]}>{group.stage.label}</span>
       {group.issues.length > 0 && (
         <div style={styles.flowDots}>
-          {group.issues.map(issue => {
+          {group.issues.length > PIPELINE_FLOW_COLLAPSE_THRESHOLD ? renderFlowIssueCount(group) : group.issues.map(issue => {
             const isEpic = issue.isEpicChild || issue.epicNumber > 0
             const dotStyles = isEpic ? epicFlowDotStyleMap : regularFlowDotStyleMap
             const dotStyle =
@@ -562,6 +581,29 @@ const flowDotFailedStyles = Object.fromEntries(
 
 const flowDotHitlStyles = Object.fromEntries(
   PIPELINE_STAGES.map(s => [s.key, { ...flowDotBase, background: theme.yellow }])
+)
+
+const flowCountBadgeBase = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  minWidth: 24,
+  height: 16,
+  padding: '0 6px',
+  borderRadius: 8,
+  border: '1px solid currentColor',
+  flexShrink: 0,
+  fontSize: 10,
+  fontWeight: 700,
+  lineHeight: 1,
+}
+
+const flowCountBadgeStyles = Object.fromEntries(
+  PIPELINE_STAGES.map(s => [s.key, {
+    ...flowCountBadgeBase,
+    color: s.color,
+    background: s.subtleColor,
+  }])
 )
 
 // Epic dot styles — 12px circles with centered "e" text

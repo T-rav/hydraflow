@@ -4,6 +4,7 @@ import { theme } from '../theme'
 import { canonicalRepoSlug } from '../constants'
 import { RepoSelector } from './RepoSelector'
 import { RegisterRepoDialog } from './RegisterRepoDialog'
+import { BootstrapWizard } from './BootstrapWizard'
 import { formatRelative, formatDuration } from '../utils/timeFormat'
 
 function pickLatestSession(sessions) {
@@ -15,6 +16,14 @@ function pickLatestSession(sessions) {
     }
   }
   return latest
+}
+
+function isPipelineEnabled(runtime, repoInfo) {
+  return runtime?.pipeline_enabled
+    ?? repoInfo?.pipeline_enabled
+    ?? runtime?.running
+    ?? repoInfo?.running
+    ?? false
 }
 
 function LastRunLine({ session, repoRunning, stageStatus }) {
@@ -69,8 +78,11 @@ export function SessionSidebar() {
     removeRepoShortcut,
   } = useHydraFlow()
   const [registerModalOpen, setRegisterModalOpen] = useState(false)
+  const [wizardOpen, setWizardOpen] = useState(false)
   const openRegister = useCallback(() => setRegisterModalOpen(true), [])
   const closeRegister = useCallback(() => setRegisterModalOpen(false), [])
+  const openWizard = useCallback(() => setWizardOpen(true), [])
+  const closeWizard = useCallback(() => setWizardOpen(false), [])
 
   const repoEntries = useMemo(() => {
     const entries = new Map()
@@ -150,18 +162,19 @@ export function SessionSidebar() {
   return (
     <div style={styles.sidebar}>
       <div style={styles.repoSelectorSection}>
-        <RepoSelector onOpenRegister={openRegister} />
+        <RepoSelector onOpenRegister={openRegister} onOpenNewProject={openWizard} />
       </div>
 
       <div style={styles.list}>
         {repoEntries.map(entry => {
           const isRepoSelected = selectedRepoSlug === entry.filterSlug
           const rt = entry.runtime
-          const isRunning = rt?.running ?? entry.info?.running ?? false
+          const isRunning = isPipelineEnabled(rt, entry.info)
           const lastError = rt?.last_error || null
           const orchRunning = orchestratorStatus === 'running'
           const disabled = !orchRunning && !isRunning
           const slug = entry.repoSlug || entry.displayName
+          const localOnly = entry.info?.local_only === true
 
           return (
             <div
@@ -170,15 +183,16 @@ export function SessionSidebar() {
               style={isRepoSelected ? repoRowSelected : styles.repoRow}
             >
               <div style={styles.repoLineOne}>
-                <span style={isRunning ? styles.repoDotRunning : styles.repoDotStopped} />
+                <span style={localOnly ? styles.repoDotLocal : isRunning ? styles.repoDotRunning : styles.repoDotStopped} />
                 <div style={styles.repoText}>
                   <span style={styles.repoName}>{entry.displayName}</span>
+                  {localOnly && <span style={styles.localOnlyBadge}>local only</span>}
                   {entry.info?.path && entry.info.path !== entry.displayName && (
                     <span style={styles.repoSubLabel}>{entry.info.path}</span>
                   )}
                 </div>
                 <div style={styles.repoControls}>
-                  {(entry.info || entry.runtime) && (
+                  {(entry.info || entry.runtime) && !localOnly && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
@@ -230,6 +244,7 @@ export function SessionSidebar() {
         )}
       </div>
       <RegisterRepoDialog isOpen={registerModalOpen} onClose={closeRegister} />
+      <BootstrapWizard isOpen={wizardOpen} onClose={closeWizard} />
     </div>
   )
 }
@@ -321,6 +336,19 @@ const styles = {
     borderRadius: '50%',
     background: theme.textMuted,
     flexShrink: 0,
+  },
+  repoDotLocal: {
+    width: 8,
+    height: 8,
+    borderRadius: '50%',
+    background: theme.orange,
+    flexShrink: 0,
+  },
+  localOnlyBadge: {
+    color: theme.orange,
+    fontSize: 10,
+    fontWeight: 700,
+    textTransform: 'uppercase',
   },
   runtimeStartBtn: {
     background: 'none',

@@ -1365,6 +1365,7 @@ class RepoRuntimeInfo(BaseModel):
     slug: str
     repo: str = ""
     running: bool = False
+    pipeline_enabled: bool = False
     session_id: str | None = None
     uptime_seconds: float = 0.0
     last_error: str | None = None
@@ -1879,6 +1880,7 @@ class StateData(BaseModel):
     escalation_contexts: dict[str, EscalationContext] = Field(default_factory=dict)
     diagnostic_attempts: dict[str, list[AttemptRecord]] = Field(default_factory=dict)
     diagnosis_severities: dict[str, str] = Field(default_factory=dict)
+    onboarding_drafts: dict[str, dict[str, object]] = Field(default_factory=dict)
     sentry_creation_attempts: dict[str, int] = Field(default_factory=dict)
     trace_runs: TraceRunsContainer = Field(default_factory=TraceRunsContainer)
     # StagingBisectLoop state (spec §4.3 + §8). Written by StagingPromotionLoop
@@ -2977,6 +2979,7 @@ class MetricsResponse(BaseModel):
     thresholds: list[ThresholdProposal] = Field(default_factory=list)
     inference_lifetime: dict[str, int] = Field(default_factory=dict)
     inference_session: dict[str, int] = Field(default_factory=dict)
+    repo_metrics: dict[str, Any] = Field(default_factory=dict)
 
 
 class IssueHistoryLink(BaseModel):

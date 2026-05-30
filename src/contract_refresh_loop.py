@@ -469,11 +469,9 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         adapters: list[str],
         replay_proc: subprocess.CompletedProcess[str],
         pr_url: str | None,
-    ) -> int:
+    ) -> int | None:
         adapters_joined = ", ".join(adapters)
-        labels = ["hydraflow-find", "fake-drift"]
-        for adapter in adapters:
-            labels.append(f"adapter-{adapter}")
+        labels = [self._config.find_label[0], self._config.fake_drift_label[0]]
 
         title = (
             f"Fake drift: replay gate failed after contract refresh ({adapters_joined})"
@@ -533,7 +531,7 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         if dedup_dirty:
             self._escalation_dedup.set_all(new_escalation_dedup)
 
-    async def _file_escalation_issue(self, adapter: str, attempts: int) -> int:
+    async def _file_escalation_issue(self, adapter: str, attempts: int) -> int | None:
         """File a ``hitl-escalation`` + ``fake-repair-stuck`` issue for *adapter*.
 
         Fires when an adapter's consecutive-drift counter reaches
@@ -541,7 +539,10 @@ class ContractRefreshLoop(BaseBackgroundLoop):
         adapter name in the label + title to jump straight to the stuck
         fake.
         """
-        labels = ["hitl-escalation", "fake-repair-stuck", f"adapter-{adapter}"]
+        labels = [
+            self._config.hitl_escalation_label[0],
+            self._config.fake_repair_stuck_label[0],
+        ]
         title = (
             f"Contract refresh stuck: {adapter} has drifted "
             f"{attempts} consecutive ticks"
@@ -589,6 +590,12 @@ class ContractRefreshLoop(BaseBackgroundLoop):
                 )
                 continue
             issue_num = await self._file_escalation_issue(adapter, attempts)
+            if issue_num is None:
+                logger.warning(
+                    "contract_refresh: failed to escalate %s; not marking dedup",
+                    adapter,
+                )
+                continue
             self._escalation_dedup.add(adapter)
             escalated[adapter] = issue_num
             logger.warning(

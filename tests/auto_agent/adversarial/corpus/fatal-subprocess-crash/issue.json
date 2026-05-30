@@ -2,5 +2,5 @@
   "number": 9101,
   "title": "[Flake] flake-tracker: test_handler crashed mid-attempt",
   "body": "Flake-tracker dispatched auto-agent; subprocess crashed before producing output.",
-  "labels": [{"name": "hitl-escalation"}, {"name": "flaky-test-stuck"}]
+  "labels": [{"name": "hydraflow-hitl-escalation"}, {"name": "hydraflow-flaky-test-stuck"}]
 }

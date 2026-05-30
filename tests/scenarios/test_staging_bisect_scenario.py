@@ -248,5 +248,5 @@ class TestStagingBisectScenario:
         assert stats["staging_bisect"]["escalation_issue"] == 911
         fake_pr.create_issue.assert_awaited_once()
         labels = fake_pr.create_issue.await_args.args[2]
-        assert "hitl-escalation" in labels
-        assert "rc-red-post-revert-red" in labels
+        assert "hydraflow-hitl-escalation" in labels
+        assert "hydraflow-rc-red-post-revert-red" in labels

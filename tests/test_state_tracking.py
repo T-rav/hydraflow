@@ -111,6 +111,7 @@ class TestInitialization:
             "last_green_rc_sha",
             "last_rc_red_sha",
             "managed_repos_onboarding_status",
+            "onboarding_drafts",
             "principles_drift_attempts",
             "corpus_learning_validation_attempts",
             "retry_lineage_attempts",

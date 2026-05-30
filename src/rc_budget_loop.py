@@ -337,7 +337,7 @@ class RCBudgetLoop(BaseBackgroundLoop):
         previous_5: list[dict[str, Any]],
         jobs: list[dict[str, Any]],
         junit_tests: list[tuple[str, float]],
-    ) -> int:
+    ) -> int | None:
         """File a ``hydraflow-find`` + ``rc-duration-regression`` issue."""
         cfg = self._config
         cur = int(current["duration_s"])
@@ -376,10 +376,12 @@ class RCBudgetLoop(BaseBackgroundLoop):
             f"Escalates after 3 unresolved attempts._"
         )
         return await self._pr.create_issue(
-            title, body, ["hydraflow-find", "rc-duration-regression"]
+            title,
+            body,
+            [self._config.find_label[0], self._config.rc_duration_regression_label[0]],
         )
 
-    async def _file_escalation(self, kind: str, attempts: int) -> int:
+    async def _file_escalation(self, kind: str, attempts: int) -> int | None:
         """File a ``hitl-escalation`` + ``rc-duration-stuck`` issue."""
         title = (
             f"HITL: RC gate duration regression ({kind}) unresolved after "
@@ -391,7 +393,12 @@ class RCBudgetLoop(BaseBackgroundLoop):
             f"`rc_budget:{kind}` dedup key (spec §3.2)."
         )
         return await self._pr.create_issue(
-            title, body, ["hitl-escalation", "rc-duration-stuck"]
+            title,
+            body,
+            [
+                self._config.hitl_escalation_label[0],
+                self._config.rc_duration_stuck_label[0],
+            ],
         )
 
     async def _reconcile_closed_escalations(self) -> None:
@@ -405,9 +412,9 @@ class RCBudgetLoop(BaseBackgroundLoop):
             "--state",
             "closed",
             "--label",
-            "hitl-escalation",
+            self._config.hitl_escalation_label[0],
             "--label",
-            "rc-duration-stuck",
+            self._config.rc_duration_stuck_label[0],
             "--author",
             "@me",
             "--limit",

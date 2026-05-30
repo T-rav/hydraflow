@@ -7,11 +7,13 @@ subclasses via ``run_with_loops()``, and asserts on the world's final state.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from tests.scenarios.builders import IssueBuilder, PRBuilder
 from tests.scenarios.fakes.mock_world import MockWorld
+from tests.scenarios.helpers.loop_port_seeding import seed_ports as _seed_ports
 
 pytestmark = pytest.mark.scenario_loops
 
@@ -69,17 +71,6 @@ class TestL1HealthMonitorConfigAdjustment:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason=(
-        "workspace_gc state mock returns empty active_workspaces (Phase 1 no-ops) and "
-        "_is_safe_to_gc calls `gh api` via run_subprocess which is not stubbed in the "
-        "scenario harness. Full GC coverage deferred to the per-loop scenarios track "
-        "documented in the Phase 3B plan's 'out of scope' section; remove this xfail "
-        "when that track lands and the workspace_gc registration feeds realistic "
-        "active-issue state to the loop."
-    ),
-    strict=False,
-)
 class TestL2WorkspaceGCCleansStale:
     """L2: workspace_gc destroys stale (closed-issue) worktrees, preserves active."""
 
@@ -95,8 +86,29 @@ class TestL2WorkspaceGCCleansStale:
         await world._workspace.create(100, "agent/issue-100")
         await world._workspace.create(200, "agent/issue-200")
 
+        state = MagicMock()
+        state.get_active_workspaces.return_value = {
+            100: str(tmp_path / "issue-100"),
+            200: str(tmp_path / "issue-200"),
+        }
+        state.get_active_issue_numbers.return_value = {200}
+        state.get_active_branches.return_value = {}
+        state.get_hitl_cause.return_value = None
+        state.get_issue_attempts.return_value = 0
+        _seed_ports(world, workspace_gc_state=state)
+
         # Run workspace_gc — it should GC issue 100's worktree but not 200's
-        await world.run_with_loops(["workspace_gc"], cycles=1)
+        async def _fake_run_subprocess(*args, **kwargs):  # noqa: ANN002, ANN003
+            if args[:3] == ("gh", "api", "repos/test-org/test-repo/issues/100"):
+                return "closed"
+            if args[:3] == ("git", "branch", "--list"):
+                return ""
+            return ""
+
+        with patch(
+            "workspace_gc_loop.run_subprocess", side_effect=_fake_run_subprocess
+        ):
+            await world.run_with_loops(["workspace_gc"], cycles=1)
 
         # After GC: issue 100 destroyed, 200 still active
         assert 100 in world._workspace.destroyed, (

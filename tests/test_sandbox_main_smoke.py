@@ -6,7 +6,8 @@ import os
 from unittest.mock import patch
 
 from mockworld import sandbox_main
-from mockworld.sandbox_main import _build_caretaker_enabled_cb
+from mockworld.sandbox_main import _build_caretaker_enabled_cb, _build_seed_repo_store
+from mockworld.seed import MockWorldSeed
 
 
 def test_load_seed_returns_empty_when_no_path() -> None:
@@ -33,12 +34,26 @@ def test_load_seed_reads_file_path_from_argv(tmp_path) -> None:
     assert seed.issues[0]["number"] == 1
 
 
-def test_caretaker_enabled_cb_none_enables_all() -> None:
-    """``loops_enabled=None`` (default) → every caretaker enabled."""
+def test_seed_repos_populate_dashboard_repo_store(tmp_path) -> None:
+    seed = MockWorldSeed(
+        repos=[
+            ("acme/repo-a", "/workspace/repo-a"),
+            ("acme/repo-b", "/workspace/repo-b"),
+        ]
+    )
+
+    repo_store = _build_seed_repo_store(seed, tmp_path)
+
+    records = repo_store.list()
+    assert [record.repo for record in records] == ["acme/repo-a", "acme/repo-b"]
+
+
+def test_caretaker_enabled_cb_none_disables_all() -> None:
+    """``loops_enabled=None`` in sandbox → no caretaker loops enabled."""
     cb = _build_caretaker_enabled_cb(None)
-    assert cb("workspace_gc") is True
-    assert cb("dependabot_merge") is True
-    assert cb("anything_else") is True
+    assert cb("workspace_gc") is False
+    assert cb("dependabot_merge") is False
+    assert cb("anything_else") is False
 
 
 def test_caretaker_enabled_cb_empty_disables_all() -> None:
@@ -73,6 +88,6 @@ def test_caretaker_enabled_cb_tolerates_extra_args() -> None:
     cb_all = _build_caretaker_enabled_cb(None)
     cb_subset = _build_caretaker_enabled_cb(["workspace_gc"])
     # Should not raise.
-    assert cb_all("workspace_gc", "extra", key="val") is True
+    assert cb_all("workspace_gc", "extra", key="val") is False
     assert cb_subset("workspace_gc", "extra", key="val") is True
     assert cb_subset("other", "extra", key="val") is False

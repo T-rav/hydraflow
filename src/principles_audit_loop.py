@@ -309,7 +309,8 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
             "principles-drift",
             f"check-{check_id}",
         ]
-        return await self._pr.create_issue(title, body, labels)
+        issue_number = await self._pr.create_issue(title, body, labels)
+        return int(issue_number or 0)
 
     async def _maybe_escalate(self, slug: str, check_id: str, severity: str) -> bool:
         """Fire exactly one hitl-escalation when the attempt counter reaches threshold.
@@ -452,11 +453,12 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
             f"reports all P1–P5 as PASS. Run `make audit DIR=<checkout>` "
             f"locally to reproduce."
         )
-        return await self._pr.create_issue(
+        issue_number = await self._pr.create_issue(
             title,
             body,
             labels=["hydraflow-find", "onboarding-blocked"],
         )
+        return int(issue_number or 0)
 
     async def _reconcile_onboarding(self) -> int:
         """For every managed_repos entry, ensure onboarding status is set."""
