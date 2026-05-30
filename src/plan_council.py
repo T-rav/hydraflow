@@ -34,6 +34,7 @@ from src.plan_council_prompts import (
     RISK_SKEPTIC_PROMPT,
     TESTER_PROMPT,
 )
+from subprocess_util import AuthenticationError, CreditExhaustedError
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,15 @@ class PlanCouncil:
             *(self._run_voter(role, user_msg) for role in _ROLES),
             return_exceptions=True,
         )
+
+        # Dark-factory contract: a voter that exhausts credit (or hits an
+        # auth failure) must NOT be silently treated as "contributed zero
+        # findings". Re-raise the fatal billing/auth signal out of the
+        # council so plan_phase's caller can pause the loop instead of
+        # marching the issue toward 'ready' on a half-empty tally.
+        for result in results:
+            if isinstance(result, AuthenticationError | CreditExhaustedError):
+                raise result
 
         per_voter: dict[str, list[Concern]] = {}
         all_findings: list[tuple[str, Concern]] = []
