@@ -606,48 +606,6 @@ export function reducer(state, action) {
       return { ...state, trackedReports: updated }
     }
 
-    case 'WS_PIPELINE_UPDATE': {
-      const { issueNumber, fromStage, toStage, status: pipeStatus } = action.data
-      const next = { ...state.pipelineIssues }
-
-      // Remove from source stage if specified
-      let foundInFrom = false
-      if (fromStage && next[fromStage]) {
-        const idx = next[fromStage].findIndex(i => i.issue_number === issueNumber)
-        if (idx >= 0) {
-          foundInFrom = true
-          next[fromStage] = next[fromStage].filter((_, i) => i !== idx)
-          // Add to target stage if specified
-          if (toStage && next[toStage] !== undefined) {
-            const moved = { issue_number: issueNumber, title: '', url: '', status: pipeStatus || 'queued' }
-            next[toStage] = [...next[toStage], moved]
-          }
-        }
-        // If not found in fromStage but toStage is merged, add anyway (item may have
-        // been removed by a prior event like review_update done)
-        if (!foundInFrom && toStage === 'merged') {
-          const alreadyMerged = (next.merged || []).some(i => i.issue_number === issueNumber)
-          if (!alreadyMerged) {
-            const moved = { issue_number: issueNumber, title: '', url: '', status: 'done' }
-            next.merged = [...(next.merged || []), moved]
-          }
-        }
-      } else if (!fromStage && pipeStatus) {
-        // Status-only update: find the issue in any stage and update its status
-        for (const stageKey of Object.keys(next)) {
-          const idx = next[stageKey].findIndex(i => i.issue_number === issueNumber)
-          if (idx >= 0) {
-            next[stageKey] = next[stageKey].map(i =>
-              i.issue_number === issueNumber ? { ...i, status: pipeStatus } : i
-            )
-            break
-          }
-        }
-      }
-
-      return { ...state, pipelineIssues: next }
-    }
-
     case 'SESSION_RESET': {
       return {
         ...state,
@@ -864,31 +822,6 @@ function getReporterId() {
     localStorage.setItem(key, id)
   }
   return id
-}
-
-/** Maps a WebSocket event to a WS_PIPELINE_UPDATE action, or null if not applicable. */
-export function getPipelineAction(event) {
-  const issueNum = event.data?.issue != null ? Number(event.data.issue) : null
-  if (issueNum == null) return null
-  const s = event.data?.status
-  if (event.type === 'triage_update') {
-    if (s === 'done') return { type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: 'triage', toStage: 'plan', status: 'queued' } }
-    if (s === 'failed') return { type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: null, toStage: null, status: 'failed' } }
-    if (s) return { type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: null, toStage: null, status: 'active' } }
-  } else if (event.type === 'planner_update') {
-    if (s === 'done') return { type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: 'plan', toStage: 'implement', status: 'queued' } }
-    if (s === 'failed') return { type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: null, toStage: null, status: 'failed' } }
-    if (s) return { type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: null, toStage: null, status: 'active' } }
-  } else if (event.type === 'worker_update') {
-    if (s === 'done') return { type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: 'implement', toStage: 'review', status: 'queued' } }
-    if (s) return { type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: null, toStage: null, status: 'active' } }
-  } else if (event.type === 'review_update') {
-    if (s === 'done') return { type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: null, toStage: null, status: 'done' } }
-    if (s) return { type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: null, toStage: null, status: 'active' } }
-  } else if (event.type === 'merge_update' && s === 'merged') {
-    return { type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: 'review', toStage: 'merged', status: 'done' } }
-  }
-  return null
 }
 
 export function HydraFlowProvider({ children }) {
@@ -1561,10 +1494,11 @@ export function HydraFlowProvider({ children }) {
         if (event.timestamp && (!lastEventTsRef.current || event.timestamp > lastEventTsRef.current)) {
           lastEventTsRef.current = event.timestamp
         }
-        // Dispatch WS pipeline updates for stage transitions
-        const pipelineAction = getPipelineAction(event)
-        if (pipelineAction) dispatch(pipelineAction)
-
+        // Board membership is driven authoritatively by the coalesced
+        // PIPELINE_SNAPSHOT push (handled in the reducer's pipeline_snapshot
+        // case) plus the 30s REST safety net. The former optimistic
+        // getPipelineAction → WS_PIPELINE_UPDATE layer was removed because it
+        // raced the snapshot and produced card flicker (recon B2).
         if (event.type === 'metrics_update') {
           fetchLifetimeStats()
           fetchWithRepo('/api/metrics').then(r => r.json()).then(data => dispatch({ type: 'METRICS', data })).catch(() => {})
