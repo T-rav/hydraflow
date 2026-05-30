@@ -89,6 +89,68 @@ async def test_run_passes_disallowed_tools_to_command(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_builds_restricted_claude_command(tmp_path: Path) -> None:
+    """ADR-0084 / W7-OC-1: the auto-agent runs on attacker-reachable input, so
+    its built claude command MUST be hardened by default — acceptEdits (NOT
+    bypassPermissions), an explicit --allowedTools allowlist, and the egress
+    tools (WebFetch/WebSearch) on --disallowedTools. Mirrors
+    test_claude_restricted_hardens_against_injection at the runner level.
+    """
+    captured: dict[str, Any] = {}
+
+    async def capture_stream(*, cmd, **kwargs: Any) -> str:
+        captured["cmd"] = cmd
+        return ""
+
+    runner = _make_runner(implementation_tool="claude")
+    with patch(
+        "runners.base_subprocess_runner.stream_claude_process",
+        side_effect=capture_stream,
+    ):
+        await runner.run(prompt="x", worktree_path=str(tmp_path), issue_number=1)
+
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("--permission-mode") + 1] == "acceptEdits"
+    assert "bypassPermissions" not in cmd
+    assert "--allowedTools" in cmd
+    allow = cmd[cmd.index("--allowedTools") + 1]
+    assert "Bash" in allow and "Edit" in allow and "Write" in allow
+    disallow = cmd[cmd.index("--disallowedTools") + 1]
+    assert "WebFetch" in disallow
+    assert "WebSearch" in disallow
+
+
+@pytest.mark.asyncio
+async def test_run_unrestricted_escape_hatch_reverts_to_bypass(tmp_path: Path) -> None:
+    """agent_unrestricted_tools=True is the ADR-0084 escape hatch: it reverts
+    the auto-agent claude command to the legacy bypassPermissions mode.
+    """
+    captured: dict[str, Any] = {}
+
+    async def capture_stream(*, cmd, **kwargs: Any) -> str:
+        captured["cmd"] = cmd
+        return ""
+
+    # ConfigFactory.create() has an explicit kwarg allowlist that doesn't cover
+    # the ADR-0084 escape hatch, so set the field via model_copy on the built
+    # config (HydraFlowConfig is not frozen but copying is the cleanest path).
+    config = ConfigFactory.create(implementation_tool="claude")
+    config = config.model_copy(update={"agent_unrestricted_tools": True})
+    bus = MagicMock()
+    bus.current_session_id = "test-session"
+    runner = AutoAgentRunner(config=config, event_bus=bus)
+    with patch(
+        "runners.base_subprocess_runner.stream_claude_process",
+        side_effect=capture_stream,
+    ):
+        await runner.run(prompt="x", worktree_path=str(tmp_path), issue_number=1)
+
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("--permission-mode") + 1] == "bypassPermissions"
+    assert "--allowedTools" not in cmd
+
+
+@pytest.mark.asyncio
 async def test_run_passes_wall_clock_cap_to_stream_timeout(tmp_path: Path) -> None:
     """auto_agent_wall_clock_cap_s flows into StreamConfig.timeout so the
     subprocess is killed at the operator-set bound, not the codebase

@@ -31,6 +31,28 @@ def _plugin_dir_flags() -> list[str]:
     return flags
 
 
+# Tools the issue-derived implementer / auto-agent legitimately needs in
+# restricted mode. WebFetch and WebSearch are deliberately EXCLUDED here and
+# additionally placed on the disallow list — they are the agent's built-in
+# network-egress/exfiltration surface that a prompt-injection payload would
+# reach for. Bash stays allowed (the implementer must run git/tests/build), so
+# a fully airtight egress block still requires a container-level network policy
+# on the agent runtime (see ADR-0084). This is defence-in-depth, not a sandbox.
+_RESTRICTED_ALLOWED_TOOLS = (
+    "Bash Read Edit Write MultiEdit Glob Grep LS TodoWrite NotebookEdit Task Skill"
+)
+_NETWORK_EGRESS_TOOLS = ("WebFetch", "WebSearch")
+
+
+def _merge_disallowed(disallowed_tools: str | None, extra: tuple[str, ...]) -> str:
+    """Union a comma-separated disallow list with *extra* tool names."""
+    present = [t.strip() for t in (disallowed_tools or "").split(",") if t.strip()]
+    for name in extra:
+        if name not in present:
+            present.append(name)
+    return ",".join(present)
+
+
 def build_agent_command(
     *,
     tool: AgentTool,
@@ -38,14 +60,21 @@ def build_agent_command(
     disallowed_tools: str | None = None,
     max_turns: int | None = None,
     effort: str | None = None,
+    restricted: bool = False,
 ) -> list[str]:
     """Build a non-interactive command for an agent stage.
 
     *effort* sets the reasoning effort level (``"low"``, ``"medium"``,
     ``"high"``, ``"max"``).  When ``None``, the CLI default is used.
+
+    *restricted* hardens issue-derived spawns (implementer, auto-agent) against
+    prompt injection (ADR-0084): the blanket ``bypassPermissions`` is replaced
+    by ``acceptEdits`` + an explicit tool allowlist, and the network-egress
+    tools (WebFetch/WebSearch) are disallowed. Codex switches to its
+    network-blocked ``workspace-write`` sandbox.
     """
     if tool == "codex":
-        return _build_codex_command(model=model)
+        return _build_codex_command(model=model, restricted=restricted)
     if tool == "gemini":
         return _build_gemini_command(model=model)
     if tool == "pi":
@@ -63,9 +92,13 @@ def build_agent_command(
         "--model",
         model,
         "--verbose",
-        "--permission-mode",
-        "bypassPermissions",
     ]
+    if restricted:
+        cmd.extend(["--permission-mode", "acceptEdits"])
+        cmd.extend(["--allowedTools", _RESTRICTED_ALLOWED_TOOLS])
+        disallowed_tools = _merge_disallowed(disallowed_tools, _NETWORK_EGRESS_TOOLS)
+    else:
+        cmd.extend(["--permission-mode", "bypassPermissions"])
     cmd.extend(_plugin_dir_flags())
     if disallowed_tools:
         cmd.extend(["--disallowedTools", disallowed_tools])
@@ -76,19 +109,27 @@ def build_agent_command(
     return cmd
 
 
-def _build_codex_command(*, model: str) -> list[str]:
-    """Build a Codex `exec` command with non-interactive automation settings."""
-    return [
+def _build_codex_command(*, model: str, restricted: bool = False) -> list[str]:
+    """Build a Codex `exec` command with non-interactive automation settings.
+
+    In *restricted* mode the sandbox is ``workspace-write`` (writes allowed,
+    network blocked) and the dangerous bypass flag is dropped — for codex this
+    is a real network-egress block (ADR-0084). Otherwise the legacy
+    ``danger-full-access`` behaviour is preserved for trusted, non-issue spawns.
+    """
+    cmd = [
         "codex",
         "exec",
         "--json",
         "--model",
         model,
         "--sandbox",
-        "danger-full-access",
-        "--dangerously-bypass-approvals-and-sandbox",
-        "--skip-git-repo-check",
+        "workspace-write" if restricted else "danger-full-access",
     ]
+    if not restricted:
+        cmd.append("--dangerously-bypass-approvals-and-sandbox")
+    cmd.append("--skip-git-repo-check")
+    return cmd
 
 
 def _build_gemini_command(*, model: str) -> list[str]:

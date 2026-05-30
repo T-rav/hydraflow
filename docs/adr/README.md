@@ -114,6 +114,7 @@ ADR and that named test files actually exist.
 | [0081](0081-epic-sweeper-loop.md) | EpicSweeperLoop: Autonomous Completion-Based Epic Auto-Close | Proposed |
 | [0082](0082-declarative-gate-contract.md) | Declarative Gate Contract for Branch Protection | Proposed |
 | [0083](0083-no-ignored-test-gates.md) | No ignored automated test gates | Accepted |
+| [0084](0084-untrusted-text-trust-boundary.md) | Untrusted-text trust boundary for agent prompts | Accepted |
 
 ## Adding a new ADR
 

@@ -6,7 +6,15 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W22
 
+- `40473a4` — merge staging into credit telemetry integrity *(2026-05-30)*
 - `febc4e7` — chore(arch): regenerate architecture artifacts after credit fixes *(2026-05-29)*
+- `ed8c682` — merge staging into no-ignored sandbox gates *(2026-05-29)*
+- `8642f7b` — test: enforce non-ignored sandbox coverage *(2026-05-29)*
+- `bb088ee` — fix(gates): assign BranchProtectionAuditorLoop to a functional area + orchestrator test double *(2026-05-29)*
+- `5962bdb` — fix(gates): address grumpy-principal review across all slices *(2026-05-29)*
+- `3c87f71` — feat(gates): branch-protection drift caretaker loop (Slice 4) *(2026-05-29)*
+- `79a1ada` — docs(adr): ADR-0082 declarative gate contract (extends ADR-0042 enforcement) *(2026-05-29)*
+- `0afd876` — feat(gates): gen-gates CLI + make targets; generate README table; scrub stale prose *(2026-05-29)*
 
 ## 2026-W21
 
@@ -381,4 +389,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `7c6fe67` — Fixes #1634: add ADR-0009 for multi-repo process-per-repo model (#1679) (#1679) *(2026-03-01)*
 
 
-_Regenerated from commit `febc4e7` on 2026-05-30 11:21 UTC. Source last changed at `febc4e7`. Status: 🟢 fresh._
+_Regenerated from commit `40473a4` on 2026-05-30 11:42 UTC. Source last changed at `40473a4`. Status: 🟢 fresh._
