@@ -34,17 +34,17 @@ describe('ACTIVE_STATUSES', () => {
 describe('PIPELINE_STAGES', () => {
   it('is an array with 7 stages', () => {
     expect(Array.isArray(PIPELINE_STAGES)).toBe(true)
-    expect(PIPELINE_STAGES).toHaveLength(7)
+    expect(PIPELINE_STAGES).toHaveLength(8)
   })
 
   it('contains all pipeline stage keys in order', () => {
     const keys = PIPELINE_STAGES.map(s => s.key)
-    expect(keys).toEqual(['triage', 'discover', 'shape', 'plan', 'implement', 'review', 'merged'])
+    expect(keys).toEqual(['triage', 'discover', 'shape', 'plan', 'implement', 'review', 'hitl', 'merged'])
   })
 
   it('has title-case labels for each stage', () => {
     const labels = PIPELINE_STAGES.map(s => s.label)
-    expect(labels).toEqual(['Triage', 'Discover', 'Shape', 'Plan', 'Implement', 'Review', 'Merged'])
+    expect(labels).toEqual(['Triage', 'Discover', 'Shape', 'Plan', 'Implement', 'Review', 'Needs Human', 'Merged'])
   })
 
   it('maps each stage to the correct theme color', () => {
@@ -56,6 +56,7 @@ describe('PIPELINE_STAGES', () => {
       plan: theme.purple,
       implement: theme.accent,
       review: theme.orange,
+      hitl: theme.yellow,
       merged: theme.green,
     })
   })
@@ -69,6 +70,7 @@ describe('PIPELINE_STAGES', () => {
       plan: 'planner',
       implement: 'implementer',
       review: 'reviewer',
+      hitl: null,
       merged: null,
     })
   })
@@ -82,6 +84,7 @@ describe('PIPELINE_STAGES', () => {
       plan: 'max_planners',
       implement: 'max_workers',
       review: 'max_reviewers',
+      hitl: null,
       merged: null,
     })
   })
@@ -95,6 +98,7 @@ describe('PIPELINE_STAGES', () => {
       plan: theme.purpleSubtle,
       implement: theme.accentSubtle,
       review: theme.orangeSubtle,
+      hitl: theme.yellowSubtle,
       merged: theme.greenSubtle,
     })
   })
@@ -117,8 +121,10 @@ describe('PIPELINE_STAGES', () => {
 })
 
 describe('PIPELINE_LOOPS', () => {
-  it('has entries for all non-merged pipeline stages', () => {
-    const stageKeys = PIPELINE_STAGES.filter(s => s.key !== 'merged').map(s => s.key)
+  it('has entries for all worker-bearing pipeline stages (excludes terminal/no-role stages)', () => {
+    // PIPELINE_LOOPS are the stages that run workers — i.e. stages with a role.
+    // Terminal/no-role stages (merged, hitl) have no loop.
+    const stageKeys = PIPELINE_STAGES.filter(s => s.role !== null).map(s => s.key)
     expect(PIPELINE_LOOPS.map(l => l.key)).toEqual(stageKeys)
   })
 

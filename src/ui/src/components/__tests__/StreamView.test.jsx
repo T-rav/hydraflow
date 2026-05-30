@@ -59,6 +59,24 @@ const basePipeIssue = {
   url: 'https://github.com/test/42',
 }
 
+describe('HITL issues are rendered in the workstream (WS-RT)', () => {
+  it('renders a card for an issue escalated to the hitl bucket', () => {
+    // Before the fix PIPELINE_STAGES had no 'hitl' entry, so StreamView's
+    // `PIPELINE_STAGES.map(...)` never rendered the hitl bucket — an escalated
+    // issue vanished from the board entirely (present only in the HITL tab).
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      pipelineIssues: {
+        hitl: [{ issue_number: 77, title: 'Escalated issue', status: 'hitl' }],
+      },
+    }))
+    render(<StreamView {...defaultProps} />)
+
+    expect(screen.getByTestId('stage-section-hitl')).toBeTruthy()
+    expect(screen.getByTestId('stream-card-77')).toBeTruthy()
+    expect(screen.getByText('Escalated issue')).toBeTruthy()
+  })
+})
+
 describe('StreamView stage indicators', () => {
   it('keeps stream card horizontal inset aligned with its stage header', () => {
     mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({

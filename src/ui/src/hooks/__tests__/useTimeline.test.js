@@ -13,7 +13,7 @@ import {
 
 describe('STAGE_KEYS', () => {
   it('contains all pipeline stages in order', () => {
-    expect(STAGE_KEYS).toEqual(['triage', 'discover', 'shape', 'plan', 'implement', 'review', 'merged'])
+    expect(STAGE_KEYS).toEqual(['triage', 'discover', 'shape', 'plan', 'implement', 'review', 'hitl', 'merged'])
   })
 })
 
