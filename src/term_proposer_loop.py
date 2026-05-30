@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from dedup_store import DedupStore
+from subprocess_util import AuthenticationError, CreditExhaustedError
 from ubiquitous_language import (
     Candidate,
     Term,
@@ -187,6 +188,14 @@ class TermProposerLoop(BaseBackgroundLoop):
             ctx = self._build_draft_context(candidate, existing_terms, src_root)
             try:
                 draft = await self._llm.draft(ctx)
+            except (AuthenticationError, CreditExhaustedError):
+                # Billing/auth signal — propagate to the loop's pause handler
+                # (base_background_loop) instead of swallowing it as a benign
+                # draft failure. CreditExhaustedError subclasses RuntimeError,
+                # so this clause MUST precede the broad (ValueError, RuntimeError)
+                # handler below or the loop keeps spawning against an exhausted
+                # account (WS-2.2 self-review M1).
+                raise
             except (ValueError, RuntimeError) as e:
                 # No dedup on failure — the candidate falls through to natural
                 # re-detection on the next tick (Fix C1; see ADR-0054 I2).

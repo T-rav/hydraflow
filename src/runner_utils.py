@@ -551,6 +551,7 @@ async def run_lightweight_agent(
     env = make_clean_env(gh_token)
     start = time.monotonic()
     success = False
+    record_row = False
     result = SimpleResult(returncode=-1)
     try:
         try:
@@ -559,25 +560,32 @@ async def run_lightweight_agent(
             )
         except Exception as exc:
             # Credit / likely-bug exceptions propagate so the outer loop can
-            # pause or surface the bug; transient failures become a soft
-            # rc=-1 result the caller treats as an empty reply.
+            # pause or surface the bug — and are NOT recorded, matching
+            # BaseSubprocessRunner (which reraises before its telemetry write)
+            # so a credit-blocked spawn never attributes phantom cost. Transient
+            # failures become a soft rc=-1 result the caller treats as an empty
+            # reply, and ARE recorded as a failed inference.
             reraise_on_credit_or_bug(exc)
             result = SimpleResult(stderr=str(exc), returncode=-1)
+            record_row = True
             return result
+        # Credit-out via output text propagates without recording, same as above.
         raise_if_credit_exhausted(result.stdout, result.stderr, tool)
         success = result.returncode == 0
+        record_row = True
         return result
     finally:
-        _record_inference(
-            config,
-            source=source,
-            cmd=cmd,
-            prompt=prompt,
-            transcript=result.stdout or "",
-            duration_s=time.monotonic() - start,
-            success=success,
-            issue_number=issue_number,
-            pr_number=pr_number,
-            session_id=session_id,
-            stats=None,
-        )
+        if record_row:
+            _record_inference(
+                config,
+                source=source,
+                cmd=cmd,
+                prompt=prompt,
+                transcript=result.stdout or "",
+                duration_s=time.monotonic() - start,
+                success=success,
+                issue_number=issue_number,
+                pr_number=pr_number,
+                session_id=session_id,
+                stats=None,
+            )

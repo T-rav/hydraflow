@@ -5,10 +5,14 @@ The lightweight (``run_simple``) spawn path NEVER raises ``CreditExhaustedError`
 detect credit (via the ``run_lightweight_agent`` helper, which scans + raises, or
 its own ``raise_if_credit_exhausted`` / ``is_credit_exhaustion`` scan) misclassifies
 a billing signal as a generic failure and burns attempt budget — the
-``run-simple-agent-spawn-no-credit-detection`` finding from the dark-factory audit.
+``run-simple-agent-spawn-no-credit-detection`` audit finding.
 
-This ratchet enforces the CLAUDE.md subprocess-runner contract on the lightweight
-path. ``_GRANDFATHERED`` must stay EMPTY — the audited gap is fully closed.
+SCOPE: this ratchet checks that each lightweight spawner module *contains* a
+credit detector call. It does NOT prove the raised ``CreditExhaustedError``
+reaches a pause handler — a caller that catches ``RuntimeError`` (its superclass)
+one layer up still swallows it. Per-loop credit PROPAGATION must be covered by a
+behavioral test at the loop boundary (e.g. assert ``CreditExhaustedError``
+escapes ``_do_work``). ``_GRANDFATHERED`` must stay EMPTY.
 
 Ref: ADR-0086, ``docs/wiki/dark-factory.md`` §6, ``src/exception_classify.py``.
 """
@@ -31,6 +35,7 @@ _CREDIT_DETECTORS = frozenset(
 )
 
 # runner_utils DEFINES the helper + the scan — the contract home, not a bypass.
+# Keyed by rel path (basename collisions must not silently exempt a subdir file).
 _CONTRACT_HOME = frozenset({"runner_utils.py"})
 
 # MUST stay empty: every lightweight LLM spawner detects credit exhaustion.
@@ -41,12 +46,12 @@ def _lightweight_modules_missing_credit_detection() -> set[str]:
     """Return lightweight-path modules that never detect credit exhaustion."""
     offenders: set[str] = set()
     for facts in iter_module_facts():
-        if facts.name in _CONTRACT_HOME:
+        if facts.rel in _CONTRACT_HOME:
             continue
         if (facts.calls & _LIGHTWEIGHT_MARKERS) and not (
             facts.calls & _CREDIT_DETECTORS
         ):
-            offenders.add(facts.name)
+            offenders.add(facts.rel)
     return offenders
 
 
@@ -70,7 +75,7 @@ def test_credit_grandfather_list_is_empty() -> None:
 
 def test_lightweight_helper_keeps_credit_contract() -> None:
     """Guard against gutting: run_lightweight_agent must keep its credit detection."""
-    facts = {f.name: f for f in iter_module_facts()}
+    facts = {f.rel: f for f in iter_module_facts()}
     runner_utils = facts["runner_utils.py"]
     assert {"raise_if_credit_exhausted", "reraise_on_credit_or_bug"} <= (
         runner_utils.calls
@@ -83,9 +88,9 @@ def test_lightweight_helper_keeps_credit_contract() -> None:
 
 def test_central_subprocess_runner_reraises_credit() -> None:
     """The central subprocess runner must propagate credit/auth, not swallow it."""
-    facts = {f.name: f for f in iter_module_facts()}
-    base = facts.get("base_subprocess_runner.py")
-    assert base is not None, "base_subprocess_runner.py not found in src/"
+    facts = {f.rel: f for f in iter_module_facts()}
+    base = facts.get("runners/base_subprocess_runner.py")
+    assert base is not None, "runners/base_subprocess_runner.py not found in src/"
     assert "reraise_on_credit_or_bug" in base.calls, (
         "BaseSubprocessRunner.run must call reraise_on_credit_or_bug so credit/auth "
         "signals propagate instead of collapsing to crashed=True."

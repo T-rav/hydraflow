@@ -147,3 +147,127 @@ class TestTermProposerCreditDetection:
 
         with pytest.raises(CreditExhaustedError):
             await client.complete_structured(prompt="propose terms", schema={})
+
+
+class TestCostRollupCountsEstimatedSpend:
+    """WS-2.2 self-review S2: the cost-cap rollup re-prices from token counts, so a
+    char-estimated lightweight row (0 actual tokens) must fall back to the stored
+    estimated_cost_usd — otherwise lightweight spend re-prices to $0 and never
+    counts toward the daily cost cap."""
+
+    def test_char_estimated_row_counts_via_stored_estimate(self, tmp_path) -> None:
+        import json
+        from datetime import UTC, datetime
+
+        from dashboard_routes._cost_rollups import iter_priced_inferences
+        from model_pricing import load_pricing
+
+        config = ConfigFactory.create(repo_root=tmp_path / "repo")
+        path = config.data_path("metrics", "prompt", "inferences.jsonl")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        rows = [
+            # char-estimated lightweight row: 0 actual tokens, stored estimate > 0
+            {
+                "timestamp": "2026-05-30T12:00:00+00:00",
+                "model": "claude-sonnet-4-5",
+                "source": "transcript_summary",
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "estimated_cost_usd": 0.05,
+            },
+            # genuinely-zero row: no actual tokens AND no stored estimate -> stays 0
+            {
+                "timestamp": "2026-05-30T12:01:00+00:00",
+                "model": "claude-sonnet-4-5",
+                "source": "transcript_summary",
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "estimated_cost_usd": 0.0,
+            },
+        ]
+        path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+
+        since = datetime(2026, 5, 1, tzinfo=UTC)
+        until = datetime(2026, 6, 1, tzinfo=UTC)
+        priced = list(
+            iter_priced_inferences(
+                config, since=since, until=until, pricing=load_pricing()
+            )
+        )
+
+        costs = sorted(r["cost_usd"] for r in priced)
+        assert costs == [0.0, 0.05], (
+            "char-estimated row must contribute its stored estimate to the cost cap; "
+            f"got {costs}"
+        )
+
+
+class TestStreamClaudeWithTelemetry:
+    """WS-2.2 self-review S4: the streaming wrapper (backing acceptance_criteria,
+    report_issue_loop, sentry_loop, verification_judge) records telemetry on success
+    AND failure, with issue/pr derived from event_data."""
+
+    @pytest.mark.asyncio
+    async def test_records_row_on_success(self, tmp_path) -> None:
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from runner_utils import StreamConfig, stream_claude_with_telemetry
+
+        config = ConfigFactory.create(repo_root=tmp_path / "repo")
+        bus = MagicMock()
+        bus.current_session_id = "sess-1"
+        with patch(
+            "runner_utils.stream_claude_process",
+            new=AsyncMock(return_value="the transcript"),
+        ):
+            out = await stream_claude_with_telemetry(
+                config=config,
+                cmd=["claude", "-p", "x", "--model", "sonnet"],
+                prompt="a non-trivial streaming prompt",
+                cwd=tmp_path,
+                active_procs=set(),
+                event_bus=bus,
+                event_data={"source": "ac_generator", "issue": 7, "pr": 9},
+                logger=MagicMock(),
+                stream_config=StreamConfig(),
+            )
+        assert out == "the transcript"
+        rows = PromptTelemetry(config).load_inferences()
+        match = [r for r in rows if r.get("source") == "ac_generator"]
+        assert match, "streaming wrapper must record a telemetry row on success"
+        assert match[-1]["issue_number"] == 7
+        assert match[-1]["pr_number"] == 9
+
+    @pytest.mark.asyncio
+    async def test_records_row_when_stream_raises(self, tmp_path) -> None:
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from runner_utils import StreamConfig, stream_claude_with_telemetry
+
+        config = ConfigFactory.create(repo_root=tmp_path / "repo")
+        bus = MagicMock()
+        bus.current_session_id = "sess-2"
+        with (
+            patch(
+                "runner_utils.stream_claude_process",
+                new=AsyncMock(side_effect=RuntimeError("boom")),
+            ),
+            pytest.raises(RuntimeError),
+        ):
+            await stream_claude_with_telemetry(
+                config=config,
+                cmd=["claude", "-p", "x", "--model", "sonnet"],
+                prompt="a non-trivial streaming prompt",
+                cwd=tmp_path,
+                active_procs=set(),
+                event_bus=bus,
+                event_data={"source": "sentry_ingest"},
+                logger=MagicMock(),
+                stream_config=StreamConfig(),
+            )
+        rows = PromptTelemetry(config).load_inferences()
+        match = [r for r in rows if r.get("source") == "sentry_ingest"]
+        assert match, (
+            "wrapper must record a row in the finally even when the stream raises"
+        )
+        assert match[-1]["status"] == "failed"

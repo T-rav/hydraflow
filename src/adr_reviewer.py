@@ -495,16 +495,25 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
         # degrading to None and burning attempt budget, propagates likely-bug
         # exceptions, collapses transient failures (timeouts, OSError, etc.) to
         # SimpleResult(returncode=-1), and records PromptTelemetry.
-        result = await run_lightweight_agent(
-            runner=self._runner,
-            config=self._config,
-            tool=self._config.adr_review_tool,
-            model=self._config.adr_review_model,
-            prompt=prompt,
-            source="adr_reviewer",
-            timeout=self._config.agent_timeout,
-            gh_token=self._credentials.gh_token,
-        )
+        try:
+            result = await run_lightweight_agent(
+                runner=self._runner,
+                config=self._config,
+                tool=self._config.adr_review_tool,
+                model=self._config.adr_review_model,
+                prompt=prompt,
+                source="adr_reviewer",
+                timeout=self._config.agent_timeout,
+                gh_token=self._credentials.gh_token,
+            )
+        except (TimeoutError, OSError, FileNotFoundError, NotImplementedError) as exc:
+            # Graceful-degradation parity with the sibling lightweight spawners
+            # (transcript_summarizer/wiki_compiler): an unavailable or
+            # unimplemented backend yields None -> NO_CONSENSUS, not a skipped
+            # ADR. NotImplementedError is the live case -- DockerRunner.run_simple
+            # raises it for >100KB stdin prompts (WS-2.2 self-review S1).
+            logger.warning("ADR council orchestrator unavailable: %s", exc)
+            return None
         if result.returncode != 0:
             logger.warning(
                 "ADR council orchestrator failed (rc=%d): %s",
