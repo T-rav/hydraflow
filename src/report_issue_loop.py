@@ -381,11 +381,11 @@ class ReportIssueLoop(BaseBackgroundLoop):
             )
             raise
         except Exception as exc:
+            reraise_on_credit_or_bug(exc)
             logger.exception("Report issue agent failed for report %s", report.id)
             # Record the crash so the failure path below marks the tracked
             # report "failed" instead of silently retrying (#6408 / #6490).
             agent_crashed = True
-            _ = exc  # name used to make the binding read
         finally:
             if screenshot_path:
                 screenshot_path.unlink(missing_ok=True)
