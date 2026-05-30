@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hydraflow.bg_worker_manager")
 
+DEFAULT_DISABLED_WORKERS: frozenset[str] = frozenset({"principles_audit"})
+
 
 class BGWorkerManager:
     """Manages background worker states, enabled flags, intervals, and triggering."""
@@ -31,6 +33,7 @@ class BGWorkerManager:
         self._bg_worker_states: dict[str, BackgroundWorkerState] = {}
         self._bg_worker_enabled: dict[str, bool] = {}
         self._bg_worker_intervals: dict[str, int] = {}
+        self._seed_default_disabled_workers()
 
     @property
     def worker_states(self) -> dict[str, BackgroundWorkerState]:
@@ -93,6 +96,21 @@ class BGWorkerManager:
     def _restore_intervals(self, intervals: dict[str, int]) -> None:
         """Bulk-restore interval overrides (used during startup recovery)."""
         self._bg_worker_intervals.update(intervals)
+
+    def _seed_default_disabled_workers(self) -> None:
+        """Persist first-run disabled defaults without overriding later UI enables."""
+        defaults = DEFAULT_DISABLED_WORKERS & set(self._bg_loop_registry)
+        if not defaults:
+            return
+        seeded = self._state.get_default_disabled_workers_seeded()
+        missing = defaults - seeded
+        if not missing:
+            return
+        disabled = self._state.get_disabled_workers() | missing
+        for name in missing:
+            self._bg_worker_enabled[name] = False
+        self._state.set_disabled_workers(disabled)
+        self._state.set_default_disabled_workers_seeded(seeded | missing)
 
     def _restore_enabled_flags(self, disabled_names: set[str]) -> None:
         """Bulk-restore disabled flags (used during startup recovery)."""

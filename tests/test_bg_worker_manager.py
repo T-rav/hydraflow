@@ -74,6 +74,29 @@ class TestEnabled:
         disabled = manager._state.get_disabled_workers()
         assert "x" in disabled
 
+    def test_principles_audit_is_seeded_disabled_by_default(
+        self, config: HydraFlowConfig, state: Any
+    ) -> None:
+        loop = MagicMock()
+        manager = BGWorkerManager(config, state, {"principles_audit": loop})
+
+        assert manager.is_enabled("principles_audit") is False
+        assert state.get_disabled_workers() == {"principles_audit"}
+        assert state.get_default_disabled_workers_seeded() == {"principles_audit"}
+
+    def test_principles_audit_enable_persists_after_default_seed(
+        self, config: HydraFlowConfig, state: Any
+    ) -> None:
+        loop = MagicMock()
+        manager = BGWorkerManager(config, state, {"principles_audit": loop})
+        manager.set_enabled("principles_audit", True)
+
+        restarted = BGWorkerManager(config, state, {"principles_audit": loop})
+
+        assert restarted.is_enabled("principles_audit") is True
+        assert state.get_disabled_workers() == set()
+        assert state.get_default_disabled_workers_seeded() == {"principles_audit"}
+
 
 class TestGetStates:
     def test_empty_by_default(self, manager: BGWorkerManager) -> None:

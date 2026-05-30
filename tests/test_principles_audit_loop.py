@@ -26,7 +26,6 @@ def _deps(stop: asyncio.Event) -> LoopDeps:
 @pytest.fixture
 def loop_env(tmp_path: Path):
     cfg = HydraFlowConfig(data_root=tmp_path, repo="hydra/hydraflow")
-    cfg.principles_audit_loop_enabled = True
     cfg.managed_repos = []
     state = MagicMock()
     state.blocked_slugs.return_value = set()

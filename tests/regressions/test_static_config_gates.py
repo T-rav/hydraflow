@@ -1,12 +1,11 @@
-"""Regression tests for static config gates on all 34 loops.
+"""Regression tests for static config gates on all loops with deploy-time gates.
 
 Dark-factory §2.1 #3: every loop must short-circuit with
 ``{"status": "config_disabled"}`` when its ``config.<loop>_enabled`` field
 is ``False``, even when the ADR-0049 in-body kill-switch (``_enabled_cb``)
 is live.
 
-This test exercises each of the 34 loops that received static gates in this
-PR. For each loop:
+This test exercises each loop that has a static config gate. For each loop:
 
   1. Build a minimal loop instance with ``enabled=True`` (so ``_enabled_cb``
      does not short-circuit).
@@ -16,11 +15,9 @@ PR. For each loop:
 
 from __future__ import annotations
 
-import asyncio
 import sys
 from pathlib import Path
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -28,7 +25,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 
 from tests.helpers import make_bg_loop_deps
-
 
 # ---------------------------------------------------------------------------
 # Helper: build a loop instance with the static gate disabled
@@ -286,18 +282,6 @@ def _pricing_refresh_loop(tmp_path: Path):
     return PricingRefreshLoop(config=d.config, pr_manager=MagicMock(), deps=d.loop_deps)
 
 
-def _principles_audit_loop(tmp_path: Path):
-    from principles_audit_loop import PrinciplesAuditLoop
-
-    d = _deps(tmp_path, "principles_audit_loop_enabled")
-    return PrinciplesAuditLoop(
-        config=d.config,
-        state=MagicMock(),
-        pr_manager=MagicMock(),
-        deps=d.loop_deps,
-    )
-
-
 def _rc_budget_loop(tmp_path: Path):
     from rc_budget_loop import RCBudgetLoop
 
@@ -473,7 +457,6 @@ _LOOP_FACTORIES = [
     ("MergeStateWatcherLoop", _merge_state_watcher_loop),
     ("PRUnstickerLoop", _pr_unsticker_loop),
     ("PricingRefreshLoop", _pricing_refresh_loop),
-    ("PrinciplesAuditLoop", _principles_audit_loop),
     ("RCBudgetLoop", _rc_budget_loop),
     ("RepoWikiLoop", _repo_wiki_loop),
     ("ReportIssueLoop", _report_issue_loop),
