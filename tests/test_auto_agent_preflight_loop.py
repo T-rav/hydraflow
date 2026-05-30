@@ -155,6 +155,35 @@ async def test_deny_list_bypasses_agent_with_prefixed_label(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
+async def test_deny_list_skips_when_denied_label_not_sorted_first(
+    tmp_path: Path,
+) -> None:
+    # The real producer pattern (principles_audit_loop): the deny-listed
+    # "principles-stuck" is filed ALONGSIDE a "check-<id>" label that sorts first.
+    # The old sub_labels[0]-only check looked at "check-some-id", missed the
+    # deny-listed label, and ran the auto-agent on a principles escalation it must
+    # defer to a human. Checking EVERY sub-label closes the recursion-safety hole.
+    loop, state = _make_loop(tmp_path)
+    state.get_auto_agent_attempts = MagicMock(return_value=0)
+    loop._prs.list_issues_by_label = AsyncMock(
+        return_value=[
+            {
+                "number": 1,
+                "body": "x",
+                "labels": [
+                    {"name": "hitl-escalation"},
+                    {"name": "check-some-id"},  # sorts before "principles-stuck"
+                    {"name": "principles-stuck"},
+                ],
+            },
+        ]
+    )
+    result = await loop._do_work()
+    loop._prs.add_labels.assert_awaited_with(1, ["human-required"])
+    assert result["result_status"] == "skipped_deny_list"
+
+
+@pytest.mark.asyncio
 async def test_attempt_cap_marks_exhausted(tmp_path: Path) -> None:
     loop, state = _make_loop(tmp_path)
     state.get_auto_agent_attempts = MagicMock(return_value=3)
