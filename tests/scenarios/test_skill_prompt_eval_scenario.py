@@ -35,8 +35,6 @@ class TestSkillPromptEval:
     async def test_drift_regression_files_issue(self, tmp_path) -> None:
         """One hand-crafted case regressed PASS→FAIL → one drift issue filed."""
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=301)
 
         # Seed a state mock whose last-green snapshot pre-declares both
         # cases as PASS; the corpus below flips case_shrink_001 to FAIL.
@@ -67,7 +65,6 @@ class TestSkillPromptEval:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             skill_prompt_state=fake_state,
             skill_corpus_runner=AsyncMock(return_value=corpus_result),
             skill_reconcile_closed=AsyncMock(return_value=None),
@@ -75,19 +72,17 @@ class TestSkillPromptEval:
 
         await world.run_with_loops(["skill_prompt_eval"], cycles=1)
 
-        assert fake_pr.create_issue.await_count == 1
-        args = fake_pr.create_issue.await_args.args
-        title, _body, labels = args[0], args[1], args[2]
-        assert "diff_sanity" in title
-        assert "case_shrink_001" in title
-        assert "skill-prompt-drift" in labels
-        assert "hydraflow-find" in labels
+        issues = await world.github.list_issues_by_label("skill-prompt-drift")
+        assert len(issues) == 1
+        issue = world.github.issue(issues[0]["number"])
+        assert "diff_sanity" in issue.title
+        assert "case_shrink_001" in issue.title
+        assert "skill-prompt-drift" in issue.labels
+        assert "hydraflow-find" in issue.labels
 
     async def test_weak_case_sampling_files_issue(self, tmp_path) -> None:
         """10 learning-loop cases all PASS — sampled 10% surface a weak-case issue."""
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=302)
 
         fake_state = MagicMock()
         fake_state.get_skill_prompt_last_green.return_value = {}
@@ -107,7 +102,6 @@ class TestSkillPromptEval:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             skill_prompt_state=fake_state,
             skill_corpus_runner=AsyncMock(return_value=corpus_result),
             skill_reconcile_closed=AsyncMock(return_value=None),
@@ -115,9 +109,5 @@ class TestSkillPromptEval:
 
         await world.run_with_loops(["skill_prompt_eval"], cycles=1)
 
-        weak_calls = [
-            c
-            for c in fake_pr.create_issue.await_args_list
-            if len(c.args) > 2 and "corpus-case-weak" in c.args[2]
-        ]
-        assert len(weak_calls) >= 1
+        weak_issues = await world.github.list_issues_by_label("corpus-case-weak")
+        assert len(weak_issues) >= 1

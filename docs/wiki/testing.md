@@ -1,6 +1,24 @@
 # Testing
 
 
+## Assert MockWorld side effects through fake adapters
+
+MockWorld loop scenarios should use production-facing fake adapters for side
+effects whenever an adapter exists. For GitHub actions, let `MockWorld` wire
+`FakeGitHub` and assert on created issues, labels, comments, PRs, and CI scripts
+instead of replacing `create_issue`, `post_comment`, or `add_labels` with raw
+`AsyncMock` call counters. Mock only the unmodeled external boundary, such as a
+`gh` subprocess, `git bisect`, or an LLM corpus runner. Cover parser and
+formatter branches that sit behind those boundaries with focused unit tests.
+**Why:** Adapter-backed assertions catch title/body/label drift and fake-contract
+regressions that call-count-only mocks hide.
+
+
+```json:entry
+{"id":"01JRC_MOCKWORLD_FAKE_PORT_ASSERTIONS","title":"Assert MockWorld side effects through fake adapters","topic":"mockworld","source_type":"manual","source_issue":"hydraflow-wgac","source_repo":"T-rav/hydraflow","created_at":"2026-05-30T21:15:00+00:00","updated_at":"2026-05-30T21:15:00+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+```
+
+
 ## Enforce function structure limits for testability
 
 Limit handler functions to 50 lines and registration wiring to 30 lines. Extract nested closures into instance methods to flatten nesting to ≤3 levels. Example: move callback validation from nested closures to instance methods. **Why:** Deep nesting and long functions are difficult to test in isolation and encourage tight coupling.

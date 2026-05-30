@@ -45,8 +45,6 @@ class TestFakeCoverageAuditor:
     async def test_uncassetted_surface_files_adapter_gap(self, tmp_path) -> None:
         """Public fake method w/o cassette → one adapter-surface gap filed."""
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=501)
 
         # Seed under config.repo_root (= tmp_path / "repo" per make_bg_loop_deps).
         repo = tmp_path / "repo"
@@ -68,7 +66,6 @@ class TestFakeCoverageAuditor:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             fake_coverage_reconcile_closed=AsyncMock(return_value=None),
             # Helpers (none present in this fake) — trivially True to short-circuit.
             fake_coverage_grep=AsyncMock(return_value=True),
@@ -76,23 +73,21 @@ class TestFakeCoverageAuditor:
 
         await world.run_with_loops(["fake_coverage_auditor"], cycles=1)
 
-        assert fake_pr.create_issue.await_count == 1
-        args = fake_pr.create_issue.await_args.args
-        title, body, labels = args[0], args[1], args[2]
+        issues = await world.github.list_issues_by_label("hydraflow-adapter-surface")
+        assert len(issues) == 1
+        issue = world.github.issue(issues[0]["number"])
         # #8986 — rollup shape: title names the (fake, kind) pair; the
         # uncovered method names live in the body.
-        assert "FakeGitHub" in title
-        assert "adapter surface" in title
-        assert "close_issue" in body
-        assert "hydraflow-adapter-surface" in labels
-        assert "hydraflow-fake-coverage-gap" in labels
-        assert "hydraflow-find" in labels
+        assert "FakeGitHub" in issue.title
+        assert "adapter surface" in issue.title
+        assert "close_issue" in issue.body
+        assert "hydraflow-adapter-surface" in issue.labels
+        assert "hydraflow-fake-coverage-gap" in issue.labels
+        assert "hydraflow-find" in issue.labels
 
     async def test_unused_test_helper_files_helper_gap(self, tmp_path) -> None:
         """Fake ``script_*`` helper with no scenario caller → one test-helper gap."""
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=502)
 
         repo = tmp_path / "repo"
         # Seed at the new canonical Fake location (post-Task-1.1 of the
@@ -110,21 +105,20 @@ class TestFakeCoverageAuditor:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             fake_coverage_reconcile_closed=AsyncMock(return_value=None),
             fake_coverage_grep=AsyncMock(return_value=False),  # helper uncalled
         )
 
         await world.run_with_loops(["fake_coverage_auditor"], cycles=1)
 
-        assert fake_pr.create_issue.await_count == 1
-        args = fake_pr.create_issue.await_args.args
-        title, body, labels = args[0], args[1], args[2]
+        issues = await world.github.list_issues_by_label("hydraflow-test-helper")
+        assert len(issues) == 1
+        issue = world.github.issue(issues[0]["number"])
         # #8986 — rollup shape: title names the (fake, kind) pair; the
         # uncovered helper names live in the body.
-        assert "FakeDocker" in title
-        assert "test helpers" in title
-        assert "script_run" in body
-        assert "hydraflow-test-helper" in labels
-        assert "hydraflow-fake-coverage-gap" in labels
-        assert "hydraflow-find" in labels
+        assert "FakeDocker" in issue.title
+        assert "test helpers" in issue.title
+        assert "script_run" in issue.body
+        assert "hydraflow-test-helper" in issue.labels
+        assert "hydraflow-fake-coverage-gap" in issue.labels
+        assert "hydraflow-find" in issue.labels

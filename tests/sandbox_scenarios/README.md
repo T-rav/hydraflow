@@ -35,6 +35,23 @@ architecture, and the spec at
    Builds the compose stack, boots, runs your assertions, tears down.
    Returns 0 on PASS, 1 on scenario failure, 2 on infra failure.
 
+## MockWorld fidelity rules
+
+MockWorld scenarios should exercise production ports through fake adapters
+whenever the adapter exists. For GitHub side effects, prefer the default
+`FakeGitHub` wired into `MockWorld` and assert on stored issues, labels,
+comments, PRs, and CI scripts. Do not replace `pr_manager.create_issue`,
+`post_comment`, or `add_labels` with a raw `AsyncMock` just to count calls; that
+misses the fake-adapter contract and can hide title/body/label drift.
+
+Patch only the true external boundary that MockWorld cannot yet model, such as
+`gh run download`, `git bisect`, or an LLM/subprocess corpus runner. When a loop
+has enrichment logic behind that boundary, add focused unit coverage for the
+parser/formatter as well as the scenario. The RC budget loop is the reference
+pattern: the MockWorld scenario asserts issue creation through `FakeGitHub`,
+while unit tests cover job-breakdown parsing, JUnit parsing, and issue-body
+enrichment without creating live GitHub issues.
+
 ## Existing scenarios
 
 | Name | What it tests |
