@@ -54,6 +54,7 @@ areas:
       chain (DiffSanity / ScopeCheck / PlanCompliance / TestAdequacy)
       which are call-sites, not loops.
     loops:
+      - BranchProtectionAuditorLoop
       - CIMonitorLoop
     related_adrs: ['0023', '0035', '0044']
 
