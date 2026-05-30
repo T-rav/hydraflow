@@ -56,7 +56,7 @@ def render_prompt(
     # Substitute fields. issue_body is attacker-controllable → fence it; the
     # *_block values are already fenced by render_blocks. Prepend the standing
     # untrusted-data preamble so the agent treats every <untrusted_*> region as
-    # data, not instructions (ADR-0066).
+    # data, not instructions (ADR-0082).
     rendered = content.format(
         persona=persona,
         issue_number=issue_number,
@@ -84,7 +84,7 @@ def render_blocks(
     prior_attempts: list,
 ) -> dict[str, str]:
     """Render the structured-block strings injected into the prompt."""
-    # Attacker-reachable blocks are fenced as untrusted data (ADR-0066). The
+    # Attacker-reachable blocks are fenced as untrusted data (ADR-0082). The
     # escalation context and prior-attempts blocks are system-generated.
     return {
         "issue_comments_block": fence_untrusted(

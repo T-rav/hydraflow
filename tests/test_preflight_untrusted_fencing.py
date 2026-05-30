@@ -1,4 +1,4 @@
-"""ADR-0066: auto-agent envelope fences attacker-reachable text as untrusted data."""
+"""ADR-0082: auto-agent envelope fences attacker-reachable text as untrusted data."""
 
 from __future__ import annotations
 

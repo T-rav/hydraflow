@@ -661,7 +661,7 @@ class HydraFlowConfig(BaseModel):
     agent_unrestricted_tools: bool = Field(
         default=False,
         description=(
-            "Escape hatch (ADR-0066): when True, issue-derived implementer/auto-agent "
+            "Escape hatch (ADR-0082): when True, issue-derived implementer/auto-agent "
             "spawns use the legacy bypassPermissions/danger-full-access mode instead of "
             "the hardened acceptEdits + tool-allowlist + WebFetch/WebSearch-disallow "
             "mode. Leave False unless the restricted allowlist breaks a backend."

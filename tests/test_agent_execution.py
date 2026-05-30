@@ -109,7 +109,12 @@ class TestBuildCommand:
     def test_build_command_supports_codex_backend(
         self, event_bus: EventBus, tmp_path: Path
     ) -> None:
-        """Codex backend should build a non-interactive codex exec command."""
+        """Codex backend builds a non-interactive codex exec command.
+
+        The implementer is an issue-derived spawn, so it runs in restricted mode
+        (ADR-0082): the network-blocked ``workspace-write`` sandbox, not
+        ``danger-full-access``.
+        """
         cfg = ConfigFactory.create(
             implementation_tool="codex",
             model="gpt-5-codex",
@@ -123,8 +128,9 @@ class TestBuildCommand:
         assert "--model" in cmd
         assert cmd[cmd.index("--model") + 1] == "gpt-5-codex"
         assert "--sandbox" in cmd
-        assert cmd[cmd.index("--sandbox") + 1] == "danger-full-access"
-        assert "--dangerously-bypass-approvals-and-sandbox" in cmd
+        assert cmd[cmd.index("--sandbox") + 1] == "workspace-write"
+        assert "danger-full-access" not in cmd
+        assert "--dangerously-bypass-approvals-and-sandbox" not in cmd
         assert "--skip-git-repo-check" in cmd
         assert "--ask-for-approval" not in cmd
 

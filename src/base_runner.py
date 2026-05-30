@@ -484,7 +484,7 @@ class BaseRunner:
             tool=self._config.implementation_tool,
             model=self._config.model,
             # Issue-derived implementer / auto-agent: harden against prompt
-            # injection (ADR-0066) unless an operator opts out via config.
+            # injection (ADR-0082) unless an operator opts out via config.
             restricted=not self._config.agent_unrestricted_tools,
         )
 

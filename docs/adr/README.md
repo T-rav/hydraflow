@@ -112,6 +112,7 @@ ADR and that named test files actually exist.
 | [0079](0079-adr-reviewer-loop.md) | ADRReviewerLoop: Autonomous Council Review for Proposed ADRs | Proposed |
 | [0080](0080-epic-monitor-loop.md) | EpicMonitorLoop: Autonomous Stale-Epic Detection and Progress Refresh | Proposed |
 | [0081](0081-epic-sweeper-loop.md) | EpicSweeperLoop: Autonomous Completion-Based Epic Auto-Close | Proposed |
+| [0082](0082-untrusted-text-trust-boundary.md) | Untrusted-text trust boundary for agent prompts | Accepted |
 
 ## Adding a new ADR
 
