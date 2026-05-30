@@ -13,6 +13,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `ADRReviewerLoop` | ✅ [0079] | ✅ [adr-reviewer-loop.md] | ❌ | ✅ README.md | ✅ `test_adr_reviewer_loop.py` | ✅ in catalog | ✅ `s25_adr_reviewer_no_proposed_adrs.py` |
 | `AdrTouchpointAuditorLoop` | ✅ [0056, 0057] | ✅ [adr-touchpoint-auditor-loop.md] | ❌ | ✅ README.md | ✅ `test_adr_touchpoint_auditor_loop.py` | ✅ in catalog | ✅ `s33_adr_touchpoint_auditor_no_drift.py` |
 | `AutoAgentPreflightLoop` | ✅ [0050, 0063] | ✅ [dark-factory.md] | ❌ | ✅ README.md | ✅ `test_auto_agent_preflight_loop.py` | ✅ in catalog | ✅ `s31_auto_agent_preflight_no_escalations.py` |
+| `BranchProtectionAuditorLoop` | ✅ [0082] | ❌ | ❌ | ❌ | ✅ `test_branch_protection_auditor_loop.py` | ✅ in catalog | ✅ `s41_branch_protection_auditor_no_drift.py` |
 | `CIMonitorLoop` | ✅ [0029, 0065] | ✅ [ci-monitor-loop.md] | ❌ | ✅ README.md | ✅ `test_ci_monitor_loop.py` | ⚠️ in catalog (no scenario file) | ✅ `s15_ci_monitor_main_branch_red.py` |
 | `ContractRefreshLoop` | ✅ [0045, 0047] | ✅ [contract-refresh-loop.md] | ❌ | ✅ README.md | ✅ `test_contract_refresh_loop.py` | ✅ in catalog | ✅ `s30_contract_refresh_clean.py` |
 | `CorpusLearningLoop` | ✅ [0045] | ✅ [corpus-learning-loop.md] | ❌ | ✅ README.md | ✅ `test_corpus_learning_loop.py` | ✅ in catalog | ✅ `s22_corpus_learning_no_escape_issues.py` |
@@ -45,7 +46,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `SentryLoop` | ✅ [0055] | ✅ [sentry-loop.md] | ❌ | ✅ README.md | ✅ `test_sentry_loop.py` | ❌ | ❌ |
 | `SkillPromptEvalLoop` | ✅ [0045] | ✅ [skill-prompt-eval-loop.md] | ❌ | ✅ README.md | ✅ `test_skill_prompt_eval_loop.py` | ✅ in catalog | ✅ `s17_skill_prompt_eval_clean_corpus.py` |
 | `StagingBisectLoop` | ✅ [0045, 0048, 0063] | ✅ [architecture.md] | ❌ | ✅ README.md | ✅ `test_staging_bisect_loop.py` | ✅ in catalog | ❌ |
-| `StagingPromotionLoop` | ✅ [0042] | ✅ [patterns.md] | ❌ | ✅ README.md | ✅ `test_staging_promotion_loop.py` | ✅ in catalog | ✅ `s13_rc_rebase_recovery.py` |
+| `StagingPromotionLoop` | ✅ [0042] | ✅ [patterns.md] | ❌ | ✅ README.md | ✅ `test_staging_promotion_loop.py` | ✅ in catalog | ❌ |
 | `StaleIssueGCLoop` | ✅ [0029, 0072] | ✅ [gotchas.md, stale-issue-gc-loop.md] | ❌ | ✅ README.md | ✅ `test_stale_issue_gc_loop.py` | ✅ in catalog | ❌ |
 | `StaleIssueLoop` | ✅ [0072] | ✅ [gotchas.md, stale-issue-gc-loop.md] | ❌ | ✅ README.md | ✅ `test_stale_issue_loop.py` | ✅ in catalog | ✅ `s16_stale_issue_scan.py` |
 | `TermProposerLoop` | ✅ [0054, 0057, 0060, 0061, 0062, 0068] | ✅ [bot-pr-port.md, entry-evidence-loop.md, task.md, term-pruner-loop.md] | ❌ | ✅ README.md | ✅ `test_term_proposer_loop.py` | ✅ in catalog | ❌ |
@@ -53,7 +54,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `TriageRetryLoop` | ✅ [0063] | ❌ | ❌ | ✅ README.md | ✅ `test_triage_retry_loop.py` | ✅ in catalog | ❌ |
 | `TrustFleetSanityLoop` | ✅ [0045, 0046] | ✅ [testing.md] | ❌ | ✅ README.md | ✅ `test_trust_fleet_sanity_loop.py` | ✅ in catalog | ❌ |
 | `WikiRotDetectorLoop` | ✅ [0045, 0056, 0057] | ✅ [wiki-rot-detector-loop.md] | ❌ | ✅ README.md | ✅ `test_wiki_rot_detector_loop.py` | ✅ in catalog | ❌ |
-| `WorkspaceGCLoop` | ✅ [0069] | ✅ [workspace-gc-loop.md] | ❌ | ✅ README.md | ✅ `test_workspace_gc_loop.py` | ⚠️ in catalog (no scenario file) | ✅ `s07_workspace_gc_reaps_dead_worktree.py` |
+| `WorkspaceGCLoop` | ✅ [0069] | ✅ [workspace-gc-loop.md] | ❌ | ✅ README.md | ✅ `test_workspace_gc_loop.py` | ⚠️ in catalog (no scenario file) | ❌ |
 ## Section 2: Ports
 
 Cassette and Contract columns are N/A for all ports (ADR-0047 contracts are
@@ -77,4 +78,4 @@ HITL trigger). It is not regenerable from source and is maintained in
 `docs/arch/coverage_matrix.md` (the hand-curated baseline document).
 
 
-_Regenerated from commit `38e1a41` on 2026-05-30 05:41 UTC. Source last changed at `38e1a41`. Status: 🟢 fresh._
+_Regenerated from commit `febc4e7` on 2026-05-30 11:21 UTC. Source last changed at `febc4e7`. Status: 🟢 fresh._

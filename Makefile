@@ -36,7 +36,7 @@ RESET := \033[0m
 DOCKER_IMAGE ?= ghcr.io/t-rav/hydraflow-agent:latest
 DOCKER_BASE_IMAGE ?= ghcr.io/t-rav/hydraflow-agent-base:latest
 
-.PHONY: help run dev dry-run clean clean-assets compact coverage cover smoke test test-fast test-cov lint lint-check lint-fix lint-ul typecheck security quality quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak screenshot screenshot-update check-node-ui trust trust-adversarial auto-agent-adversarial
+.PHONY: help run dev dry-run clean clean-assets compact coverage cover smoke test test-fast test-cov lint lint-check lint-fix lint-ul typecheck security quality quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak check-node-ui trust trust-adversarial auto-agent-adversarial
 
 check-node-ui:
 	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh --version >/dev/null
@@ -304,6 +304,17 @@ audit:
 
 audit-json:
 	@cd $(HYDRAFLOW_DIR) && $(UV) python -m scripts.hydraflow_audit $(or $(DIR),.) --json
+
+# --------------------------------------------------------------------------
+# Branch-protection gates — generate rulesets + README table from gates.toml.
+#   make gen-gates                         # regenerate artifacts
+#   make gen-gates-check                   # CI: fail on drift (no writes)
+# --------------------------------------------------------------------------
+gen-gates:
+	@cd $(HYDRAFLOW_DIR) && $(UV) python -m scripts.gen_gates
+
+gen-gates-check:
+	@cd $(HYDRAFLOW_DIR) && $(UV) python -m scripts.gen_gates --check
 
 # --------------------------------------------------------------------------
 # Adoption plan — reads the audit report, emits a superpowers-chained prompt.

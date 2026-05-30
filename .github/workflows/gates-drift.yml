@@ -1,0 +1,30 @@
+name: Gates Drift
+# Verifies the generated branch-protection artifacts (main_ruleset.json,
+# staging_ruleset.json, the README gate table) match the gates.toml source of
+# truth, and that every active gate maps to a real workflow job.
+#
+# Standalone (NOT prep-managed) so the prep CI scaffolder never clobbers it.
+# Not yet a required status check: a new required check must already exist on
+# the base branch before being required, or the first PR self-blocks. Promote
+# it to required once it is green on staging (see the add-a-gate runbook).
+
+on:
+  pull_request:
+    branches: [main, staging]
+  push:
+    branches: [staging]
+
+permissions:
+  contents: read
+
+jobs:
+  gates-drift:
+    name: Gates Drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pyyaml
+      - run: python -m scripts.gen_gates --check

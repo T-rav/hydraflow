@@ -18,6 +18,8 @@ from auto_agent_preflight_loop import AutoAgentPreflightLoop
 from base_background_loop import LoopDeps
 from baseline_policy import BaselinePolicy
 from beads_manager import BeadsManager
+from branch_protection_audit import AuditReport, audit_repo, gh_fetch_rulesets
+from branch_protection_auditor_loop import BranchProtectionAuditorLoop  # noqa: TCH001
 from bug_reproducer import BugReproducer
 from caching_issue_store import CachingIssueStore
 from ci_monitor_loop import CIMonitorLoop  # noqa: TCH001
@@ -191,6 +193,7 @@ class ServiceRegistry:
     sentry_loop: SentryLoop
     stale_issue_gc_loop: StaleIssueGCLoop
     ci_monitor_loop: CIMonitorLoop
+    branch_protection_auditor_loop: BranchProtectionAuditorLoop
     security_patch_loop: SecurityPatchLoop
     repo_wiki_store: RepoWikiStore
     repo_wiki_loop: RepoWikiLoop
@@ -1096,6 +1099,29 @@ def build_services(
         deps=loop_deps,
     )
 
+    branch_protection_auditor_dedup = DedupStore(
+        "branch_protection_auditor",
+        config.data_root / "dedup" / "branch_protection_auditor.json",
+    )
+    _bp_canonical_dir = config.repo_root / "docs" / "standards" / "branch_protection"
+
+    async def _branch_protection_audit() -> AuditReport:
+        # Offload the blocking gh calls so the event loop is not stalled.
+        return await asyncio.to_thread(
+            audit_repo,
+            config.repo,
+            _bp_canonical_dir,
+            fetch_rulesets=gh_fetch_rulesets,
+        )
+
+    branch_protection_auditor_loop = BranchProtectionAuditorLoop(  # noqa: F841
+        config=config,
+        pr_manager=prs,
+        dedup=branch_protection_auditor_dedup,
+        deps=loop_deps,
+        auditor=_branch_protection_audit,
+    )
+
     memory_backlog_dedup = DedupStore(
         "memory_backlog",
         config.data_root / "dedup" / "memory_backlog.json",
@@ -1344,6 +1370,7 @@ def build_services(
         sentry_loop=sentry_loop,
         stale_issue_gc_loop=stale_issue_gc_loop,
         ci_monitor_loop=ci_monitor_loop,
+        branch_protection_auditor_loop=branch_protection_auditor_loop,
         security_patch_loop=security_patch_loop,
         repo_wiki_store=repo_wiki_store,
         repo_wiki_loop=repo_wiki_loop,

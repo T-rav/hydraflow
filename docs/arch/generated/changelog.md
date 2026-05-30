@@ -4,6 +4,10 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W22
+
+- `febc4e7` — chore(arch): regenerate architecture artifacts after credit fixes *(2026-05-29)*
+
 ## 2026-W21
 
 - `60d07b4` — feat(mockworld): FakeDocker bd-CLI emulation for bead lifecycle coverage (closes #8367) (#9053) (#9053) *(2026-05-21)*
@@ -377,4 +381,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `7c6fe67` — Fixes #1634: add ADR-0009 for multi-repo process-per-repo model (#1679) (#1679) *(2026-03-01)*
 
 
-_Regenerated from commit `38e1a41` on 2026-05-30 05:41 UTC. Source last changed at `38e1a41`. Status: 🟢 fresh._
+_Regenerated from commit `febc4e7` on 2026-05-30 11:21 UTC. Source last changed at `febc4e7`. Status: 🟢 fresh._

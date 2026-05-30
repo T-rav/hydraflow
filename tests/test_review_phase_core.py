@@ -3517,13 +3517,13 @@ class TestVisualGateAdvisor:
         phase._prs.post_pr_comment = AsyncMock()
         phase._escalate_to_hitl = AsyncMock()
         phase._invoke_visual_pipeline = AsyncMock(  # type: ignore[method-assign]
-            return_value=("pass", {}, "pixel diff under threshold")
+            return_value=("pass", {}, "semantic checks passed")
         )
         veto_payload = (
             '{"verdict":"VETO",'
-            '"reasoning":"baseline shows misaligned modal — regression",'
+            '"reasoning":"modal lacks required accessible label — regression",'
             '"disagreements":[{"executor_claim":"pass",'
-            '"advisor_assessment":"modal misalignment",'
+            '"advisor_assessment":"missing accessible label",'
             '"severity":"blocking"}]}'
         )
         runner_run = AsyncMock(return_value=veto_payload)
