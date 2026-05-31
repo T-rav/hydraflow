@@ -96,6 +96,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0083 | — |
 | ADR-0084 | `src.agent`, `src.preflight.runner`, `src.untrusted_text` |
 | ADR-0085 | `src.secret_scrub` |
+| ADR-0086 | `src.contracts.shadow`, `src.live_corpus_replay_loop` |
 
 ## Module → ADRs
 
@@ -125,6 +126,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.contract_diff` | ADR-0047, ADR-0052 |
 | `src.contract_recording` | ADR-0047, ADR-0052 |
 | `src.contract_refresh_loop` | ADR-0045, ADR-0047 |
+| `src.contracts.shadow` | ADR-0086 |
 | `src.corpus_learning_loop` | ADR-0045 |
 | `src.dashboard` | ADR-0007, ADR-0008, ADR-0038 |
 | `src.dashboard_routes` | ADR-0007, ADR-0008, ADR-0013, ADR-0019, ADR-0038 |
@@ -159,6 +161,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.issue_fetcher` | ADR-0019, ADR-0067 |
 | `src.issue_store` | ADR-0006, ADR-0022, ADR-0041 |
 | `src.label_drift_watcher_loop` | ADR-0056 |
+| `src.live_corpus_replay_loop` | ADR-0086 |
 | `src.memory_backlog_loop` | ADR-0057 |
 | `src.memory_backlog_mirror` | ADR-0057 |
 | `src.merge_state_watcher` | ADR-0075 |
@@ -249,4 +252,4 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.workspace_gc_loop` | ADR-0069 |
 | `src.worktree` | ADR-0003, ADR-0009, ADR-0010 |
 
-_Regenerated from commit `bca7775` on 2026-05-30 15:10 UTC. Source last changed at `bca7775`. Status: 🟢 fresh._
+_Regenerated from commit `bc00989` on 2026-05-31 23:35 UTC. Source last changed at `bc00989`. Status: 🟢 fresh._

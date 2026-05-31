@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_40 terms across 3 bounded contexts._
+_41 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -260,6 +260,22 @@ Hexagonal port for the in-memory issue work-queue — exposes only the queue acc
 **Invariants:**
 - Pure Protocol — no implementation, no state.
 - Only domain-consumed methods are declared; orchestrator and dashboard methods deliberately stay off the port.
+
+## LiveCorpusReplayLoop
+
+**Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/live_corpus_replay_loop.py:LiveCorpusReplayLoop` · **Confidence:** `accepted`
+**Aliases:** `live corpus replay loop`, `shadow corpus replay`, `shadow drift replay`
+
+Trust-fleet loop that replays live shadow-corpus samples against registered
+fake-adapter or shape validators. `LiveCorpusReplayLoop` files
+`hydraflow-find` / `shadow-drift` issues when live adapter output diverges
+from the current fake or schema contract, and escalates to HITL only after the
+configured drift retry budget is exhausted.
+
+**Invariants:**
+- Empty shadow corpus is an idle tick, not an error.
+- Drift issues are auto-agent routed before any human escalation.
+- Dispatcher registration is keyed by `(adapter, command)` so cassette
 
 ## MergeStateWatcherLoop
 

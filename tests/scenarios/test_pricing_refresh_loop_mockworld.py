@@ -68,11 +68,7 @@ class TestPricingRefreshLoop:
         world = MockWorld(tmp_path)
         _seed_pricing_file(tmp_path)
 
-        github = AsyncMock(
-            find_existing_issue=AsyncMock(return_value=0),
-            create_issue=AsyncMock(return_value=0),
-        )
-        _seed_ports(world, github=github, repo_root=tmp_path)
+        _seed_ports(world, github=world.github, repo_root=tmp_path)
 
         upstream_payload = {
             "claude-haiku-4-5-20251001": {
@@ -102,18 +98,14 @@ class TestPricingRefreshLoop:
 
         assert stats["pricing_refresh"] == {"drift": False}
         pr_helper.assert_not_awaited()
-        github.create_issue.assert_not_awaited()
+        assert world.github._issues == {}
 
     async def test_drift_opens_pr(self, tmp_path) -> None:
         """Upstream price changed → PR opens with pricing-refresh-auto branch."""
         world = MockWorld(tmp_path)
         _seed_pricing_file(tmp_path)
 
-        github = AsyncMock(
-            find_existing_issue=AsyncMock(return_value=0),
-            create_issue=AsyncMock(return_value=0),
-        )
-        _seed_ports(world, github=github, repo_root=tmp_path)
+        _seed_ports(world, github=world.github, repo_root=tmp_path)
 
         # Bump haiku's input cost: 1.0/M → 1.5/M (within bounds).
         upstream_payload = {

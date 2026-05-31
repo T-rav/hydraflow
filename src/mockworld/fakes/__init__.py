@@ -13,6 +13,7 @@ from mockworld.fakes.fake_docker import FakeDocker
 from mockworld.fakes.fake_fs import FakeFS
 from mockworld.fakes.fake_git import FakeGit
 from mockworld.fakes.fake_github import FakeGitHub
+from mockworld.fakes.fake_honeycomb import FakeHoneycomb
 from mockworld.fakes.fake_http import FakeHTTP
 from mockworld.fakes.fake_issue_fetcher import FakeIssueFetcher
 from mockworld.fakes.fake_issue_store import FakeIssueStore
@@ -32,6 +33,7 @@ __all__ = [
     "FakeFS",
     "FakeGit",
     "FakeGitHub",
+    "FakeHoneycomb",
     "FakeHTTP",
     "FakeIssueFetcher",
     "FakeIssueStore",

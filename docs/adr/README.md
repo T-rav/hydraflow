@@ -116,6 +116,7 @@ ADR and that named test files actually exist.
 | [0083](0083-no-ignored-test-gates.md) | No ignored automated test gates | Accepted |
 | [0084](0084-untrusted-text-trust-boundary.md) | Untrusted-text trust boundary for agent prompts | Accepted |
 | [0085](0085-secrets-never-persist-in-audit-stream.md) | Secrets never persist in the canonical audit stream | Accepted |
+| [0086](0086-live-corpus-replay-loop.md) | LiveCorpusReplayLoop: Shadow-Corpus Drift Detection | Proposed |
 
 ## Adding a new ADR
 

@@ -37,10 +37,6 @@ def _parse_bg_loop_registry() -> set[str]:
     return set(re.findall(r'"(\w+)"\s*:\s*svc\.', text))
 
 
-import pytest
-
-
-@pytest.mark.xfail(reason="LiveCorpusReplayLoop catalog builder pending", strict=False)
 def test_catalog_covers_bg_loop_registry() -> None:
     """Every loop in bg_loop_registry must have a catalog builder.
 
