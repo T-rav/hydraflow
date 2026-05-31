@@ -1,42 +1,42 @@
 {
-  "regenerated_at": "2026-05-31T05:14:40.623239+00:00",
-  "commit_sha": "347cc9ed2d20ebfc7a1dce0ad074f95340a826c9",
+  "regenerated_at": "2026-05-31T06:11:22.210076+00:00",
+  "commit_sha": "23d41c7d8e29cfed81ca688d85fd38cc0a9a66eb",
   "artifacts": {
     "loops.md": {
-      "source_sha": "347cc9ed2d20ebfc7a1dce0ad074f95340a826c9"
+      "source_sha": "23d41c7d8e29cfed81ca688d85fd38cc0a9a66eb"
     },
     "ports.md": {
-      "source_sha": "347cc9ed2d20ebfc7a1dce0ad074f95340a826c9"
+      "source_sha": "23d41c7d8e29cfed81ca688d85fd38cc0a9a66eb"
     },
     "labels.md": {
-      "source_sha": "347cc9ed2d20ebfc7a1dce0ad074f95340a826c9"
+      "source_sha": "23d41c7d8e29cfed81ca688d85fd38cc0a9a66eb"
     },
     "modules.md": {
-      "source_sha": "347cc9ed2d20ebfc7a1dce0ad074f95340a826c9"
+      "source_sha": "23d41c7d8e29cfed81ca688d85fd38cc0a9a66eb"
     },
     "events.md": {
-      "source_sha": "347cc9ed2d20ebfc7a1dce0ad074f95340a826c9"
+      "source_sha": "23d41c7d8e29cfed81ca688d85fd38cc0a9a66eb"
     },
     "adr_xref.md": {
-      "source_sha": "347cc9ed2d20ebfc7a1dce0ad074f95340a826c9"
+      "source_sha": "23d41c7d8e29cfed81ca688d85fd38cc0a9a66eb"
     },
     "mockworld.md": {
-      "source_sha": "347cc9ed2d20ebfc7a1dce0ad074f95340a826c9"
+      "source_sha": "23d41c7d8e29cfed81ca688d85fd38cc0a9a66eb"
     },
     "changelog.md": {
-      "source_sha": "347cc9ed2d20ebfc7a1dce0ad074f95340a826c9"
+      "source_sha": "23d41c7d8e29cfed81ca688d85fd38cc0a9a66eb"
     },
     "coverage_matrix.md": {
-      "source_sha": "347cc9ed2d20ebfc7a1dce0ad074f95340a826c9"
+      "source_sha": "23d41c7d8e29cfed81ca688d85fd38cc0a9a66eb"
     },
     "functional_areas.md": {
-      "source_sha": "347cc9ed2d20ebfc7a1dce0ad074f95340a826c9"
+      "source_sha": "23d41c7d8e29cfed81ca688d85fd38cc0a9a66eb"
     },
     "ubiquitous-language.md": {
-      "source_sha": "347cc9ed2d20ebfc7a1dce0ad074f95340a826c9"
+      "source_sha": "23d41c7d8e29cfed81ca688d85fd38cc0a9a66eb"
     },
     "ubiquitous-language-context-map.md": {
-      "source_sha": "347cc9ed2d20ebfc7a1dce0ad074f95340a826c9"
+      "source_sha": "23d41c7d8e29cfed81ca688d85fd38cc0a9a66eb"
     }
   }
 }
