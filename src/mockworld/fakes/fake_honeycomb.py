@@ -23,6 +23,8 @@ class FakeHoneycomb:
     exporter at the global TracerProvider. Use SimpleSpanProcessor (sync,
     not batched) so spans are visible immediately after their ``with`` block."""
 
+    _is_fake_adapter = True
+
     def __init__(self) -> None:
         self._exporter = InMemorySpanExporter()
         self._provider = TracerProvider(
