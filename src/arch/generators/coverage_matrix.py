@@ -58,6 +58,15 @@ PORT_ALIASES: dict[str, list[str]] = {
     # Example: "SomePort": ["some-port"],
 }
 
+SNAKE_OVERRIDES: dict[str, str] = {
+    "GitHubCacheLoop": "github_cache_loop",
+}
+
+SCENARIO_KEY_ALIASES: dict[str, list[str]] = {
+    "GitHubCacheLoop": ["github_cache"],
+    "SentryLoop": ["sentry_ingest"],
+}
+
 #: Mapping from functional-area standard-category keyword to the phrase that
 #: appears in docs/standards/**/*.md roll-up rules.
 STANDARD_CATEGORY_MAP: dict[str, str] = {
@@ -86,6 +95,8 @@ def _snake(name: str) -> str:
     >>> _snake("ADRReviewerLoop")
     'adr_reviewer_loop'
     """
+    if name in SNAKE_OVERRIDES:
+        return SNAKE_OVERRIDES[name]
     s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
     s = re.sub(r"([a-z\d])([A-Z])", r"\1_\2", s)
     return s.lower()
@@ -161,7 +172,12 @@ def _wiki_check(name: str, wiki_dir: Path, aliases: list[str]) -> str:
 
 
 def _generated_check(name: str, loops_md: Path) -> str:
-    """Return ✅ or ❌ based on whether the loop appears in loops.md with non-— Tick AND Kill cells."""
+    """Return ✅ when the loop appears in loops.md with a discovered tick.
+
+    The "Generated" cell is an inventory signal: does the generated loop
+    registry know about this loop? Kill-switch coverage belongs to ADR-0049
+    and the config/static-gate tests, not this matrix column.
+    """
     if not loops_md.exists():
         return "❌"
     try:
@@ -178,8 +194,7 @@ def _generated_check(name: str, loops_md: Path) -> str:
         if len(cols) < 6:
             continue
         tick = cols[3]
-        kill = cols[4]
-        if tick != "—" and kill != "—":
+        if tick != "—":
             return "✅ loops.md"
         return "❌"
     return "❌"
@@ -297,7 +312,11 @@ def _scenario_check(name: str, registrations_py: Path, scenarios_dir: Path) -> s
     # Check registration: the snake-case key appears as a dict key string
     snake = _snake(name)
     # Registrations use keys like "ci_monitor", "stale_issue_gc" — strip _loop suffix
-    key_variants = [snake, snake.removesuffix("_loop")]
+    key_variants = [
+        snake,
+        snake.removesuffix("_loop"),
+        *SCENARIO_KEY_ALIASES.get(name, []),
+    ]
     in_catalog = any(f'"{k}"' in reg_text for k in key_variants)
 
     if not in_catalog:

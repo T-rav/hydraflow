@@ -144,8 +144,11 @@ def _build_adr_reviewer(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 def _build_github_cache(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from github_cache_loop import GitHubCacheLoop  # noqa: PLC0415
 
-    cache = ports.get("github_cache") or MagicMock()
-    ports.setdefault("github_cache", cache)
+    cache = ports.get("github_cache")
+    if cache is None:
+        cache = MagicMock()
+        cache.poll = AsyncMock(return_value={"status": "idle"})
+        ports["github_cache"] = cache
     return GitHubCacheLoop(config=config, cache=cache, deps=deps)
 
 
@@ -161,6 +164,32 @@ def _build_sentry_ingest(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from sentry_loop import SentryLoop  # noqa: PLC0415
 
     return SentryLoop(config=config, prs=ports["github"], deps=deps)
+
+
+def _build_live_corpus_replay(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    from contracts.shadow import ShadowCorpus  # noqa: PLC0415
+    from dedup_store import DedupStore  # noqa: PLC0415
+    from live_corpus_replay_loop import LiveCorpusReplayLoop  # noqa: PLC0415
+
+    corpus = ports.get("shadow_corpus")
+    if corpus is None:
+        corpus = ShadowCorpus(config.data_root / "contract_shadow")
+        ports["shadow_corpus"] = corpus
+    dedup = ports.get("live_corpus_dedup")
+    if dedup is None:
+        dedup = DedupStore(
+            "live_corpus_replay",
+            config.data_root / "dedup" / "live_corpus_replay.json",
+        )
+        ports["live_corpus_dedup"] = dedup
+    return LiveCorpusReplayLoop(
+        config=config,
+        corpus=corpus,
+        pr_manager=ports["github"],
+        dedup=dedup,
+        state=ports.get("state"),
+        deps=deps,
+    )
 
 
 def _build_diagnostic(ports: dict[str, Any], config: Any, deps: Any) -> Any:
@@ -1325,6 +1354,7 @@ _BUILDERS: dict[str, Any] = {
     "github_cache": _build_github_cache,
     "repo_wiki": _build_repo_wiki,
     "sentry_ingest": _build_sentry_ingest,
+    "live_corpus_replay": _build_live_corpus_replay,
     "diagnostic": _build_diagnostic,
     "report_issue": _build_report_issue,
     "epic_sweeper": _build_epic_sweeper,

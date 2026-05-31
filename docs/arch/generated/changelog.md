@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W22
 
+- `932dc1d` — fix(mockworld): include FakeHoneycomb in generated map (#9116) (#9116) *(2026-05-30)*
 - `5ada680` — test: harden MockWorld side-effect coverage (#9104) (#9104) *(2026-05-30)*
 - `1ff6c54` — feat(security): scrub secrets on the canonical audit-write path (WS-4, ADR-0085) *(2026-05-30)*
 - `2abc16a` — merge prompt trust boundary into credit telemetry integrity *(2026-05-30)*
@@ -379,4 +380,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `ac0ecda` — Fixes #1883: [Bug Report] remove the processes tab too, and related... (#1906) (#1906) *(2026-03-04)*
 
 
-_Regenerated from commit `9e5116f` on 2026-05-31 03:27 UTC. Source last changed at `9e5116f`. Status: 🟢 fresh._
+_Regenerated from commit `932dc1d` on 2026-05-31 04:22 UTC. Source last changed at `932dc1d`. Status: 🟢 fresh._
