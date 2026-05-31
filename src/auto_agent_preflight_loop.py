@@ -62,7 +62,16 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         cap = self._config.auto_agent_daily_budget_usd
         if cap is not None:
             today = datetime.now(UTC).date().isoformat()
-            spend = self._state.get_auto_agent_daily_spend(today)
+            # Use the durable audit log as a floor for today's spend. The state
+            # cache (add_auto_agent_daily_spend) is updated only AFTER the costly
+            # run_preflight returns, so a crash in between loses the increment and
+            # the gate would undercount → overspend past the cap. The audit entry
+            # is appended BEFORE that cache update, so it never loses a completed
+            # attempt; max() tolerates either being momentarily ahead.
+            spend = max(
+                self._state.get_auto_agent_daily_spend(today),
+                self._audit_store.daily_spend(today),
+            )
             if spend >= cap:
                 return {"status": "budget_exceeded", "spend_usd": spend, "cap_usd": cap}
 

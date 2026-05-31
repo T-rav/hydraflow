@@ -40,6 +40,16 @@ def test_append_and_query_for_issue(tmp_path: Path) -> None:
     assert len(store.entries_for_issue(2)) == 1
 
 
+def test_daily_spend_sums_only_the_given_utc_date(tmp_path: Path) -> None:
+    store = PreflightAuditStore(tmp_path)
+    store.append(_entry(ts="2026-04-25T08:00:00Z", cost=1.5))
+    store.append(_entry(ts="2026-04-25T20:00:00Z", cost=0.75))
+    store.append(_entry(ts="2026-04-26T01:00:00Z", cost=9.0))  # different day
+    assert store.daily_spend("2026-04-25") == 2.25
+    assert store.daily_spend("2026-04-26") == 9.0
+    assert store.daily_spend("2026-04-27") == 0.0
+
+
 def test_query_window_filters_by_ts(tmp_path: Path) -> None:
     store = PreflightAuditStore(tmp_path)
     old = datetime.now(UTC) - timedelta(hours=48)
