@@ -290,6 +290,25 @@ def test_mockworld_red_gap_loops_have_detected_coverage(
         assert cell in row
 
 
+@pytest.mark.parametrize(
+    "loop_name",
+    [
+        "CIMonitorLoop",
+        "DependabotMergeLoop",
+        "HealthMonitorLoop",
+        "LabelDriftWatcherLoop",
+        "PRUnstickerLoop",
+        "WorkspaceGCLoop",
+    ],
+)
+def test_mockworld_scenario_key_invocations_count_as_scenario_files(
+    matrix_md: str, loop_name: str
+) -> None:
+    row = _loop_row(matrix_md, loop_name)
+    assert "✅ in catalog" in row
+    assert "⚠️ in catalog (no scenario file)" not in row
+
+
 # ---------------------------------------------------------------------------
 # Byte-stability test (same inputs → same output)
 # ---------------------------------------------------------------------------

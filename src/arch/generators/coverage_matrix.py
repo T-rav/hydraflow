@@ -322,7 +322,9 @@ def _scenario_check(name: str, registrations_py: Path, scenarios_dir: Path) -> s
     if not in_catalog:
         return "❌"
 
-    # Check scenario files reference the CamelCase name
+    # Check scenario files reference the CamelCase name or the registered
+    # loop key used by MockWorld.run_with_loops([...]).
+    scenario_terms = [name, *key_variants]
     found_in_scenario = False
     for scenario_file in sorted(scenarios_dir.rglob("*.py")):
         # Skip the catalog itself
@@ -332,7 +334,7 @@ def _scenario_check(name: str, registrations_py: Path, scenarios_dir: Path) -> s
             s_text = scenario_file.read_text()
         except OSError:
             continue
-        if name in s_text:
+        if any(term in s_text for term in scenario_terms):
             found_in_scenario = True
             break
 
