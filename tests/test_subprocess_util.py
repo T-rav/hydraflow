@@ -926,6 +926,36 @@ class TestRateLimitCooldown:
         assert subprocess_util._rate_limit_until is not None
 
     @pytest.mark.asyncio
+    async def test_rate_limit_429_triggers_global_cooldown(self) -> None:
+        """An HTTP 429 rate-limit response should set _rate_limit_until too.
+
+        GitHub returns 429 for the primary/abuse limit (vs 403 for the
+        secondary limit). Without the 429 case in _is_rate_limited, a 429
+        skips the global cooldown and falls to the per-call retry path, which
+        either fails outright or retries too fast — amplifying the limit
+        across concurrent agents instead of pausing.
+        """
+        import subprocess_util
+        from execution import SimpleResult
+
+        configure_gh_concurrency(5)
+
+        async def rate_limit_429(cmd: list[str], **_kwargs: object) -> SimpleResult:
+            return SimpleResult(
+                stdout="",
+                stderr="gh: API rate limit exceeded (HTTP 429)",
+                returncode=1,
+            )
+
+        runner = MagicMock()
+        runner.run_simple = rate_limit_429
+
+        with pytest.raises(RuntimeError, match="rate limit"):
+            await run_subprocess("gh", "api", "test", runner=runner)
+
+        assert subprocess_util._rate_limit_until is not None
+
+    @pytest.mark.asyncio
     async def test_cooldown_delays_subsequent_calls(self) -> None:
         """When cooldown is active, gh calls should wait before executing."""
         from datetime import UTC, datetime, timedelta
