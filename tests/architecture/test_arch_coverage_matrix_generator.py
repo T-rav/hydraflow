@@ -22,6 +22,8 @@ from arch.extractors.ports import extract_ports
 from arch.generators.coverage_matrix import (
     LOOP_ALIASES,
     PORT_ALIASES,
+    SCENARIO_KEY_ALIASES,
+    SNAKE_OVERRIDES,
     _snake,
     render_coverage_matrix,
 )
@@ -234,10 +236,58 @@ def test_ports_have_na_cassette_and_contract(matrix_md: str) -> None:
         ("StagingPromotionLoop", "staging_promotion_loop"),
         ("TrustFleetSanityLoop", "trust_fleet_sanity_loop"),
         ("RCBudgetLoop", "rc_budget_loop"),
+        ("GitHubCacheLoop", "github_cache_loop"),
     ],
 )
 def test_snake_conversion(name: str, expected: str) -> None:
     assert _snake(name) == expected
+
+
+def _loop_row(matrix_md: str, loop_name: str) -> str:
+    for line in matrix_md.splitlines():
+        if line.startswith(f"| `{loop_name}` |"):
+            return line
+    raise AssertionError(f"Loop row not found: {loop_name}")
+
+
+@pytest.mark.parametrize(
+    "loop_name,expected_cells",
+    [
+        (
+            "GitHubCacheLoop",
+            [
+                "✅ loops.md",
+                "✅ `test_github_cache_loop.py`",
+                "✅ in catalog",
+                "✅ `s44_github_cache_idle_poll.py`",
+            ],
+        ),
+        (
+            "SentryLoop",
+            [
+                "✅ loops.md",
+                "✅ `test_sentry_loop.py`",
+                "✅ in catalog",
+                "✅ `s42_sentry_ingest_no_credentials.py`",
+            ],
+        ),
+        (
+            "LiveCorpusReplayLoop",
+            [
+                "✅ loops.md",
+                "✅ `test_live_corpus_replay_loop.py`",
+                "✅ in catalog",
+                "✅ `s43_live_corpus_replay_idle.py`",
+            ],
+        ),
+    ],
+)
+def test_mockworld_red_gap_loops_have_detected_coverage(
+    matrix_md: str, loop_name: str, expected_cells: list[str]
+) -> None:
+    row = _loop_row(matrix_md, loop_name)
+    for cell in expected_cells:
+        assert cell in row
 
 
 # ---------------------------------------------------------------------------
@@ -300,3 +350,5 @@ def test_constants_are_accessible() -> None:
     """LOOP_ALIASES and PORT_ALIASES are importable dicts."""
     assert isinstance(LOOP_ALIASES, dict)
     assert isinstance(PORT_ALIASES, dict)
+    assert isinstance(SNAKE_OVERRIDES, dict)
+    assert isinstance(SCENARIO_KEY_ALIASES, dict)
