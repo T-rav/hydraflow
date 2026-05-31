@@ -1643,6 +1643,21 @@ async def test_build_review_prompt_includes_test_coverage_audit(
 
 
 @pytest.mark.asyncio
+async def test_build_review_prompt_enforces_test_value_standards(
+    config, event_bus, pr_info, task
+):
+    """Reviewer prompt should enforce the documented test-value standard."""
+    runner = _make_runner(config, event_bus)
+    prompt, _ = await runner._build_review_prompt_with_stats(pr_info, task, "diff")
+
+    assert "Test-value standards" in prompt
+    assert "Skipped, xfailed, commented-out, or placeholder tests" in prompt
+    assert "world-building helpers" in prompt
+    assert "Integration tests should wire real business logic" in prompt
+    assert "world.<fake>" in prompt
+
+
+@pytest.mark.asyncio
 async def test_build_review_prompt_includes_redundant_guard_audit(
     config, event_bus, pr_info, task
 ):

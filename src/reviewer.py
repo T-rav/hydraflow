@@ -890,6 +890,11 @@ Quality: No issues — <justification>
 7. Run project audits on changed code:
    - Review code quality patterns (SRP, type hints, naming, complexity)
    - Review test quality (3As structure, factories, edge cases)
+   - **Test-value standards (merge gate)** — request changes for:
+     - Skipped, xfailed, commented-out, or placeholder tests in active coverage; file deferred work in bd instead of keeping green placeholders.
+     - Unit tests that bypass documented factories or world-building helpers when the repo provides them (for HydraFlow, use `ConfigFactory`, `TaskFactory`, `make_pr_manager`, and MockWorld helpers as applicable).
+     - Integration tests that mock behavior-changing collaborators or assert only mock call shape. Integration tests should wire real business logic and mock only external boundaries that cannot run in the test environment.
+     - MockWorld scenarios that replace FakeGitHub/Fake* side effects with raw `AsyncMock`/`MagicMock` call-count assertions instead of asserting state through `world.<fake>`.
    - **Test coverage audit** — verify:
      - Tests cover the specific issue requirements, not just helper/utility functions
      - Failure and error paths have explicit tests, not only happy paths

@@ -114,6 +114,12 @@ wrong. Canonicalised here so the generator slice and future audits agree.
 
 - **"My feature is too small to need scenario / sandbox tests."** This is the rationalisation that ships features which pass unit tests but break in real conditions. If the feature has any observable runtime path through a loop or the orchestrator, both higher layers apply. Real-API behavior (e.g. GitHub's update-branch endpoint, OAuth flows, third-party rate limits) is invisible to unit tests.
 
+- **Skipped, xfailed, commented-out, or placeholder tests in active coverage.**
+  A skipped or expected-failing test is not a test; it is deferred work. If the
+  behavior is required, make the test active and fix the code. If the behavior is
+  not ready to implement, file the work in `bd` and keep the placeholder out of
+  the runnable suite.
+
 - **Asserting against state shapes that don't exist.** Scenarios authored against fields that aren't in `StateData` will pass at write-time (Python dicts are tolerant) but fail in CI when the missing key raises `KeyError`. Always `grep` the source-of-truth model file for the field name before asserting on it.
 
 - **Importing pytest or skipping at runtime in sandbox scenarios.** The sandbox
@@ -145,3 +151,13 @@ This standard lives at three load-bearing surfaces in any HydraFlow-format repo:
 - `CLAUDE.md` Quick Rules — one-line directive that all features ship with the full pyramid
 
 Drift detection: a future audit (extension of `principles_audit_loop`) should check that every PR landing on the integration branch adds at least one test in `tests/test_*.py`, one in `tests/scenarios/test_*.py`, and one in `tests/sandbox_scenarios/scenarios/sNN_*.py` — exempting docs-only and pure-refactor PRs.
+
+## Review enforcement
+
+Reviewers must treat this standard as a merge gate, not guidance. A PR review
+should request changes when it adds or preserves ignored tests (`skip`, `xfail`,
+commented-out tests/assertions, or placeholder smoke tests), labels mock-backed
+tests as integration, bypasses documented unit factories/world-building helpers,
+or asserts MockWorld side effects through raw mock call counts where a stateful
+fake adapter exists. New exceptions must be tracked in `bd` and removed from the
+active runnable suite until they can assert real behavior.
