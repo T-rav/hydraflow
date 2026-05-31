@@ -14,8 +14,8 @@ All Fake adapters under `src/mockworld/fakes/` (classes with ``_is_fake_adapter 
 | **FakeClock** | `ClockPort` | `tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/fakes/test_fake_clock.py`<br>`tests/scenarios/fakes/test_supporting_fakes.py`<br>`tests/scenarios/test_fidelity.py` |
 | **FakeDocker** | `DockerPort` | `tests/scenarios/fakes/test_fake_docker.py`<br>`tests/scenarios/fakes/test_fake_subprocess_runner.py` |
 | **FakeFS** | `FSPort` | `tests/scenarios/fakes/test_fake_fs.py` |
-| **FakeGit** | `GitPort` | `tests/scenarios/behaviors/test_eventual_consistency.py`<br>`tests/scenarios/behaviors/test_flaky.py`<br>`tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/behaviors/test_rate_limit.py`<br>`tests/scenarios/browser/scenarios/test_loops_browser.py`<br>`tests/scenarios/fakes/test_fake_git.py`<br>`tests/scenarios/fakes/test_fake_github.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_fidelity.py`<br>`tests/scenarios/test_loops.py` |
-| **FakeGitHub** | `GitHubPort` | `tests/scenarios/behaviors/test_eventual_consistency.py`<br>`tests/scenarios/behaviors/test_flaky.py`<br>`tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/behaviors/test_rate_limit.py`<br>`tests/scenarios/browser/scenarios/test_loops_browser.py`<br>`tests/scenarios/fakes/test_fake_github.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_fidelity.py`<br>`tests/scenarios/test_loops.py` |
+| **FakeGit** | `GitPort` | `tests/scenarios/behaviors/test_eventual_consistency.py`<br>`tests/scenarios/behaviors/test_flaky.py`<br>`tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/behaviors/test_rate_limit.py`<br>`tests/scenarios/browser/scenarios/test_loops_browser.py`<br>`tests/scenarios/fakes/test_fake_git.py`<br>`tests/scenarios/fakes/test_fake_github.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_fidelity.py`<br>`tests/scenarios/test_loops.py`<br>`tests/scenarios/test_memory_backlog_scenario.py` |
+| **FakeGitHub** | `GitHubPort` | `tests/scenarios/behaviors/test_eventual_consistency.py`<br>`tests/scenarios/behaviors/test_flaky.py`<br>`tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/behaviors/test_rate_limit.py`<br>`tests/scenarios/browser/scenarios/test_loops_browser.py`<br>`tests/scenarios/fakes/test_fake_github.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_fidelity.py`<br>`tests/scenarios/test_loops.py`<br>`tests/scenarios/test_memory_backlog_scenario.py` |
 | **FakeHTTP** | `HTTPPort` | `tests/scenarios/fakes/test_fake_http.py` |
 | **FakeHoneycomb** | `HoneycombPort` | — |
 | **FakeIssueFetcher** | `IssueFetcherPort` | — |
@@ -76,4 +76,4 @@ graph LR
     tests_scenarios_fakes_test_supporting_fakes_py([tests/scenarios/fakes/test_supporting_fakes.py]) --> FakeWorkspace
 ```
 
-_Regenerated from commit `347cc9e` on 2026-05-31 05:14 UTC. Source last changed at `347cc9e`. Status: 🟢 fresh._
+_Regenerated from commit `23d41c7` on 2026-05-31 06:11 UTC. Source last changed at `23d41c7`. Status: 🟢 fresh._
