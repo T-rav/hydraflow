@@ -1339,8 +1339,16 @@ def create_router(
         return JSONResponse(QueueStats().model_dump())
 
     @router.post("/api/request-changes")
-    async def request_changes(body: dict[str, Any]) -> JSONResponse:
-        """Escalate an issue to HITL with user feedback."""
+    async def request_changes(
+        body: dict[str, Any], repo: RepoSlugParam = None
+    ) -> JSONResponse:
+        """Escalate an issue to HITL with user feedback (repo-scoped).
+
+        Resolves the per-repo runtime so the label swap, HITL cause/origin, and
+        escalation event all land on the SELECTED repo — not the default one —
+        in a multi-repo deployment.
+        """
+        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
         issue_number: int | None = body.get("issue_number")
         feedback = (body.get("feedback") or "").strip()
         stage: str = body.get("stage") or ""
@@ -1361,15 +1369,16 @@ def create_router(
                 status_code=400,
             )
 
-        stage_labels: list[str] = getattr(config, label_field, [])
+        stage_labels: list[str] = getattr(_cfg, label_field, [])
         origin_label: str = stage_labels[0]
 
-        await pr_manager.swap_pipeline_labels(issue_number, config.hitl_label[0])
+        manager = _pr_manager_for(_cfg, _bus)
+        await manager.swap_pipeline_labels(issue_number, _cfg.hitl_label[0])
 
-        state.set_hitl_cause(issue_number, feedback)
-        state.set_hitl_origin(issue_number, origin_label)
+        _state.set_hitl_cause(issue_number, feedback)
+        _state.set_hitl_origin(issue_number, origin_label)
 
-        await event_bus.publish(
+        await _bus.publish(
             HydraFlowEvent(
                 type=EventType.HITL_ESCALATION,
                 data=HITLEscalationPayload(
@@ -1824,20 +1833,26 @@ def create_router(
     _register_state(router, ctx)
 
     @router.post("/api/intent")
-    async def submit_intent(request: IntentRequest) -> JSONResponse:
-        """Create a GitHub issue from a user intent typed in the dashboard."""
+    async def submit_intent(
+        request: IntentRequest, repo: RepoSlugParam = None
+    ) -> JSONResponse:
+        """Create a GitHub issue from a user intent typed in the dashboard.
+
+        Repo-scoped: the issue is created in the SELECTED repo (and its URL
+        points there), not the default repo, in a multi-repo deployment.
+        """
+        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
         title = request.text[:120]
         body = request.text
-        labels = list(config.planner_label)
+        labels = list(_cfg.planner_label)
 
-        issue_number = await pr_manager.create_issue(
-            title=title, body=body, labels=labels
-        )
+        manager = _pr_manager_for(_cfg, _bus)
+        issue_number = await manager.create_issue(title=title, body=body, labels=labels)
 
         if issue_number == 0:
             return JSONResponse({"error": "Failed to create issue"}, status_code=500)
 
-        url = f"https://github.com/{config.repo}/issues/{issue_number}"
+        url = f"https://github.com/{_cfg.repo}/issues/{issue_number}"
         response = IntentResponse(issue_number=issue_number, title=title, url=url)
         return JSONResponse(response.model_dump())
 
