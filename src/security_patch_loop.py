@@ -89,6 +89,7 @@ class SecurityPatchLoop(BaseBackgroundLoop):
 
         filed = 0
         skipped_dedup = 0
+        skipped_existing = 0
         skipped_unfixable = 0
         skipped_severity = 0
 
@@ -123,6 +124,24 @@ class SecurityPatchLoop(BaseBackgroundLoop):
                 f"A patched version is available. Please update the dependency.\n"
             )
 
+            # GitHub-side backstop: the local dedup file can lose an entry if a
+            # prior tick crashed between create_issue and dedup.add, which would
+            # otherwise re-file a duplicate security issue. GitHub is the durable
+            # source of truth — if an open issue with this exact title already
+            # exists, skip the create and heal the local dedup. find_existing_issue
+            # returns 0 when none is found (the common path), so creation proceeds.
+            existing = await self._pr_manager.find_existing_issue(title)
+            if existing:
+                self._dedup.add(alert_key)
+                skipped_existing += 1
+                logger.info(
+                    "Security issue for alert #%s already open as #%s; "
+                    "skipping duplicate and healing local dedup",
+                    alert_key,
+                    existing,
+                )
+                continue
+
             await self._pr_manager.create_issue(title, body, labels=["security"])
             self._dedup.add(alert_key)
             filed += 1
@@ -139,6 +158,7 @@ class SecurityPatchLoop(BaseBackgroundLoop):
             "total_alerts": len(alerts),
             "filed": filed,
             "skipped_dedup": skipped_dedup,
+            "skipped_existing": skipped_existing,
             "skipped_unfixable": skipped_unfixable,
             "skipped_severity": skipped_severity,
         }
