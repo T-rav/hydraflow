@@ -207,10 +207,13 @@ and T13 close-reconciliation tasks).
 Tests that use `AsyncMock(pr)` auto-create any attribute name on access,
 so a typo like `pr.remove_labels(...)` (plural) when the real method is
 `remove_label` (singular) passes the test but crashes in production. The
-`tests/scenarios/fakes/test_port_conformance.py` is the safety net —
-make sure any new method on a real Port is also added to the corresponding
-Fake AND the conformance test runs. The C2/C3 critical findings on PR
-#8439 were exactly this class of break.
+`tests/test_ports.py` structural conformance suite is the safety net (it
+checks each adapter against its Port protocol via `runtime_checkable`
+isinstance AND `inspect.signature` comparison; per-Fake conformance lives
+in `tests/scenarios/fakes/test_fake_*.py` since the Fakes moved to
+`src/mockworld/fakes/`) — make sure any new method on a real Port is also
+added to the corresponding Fake AND the conformance suite runs. The C2/C3
+critical findings on PR #8439 were exactly this class of break.
 
 ### 4.3 Pyright IDE noise on Pydantic dynamic attrs
 
@@ -261,7 +264,7 @@ Auto-discovery tests that fail when a load-bearing convention is broken:
 | `tests/test_loop_wiring_completeness.py` | Loop missing one of the five checkpoints |
 | `tests/architecture/test_functional_area_coverage.py` | New loop or port unassigned in `functional_areas.yml` |
 | `tests/architecture/test_curated_drift.py` | Generated docs out of sync after a source-file change |
-| `tests/scenarios/fakes/test_port_conformance.py` | Fake adapter drifts from Port protocol |
+| `tests/test_ports.py` | Adapter/Fake drifts from its Port protocol signature |
 | `tests/test_loop_kill_switch_completeness.py` | Loop without ADR-0049 in-body gate |
 | `tests/test_config_consistency.py` | `*_interval` config field without matching `_INTERVAL_BOUNDS` entry |
 

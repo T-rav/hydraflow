@@ -1,11 +1,12 @@
 # ADR-0049: Trust-loop kill-switch convention (`enabled_cb` only, no config-only)
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-04-23
+- **Accepted:** 2026-05-30
 - **Supersedes:** none
 - **Superseded by:** none
 - **Related:** [ADR-0045](0045-trust-architecture-hardening.md) §12.2 (spec reference); [ADR-0048](0048-auto-revert-on-rc-red.md) (relies on live kill for StagingBisectLoop).
-- **Enforced by:** Convention-check in code review; `_do_work` body in every `BaseBackgroundLoop` subclass must call `self._enabled_cb(self._worker_name)` at the top; dark-factory review dispatched on every large background-loop PR.
+- **Enforced by:** tests/test_loop_kill_switch_completeness.py, tests/regressions/test_canonical_killswitch.py
 
 ## Context
 
@@ -52,9 +53,11 @@ The `enabled_cb` is wired by `LoopDeps` to the System-tab worker-enable state (`
 
 ## Verifying compliance
 
-Run `grep -l "async def _do_work" src/*_loop.py | xargs grep -L "self._enabled_cb"` in a review — any loop listed in the output is violating this ADR. (This is a simple grep, not a hard CI gate, because we don't want to dictate the exact line of the check — only that it's present.)
+`tests/test_loop_kill_switch_completeness.py` is the hard CI gate: it AST-discovers every `BaseBackgroundLoop` subclass in `src/*_loop.py` and fails closed if any `_do_work` omits the `self._enabled_cb(self._worker_name)` gate, with an empty grandfather list so the gap cannot silently reopen. For a quick manual spot-check, `grep -l "async def _do_work" src/*_loop.py | xargs grep -L "self._enabled_cb"` lists any violators.
 
-The dark-factory review agent dispatched for any PR >500 lines touching `src/*_loop.py` should flag violations as blockers.
+(The original convention deliberately stopped at a code-review grep "not a hard CI gate" so as not to dictate the exact line of the check. The kill-switch-integrity work — see Update Log — replaced that stance with the completeness ratchet above, which asserts presence of the gate without dictating its exact placement.)
+
+The dark-factory review agent dispatched for any PR >500 lines touching `src/*_loop.py` should also flag violations as blockers.
 
 ## When to supersede this ADR
 
@@ -67,3 +70,7 @@ The dark-factory review agent dispatched for any PR >500 lines touching `src/*_l
 - `src/bg_worker_manager.py::BGWorkerManager.is_enabled` — the backing implementation.
 - `src/ui/src/constants.js::EDITABLE_INTERVAL_WORKERS` — the list of loops the System tab exposes for toggling.
 - `tests/test_*_loop.py` — test fixtures that stub `enabled_cb` to exercise the disabled branch.
+
+## Update Log
+
+- **2026-05-30: Promoted Proposed → Accepted.** The convention shipped fleet-wide and is now hard-enforced. The kill-switch-integrity work fixed the `DiagramLoop` `worker_name` hyphen/underscore mismatch, added the in-body `_enabled_cb` gate to the four env-only loops (`cost_budget_watcher`, `diagram`, `entry_evidence`, `pricing_refresh`), and landed `tests/test_loop_kill_switch_completeness.py` — an AST-discovery ratchet with an empty grandfather list that fails CI if any `BaseBackgroundLoop` subclass omits the gate. This supersedes the original "simple grep in code review, not a hard CI gate" enforcement stance recorded above under *Verifying compliance*: the gate is now a CI hard-stop, so the decision is no longer aspirational.

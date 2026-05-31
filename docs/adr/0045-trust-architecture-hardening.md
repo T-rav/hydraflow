@@ -1,9 +1,11 @@
 # ADR-0045: Trust Architecture Hardening — Lights-Off Trust Fleet
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-04-23
+- **Accepted:** 2026-05-30
 - **Supersedes:** none
 - **Superseded by:** none
+- **Enforced by:** tests/test_trust_fleet_sanity_loop.py, tests/test_loop_wiring_completeness.py, tests/test_trust_fleet_anomaly_detectors.py
 - **Spec:** [docs/superpowers/specs/2026-04-22-trust-architecture-hardening-design.md](../superpowers/specs/2026-04-22-trust-architecture-hardening-design.md)
 - **Implementation plans:** 11 plans under [docs/superpowers/plans/2026-04-22-*.md](../superpowers/plans/) — one per trust loop and subsystem.
 
@@ -98,6 +100,15 @@ The following files carry this ADR's decisions and must be kept in sync with any
 
 ## Update Log
 
+- **2026-05-30: Promoted Proposed → Accepted.** The trust fleet shipped and is
+  running fleet-wide: all nine watched trust loops (`CorpusLearningLoop`,
+  `ContractRefreshLoop`, `StagingBisectLoop`, `PrinciplesAuditLoop`,
+  `FlakeTrackerLoop`, `SkillPromptEvalLoop`, `FakeCoverageAuditorLoop`,
+  `RCBudgetLoop`, `WikiRotDetectorLoop`) plus `TrustFleetSanityLoop` (meta-observer)
+  and `HealthMonitorLoop` (dead-man switch) appear in the generated loop registry
+  and operate in production. The `Proposed` label was the only drift; the decisions
+  it records (nine watched loops, the meta-observability spine, the kill-switch
+  convention per [ADR-0049](0049-trust-loop-kill-switch-convention.md)) are live.
 - **2026-05-19 (#8986):** `FakeCoverageAuditorLoop` issue shape changed from
   one-issue-per-`(fake, method)` to a **rollup** issue per `(fake, gap_kind)`
   with the uncovered-method list in the body. Subsequent ticks update the
