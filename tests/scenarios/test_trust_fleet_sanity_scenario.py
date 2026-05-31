@@ -58,10 +58,6 @@ def _healthy_heartbeats(now: _dt.datetime) -> dict[str, dict[str, object]]:
     }
 
 
-@pytest.mark.xfail(
-    reason="bg_workers MagicMock doesn't support await; needs AsyncMock conversion (staging-level test bug)",
-    strict=False,
-)
 class TestTrustFleetSanityScenario:
     """§12.1 — meta-observability MockWorld scenarios."""
 
@@ -82,6 +78,7 @@ class TestTrustFleetSanityScenario:
             world,
             pr_manager=fake_pr,
             trust_fleet_sanity_state=state,
+            event_bus=EventBus(),
         )
 
         stats = await world.run_with_loops(["trust_fleet_sanity"], cycles=1)
@@ -123,6 +120,7 @@ class TestTrustFleetSanityScenario:
             pr_manager=fake_pr,
             trust_fleet_sanity_state=state,
             trust_fleet_sanity_bg_workers=bg_workers,
+            event_bus=EventBus(),
         )
 
         stats = await world.run_with_loops(["trust_fleet_sanity"], cycles=1)
