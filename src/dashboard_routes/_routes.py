@@ -1646,16 +1646,18 @@ def create_router(
         status: str | None = None,
         query: str | None = None,
         limit: int = 300,
+        repo: RepoSlugParam = None,
     ) -> JSONResponse:
-        """Return issue lifecycle history with inference rollups."""
+        """Return issue lifecycle history with inference rollups (repo-scoped)."""
+        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
         since_dt = _parse_iso_or_none(since)
         until_dt = _parse_iso_or_none(until)
         requested_status = (status or "").strip().lower()
         query_text = (query or "").strip().lower()
         clamped_limit = max(1, min(limit, 1000))
 
-        telemetry = PromptTelemetry(config)
-        all_events = event_bus.get_history()
+        telemetry = PromptTelemetry(_cfg)
+        all_events = _bus.get_history()
 
         # Check if we can reuse cached aggregation for the unfiltered case.
         use_unfiltered = since_dt is None and until_dt is None
@@ -1664,6 +1666,7 @@ def create_router(
         now = time.monotonic()
         cache_hit = (
             use_unfiltered
+            and repo is None
             and _history_cache["issue_rows"] is not None
             and _history_cache["event_count"] == event_count
             and _history_cache["telemetry_mtime"] == telem_mtime
@@ -1740,8 +1743,11 @@ def create_router(
                 all_events, issue_rows, pr_to_issue, since_dt, until_dt
             )
 
-            # Store in cache if this was an unfiltered aggregation.
-            if use_unfiltered:
+            # Store in cache if this was an unfiltered aggregation. Only the
+            # default-repo view is cached: _history_cache is not repo-keyed, so
+            # a per-repo request must never read (see cache_hit above) or write
+            # it, or one repo's rollups would bleed into another's view.
+            if use_unfiltered and repo is None:
                 _history_cache["issue_rows"] = copy.deepcopy(issue_rows)
                 _history_cache["pr_to_issue"] = dict(pr_to_issue)
                 _history_cache["event_count"] = event_count
@@ -1793,29 +1799,34 @@ def create_router(
         )
 
     @router.get("/api/timeline")
-    async def get_timeline() -> JSONResponse:
-        """Return timelines for all tracked issues."""
-        builder = TimelineBuilder(event_bus)
+    async def get_timeline(repo: RepoSlugParam = None) -> JSONResponse:
+        """Return timelines for all tracked issues (repo-scoped)."""
+        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
+        builder = TimelineBuilder(_bus)
         timelines = builder.build_all()
         return JSONResponse([t.model_dump() for t in timelines])
 
     @router.get("/api/timeline/issue/{issue_number}")
-    async def get_timeline_issue(issue_number: int) -> JSONResponse:
-        """Return the event timeline for a single issue."""
-        builder = TimelineBuilder(event_bus)
+    async def get_timeline_issue(
+        issue_number: int, repo: RepoSlugParam = None
+    ) -> JSONResponse:
+        """Return the event timeline for a single issue (repo-scoped)."""
+        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
+        builder = TimelineBuilder(_bus)
         timeline = builder.build_for_issue(issue_number)
         if timeline is None:
             return JSONResponse({"error": "Issue not found"}, status_code=404)
         return JSONResponse(timeline.model_dump())
 
     @router.get("/api/timeline/completed")
-    async def get_completed_timelines() -> JSONResponse:
-        """Return persisted timelines for completed (merged) issues.
+    async def get_completed_timelines(repo: RepoSlugParam = None) -> JSONResponse:
+        """Return persisted timelines for completed (merged) issues (repo-scoped).
 
         Unlike /api/timeline which derives from ephemeral events,
         these survive event log rotation.
         """
-        timelines = state.get_all_completed_timelines()
+        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
+        timelines = _state.get_all_completed_timelines()
         return JSONResponse([t.model_dump() for t in timelines.values()])
 
     # --- State/runtimes/repos/filesystem routes (extracted to _state_routes.py) ---
