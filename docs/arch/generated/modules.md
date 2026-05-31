@@ -34,7 +34,7 @@ graph LR
     src_arch_generators -- "11" --> src_arch
     src_dashboard_routes -- "1" --> src_preflight
     src_dashboard_routes -- "1" --> src_state
-    src_mockworld_fakes -- "28" --> src_mockworld
+    src_mockworld_fakes -- "29" --> src_mockworld
     src_mockworld_fakes -- "1" --> src_telemetry
     src_preflight -- "1" --> src_runners
     src_preflight -- "1" --> src_sentry
@@ -44,4 +44,4 @@ graph LR
     src_state -- "1" --> src
 ```
 
-_Regenerated from commit `40473a4` on 2026-05-30 11:42 UTC. Source last changed at `40473a4`. Status: 🟢 fresh._
+_Regenerated from commit `9e5116f` on 2026-05-31 03:27 UTC. Source last changed at `9e5116f`. Status: 🟢 fresh._

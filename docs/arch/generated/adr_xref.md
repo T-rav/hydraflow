@@ -249,4 +249,4 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.workspace_gc_loop` | ADR-0069 |
 | `src.worktree` | ADR-0003, ADR-0009, ADR-0010 |
 
-_Regenerated from commit `bca7775` on 2026-05-30 15:10 UTC. Source last changed at `bca7775`. Status: 🟢 fresh._
+_Regenerated from commit `9e5116f` on 2026-05-31 03:27 UTC. Source last changed at `9e5116f`. Status: 🟢 fresh._
