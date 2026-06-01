@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W22
 
+- `e9f11f8` — feat(ci): move arch freshness-stamp out of artifact bodies + fix DiagramLoop base + gate hygiene (factory refinements) *(2026-05-31)*
 - `57bf27f` — review: enforce test value standards *(2026-05-31)*
 - `afda157` — test(mockworld): assert side effects through fake state (#9124) (#9124) *(2026-05-31)*
 - `1e5ce26` — test(mockworld): count real scenario key invocations (#9121) (#9121) *(2026-05-30)*
