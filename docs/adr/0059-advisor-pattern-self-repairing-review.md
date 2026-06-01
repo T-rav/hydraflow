@@ -29,15 +29,18 @@ Implement the advisor pattern as **three role-based advisors** layered onto `Rev
 
 ### Per-surface tiering
 
-The matrix below matches `_SURFACE_DEFAULTS` in `src/review_advisor.py`:
+The matrix below matches `_SURFACE_DEFAULTS` in `src/review_advisor.py`. The
+post-verify retry budget is **derived** from blast radius + authority since R-2
+(`post_verify_retry_budget`), not a stored `max_veto_retries` field (retired in
+favour of the single-source-of-truth `post_verify_authority`):
 
-| Surface | Pre-flight | Mid-flight | Post-verify | Authority | `max_veto_retries` |
+| Surface | Pre-flight | Mid-flight | Post-verify | Authority | Post-verify retry budget |
 |---|---|---|---|---|---|
-| `pr_review` | conditional (`CompositeTrigger`: LOC + critical paths + prior fix attempts) | yes | yes | `veto` | 2 |
-| `pre_merge_spec_check` | piggyback (reuses `pr_review`'s plan) | yes | yes | `veto` | 2 (binary gate) |
-| `adr_review` | always (`AlwaysTrigger`) | n/a | yes | `veto` | 2 |
-| `visual_gate` | n/a | n/a | yes | `veto` | 1 |
-| `wiki_ingest` | n/a | n/a | yes | `advisory`* | 0 |
+| `pr_review` | conditional (`CompositeTrigger`: LOC + critical paths + prior fix attempts) | yes | yes | `veto` | blast-stratified (low 1 / med 2 / high 3) |
+| `pre_merge_spec_check` | piggyback (reuses `pr_review`'s plan) | yes | yes | `veto` | blast-stratified (low 1 / med 2 / high 3) |
+| `adr_review` | always (`AlwaysTrigger`) | n/a | yes | `veto` | one-shot (no retry loop) |
+| `visual_gate` | n/a | n/a | yes | `veto` | one-shot (no retry loop) |
+| `wiki_ingest` | n/a | n/a | yes | `advisory`* | n/a (advisory — never retries/blocks) |
 
 \* `wiki_ingest`'s advisory authority is upgraded to `veto` when the diff modifies advisor's own implementation (T29 self-modification guard).
 
@@ -55,7 +58,7 @@ The matrix below matches `_SURFACE_DEFAULTS` in `src/review_advisor.py`:
    - Mid-flight failure → executor proceeds with own judgment.
    - Post-verify failure → APPROVE by default; `HYDRAFLOW_REVIEW_POSTVERIFY_FAIL_AS_VETO=true` flips to VETO for high-trust environments.
 5. **Credit/bug error propagation** — every advisor runner calls `reraise_on_credit_or_bug(exc)` in its broad `except` block, per `docs/wiki/dark-factory.md` §2.2. Without this, `CreditExhaustedError` is silently eaten and the review burns retry budget against an exhausted billing signal.
-6. **Veto bounded retry** — post-verify VETO hands back the **full advisor transcript** (not just verdict reasoning) to the executor for re-attempt. After `max_veto_retries` exhausted, escalate to HITL with the disagreement transcript attached.
+6. **Veto bounded retry** — post-verify VETO hands back the **full advisor transcript** (not just verdict reasoning) to the executor for re-attempt. After the blast-radius-stratified retry budget is exhausted (R-2; `post_verify_retry_budget` — low 1 / med 2 / high 3 for veto-authority surfaces, 0 for advisory), escalate to HITL with the disagreement transcript attached.
 7. **Cross-review state isolation** — `_advisor_attempt`, `_advisor_results`, and `_advisor_pre_flight_plan` reset per review entry. HITL-escalated PRs that come back through review get a fresh budget; nothing leaks across re-reviews.
 8. **Explicit `role` Protocol parameter, not substring detection** — initial prototypes inferred role from prompt-text substrings; this misrouted on meta-PRs whose body legitimately quoted role markers. Replaced with an explicit `role` parameter on the advisor Protocol plus a HTML-comment sentinel marker for mid-flight. (T24.5 fix; see Risks below.)
 

@@ -246,7 +246,6 @@ class SurfaceAdvisorConfig:
     post_verify_authority: Literal["advisory", "veto"]
     executor_model: str
     advisor_model: str
-    max_veto_retries: int
 
 
 @dataclass(frozen=True)
@@ -394,26 +393,23 @@ def min_review_passes_for_blast_radius(
 
 def post_verify_retry_budget(
     blast_radius: Literal["low", "medium", "high"],
-    max_veto_retries: int,
+    post_verify_authority: Literal["advisory", "veto"],
 ) -> int:
     """Return the PostVerifyAdvisor veto-retry budget for a diff (refinement R-2).
 
-    For veto-authority surfaces (``max_veto_retries > 0``) the budget is
-    stratified by blast radius (``BLAST_RADIUS_RETRIES``) so high-blast changes
-    earn more automated fix attempts before escalating to a human and trivial
-    ones escalate sooner. Here ``max_veto_retries`` acts as a veto-authority
-    *enable flag*, not a numeric cap: a high-blast budget of 3 intentionally
-    exceeds a configured value of 2 — that "more retries for risky changes" is
-    the whole point of R-2.
+    For veto-authority surfaces the budget is stratified by blast radius
+    (``BLAST_RADIUS_RETRIES``) so high-blast changes earn more automated fix
+    attempts before escalating to a human and trivial ones escalate sooner.
 
-    ``max_veto_retries == 0`` is a HARD CAP returning 0 regardless of blast: an
-    advisory-only surface never retries and never blocks a merge, preserving
-    the zero-budget contract. (Only ``wiki_ingest`` is configured to 0 today,
-    and the advisory surfaces — visual_gate/adr_review/wiki_ingest — run their
-    own one-shot advisor path rather than the retry loop that consumes this
-    budget, so the cap is defensive.)
+    Advisory surfaces (``post_verify_authority == "advisory"``) are HARD-CAPPED
+    to 0: they never retry and never block a merge, preserving the zero-budget
+    contract. The cap derives from the authority — the single source of truth
+    for advisory-vs-veto — rather than a separate retry-count field. It is
+    defensive for the retry loop, which only the veto-authority PR-review
+    surfaces (pr_review, pre_merge_spec_check) reach; the advisory wiki_ingest
+    surface and the one-shot visual_gate/adr_review surfaces never enter it.
     """
-    if max_veto_retries == 0:
+    if post_verify_authority == "advisory":
         return 0
     return BLAST_RADIUS_RETRIES[blast_radius]
 
@@ -473,7 +469,6 @@ _SURFACE_DEFAULTS: dict[str, dict[str, object]] = {
         "mid_flight_enabled": True,
         "post_verify_enabled": True,
         "post_verify_authority": "veto",
-        "max_veto_retries": 2,
     },
     "pre_merge_spec_check": {
         "pre_flight_enabled": False,
@@ -481,7 +476,6 @@ _SURFACE_DEFAULTS: dict[str, dict[str, object]] = {
         "mid_flight_enabled": True,
         "post_verify_enabled": True,
         "post_verify_authority": "veto",
-        "max_veto_retries": 2,
     },
     "adr_review": {
         "pre_flight_enabled": True,
@@ -489,7 +483,6 @@ _SURFACE_DEFAULTS: dict[str, dict[str, object]] = {
         "mid_flight_enabled": False,
         "post_verify_enabled": True,
         "post_verify_authority": "veto",
-        "max_veto_retries": 2,
     },
     "visual_gate": {
         "pre_flight_enabled": False,
@@ -497,7 +490,6 @@ _SURFACE_DEFAULTS: dict[str, dict[str, object]] = {
         "mid_flight_enabled": False,
         "post_verify_enabled": True,
         "post_verify_authority": "veto",
-        "max_veto_retries": 1,
     },
     "wiki_ingest": {
         "pre_flight_enabled": False,
@@ -505,7 +497,6 @@ _SURFACE_DEFAULTS: dict[str, dict[str, object]] = {
         "mid_flight_enabled": False,
         "post_verify_enabled": True,
         "post_verify_authority": "advisory",
-        "max_veto_retries": 0,
     },
 }
 
@@ -521,7 +512,6 @@ def build_surface_config(surface: str) -> SurfaceAdvisorConfig:
     mid_flight_enabled = base["mid_flight_enabled"]
     post_verify_enabled = base["post_verify_enabled"]
     post_verify_authority = base["post_verify_authority"]
-    max_veto_retries = base["max_veto_retries"]
     assert isinstance(pre_flight_enabled, bool)
     assert pre_flight_trigger is None or isinstance(
         pre_flight_trigger, PreFlightTrigger
@@ -529,7 +519,6 @@ def build_surface_config(surface: str) -> SurfaceAdvisorConfig:
     assert isinstance(mid_flight_enabled, bool)
     assert isinstance(post_verify_enabled, bool)
     assert post_verify_authority in ("advisory", "veto")
-    assert isinstance(max_veto_retries, int)
     return SurfaceAdvisorConfig(
         surface=surface,
         pre_flight_enabled=pre_flight_enabled,
@@ -539,7 +528,6 @@ def build_surface_config(surface: str) -> SurfaceAdvisorConfig:
         post_verify_authority=post_verify_authority,
         executor_model=resolve_model(surface, "executor", default="sonnet"),
         advisor_model=resolve_model(surface, "advisor", default="opus"),
-        max_veto_retries=max_veto_retries,
     )
 
 
