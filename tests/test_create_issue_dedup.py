@@ -75,7 +75,7 @@ class TestCreateIssueDedup:
 
     @pytest.mark.asyncio
     async def test_skips_dedup_on_dry_run(self, config, event_bus) -> None:
-        """Dry run should return None without searching."""
+        """Dry run should return 0 without searching."""
         dry_config = ConfigFactory.create(
             repo_root=config.repo_root,
             repo="owner/repo",
@@ -83,7 +83,7 @@ class TestCreateIssueDedup:
         )
         mgr = make_pr_manager(dry_config, event_bus)
         result = await mgr.create_issue("Any title", "body")
-        assert result is None
+        assert result == 0
 
     @pytest.mark.asyncio
     async def test_find_existing_issue_ignores_partial_title_match(

@@ -92,7 +92,7 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         """
         try:
             closed = await self._prs.list_closed_issues_by_label(
-                self._config.hitl_escalation_label[0],
+                "hitl-escalation",
                 limit=200,
             )
         except Exception as exc:
@@ -109,9 +109,7 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
     async def _poll_eligible_issues(self) -> list[dict[str, Any]]:
         """Return open hitl-escalation issues lacking human-required."""
         try:
-            raw = await self._prs.list_issues_by_label(
-                self._config.hitl_escalation_label[0]
-            )
+            raw = await self._prs.list_issues_by_label("hitl-escalation")
         except Exception as exc:
             logger.warning("Eligible-issue poll failed: %s", exc)
             return []
@@ -136,7 +134,7 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         # in CPython, so an issue with multiple sub-labels would otherwise pick
         # a random playbook each tick (and randomly skip the deny-list). Sort
         # alphabetically so the same issue always routes to the same playbook.
-        sub_labels = sorted(labels - {self._config.hitl_escalation_label[0]})
+        sub_labels = sorted(labels - {"hitl-escalation"})
         sub_label = sub_labels[0] if sub_labels else "_default"
 
         # Sub-label deny-list (recursion safety, dark-factory §2.7). The real gap:
@@ -208,7 +206,6 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
             pr_port=self._prs,
             state=self._state,
             max_attempts=self._config.auto_agent_max_attempts,
-            hitl_escalation_label=self._config.hitl_escalation_label[0],
         )
 
         # Append audit.

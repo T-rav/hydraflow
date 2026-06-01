@@ -24,50 +24,7 @@ const statusDotBase = {
 const statusDotRunning = { ...statusDotBase, background: theme.green }
 const statusDotStopped = { ...statusDotBase, background: theme.textMuted }
 
-function isPipelineEnabled(runtime, repo) {
-  return runtime?.pipeline_enabled
-    ?? repo?.pipeline_enabled
-    ?? runtime?.running
-    ?? repo?.running
-    ?? repo?.status === 'running'
-}
-
-function readPlanProgress(repo) {
-  const progress = repo?.plan_progress || repo?.onboarding_plan_progress
-  if (progress && Number.isFinite(Number(progress.completed)) && Number.isFinite(Number(progress.total))) {
-    return {
-      completed: Number(progress.completed),
-      total: Number(progress.total),
-    }
-  }
-  const planDraft = repo?.onboarding_plan_draft || repo?.plan_draft
-  if (Array.isArray(planDraft)) {
-    return { completed: 0, total: planDraft.length }
-  }
-  return null
-}
-
-function buildRepoSummary(repo, runtime) {
-  const pieces = []
-  const plan = repo?.current_plan || repo?.onboarding_current_plan || runtime?.current_plan
-  const progress = readPlanProgress(repo)
-  const inFlight = repo?.in_flight_issues ?? runtime?.in_flight_issues
-  const lastGreen = repo?.last_green_ci ?? runtime?.last_green_ci
-
-  if (plan) {
-    const progressText = progress ? ` ${progress.completed}/${progress.total}` : ''
-    pieces.push(`${plan}${progressText}`)
-  }
-  if (Number.isFinite(Number(inFlight)) && Number(inFlight) > 0) {
-    pieces.push(`${Number(inFlight)} in flight`)
-  }
-  if (lastGreen) {
-    pieces.push(`green ${lastGreen}`)
-  }
-  return pieces.join(' | ')
-}
-
-export function RepoSelector({ onOpenRegister, onOpenNewProject }) {
+export function RepoSelector({ onOpenRegister }) {
   const {
     canRegisterRepos = false,
     supervisedRepos = [],
@@ -100,16 +57,14 @@ export function RepoSelector({ onOpenRegister, onOpenNewProject }) {
       const rawSlug = repo.slug || repo.repo || repo.full_name || repo.path || `repo-${index + 1}`
       const filterSlug = canonicalRepoSlug(rawSlug)
       const runtime = runtimeMap.get(filterSlug)
-      const isRunning = isPipelineEnabled(runtime, repo)
-      const summary = buildRepoSummary(repo, runtime)
+      const isRunning = runtime?.running ?? repo.running ?? repo.status === 'running'
       return {
         key: `${filterSlug || rawSlug}-${index}`,
         label: buildDisplayName(repo),
-        subLabel: summary || repo.path || runtime?.repo || '',
+        subLabel: repo.path || runtime?.repo || '',
         filterSlug,
         rawSlug,
         isRunning,
-        localOnly: repo.local_only === true,
       }
     })
     entries.sort((a, b) => a.label.localeCompare(b.label))
@@ -174,22 +129,10 @@ export function RepoSelector({ onOpenRegister, onOpenNewProject }) {
                     {opt.subLabel && <span style={styles.optionSubLabel}>{opt.subLabel}</span>}
                   </span>
                 </span>
-                <span style={opt.localOnly ? styles.optionLocalOnly : styles.optionStatus}>
-                  {opt.localOnly ? 'Local only' : opt.isRunning ? 'Running' : 'Stopped'}
-                </span>
+                <span style={styles.optionStatus}>{opt.isRunning ? 'Running' : 'Stopped'}</span>
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(false)
-              onOpenNewProject?.()
-            }}
-            style={styles.newProjectBtn}
-          >
-            + New project
-          </button>
           <button
             type="button"
             disabled={!canRegisterRepos}
@@ -289,12 +232,6 @@ const styles = {
     color: theme.textMuted,
     flexShrink: 0,
   },
-  optionLocalOnly: {
-    fontSize: 11,
-    color: theme.orange,
-    flexShrink: 0,
-    fontWeight: 700,
-  },
   divider: {
     height: 1,
     background: theme.border,
@@ -313,16 +250,6 @@ const styles = {
     fontSize: 12,
     fontWeight: 600,
     color: theme.accent,
-    cursor: 'pointer',
-  },
-  newProjectBtn: {
-    border: 'none',
-    borderTop: `1px solid ${theme.border}`,
-    background: theme.surfaceInset,
-    padding: '8px 10px',
-    fontSize: 12,
-    fontWeight: 600,
-    color: theme.orange,
     cursor: 'pointer',
   },
   registerBtnDisabled: {

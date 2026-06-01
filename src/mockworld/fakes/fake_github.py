@@ -56,7 +56,6 @@ class FakePR:
     ci_status: str = "pass"
     draft: bool = False
     url: str = ""
-    author: str = "fake-author"
     mergeable: bool = True
     additions: int = 0
     deletions: int = 0
@@ -114,12 +113,6 @@ class FakeGitHub:
                 branch=pr_dict["branch"],
                 ci_status=pr_dict.get("ci_status", "pass"),
                 merged=pr_dict.get("merged", False),
-                author=pr_dict.get(
-                    "author",
-                    "dependabot[bot]"
-                    if str(pr_dict.get("branch", "")).startswith("dependabot/")
-                    else "fake-author",
-                ),
             )
             for label in pr_dict.get("labels", []):
                 gh.add_pr_label(pr_dict["number"], label)
@@ -153,7 +146,6 @@ class FakeGitHub:
         branch: str,
         ci_status: str = "pass",
         merged: bool = False,
-        author: str = "fake-author",
     ) -> None:
         """Directly insert a PR record (sync helper for test seeding).
 
@@ -167,7 +159,6 @@ class FakeGitHub:
             branch=branch,
             merged=merged,
             ci_status=ci_status,
-            author=author,
         )
 
     def add_pr_label(self, pr_number: int, label: str) -> None:
@@ -886,7 +877,7 @@ class FakeGitHub:
                     draft=pr.draft,
                     title="",
                     merged=pr.merged,
-                    author=pr.author,
+                    author="fake-author",
                 )
             )
         return out

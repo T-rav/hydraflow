@@ -26,19 +26,13 @@ def seed() -> MockWorldSeed:
 
 
 async def assert_outcome(api, page) -> None:
-    events = await api.wait_until(
-        "/api/events",
+    prs = await api.wait_until(
+        "/api/prs",
         lambda p: any(
-            item.get("type") == "background_worker_status"
-            and item.get("data", {}).get("worker") == "dependabot_merge"
-            and item.get("data", {}).get("details", {}).get("merged", 0) >= 1
-            for item in (p if isinstance(p, list) else [])
+            item.get("number") == 100 and item.get("merged") is True
+            for item in p.get("prs", [])
         ),
         timeout=45.0,
     )
-    assert any(
-        item.get("type") == "background_worker_status"
-        and item.get("data", {}).get("worker") == "dependabot_merge"
-        and item.get("data", {}).get("details", {}).get("merged", 0) >= 1
-        for item in events
-    )
+    pr = next(p for p in prs["prs"] if p["number"] == 100)
+    assert pr["merged"] is True

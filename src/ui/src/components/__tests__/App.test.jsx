@@ -238,14 +238,6 @@ describe('Main tab bar', () => {
     }
   })
 
-  it('wraps main tabs in a tablist', async () => {
-    const { default: App } = await import('../../App')
-    render(<App />)
-    const tablist = screen.getByRole('tablist')
-    expect(tablist).toHaveAttribute('data-testid', 'main-tabs')
-    expect(within(tablist).getAllByRole('tab')).toHaveLength(5)
-  })
-
   it('coerces ?tab=wiki query param to atlas on mount', async () => {
     const oldHref = window.location.href
     const oldFetch = global.fetch

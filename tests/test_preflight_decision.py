@@ -27,19 +27,19 @@ async def test_resolved_removes_hitl_escalation() -> None:
     state.get_auto_agent_attempts = MagicMock(return_value=1)
     out = await apply_decision(
         issue_number=42,
-        sub_label="hydraflow-flaky-test-stuck",
+        sub_label="flaky-test-stuck",
         result=_result("resolved", pr_url="https://x/pr/1"),
         pr_port=pr,
         state=state,
         max_attempts=3,
     )
-    # `resolved` removes hydraflow-hitl-escalation + human-required + the sub-label
+    # `resolved` removes hitl-escalation + human-required + the sub-label
     # itself (spec §3 line 119: a successful resolve cleans up the routing
     # tag too). remove_label is singular, called once per label.
     assert pr.remove_label.await_count == 3
-    pr.remove_label.assert_any_await(42, "hydraflow-hitl-escalation")
+    pr.remove_label.assert_any_await(42, "hitl-escalation")
     pr.remove_label.assert_any_await(42, "human-required")
-    pr.remove_label.assert_any_await(42, "hydraflow-flaky-test-stuck")
+    pr.remove_label.assert_any_await(42, "flaky-test-stuck")
     pr.post_comment.assert_awaited()
     assert out["status"] == "resolved"
     pr.add_labels.assert_not_awaited()
@@ -52,7 +52,7 @@ async def test_needs_human_adds_label() -> None:
     state.get_auto_agent_attempts = MagicMock(return_value=1)
     await apply_decision(
         issue_number=42,
-        sub_label="hydraflow-flaky-test-stuck",
+        sub_label="flaky-test-stuck",
         result=_result("needs_human"),
         pr_port=pr,
         state=state,
@@ -145,7 +145,7 @@ async def test_pr_failed_pairs_correctly() -> None:
 @pytest.mark.asyncio
 async def test_resolved_with_default_sentinel_skips_sub_label_remove() -> None:
     """When sub_label is the '_default' sentinel (no domain routing tag was
-    present on the issue), `resolved` removes only hydraflow-hitl-escalation +
+    present on the issue), `resolved` removes only hitl-escalation +
     human-required — NOT a literal '_default' label."""
     pr = AsyncMock()
     state = MagicMock()
@@ -160,7 +160,7 @@ async def test_resolved_with_default_sentinel_skips_sub_label_remove() -> None:
     )
     # Exactly two remove_label calls — no spurious "_default" removal.
     assert pr.remove_label.await_count == 2
-    pr.remove_label.assert_any_await(42, "hydraflow-hitl-escalation")
+    pr.remove_label.assert_any_await(42, "hitl-escalation")
     pr.remove_label.assert_any_await(42, "human-required")
     assert "_default" not in out["removed"]
 

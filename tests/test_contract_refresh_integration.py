@@ -403,7 +403,8 @@ async def test_end_to_end_replay_gate_fail_files_fake_drift_issue(
     issue_kwargs = prs.create_issue.await_args.kwargs
     labels = issue_kwargs["labels"]
     assert "hydraflow-find" in labels
-    assert "hydraflow-fake-drift" in labels
+    assert "fake-drift" in labels
+    assert "adapter-git" in labels
     body = issue_kwargs["body"]
     assert "replay mismatch" in body
     # The refresh PR URL is threaded into the issue body so the repair

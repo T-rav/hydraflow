@@ -102,11 +102,11 @@ class TestIntentEndpoint:
     async def test_intent_returns_500_on_create_failure(
         self, config, event_bus: EventBus, state, tmp_path: Path
     ) -> None:
-        """create_issue returns None -> verify error response."""
+        """create_issue returns 0 → verify error response."""
         from models import IntentRequest
 
         router, pr_mgr = _make_router(config, event_bus, state, tmp_path)
-        pr_mgr.create_issue = AsyncMock(return_value=None)
+        pr_mgr.create_issue = AsyncMock(return_value=0)
 
         endpoint = _find_endpoint(router, "/api/intent")
         assert endpoint is not None

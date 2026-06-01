@@ -196,7 +196,7 @@ async def test_drifted_call_files_hydraflow_find_via_real_chain(
 ) -> None:
     """Inject a sample that fails Pydantic Literal validation, tick the
     loop, assert PRManager.create_issue is awaited with hydraflow-find
-    + hydraflow-shadow-drift labels. End-to-end: real registry, real sampler, real
+    + shadow-drift labels. End-to-end: real registry, real sampler, real
     corpus, real loop, real dispatcher, real PRManager → mocked
     create_issue (the only thing we mock is gh-API egress)."""
     svc = _build_real_registry(_config)
@@ -235,8 +235,8 @@ async def test_drifted_call_files_hydraflow_find_via_real_chain(
         labels = []
     assert labels, "expected non-empty labels list"
     assert "hydraflow-find" in labels
-    assert "hydraflow-shadow-drift" in labels
-    assert "hydraflow-hitl-escalation" not in labels
+    assert "shadow-drift" in labels
+    assert "hitl-escalation" not in labels
 
 
 # ---------------------------------------------------------------------------

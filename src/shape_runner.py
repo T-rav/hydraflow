@@ -35,8 +35,10 @@ _SHAPE_START = "SHAPE_START"
 _SHAPE_END = "SHAPE_END"
 _JSON_BLOCK_RE = re.compile(r"```json\s*\n(.*?)\n```", re.DOTALL)
 
-# Evaluator skill (§4.10)
+# Evaluator skill + escalation label constants (§4.10)
 _SKILL_NAME = "shape-coherence"
+_ESCALATION_LABEL_STUCK = "shape-stuck"
+_ESCALATION_LABEL_HITL = "hitl-escalation"
 
 
 class ShapeRunner(BaseRunner):
@@ -277,10 +279,7 @@ class ShapeRunner(BaseRunner):
         issue_number = await prs.create_issue(
             title=f"[shape-stuck] #{task.id} — {task.title}",
             body="\n".join(body_lines),
-            labels=[
-                self._config.hitl_escalation_label[0],
-                self._config.shape_stuck_label[0],
-            ],
+            labels=[_ESCALATION_LABEL_HITL, _ESCALATION_LABEL_STUCK],
         )
         if issue_number and dedup is not None:
             dedup.add(key)

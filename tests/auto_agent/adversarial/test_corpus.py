@@ -32,9 +32,7 @@ def _entries() -> list[Path]:
 async def test_corpus_entry(entry: Path) -> None:
     issue, cassette, expected = _load(entry)
     sub_label = next(
-        lbl["name"]
-        for lbl in issue["labels"]
-        if lbl["name"] != "hydraflow-hitl-escalation"
+        lbl["name"] for lbl in issue["labels"] if lbl["name"] != "hitl-escalation"
     )
 
     spawn_fn = AsyncMock(

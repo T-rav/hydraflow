@@ -108,7 +108,7 @@ async def test_tick_repo_files_issue_on_broken_cite(
     assert "Wiki rot" in title
     assert "src/foo.py:bar" in title
     assert "Did you mean: other" in body
-    assert set(labels) == {"hydraflow-find", "hydraflow-wiki-rot"}
+    assert set(labels) == {"hydraflow-find", "wiki-rot"}
 
 
 async def test_tick_repo_dedups_repeat_cite(
@@ -161,10 +161,7 @@ async def test_tick_repo_escalates_on_third_attempt(
     calls = pr.create_issue.await_args_list
     assert len(calls) == 2
     labels_escalate = calls[-1].args[2]
-    assert set(labels_escalate) == {
-        "hydraflow-hitl-escalation",
-        "hydraflow-wiki-rot-stuck",
-    }
+    assert set(labels_escalate) == {"hitl-escalation", "wiki-rot-stuck"}
 
 
 async def test_reconcile_clears_dedup_and_attempts(

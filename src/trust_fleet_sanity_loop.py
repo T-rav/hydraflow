@@ -329,7 +329,7 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
         worker: str,
         kind: str,
         details: dict[str, Any],
-    ) -> int | None:
+    ) -> int:
         title = f"HITL: trust-loop anomaly — {worker} {kind}"
         detail_lines = "\n".join(
             f"- `{k}`: `{v}`" for k, v in sorted(details.items()) if k not in {"worker"}
@@ -353,10 +353,7 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
         return await self._pr.create_issue(
             title,
             body,
-            [
-                self._config.hitl_escalation_label[0],
-                self._config.trust_loop_anomaly_label[0],
-            ],
+            ["hitl-escalation", "trust-loop-anomaly"],
         )
 
     async def _reconcile_closed_escalations(self) -> None:
@@ -377,9 +374,9 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
             "--state",
             "closed",
             "--label",
-            self._config.hitl_escalation_label[0],
+            "hitl-escalation",
             "--label",
-            self._config.trust_loop_anomaly_label[0],
+            "trust-loop-anomaly",
             "--author",
             "@me",
             "--limit",

@@ -172,7 +172,7 @@ async def test_dispatcher_match_with_drift_files_issue(tmp_path: Path) -> None:
     call_args = pr.create_issue.await_args
     labels = call_args.kwargs.get("labels") or call_args.args[2]
     assert "hydraflow-find" in labels
-    assert "hydraflow-shadow-drift" in labels
+    assert "shadow-drift" in labels
 
 
 @pytest.mark.asyncio
@@ -249,7 +249,7 @@ async def test_disabled_kill_switch_short_circuits(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_escalation_fires_after_threshold_attempts(tmp_path: Path) -> None:
     """When the same drift signature survives ``live_corpus_max_drift_attempts``
-    consecutive ticks, the loop files a ``hydraflow-hitl-escalation`` issue routed to
+    consecutive ticks, the loop files a ``hitl-escalation`` issue routed to
     the auto-agent preflight pipeline."""
     pr = MagicMock()
     # Two awaited calls in this test: one drift issue (tick 1), one
@@ -283,12 +283,12 @@ async def test_escalation_fires_after_threshold_attempts(tmp_path: Path) -> None
     assert results[2]["escalated_signatures"] == 1
     assert results[2]["escalated_issue"] == 5555
 
-    # The escalation issue carries the hydraflow-hitl-escalation label so the
+    # The escalation issue carries the hitl-escalation label so the
     # AutoAgentPreflightLoop picks it up.
     escalation_call = pr.create_issue.await_args_list[-1]
     labels = escalation_call.kwargs.get("labels") or escalation_call.args[2]
-    assert "hydraflow-hitl-escalation" in labels
-    assert "hydraflow-shadow-drift-stuck" in labels
+    assert "hitl-escalation" in labels
+    assert "shadow-drift-stuck" in labels
 
 
 @pytest.mark.asyncio

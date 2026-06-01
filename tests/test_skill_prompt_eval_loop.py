@@ -123,12 +123,12 @@ async def test_weak_case_sampling_files_corpus_case_weak(loop_env, monkeypatch) 
 
     stats = await loop._do_work()
     # 10% of 10 = 1 case sampled. Sampled case is flagged because
-    # its expected catcher passed it. So 1 hydraflow-corpus-case-weak issue.
+    # its expected catcher passed it. So 1 corpus-case-weak issue.
     assert stats["weak_cases_flagged"] >= 1
     weak_calls = [
         c
         for c in pr.create_issue.await_args_list
-        if "hydraflow-corpus-case-weak" in (c.args[2] if len(c.args) > 2 else [])
+        if "corpus-case-weak" in (c.args[2] if len(c.args) > 2 else [])
     ]
     assert len(weak_calls) >= 1
 
@@ -162,8 +162,8 @@ async def test_escalation_fires_after_three_attempts(loop_env, monkeypatch) -> N
     stats = await loop._do_work()
     assert stats["escalated"] == 1
     labels = pr.create_issue.await_args.args[2]
-    assert "hydraflow-hitl-escalation" in labels
-    assert "hydraflow-skill-prompt-stuck" in labels
+    assert "hitl-escalation" in labels
+    assert "skill-prompt-stuck" in labels
 
 
 async def test_reconcile_closed_escalations(loop_env, monkeypatch) -> None:

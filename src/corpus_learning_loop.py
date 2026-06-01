@@ -531,10 +531,7 @@ class CorpusLearningLoop(BaseBackgroundLoop):
             await self._prs.create_issue(
                 title,
                 body,
-                [
-                    self._config.hitl_escalation_label[0],
-                    self._config.corpus_learning_stuck_label[0],
-                ],
+                ["hitl-escalation", "corpus-learning-stuck"],
             )
         except Exception as exc:  # noqa: BLE001
             reraise_on_credit_or_bug(exc)
@@ -749,7 +746,7 @@ class CorpusLearningLoop(BaseBackgroundLoop):
                 "--state",
                 "closed",
                 "--label",
-                self._config.corpus_learning_stuck_label[0],
+                "corpus-learning-stuck",
                 "--json",
                 "title",
                 "--limit",

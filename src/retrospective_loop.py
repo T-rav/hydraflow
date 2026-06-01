@@ -152,13 +152,7 @@ class RetrospectiveLoop(BaseBackgroundLoop):
             desc = CATEGORY_DESCRIPTIONS.get(category, category)
             title = f"[Review Insight] Recurring feedback: {desc}"
             labels = self._config.find_label[:1]
-            issue_number = await self._prs.create_issue(title, body, labels)
-            if issue_number is None:
-                logger.warning(
-                    "Retrospective: failed to file review insight issue for %s",
-                    category,
-                )
-                continue
+            await self._prs.create_issue(title, body, labels)
             self._insights.mark_category_proposed(category)
             self._insights.record_proposal(category, pre_count=count)
             filed += 1

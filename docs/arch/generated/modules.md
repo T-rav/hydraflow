@@ -15,6 +15,7 @@ graph LR
     src_mockworld["src.mockworld"]
     src_mockworld_fakes["src.mockworld.fakes"]
     src_observability["src.observability"]
+    src_onboarding["src.onboarding"]
     src_preflight["src.preflight"]
     src_preflight_playbooks["src.preflight.playbooks"]
     src_review_phase["src.review_phase"]
@@ -32,6 +33,7 @@ graph LR
     src -- "7" --> src_telemetry
     src_arch_extractors -- "7" --> src_arch
     src_arch_generators -- "11" --> src_arch
+    src_dashboard_routes -- "3" --> src_onboarding
     src_dashboard_routes -- "1" --> src_preflight
     src_dashboard_routes -- "1" --> src_state
     src_mockworld_fakes -- "29" --> src_mockworld

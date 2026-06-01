@@ -301,8 +301,8 @@ class PRPort(Protocol):
         title: str,
         body: str,
         labels: list[str] | None = None,
-    ) -> int | None:
-        """Create a new GitHub issue. Returns the new issue number or None."""
+    ) -> int:
+        """Create a new GitHub issue. Returns the new issue number (0 on failure)."""
         ...
 
     # --- HITL ---
@@ -454,8 +454,8 @@ class PRPort(Protocol):
 
     async def create_task(
         self, title: str, body: str, labels: list[str] | None = None
-    ) -> int | None:
-        """Create a new task (GitHub issue). Returns the issue number or None."""
+    ) -> int:
+        """Create a new task (GitHub issue). Returns the new issue number."""
         ...
 
 

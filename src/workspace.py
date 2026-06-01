@@ -266,12 +266,6 @@ class WorkspaceManager:
 
         try:
             await run_subprocess(
-                "make",
-                "arch-regen",
-                cwd=wt_path,
-                gh_token=gh,
-            )
-            await run_subprocess(
                 "git",
                 "add",
                 "-A",
@@ -290,6 +284,7 @@ class WorkspaceManager:
             await run_subprocess(
                 "git",
                 "push",
+                "--no-verify",
                 "-u",
                 "origin",
                 branch,

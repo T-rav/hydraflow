@@ -120,9 +120,7 @@ class TestDiscoverRunnerEvaluator:
         await runner.discover(_make_task(42))
         prs.create_issue.assert_awaited_once()
         kwargs = prs.create_issue.call_args.kwargs
-        assert {"hydraflow-hitl-escalation", "hydraflow-discover-stuck"} <= set(
-            kwargs["labels"]
-        )
+        assert {"hitl-escalation", "discover-stuck"} <= set(kwargs["labels"])
         assert "#42" in kwargs["title"]
         dedup.add.assert_called_once_with("discover_runner:42")
 

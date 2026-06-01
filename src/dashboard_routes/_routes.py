@@ -1844,7 +1844,7 @@ def create_router(
             title=title, body=body, labels=labels
         )
 
-        if not issue_number:
+        if issue_number == 0:
             return JSONResponse({"error": "Failed to create issue"}, status_code=500)
 
         url = f"https://github.com/{config.repo}/issues/{issue_number}"
@@ -1855,6 +1855,11 @@ def create_router(
     from dashboard_routes._reports_routes import register as _register_reports
 
     _register_reports(router, ctx)
+
+    # --- Headless onboarding draft routes (merged from main) ---
+    from dashboard_routes._onboarding_routes import register as _register_onboarding
+
+    _register_onboarding(router, ctx)
 
     @router.get("/api/sessions")
     async def get_sessions(

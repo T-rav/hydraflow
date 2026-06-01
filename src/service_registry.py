@@ -39,6 +39,7 @@ from edge_proposer_loop import EdgeProposerLoop
 from entry_evidence_loop import EntryEvidenceLoop
 from epic import EpicCompletionChecker, EpicManager
 from epic_monitor_loop import EpicMonitorLoop
+from epic_sweeper_loop import EpicSweeperLoop
 from events import EventBus
 from execution import SubprocessRunner
 from fake_coverage_auditor_loop import FakeCoverageAuditorLoop
@@ -180,6 +181,7 @@ class ServiceRegistry:
     merge_state_watcher_loop: MergeStateWatcherLoop
     report_issue_loop: ReportIssueLoop
     epic_monitor_loop: EpicMonitorLoop
+    epic_sweeper_loop: EpicSweeperLoop
     workspace_gc_loop: WorkspaceGCLoop
     runs_gc_loop: RunsGCLoop
     adr_reviewer_loop: ADRReviewerLoop
@@ -900,6 +902,13 @@ def build_services(
     epic_monitor_loop = EpicMonitorLoop(
         config=config, epic_manager=epic_manager, deps=loop_deps
     )
+    epic_sweeper_loop = EpicSweeperLoop(
+        config=config,
+        fetcher=fetcher,
+        prs=prs,
+        state=state,
+        deps=loop_deps,
+    )
     # ``is_in_pipeline`` is internal IssueStore plumbing not part of
     # IssueStorePort. Sandbox stores (FakeIssueStore) don't implement it
     # — fall back to a never-in-pipeline lambda so loop construction
@@ -1347,6 +1356,7 @@ def build_services(
         merge_state_watcher_loop=merge_state_watcher_loop,
         report_issue_loop=report_issue_loop,
         epic_monitor_loop=epic_monitor_loop,
+        epic_sweeper_loop=epic_sweeper_loop,
         workspace_gc_loop=workspace_gc_loop,
         runs_gc_loop=runs_gc_loop,
         adr_reviewer_loop=adr_reviewer_loop,

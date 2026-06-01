@@ -278,8 +278,8 @@ class TestGuardrail:
         prs.create_issue.assert_awaited_once()
         title = prs.create_issue.await_args.args[0]
         labels = prs.create_issue.await_args.args[2]
-        assert "hydraflow-rc-red-bisect-exhausted" in labels
-        assert "hydraflow-hitl-escalation" in labels
+        assert "rc-red-bisect-exhausted" in labels
+        assert "hitl-escalation" in labels
         assert "current_red" in title
 
     @pytest.mark.asyncio
@@ -408,7 +408,7 @@ class TestRetryIssue:
         title, body, labels = prs.create_issue.await_args.args
         assert title == "Retry: Feature: widgets"
         assert "hydraflow-find" in labels
-        assert "hydraflow-rc-red-retry" in labels
+        assert "rc-red-retry" in labels
         assert "pull/900" in body
         assert "green_sha" in body
         assert "red_sha" in body
@@ -458,7 +458,7 @@ class TestWatchdog:
 
         assert result["status"] == "watchdog_still_red"
         labels = prs.create_issue.await_args.args[2]
-        assert "hydraflow-rc-red-post-revert-red" in labels
+        assert "rc-red-post-revert-red" in labels
 
     @pytest.mark.asyncio
     async def test_watchdog_timeout_escalates(
@@ -476,7 +476,7 @@ class TestWatchdog:
 
         assert result["status"] == "watchdog_timeout"
         labels = prs.create_issue.await_args.args[2]
-        assert "hydraflow-rc-red-verify-timeout" in labels
+        assert "rc-red-verify-timeout" in labels
 
 
 class TestPipelineIntegration:
@@ -529,10 +529,10 @@ class TestPipelineIntegration:
 
         assert result["status"] == "bisect_timeout"
         labels = prs.create_issue.await_args.args[2]
-        # Spec §6: timeouts route to `hydraflow-bisect-harness-failure`, not a
+        # Spec §6: timeouts route to `bisect-harness-failure`, not a
         # separate `bisect-timeout` label.
-        assert "hydraflow-bisect-harness-failure" in labels
-        assert "hydraflow-hitl-escalation" in labels
+        assert "bisect-harness-failure" in labels
+        assert "hitl-escalation" in labels
 
 
 class TestInvalidRange:
@@ -947,8 +947,8 @@ class TestBisectPipelineHarnessFailurePath:
         assert result["status"] == "bisect_harness_failure"
         assert result["escalation_issue"] == 501
         labels = prs.create_issue.await_args.args[2]
-        assert "hydraflow-bisect-harness-failure" in labels
-        assert "hydraflow-hitl-escalation" in labels
+        assert "bisect-harness-failure" in labels
+        assert "hitl-escalation" in labels
 
 
 class TestBisectPipelineRevertConflictPath:
@@ -980,8 +980,8 @@ class TestBisectPipelineRevertConflictPath:
         assert result["escalation_issue"] == 502
         title = prs.create_issue.await_args.args[0]
         labels = prs.create_issue.await_args.args[2]
-        assert "hydraflow-revert-conflict" in labels
-        assert "hydraflow-hitl-escalation" in labels
+        assert "revert-conflict" in labels
+        assert "hitl-escalation" in labels
         assert "culprit_sha" in title
 
 
@@ -1274,8 +1274,8 @@ class TestG10RetryLineageWiring:
         )
         labels = prs.create_issue.await_args.args[2]
         assert "hydraflow-find" in labels
-        assert "hydraflow-rc-red-retry" in labels
-        assert "hydraflow-hitl-escalation" not in labels
+        assert "rc-red-retry" in labels
+        assert "hitl-escalation" not in labels
         # Lineage counter advanced.
         # (Can't easily extract id without re-computing, so just check >0.)
 
@@ -1305,9 +1305,9 @@ class TestG10RetryLineageWiring:
 
         # Last call's labels — must be the escalation, not normal retry.
         last_labels = prs.create_issue.await_args.args[2]
-        assert "hydraflow-hitl-escalation" in last_labels
-        assert "hydraflow-retry-lineage-exhausted" in last_labels
-        assert "hydraflow-rc-red-retry" not in last_labels
+        assert "hitl-escalation" in last_labels
+        assert "retry-lineage-exhausted" in last_labels
+        assert "rc-red-retry" not in last_labels
 
     @pytest.mark.asyncio
     async def test_different_failing_tests_get_separate_lineages(
@@ -1338,7 +1338,7 @@ class TestG10RetryLineageWiring:
             bisect_log="",
             revert_pr_url="",
         )
-        # Both still use hydraflow-rc-red-retry — different lineages, neither
+        # Both still use rc-red-retry — different lineages, neither
         # past cap.
         all_labels = [c.args[2] for c in prs.create_issue.await_args_list]
-        assert all("hydraflow-hitl-escalation" not in lbls for lbls in all_labels)
+        assert all("hitl-escalation" not in lbls for lbls in all_labels)

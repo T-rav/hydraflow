@@ -97,28 +97,17 @@ class StagingPromotionLoop(BaseBackgroundLoop):
             return {"status": "ci_pending", "pr": pr_number}
 
         issue_number = await self._file_failure_issue(pr_number, summary)
-        follow_up = (
-            f"Filed follow-up: #{issue_number}."
-            if issue_number is not None
-            else "Follow-up issue filing failed; the next cadence cycle will retry."
-        )
         await self._prs.post_comment(
             pr_number,
             f"Promotion CI failed — closing, next cadence cycle will retry.\n\n"
-            f"{follow_up}\n\n{summary}",
+            f"Filed follow-up: #{issue_number}.\n\n{summary}",
         )
         await self._prs.close_issue(pr_number)
-        if issue_number is None:
-            logger.warning(
-                "Promotion PR #%d closed after CI failure; follow-up issue filing failed",
-                pr_number,
-            )
-        else:
-            logger.warning(
-                "Promotion PR #%d closed after CI failure; filed #%d",
-                pr_number,
-                issue_number,
-            )
+        logger.warning(
+            "Promotion PR #%d closed after CI failure; filed #%d",
+            pr_number,
+            issue_number,
+        )
         if self._state is not None:
             try:
                 red_sha = await self._prs.get_pr_head_sha(pr_number)
@@ -137,7 +126,7 @@ class StagingPromotionLoop(BaseBackgroundLoop):
             "find_issue": issue_number,
         }
 
-    async def _file_failure_issue(self, pr_number: int, summary: str) -> int | None:
+    async def _file_failure_issue(self, pr_number: int, summary: str) -> int:
         labels = self._config.find_label or ["hydraflow-find"]
         title = f"RC promotion #{pr_number} failed CI"
         body = (
@@ -153,7 +142,7 @@ class StagingPromotionLoop(BaseBackgroundLoop):
             return await self._prs.create_issue(title, body, labels)
         except Exception:  # noqa: BLE001
             logger.exception("Failed to file hydraflow-find issue for PR %d", pr_number)
-            return None
+            return 0
 
     async def _cut_new_rc(self) -> dict[str, Any]:
         now = datetime.now(UTC)

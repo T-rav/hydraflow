@@ -5,7 +5,9 @@ from __future__ import annotations
 from mockworld.seed import MockWorldSeed
 
 NAME = "s12_trust_fleet_three_repos_independent"
-DESCRIPTION = "Multi-repo fleet: 3 repos process independently."
+DESCRIPTION = (
+    "Multi-repo fleet: 3 repos process independently; Wiki tab shows entries from all."
+)
 
 
 def seed() -> MockWorldSeed:
@@ -32,34 +34,16 @@ def seed() -> MockWorldSeed:
 
 
 async def assert_outcome(api, page) -> None:
-    def _merged(payload: dict, n: int) -> bool:
-        items = payload.get("items") if isinstance(payload, dict) else None
-        if not isinstance(items, list):
-            return False
-        for item in items:
-            if not isinstance(item, dict) or item.get("issue_number") != n:
-                continue
-            outcome = item.get("outcome") or {}
-            if isinstance(outcome, dict) and outcome.get("outcome") == "merged":
-                return True
-        return False
-
     for n in (1, 2, 3):
-        await api.wait_until(
-            "/api/issues/history?limit=500",
-            lambda p, _n=n: _merged(p, _n),
+        timeline = await api.wait_until(
+            f"/api/timeline/issue/{n}",
+            lambda p: p.get("outcome") == "merged",
             timeout=180.0,
         )
+        assert timeline["outcome"] == "merged"
 
-    def _all_repos_registered(payload: dict) -> bool:
-        repos = payload.get("repos") if isinstance(payload, dict) else None
-        if not isinstance(repos, list):
-            return False
-        slugs = {
-            item.get("repo")
-            for item in repos
-            if isinstance(item, dict) and isinstance(item.get("repo"), str)
-        }
-        return {"acme/repo-a", "acme/repo-b", "acme/repo-c"} <= slugs
-
-    await api.wait_until("/api/repos", _all_repos_registered, timeout=30.0)
+    await page.goto("/")
+    await page.click("text=Wiki")
+    # All three repos surface in the Wiki tab.
+    for slug in ("repo-a", "repo-b", "repo-c"):
+        await page.wait_for_selector(f"text=acme/{slug}", timeout=10_000)

@@ -1107,18 +1107,11 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             f"_Auto-filed by HydraFlow `health_monitor` "
             f"(spec §12.1 dead-man-switch)._"
         )
-        issue_number = await prs.create_issue(
+        await prs.create_issue(
             title,
             body,
             ["hydraflow-find", "sanity-loop-stalled"],
         )
-        if issue_number is None:
-            logger.warning(
-                "health_monitor: failed to file sanity-loop stall issue for %s; "
-                "not marking dedup",
-                dedup_key,
-            )
-            return
         filed_keys = self._sanity_stall_dedup.get()
         self._sanity_stall_dedup.set_all(filed_keys | {dedup_key})
 
@@ -1187,15 +1180,10 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             f"_Auto-filed by HydraFlow `health_monitor` "
             f"(wiki-freshness dead-man-switch)._"
         )
-        issue_number = await prs.create_issue(
+        await prs.create_issue(
             title,
             body,
             ["hydraflow-find", "wiki-stale"],
         )
-        if issue_number is None:
-            logger.warning(
-                "health_monitor: failed to file wiki-stale issue; not marking dedup"
-            )
-            return
         filed_keys = self._wiki_stall_dedup.get()
         self._wiki_stall_dedup.set_all(filed_keys | {dedup_key})

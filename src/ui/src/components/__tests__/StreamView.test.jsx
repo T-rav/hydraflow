@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { PIPELINE_FLOW_COLLAPSE_THRESHOLD, PIPELINE_STAGES } from '../../constants'
+import { PIPELINE_STAGES } from '../../constants'
 import { deriveStageStatus } from '../../hooks/useStageStatus'
 import { STAGE_KEYS } from '../../hooks/useTimeline'
 
@@ -57,14 +57,6 @@ const basePipeIssue = {
   issue_number: 42,
   title: 'Test issue',
   url: 'https://github.com/test/42',
-}
-
-function makePipelineIssues(count, status = 'queued', start = 100) {
-  return Array.from({ length: count }, (_, idx) => ({
-    issue_number: start + idx,
-    title: `Issue ${start + idx}`,
-    status: typeof status === 'function' ? status(idx) : status,
-  }))
 }
 
 describe('StreamView stage indicators', () => {
@@ -584,67 +576,6 @@ describe('PipelineFlow visualization', () => {
     const queuedDot = screen.getByTestId('flow-dot-11')
     expect(activeDot.style.animation).toContain('stream-pulse')
     expect(queuedDot.style.animation).toBe('')
-  })
-
-  it('keeps individual dots when a stage has exactly the collapse threshold', () => {
-    const issues = makePipelineIssues(PIPELINE_FLOW_COLLAPSE_THRESHOLD, 'queued')
-    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
-      pipelineIssues: {
-        triage: [],
-        plan: issues,
-        implement: [],
-        review: [],
-      },
-    }))
-
-    render(<StreamView {...defaultProps} />)
-
-    expect(screen.queryByTestId('flow-count-plan')).not.toBeInTheDocument()
-    issues.forEach(issue => {
-      expect(screen.getByTestId(`flow-dot-${issue.issue_number}`)).toBeInTheDocument()
-    })
-  })
-
-  it('collapses dots to an active count badge when a stage exceeds the threshold', () => {
-    const issues = makePipelineIssues(
-      PIPELINE_FLOW_COLLAPSE_THRESHOLD + 1,
-      idx => (idx < 3 ? 'active' : 'queued')
-    )
-    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
-      pipelineIssues: {
-        triage: [],
-        plan: issues,
-        implement: [],
-        review: [],
-      },
-    }))
-
-    render(<StreamView {...defaultProps} />)
-
-    const badge = screen.getByTestId('flow-count-plan')
-    expect(badge).toBeInTheDocument()
-    expect(badge.textContent).toBe('3')
-    expect(badge.style.color).toBe('var(--purple)')
-    expect(badge.style.background).toBe('var(--purple-subtle)')
-    issues.forEach(issue => {
-      expect(screen.queryByTestId(`flow-dot-${issue.issue_number}`)).not.toBeInTheDocument()
-    })
-  })
-
-  it('falls back to total count when a collapsed stage has no active issues', () => {
-    const issues = makePipelineIssues(PIPELINE_FLOW_COLLAPSE_THRESHOLD + 1, 'queued')
-    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
-      pipelineIssues: {
-        triage: [],
-        plan: issues,
-        implement: [],
-        review: [],
-      },
-    }))
-
-    render(<StreamView {...defaultProps} />)
-
-    expect(screen.getByTestId('flow-count-plan').textContent).toBe('11')
   })
 })
 

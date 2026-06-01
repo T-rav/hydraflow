@@ -158,7 +158,7 @@ async def test_do_work_files_issue_on_median_signal(loop_env) -> None:
     title = pr.create_issue.await_args.args[0]
     assert "RC gate duration regression" in title
     labels = pr.create_issue.await_args.args[2]
-    assert "hydraflow-find" in labels and "hydraflow-rc-duration-regression" in labels
+    assert "hydraflow-find" in labels and "rc-duration-regression" in labels
 
 
 async def test_do_work_skips_when_dedup_key_present(loop_env) -> None:
@@ -205,8 +205,7 @@ async def test_escalation_fires_after_three_attempts(loop_env) -> None:
     stats = await loop._do_work()
     assert stats["escalated"] >= 1
     assert any(
-        "hydraflow-hitl-escalation" in call.args[2]
-        and "hydraflow-rc-duration-stuck" in call.args[2]
+        "hitl-escalation" in call.args[2] and "rc-duration-stuck" in call.args[2]
         for call in pr.create_issue.await_args_list
     )
 

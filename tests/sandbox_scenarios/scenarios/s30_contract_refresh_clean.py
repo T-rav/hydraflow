@@ -32,7 +32,7 @@ async def assert_outcome(api, page) -> None:
             and e.get("data", {}).get("worker") == "contract_refresh"
             for e in (payload if isinstance(payload, list) else [])
         ),
-        timeout=90.0,
+        timeout=60.0,
     )
 
     cr_events = [

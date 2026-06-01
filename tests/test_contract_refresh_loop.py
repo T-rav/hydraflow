@@ -11,7 +11,7 @@ replay-gate wiring, plus the Task 20 per-loop telemetry emission:
   ``auto_pr.open_automated_pr_async`` with the right title/body/labels
   and records a dedup key so identical drift does not refile.
 - Task 16: after the refresh PR opens, re-runs ``make trust-contracts``
-  via subprocess. Replay failure → ``hydraflow-find`` + ``hydraflow-fake-drift``
+  via subprocess. Replay failure → ``hydraflow-find`` + ``fake-drift``
   issue via ``PRManager.create_issue``. Replay pass → no companion issue.
 - Task 20: each recorder subprocess + the replay gate emits one
   ``trace_collector.emit_loop_subprocess_trace`` call with the
@@ -338,7 +338,7 @@ async def test_do_work_dedup_hit_skips_pr(
 
 
 # ---------------------------------------------------------------------------
-# Task 16: replay gate + hydraflow-fake-drift companion issue
+# Task 16: replay gate + fake-drift companion issue
 # ---------------------------------------------------------------------------
 
 
@@ -346,7 +346,7 @@ async def test_do_work_dedup_hit_skips_pr(
 async def test_do_work_replay_gate_fails_files_companion_issue(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Replay fails after refresh PR → hydraflow-find + hydraflow-fake-drift issue."""
+    """Replay fails after refresh PR → hydraflow-find + fake-drift issue."""
     _stub_recording(monkeypatch)
     recorded_git = _seed_recorded_cassette(tmp_path / "rec" / "git", "git", "commit")
     monkeypatch.setattr(crl_module, "record_git", lambda *_a, **_k: [recorded_git])
@@ -376,7 +376,7 @@ async def test_do_work_replay_gate_fails_files_companion_issue(
     prs.create_issue.assert_awaited()
     kwargs = prs.create_issue.await_args.kwargs
     assert "hydraflow-find" in kwargs["labels"]
-    assert "hydraflow-fake-drift" in kwargs["labels"]
+    assert "fake-drift" in kwargs["labels"]
     assert "trust-contracts" in kwargs["body"] or "replay" in kwargs["body"].lower()
 
 
@@ -659,9 +659,9 @@ async def test_drift_clears_attempts_for_adapters_not_in_this_tick(
 async def test_third_attempt_files_escalation_issue(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """3rd consecutive drift tick for one adapter → hydraflow-hitl-escalation issue.
+    """3rd consecutive drift tick for one adapter → hitl-escalation issue.
 
-    Labels: ``hydraflow-hitl-escalation`` + ``hydraflow-fake-repair-stuck`` + ``adapter-<name>``.
+    Labels: ``hitl-escalation`` + ``fake-repair-stuck`` + ``adapter-<name>``.
     The issue body names the stuck adapter so the HITL operator can jump
     straight to it.
     """
@@ -689,15 +689,16 @@ async def test_third_attempt_files_escalation_issue(
 
     # The escalation issue was filed.
     assert prs.create_issue.await_count >= 1
-    # Find the hydraflow-hitl-escalation call (there may be another for hydraflow-fake-drift).
+    # Find the hitl-escalation call (there may be another for fake-drift).
     escalation_calls = [
         call
         for call in prs.create_issue.await_args_list
-        if "hydraflow-hitl-escalation" in (call.kwargs.get("labels") or [])
+        if "hitl-escalation" in (call.kwargs.get("labels") or [])
     ]
     assert len(escalation_calls) == 1, prs.create_issue.await_args_list
     kwargs = escalation_calls[0].kwargs
-    assert "hydraflow-fake-repair-stuck" in kwargs["labels"]
+    assert "fake-repair-stuck" in kwargs["labels"]
+    assert "adapter-git" in kwargs["labels"]
     assert "git" in kwargs["title"].lower() or "git" in kwargs["body"].lower()
 
 
@@ -734,7 +735,7 @@ async def test_escalation_is_deduped_across_ticks(
     first_escalations = [
         c
         for c in prs.create_issue.await_args_list
-        if "hydraflow-hitl-escalation" in (c.kwargs.get("labels") or [])
+        if "hitl-escalation" in (c.kwargs.get("labels") or [])
     ]
     assert len(first_escalations) == 1
 
@@ -743,7 +744,7 @@ async def test_escalation_is_deduped_across_ticks(
     all_escalations = [
         c
         for c in prs.create_issue.await_args_list
-        if "hydraflow-hitl-escalation" in (c.kwargs.get("labels") or [])
+        if "hitl-escalation" in (c.kwargs.get("labels") or [])
     ]
     assert len(all_escalations) == 1, all_escalations
 
@@ -803,7 +804,7 @@ async def test_escalation_resets_after_clean_tick(
         [
             c
             for c in prs.create_issue.await_args_list
-            if "hydraflow-hitl-escalation" in (c.kwargs.get("labels") or [])
+            if "hitl-escalation" in (c.kwargs.get("labels") or [])
         ]
     )
     await loop._do_work()
@@ -811,7 +812,7 @@ async def test_escalation_resets_after_clean_tick(
         [
             c
             for c in prs.create_issue.await_args_list
-            if "hydraflow-hitl-escalation" in (c.kwargs.get("labels") or [])
+            if "hitl-escalation" in (c.kwargs.get("labels") or [])
         ]
     )
     assert post_count == pre_count + 1, (

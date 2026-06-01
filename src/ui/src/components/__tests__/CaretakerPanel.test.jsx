@@ -18,7 +18,7 @@ function defaultContext(overrides = {}) {
       { name: 'dependabot_merge', status: 'ok', enabled: false, last_run: null, details: {} },
       { name: 'worktree_gc', status: 'ok', enabled: true, last_run: '2026-03-28T11:00:00Z', details: {} },
       { name: 'health_monitor', status: 'error', enabled: true, last_run: '2026-03-28T10:00:00Z', details: {} },
-      { name: 'security_patch', status: 'ok', enabled: true, last_run: null, details: {} },
+      { name: 'epic_sweeper', status: 'ok', enabled: true, last_run: null, details: {} },
     ],
     toggleBgWorker: vi.fn(),
     triggerBgWorker: vi.fn(),

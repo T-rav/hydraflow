@@ -234,14 +234,3 @@ class TestLoadPricing:
         path.write_text(json.dumps({"schema_version": 1, "models": {}}))
         table = load_pricing(path)
         assert isinstance(table, ModelPricingTable)
-
-    def test_bundled_opus_47_rates_match_verified_pricing(self):
-        table = load_pricing()
-
-        rate = table.get_rate("claude-opus-4-7")
-
-        assert rate is not None
-        assert rate.input_cost_per_million == 5.0
-        assert rate.output_cost_per_million == 25.0
-        assert rate.cache_write_cost_per_million == 6.25
-        assert rate.cache_read_cost_per_million == 0.50

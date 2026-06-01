@@ -536,7 +536,7 @@ class TriagePhase:
             decomp.epic_body,
             [epic_label],
         )
-        if epic_number is None:
+        if epic_number <= 0:
             logger.warning(
                 "Failed to create epic issue for decomposition of #%d",
                 issue.id,
@@ -552,7 +552,7 @@ class TriagePhase:
                 child_body,
                 [epic_child_label, find_label],
             )
-            if child_num is not None:
+            if child_num > 0:
                 child_numbers.append(child_num)
                 self._state.record_issue_created()
 

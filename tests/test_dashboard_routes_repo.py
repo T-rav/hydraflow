@@ -1220,48 +1220,4 @@ class TestListSupervisedReposWithStore:
         data = json.loads(resp.body)
         assert resp.status_code == 200
         assert data["repos"][0]["running"] is True
-        assert data["repos"][0]["pipeline_enabled"] is True
         assert data["repos"][0]["session_id"] == "sess-abc"
-
-    @pytest.mark.asyncio
-    async def test_default_repo_start_reflected_by_repos_pipeline_enabled(
-        self, config, event_bus, state, tmp_path
-    ) -> None:
-        import json
-        from types import SimpleNamespace
-
-        from repo_store import RepoRecord, RepoStore
-
-        store = RepoStore(tmp_path)
-        repo_path = tmp_path / "test-repo"
-        repo_path.mkdir()
-        store.upsert(
-            RepoRecord(slug="test-org-test-repo", repo=config.repo, path=str(repo_path))
-        )
-        orch = SimpleNamespace(
-            running=True,
-            pipeline_enabled=False,
-            current_session_id="sess-default",
-        )
-
-        router, _ = make_dashboard_router(
-            config,
-            event_bus,
-            state,
-            tmp_path,
-            get_orch=lambda: orch,
-            repo_store=store,
-            registry=None,
-        )
-        start_endpoint = find_endpoint(router, "/api/runtimes/{slug}/start", "POST")
-        repos_endpoint = find_endpoint(router, "/api/repos")
-
-        start_resp = await start_endpoint("test-org-test-repo")
-        repos_resp = await repos_endpoint()
-
-        data = json.loads(repos_resp.body)
-        assert start_resp.status_code == 200
-        assert orch.pipeline_enabled is True
-        assert data["repos"][0]["running"] is False
-        assert data["repos"][0]["pipeline_enabled"] is True
-        assert data["repos"][0]["session_id"] == "sess-default"

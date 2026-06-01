@@ -98,7 +98,7 @@ async def test_skips_human_required_already_set(tmp_path: Path) -> None:
                 "number": 1,
                 "body": "x",
                 "labels": [
-                    {"name": "hydraflow-hitl-escalation"},
+                    {"name": "hitl-escalation"},
                     {"name": "human-required"},
                 ],
             },
@@ -118,8 +118,8 @@ async def test_deny_list_bypasses_agent(tmp_path: Path) -> None:
                 "number": 1,
                 "body": "x",
                 "labels": [
-                    {"name": "hydraflow-hitl-escalation"},
-                    {"name": "hydraflow-principles-stuck"},
+                    {"name": "hitl-escalation"},
+                    {"name": "principles-stuck"},
                 ],
             },
         ]
@@ -193,8 +193,8 @@ async def test_attempt_cap_marks_exhausted(tmp_path: Path) -> None:
                 "number": 1,
                 "body": "x",
                 "labels": [
-                    {"name": "hydraflow-hitl-escalation"},
-                    {"name": "hydraflow-flaky-test-stuck"},
+                    {"name": "hitl-escalation"},
+                    {"name": "flaky-test-stuck"},
                 ],
             },
         ]

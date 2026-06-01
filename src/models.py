@@ -1381,7 +1381,6 @@ class RepoRuntimeInfo(BaseModel):
     slug: str
     repo: str = ""
     running: bool = False
-    pipeline_enabled: bool = False
     session_id: str | None = None
     uptime_seconds: float = 0.0
     last_error: str | None = None
@@ -1904,7 +1903,6 @@ class StateData(BaseModel):
     escalation_contexts: dict[str, EscalationContext] = Field(default_factory=dict)
     diagnostic_attempts: dict[str, list[AttemptRecord]] = Field(default_factory=dict)
     diagnosis_severities: dict[str, str] = Field(default_factory=dict)
-    onboarding_drafts: dict[str, dict[str, object]] = Field(default_factory=dict)
     sentry_creation_attempts: dict[str, int] = Field(default_factory=dict)
     trace_runs: TraceRunsContainer = Field(default_factory=TraceRunsContainer)
     # StagingBisectLoop state (spec §4.3 + §8). Written by StagingPromotionLoop
@@ -1924,6 +1922,8 @@ class StateData(BaseModel):
     # ``retry-lineage-exhausted``.
     retry_lineage_attempts: dict[str, int] = Field(default_factory=dict)
     retry_lineage_pr_chains: dict[str, list[int]] = Field(default_factory=dict)
+    # Headless onboarding draft store (merged from main): draft_id -> draft dict.
+    onboarding_drafts: dict[str, dict[str, object]] = Field(default_factory=dict)
     # PrinciplesAuditLoop state (spec §4.4).
     # Keys are repo slugs ("owner/repo"); sentinel "hydraflow-self" = working tree.
     managed_repos_onboarding_status: dict[
@@ -3020,6 +3020,8 @@ class MetricsResponse(BaseModel):
     thresholds: list[ThresholdProposal] = Field(default_factory=list)
     inference_lifetime: dict[str, int] = Field(default_factory=dict)
     inference_session: dict[str, int] = Field(default_factory=dict)
+    # Repo-scoped metrics payload for the onboarding/project dashboard (merged
+    # from main, #8933).
     repo_metrics: dict[str, Any] = Field(default_factory=dict)
 
 

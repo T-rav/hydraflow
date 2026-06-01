@@ -124,9 +124,6 @@ class TestL16EpicMonitorLoop:
 
         epic_mgr = MagicMock()
         epic_mgr.check_stale_epics = AsyncMock(return_value=[])
-        epic_mgr.sweep_completed_epics = AsyncMock(
-            return_value={"checked": 0, "swept": 0, "total_open_epics": 0}
-        )
         epic_mgr.refresh_cache = AsyncMock(return_value=None)
         epic_mgr.get_all_progress.return_value = {}
         _seed_ports(world, epic_manager=epic_mgr)
@@ -149,9 +146,6 @@ class TestL16EpicMonitorLoop:
 
         epic_mgr = MagicMock()
         epic_mgr.check_stale_epics = AsyncMock(return_value=fake_stale)
-        epic_mgr.sweep_completed_epics = AsyncMock(
-            return_value={"checked": 0, "swept": 0, "total_open_epics": 0}
-        )
         epic_mgr.refresh_cache = AsyncMock(return_value=None)
         epic_mgr.get_all_progress.return_value = fake_progress
         _seed_ports(world, epic_manager=epic_mgr)
