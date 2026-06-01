@@ -53,6 +53,23 @@ Only mark tests that exercise real external dependencies (Docker, network, files
 ```
 
 
+## Enforce test-value standards during review
+
+Review must request changes for skipped, xfailed, commented-out, or placeholder
+tests in active coverage. Unit tests should use the documented factories and
+world-building helpers instead of ad hoc setup. Integration tests should keep
+real business logic wired and mock only external boundaries whose real effects
+cannot run in the test environment. MockWorld scenarios should assert side
+effects through fake-adapter state, not raw mock call counts. **Why:** Test
+counts are meaningless when the runnable suite contains ignored tests or mocks
+that decide the outcome being asserted.
+
+
+```json:entry
+{"id":"01JRC_TEST_VALUE_REVIEW_GATE","title":"Enforce test-value standards during review","topic":"testing","source_type":"manual","source_issue":"hydraflow-1x87","source_repo":"T-rav/hydraflow","created_at":"2026-05-31T23:45:00+00:00","updated_at":"2026-05-31T23:45:00+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+```
+
+
 ## Test async patterns with AsyncMock and fire-and-forget cleanup
 
 Use `AsyncMock` with explicit `assert_called_with()`. For fire-and-forget tasks via `create_task()`, call `await asyncio.sleep(0)` before assertions. Test async context managers: idempotent close, context manager triggers close on exit, returns self. **Why:** Async fire-and-forget races without yield points; explicit sleep ensures task completion.
