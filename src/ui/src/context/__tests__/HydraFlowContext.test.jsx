@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { render, screen, act } from '@testing-library/react'
-import { reducer, getPipelineAction } from '../HydraFlowContext'
+import { render, screen, act, waitFor } from '@testing-library/react'
+import { reducer } from '../HydraFlowContext'
 
 const emptyPipeline = {
   triage: [],
@@ -373,175 +373,38 @@ describe('PIPELINE_SNAPSHOT reducer', () => {
     expect(next.pipelineIssues.merged).toHaveLength(1)
     expect(next.pipelineIssues.merged[0].issue_number).toBe(99)
   })
-})
 
-describe('WS_PIPELINE_UPDATE reducer', () => {
-  it('moves issue between stages on stage transition', () => {
-    const state = {
-      ...initialState,
-      pipelineIssues: {
-        ...emptyPipeline,
-        triage: [{ issue_number: 5, title: 'Test', url: '', status: 'active' }],
-      },
+  it('F8: snapshot push alone walks a card through the full lifecycle with no optimistic layer', () => {
+    // Without the optimistic WS_PIPELINE_UPDATE layer, the authoritative
+    // pipeline_snapshot must move a card through every stage on its own. Each
+    // snapshot is the full state with issue #314 in exactly one stage; after
+    // each, the card must be present ONLY in the current stage (gone from prior).
+    const card = (status) => ({ issue_number: 314, title: 'Lifecycle', url: 'u', status })
+    const stageOf = (state) =>
+      Object.entries(state.pipelineIssues)
+        .filter(([, items]) => items.some(i => i.issue_number === 314))
+        .map(([stage]) => stage)
+
+    let state = { ...initialState, pipelineIssues: { ...emptyPipeline } }
+    const lifecycle = [
+      ['triage', 'queued'],
+      ['plan', 'planning'],
+      ['implement', 'active'],
+      ['review', 'queued'],
+      ['merged', 'done'],
+    ]
+
+    for (const [stage, status] of lifecycle) {
+      state = reducer(state, {
+        type: 'pipeline_snapshot',
+        data: { stages: { triage: [], plan: [], implement: [], review: [], merged: [], [stage]: [card(status)] } },
+      })
+      // Present only in the current stage, absent from every other (incl. prior)
+      expect(stageOf(state)).toEqual([stage])
+      expect(state.pipelineIssues[stage]).toHaveLength(1)
+      expect(state.pipelineIssues[stage][0].issue_number).toBe(314)
+      expect(state.pipelineIssues[stage][0].status).toBe(status)
     }
-    const next = reducer(state, {
-      type: 'WS_PIPELINE_UPDATE',
-      data: { issueNumber: 5, fromStage: 'triage', toStage: 'plan', status: 'queued' },
-    })
-    expect(next.pipelineIssues.triage).toHaveLength(0)
-    expect(next.pipelineIssues.plan).toHaveLength(1)
-    expect(next.pipelineIssues.plan[0].issue_number).toBe(5)
-    expect(next.pipelineIssues.plan[0].status).toBe('queued')
-  })
-
-  it('updates status without moving when no fromStage', () => {
-    const state = {
-      ...initialState,
-      pipelineIssues: {
-        ...emptyPipeline,
-        implement: [{ issue_number: 7, title: 'Impl', url: '', status: 'queued' }],
-      },
-    }
-    const next = reducer(state, {
-      type: 'WS_PIPELINE_UPDATE',
-      data: { issueNumber: 7, fromStage: null, toStage: null, status: 'active' },
-    })
-    expect(next.pipelineIssues.implement).toHaveLength(1)
-    expect(next.pipelineIssues.implement[0].status).toBe('active')
-  })
-
-  it('does not add unknown issues (no-op for missing issue)', () => {
-    const next = reducer(initialState, {
-      type: 'WS_PIPELINE_UPDATE',
-      data: { issueNumber: 999, fromStage: 'triage', toStage: 'plan', status: 'queued' },
-    })
-    // Issue 999 not found in triage, should not appear in plan
-    expect(next.pipelineIssues.plan).toHaveLength(0)
-    expect(next.pipelineIssues.triage).toHaveLength(0)
-  })
-
-  it('moves issue from review to merged on merge event', () => {
-    const state = {
-      ...initialState,
-      pipelineIssues: {
-        ...emptyPipeline,
-        review: [{ issue_number: 10, title: 'PR Fix', url: '', status: 'done' }],
-      },
-    }
-    const next = reducer(state, {
-      type: 'WS_PIPELINE_UPDATE',
-      data: { issueNumber: 10, fromStage: 'review', toStage: 'merged', status: 'done' },
-    })
-    expect(next.pipelineIssues.review).toHaveLength(0)
-    expect(next.pipelineIssues.merged).toHaveLength(1)
-    expect(next.pipelineIssues.merged[0].issue_number).toBe(10)
-    expect(next.pipelineIssues.merged[0].status).toBe('done')
-  })
-
-  it('adds to merged even if issue was already removed from review', () => {
-    // Item may have been removed by review_update done before merge_update arrives
-    const state = {
-      ...initialState,
-      pipelineIssues: {
-        ...emptyPipeline,
-        review: [], // already removed
-      },
-    }
-    const next = reducer(state, {
-      type: 'WS_PIPELINE_UPDATE',
-      data: { issueNumber: 10, fromStage: 'review', toStage: 'merged', status: 'done' },
-    })
-    expect(next.pipelineIssues.merged).toHaveLength(1)
-    expect(next.pipelineIssues.merged[0].issue_number).toBe(10)
-  })
-
-  it('does not duplicate issue in merged stage', () => {
-    const state = {
-      ...initialState,
-      pipelineIssues: {
-        ...emptyPipeline,
-        merged: [{ issue_number: 10, title: '', url: '', status: 'done' }],
-      },
-    }
-    const next = reducer(state, {
-      type: 'WS_PIPELINE_UPDATE',
-      data: { issueNumber: 10, fromStage: 'review', toStage: 'merged', status: 'done' },
-    })
-    expect(next.pipelineIssues.merged).toHaveLength(1)
-  })
-
-  it('updates triage item to failed status without moving stages', () => {
-    const state = {
-      ...initialState,
-      pipelineIssues: {
-        ...emptyPipeline,
-        triage: [{ issue_number: 20, title: 'Triage Fail', url: '', status: 'active' }],
-      },
-    }
-    const next = reducer(state, {
-      type: 'WS_PIPELINE_UPDATE',
-      data: { issueNumber: 20, fromStage: null, toStage: null, status: 'failed' },
-    })
-    expect(next.pipelineIssues.triage).toHaveLength(1)
-    expect(next.pipelineIssues.triage[0].status).toBe('failed')
-    expect(next.pipelineIssues.plan).toHaveLength(0)
-  })
-
-  it('updates plan item to failed status without moving stages', () => {
-    const state = {
-      ...initialState,
-      pipelineIssues: {
-        ...emptyPipeline,
-        plan: [{ issue_number: 21, title: 'Plan Fail', url: '', status: 'active' }],
-      },
-    }
-    const next = reducer(state, {
-      type: 'WS_PIPELINE_UPDATE',
-      data: { issueNumber: 21, fromStage: null, toStage: null, status: 'failed' },
-    })
-    expect(next.pipelineIssues.plan).toHaveLength(1)
-    expect(next.pipelineIssues.plan[0].status).toBe('failed')
-    expect(next.pipelineIssues.implement).toHaveLength(0)
-  })
-})
-
-describe('getPipelineAction', () => {
-  it('triage_update done → move triage→plan as queued', () => {
-    const action = getPipelineAction({ type: 'triage_update', data: { issue: 5, status: 'done' } })
-    expect(action).toEqual({ type: 'WS_PIPELINE_UPDATE', data: { issueNumber: 5, fromStage: 'triage', toStage: 'plan', status: 'queued' } })
-  })
-
-  it('triage_update failed → mark failed in-place', () => {
-    const action = getPipelineAction({ type: 'triage_update', data: { issue: 5, status: 'failed' } })
-    expect(action).toEqual({ type: 'WS_PIPELINE_UPDATE', data: { issueNumber: 5, fromStage: null, toStage: null, status: 'failed' } })
-  })
-
-  it('triage_update active status → mark active in-place', () => {
-    const action = getPipelineAction({ type: 'triage_update', data: { issue: 5, status: 'evaluating' } })
-    expect(action).toEqual({ type: 'WS_PIPELINE_UPDATE', data: { issueNumber: 5, fromStage: null, toStage: null, status: 'active' } })
-  })
-
-  it('planner_update done → move plan→implement as queued', () => {
-    const action = getPipelineAction({ type: 'planner_update', data: { issue: 7, status: 'done' } })
-    expect(action).toEqual({ type: 'WS_PIPELINE_UPDATE', data: { issueNumber: 7, fromStage: 'plan', toStage: 'implement', status: 'queued' } })
-  })
-
-  it('planner_update failed → mark failed in-place', () => {
-    const action = getPipelineAction({ type: 'planner_update', data: { issue: 7, status: 'failed' } })
-    expect(action).toEqual({ type: 'WS_PIPELINE_UPDATE', data: { issueNumber: 7, fromStage: null, toStage: null, status: 'failed' } })
-  })
-
-  it('planner_update planning status → mark active in-place', () => {
-    const action = getPipelineAction({ type: 'planner_update', data: { issue: 7, status: 'planning' } })
-    expect(action).toEqual({ type: 'WS_PIPELINE_UPDATE', data: { issueNumber: 7, fromStage: null, toStage: null, status: 'active' } })
-  })
-
-  it('event with no issue number → returns null', () => {
-    expect(getPipelineAction({ type: 'triage_update', data: { status: 'failed' } })).toBeNull()
-  })
-
-  it('unrecognised event type → returns null', () => {
-    expect(getPipelineAction({ type: 'metrics_update', data: { issue: 1 } })).toBeNull()
   })
 })
 
@@ -2177,8 +2040,12 @@ describe('HydraFlowProvider body[data-connected]', () => {
       )
     })
 
-    expect(document.body.getAttribute('data-connected')).toBe('true')
-    expect(screen.getByTestId('connected').textContent).toBe('true')
+    // onopen fires on a macrotask (setTimeout 0), which act() does not await —
+    // poll until the connected state propagates to avoid a timing-race flake.
+    await waitFor(() => {
+      expect(document.body.getAttribute('data-connected')).toBe('true')
+      expect(screen.getByTestId('connected').textContent).toBe('true')
+    })
   })
 
   it('sets data-connected to false when not connected', async () => {

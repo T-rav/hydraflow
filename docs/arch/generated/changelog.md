@@ -6,11 +6,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W22
 
-- `7d4af08` — Merge remote-tracking branch 'origin/staging' into fix/ws-pipeline-snapshot-push *(2026-05-31)*
-- `afda157` — test(mockworld): assert side effects through fake state (#9124) (#9124) *(2026-05-31)*
-- `1e5ce26` — test(mockworld): count real scenario key invocations (#9121) (#9121) *(2026-05-30)*
-- `347cc9e` — test(mockworld): close loop coverage matrix gaps (#9119) (#9119) *(2026-05-30)*
-- `932dc1d` — fix(mockworld): include FakeHoneycomb in generated map (#9116) (#9116) *(2026-05-30)*
 - `ea70758` — feat(dashboard): push coalesced pipeline-snapshot deltas over WS (WS-RT PR3, backend) *(2026-05-30)*
 - `5ada680` — test: harden MockWorld side-effect coverage (#9104) (#9104) *(2026-05-30)*
 - `1ff6c54` — feat(security): scrub secrets on the canonical audit-write path (WS-4, ADR-0085) *(2026-05-30)*
