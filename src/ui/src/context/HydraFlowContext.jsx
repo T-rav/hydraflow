@@ -1,9 +1,11 @@
 import React, { createContext, useContext, useEffect, useRef, useCallback, useReducer, useMemo } from 'react'
-import { MAX_EVENTS, SYSTEM_WORKER_INTERVALS } from '../constants'
+import { MAX_EVENTS, SYSTEM_WORKER_INTERVALS, PIPELINE_POLL_SAFETY_NET_MS } from '../constants'
 import { deriveStageStatus } from '../hooks/useStageStatus'
 
 const emptyPipeline = {
   triage: [],
+  discover: [],
+  shape: [],
   plan: [],
   implement: [],
   review: [],
@@ -563,8 +565,11 @@ export function reducer(state, action) {
       return { ...state, events: merged }
     }
 
+    case 'pipeline_snapshot':
     case 'PIPELINE_SNAPSHOT': {
-      const incoming = action.data || {}
+      // WS frame carries {seq, stages}; REST dispatch passes stages already
+      // unwrapped. Normalize both to the bare stage map.
+      const incoming = action.data?.stages ?? action.data ?? {}
       const allStages = ['triage', 'discover', 'shape', 'plan', 'implement', 'review', 'hitl', 'merged']
 
       const nextStages = Object.fromEntries(allStages.map((key) => {
@@ -1566,7 +1571,10 @@ export function HydraFlowProvider({ children }) {
           fetchGithubMetrics()
           fetchMetricsHistory()
         }
-        if (event.type === 'queue_update') fetchPipeline()
+        // queue_update no longer triggers a pipeline fetch: the QUEUE_UPDATE
+        // storm is the source of the REST-poll thrash. The authoritative
+        // pipeline view now arrives via the coalesced WS PIPELINE_SNAPSHOT
+        // push; queue_update still updates queueStats via the reducer.
         if (event.type === 'hitl_update' || event.type === 'hitl_escalation') fetchHitlItems()
         if (event.type === 'epic_update' || event.type === 'epic_ready' || event.type === 'epic_released') fetchEpics()
       } catch { /* ignore parse errors */ }
@@ -1605,13 +1613,15 @@ export function HydraFlowProvider({ children }) {
   }, [fetchWithRepo])
 
   // Pipeline polling — interval is editable via system worker controls.
-  // When WebSocket is connected and pipeline_stats events are flowing,
-  // double the polling interval since stats arrive via WebSocket.
+  // When the WebSocket is connected, the coalesced PIPELINE_SNAPSHOT push is
+  // authoritative, so the REST poll is demoted to a slow 30s safety net that
+  // catches any missed/coalesced WS frame. When disconnected, fall back to the
+  // fast editable worker cadence so the board stays live without the WS.
   const pipelinePollerIntervalMs = useMemo(() => {
+    if (state.connected) return PIPELINE_POLL_SAFETY_NET_MS
     const worker = state.backgroundWorkers.find(w => w.name === 'pipeline_poller')
-    const baseMs = (worker?.interval_seconds ?? SYSTEM_WORKER_INTERVALS.pipeline_poller) * 1000
-    return (state.connected && state.pipelineStats) ? baseMs * 2 : baseMs
-  }, [state.backgroundWorkers, state.connected, state.pipelineStats])
+    return (worker?.interval_seconds ?? SYSTEM_WORKER_INTERVALS.pipeline_poller) * 1000
+  }, [state.backgroundWorkers, state.connected])
 
   useEffect(() => {
     fetchPipeline()

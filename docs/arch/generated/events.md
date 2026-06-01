@@ -32,6 +32,7 @@ Every `EventType` published or subscribed in `src/`. Events with no subscribers 
 | **METRICS_UPDATE** ⚠️ | `src.metrics_manager:MetricsManager.sync` | — |
 | **ORCHESTRATOR_STATUS** ⚠️ | `src.dashboard_routes._control_routes:register.start_orchestrator`<br>`src.orchestrator:HydraFlowOrchestrator._publish_status` | — |
 | **PHASE_CHANGE** ⚠️ | `src.server:_run_with_dashboard` | — |
+| **PIPELINE_SNAPSHOT** ⚠️ | `src.issue_store:IssueStore._flush_pipeline_snapshot` | — |
 | **PIPELINE_STATS** ⚠️ | `src.orchestrator:HydraFlowOrchestrator.emit_pipeline_stats` | — |
 | **PLANNER_UPDATE** ⚠️ | `src.planner:PlannerRunner._emit_status` | — |
 | **PR_CREATED** ⚠️ | `src.pr_manager:PRManager.create_pr`<br>`src.pr_manager:PRManager.create_promotion_pr` | — |

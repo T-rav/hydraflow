@@ -2752,6 +2752,23 @@ class PipelineSnapshotEntry(TypedDict):
     is_epic_child: NotRequired[bool]
 
 
+class PipelineSnapshotPayload(TypedDict):
+    """``event.data`` shape for a ``PIPELINE_SNAPSHOT`` event.
+
+    Mirrors ``GET /api/pipeline`` byte-for-byte (modulo ``seq``): ``stages``
+    keys are frontend stage names (triage/discover/shape/plan/implement/
+    review/hitl/merged) so the dashboard's ``PIPELINE_SNAPSHOT`` reducer can
+    consume WS pushes and REST polls interchangeably. ``seq`` is a monotonic
+    emit counter (per ``IssueStore`` instance; resets on restart). It is NOT
+    yet consumed by the frontend — snapshot ordering currently relies on
+    EventBus FIFO delivery + full-snapshot idempotency. A seq-based stale-frame
+    guard is deferred to the reconnect-resilience work (WS-RT PR5).
+    """
+
+    seq: int
+    stages: dict[str, list[PipelineSnapshotEntry]]
+
+
 class LabelCounts(TypedDict):
     """Return shape of ``PRManager.get_label_counts``."""
 

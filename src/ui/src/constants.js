@@ -22,6 +22,14 @@ export const ACTIVE_STATUSES = [
 export const MAX_EVENTS = 5000
 
 /**
+ * Pipeline REST-poll cadence used as a safety net while the WebSocket is
+ * connected. The WS PIPELINE_SNAPSHOT push is authoritative when connected,
+ * so the poll is demoted to this slow 30s fallback (vs the fast worker cadence
+ * used when disconnected) to catch any missed/coalesced WS frame.
+ */
+export const PIPELINE_POLL_SAFETY_NET_MS = 30_000
+
+/**
  * Canonical pipeline stage definitions.
  * All stage metadata lives here to prevent drift across components.
  * Components derive their own views (uppercase labels, filtered subsets, etc.) from this array.

@@ -4,6 +4,8 @@ import { reducer, getPipelineAction } from '../HydraFlowContext'
 
 const emptyPipeline = {
   triage: [],
+  discover: [],
+  shape: [],
   plan: [],
   implement: [],
   review: [],
@@ -283,6 +285,93 @@ describe('PIPELINE_SNAPSHOT reducer', () => {
     })
     // Incoming status wins (snapshot is newer / more authoritative than local WS update)
     expect(next.pipelineIssues.implement[0].status).toBe('queued')
+  })
+
+  it('F1: new card appears via lowercase WS pipeline_snapshot into an empty stage', () => {
+    const state = { ...initialState, pipelineIssues: { ...emptyPipeline } }
+    const next = reducer(state, {
+      type: 'pipeline_snapshot',
+      data: { stages: { implement: [{ issue_number: 42, title: 'X', url: 'u', status: 'active' }] } },
+    })
+    expect(next.pipelineIssues.implement).toHaveLength(1)
+    expect(next.pipelineIssues.implement[0].issue_number).toBe(42)
+    expect(next.pipelineIssues.implement[0].status).toBe('active')
+  })
+
+  it('F2: {stages:{...}} WS frame and bare {...} REST payload produce identical buckets', () => {
+    const state = { ...initialState, pipelineIssues: { ...emptyPipeline } }
+    const bucket = { implement: [{ issue_number: 9, title: 'A', url: 'u', status: 'active' }], triage: [] }
+    const wsNext = reducer(state, { type: 'pipeline_snapshot', data: { seq: 3, stages: bucket } })
+    const restNext = reducer(state, { type: 'PIPELINE_SNAPSHOT', data: bucket })
+    expect(wsNext.pipelineIssues).toEqual(restNext.pipelineIssues)
+  })
+
+  it('F3: card moves between stages — #5 leaves triage and lands in plan', () => {
+    const state = {
+      ...initialState,
+      pipelineIssues: {
+        ...emptyPipeline,
+        triage: [{ issue_number: 5, title: 'Move me', url: 'u', status: 'queued' }],
+      },
+    }
+    const next = reducer(state, {
+      type: 'pipeline_snapshot',
+      data: { stages: { triage: [], plan: [{ issue_number: 5, title: 'Move me', url: 'u', status: 'planning' }] } },
+    })
+    expect(next.pipelineIssues.triage.find(i => i.issue_number === 5)).toBeFalsy()
+    expect(next.pipelineIssues.plan.find(i => i.issue_number === 5)).toBeTruthy()
+  })
+
+  it('F4: title is preserved when snapshot omits it; a supplied title wins', () => {
+    const state = {
+      ...initialState,
+      pipelineIssues: {
+        ...emptyPipeline,
+        implement: [{ issue_number: 7, title: 'Real', url: 'u', status: 'active' }],
+      },
+    }
+    const preserved = reducer(state, {
+      type: 'pipeline_snapshot',
+      data: { stages: { implement: [{ issue_number: 7, url: 'u', status: 'active' }] } },
+    })
+    expect(preserved.pipelineIssues.implement[0].title).toBe('Real')
+
+    const overridden = reducer(state, {
+      type: 'pipeline_snapshot',
+      data: { stages: { implement: [{ issue_number: 7, title: 'Renamed', url: 'u', status: 'active' }] } },
+    })
+    expect(overridden.pipelineIssues.implement[0].title).toBe('Renamed')
+  })
+
+  it('F6: discover and shape stages are included in the merged snapshot', () => {
+    const state = { ...initialState, pipelineIssues: { ...emptyPipeline } }
+    const next = reducer(state, {
+      type: 'pipeline_snapshot',
+      data: { stages: {
+        discover: [{ issue_number: 21, title: 'D', url: 'u', status: 'active' }],
+        shape: [{ issue_number: 22, title: 'S', url: 'u', status: 'active' }],
+      } },
+    })
+    expect(next.pipelineIssues.discover).toHaveLength(1)
+    expect(next.pipelineIssues.discover[0].issue_number).toBe(21)
+    expect(next.pipelineIssues.shape).toHaveLength(1)
+    expect(next.pipelineIssues.shape[0].issue_number).toBe(22)
+  })
+
+  it('F7: absent stage key is preserved — omitting merged keeps the existing merged card', () => {
+    const state = {
+      ...initialState,
+      pipelineIssues: {
+        ...emptyPipeline,
+        merged: [{ issue_number: 99, title: 'Shipped', url: 'u', status: 'done' }],
+      },
+    }
+    const next = reducer(state, {
+      type: 'pipeline_snapshot',
+      data: { stages: { implement: [] } },
+    })
+    expect(next.pipelineIssues.merged).toHaveLength(1)
+    expect(next.pipelineIssues.merged[0].issue_number).toBe(99)
   })
 })
 
@@ -1815,14 +1904,7 @@ describe('SESSION_RESET reducer', () => {
     expect(next.hitlEscalation).toBeNull()
     expect(next.humanInputRequests).toEqual({})
     expect(next.lastSeenId).toBe(-1)
-    expect(next.pipelineIssues).toEqual({
-      triage: [],
-      plan: [],
-      implement: [],
-      review: [],
-      hitl: [],
-      merged: [],
-    })
+    expect(next.pipelineIssues).toEqual({ ...emptyPipeline })
     expect(next.intents).toEqual([])
   })
 
@@ -2117,5 +2199,157 @@ describe('HydraFlowProvider body[data-connected]', () => {
     })
 
     expect(document.body.getAttribute('data-connected')).toBe('false')
+  })
+})
+
+describe('queue_update WS storm fix', () => {
+  let originalWebSocket
+
+  beforeEach(() => {
+    originalWebSocket = global.WebSocket
+  })
+
+  afterEach(() => {
+    global.WebSocket = originalWebSocket
+    document.body.removeAttribute('data-connected')
+    vi.useRealTimers()
+    vi.resetModules()
+  })
+
+  it('F10: pipeline REST poll fires at the 30s safety-net cadence while connected', async () => {
+    // PR3 demotes the REST poll to PIPELINE_POLL_SAFETY_NET_MS (30s) once the
+    // WS is connected, because the coalesced PIPELINE_SNAPSHOT push is now
+    // authoritative. Assert the interval-driven poll does NOT fire before ~30s
+    // and DOES fire once at the 30s boundary.
+    vi.useFakeTimers()
+    let wsInstance = null
+    vi.spyOn(global, 'fetch').mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url.includes('/api/system/workers')) return Promise.resolve({ ok: true, json: async () => ({ workers: [] }) })
+      if (url.includes('/api/sessions')) return Promise.resolve({ ok: true, json: async () => [] })
+      if (url.includes('/api/repos')) return Promise.resolve({ ok: true, json: async () => ({ repos: [] }) })
+      if (url.includes('/api/runtimes')) return Promise.resolve({ ok: true, json: async () => ({ runtimes: [] }) })
+      if (url.includes('/api/epics')) return Promise.resolve({ ok: true, json: async () => ({ epics: [] }) })
+      if (url.includes('/api/pipeline')) return Promise.resolve({ ok: true, json: async () => ({ stages: {} }) })
+      return Promise.resolve({ ok: true, json: async () => ({}) })
+    })
+    global.WebSocket = class MockWS {
+      constructor() { wsInstance = this }
+      close() {}
+    }
+
+    const { HydraFlowProvider } = await import('../HydraFlowContext')
+
+    render(<HydraFlowProvider><div /></HydraFlowProvider>)
+
+    // Open the WS so state.connected flips true. The interval memo recomputes
+    // to PIPELINE_POLL_SAFETY_NET_MS (30s) and the poller effect re-runs (which
+    // does its own one-time immediate fetchPipeline()). Let that settle first.
+    await act(async () => {
+      wsInstance.onopen && wsInstance.onopen()
+    })
+
+    const countPipeline = () => global.fetch.mock.calls.filter(
+      ([input]) => String(input).includes('/api/pipeline')
+    ).length
+
+    const before = countPipeline()
+
+    // Just under the 30s safety net: the slow interval must NOT have fired yet.
+    await act(async () => { await vi.advanceTimersByTimeAsync(29_000) })
+    expect(countPipeline()).toBe(before)
+
+    // Crossing the 30s boundary fires exactly one safety-net poll.
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000) })
+    expect(countPipeline()).toBe(before + 1)
+  })
+
+  it('F11: pipeline REST poll resumes the fast worker cadence (5s) when disconnected', async () => {
+    // When the WS is NOT connected, the snapshot push is unavailable, so the
+    // poll falls back to the editable worker cadence (default 5s) to keep the
+    // board live. The MockWS never opens, so state.connected stays false.
+    vi.useFakeTimers()
+    vi.spyOn(global, 'fetch').mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url.includes('/api/system/workers')) return Promise.resolve({ ok: true, json: async () => ({ workers: [] }) })
+      if (url.includes('/api/sessions')) return Promise.resolve({ ok: true, json: async () => [] })
+      if (url.includes('/api/repos')) return Promise.resolve({ ok: true, json: async () => ({ repos: [] }) })
+      if (url.includes('/api/runtimes')) return Promise.resolve({ ok: true, json: async () => ({ runtimes: [] }) })
+      if (url.includes('/api/epics')) return Promise.resolve({ ok: true, json: async () => ({ epics: [] }) })
+      if (url.includes('/api/pipeline')) return Promise.resolve({ ok: true, json: async () => ({ stages: {} }) })
+      return Promise.resolve({ ok: true, json: async () => ({}) })
+    })
+    global.WebSocket = class MockWS {
+      constructor() {}
+      close() {}
+    }
+
+    const { HydraFlowProvider } = await import('../HydraFlowContext')
+
+    render(<HydraFlowProvider><div /></HydraFlowProvider>)
+
+    // Let mount-time effects (including the immediate fetchPipeline) settle
+    // without advancing far enough to trip the fast interval.
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+    const countPipeline = () => global.fetch.mock.calls.filter(
+      ([input]) => String(input).includes('/api/pipeline')
+    ).length
+
+    const before = countPipeline()
+
+    // Disconnected default cadence is SYSTEM_WORKER_INTERVALS.pipeline_poller (5s):
+    // advancing 5s fires one fast-cadence poll. (A 30s-only safety net would not.)
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
+    expect(countPipeline()).toBe(before + 1)
+  })
+
+  it('F13: a queue_update WS message does not trigger a /api/pipeline fetch', async () => {
+    // Fake timers make this deterministic and immune to a leaked reconnect/poll
+    // timer from a prior provider test firing a stray fetchPipeline() between
+    // our two snapshots — we only ever advance the MockWS onopen, never the
+    // 2000ms reconnect or the poll interval.
+    vi.useFakeTimers()
+    let wsInstance = null
+    vi.spyOn(global, 'fetch').mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url.includes('/api/system/workers')) return Promise.resolve({ ok: true, json: async () => ({ workers: [] }) })
+      if (url.includes('/api/sessions')) return Promise.resolve({ ok: true, json: async () => [] })
+      if (url.includes('/api/repos')) return Promise.resolve({ ok: true, json: async () => ({ repos: [] }) })
+      if (url.includes('/api/runtimes')) return Promise.resolve({ ok: true, json: async () => ({ runtimes: [] }) })
+      if (url.includes('/api/epics')) return Promise.resolve({ ok: true, json: async () => ({ epics: [] }) })
+      if (url.includes('/api/pipeline')) return Promise.resolve({ ok: true, json: async () => ({ stages: {} }) })
+      return Promise.resolve({ ok: true, json: async () => ({}) })
+    })
+    global.WebSocket = class MockWS {
+      constructor() { wsInstance = this }
+      close() {}
+    }
+
+    const { HydraFlowProvider } = await import('../HydraFlowContext')
+
+    render(<HydraFlowProvider><div /></HydraFlowProvider>)
+
+    // Open the WS connection (onopen does its own one-time pipeline fetch).
+    await act(async () => {
+      wsInstance.onopen && wsInstance.onopen()
+    })
+
+    // Snapshot pipeline-fetch count after connection settles.
+    const pipelineCallsBefore = global.fetch.mock.calls.filter(
+      ([input]) => String(input).includes('/api/pipeline')
+    ).length
+
+    // A queue_update WS frame must NOT trigger any new /api/pipeline fetch
+    // (the storm-fix removed that side-effect).
+    await act(async () => {
+      wsInstance.onmessage({ data: JSON.stringify({ type: 'queue_update', data: { queued: 3 }, timestamp: '2026-05-30T00:00:00Z', id: 1 }) })
+    })
+
+    const pipelineCallsAfter = global.fetch.mock.calls.filter(
+      ([input]) => String(input).includes('/api/pipeline')
+    ).length
+
+    expect(pipelineCallsAfter).toBe(pipelineCallsBefore)
   })
 })
