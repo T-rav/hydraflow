@@ -51,6 +51,7 @@ export const PIPELINE_STAGES = [
   { key: 'plan',      label: 'Plan',      color: theme.purple,      subtleColor: theme.purpleSubtle,  role: 'planner',     configKey: 'max_planners', track: 'junction' },
   { key: 'implement', label: 'Implement', color: theme.accent,      subtleColor: theme.accentSubtle,  role: 'implementer', configKey: 'max_workers',  track: 'engineering' },
   { key: 'review',    label: 'Review',    color: theme.orange,      subtleColor: theme.orangeSubtle,  role: 'reviewer',    configKey: 'max_reviewers', track: 'engineering' },
+  { key: 'hitl',      label: 'Needs Human', color: theme.yellow,    subtleColor: theme.yellowSubtle,  role: null,           configKey: null,           track: 'engineering' },
   { key: 'merged',    label: 'Merged',    color: theme.green,       subtleColor: theme.greenSubtle,   role: null,           configKey: null,           track: 'engineering' },
 ]
 
