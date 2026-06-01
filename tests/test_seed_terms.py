@@ -75,11 +75,7 @@ def test_seed_terms_are_accepted(seed_terms: list[Term]) -> None:
         assert t.confidence == "accepted", f"{t.name} should ship as accepted"
 
 
-@pytest.mark.skip(
-    reason="Wiki paraphrase cleanup is a follow-up plan; this asserts the lint runs"
-)
 def test_paraphrase_lint_runs_against_live_wiki() -> None:
     terms = TermStore(TERMS_DIR).list()
     violations = lint_paraphrases(terms, REPO_ROOT / "docs" / "wiki")
-    # Document baseline count rather than assert clean
-    assert isinstance(violations, list)
+    assert violations == []

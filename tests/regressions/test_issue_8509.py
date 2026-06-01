@@ -18,8 +18,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from fake_coverage_auditor_loop import catalog_fake_methods
 
 _FAKES_DIR = Path(__file__).resolve().parents[2] / "src" / "mockworld" / "fakes"
@@ -30,11 +28,11 @@ class TestClearRateLimitIsHelper:
 
     def test_clear_rate_limit_classifies_as_test_helper(self) -> None:
         catalog = catalog_fake_methods(_FAKES_DIR)
-        if "FakeGitHub" not in catalog:
-            pytest.skip("FakeGitHub not found in fakes dir")
+        assert "FakeGitHub" in catalog, "FakeGitHub not found in fakes dir"
         github = catalog["FakeGitHub"]
-        if "clear_rate_limit" not in github["adapter-surface"] + github["test-helper"]:
-            pytest.skip("clear_rate_limit no longer exists — method renamed or removed")
+        assert "clear_rate_limit" in github["adapter-surface"] + github[
+            "test-helper"
+        ], "clear_rate_limit no longer exists"
         assert "clear_rate_limit" not in github["adapter-surface"], (
             "clear_rate_limit is a test-only helper and must not appear in adapter-surface"
         )
@@ -42,16 +40,11 @@ class TestClearRateLimitIsHelper:
 
     def test_set_rate_limit_mode_classifies_as_test_helper(self) -> None:
         catalog = catalog_fake_methods(_FAKES_DIR)
-        if "FakeGitHub" not in catalog:
-            pytest.skip("FakeGitHub not found in fakes dir")
+        assert "FakeGitHub" in catalog, "FakeGitHub not found in fakes dir"
         github = catalog["FakeGitHub"]
-        if (
-            "set_rate_limit_mode"
-            not in github["adapter-surface"] + github["test-helper"]
-        ):
-            pytest.skip(
-                "set_rate_limit_mode no longer exists — method renamed or removed"
-            )
+        assert "set_rate_limit_mode" in github["adapter-surface"] + github[
+            "test-helper"
+        ], "set_rate_limit_mode no longer exists"
         assert "set_rate_limit_mode" not in github["adapter-surface"], (
             "set_rate_limit_mode is a test-only helper and must not appear in adapter-surface"
         )

@@ -77,8 +77,7 @@ class TestFalsyGuardsOnOptionalAttributes:
         self, filename: str, attrs: set[str]
     ) -> None:
         filepath = SRC_ROOT / filename
-        if not filepath.exists():
-            pytest.skip(f"{filename} does not exist")
+        assert filepath.exists(), f"{filename} does not exist"
 
         violations = _find_falsy_guards(filepath, attrs)
         assert violations == [], (

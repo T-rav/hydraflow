@@ -12,7 +12,7 @@ instead of replacing `create_issue`, `post_comment`, or `add_labels` with raw
 formatter branches that sit behind those boundaries with focused unit tests.
 `tests/architecture/test_mockworld_scenario_fake_boundaries.py` guards this for
 MockWorld scenario files; documented Pattern B direct-instantiation tests may
-still script a PR port when the assertion is the loop's reaction to a specific
+still script a PRPort when the assertion is the loop's reaction to a specific
 port return value.
 **Why:** Adapter-backed assertions catch title/body/label drift and fake-contract
 regressions that call-count-only mocks hide.
