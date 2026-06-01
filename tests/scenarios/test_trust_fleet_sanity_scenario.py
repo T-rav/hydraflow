@@ -25,7 +25,7 @@ stubbed via pre-seeded port keys.
 from __future__ import annotations
 
 import datetime as _dt
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -58,18 +58,12 @@ def _healthy_heartbeats(now: _dt.datetime) -> dict[str, dict[str, object]]:
     }
 
 
-@pytest.mark.xfail(
-    reason="bg_workers MagicMock doesn't support await; needs AsyncMock conversion (staging-level test bug)",
-    strict=False,
-)
 class TestTrustFleetSanityScenario:
     """§12.1 — meta-observability MockWorld scenarios."""
 
     async def test_no_anomaly_no_file(self, tmp_path) -> None:
         """Healthy fleet → loop runs, finds nothing, files nothing."""
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=0)
 
         now = _dt.datetime.now(_dt.UTC)
         state = MagicMock()
@@ -80,21 +74,19 @@ class TestTrustFleetSanityScenario:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             trust_fleet_sanity_state=state,
+            event_bus=EventBus(),
         )
 
         stats = await world.run_with_loops(["trust_fleet_sanity"], cycles=1)
 
         assert stats["trust_fleet_sanity"]["status"] == "ok", stats
         assert stats["trust_fleet_sanity"].get("filed", 0) == 0, stats
-        fake_pr.create_issue.assert_not_awaited()
+        assert world.github._issues == {}
 
     async def test_staleness_breach_files_escalation(self, tmp_path) -> None:
         """One watched loop silent far beyond its interval → escalation filed."""
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=4242)
 
         now = _dt.datetime.now(_dt.UTC)
         heartbeats = _healthy_heartbeats(now)
@@ -120,18 +112,18 @@ class TestTrustFleetSanityScenario:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             trust_fleet_sanity_state=state,
             trust_fleet_sanity_bg_workers=bg_workers,
+            event_bus=EventBus(),
         )
 
         stats = await world.run_with_loops(["trust_fleet_sanity"], cycles=1)
 
         assert stats["trust_fleet_sanity"]["status"] == "ok", stats
         assert stats["trust_fleet_sanity"].get("filed", 0) >= 1, stats
-        assert fake_pr.create_issue.await_count >= 1
 
-        labels = fake_pr.create_issue.await_args.args[2]
+        issue = next(iter(world.github._issues.values()))
+        labels = issue.labels
         assert "hitl-escalation" in labels
         assert "trust-loop-anomaly" in labels
 
@@ -157,8 +149,6 @@ class TestTrustFleetSanityBreachScenario:
         dedup set update.
         """
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=9001)
 
         now = _dt.datetime.now(_dt.UTC)
 
@@ -190,7 +180,6 @@ class TestTrustFleetSanityBreachScenario:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             trust_fleet_sanity_state=state,
             event_bus=seeded_bus,
         )
@@ -199,13 +188,12 @@ class TestTrustFleetSanityBreachScenario:
 
         assert stats["trust_fleet_sanity"]["status"] == "ok", stats
         assert stats["trust_fleet_sanity"].get("filed", 0) >= 1, stats
-        assert fake_pr.create_issue.await_count >= 1
 
-        title = fake_pr.create_issue.await_args.args[0]
-        assert "rc_budget" in title
-        assert "issues_per_hour" in title
+        issue = next(iter(world.github._issues.values()))
+        assert "rc_budget" in issue.title
+        assert "issues_per_hour" in issue.title
 
-        labels = fake_pr.create_issue.await_args.args[2]
+        labels = issue.labels
         assert "hitl-escalation" in labels
         assert "trust-loop-anomaly" in labels
 
@@ -216,8 +204,6 @@ class TestTrustFleetSanityBreachScenario:
         Verifies a second distinct breach kind reaches the issue-filing path.
         """
         world = MockWorld(tmp_path)
-        fake_pr = AsyncMock()
-        fake_pr.create_issue = AsyncMock(return_value=9002)
 
         now = _dt.datetime.now(_dt.UTC)
         seeded_bus = EventBus()
@@ -251,7 +237,6 @@ class TestTrustFleetSanityBreachScenario:
 
         _seed_ports(
             world,
-            pr_manager=fake_pr,
             trust_fleet_sanity_state=state,
             event_bus=seeded_bus,
         )
@@ -260,7 +245,6 @@ class TestTrustFleetSanityBreachScenario:
 
         assert stats["trust_fleet_sanity"]["status"] == "ok", stats
         assert stats["trust_fleet_sanity"].get("filed", 0) >= 1, stats
-        assert fake_pr.create_issue.await_count >= 1
 
-        titles = [call.args[0] for call in fake_pr.create_issue.await_args_list]
+        titles = [issue.title for issue in world.github._issues.values()]
         assert any("tick_error_ratio" in t and "corpus_learning" in t for t in titles)

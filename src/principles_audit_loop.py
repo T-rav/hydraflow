@@ -41,6 +41,11 @@ _STUCK_TITLE_RE = re.compile(
 )
 
 
+def _audit_iso_now() -> str:
+    """Return the current UTC time as a second-precision ISO-8601 string."""
+    return datetime.now(UTC).isoformat(timespec="seconds")
+
+
 class PrinciplesAuditLoop(BaseBackgroundLoop):
     """Weekly audit against ADR-0044 + onboarding trigger (spec §4.4)."""
 
@@ -300,7 +305,9 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
             f"**Last-green status:** {last_status}\n"
             f"**Current status:** {finding.get('status', 'FAIL')}\n"
             f"**Audit message:** {finding.get('message', '')}\n\n"
-            f"Filed by PrinciplesAuditLoop (spec §4.4)."
+            f"Filed by PrinciplesAuditLoop (spec §4.4).\n\n"
+            f"<!-- [hydraflow-auditor: source=PrinciplesAuditLoop, "
+            f"check_id={check_id}, filed_at={_audit_iso_now()}, slug={slug}] -->"
         )
         labels = [
             "hydraflow-find",

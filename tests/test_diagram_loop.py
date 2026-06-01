@@ -82,3 +82,33 @@ async def test_drift_opens_pr_and_runs_coverage(loop_deps, tmp_path, monkeypatch
     assert result["pr_url"] == "https://pr/1"
     open_pr_mock.assert_awaited_once()
     coverage_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_regen_pr_uses_config_base_branch_staging(
+    loop_deps, tmp_path, monkeypatch
+):
+    config = MagicMock()
+    config.diagram_loop_enabled = True
+    config.base_branch.return_value = "staging"
+    loop = DiagramLoop(config=config, pr_manager=MagicMock(), deps=loop_deps)
+    loop._set_repo_root(tmp_path)
+
+    captured = {}
+
+    import auto_pr as _auto_pr_mod
+
+    async def intercept(**kw):
+        captured["base"] = kw["base"]
+        from auto_pr import AutoPrResult
+
+        return AutoPrResult(
+            status="opened",
+            pr_url="https://pr/2",
+            branch=kw["branch"],
+            error=None,
+        )
+
+    monkeypatch.setattr(_auto_pr_mod, "open_automated_pr_async", intercept)
+    await loop._open_or_update_regen_pr(["M docs/arch/generated/loops.md"])
+    assert captured["base"] == "staging"

@@ -372,6 +372,8 @@ class TriageResultFactory:
         enrichment: str = "",
         clarity_score: int = 10,
         needs_discovery: bool = False,
+        already_addressed: bool = False,
+        claim_verified: bool | None = None,
     ) -> TriageResult:
         from models import IssueType
         from models import TriageResult as TR
@@ -387,6 +389,8 @@ class TriageResultFactory:
             enrichment=enrichment,
             clarity_score=clarity_score,
             needs_discovery=needs_discovery,
+            already_addressed=already_addressed,
+            claim_verified=claim_verified,
         )
 
 

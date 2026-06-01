@@ -79,8 +79,8 @@ class TestIssue6600FireAndForgetTask:
                 break
         assert get_hitl is not None, "Could not find /api/hitl route"
 
-        # Intercept asyncio.create_task: return a MagicMock task so we can
-        # assert whether add_done_callback was called on it.
+        # Intercept asyncio.create_task with a MagicMock task so callback
+        # attachment can be verified.
         mock_task = MagicMock(spec=asyncio.Task)
         captured_coros: list = []
 

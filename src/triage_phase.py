@@ -34,11 +34,33 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hydraflow.triage_phase")
 
 _SENTRY_MARKER = "<!-- [sentry:"
+_AUDITOR_MARKER = "<!-- [hydraflow-auditor:"
 
 
 def _is_sentry_issue(issue: Task) -> bool:
     """Return True if the issue was filed by the Sentry ingest loop."""
     return _SENTRY_MARKER in (issue.body or "")
+
+
+def _is_auditor_issue(issue: Task) -> bool:
+    """Return True if the issue was filed by a HydraFlow auditor loop."""
+    return _AUDITOR_MARKER in (issue.body or "")
+
+
+def _is_auditor_finding_stale(issue: Task, max_age_days: int) -> bool:
+    """Return True if the auditor finding is older than *max_age_days*."""
+    from datetime import UTC, datetime, timedelta  # noqa: PLC0415
+
+    created_raw = issue.created_at
+    if not created_raw:
+        return False
+    try:
+        created = datetime.fromisoformat(created_raw.replace("Z", "+00:00"))
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=UTC)
+        return datetime.now(UTC) - created > timedelta(days=max_age_days)
+    except (ValueError, AttributeError):
+        return False
 
 
 class TriagePhase:
@@ -196,6 +218,32 @@ class TriagePhase:
                 await self._triage_adr(issue)
             return 1
 
+        if (
+            not self._config.dry_run
+            and self._config.auditor_finding_max_age_days > 0
+            and _is_auditor_issue(issue)
+            and _is_auditor_finding_stale(
+                issue, self._config.auditor_finding_max_age_days
+            )
+        ):
+            await self._prs.post_comment(
+                issue.id,
+                "## Auto-closed: Stale Auditor Finding\n\n"
+                f"This auditor-filed finding is older than "
+                f"{self._config.auditor_finding_max_age_days} days. "
+                "The auditor loop will re-file it on its next cycle if the "
+                "issue persists.\n\n"
+                "*Closed by HydraFlow Triage.*",
+            )
+            await self._transitioner.close_task(issue.id)
+            self._state.mark_issue(issue.id, "completed")
+            logger.info(
+                "Issue #%d auditor finding auto-closed (stale > %d days)",
+                issue.id,
+                self._config.auditor_finding_max_age_days,
+            )
+            return 1
+
         from trace_rollup import write_phase_rollup  # noqa: PLC0415
         from tracing_context import (  # noqa: PLC0415
             TracingContext,
@@ -306,6 +354,27 @@ class TriagePhase:
                 issue.id,
                 "; ".join(result.reasons),
             )
+        elif result.already_addressed:
+            # LLM verified the claim does not exist at HEAD — auto-close
+            evidence = (
+                "; ".join(result.reasons) if result.reasons else "See triage evaluation"
+            )
+            await self._prs.post_comment(
+                issue.id,
+                "## Auto-closed: Already Addressed\n\n"
+                "The triage LLM verified that the described problem no longer "
+                "exists in the current codebase.\n\n"
+                f"**Evidence:** {evidence}\n\n"
+                "*Closed by HydraFlow Triage. Re-file if the problem reappears.*",
+            )
+            await self._transitioner.close_task(issue.id)
+            self._state.mark_issue(issue.id, "completed")
+            routing_outcome = "already_addressed"
+            logger.info(
+                "Issue #%d auto-closed as already-addressed: %s",
+                issue.id,
+                evidence,
+            )
         else:
             # Park the issue instead of escalating to HITL — author needs
             # to provide more detail before the system can act on it.
@@ -376,6 +445,28 @@ class TriagePhase:
                     test_path=repro.test_path,
                     details=repro.investigation or repro.failing_output,
                 )
+                if str(repro.outcome) == "not_present":
+                    evidence = (
+                        repro.investigation or "No evidence found in current codebase"
+                    )
+                    await self._prs.post_comment(
+                        issue.id,
+                        "## Auto-closed: Bug Not Present\n\n"
+                        "The bug reproducer could not find evidence of the "
+                        "described symptom in the current codebase.\n\n"
+                        f"**Evidence:** {evidence}\n\n"
+                        "*Closed by HydraFlow Triage. Re-file if the symptom "
+                        "reappears.*",
+                    )
+                    await self._transitioner.close_task(issue.id)
+                    self._state.mark_issue(issue.id, "completed")
+                    routing_outcome = "bug_not_present"
+                    logger.info(
+                        "Issue #%d bug not-present — auto-closed: %s",
+                        issue.id,
+                        evidence,
+                    )
+                    return 1
                 if str(repro.outcome) == "unable":
                     logger.warning(
                         "Bug reproduction unable for issue #%d — READY "

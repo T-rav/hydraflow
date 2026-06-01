@@ -20,6 +20,7 @@ from contracts.shadow import ShadowCorpus
 from dedup_store import DedupStore
 from events import EventBus
 from live_corpus_replay_loop import LiveCorpusReplayLoop
+from tests.scenarios.fakes.mock_world import MockWorld
 
 pytestmark = pytest.mark.scenario_loops
 
@@ -29,6 +30,7 @@ class TestLiveCorpusReplayScenario:
         """End-to-end: a shadow sample diverging from the fake fires a
         ``hydraflow-find`` + ``shadow-drift`` issue via PRManager.create_issue.
         No HITL label, no human in the loop."""
+        world = MockWorld(tmp_path)
         config = HydraFlowConfig(
             data_root=tmp_path / "data",
             repo_root=tmp_path / "repo",
@@ -48,8 +50,6 @@ class TestLiveCorpusReplayScenario:
             "live_corpus_replay",
             config.data_root / "dedup" / "live_corpus_replay.json",
         )
-        pr = MagicMock()
-        pr.create_issue = AsyncMock(return_value=7777)
         stop = asyncio.Event()
         deps = LoopDeps(
             event_bus=EventBus(),
@@ -61,7 +61,7 @@ class TestLiveCorpusReplayScenario:
         loop = LiveCorpusReplayLoop(
             config=config,
             corpus=corpus,
-            pr_manager=pr,
+            pr_manager=world.github,
             dedup=dedup,
             deps=deps,
         )
@@ -75,14 +75,9 @@ class TestLiveCorpusReplayScenario:
         result = await loop._do_work()
 
         assert result["drifted"] == 1
-        assert result["filed_issue"] == 7777
-        pr.create_issue.assert_awaited_once()
-        call_args = pr.create_issue.await_args
-        labels = (
-            call_args.kwargs.get("labels")
-            if "labels" in call_args.kwargs
-            else call_args.args[2]
-        )
+        assert result["filed_issue"] == 9001
+        issue = world.github.issue(9001)
+        labels = issue.labels
         assert "hydraflow-find" in labels
         assert "shadow-drift" in labels
         # Critically: the issue must NOT carry hitl-escalation or

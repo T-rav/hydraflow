@@ -51,9 +51,7 @@ def test_schema_normalizes_adr_ids(tmp_path: Path):
 
 
 def test_real_yaml_passes_schema(real_repo_root: Path):
-    """Once Task 4 commits docs/arch/functional_areas.yml, this lights up."""
     p = real_repo_root / "docs/arch/functional_areas.yml"
-    if not p.exists():
-        pytest.skip("docs/arch/functional_areas.yml not yet authored (Task 4)")
+    assert p.exists(), "docs/arch/functional_areas.yml must be committed"
     fa = load_functional_areas(p)
     assert len(fa.areas) >= 1

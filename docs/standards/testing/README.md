@@ -66,6 +66,7 @@ A feature merges into `staging` when ALL three layers exist for it. Specifically
   - **Pattern A (full MockWorld):** import `MockWorld`, set up via builder methods (`add_repo`, `add_issue`, `set_phase_result`, `fail_service`), drive a phase or loop tick, assert against `world.<fake>`. Use this when the test exercises orchestration + multiple ports.
   - **Pattern B (direct instantiation):** build the loop directly with `LoopDeps` + a `MagicMock(spec=PRPort)` whose methods are scripted. Use this when the test exercises a single loop's reaction to specific port outcomes (e.g. `prs.merge_promotion_pr` returns False → loop files find-issue). Existing example: `tests/scenarios/test_caretaker_loops_part2.py::TestL22StagingPromotionLoop`.
 - The choice is governed by what's being asserted. Pattern A asserts cross-cutting outcomes ("after the phase ran, the dashboard reflects X"). Pattern B asserts a loop's reaction surface ("when the port returns Y, the loop does Z").
+- **Do not replace FakeGitHub side effects with raw mocks in MockWorld scenarios.** If a Pattern A test expects `create_issue`, `post_comment`, `add_labels`, `close_issue`, or related PR/issue mutations, let `MockWorld` wire `FakeGitHub` and assert `world.github.issue(...)`, labels, comments, PR records, or issue state. Keep raw `AsyncMock`/`MagicMock` PR ports only in documented Pattern B direct-instantiation tests or for boundaries FakeGitHub cannot model yet. `tests/architecture/test_mockworld_scenario_fake_boundaries.py` enforces this.
 
 ### Sandbox e2e scenarios
 - Live in `tests/sandbox_scenarios/scenarios/sNN_<feature>.py`
@@ -113,6 +114,12 @@ wrong. Canonicalised here so the generator slice and future audits agree.
 
 - **"My feature is too small to need scenario / sandbox tests."** This is the rationalisation that ships features which pass unit tests but break in real conditions. If the feature has any observable runtime path through a loop or the orchestrator, both higher layers apply. Real-API behavior (e.g. GitHub's update-branch endpoint, OAuth flows, third-party rate limits) is invisible to unit tests.
 
+- **Skipped, xfailed, commented-out, or placeholder tests in active coverage.**
+  A skipped or expected-failing test is not a test; it is deferred work. If the
+  behavior is required, make the test active and fix the code. If the behavior is
+  not ready to implement, file the work in `bd` and keep the placeholder out of
+  the runnable suite.
+
 - **Asserting against state shapes that don't exist.** Scenarios authored against fields that aren't in `StateData` will pass at write-time (Python dicts are tolerant) but fail in CI when the missing key raises `KeyError`. Always `grep` the source-of-truth model file for the field name before asserting on it.
 
 - **Importing pytest or skipping at runtime in sandbox scenarios.** The sandbox
@@ -125,6 +132,11 @@ wrong. Canonicalised here so the generator slice and future audits agree.
   keep a green scenario file without a load-bearing assertion.
 
 - **Scenario tests that just unit-test through a fake.** Pattern B is fine when the loop's reaction surface is what matters — but if the test could equivalently be written as a unit test of one method, it's not really a scenario test.
+
+- **MockWorld scenarios that assert GitHub call counts instead of fake state.**
+  `create_issue.assert_awaited_once()` proves the call happened, not that
+  HydraFlow filed the right issue, labels, body, or state transition. Assert
+  the `FakeGitHub` state unless the test is explicitly documented as Pattern B.
 
 - **Screenshot or pixel-baseline regression tests.** They are noisy and
   low-signal for HydraFlow's UI. Prefer role/text/state/API assertions that
@@ -139,3 +151,13 @@ This standard lives at three load-bearing surfaces in any HydraFlow-format repo:
 - `CLAUDE.md` Quick Rules — one-line directive that all features ship with the full pyramid
 
 Drift detection: a future audit (extension of `principles_audit_loop`) should check that every PR landing on the integration branch adds at least one test in `tests/test_*.py`, one in `tests/scenarios/test_*.py`, and one in `tests/sandbox_scenarios/scenarios/sNN_*.py` — exempting docs-only and pure-refactor PRs.
+
+## Review enforcement
+
+Reviewers must treat this standard as a merge gate, not guidance. A PR review
+should request changes when it adds or preserves ignored tests (`skip`, `xfail`,
+commented-out tests/assertions, or placeholder smoke tests), labels mock-backed
+tests as integration, bypasses documented unit factories/world-building helpers,
+or asserts MockWorld side effects through raw mock call counts where a stateful
+fake adapter exists. New exceptions must be tracked in `bd` and removed from the
+active runnable suite until they can assert real behavior.

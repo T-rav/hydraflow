@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { render, screen, act } from '@testing-library/react'
+import { render, screen, act, waitFor } from '@testing-library/react'
 import { reducer } from '../HydraFlowContext'
 
 const emptyPipeline = {
@@ -2040,8 +2040,12 @@ describe('HydraFlowProvider body[data-connected]', () => {
       )
     })
 
-    expect(document.body.getAttribute('data-connected')).toBe('true')
-    expect(screen.getByTestId('connected').textContent).toBe('true')
+    // onopen fires on a macrotask (setTimeout 0), which act() does not await —
+    // poll until the connected state propagates to avoid a timing-race flake.
+    await waitFor(() => {
+      expect(document.body.getAttribute('data-connected')).toBe('true')
+      expect(screen.getByTestId('connected').textContent).toBe('true')
+    })
   })
 
   it('sets data-connected to false when not connected', async () => {

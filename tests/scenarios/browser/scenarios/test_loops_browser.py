@@ -20,11 +20,13 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from playwright.async_api import expect
 
 from tests.scenarios.builders import IssueBuilder, PRBuilder
+from tests.scenarios.helpers.loop_port_seeding import seed_ports as _seed_ports
 
 pytestmark = pytest.mark.scenario_browser
 
@@ -130,15 +132,6 @@ async def test_l1_health_monitor_config_bump(world, page) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason=(
-        "workspace_gc state mock returns empty active_workspaces (Phase 1 no-ops) and "
-        "_is_safe_to_gc calls `gh api` via run_subprocess which is not stubbed in the "
-        "scenario harness. Same xfail as the reference test_loops.py::TestL2. "
-        "Remove when the workspace_gc Phase 3B track lands."
-    ),
-    strict=False,
-)
 async def test_l2_workspace_gc_cleans_stale(world, page) -> None:
     """L2: workspace_gc destroys stale (closed-issue) worktrees, preserves active.
 
@@ -156,8 +149,23 @@ async def test_l2_workspace_gc_cleans_stale(world, page) -> None:
     await world._workspace.create(100, "agent/issue-100")
     await world._workspace.create(200, "agent/issue-200")
 
+    state = MagicMock()
+    state.get_active_workspaces.return_value = {
+        100: "agent/issue-100",
+        200: "agent/issue-200",
+    }
+    state.get_active_issue_numbers.return_value = {200}
+    state.get_active_branches.return_value = {}
+    state.get_hitl_cause.return_value = None
+    state.get_issue_attempts.return_value = 0
+    _seed_ports(world, workspace_gc_state=state)
+
+    run_subprocess = AsyncMock(return_value="")
+    run_subprocess.side_effect = ["closed", ""]
+
     # --- Step 2: run loop ---
-    await world.run_with_loops(["workspace_gc"], cycles=1)
+    with patch("workspace_gc_loop.run_subprocess", run_subprocess):
+        await world.run_with_loops(["workspace_gc"], cycles=1)
 
     # --- Step 3: Python-side assertions ---
     assert 100 in world._workspace.destroyed, (

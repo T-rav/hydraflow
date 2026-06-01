@@ -6,10 +6,17 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W22
 
+- `ea70758` — feat(dashboard): push coalesced pipeline-snapshot deltas over WS (WS-RT PR3, backend) *(2026-05-30)*
+- `5ada680` — test: harden MockWorld side-effect coverage (#9104) (#9104) *(2026-05-30)*
+- `1ff6c54` — feat(security): scrub secrets on the canonical audit-write path (WS-4, ADR-0085) *(2026-05-30)*
+- `2abc16a` — merge prompt trust boundary into credit telemetry integrity *(2026-05-30)*
 - `40473a4` — merge staging into credit telemetry integrity *(2026-05-30)*
+- `038bf38` — merge staging into prompt injection trust boundary *(2026-05-30)*
 - `febc4e7` — chore(arch): regenerate architecture artifacts after credit fixes *(2026-05-29)*
+- `a62f093` — fix(security): harden untrusted-text fence + restrict auto-agent (WS-7 fixes) *(2026-05-29)*
 - `ed8c682` — merge staging into no-ignored sandbox gates *(2026-05-29)*
 - `8642f7b` — test: enforce non-ignored sandbox coverage *(2026-05-29)*
+- `83c941d` — docs(adr): ADR-0082 untrusted-text trust boundary + fix numbering (WS-7.4) *(2026-05-29)*
 - `bb088ee` — fix(gates): assign BranchProtectionAuditorLoop to a functional area + orchestrator test double *(2026-05-29)*
 - `5962bdb` — fix(gates): address grumpy-principal review across all slices *(2026-05-29)*
 - `3c87f71` — feat(gates): branch-protection drift caretaker loop (Slice 4) *(2026-05-29)*
@@ -372,21 +379,5 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `8875cd8` — Accept ADR-0011: epic release creation architecture (#1965) (#1965) *(2026-03-04)*
 - `ac0ecda` — Fixes #1883: [Bug Report] remove the processes tab too, and related... (#1906) (#1906) *(2026-03-04)*
 
-## 2026-W09
 
-- `8825cd5` — Fixes #1633: add ADR-0009 for persistence architecture and data layout (#1680) (#1680) *(2026-03-01)*
-- `b47789e` — Fixes #1818: Add ADR-0009 for autoApproveRow borderTop context awareness (#1820) (#1820) *(2026-03-01)*
-- `9a2d6e9` — Fixes #1798: Add ADR-0009 for background task delegation abstraction layer (#1810) (#1810) *(2026-03-01)*
-- `1fea79a` — Fixes #1749: Add ADR-0009 for screenshot capture pipeline architecture (#1792) (#1792) *(2026-03-01)*
-- `793f790` — Fixes #1748: ADR-0009 documents auto-decompose triage counter exclusion as intentional (#1791) (#1791) *(2026-03-01)*
-- `d26f6b9` — Fixes #1747: ADR-0009 VisualValidation SKIPPED override partial suppression semantics (#1788) (#1788) *(2026-03-01)*
-- `91603e3` — Fixes #1746: Add ADR-0009 for protocol-based callback injection gate pattern (#1786) (#1786) *(2026-03-01)*
-- `bd72277` — Fixes #1703: ADR-0009 session counter forward-progression semantics (#1750) (#1750) *(2026-03-01)*
-- `b0e04ed` — Fixes #1704: ADR-0009 screenshot capture pipeline architecture (#1745) (#1745) *(2026-03-01)*
-- `7fdccc8` — Fixes #1702: ADR-0009 epic merge coordination architecture (#1740) (#1740) *(2026-03-01)*
-- `522e013` — Fixes #1701: ADR-0009 epic release creation architecture (#1739) (#1739) *(2026-03-01)*
-- `961b141` — Fixes #1677: add ADR-0009 for worktree and path isolation architecture (#1683) (#1683) *(2026-03-01)*
-- `7c6fe67` — Fixes #1634: add ADR-0009 for multi-repo process-per-repo model (#1679) (#1679) *(2026-03-01)*
-
-
-_Regenerated from commit `40473a4` on 2026-05-30 11:42 UTC. Source last changed at `40473a4`. Status: 🟢 fresh._
+<!-- arch:generated -->
