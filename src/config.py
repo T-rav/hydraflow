@@ -147,6 +147,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_BRANCH_PROTECTION_AUDITOR_INTERVAL",
         604800,
     ),
+    ("gate_activator_interval", "HYDRAFLOW_GATE_ACTIVATOR_INTERVAL", 604800),
     ("rc_cadence_hours", "HYDRAFLOW_RC_CADENCE_HOURS", 4),
     ("staging_promotion_interval", "HYDRAFLOW_STAGING_PROMOTION_INTERVAL", 300),
     ("staging_rc_retention_days", "HYDRAFLOW_STAGING_RC_RETENTION_DAYS", 7),
@@ -408,6 +409,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_BRANCH_PROTECTION_AUDITOR_LOOP_ENABLED",
         True,
     ),
+    ("gate_activator_loop_enabled", "HYDRAFLOW_GATE_ACTIVATOR_LOOP_ENABLED", True),
     ("contract_refresh_loop_enabled", "HYDRAFLOW_CONTRACT_REFRESH_LOOP_ENABLED", True),
     ("corpus_learning_loop_enabled", "HYDRAFLOW_CORPUS_LEARNING_LOOP_ENABLED", True),
     (
@@ -993,6 +995,15 @@ class HydraFlowConfig(BaseModel):
         description=(
             "BranchProtectionAuditorLoop interval in seconds (default 7 days); "
             "audits live branch protection against the canonical rulesets (ADR-0082)"
+        ),
+    )
+    gate_activator_interval: int = Field(
+        default=604800,
+        ge=3600,
+        le=2592000,
+        description=(
+            "GateActivatorLoop interval in seconds (default 7 days); proposes "
+            "activating planned gates whose protected surface now exists (ADR-0082)"
         ),
     )
     collaborator_check_enabled: bool = Field(
@@ -2631,6 +2642,10 @@ class HydraFlowConfig(BaseModel):
     branch_protection_auditor_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for BranchProtectionAuditorLoop.",
+    )
+    gate_activator_loop_enabled: bool = Field(
+        default=True,
+        description="Deploy-time kill-switch for GateActivatorLoop.",
     )
     contract_refresh_loop_enabled: bool = Field(
         default=True,

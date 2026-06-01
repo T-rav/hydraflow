@@ -93,7 +93,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0079 | `src.adr_reviewer`, `src.adr_reviewer_loop` |
 | ADR-0080 | `src.epic`, `src.epic_monitor_loop` |
 | ADR-0081 | `src.epic`, `src.epic_sweeper_loop` |
-| ADR-0082 | `src.branch_protection_audit`, `src.branch_protection_auditor_loop` |
+| ADR-0082 | `src.branch_protection_audit`, `src.branch_protection_auditor_loop`, `src.gate_activation_check`, `src.gate_activator_loop` |
 | ADR-0083 | — |
 | ADR-0084 | `src.agent`, `src.preflight.runner`, `src.untrusted_text` |
 | ADR-0085 | `src.secret_scrub` |
@@ -151,6 +151,8 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.fake_coverage_auditor_loop` | ADR-0045 |
 | `src.file_util` | ADR-0021 |
 | `src.flake_tracker_loop` | ADR-0045 |
+| `src.gate_activation_check` | ADR-0082 |
+| `src.gate_activator_loop` | ADR-0082 |
 | `src.github_cache_loop` | ADR-0076 |
 | `src.health_monitor_loop` | ADR-0045, ADR-0046 |
 | `src.hf_cli.__main__` | ADR-0036 |

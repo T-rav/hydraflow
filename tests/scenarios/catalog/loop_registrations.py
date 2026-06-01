@@ -676,6 +676,41 @@ def _build_branch_protection_auditor(
     )
 
 
+def _build_gate_activator(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build GateActivatorLoop for scenarios (ADR-0082, Slice 4).
+
+    Tests pre-seed:
+    * ``gate_activation_detect`` → an async detector returning a
+      ``list[ActivationProposal]`` (replaces the contract/workflow/Makefile
+      read). Defaults to ``[]`` (steady state: nothing to activate).
+
+    ``dedup`` defaults to a clean-slate MagicMock; override via
+    ``gate_activator_dedup``.
+    """
+    from gate_activator_loop import GateActivatorLoop  # noqa: PLC0415
+
+    dedup = ports.get("gate_activator_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["gate_activator_dedup"] = dedup
+
+    detector = ports.get("gate_activation_detect")
+    if detector is None:
+        detector = AsyncMock(return_value=[])
+        ports["gate_activation_detect"] = detector
+
+    pr_manager = ports.get("pr_manager") or ports["github"]
+
+    return GateActivatorLoop(
+        config=config,
+        pr_manager=pr_manager,
+        dedup=dedup,
+        deps=deps,
+        detector=detector,
+    )
+
+
 def _build_memory_backlog(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build MemoryBacklogLoop for scenarios (ADR-0057).
 
@@ -1341,6 +1376,7 @@ _BUILDERS: dict[str, Any] = {
     # phase 1
     "ci_monitor": _build_ci_monitor,
     "branch_protection_auditor": _build_branch_protection_auditor,
+    "gate_activator": _build_gate_activator,
     "stale_issue_gc": _build_stale_issue_gc,
     "dependabot_merge": _build_dependabot_merge,
     "pr_unsticker": _build_pr_unsticker,
