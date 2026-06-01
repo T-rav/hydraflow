@@ -459,3 +459,204 @@ class TestComplexityRank:
         assert phase._complexity_rank(6) == "high"
         assert phase._complexity_rank(7) == "high"
         assert phase._complexity_rank(5) == "medium"
+
+
+class TestAuditorMarker:
+    def test_is_auditor_issue_true_when_marker_present(self) -> None:
+        from triage_phase import _is_auditor_issue
+
+        issue = TaskFactory.create(
+            id=1,
+            body="Some finding.\n<!-- [hydraflow-auditor: source=PrinciplesAuditLoop] -->",
+        )
+        assert _is_auditor_issue(issue) is True
+
+    def test_is_auditor_issue_false_when_marker_absent(self) -> None:
+        from triage_phase import _is_auditor_issue
+
+        issue = TaskFactory.create(id=2, body="Regular human-filed issue.")
+        assert _is_auditor_issue(issue) is False
+
+    def test_is_auditor_issue_false_for_sentry_issue(self) -> None:
+        from triage_phase import _is_auditor_issue
+
+        issue = TaskFactory.create(
+            id=3, body="Error spike\n<!-- [sentry: project=backend] -->"
+        )
+        assert _is_auditor_issue(issue) is False
+
+
+class TestAuditorAgeGate:
+    @pytest.mark.asyncio
+    async def test_auditor_issue_within_max_age_proceeds_to_llm(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        config.auditor_finding_max_age_days = 14
+        phase, _state, triage, prs, store, _stop = make_triage_phase(config)
+        body = (
+            "Finding detail.\n<!-- [hydraflow-auditor: source=PrinciplesAuditLoop] -->"
+        )
+        issue = TaskFactory.create(
+            id=10,
+            title="Principles drift: check_id regressed in slug",
+            body=body,
+            created_at=(datetime.now(UTC) - timedelta(days=3)).isoformat(),
+        )
+        triage.evaluate = AsyncMock(
+            return_value=TriageResultFactory.create(issue_number=10, ready=True)
+        )
+        store.get_triageable = supply_once([issue])
+        await phase.triage_issues()
+        triage.evaluate.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_stale_auditor_issue_is_closed_before_llm(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        config.auditor_finding_max_age_days = 14
+        phase, _state, triage, prs, store, _stop = make_triage_phase(config)
+        body = (
+            "Finding detail.\n<!-- [hydraflow-auditor: source=PrinciplesAuditLoop] -->"
+        )
+        issue = TaskFactory.create(
+            id=11,
+            title="Principles drift: old finding",
+            body=body,
+            created_at=(datetime.now(UTC) - timedelta(days=20)).isoformat(),
+        )
+        store.get_triageable = supply_once([issue])
+        await phase.triage_issues()
+        triage.evaluate.assert_not_awaited()
+        prs.close_task.assert_called_once_with(11)
+        comment = prs.post_comment.call_args.args[1]
+        assert "stale" in comment.lower() or "auto-closed" in comment.lower()
+
+    @pytest.mark.asyncio
+    async def test_age_gate_respects_max_age_zero_disables_gate(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """auditor_finding_max_age_days=0 means no gate — all auditor issues proceed."""
+        from datetime import UTC, datetime, timedelta
+
+        config.auditor_finding_max_age_days = 0
+        phase, _state, triage, prs, store, _stop = make_triage_phase(config)
+        body = "Finding.\n<!-- [hydraflow-auditor: source=PrinciplesAuditLoop] -->"
+        issue = TaskFactory.create(
+            id=12,
+            title="Principles drift: should not be gated",
+            body=body,
+            created_at=(datetime.now(UTC) - timedelta(days=100)).isoformat(),
+        )
+        triage.evaluate = AsyncMock(
+            return_value=TriageResultFactory.create(issue_number=12, ready=True)
+        )
+        store.get_triageable = supply_once([issue])
+        await phase.triage_issues()
+        triage.evaluate.assert_awaited_once()
+        prs.close_task.assert_not_called()
+
+
+class TestAlreadyAddressedRouting:
+    @pytest.mark.asyncio
+    async def test_already_addressed_verdict_auto_closes_issue(
+        self, config: HydraFlowConfig
+    ) -> None:
+        phase, state, triage, prs, store, _stop = make_triage_phase(config)
+        issue = TaskFactory.create(
+            id=55, title="visual_validation is a noop stub", body="A" * 100
+        )
+        triage.evaluate = AsyncMock(
+            return_value=TriageResultFactory.create(
+                issue_number=55,
+                ready=False,
+                already_addressed=True,
+                reasons=[
+                    "Claim not reproducible: function has real logic at "
+                    "src/visual.py:88"
+                ],
+            )
+        )
+        store.get_triageable = supply_once([issue])
+        await phase.triage_issues()
+        prs.close_task.assert_called_once_with(55)
+        comment = prs.post_comment.call_args.args[1]
+        assert "already" in comment.lower() or "implemented" in comment.lower()
+        prs.swap_pipeline_labels.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_already_addressed_does_not_park(
+        self, config: HydraFlowConfig
+    ) -> None:
+        phase, _state, triage, prs, store, _stop = make_triage_phase(config)
+        issue = TaskFactory.create(
+            id=56, title="Missing kill-switch in loop", body="A" * 100
+        )
+        triage.evaluate = AsyncMock(
+            return_value=TriageResultFactory.create(
+                issue_number=56,
+                ready=False,
+                already_addressed=True,
+                reasons=["Kill-switch present at src/loop.py:15"],
+            )
+        )
+        store.get_triageable = supply_once([issue])
+        await phase.triage_issues()
+        prs.swap_pipeline_labels.assert_not_called()
+        prs.close_task.assert_called_once_with(56)
+
+
+class TestBugReproducerNotPresentRouting:
+    @pytest.mark.asyncio
+    async def test_not_present_repro_auto_closes_issue(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from models import ReproductionOutcome, ReproductionResult
+
+        phase, state, triage, prs, store, _stop = make_triage_phase(config)
+        issue = TaskFactory.create(
+            id=70,
+            title="Crash in validate_config",
+            body="A" * 100,
+        )
+        triage.evaluate = AsyncMock(
+            return_value=TriageResultFactory.create(
+                issue_number=70, ready=True, issue_type="bug"
+            )
+        )
+        fake_repro = AsyncMock(
+            return_value=ReproductionResult(
+                issue_number=70,
+                outcome=ReproductionOutcome.NOT_PRESENT,
+                confidence=0.0,
+                investigation=(
+                    "validate_config does not exist in src/; function was renamed"
+                ),
+            )
+        )
+        store.get_triageable = supply_once([issue])
+
+        from unittest.mock import MagicMock
+
+        from bug_reproducer import BugReproducer
+
+        mock_reproducer = MagicMock(spec=BugReproducer)
+        mock_reproducer.reproduce = fake_repro
+        phase._bug_reproducer = mock_reproducer
+
+        from issue_cache import IssueCache
+
+        mock_cache = MagicMock(spec=IssueCache)
+        mock_cache.record_classification = MagicMock()
+        mock_cache.record_reproduction_stored = MagicMock()
+        phase._issue_cache = mock_cache
+
+        await phase.triage_issues()
+
+        prs.close_task.assert_called_once_with(70)
+        comment = prs.post_comment.call_args.args[1]
+        assert "not present" in comment.lower() or "does not exist" in comment.lower()
+        prs.transition.assert_not_called()

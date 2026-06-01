@@ -370,3 +370,21 @@ class TestReproduceOrchestration:
         assert callback("partial reproducer output") is False
         # END marker present → terminate.
         assert callback(f"some output\n{REPRO_END}\n") is True
+
+
+class TestNotPresentOutcome:
+    def test_parse_outcome_recognises_not_present(self) -> None:
+        transcript = (
+            f"{REPRO_START}\n"
+            "Outcome: not_present\n"
+            "Investigation: The function described as broken does not exist in src/\n"
+            f"{REPRO_END}"
+        )
+        result = BugReproducer._parse_outcome(transcript)
+        assert result.outcome == ReproductionOutcome.NOT_PRESENT
+        assert "does not exist" in result.investigation
+
+    def test_build_prompt_instructs_not_present_outcome(self) -> None:
+        task = Task(id=99, title="Bug in foo", body="foo is broken")
+        prompt = BugReproducer._build_prompt(task)
+        assert "not_present" in prompt

@@ -247,6 +247,8 @@ class ConfigFactory:
         planner_model: str = "opus",
         triage_tool: Literal["claude", "codex", "pi"] = "claude",
         triage_model: str = "haiku",
+        triage_max_turns: int = 3,
+        auditor_finding_max_age_days: int = 14,
         min_plan_words: int = 200,
         max_new_files_warning: int = 5,
         lite_plan_labels: list[str] | None = None,
@@ -473,6 +475,8 @@ class ConfigFactory:
                 planner_model=planner_model,
                 triage_tool=triage_tool,
                 triage_model=triage_model,
+                triage_max_turns=triage_max_turns,
+                auditor_finding_max_age_days=auditor_finding_max_age_days,
                 min_plan_words=min_plan_words,
                 max_new_files_warning=max_new_files_warning,
                 lite_plan_labels=lite_plan_labels

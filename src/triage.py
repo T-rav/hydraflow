@@ -197,7 +197,7 @@ class TriageRunner(BaseRunner):
         return build_agent_command(
             tool=self._config.triage_tool,
             model=self._config.triage_model,
-            max_turns=1,
+            max_turns=self._config.triage_max_turns,
         )
 
     def _build_prompt_with_stats(
@@ -217,12 +217,14 @@ class TriageRunner(BaseRunner):
 
 ## Evaluation Criteria
 
-Evaluate the issue against these four criteria:
+Evaluate the issue against these six criteria:
 
 1. **Clarity**: Is the issue clearly written? Can an engineer understand what needs to happen?
 2. **Specificity**: Does it describe a concrete problem or feature, not a vague wish?
 3. **Actionability**: Is there enough context to start planning? (expected behavior, affected area, reproduction steps for bugs)
 4. **Scope**: Is it a single, bounded unit of work? (not an unstructured epic or multiple unrelated requests)
+5. **Currency**: For findings or bug reports that cite specific files, functions, or code patterns, verify the cited symptom still exists in the current codebase. Use Read or Grep tools to check. If the issue claims X is broken/missing/wrong, confirm X is actually broken/missing/wrong now. Set `already_addressed: true` if the described problem no longer exists.
+6. **Verifiable claim**: If the issue asserts that a specific thing is missing, broken, or not implemented, and that assertion is falsifiable by reading the source code, verify it. If the claim is demonstrably false (e.g., the function described as missing is present), return `ready: false` with `reasons: ["Claim not reproducible: <evidence>"]` and set `claim_verified: false`.
 
 ## Issue Type Classification
 
@@ -252,7 +254,7 @@ for competitive research and direction shaping before planning.
 Return ONLY a JSON object in this exact format, with no other text:
 
 ```json
-{{"ready": true, "reasons": [], "issue_type": "feature", "clarity_score": 9, "needs_discovery": false, "enrichment": "## Triage Enrichment\\n\\n**Interpreted intent:** ...\\n**Affected area:** ...\\n**Acceptance criteria:**\\n- ..."}}
+{{"ready": true, "reasons": [], "issue_type": "feature", "clarity_score": 9, "needs_discovery": false, "enrichment": "## Triage Enrichment\\n\\n**Interpreted intent:** ...\\n**Affected area:** ...\\n**Acceptance criteria:**\\n- ...", "already_addressed": false, "claim_verified": null}}
 ```
 
 or for vague product ideas needing discovery:
@@ -264,7 +266,13 @@ or for vague product ideas needing discovery:
 or for truly insufficient issues:
 
 ```json
-{{"ready": false, "reasons": ["Specific reason why this cannot proceed"], "issue_type": "bug", "clarity_score": 0, "needs_discovery": false, "enrichment": ""}}
+{{"ready": false, "reasons": ["Specific reason why this cannot proceed"], "issue_type": "bug", "clarity_score": 0, "needs_discovery": false, "enrichment": "", "already_addressed": false, "claim_verified": null}}
+```
+
+or for a claim that is demonstrably false / already implemented (the described problem no longer exists at HEAD):
+
+```json
+{{"ready": false, "reasons": ["Claim not reproducible: <evidence>"], "issue_type": "bug", "clarity_score": 5, "needs_discovery": false, "enrichment": "", "already_addressed": true, "claim_verified": false}}
 ```
 """
         plugin_skills_section = format_plugin_skills_for_prompt(
@@ -374,6 +382,11 @@ or for truly insufficient issues:
         clarity_raw = data.get("clarity_score", 10)
         clarity = int(clarity_raw) if isinstance(clarity_raw, int | float) else 10
         needs_discovery = bool(data.get("needs_discovery", False))
+        already_addressed = bool(data.get("already_addressed", False))
+        claim_verified_raw = data.get("claim_verified")
+        claim_verified = (
+            bool(claim_verified_raw) if claim_verified_raw is not None else None
+        )
         return TriageResult(
             issue_number=issue_number,
             ready=_coerce_ready(data["ready"]),
@@ -383,6 +396,8 @@ or for truly insufficient issues:
             enrichment=enrichment,
             clarity_score=max(0, min(clarity, 10)),
             needs_discovery=needs_discovery,
+            already_addressed=already_addressed,
+            claim_verified=claim_verified,
         )
 
     @staticmethod
