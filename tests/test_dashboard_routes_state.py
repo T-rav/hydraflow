@@ -354,6 +354,100 @@ class TestRequestChangesEndpoint:
 
 
 # ---------------------------------------------------------------------------
+# Multi-repo ACTION route scoping (WS-8): /api/request-changes and /api/intent
+# must write to the SELECTED repo (its pr_manager / state / event bus), not the
+# closure-captured default — otherwise a HITL escalation or new issue lands in
+# the wrong repo in a multi-repo deployment.
+# ---------------------------------------------------------------------------
+
+
+class TestMultiRepoActionRouteScoping:
+    def _registry_for(self, repo_b_cfg, repo_b_state, repo_b_bus):
+        rt = SimpleNamespace(
+            config=repo_b_cfg,
+            state=repo_b_state,
+            event_bus=repo_b_bus,
+            orchestrator=None,
+        )
+        registry = MagicMock()
+        registry.get.return_value = rt
+        return registry
+
+    @pytest.mark.asyncio
+    async def test_request_changes_routes_write_to_selected_repo(
+        self, monkeypatch, config, event_bus, state, tmp_path
+    ) -> None:
+        from tests.helpers import ConfigFactory
+
+        repo_b_cfg = ConfigFactory.create(repo="owner/repo-b")
+        repo_b_state = MagicMock()
+        repo_b_bus = EventBus()
+        registry = self._registry_for(repo_b_cfg, repo_b_state, repo_b_bus)
+
+        router, default_pm = make_dashboard_router(
+            config, event_bus, state, tmp_path, registry=registry
+        )
+        default_pm.swap_pipeline_labels = AsyncMock()
+        # repo-b's pr_manager is constructed via PRManager(repo_b_cfg, repo_b_bus)
+        # (different config than default) — mock the class so no real gh runs.
+        repo_b_pm = AsyncMock()
+        monkeypatch.setattr(
+            "dashboard_routes._routes.PRManager", lambda cfg, bus: repo_b_pm
+        )
+
+        queue = repo_b_bus.subscribe()
+        endpoint = find_endpoint(router, "/api/request-changes")
+        resp = await endpoint(
+            {"issue_number": 5, "feedback": "redo it", "stage": "implement"},
+            repo="repo-b",
+        )
+        assert json.loads(resp.body)["status"] == "ok"
+
+        # Write went to repo-b's pr_manager + state + bus; default untouched.
+        repo_b_pm.swap_pipeline_labels.assert_awaited_once_with(
+            5, repo_b_cfg.hitl_label[0]
+        )
+        default_pm.swap_pipeline_labels.assert_not_called()
+        repo_b_state.set_hitl_cause.assert_called_once_with(5, "redo it")
+        event = queue.get_nowait()
+        assert event.type == "hitl_escalation"
+        assert event.data["issue"] == 5
+
+    @pytest.mark.asyncio
+    async def test_intent_creates_issue_in_selected_repo(
+        self, monkeypatch, config, event_bus, state, tmp_path
+    ) -> None:
+        from models import IntentRequest
+        from tests.helpers import ConfigFactory
+
+        repo_b_cfg = ConfigFactory.create(repo="owner/repo-b")
+        repo_b_state = MagicMock()
+        repo_b_bus = EventBus()
+        registry = self._registry_for(repo_b_cfg, repo_b_state, repo_b_bus)
+
+        router, default_pm = make_dashboard_router(
+            config, event_bus, state, tmp_path, registry=registry
+        )
+        default_pm.create_issue = AsyncMock(return_value=999)
+        repo_b_pm = AsyncMock()
+        repo_b_pm.create_issue = AsyncMock(return_value=314)
+        monkeypatch.setattr(
+            "dashboard_routes._routes.PRManager", lambda cfg, bus: repo_b_pm
+        )
+
+        endpoint = find_endpoint(router, "/api/intent")
+        resp = await endpoint(IntentRequest(text="add a thing"), repo="repo-b")
+        data = json.loads(resp.body)
+
+        # Issue created in repo-b (its create_issue, its repo in the URL); the
+        # default pr_manager was not touched.
+        repo_b_pm.create_issue.assert_awaited_once()
+        default_pm.create_issue.assert_not_called()
+        assert data["issue_number"] == 314
+        assert "owner/repo-b" in data["url"]
+
+
+# ---------------------------------------------------------------------------
 # /api/runs endpoints
 # ---------------------------------------------------------------------------
 
