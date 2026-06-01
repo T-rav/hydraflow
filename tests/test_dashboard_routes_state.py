@@ -687,6 +687,53 @@ class TestGetEventsEndpoint:
 
 
 # ---------------------------------------------------------------------------
+# Multi-repo route scoping (WS-8): read-only routes must resolve the per-repo
+# runtime via _resolve_runtime(repo), not the closure-captured default bus, so
+# one repo's data never bleeds into another's view in a multi-repo deployment.
+# ---------------------------------------------------------------------------
+
+
+class TestMultiRepoReadOnlyRouteScoping:
+    @pytest.mark.asyncio
+    async def test_timeline_scoped_to_requested_repo_bus(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        from events import EventType
+        from tests.conftest import EventFactory
+
+        # repo-b carries issue #42's lifecycle on its OWN bus; the default
+        # (closure) bus the router was built with is empty.
+        repo_b_bus = EventBus()
+        await repo_b_bus.publish(
+            EventFactory.create(
+                type=EventType.TRIAGE_UPDATE,
+                data={"issue": 42, "status": "done"},
+            )
+        )
+        rt = MagicMock()
+        rt.config = config
+        rt.state = state
+        rt.event_bus = repo_b_bus
+        rt.orchestrator = None
+        registry = MagicMock()
+        registry.get.return_value = rt
+
+        router, _ = make_dashboard_router(
+            config, event_bus, state, tmp_path, registry=registry
+        )
+        endpoint = find_endpoint(router, "/api/timeline")
+
+        # repo-scoped request resolves repo-b's bus → sees issue #42.
+        scoped = json.loads((await endpoint(repo="repo-b")).body)
+        registry.get.assert_called_with("repo-b")
+        assert any(t["issue_number"] == 42 for t in scoped)
+
+        # no repo → the default empty bus, NOT repo-b's: no #42 bleed.
+        default = json.loads((await endpoint(repo=None)).body)
+        assert not any(t.get("issue_number") == 42 for t in default)
+
+
+# ---------------------------------------------------------------------------
 # GET /api/prs
 # ---------------------------------------------------------------------------
 
