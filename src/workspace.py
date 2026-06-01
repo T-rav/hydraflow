@@ -231,6 +231,42 @@ class WorkspaceManager:
         """
         await self._fetch_origin_with_retry(self._repo_root, self._config.base_branch())
 
+    async def _heal_worktree_config(self, wt_path: Path, gh_token: str) -> None:
+        """Clear a stale ``core.worktree`` from a worktree's git config.
+
+        A docker container that runs git inside the worktree can write
+        ``core.worktree=/workspace`` into ``<wt>/.git/config``. On the host that
+        path doesn't exist, and git then refuses to run *any* command in the
+        worktree — including ``git config --unset core.worktree`` itself —
+        failing with "fatal: Invalid path '/workspace'". So we can't heal from
+        inside the worktree.
+
+        Instead, edit the config file directly via ``git config --file <path>
+        --unset`` run from OUTSIDE the worktree (``cwd=wt_path.parent``), where
+        git won't auto-discover and validate the broken worktree. Workspaces
+        here are full local clones (see ``_create_unlocked``), so the config is
+        always ``<wt>/.git/config``. No-op when ``core.worktree`` is absent (git
+        exits non-zero, which we ignore) or the config file is missing.
+        """
+        config_path = wt_path / ".git" / "config"
+        if not config_path.exists():
+            return
+        # A non-zero exit just means core.worktree was not set — nothing to heal.
+        with contextlib.suppress(RuntimeError):
+            await run_subprocess(
+                "git",
+                "config",
+                "--file",
+                str(config_path),
+                "--unset",
+                "core.worktree",
+                # Run from outside the worktree: from inside, git auto-discovers
+                # the repo and re-validates the bogus core.worktree before it
+                # ever processes --file, re-triggering the same fatal error.
+                cwd=wt_path.parent,
+                gh_token=gh_token,
+            )
+
     async def _salvage_uncommitted(self, issue_number: int) -> None:
         """Commit and push any uncommitted changes in the worktree before destroying it.
 
@@ -243,6 +279,12 @@ class WorkspaceManager:
 
         gh = self._credentials.gh_token
         branch = self._config.branch_for_issue(issue_number)
+
+        # A container may have written a stale core.worktree into the worktree's
+        # git config during the run; heal it before the status check below, or
+        # that check fails with "not a work tree" and we silently skip the
+        # salvage — losing the uncommitted work this method exists to protect.
+        await self._heal_worktree_config(wt_path, gh)
 
         # Check for uncommitted changes
         try:
@@ -836,11 +878,22 @@ class WorkspaceManager:
             logger.warning("git identity config failed in %s: %s", wt_path, exc)
 
     async def _create_venv(self, wt_path: Path) -> None:
-        """Create an independent venv in the worktree via ``uv sync``."""
+        """Create an independent venv in the worktree via ``uv sync --all-extras``.
+
+        ``--all-extras`` ensures test and dev extras (pytest, hypothesis, ulid, etc.)
+        are installed, matching the ``make deps`` behaviour in the main repo. Without
+        it, fresh worktree venvs miss test-only deps and route/scenario tests fail to
+        import.
+        """
         try:
             await run_subprocess(
-                "uv", "sync", cwd=wt_path, gh_token=self._credentials.gh_token
+                "uv",
+                "sync",
+                "--all-extras",
+                cwd=wt_path,
+                gh_token=self._credentials.gh_token,
             )
+            logger.info("uv sync --all-extras complete in %s", wt_path)
         except (RuntimeError, FileNotFoundError) as exc:
             logger.warning("uv sync failed in %s: %s", wt_path, exc)
 

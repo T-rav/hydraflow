@@ -1,8 +1,7 @@
 """Integration tests for docker_runner.py — real Docker daemon interactions.
 
 These tests require a running Docker daemon and the ``alpine:latest`` image.
-They are marked with ``@pytest.mark.integration`` and will be skipped when
-Docker is unavailable.
+They are excluded from the default suite by the ``docker`` marker.
 """
 
 from __future__ import annotations
@@ -10,6 +9,7 @@ from __future__ import annotations
 import contextlib
 import textwrap
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -19,28 +19,20 @@ from docker_runner import (
 )
 from tests.helpers import ConfigFactory
 
-# ---------------------------------------------------------------------------
-# Skip guard — skip entire module when Docker daemon is not reachable
-# ---------------------------------------------------------------------------
-
-_docker_available = False
-try:
-    import docker as _docker_mod
-
-    _client = _docker_mod.from_env()
-    _client.ping()
-    _docker_available = True
-except Exception:
-    pass
-
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.docker,
-    pytest.mark.skipif(not _docker_available, reason="Docker daemon not available"),
 ]
 
 # Use a minimal, widely-available image for integration tests
 _TEST_IMAGE = "alpine:latest"
+
+
+def _docker_mod() -> ModuleType:
+    """Import the optional Docker SDK only when docker-marked tests run."""
+    import docker
+
+    return docker
 
 
 # ---------------------------------------------------------------------------
@@ -51,12 +43,11 @@ _TEST_IMAGE = "alpine:latest"
 @pytest.fixture(autouse=True, scope="session")
 def _pull_image_once() -> None:
     """Ensure the test image is available locally (runs once per session)."""
-    if not _docker_available:
-        return
-    client = _docker_mod.from_env()
+    docker_mod = _docker_mod()
+    client = docker_mod.from_env()
     try:
         client.images.get(_TEST_IMAGE)
-    except _docker_mod.errors.ImageNotFound:
+    except docker_mod.errors.ImageNotFound:
         client.images.pull(_TEST_IMAGE)
 
 
@@ -211,7 +202,7 @@ class TestContainerCleanupIntegration:
         assert len(r._containers) == 0
 
         # Verify the container no longer exists in Docker
-        client = _docker_mod.from_env()
+        client = _docker_mod().from_env()
         running_ids = {c.id for c in client.containers.list(all=True)}
         assert container_id not in running_ids
 
@@ -304,7 +295,7 @@ class TestBuildContainerKwargsDockerValidation:
         )
         kwargs = build_container_kwargs(config)
 
-        client = _docker_mod.from_env()
+        client = _docker_mod().from_env()
         container = client.containers.create(
             image=_TEST_IMAGE,
             command=["true"],
@@ -322,7 +313,7 @@ class TestBuildContainerKwargsDockerValidation:
         config = ConfigFactory.create(docker_network_mode="none")
         kwargs = build_container_kwargs(config)
 
-        client = _docker_mod.from_env()
+        client = _docker_mod().from_env()
         container = client.containers.create(
             image=_TEST_IMAGE,
             command=["true"],

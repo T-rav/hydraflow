@@ -51,7 +51,7 @@ def test_hitl_escalation_carries_reason(world: MockWorld) -> None:
     first = scripts[0]
     assert getattr(first, "success", True) is False
     # The reason must be threaded into the scripted error so scenarios can
-    # assert WHICH hitl escalation fired.
+    # Capture which HITL escalation fired.
     assert "unclear scope" in (getattr(first, "error", "") or ""), (
         f"hitl_escalation(reason=...) must record the reason on the result, "
         f"got error={getattr(first, 'error', None)!r}"

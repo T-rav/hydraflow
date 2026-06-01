@@ -44,6 +44,11 @@ Ask:
   - Is the motivating assumption verifiable?
   - Is this scope-creep beyond the issue?
   - Is there a cheaper way to test the hypothesis before building this?
+  - If the plan assumes a specific git, gh, or subprocess behavior (exit code,
+    command flag, path manipulation, tool return value), flag HIGH unless the
+    plan includes empirical validation for that behavior: a scratch-repo test
+    result, a cited documentation reference, or a named spike outcome. Untested
+    mechanism assumptions are a top-3 source of implementation failures.
 
 You do NOT critique buildability or test coverage. You critique whether this plan should exist as written. YAGNI is your default.
 

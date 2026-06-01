@@ -144,8 +144,11 @@ def _build_adr_reviewer(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 def _build_github_cache(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from github_cache_loop import GitHubCacheLoop  # noqa: PLC0415
 
-    cache = ports.get("github_cache") or MagicMock()
-    ports.setdefault("github_cache", cache)
+    cache = ports.get("github_cache")
+    if cache is None:
+        cache = MagicMock()
+        cache.poll = AsyncMock(return_value={"status": "idle"})
+        ports["github_cache"] = cache
     return GitHubCacheLoop(config=config, cache=cache, deps=deps)
 
 
@@ -161,6 +164,32 @@ def _build_sentry_ingest(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from sentry_loop import SentryLoop  # noqa: PLC0415
 
     return SentryLoop(config=config, prs=ports["github"], deps=deps)
+
+
+def _build_live_corpus_replay(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    from contracts.shadow import ShadowCorpus  # noqa: PLC0415
+    from dedup_store import DedupStore  # noqa: PLC0415
+    from live_corpus_replay_loop import LiveCorpusReplayLoop  # noqa: PLC0415
+
+    corpus = ports.get("shadow_corpus")
+    if corpus is None:
+        corpus = ShadowCorpus(config.data_root / "contract_shadow")
+        ports["shadow_corpus"] = corpus
+    dedup = ports.get("live_corpus_dedup")
+    if dedup is None:
+        dedup = DedupStore(
+            "live_corpus_replay",
+            config.data_root / "dedup" / "live_corpus_replay.json",
+        )
+        ports["live_corpus_dedup"] = dedup
+    return LiveCorpusReplayLoop(
+        config=config,
+        corpus=corpus,
+        pr_manager=ports["github"],
+        dedup=dedup,
+        state=ports.get("state"),
+        deps=deps,
+    )
 
 
 def _build_diagnostic(ports: dict[str, Any], config: Any, deps: Any) -> Any:
@@ -644,6 +673,41 @@ def _build_branch_protection_auditor(
         dedup=dedup,
         deps=deps,
         auditor=auditor,
+    )
+
+
+def _build_gate_activator(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build GateActivatorLoop for scenarios (ADR-0082, Slice 4).
+
+    Tests pre-seed:
+    * ``gate_activation_detect`` → an async detector returning a
+      ``list[ActivationProposal]`` (replaces the contract/workflow/Makefile
+      read). Defaults to ``[]`` (steady state: nothing to activate).
+
+    ``dedup`` defaults to a clean-slate MagicMock; override via
+    ``gate_activator_dedup``.
+    """
+    from gate_activator_loop import GateActivatorLoop  # noqa: PLC0415
+
+    dedup = ports.get("gate_activator_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["gate_activator_dedup"] = dedup
+
+    detector = ports.get("gate_activation_detect")
+    if detector is None:
+        detector = AsyncMock(return_value=[])
+        ports["gate_activation_detect"] = detector
+
+    pr_manager = ports.get("pr_manager") or ports["github"]
+
+    return GateActivatorLoop(
+        config=config,
+        pr_manager=pr_manager,
+        dedup=dedup,
+        deps=deps,
+        detector=detector,
     )
 
 
@@ -1312,6 +1376,7 @@ _BUILDERS: dict[str, Any] = {
     # phase 1
     "ci_monitor": _build_ci_monitor,
     "branch_protection_auditor": _build_branch_protection_auditor,
+    "gate_activator": _build_gate_activator,
     "stale_issue_gc": _build_stale_issue_gc,
     "dependabot_merge": _build_dependabot_merge,
     "pr_unsticker": _build_pr_unsticker,
@@ -1325,6 +1390,7 @@ _BUILDERS: dict[str, Any] = {
     "github_cache": _build_github_cache,
     "repo_wiki": _build_repo_wiki,
     "sentry_ingest": _build_sentry_ingest,
+    "live_corpus_replay": _build_live_corpus_replay,
     "diagnostic": _build_diagnostic,
     "report_issue": _build_report_issue,
     "epic_sweeper": _build_epic_sweeper,

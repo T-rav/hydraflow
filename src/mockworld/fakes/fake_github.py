@@ -88,6 +88,12 @@ class FakeGitHub:
         # Per-PR list of commit-diff strings for get_pr_recent_commit_diffs.
         # Each entry is a pre-rendered "## <sha> <title>\n<diff>" block.
         self._commit_diffs: dict[int, list[str]] = {}
+        # Per-PR full unified diff for get_pr_diff. Lets scenarios control the
+        # diff a review sees (e.g. its blast radius for retry-budget tests).
+        self._pr_diffs: dict[int, str] = {}
+        # Catch-all diff for PRs without a per-PR seed. PR numbers come from an
+        # opaque counter, so single-PR scenarios set this rather than guess.
+        self._default_pr_diff: str | None = None
         # Per-PR CI failure log text for fetch_ci_failure_logs.
         self._ci_failure_logs: dict[int, str] = {}
         # Mirrors PRManager._repo. Some loops (StaleIssueLoop) read this
@@ -187,6 +193,23 @@ class FakeGitHub:
         ``get_pr_recent_commit_diffs`` returns the last *n* of these.
         """
         self._commit_diffs[pr_number] = list(diffs)
+
+    def seed_pr_diff(self, pr_number: int, diff: str) -> None:
+        """Seed the full unified diff ``get_pr_diff`` returns for *pr_number*.
+
+        Lets a scenario control the diff a review sees — e.g. its blast radius
+        (critical paths / src line count), which drives the PostVerifyAdvisor
+        retry budget. Absent a seed, ``get_pr_diff`` returns the default stub.
+        """
+        self._pr_diffs[pr_number] = diff
+
+    def set_default_pr_diff(self, diff: str) -> None:
+        """Set the diff ``get_pr_diff`` returns for any PR lacking a per-PR seed.
+
+        Convenience for single-PR scenarios that want to control blast radius
+        without knowing the opaque PR number assigned by ``create_pr``.
+        """
+        self._default_pr_diff = diff
 
     def set_issue_updated_at(self, issue_number: int, updated_at: str) -> None:
         """Set the updated_at timestamp on a seeded issue."""
@@ -422,6 +445,10 @@ class FakeGitHub:
 
     async def get_pr_diff(self, pr_number: int) -> str:
         self._maybe_rate_limit()
+        if pr_number in self._pr_diffs:
+            return self._pr_diffs[pr_number]
+        if self._default_pr_diff is not None:
+            return self._default_pr_diff
         return "diff --git a/x b/x"
 
     async def get_pr_head_sha(self, pr_number: int) -> str:

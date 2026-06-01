@@ -4,12 +4,39 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W23
+
+- `85e9c95` — refactor(review): retire vestigial max_veto_retries; derive retry cap from authority (#9136) (#9136) *(2026-06-01)*
+- `650e8a9` — reconcile: staging-canonical resolution + onboarding re-integration *(2026-06-01)*
+- `d2dc597` — merge: reconcile main into staging (resolve onboarding divergence) *(2026-06-01)*
+- `83f8fdf` — test(trust-fleet): close spec drift gaps *(2026-06-01)*
+
 ## 2026-W22
 
+- `bd2167c` — test(ws-rt): browser e2e for live progression + reconnect re-sync (WS-RT PR6) (#9111) (#9111) *(2026-05-31)*
+- `1b97d49` — fix(ws-rt): reconnect resilience + ephemeral snapshots + repo-scoped /api/events (WS-RT PR5) (#9110) (#9110) *(2026-05-31)*
+- `53dc462` — refactor(ui): remove optimistic pipeline layer — snapshot push is authoritative (WS-RT PR4) (#9109) (#9109) *(2026-05-31)*
+- `1d9ade8` — feat(dashboard): real-time workstream via coalesced WS pipeline-snapshot push (WS-RT PR3) (#9108) (#9108) *(2026-05-31)*
+- `6c280b8` — Merge pull request #9132 from T-rav/arch/knowledge-bead-reconcile *(2026-05-31)*
+- `1b5c442` — feat(ci): arch freshness-stamp → .meta.json + DiagramLoop base fix + gate hygiene (factory refinements) (#9131) (#9131) *(2026-05-31)*
+- `3751706` — docs(arch): reconcile Plan A labels guard wording *(2026-05-31)*
+- `c7610ed` — test: enforce active coverage standards *(2026-05-31)*
+- `57bf27f` — review: enforce test value standards *(2026-05-31)*
+- `afda157` — test(mockworld): assert side effects through fake state (#9124) (#9124) *(2026-05-31)*
+- `1e5ce26` — test(mockworld): count real scenario key invocations (#9121) (#9121) *(2026-05-30)*
+- `347cc9e` — test(mockworld): close loop coverage matrix gaps (#9119) (#9119) *(2026-05-30)*
+- `932dc1d` — fix(mockworld): include FakeHoneycomb in generated map (#9116) (#9116) *(2026-05-30)*
+- `5ada680` — test: harden MockWorld side-effect coverage (#9104) (#9104) *(2026-05-30)*
+- `1ff6c54` — feat(security): scrub secrets on the canonical audit-write path (WS-4, ADR-0085) *(2026-05-30)*
+- `2abc16a` — merge prompt trust boundary into credit telemetry integrity *(2026-05-30)*
 - `40473a4` — merge staging into credit telemetry integrity *(2026-05-30)*
+- `038bf38` — merge staging into prompt injection trust boundary *(2026-05-30)*
+- `f3f34e5` — merge main into rc promotion *(2026-05-30)*
 - `febc4e7` — chore(arch): regenerate architecture artifacts after credit fixes *(2026-05-29)*
+- `a62f093` — fix(security): harden untrusted-text fence + restrict auto-agent (WS-7 fixes) *(2026-05-29)*
 - `ed8c682` — merge staging into no-ignored sandbox gates *(2026-05-29)*
 - `8642f7b` — test: enforce non-ignored sandbox coverage *(2026-05-29)*
+- `83c941d` — docs(adr): ADR-0082 untrusted-text trust boundary + fix numbering (WS-7.4) *(2026-05-29)*
 - `bb088ee` — fix(gates): assign BranchProtectionAuditorLoop to a functional area + orchestrator test double *(2026-05-29)*
 - `5962bdb` — fix(gates): address grumpy-principal review across all slices *(2026-05-29)*
 - `3c87f71` — feat(gates): branch-protection drift caretaker loop (Slice 4) *(2026-05-29)*
@@ -18,6 +45,31 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W21
 
+- `1d9c95f` — Fixes #8931: stream onboarding activity in dashboard *(2026-05-23)*
+- `9dc0a8d` — Refs #8933: validate third-domain onboarding dashboard flow *(2026-05-23)*
+- `01b5854` — docs: refresh architecture artifacts *(2026-05-23)*
+- `66a1b1f` — Refs #8932: stream onboarding design chat *(2026-05-23)*
+- `8728fc2` — Refs #8932: persist wizard spec edits *(2026-05-23)*
+- `9362727` — Refs #8932: harden design chat extraction *(2026-05-23)*
+- `72eae73` — Refs #8933: add repo metrics dashboard payload *(2026-05-23)*
+- `43b1e0a` — Refs #8933: wire onboarding format upgrade *(2026-05-23)*
+- `bab9837` — Fixes #8933: wire onboarding continue plan *(2026-05-23)*
+- `553bd1d` — Refs #8932: add Claude design provider fallback *(2026-05-23)*
+- `adbcc6a` — Refs #8931: add onboarding push endpoint *(2026-05-23)*
+- `f4915b8` — Refs #8933: add onboarding dashboard repo slice *(2026-05-22)*
+- `6b74497` — Refs #8932: add onboarding design chat slice *(2026-05-22)*
+- `091f166` — Refs #8931: add onboarding wizard UI slice *(2026-05-22)*
+- `e439049` — Refs #8930: add onboarding materialize API slice *(2026-05-22)*
+- `e5e3dbd` — Refs #8930: add onboarding draft API foundation *(2026-05-22)*
+- `52784fb` — Fixes #8368: resolve dashboard a11y violations *(2026-05-22)*
+- `3381e36` — Refs #8475: preserve managed repo config models *(2026-05-22)*
+- `22b8cee` — Fixes #8617: expose repo pipeline enabled state *(2026-05-22)*
+- `90279ad` — Fixes #8651: collapse crowded pipeline dots *(2026-05-22)*
+- `1e94520` — Fixes #8674: refresh arch artifacts before bot push *(2026-05-22)*
+- `700bc6b` — Fixes #8658: update Opus 4.7 pricing *(2026-05-22)*
+- `72fea53` — Fixes #8979: fold epic sweep into monitor *(2026-05-22)*
+- `527bea0` — Fixes #8928: make issue creation failure explicit *(2026-05-22)*
+- `e7d4296` — Fixes #8481: register caretaker escalation labels *(2026-05-22)*
 - `60d07b4` — feat(mockworld): FakeDocker bd-CLI emulation for bead lifecycle coverage (closes #8367) (#9053) (#9053) *(2026-05-21)*
 - `4afc722` — chore(arch): regen post-rebase against staging *(2026-05-20)*
 - `2efdbb1` — chore(arch): regen post-rebase against staging *(2026-05-20)*
@@ -372,21 +424,5 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `8875cd8` — Accept ADR-0011: epic release creation architecture (#1965) (#1965) *(2026-03-04)*
 - `ac0ecda` — Fixes #1883: [Bug Report] remove the processes tab too, and related... (#1906) (#1906) *(2026-03-04)*
 
-## 2026-W09
 
-- `8825cd5` — Fixes #1633: add ADR-0009 for persistence architecture and data layout (#1680) (#1680) *(2026-03-01)*
-- `b47789e` — Fixes #1818: Add ADR-0009 for autoApproveRow borderTop context awareness (#1820) (#1820) *(2026-03-01)*
-- `9a2d6e9` — Fixes #1798: Add ADR-0009 for background task delegation abstraction layer (#1810) (#1810) *(2026-03-01)*
-- `1fea79a` — Fixes #1749: Add ADR-0009 for screenshot capture pipeline architecture (#1792) (#1792) *(2026-03-01)*
-- `793f790` — Fixes #1748: ADR-0009 documents auto-decompose triage counter exclusion as intentional (#1791) (#1791) *(2026-03-01)*
-- `d26f6b9` — Fixes #1747: ADR-0009 VisualValidation SKIPPED override partial suppression semantics (#1788) (#1788) *(2026-03-01)*
-- `91603e3` — Fixes #1746: Add ADR-0009 for protocol-based callback injection gate pattern (#1786) (#1786) *(2026-03-01)*
-- `bd72277` — Fixes #1703: ADR-0009 session counter forward-progression semantics (#1750) (#1750) *(2026-03-01)*
-- `b0e04ed` — Fixes #1704: ADR-0009 screenshot capture pipeline architecture (#1745) (#1745) *(2026-03-01)*
-- `7fdccc8` — Fixes #1702: ADR-0009 epic merge coordination architecture (#1740) (#1740) *(2026-03-01)*
-- `522e013` — Fixes #1701: ADR-0009 epic release creation architecture (#1739) (#1739) *(2026-03-01)*
-- `961b141` — Fixes #1677: add ADR-0009 for worktree and path isolation architecture (#1683) (#1683) *(2026-03-01)*
-- `7c6fe67` — Fixes #1634: add ADR-0009 for multi-repo process-per-repo model (#1679) (#1679) *(2026-03-01)*
-
-
-_Regenerated from commit `40473a4` on 2026-05-30 11:42 UTC. Source last changed at `40473a4`. Status: 🟢 fresh._
+<!-- arch:generated -->

@@ -3441,7 +3441,7 @@ class TestPreMergeSpecCheckAdvisor:
 class TestVisualGateAdvisor:
     """T27 — PostVerifyAdvisor wired into ``check_visual_gate`` for the
     ``visual_gate`` surface (post-only; pre_flight=False, mid_flight=False;
-    ``max_veto_retries=1``).
+    one-shot binary gate — no retry budget).
 
     The visual gate is a binary post-verify gate: when the visual pipeline
     returns ``"pass"``, the advisor gets a chance to second-opinion the
@@ -3687,7 +3687,7 @@ class TestVisualGateAdvisor:
 class TestWikiIngestAdvisor:
     """T28 — PostVerifyAdvisor wired into ``_wiki_ingest_review`` for the
     ``wiki_ingest`` surface (post-only; pre_flight=False, mid_flight=False;
-    ``post_verify_authority="advisory"``; ``max_veto_retries=0``).
+    ``post_verify_authority="advisory"``).
 
     Advisory mode means the advisor's VETO is downgraded to APPROVE in
     :meth:`PostVerifyAdvisor.run` — disagreements are still logged via the

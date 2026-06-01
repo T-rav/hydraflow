@@ -230,3 +230,59 @@ class TestStagingBisectScenario:
         assert stats["staging_bisect"]["escalation_issue"] == issue.number
         assert "hitl-escalation" in issue.labels
         assert "rc-red-post-revert-red" in issue.labels
+
+    async def test_watchdog_resolves_green_after_revert(self, tmp_path) -> None:
+        """Watchdog clears when a later RC goes green after the revert."""
+        world = MockWorld(tmp_path)
+
+        state = MagicMock()
+        state.get_last_green_rc_sha.return_value = "green_after_revert"
+        state.get_last_rc_red_sha.return_value = "red_A_original"
+        state.get_rc_cycle_id.return_value = 3
+        state.get_auto_reverts_in_cycle.return_value = 0
+
+        _seed_ports(
+            world,
+            staging_bisect_state=state,
+            staging_bisect_pending_watchdog={
+                "red_sha_at_revert": "red_A_original",
+                "rc_cycle_at_revert": 2,
+                "deadline_ts": 9_999_999_999.0,
+            },
+        )
+
+        stats = await world.run_with_loops(["staging_bisect"], cycles=1)
+
+        assert stats["staging_bisect"]["status"] == "watchdog_green", stats
+        state.increment_auto_reverts_successful.assert_called_once()
+        assert await world.github.list_issues_by_label("hitl-escalation") == []
+
+    async def test_watchdog_escalates_on_timeout(self, tmp_path) -> None:
+        """Watchdog files timeout escalation when no new RC resolves it."""
+        world = MockWorld(tmp_path)
+
+        state = MagicMock()
+        state.get_last_green_rc_sha.return_value = ""
+        state.get_last_rc_red_sha.return_value = "red_A_original"
+        state.get_rc_cycle_id.return_value = 2
+        state.get_auto_reverts_in_cycle.return_value = 1
+
+        _seed_ports(
+            world,
+            staging_bisect_state=state,
+            staging_bisect_pending_watchdog={
+                "red_sha_at_revert": "red_A_original",
+                "rc_cycle_at_revert": 2,
+                "deadline_ts": 0.0,
+            },
+        )
+
+        stats = await world.run_with_loops(["staging_bisect"], cycles=1)
+
+        assert stats["staging_bisect"]["status"] == "watchdog_timeout", stats
+        issues = await world.github.list_issues_by_label("rc-red-verify-timeout")
+        assert len(issues) == 1
+        issue = world.github.issue(issues[0]["number"])
+        assert stats["staging_bisect"]["escalation_issue"] == issue.number
+        assert "hitl-escalation" in issue.labels
+        assert "rc-red-verify-timeout" in issue.labels

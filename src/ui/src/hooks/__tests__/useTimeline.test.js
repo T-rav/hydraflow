@@ -13,7 +13,7 @@ import {
 
 describe('STAGE_KEYS', () => {
   it('contains all pipeline stages in order', () => {
-    expect(STAGE_KEYS).toEqual(['triage', 'discover', 'shape', 'plan', 'implement', 'review', 'merged'])
+    expect(STAGE_KEYS).toEqual(['triage', 'discover', 'shape', 'plan', 'implement', 'review', 'hitl', 'merged'])
   })
 })
 
@@ -325,6 +325,21 @@ describe('deriveIssueTimelines', () => {
     expect(result[0].stages.merged.status).toBe('pending')
     // Should NOT be 'done' — merge hasn't happened yet
     expect(result[0].overallStatus).toBe('active')
+  })
+
+  it('advances a review-completed merge-pending issue to merged, skipping hitl', () => {
+    const events = [
+      { type: 'triage_update', timestamp: '2026-01-15T10:00:00Z', data: { issue: 13, status: 'done' } },
+      { type: 'planner_update', timestamp: '2026-01-15T10:01:00Z', data: { issue: 13, status: 'done' } },
+      { type: 'worker_update', timestamp: '2026-01-15T10:02:00Z', data: { issue: 13, status: 'done' } },
+      { type: 'review_update', timestamp: '2026-01-15T10:03:00Z', data: { issue: 13, pr: 70, status: 'done' } },
+    ]
+    const result = deriveIssueTimelines(events, {}, [])
+
+    expect(result[0].stages.review.status).toBe('done')
+    expect(result[0].stages.merged.status).toBe('pending')
+    // Natural next stage after review is merged, not hitl (a terminal/no-role stage)
+    expect(result[0].currentStage).toBe('merged')
   })
 })
 

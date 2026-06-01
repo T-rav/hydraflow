@@ -134,8 +134,7 @@ def test_record_git_captures_commit_confirmation_line(tmp_path: Path) -> None:
     """End-to-end: the recorder's actual git commit invocation must capture
     the ``[main <sha>] initial`` confirmation line (i.e. no ``-q`` flag)."""
     git_bin = shutil.which("git")
-    if git_bin is None:
-        pytest.skip("git binary not available")
+    assert git_bin is not None, "git binary must be available"
 
     from contract_recording import record_git
 

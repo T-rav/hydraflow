@@ -23,6 +23,7 @@ graph LR
     FakeCoverageAuditorLoop["FakeCoverageAuditorLoop<br/><i>loop</i>"]
     FlakeTrackerLoop["FlakeTrackerLoop<br/><i>loop</i>"]
     GitHubCacheLoop["GitHubCacheLoop<br/><i>loop</i>"]
+    LiveCorpusReplayLoop["LiveCorpusReplayLoop<br/><i>loop</i>"]
     MergeStateWatcherLoop["MergeStateWatcherLoop<br/><i>loop</i>"]
     PricingRefreshLoop["PricingRefreshLoop<br/><i>loop</i>"]
     PRUnstickerLoop["PRUnstickerLoop<br/><i>loop</i>"]

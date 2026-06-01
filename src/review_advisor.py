@@ -246,7 +246,6 @@ class SurfaceAdvisorConfig:
     post_verify_authority: Literal["advisory", "veto"]
     executor_model: str
     advisor_model: str
-    max_veto_retries: int
 
 
 @dataclass(frozen=True)
@@ -346,6 +345,75 @@ def should_pre_flight(diff_stats: DiffStats, pr: PRContext) -> bool:
     return bool(nontrivial_src and diff_stats.lines_changed > 20)
 
 
+_BLAST_MEDIUM_LINES_THRESHOLD = 200
+
+
+def compute_blast_radius(
+    diff_stats: DiffStats,
+) -> Literal["low", "medium", "high"]:
+    """Classify a diff's blast radius for retry-budget and iteration-count decisions.
+
+    Tiers:
+    - 'high'  — any changed path matches CRITICAL_PATHS_EXACT or CRITICAL_PATH_GLOBS.
+    - 'medium' — no critical paths, but > _BLAST_MEDIUM_LINES_THRESHOLD lines
+                 changed in src/.
+    - 'low'   — everything else (docs, config, small src changes).
+
+    Reuses _matches_critical() so the classification stays in sync with
+    pre-flight trigger logic. Callers (PostVerifyAdvisor retry budget,
+    StateData persistence, ADR-0051 iteration planning) consume the tier
+    as a Literal rather than computing it themselves.
+    """
+    if any(_matches_critical(p) for p in diff_stats.changed_paths):
+        return "high"
+    src_lines = (
+        diff_stats.lines_changed
+        if any(p.startswith("src/") for p in diff_stats.changed_paths)
+        else 0
+    )
+    if src_lines > _BLAST_MEDIUM_LINES_THRESHOLD:
+        return "medium"
+    return "low"
+
+
+BLAST_RADIUS_RETRIES: dict[str, int] = {"low": 1, "medium": 2, "high": 3}
+
+
+def min_review_passes_for_blast_radius(
+    blast_radius: Literal["low", "medium", "high"],
+) -> int:
+    """Return the minimum fresh-eyes review passes required for a given blast radius.
+
+    Per ADR-0051 stratified table: low=1, medium=2, high=3. Exposed as a
+    named function (rather than a dict lookup at call sites) so the dashboard
+    endpoint and ReviewStateMixin can import a single source of truth.
+    """
+    return BLAST_RADIUS_RETRIES[blast_radius]
+
+
+def post_verify_retry_budget(
+    blast_radius: Literal["low", "medium", "high"],
+    post_verify_authority: Literal["advisory", "veto"],
+) -> int:
+    """Return the PostVerifyAdvisor veto-retry budget for a diff (refinement R-2).
+
+    For veto-authority surfaces the budget is stratified by blast radius
+    (``BLAST_RADIUS_RETRIES``) so high-blast changes earn more automated fix
+    attempts before escalating to a human and trivial ones escalate sooner.
+
+    Advisory surfaces (``post_verify_authority == "advisory"``) are HARD-CAPPED
+    to 0: they never retry and never block a merge, preserving the zero-budget
+    contract. The cap derives from the authority — the single source of truth
+    for advisory-vs-veto — rather than a separate retry-count field. It is
+    defensive for the retry loop, which only the veto-authority PR-review
+    surfaces (pr_review, pre_merge_spec_check) reach; the advisory wiki_ingest
+    surface and the one-shot visual_gate/adr_review surfaces never enter it.
+    """
+    if post_verify_authority == "advisory":
+        return 0
+    return BLAST_RADIUS_RETRIES[blast_radius]
+
+
 def diff_stats_from_text(diff: str) -> DiffStats:
     """Compute a coarse :class:`DiffStats` from a raw unified-diff string.
 
@@ -401,7 +469,6 @@ _SURFACE_DEFAULTS: dict[str, dict[str, object]] = {
         "mid_flight_enabled": True,
         "post_verify_enabled": True,
         "post_verify_authority": "veto",
-        "max_veto_retries": 2,
     },
     "pre_merge_spec_check": {
         "pre_flight_enabled": False,
@@ -409,7 +476,6 @@ _SURFACE_DEFAULTS: dict[str, dict[str, object]] = {
         "mid_flight_enabled": True,
         "post_verify_enabled": True,
         "post_verify_authority": "veto",
-        "max_veto_retries": 2,
     },
     "adr_review": {
         "pre_flight_enabled": True,
@@ -417,7 +483,6 @@ _SURFACE_DEFAULTS: dict[str, dict[str, object]] = {
         "mid_flight_enabled": False,
         "post_verify_enabled": True,
         "post_verify_authority": "veto",
-        "max_veto_retries": 2,
     },
     "visual_gate": {
         "pre_flight_enabled": False,
@@ -425,7 +490,6 @@ _SURFACE_DEFAULTS: dict[str, dict[str, object]] = {
         "mid_flight_enabled": False,
         "post_verify_enabled": True,
         "post_verify_authority": "veto",
-        "max_veto_retries": 1,
     },
     "wiki_ingest": {
         "pre_flight_enabled": False,
@@ -433,7 +497,6 @@ _SURFACE_DEFAULTS: dict[str, dict[str, object]] = {
         "mid_flight_enabled": False,
         "post_verify_enabled": True,
         "post_verify_authority": "advisory",
-        "max_veto_retries": 0,
     },
 }
 
@@ -449,7 +512,6 @@ def build_surface_config(surface: str) -> SurfaceAdvisorConfig:
     mid_flight_enabled = base["mid_flight_enabled"]
     post_verify_enabled = base["post_verify_enabled"]
     post_verify_authority = base["post_verify_authority"]
-    max_veto_retries = base["max_veto_retries"]
     assert isinstance(pre_flight_enabled, bool)
     assert pre_flight_trigger is None or isinstance(
         pre_flight_trigger, PreFlightTrigger
@@ -457,7 +519,6 @@ def build_surface_config(surface: str) -> SurfaceAdvisorConfig:
     assert isinstance(mid_flight_enabled, bool)
     assert isinstance(post_verify_enabled, bool)
     assert post_verify_authority in ("advisory", "veto")
-    assert isinstance(max_veto_retries, int)
     return SurfaceAdvisorConfig(
         surface=surface,
         pre_flight_enabled=pre_flight_enabled,
@@ -467,7 +528,6 @@ def build_surface_config(surface: str) -> SurfaceAdvisorConfig:
         post_verify_authority=post_verify_authority,
         executor_model=resolve_model(surface, "executor", default="sonnet"),
         advisor_model=resolve_model(surface, "advisor", default="opus"),
-        max_veto_retries=max_veto_retries,
     )
 
 
@@ -743,6 +803,20 @@ class PostVerifyAdvisor:
         if inp.pre_flight_plan is not None:
             sections.append(
                 f"\n## Pre-flight plan\n{inp.pre_flight_plan.model_dump_json(indent=2)}"
+            )
+        # Second-order failure check for critical-path diffs (refinement §R2)
+        _critical_diff = any(
+            _matches_critical(p) for p in diff_stats_from_text(inp.diff).changed_paths
+        )
+        if _critical_diff:
+            sections.append(
+                "\n## Second-order failure check (required for shared-infrastructure diffs)\n"
+                "Before your verdict, answer both questions explicitly:\n"
+                "1. What is the failure mode if THIS fix itself fails (has a bug or "
+                "fails at runtime)?\n"
+                "2. Is that failure mode broader or more severe than the original bug being fixed?\n"
+                "If the answer to (2) is yes, flag it as a blocking disagreement with "
+                "severity='blocking' in your disagreements list."
             )
         sections.append(
             "\nRespond with JSON matching the PostVerifyResult schema:\n"

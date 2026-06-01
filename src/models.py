@@ -363,6 +363,21 @@ class TriageResult(BaseModel):
         default=False,
         description="Whether the issue needs product discovery before planning",
     )
+    already_addressed: bool = Field(
+        default=False,
+        description=(
+            "Whether the LLM determined the described problem no longer exists "
+            "at HEAD. Triggers auto-close routing in triage_phase."
+        ),
+    )
+    claim_verified: bool | None = Field(
+        default=None,
+        description=(
+            "Whether the LLM verified a falsifiable claim against the codebase. "
+            "None = no falsifiable claim present; True = claim confirmed; "
+            "False = claim was false (problem doesn't exist)."
+        ),
+    )
 
     @field_validator("issue_type", mode="before")
     @classmethod
@@ -633,6 +648,7 @@ class ReproductionOutcome(StrEnum):
     SUCCESS = "success"  # failing test written and confirmed red
     PARTIAL = "partial"  # repro script produced but no automated test
     UNABLE = "unable"  # could not reproduce — escalate to HITL
+    NOT_PRESENT = "not_present"  # described symptom does not exist at HEAD
 
 
 class ReproductionResult(BaseModel):
@@ -1798,6 +1814,13 @@ class StateData(BaseModel):
     )
     interrupted_issues: dict[str, str] = Field(default_factory=dict)
     last_reviewed_shas: dict[str, str] = Field(default_factory=dict)
+    review_blast_radii: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Per-issue blast-radius tier ('low'|'medium'|'high') computed at "
+            "pre-flight time. Used by the dashboard and ADR-0051 iteration planning."
+        ),
+    )
     pending_reports: list[PendingReport] = Field(default_factory=list)
     tracked_reports: list[TrackedReport] = Field(default_factory=list)
     issue_outcomes: dict[str, IssueOutcome] = Field(default_factory=dict)
@@ -1899,6 +1922,8 @@ class StateData(BaseModel):
     # ``retry-lineage-exhausted``.
     retry_lineage_attempts: dict[str, int] = Field(default_factory=dict)
     retry_lineage_pr_chains: dict[str, list[int]] = Field(default_factory=dict)
+    # Headless onboarding draft store (merged from main): draft_id -> draft dict.
+    onboarding_drafts: dict[str, dict[str, object]] = Field(default_factory=dict)
     # PrinciplesAuditLoop state (spec §4.4).
     # Keys are repo slugs ("owner/repo"); sentinel "hydraflow-self" = working tree.
     managed_repos_onboarding_status: dict[
@@ -2628,6 +2653,10 @@ class MergeUpdatePayload(TypedDict, total=False):
     pr: int
     status: str
     title: str
+    # Issue the merged PR resolves. Required for the dashboard to move the card
+    # review -> merged in real time: the frontend's optimistic getPipelineAction
+    # returns null without it, so the move was dead code until WS-RT populated it.
+    issue: int
 
 
 class TriageUpdatePayload(TypedDict, total=False):
@@ -2727,6 +2756,23 @@ class PipelineSnapshotEntry(TypedDict):
     status: str
     epic_number: NotRequired[int]
     is_epic_child: NotRequired[bool]
+
+
+class PipelineSnapshotPayload(TypedDict):
+    """``event.data`` shape for a ``PIPELINE_SNAPSHOT`` event.
+
+    Mirrors ``GET /api/pipeline`` byte-for-byte (modulo ``seq``): ``stages``
+    keys are frontend stage names (triage/discover/shape/plan/implement/
+    review/hitl/merged) so the dashboard's ``PIPELINE_SNAPSHOT`` reducer can
+    consume WS pushes and REST polls interchangeably. ``seq`` is a monotonic
+    emit counter (per ``IssueStore`` instance; resets on restart). It is NOT
+    yet consumed by the frontend — snapshot ordering currently relies on
+    EventBus FIFO delivery + full-snapshot idempotency. A seq-based stale-frame
+    guard is deferred to the reconnect-resilience work (WS-RT PR5).
+    """
+
+    seq: int
+    stages: dict[str, list[PipelineSnapshotEntry]]
 
 
 class LabelCounts(TypedDict):
@@ -2978,6 +3024,9 @@ class MetricsResponse(BaseModel):
     thresholds: list[ThresholdProposal] = Field(default_factory=list)
     inference_lifetime: dict[str, int] = Field(default_factory=dict)
     inference_session: dict[str, int] = Field(default_factory=dict)
+    # Repo-scoped metrics payload for the onboarding/project dashboard (merged
+    # from main, #8933).
+    repo_metrics: dict[str, Any] = Field(default_factory=dict)
 
 
 class IssueHistoryLink(BaseModel):

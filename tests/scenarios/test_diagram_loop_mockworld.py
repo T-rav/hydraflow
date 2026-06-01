@@ -27,11 +27,7 @@ class TestL24DiagramLoop:
         """Clean source → emit() runs, git status empty, no PR opened."""
         world = MockWorld(tmp_path)
 
-        github = AsyncMock(
-            find_existing_issue=AsyncMock(return_value=0),
-            create_issue=AsyncMock(return_value=0),
-        )
-        _seed_ports(world, github=github)
+        _seed_ports(world, github=world.github)
 
         pr_helper = AsyncMock()
         with (
@@ -46,17 +42,13 @@ class TestL24DiagramLoop:
         assert result == {"drift": False}
         mock_emit.assert_called_once()
         pr_helper.assert_not_awaited()
-        github.find_existing_issue.assert_not_awaited()
+        assert world.github._issues == {}
 
     async def test_drift_opens_regen_pr_via_auto_pr(self, tmp_path) -> None:
         """Source drifted → auto_pr opens PR with arch-regen-auto branch."""
         world = MockWorld(tmp_path)
 
-        github = AsyncMock(
-            find_existing_issue=AsyncMock(return_value=0),
-            create_issue=AsyncMock(return_value=0),
-        )
-        _seed_ports(world, github=github)
+        _seed_ports(world, github=world.github)
 
         pr_result = MagicMock(status="opened", pr_url="https://github.com/x/y/pull/1")
         pr_helper = AsyncMock(return_value=pr_result)

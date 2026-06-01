@@ -1339,8 +1339,16 @@ def create_router(
         return JSONResponse(QueueStats().model_dump())
 
     @router.post("/api/request-changes")
-    async def request_changes(body: dict[str, Any]) -> JSONResponse:
-        """Escalate an issue to HITL with user feedback."""
+    async def request_changes(
+        body: dict[str, Any], repo: RepoSlugParam = None
+    ) -> JSONResponse:
+        """Escalate an issue to HITL with user feedback (repo-scoped).
+
+        Resolves the per-repo runtime so the label swap, HITL cause/origin, and
+        escalation event all land on the SELECTED repo — not the default one —
+        in a multi-repo deployment.
+        """
+        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
         issue_number: int | None = body.get("issue_number")
         feedback = (body.get("feedback") or "").strip()
         stage: str = body.get("stage") or ""
@@ -1361,15 +1369,16 @@ def create_router(
                 status_code=400,
             )
 
-        stage_labels: list[str] = getattr(config, label_field, [])
+        stage_labels: list[str] = getattr(_cfg, label_field, [])
         origin_label: str = stage_labels[0]
 
-        await pr_manager.swap_pipeline_labels(issue_number, config.hitl_label[0])
+        manager = _pr_manager_for(_cfg, _bus)
+        await manager.swap_pipeline_labels(issue_number, _cfg.hitl_label[0])
 
-        state.set_hitl_cause(issue_number, feedback)
-        state.set_hitl_origin(issue_number, origin_label)
+        _state.set_hitl_cause(issue_number, feedback)
+        _state.set_hitl_origin(issue_number, origin_label)
 
-        await event_bus.publish(
+        await _bus.publish(
             HydraFlowEvent(
                 type=EventType.HITL_ESCALATION,
                 data=HITLEscalationPayload(
@@ -1421,19 +1430,29 @@ def create_router(
         return JSONResponse({})
 
     @router.get("/api/events")
-    async def get_events(since: str | None = None) -> JSONResponse:
-        """Return event history, optionally filtered by a since timestamp."""
+    async def get_events(
+        since: str | None = None,
+        repo: RepoSlugParam = None,
+    ) -> JSONResponse:
+        """Return event history, optionally filtered by a since timestamp.
+
+        Resolves the per-repo event bus via ``_resolve_runtime(repo)`` (matching
+        the adjacent operational routes) so the reconnect ``?since=`` backfill
+        returns the requested repo's events in a multi-repo deployment, not the
+        module-level default bus's.
+        """
+        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
         if since is not None:
             try:
                 since_dt = datetime.fromisoformat(since)
                 if since_dt.tzinfo is None:
                     since_dt = since_dt.replace(tzinfo=UTC)
-                events = await event_bus.load_events_since(since_dt)
+                events = await _bus.load_events_since(since_dt)
                 if events is not None:
                     return JSONResponse([e.model_dump() for e in events])
             except (ValueError, TypeError):
                 pass  # Fall through to in-memory history
-        history = event_bus.get_history()
+        history = _bus.get_history()
         return JSONResponse([e.model_dump() for e in history])
 
     @router.get("/api/prs")
@@ -1646,16 +1665,18 @@ def create_router(
         status: str | None = None,
         query: str | None = None,
         limit: int = 300,
+        repo: RepoSlugParam = None,
     ) -> JSONResponse:
-        """Return issue lifecycle history with inference rollups."""
+        """Return issue lifecycle history with inference rollups (repo-scoped)."""
+        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
         since_dt = _parse_iso_or_none(since)
         until_dt = _parse_iso_or_none(until)
         requested_status = (status or "").strip().lower()
         query_text = (query or "").strip().lower()
         clamped_limit = max(1, min(limit, 1000))
 
-        telemetry = PromptTelemetry(config)
-        all_events = event_bus.get_history()
+        telemetry = PromptTelemetry(_cfg)
+        all_events = _bus.get_history()
 
         # Check if we can reuse cached aggregation for the unfiltered case.
         use_unfiltered = since_dt is None and until_dt is None
@@ -1664,6 +1685,7 @@ def create_router(
         now = time.monotonic()
         cache_hit = (
             use_unfiltered
+            and repo is None
             and _history_cache["issue_rows"] is not None
             and _history_cache["event_count"] == event_count
             and _history_cache["telemetry_mtime"] == telem_mtime
@@ -1740,8 +1762,11 @@ def create_router(
                 all_events, issue_rows, pr_to_issue, since_dt, until_dt
             )
 
-            # Store in cache if this was an unfiltered aggregation.
-            if use_unfiltered:
+            # Store in cache if this was an unfiltered aggregation. Only the
+            # default-repo view is cached: _history_cache is not repo-keyed, so
+            # a per-repo request must never read (see cache_hit above) or write
+            # it, or one repo's rollups would bleed into another's view.
+            if use_unfiltered and repo is None:
                 _history_cache["issue_rows"] = copy.deepcopy(issue_rows)
                 _history_cache["pr_to_issue"] = dict(pr_to_issue)
                 _history_cache["event_count"] = event_count
@@ -1793,29 +1818,34 @@ def create_router(
         )
 
     @router.get("/api/timeline")
-    async def get_timeline() -> JSONResponse:
-        """Return timelines for all tracked issues."""
-        builder = TimelineBuilder(event_bus)
+    async def get_timeline(repo: RepoSlugParam = None) -> JSONResponse:
+        """Return timelines for all tracked issues (repo-scoped)."""
+        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
+        builder = TimelineBuilder(_bus)
         timelines = builder.build_all()
         return JSONResponse([t.model_dump() for t in timelines])
 
     @router.get("/api/timeline/issue/{issue_number}")
-    async def get_timeline_issue(issue_number: int) -> JSONResponse:
-        """Return the event timeline for a single issue."""
-        builder = TimelineBuilder(event_bus)
+    async def get_timeline_issue(
+        issue_number: int, repo: RepoSlugParam = None
+    ) -> JSONResponse:
+        """Return the event timeline for a single issue (repo-scoped)."""
+        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
+        builder = TimelineBuilder(_bus)
         timeline = builder.build_for_issue(issue_number)
         if timeline is None:
             return JSONResponse({"error": "Issue not found"}, status_code=404)
         return JSONResponse(timeline.model_dump())
 
     @router.get("/api/timeline/completed")
-    async def get_completed_timelines() -> JSONResponse:
-        """Return persisted timelines for completed (merged) issues.
+    async def get_completed_timelines(repo: RepoSlugParam = None) -> JSONResponse:
+        """Return persisted timelines for completed (merged) issues (repo-scoped).
 
         Unlike /api/timeline which derives from ephemeral events,
         these survive event log rotation.
         """
-        timelines = state.get_all_completed_timelines()
+        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
+        timelines = _state.get_all_completed_timelines()
         return JSONResponse([t.model_dump() for t in timelines.values()])
 
     # --- State/runtimes/repos/filesystem routes (extracted to _state_routes.py) ---
@@ -1824,20 +1854,26 @@ def create_router(
     _register_state(router, ctx)
 
     @router.post("/api/intent")
-    async def submit_intent(request: IntentRequest) -> JSONResponse:
-        """Create a GitHub issue from a user intent typed in the dashboard."""
+    async def submit_intent(
+        request: IntentRequest, repo: RepoSlugParam = None
+    ) -> JSONResponse:
+        """Create a GitHub issue from a user intent typed in the dashboard.
+
+        Repo-scoped: the issue is created in the SELECTED repo (and its URL
+        points there), not the default repo, in a multi-repo deployment.
+        """
+        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
         title = request.text[:120]
         body = request.text
-        labels = list(config.planner_label)
+        labels = list(_cfg.planner_label)
 
-        issue_number = await pr_manager.create_issue(
-            title=title, body=body, labels=labels
-        )
+        manager = _pr_manager_for(_cfg, _bus)
+        issue_number = await manager.create_issue(title=title, body=body, labels=labels)
 
         if issue_number == 0:
             return JSONResponse({"error": "Failed to create issue"}, status_code=500)
 
-        url = f"https://github.com/{config.repo}/issues/{issue_number}"
+        url = f"https://github.com/{_cfg.repo}/issues/{issue_number}"
         response = IntentResponse(issue_number=issue_number, title=title, url=url)
         return JSONResponse(response.model_dump())
 
@@ -1845,6 +1881,11 @@ def create_router(
     from dashboard_routes._reports_routes import register as _register_reports
 
     _register_reports(router, ctx)
+
+    # --- Headless onboarding draft routes (merged from main) ---
+    from dashboard_routes._onboarding_routes import register as _register_onboarding
+
+    _register_onboarding(router, ctx)
 
     @router.get("/api/sessions")
     async def get_sessions(

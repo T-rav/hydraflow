@@ -169,6 +169,8 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
                 "audit trail).",
                 "",
                 "_Filed by `adr_touchpoint_auditor` per ADR-0056 (per-ADR rollup, #8987)._",
+                "",
+                "<!-- [hydraflow-auditor: source=ADRTouchpointAuditorLoop] -->",
             ]
         )
         return "\n".join(lines)

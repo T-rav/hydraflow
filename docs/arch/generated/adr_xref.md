@@ -75,6 +75,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0062 | `src.entry_evidence_loop`, `src.term_proposer_llm` |
 | ADR-0063 | `src.auto_agent_preflight_loop`, `src.discover_runner`, `src.implement_phase`, `src.plan_phase`, `src.review_phase._phase`, `src.shape_phase`, `src.triage_phase` |
 | ADR-0064 | `src.adversarial_labels`, `src.adversarial_retry_loop`, `src.assumption_surfacer`, `src.complexity_gate`, `src.discovery_council`, `src.discovery_council_prompts`, `src.events`, `src.models`, `src.pending_concerns`, `src.plan_council`, `src.plan_council_prompts`, `src.plan_phase`, `src.post_merge_handler`, `src.shape_challenger`, `src.shape_expert_council`, `src.shape_phase`, `src.spec_ac_generator`, `src.spec_judge`, `src.wiki_carryover` |
+| ADR-0064 | — |
 | ADR-0065 | `src.code_grooming_loop`, `src.config`, `src.skill_registry` |
 | ADR-0066 | `src.agent`, `src.base_runner`, `src.ports` |
 | ADR-0067 | `src.issue_fetcher`, `src.ports` |
@@ -92,10 +93,11 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0079 | `src.adr_reviewer`, `src.adr_reviewer_loop` |
 | ADR-0080 | `src.epic`, `src.epic_monitor_loop` |
 | ADR-0081 | `src.epic`, `src.epic_sweeper_loop` |
-| ADR-0082 | `src.branch_protection_audit`, `src.branch_protection_auditor_loop` |
+| ADR-0082 | `src.branch_protection_audit`, `src.branch_protection_auditor_loop`, `src.gate_activation_check`, `src.gate_activator_loop` |
 | ADR-0083 | — |
 | ADR-0084 | `src.agent`, `src.preflight.runner`, `src.untrusted_text` |
 | ADR-0085 | `src.secret_scrub` |
+| ADR-0086 | `src.contracts.shadow`, `src.live_corpus_replay_loop` |
 
 ## Module → ADRs
 
@@ -125,6 +127,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.contract_diff` | ADR-0047, ADR-0052 |
 | `src.contract_recording` | ADR-0047, ADR-0052 |
 | `src.contract_refresh_loop` | ADR-0045, ADR-0047 |
+| `src.contracts.shadow` | ADR-0086 |
 | `src.corpus_learning_loop` | ADR-0045 |
 | `src.dashboard` | ADR-0007, ADR-0008, ADR-0038 |
 | `src.dashboard_routes` | ADR-0007, ADR-0008, ADR-0013, ADR-0019, ADR-0038 |
@@ -148,6 +151,8 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.fake_coverage_auditor_loop` | ADR-0045 |
 | `src.file_util` | ADR-0021 |
 | `src.flake_tracker_loop` | ADR-0045 |
+| `src.gate_activation_check` | ADR-0082 |
+| `src.gate_activator_loop` | ADR-0082 |
 | `src.github_cache_loop` | ADR-0076 |
 | `src.health_monitor_loop` | ADR-0045, ADR-0046 |
 | `src.hf_cli.__main__` | ADR-0036 |
@@ -159,6 +164,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.issue_fetcher` | ADR-0019, ADR-0067 |
 | `src.issue_store` | ADR-0006, ADR-0022, ADR-0041 |
 | `src.label_drift_watcher_loop` | ADR-0056 |
+| `src.live_corpus_replay_loop` | ADR-0086 |
 | `src.memory_backlog_loop` | ADR-0057 |
 | `src.memory_backlog_mirror` | ADR-0057 |
 | `src.merge_state_watcher` | ADR-0075 |
@@ -249,4 +255,4 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.workspace_gc_loop` | ADR-0069 |
 | `src.worktree` | ADR-0003, ADR-0009, ADR-0010 |
 
-_Regenerated from commit `bca7775` on 2026-05-30 15:10 UTC. Source last changed at `bca7775`. Status: 🟢 fresh._
+<!-- arch:generated -->

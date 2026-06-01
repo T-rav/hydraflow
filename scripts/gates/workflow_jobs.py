@@ -52,14 +52,22 @@ def _jobs_from_scan(text: str) -> set[str]:
 
 
 def index_workflow_jobs(workflows_dir: Path) -> set[tuple[str, str]]:
-    """Every ``(filename, job_key)`` defined under ``jobs:`` across ``*.yml``.
+    """Every ``(filename, job_key)`` defined under ``jobs:`` across workflows.
+
+    Scans both ``*.yml`` and ``*.yaml`` so a gate whose producer uses the
+    ``.yaml`` extension is not a silent false-negative for the gate activator.
 
     Matching the job KEY (not the expanded check-run name) is deliberate: it is
     robust to matrix ``name:`` interpolation, and it still catches the failure
     mode where a producing workflow file is deleted (the stale ``ADR gate``).
     """
     index: set[tuple[str, str]] = set()
-    for wf in sorted(Path(workflows_dir).glob("*.yml")):
+    workflows = sorted(
+        wf
+        for pattern in ("*.yml", "*.yaml")
+        for wf in Path(workflows_dir).glob(pattern)
+    )
+    for wf in workflows:
         text = wf.read_text()
         keys = _jobs_from_yaml(text)
         if keys is None:

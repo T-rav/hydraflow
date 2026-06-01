@@ -82,7 +82,7 @@ if [ -n "$STAGED_ARCH" ]; then
         echo "❌ docs/arch/generated/ is out of sync with source." >&2
         echo "" >&2
         echo "Run:" >&2
-        echo "  make arch-regen && git add docs/arch/" >&2
+        echo "  make arch-regen-stage && git commit --amend --no-edit" >&2
         echo "" >&2
         echo "First 20 lines of arch-check output:" >&2
         head -20 /tmp/hydraflow-arch-check.out >&2

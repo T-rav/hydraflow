@@ -46,6 +46,13 @@ def test_workflow_quality_lite_detected(tmp_path: Path) -> None:
     assert _run("P5.2", _ctx(tmp_path)).status is Status.PASS
 
 
+def test_workflow_unified_quality_detected(tmp_path: Path) -> None:
+    # C-3 unified CI onto the full `make quality` (no separate lite stage);
+    # the unified superset target satisfies P5.2's "or equivalent" principle.
+    _write(tmp_path / ".github" / "workflows" / "ci.yml", "run: make quality\n")
+    assert _run("P5.2", _ctx(tmp_path)).status is Status.PASS
+
+
 def test_workflow_quality_lite_absent_fails(tmp_path: Path) -> None:
     _write(tmp_path / ".github" / "workflows" / "ci.yml", "run: make lint\n")
     assert _run("P5.2", _ctx(tmp_path)).status is Status.FAIL

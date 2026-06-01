@@ -59,6 +59,44 @@ const basePipeIssue = {
   url: 'https://github.com/test/42',
 }
 
+describe('HITL issues are rendered in the workstream (WS-RT)', () => {
+  it('renders a card for an issue escalated to the hitl bucket', () => {
+    // Before the fix PIPELINE_STAGES had no 'hitl' entry, so StreamView's
+    // `PIPELINE_STAGES.map(...)` never rendered the hitl bucket — an escalated
+    // issue vanished from the board entirely (present only in the HITL tab).
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      pipelineIssues: {
+        hitl: [{ issue_number: 77, title: 'Escalated issue', status: 'hitl' }],
+      },
+    }))
+    render(<StreamView {...defaultProps} />)
+
+    expect(screen.getByTestId('stage-section-hitl')).toBeTruthy()
+    expect(screen.getByTestId('stream-card-77')).toBeTruthy()
+    expect(screen.getByText('Escalated issue')).toBeTruthy()
+  })
+
+  it('labels the hitl bucket as needs-human, not merged, with a yellow dot', () => {
+    // The hitl stage has role:null like merged, so it shares the worker-less
+    // rendering branches. Those branches must stay stage-aware: a "Needs Human"
+    // escalation bucket reading "merged" + green (success) is a mislabel.
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      pipelineIssues: {
+        hitl: [{ issue_number: 77, title: 'Escalated issue', status: 'hitl' }],
+      },
+    }))
+    render(<StreamView {...defaultProps} />)
+
+    const header = screen.getByTestId('stage-header-hitl')
+    expect(header.textContent).not.toContain('merged')
+    expect(header.textContent).toContain('needs human')
+
+    const dot = screen.getByTestId('stage-dot-hitl')
+    expect(dot.style.background).not.toBe('var(--green)')
+    expect(dot.style.background).toBe('var(--yellow)')
+  })
+})
+
 describe('StreamView stage indicators', () => {
   it('keeps stream card horizontal inset aligned with its stage header', () => {
     mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({

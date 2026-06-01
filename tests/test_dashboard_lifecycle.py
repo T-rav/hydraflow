@@ -28,12 +28,9 @@ class TestCreateApp:
     def test_create_app_returns_fastapi_instance(
         self, config: HydraFlowConfig, event_bus: EventBus, state
     ) -> None:
-        from dashboard import HydraFlowDashboard
+        from fastapi import FastAPI
 
-        try:
-            from fastapi import FastAPI
-        except ImportError:
-            pytest.skip("FastAPI not installed")
+        from dashboard import HydraFlowDashboard
 
         dashboard = HydraFlowDashboard(config, event_bus, state)
         app = dashboard.create_app()
@@ -43,10 +40,7 @@ class TestCreateApp:
     def test_create_app_stores_app_on_instance(
         self, config: HydraFlowConfig, event_bus: EventBus, state
     ) -> None:
-        try:
-            from dashboard import HydraFlowDashboard
-        except ImportError:
-            pytest.skip("FastAPI not installed")
+        from dashboard import HydraFlowDashboard
 
         dashboard = HydraFlowDashboard(config, event_bus, state)
         app = dashboard.create_app()
@@ -56,10 +50,7 @@ class TestCreateApp:
     def test_create_app_title_is_hydraflow_dashboard(
         self, config: HydraFlowConfig, event_bus: EventBus, state
     ) -> None:
-        try:
-            from dashboard import HydraFlowDashboard
-        except ImportError:
-            pytest.skip("FastAPI not installed")
+        from dashboard import HydraFlowDashboard
 
         dashboard = HydraFlowDashboard(config, event_bus, state)
         app = dashboard.create_app()
@@ -390,32 +381,6 @@ class TestHealthRoute:
 
 # ---------------------------------------------------------------------------
 # Accessibility
-# ---------------------------------------------------------------------------
-
-
-class TestAccessibility:
-    @pytest.mark.skip(
-        reason="aria attribute is rendered by React in the browser, not in the HTML shell"
-    )
-    def test_human_input_field_has_aria_labelledby(
-        self, config: HydraFlowConfig, event_bus: EventBus, state
-    ) -> None:
-        """The human-input field must be linked to its label for screen readers."""
-        from fastapi.testclient import TestClient
-
-        from dashboard import HydraFlowDashboard
-
-        dashboard = HydraFlowDashboard(config, event_bus, state)
-        app = dashboard.create_app()
-
-        client = TestClient(app)
-        response = client.get("/")
-
-        assert 'aria-labelledby="human-input-question"' in response.text
-
-
-# ---------------------------------------------------------------------------
-# GET /api/state
 # ---------------------------------------------------------------------------
 
 

@@ -1,9 +1,11 @@
 import React, { createContext, useContext, useEffect, useRef, useCallback, useReducer, useMemo } from 'react'
-import { MAX_EVENTS, SYSTEM_WORKER_INTERVALS } from '../constants'
+import { MAX_EVENTS, SYSTEM_WORKER_INTERVALS, PIPELINE_POLL_SAFETY_NET_MS, WS_RECONNECT_BASE_MS, WS_RECONNECT_MAX_MS } from '../constants'
 import { deriveStageStatus } from '../hooks/useStageStatus'
 
 const emptyPipeline = {
   triage: [],
+  discover: [],
+  shape: [],
   plan: [],
   implement: [],
   review: [],
@@ -563,8 +565,11 @@ export function reducer(state, action) {
       return { ...state, events: merged }
     }
 
+    case 'pipeline_snapshot':
     case 'PIPELINE_SNAPSHOT': {
-      const incoming = action.data || {}
+      // WS frame carries {seq, stages}; REST dispatch passes stages already
+      // unwrapped. Normalize both to the bare stage map.
+      const incoming = action.data?.stages ?? action.data ?? {}
       const allStages = ['triage', 'discover', 'shape', 'plan', 'implement', 'review', 'hitl', 'merged']
 
       const nextStages = Object.fromEntries(allStages.map((key) => {
@@ -599,48 +604,6 @@ export function reducer(state, action) {
         r.id === reportId ? { ...r, status: newStatus } : r
       )
       return { ...state, trackedReports: updated }
-    }
-
-    case 'WS_PIPELINE_UPDATE': {
-      const { issueNumber, fromStage, toStage, status: pipeStatus } = action.data
-      const next = { ...state.pipelineIssues }
-
-      // Remove from source stage if specified
-      let foundInFrom = false
-      if (fromStage && next[fromStage]) {
-        const idx = next[fromStage].findIndex(i => i.issue_number === issueNumber)
-        if (idx >= 0) {
-          foundInFrom = true
-          next[fromStage] = next[fromStage].filter((_, i) => i !== idx)
-          // Add to target stage if specified
-          if (toStage && next[toStage] !== undefined) {
-            const moved = { issue_number: issueNumber, title: '', url: '', status: pipeStatus || 'queued' }
-            next[toStage] = [...next[toStage], moved]
-          }
-        }
-        // If not found in fromStage but toStage is merged, add anyway (item may have
-        // been removed by a prior event like review_update done)
-        if (!foundInFrom && toStage === 'merged') {
-          const alreadyMerged = (next.merged || []).some(i => i.issue_number === issueNumber)
-          if (!alreadyMerged) {
-            const moved = { issue_number: issueNumber, title: '', url: '', status: 'done' }
-            next.merged = [...(next.merged || []), moved]
-          }
-        }
-      } else if (!fromStage && pipeStatus) {
-        // Status-only update: find the issue in any stage and update its status
-        for (const stageKey of Object.keys(next)) {
-          const idx = next[stageKey].findIndex(i => i.issue_number === issueNumber)
-          if (idx >= 0) {
-            next[stageKey] = next[stageKey].map(i =>
-              i.issue_number === issueNumber ? { ...i, status: pipeStatus } : i
-            )
-            break
-          }
-        }
-      }
-
-      return { ...state, pipelineIssues: next }
     }
 
     case 'SESSION_RESET': {
@@ -861,35 +824,11 @@ function getReporterId() {
   return id
 }
 
-/** Maps a WebSocket event to a WS_PIPELINE_UPDATE action, or null if not applicable. */
-export function getPipelineAction(event) {
-  const issueNum = event.data?.issue != null ? Number(event.data.issue) : null
-  if (issueNum == null) return null
-  const s = event.data?.status
-  if (event.type === 'triage_update') {
-    if (s === 'done') return { type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: 'triage', toStage: 'plan', status: 'queued' } }
-    if (s === 'failed') return { type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: null, toStage: null, status: 'failed' } }
-    if (s) return { type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: null, toStage: null, status: 'active' } }
-  } else if (event.type === 'planner_update') {
-    if (s === 'done') return { type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: 'plan', toStage: 'implement', status: 'queued' } }
-    if (s === 'failed') return { type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: null, toStage: null, status: 'failed' } }
-    if (s) return { type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: null, toStage: null, status: 'active' } }
-  } else if (event.type === 'worker_update') {
-    if (s === 'done') return { type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: 'implement', toStage: 'review', status: 'queued' } }
-    if (s) return { type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: null, toStage: null, status: 'active' } }
-  } else if (event.type === 'review_update') {
-    if (s === 'done') return { type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: null, toStage: null, status: 'done' } }
-    if (s) return { type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: null, toStage: null, status: 'active' } }
-  } else if (event.type === 'merge_update' && s === 'merged') {
-    return { type: 'WS_PIPELINE_UPDATE', data: { issueNumber: issueNum, fromStage: 'review', toStage: 'merged', status: 'done' } }
-  }
-  return null
-}
-
 export function HydraFlowProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState)
   const wsRef = useRef(null)
   const reconnectTimer = useRef(null)
+  const reconnectAttempts = useRef(0)
   const lastEventTsRef = useRef(null)
   const bgWorkersRef = useRef(state.backgroundWorkers)
   const reporterIdRef = useRef(getReporterId())
@@ -1482,6 +1421,9 @@ export function HydraFlowProvider({ children }) {
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws${repoParam}`)
 
     ws.onopen = () => {
+      // Successful connect — reset the reconnect backoff so the next drop
+      // starts again from BASE rather than wherever the last storm left off.
+      reconnectAttempts.current = 0
       dispatch({ type: 'CONNECTED' })
       fetchWithRepo('/api/control/status')
         .then(r => r.json())
@@ -1543,7 +1485,9 @@ export function HydraFlowProvider({ children }) {
       fetchRepos()
       fetchRuntimes()
       if (lastEventTsRef.current) {
-        fetch(`/api/events?since=${encodeURIComponent(lastEventTsRef.current)}`)
+        // Route through fetchWithRepo so applyRepoParam appends &repo=<slug>;
+        // the backfill must hit the SELECTED repo's bus, not the default one.
+        fetchWithRepo(`/api/events?since=${encodeURIComponent(lastEventTsRef.current)}`)
           .then(r => r.json())
           .then(events => dispatch({ type: 'BACKFILL_EVENTS', data: events }))
           .catch(() => {})
@@ -1556,17 +1500,21 @@ export function HydraFlowProvider({ children }) {
         if (event.timestamp && (!lastEventTsRef.current || event.timestamp > lastEventTsRef.current)) {
           lastEventTsRef.current = event.timestamp
         }
-        // Dispatch WS pipeline updates for stage transitions
-        const pipelineAction = getPipelineAction(event)
-        if (pipelineAction) dispatch(pipelineAction)
-
+        // Board membership is driven authoritatively by the coalesced
+        // PIPELINE_SNAPSHOT push (handled in the reducer's pipeline_snapshot
+        // case) plus the 30s REST safety net. The former optimistic
+        // getPipelineAction → WS_PIPELINE_UPDATE layer was removed because it
+        // raced the snapshot and produced card flicker (recon B2).
         if (event.type === 'metrics_update') {
           fetchLifetimeStats()
           fetchWithRepo('/api/metrics').then(r => r.json()).then(data => dispatch({ type: 'METRICS', data })).catch(() => {})
           fetchGithubMetrics()
           fetchMetricsHistory()
         }
-        if (event.type === 'queue_update') fetchPipeline()
+        // queue_update no longer triggers a pipeline fetch: the QUEUE_UPDATE
+        // storm is the source of the REST-poll thrash. The authoritative
+        // pipeline view now arrives via the coalesced WS PIPELINE_SNAPSHOT
+        // push; queue_update still updates queueStats via the reducer.
         if (event.type === 'hitl_update' || event.type === 'hitl_escalation') fetchHitlItems()
         if (event.type === 'epic_update' || event.type === 'epic_ready' || event.type === 'epic_released') fetchEpics()
       } catch { /* ignore parse errors */ }
@@ -1582,13 +1530,27 @@ export function HydraFlowProvider({ children }) {
       // 1008 = Policy Violation — server explicitly rejected our repo slug.
       // Don't reconnect; the slug is invalid and retrying would loop forever.
       if (event.code === 1008) return
-      reconnectTimer.current = setTimeout(connect, 2000)
+      // Exponential backoff with full jitter so a flapping socket doesn't
+      // re-run the heavy onopen fan-out every 2s, and many clients don't
+      // reconnect in lockstep. delay = random(0, min(BASE * 2**n, MAX)).
+      const attempt = reconnectAttempts.current
+      reconnectAttempts.current = attempt + 1
+      const ceiling = Math.min(WS_RECONNECT_BASE_MS * 2 ** attempt, WS_RECONNECT_MAX_MS)
+      const delay = Math.random() * ceiling
+      // Cancel any still-pending reconnect before scheduling a new one — during
+      // a rapid flap two onclose cycles could otherwise leave two timers armed,
+      // briefly opening a second socket. One timer outstanding at a time.
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
+      reconnectTimer.current = setTimeout(connect, delay)
     }
 
-    // Don't force-close on error — browsers fire `close` after `error`
-    // automatically, and calling close() here races a frame still in flight
-    // through the Vite dev proxy, producing EPIPE noise during reconnect.
-    ws.onerror = () => {}
+    // Log the error for diagnosability, but don't force-close: browsers fire
+    // `close` after `error` automatically, and calling close() here races a
+    // frame still in flight through the Vite dev proxy, producing EPIPE noise
+    // during reconnect. The `close` handler owns the reconnect/backoff.
+    ws.onerror = (err) => {
+      console.warn('[HydraFlow] WebSocket error; awaiting close for reconnect', err)
+    }
     wsRef.current = ws
   }, [state.selectedRepoSlug, fetchLifetimeStats, fetchHitlItems, fetchGithubMetrics, fetchMetricsHistory, fetchPipeline, fetchPipelineStats, fetchEpics, fetchSessions, fetchRepos, fetchRuntimes, fetchWithRepo])
 
@@ -1605,13 +1567,15 @@ export function HydraFlowProvider({ children }) {
   }, [fetchWithRepo])
 
   // Pipeline polling — interval is editable via system worker controls.
-  // When WebSocket is connected and pipeline_stats events are flowing,
-  // double the polling interval since stats arrive via WebSocket.
+  // When the WebSocket is connected, the coalesced PIPELINE_SNAPSHOT push is
+  // authoritative, so the REST poll is demoted to a slow 30s safety net that
+  // catches any missed/coalesced WS frame. When disconnected, fall back to the
+  // fast editable worker cadence so the board stays live without the WS.
   const pipelinePollerIntervalMs = useMemo(() => {
+    if (state.connected) return PIPELINE_POLL_SAFETY_NET_MS
     const worker = state.backgroundWorkers.find(w => w.name === 'pipeline_poller')
-    const baseMs = (worker?.interval_seconds ?? SYSTEM_WORKER_INTERVALS.pipeline_poller) * 1000
-    return (state.connected && state.pipelineStats) ? baseMs * 2 : baseMs
-  }, [state.backgroundWorkers, state.connected, state.pipelineStats])
+    return (worker?.interval_seconds ?? SYSTEM_WORKER_INTERVALS.pipeline_poller) * 1000
+  }, [state.backgroundWorkers, state.connected])
 
   useEffect(() => {
     fetchPipeline()

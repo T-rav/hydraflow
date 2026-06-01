@@ -19,6 +19,7 @@ def _make_loop(tmp_path: Path, *, enabled: bool = True, **config_overrides):
     pr = AsyncMock()
     pr.list_closed_issues_by_label = AsyncMock(return_value=[])
     audit = MagicMock()
+    audit.daily_spend = MagicMock(return_value=0.0)
     loop = AutoAgentPreflightLoop(
         config=deps.config,
         state=state,
@@ -71,6 +72,23 @@ async def test_daily_budget_gate(
     result = await loop._do_work()
     assert result["status"] == "budget_exceeded"
     assert result["cap_usd"] == 50.0
+
+
+@pytest.mark.asyncio
+async def test_daily_budget_gate_uses_audit_floor_when_cache_lost_increment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The state spend cache (add_auto_agent_daily_spend) is written only after
+    # run_preflight returns, so a crash can lose the increment — the cache then
+    # reads 0 even though real spend exceeds the cap. The durable audit log still
+    # has the cost, so the gate must use it (max of cache + audit) and still trip.
+    monkeypatch.setenv("HYDRAFLOW_AUTO_AGENT_DAILY_BUDGET_USD", "50.0")
+    loop, state = _make_loop(tmp_path)
+    state.get_auto_agent_daily_spend = MagicMock(return_value=0.0)  # cache lost it
+    loop._audit_store.daily_spend = MagicMock(return_value=51.0)  # durable truth
+    result = await loop._do_work()
+    assert result["status"] == "budget_exceeded"
+    assert result["spend_usd"] == 51.0
 
 
 @pytest.mark.asyncio
@@ -230,6 +248,7 @@ async def test_resolve_worktree_uses_existing_path(tmp_path: Path) -> None:
     state = MagicMock()
     state.get_auto_agent_daily_spend = MagicMock(return_value=0.0)
     audit = MagicMock()
+    audit.daily_spend = MagicMock(return_value=0.0)
     loop = AutoAgentPreflightLoop(
         config=deps.config,
         state=state,
@@ -257,6 +276,7 @@ async def test_resolve_worktree_creates_when_missing(tmp_path: Path) -> None:
     state = MagicMock()
     state.get_auto_agent_daily_spend = MagicMock(return_value=0.0)
     audit = MagicMock()
+    audit.daily_spend = MagicMock(return_value=0.0)
     loop = AutoAgentPreflightLoop(
         config=deps.config,
         state=state,
@@ -284,6 +304,7 @@ async def test_resolve_worktree_falls_back_on_create_failure(
     state = MagicMock()
     state.get_auto_agent_daily_spend = MagicMock(return_value=0.0)
     audit = MagicMock()
+    audit.daily_spend = MagicMock(return_value=0.0)
     loop = AutoAgentPreflightLoop(
         config=deps.config,
         state=state,

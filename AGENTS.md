@@ -217,6 +217,7 @@ completeness / quality, optionally applies fixes, and returns a verdict.
 7. **Review instructions** — evaluate 3 dimensions; must find ≥`min_review_findings` issues or emit `THOROUGH_REVIEW_COMPLETE` block.
 8. **Verification step** — either "do NOT run tests (CI handles it)" or "run `make lint` + test cmd", depending on `max_ci_fix_attempts`.
 9. **Project audits** — SRP, type hints, naming, complexity, test 3As structure, security (injection, crypto, auth).
+   Includes the HydraFlow test-value standard: no skipped/xfail/commented-out or placeholder tests in active coverage, unit tests use documented factories/world-building helpers, integration tests keep real business logic wired and mock only external boundaries, and MockWorld scenarios assert fake-adapter state instead of raw mock call counts.
 10. **UI-specific checks** (when `"ui/" in diff`) — DRY, responsive, style consistency, component reuse.
 11. **Fix instructions** — make direct fixes and commit if issues are found.
 12. **Findings format** — `[SEVERITY] file[:line] - issue - expected fix`.

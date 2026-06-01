@@ -129,6 +129,7 @@ async def test_post_comment_dry_run(dry_config, event_bus):
 async def test_post_comment_handles_error(config, event_bus):
     """post_comment should log warning on failure without raising."""
 
+    config.gh_max_retries = 0
     mgr = make_pr_manager(config, event_bus)
     mock_create = (
         SubprocessMockBuilder()
@@ -182,6 +183,7 @@ async def test_post_pr_comment_dry_run(dry_config, event_bus):
 async def test_post_pr_comment_handles_error(config, event_bus):
     """post_pr_comment should log warning on failure without raising."""
 
+    config.gh_max_retries = 0
     mgr = make_pr_manager(config, event_bus)
     mock_create = (
         SubprocessMockBuilder()

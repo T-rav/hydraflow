@@ -14,7 +14,13 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
-from issue_store import IssueStoreStage
+from issue_store import STAGE_NAME_MAP
+
+# Backend stage keys → frontend stage names lives in issue_store (the routing
+# layer imports it FROM issue_store, never the reverse) to avoid a layering
+# inversion.  Re-exported here under the legacy _STAGE_NAME_MAP name so
+# _routes.py keeps working unchanged.
+_STAGE_NAME_MAP = STAGE_NAME_MAP
 
 _SAFE_SLUG_COMPONENT = re.compile(r"^[A-Za-z0-9_.\-]+$")
 
@@ -32,6 +38,7 @@ _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
     "stale_issue_gc": (300, 86400),
     "ci_monitor": (60, 86400),
     "branch_protection_auditor": (3600, 2_592_000),
+    "gate_activator": (3600, 2_592_000),
     "security_patch": (300, 86400),
     "repo_wiki": (300, 604800),
     "diagnostic": (10, 3600),
@@ -76,18 +83,6 @@ _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
 _EPIC_INTERNAL_LABELS: frozenset[str] = frozenset(
     {"hydraflow-epic-child", "hydraflow-epic"}
 )
-
-# Backend stage keys → frontend stage names
-_STAGE_NAME_MAP: dict[str, str] = {
-    IssueStoreStage.FIND: "triage",
-    IssueStoreStage.DISCOVER: "discover",
-    IssueStoreStage.SHAPE: "shape",
-    IssueStoreStage.PLAN: "plan",
-    IssueStoreStage.READY: "implement",
-    IssueStoreStage.REVIEW: "review",
-    IssueStoreStage.HITL: "hitl",
-    IssueStoreStage.MERGED: "merged",
-}
 
 # Frontend stage key → config label field name (for request-changes)
 _FRONTEND_STAGE_TO_LABEL_FIELD: dict[str, str] = {

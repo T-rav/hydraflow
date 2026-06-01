@@ -125,6 +125,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("max_review_diff_chars", "HYDRAFLOW_MAX_REVIEW_DIFF_CHARS", 15_000),
     ("gh_max_retries", "HYDRAFLOW_GH_MAX_RETRIES", 3),
     ("gh_api_concurrency", "HYDRAFLOW_GH_API_CONCURRENCY", 5),
+    (
+        "gh_circuit_breaker_max_failures",
+        "HYDRAFLOW_GH_CIRCUIT_BREAKER_MAX_FAILURES",
+        10,
+    ),
     ("max_issue_attempts", "HYDRAFLOW_MAX_ISSUE_ATTEMPTS", 3),
     ("memory_sync_interval", "HYDRAFLOW_MEMORY_SYNC_INTERVAL", 3600),
     ("max_merge_conflict_fix_attempts", "HYDRAFLOW_MAX_MERGE_CONFLICT_FIX_ATTEMPTS", 3),
@@ -147,6 +152,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_BRANCH_PROTECTION_AUDITOR_INTERVAL",
         604800,
     ),
+    ("gate_activator_interval", "HYDRAFLOW_GATE_ACTIVATOR_INTERVAL", 604800),
     ("rc_cadence_hours", "HYDRAFLOW_RC_CADENCE_HOURS", 4),
     ("staging_promotion_interval", "HYDRAFLOW_STAGING_PROMOTION_INTERVAL", 300),
     ("staging_rc_retention_days", "HYDRAFLOW_STAGING_RC_RETENTION_DAYS", 7),
@@ -212,6 +218,8 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("health_monitor_interval", "HYDRAFLOW_HEALTH_MONITOR_INTERVAL", 7200),
     ("wiki_freshness_stale_days", "HYDRAFLOW_WIKI_FRESHNESS_STALE_DAYS", 7),
     ("stale_issue_interval", "HYDRAFLOW_STALE_ISSUE_INTERVAL", 86400),
+    ("auditor_finding_max_age_days", "HYDRAFLOW_AUDITOR_FINDING_MAX_AGE_DAYS", 14),
+    ("triage_max_turns", "HYDRAFLOW_TRIAGE_MAX_TURNS", 3),
     ("triage_retry_interval", "HYDRAFLOW_TRIAGE_RETRY_INTERVAL", 86400),
     ("triage_retry_max_attempts", "HYDRAFLOW_TRIAGE_RETRY_MAX_ATTEMPTS", 3),
     ("sentry_poll_interval", "SENTRY_POLL_INTERVAL", 600),
@@ -310,6 +318,11 @@ _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
         2.0,
     ),
     ("loop_anomaly_cost_spike_ratio", "HYDRAFLOW_LOOP_ANOMALY_COST_SPIKE_RATIO", 5.0),
+    (
+        "gh_circuit_breaker_reset_timeout_s",
+        "HYDRAFLOW_GH_CIRCUIT_BREAKER_RESET_TIMEOUT_S",
+        60.0,
+    ),
 ]
 
 # Optional floats — `None` when env var is missing/empty/invalid.
@@ -334,6 +347,7 @@ _ENV_FLOAT_RATIO_OVERRIDES: list[tuple[str, str, float]] = [
 _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("dry_run", "HYDRAFLOW_DRY_RUN", False),
     ("sensor_enrichment_enabled", "HYDRAFLOW_SENSOR_ENRICHMENT_ENABLED", True),
+    ("gh_circuit_breaker_enabled", "HYDRAFLOW_GH_CIRCUIT_BREAKER_ENABLED", True),
     ("issue_cache_enabled", "HYDRAFLOW_ISSUE_CACHE_ENABLED", True),
     (
         "caching_issue_store_enabled",
@@ -388,6 +402,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("term_proposer_enabled", "HYDRAFLOW_TERM_PROPOSER_ENABLED", True),
     ("term_pruner_enabled", "HYDRAFLOW_TERM_PRUNER_ENABLED", True),
     ("edge_proposer_enabled", "HYDRAFLOW_EDGE_PROPOSER_ENABLED", True),
+    (
+        "use_quality_gate_in_review",
+        "HYDRAFLOW_REVIEW_USE_QUALITY_GATE",
+        True,
+    ),
     # Static config gates — 34 loops (dark-factory §2.1 #3 defense-in-depth)
     ("adr_reviewer_loop_enabled", "HYDRAFLOW_ADR_REVIEWER_LOOP_ENABLED", True),
     (
@@ -401,6 +420,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_BRANCH_PROTECTION_AUDITOR_LOOP_ENABLED",
         True,
     ),
+    ("gate_activator_loop_enabled", "HYDRAFLOW_GATE_ACTIVATOR_LOOP_ENABLED", True),
     ("contract_refresh_loop_enabled", "HYDRAFLOW_CONTRACT_REFRESH_LOOP_ENABLED", True),
     ("corpus_learning_loop_enabled", "HYDRAFLOW_CORPUS_LEARNING_LOOP_ENABLED", True),
     (
@@ -766,6 +786,14 @@ class HydraFlowConfig(BaseModel):
         le=20,
         description="Minimum review findings threshold for adversarial review",
     )
+    use_quality_gate_in_review: bool = Field(
+        default=True,
+        description=(
+            "When ci_enabled=False, use `make quality` (full suite) in review fix "
+            "prompts instead of `make lint && {test_cmd}`. Set False for repos "
+            "without a wired Makefile quality target."
+        ),
+    )
     max_merge_conflict_fix_attempts: int = Field(
         default=3,
         ge=0,
@@ -795,6 +823,31 @@ class HydraFlowConfig(BaseModel):
         ge=1,
         le=50,
         description="Max concurrent gh/git subprocess calls (prevents API rate limiting)",
+    )
+    gh_circuit_breaker_enabled: bool = Field(
+        default=True,
+        description=(
+            "Enable the gh/git circuit breaker (fails fast when GitHub is down). "
+            "Runtime-tunable via PATCH /api/config — the live kill-switch."
+        ),
+    )
+    gh_circuit_breaker_max_failures: int = Field(
+        default=10,
+        ge=1,
+        le=1000,
+        description=(
+            "Consecutive gh/git failures before the circuit breaker OPENs "
+            "(conservative — only trips on a sustained outage)"
+        ),
+    )
+    gh_circuit_breaker_reset_timeout_s: float = Field(
+        default=60.0,
+        ge=1.0,
+        le=3600.0,
+        description=(
+            "Seconds the gh/git circuit breaker stays OPEN before probing "
+            "(HALF_OPEN); it auto-recovers so it can't halt the factory forever"
+        ),
     )
 
     # Task source
@@ -980,6 +1033,15 @@ class HydraFlowConfig(BaseModel):
             "audits live branch protection against the canonical rulesets (ADR-0082)"
         ),
     )
+    gate_activator_interval: int = Field(
+        default=604800,
+        ge=3600,
+        le=2592000,
+        description=(
+            "GateActivatorLoop interval in seconds (default 7 days); proposes "
+            "activating planned gates whose protected surface now exists (ADR-0082)"
+        ),
+    )
     collaborator_check_enabled: bool = Field(
         default=True,
         description="When True, skip issues from non-collaborators at fetch time",
@@ -1092,6 +1154,23 @@ class HydraFlowConfig(BaseModel):
     triage_model: str = Field(
         default="gemini-3.1-pro-preview",
         description="Model for triage evaluation (fast/cheap)",
+    )
+    triage_max_turns: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description=(
+            "Max LLM turns for triage evaluation. Increase from 1 to allow "
+            "Read/Grep tool calls to verify currency and falsifiable claims."
+        ),
+    )
+    auditor_finding_max_age_days: int = Field(
+        default=14,
+        ge=0,
+        description=(
+            "Auto-close auditor-filed findings older than this many days. "
+            "0 = disabled. Auditor loops re-file findings on their next cycle."
+        ),
     )
     min_plan_words: int = Field(
         default=200,
@@ -2599,6 +2678,10 @@ class HydraFlowConfig(BaseModel):
     branch_protection_auditor_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for BranchProtectionAuditorLoop.",
+    )
+    gate_activator_loop_enabled: bool = Field(
+        default=True,
+        description="Deploy-time kill-switch for GateActivatorLoop.",
     )
     contract_refresh_loop_enabled: bool = Field(
         default=True,

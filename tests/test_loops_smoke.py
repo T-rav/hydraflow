@@ -74,8 +74,7 @@ async def test_loop_ticks_without_internal_raise(
 
     registry = build_services(config, bus, state, stop_event, callbacks)
     loop = getattr(registry, loop_field)
-    if loop is None:
-        pytest.skip(f"{loop_field} is gated off by config (optional integration)")
+    assert loop is not None, f"{loop_field} is gated off by config"
 
     try:
         await asyncio.wait_for(loop._do_work(), timeout=10.0)
@@ -101,8 +100,7 @@ async def test_loop_ticks_without_internal_raise(
             pass
         else:
             raise
-    except TimeoutError:
-        pytest.skip(
-            f"{loop_field} ticked beyond 10s — likely real network IO; "
-            "consider mocking the boundary for a deterministic smoke."
-        )
+    except TimeoutError as exc:
+        raise AssertionError(
+            f"{loop_field} ticked beyond 10s; mock the boundary for a deterministic smoke"
+        ) from exc

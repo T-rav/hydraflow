@@ -31,7 +31,7 @@ Notable design strengths:
 
 - `MockWorld._wire_targets` patches runner/PR/workspace methods from a single central point, preventing "works in MockWorld but fails in sandbox" divergence.
 - `_HarnessOrchestratorShim` and `_SafeProxy` protect dashboard polling routes against `AttributeError` 500s without leaking test-only logic into the harness core.
-- The `_is_fake_adapter = True` marker pattern is enforced by `test_mockworld_fakes_marker.py`; 14 of 15 exported fakes carry it (FakeHoneycomb is intentionally excluded from `fakes/__init__` exports).
+- The `_is_fake_adapter = True` marker pattern is enforced by `test_mockworld_fakes_marker.py`; as of the 2026-05-31 UAT hardening pass, `FakeHoneycomb` is also exported and marker-backed so generated MockWorld inventory includes it.
 
 Minor issues:
 
@@ -70,7 +70,7 @@ The three-layer standard (unit + MockWorld + sandbox e2e) is upheld for the core
 
 ## Dimension 3 — Fake Fidelity
 
-**Verdict: drift-risk for 11 of 15 fakes; no-contract**
+**Verdict: drift-risk for adapter-specific contracts; no-contract remains for several fakes**
 
 ADR-0047 is still in **Proposed** status. The contract test infrastructure exists and works (4 fakes have contract test files, cassette directories, and a `test_cassette_directory_not_empty` guard), but coverage is sparse.
 
@@ -84,7 +84,7 @@ ADR-0047 is still in **Proposed** status. The contract test infrastructure exist
 | `FakeClock` | none | none | 0 |
 | `FakeFS` | none | none | 0 |
 | `FakeHTTP` | none | none | 0 |
-| `FakeHoneycomb` | none | none | 0 |
+| `FakeHoneycomb` | `test_fake_honeycomb_contract.py` | N/A (span schema, no cassette) | N/A |
 | `FakeIssueFetcher` | none | none | 0 |
 | `FakeIssueStore` | none | none | 0 |
 | `FakeSentry` | none | none | 0 |
@@ -122,7 +122,7 @@ There are no overdue cassettes by the weekly refresh cadence at the time of this
 | Source | Coverage |
 |---|---|
 | `docs/wiki/testing.md` | Good. Two entries directly address this area: "Cassette-based fake adapter contract testing" (entry with `json:entry` block) and "MockWorld fixture composes all external fakes into controllable environment". Both are corroborated and marked `stale: false`. |
-| `docs/arch/generated/mockworld.md` | Good. Auto-generated, last refreshed from commit `d649803` on 2026-05-11. Accurately reflects the 15 fakes, their Port associations, and scenario usage. Notable: `FakeIssueFetcher` and `FakeIssueStore` show "—" under "Used in scenarios" — an accurate gap signal. |
+| `docs/arch/generated/mockworld.md` | Good. Auto-generated and refreshed by `make arch-regen`. Accurately reflects the fake adapters, their Port associations, and scenario usage. Notable: `FakeHoneycomb`, `FakeIssueFetcher`, and `FakeIssueStore` show "—" under "Used in scenarios" — an accurate gap signal. |
 | ADR-0022 | Accepted. Accurately describes the PipelineHarness pattern as implemented. No drift detected. |
 | ADR-0047 | **Proposed, not Accepted.** The cassette schema, contract tests, `ContractRefreshLoop`, and `FakeCoverageAuditorLoop` all exist and run. The ADR's intent is implemented but the status has not been advanced to Accepted. |
 | `docs/arch/functional_areas.yml` | Not read in this audit; not in scope for MockWorld area. |

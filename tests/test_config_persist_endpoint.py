@@ -73,6 +73,29 @@ class TestPatchConfigEndpoint:
         assert config.model == "opus"
 
     @pytest.mark.asyncio
+    async def test_patch_config_toggles_gh_circuit_breaker_live(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """The gh circuit breaker kill-switch must take effect without a restart.
+
+        The breaker lives in the process-global subprocess layer, so patch_config
+        re-applies the toggle to that global — not just the config object.
+        """
+        import subprocess_util
+
+        subprocess_util._gh_circuit_breaker_enabled = True  # as configured at startup
+        router = _make_router(config, event_bus, state, tmp_path)
+        endpoint = _find_endpoint(router, "/api/control/config")
+
+        response = await endpoint({"gh_circuit_breaker_enabled": False})
+        data = json.loads(response.body)
+
+        assert data["updated"]["gh_circuit_breaker_enabled"] is False
+        # Live kill-switch: the module global flipped, not just config.
+        assert subprocess_util._gh_circuit_breaker_enabled is False
+        assert config.gh_circuit_breaker_enabled is False
+
+    @pytest.mark.asyncio
     async def test_patch_config_with_persist_writes_file(
         self, event_bus: EventBus, state, tmp_path: Path
     ) -> None:

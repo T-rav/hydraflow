@@ -22,6 +22,24 @@ export const ACTIVE_STATUSES = [
 export const MAX_EVENTS = 5000
 
 /**
+ * Pipeline REST-poll cadence used as a safety net while the WebSocket is
+ * connected. The WS PIPELINE_SNAPSHOT push is authoritative when connected,
+ * so the poll is demoted to this slow 30s fallback (vs the fast worker cadence
+ * used when disconnected) to catch any missed/coalesced WS frame.
+ */
+export const PIPELINE_POLL_SAFETY_NET_MS = 30_000
+
+/**
+ * WebSocket reconnect backoff (PR5). A flapping socket previously re-ran the
+ * heavy onopen fan-out (10+ fetches + history replay) every fixed 2s. We now
+ * back off exponentially with full jitter — delay = random(0, min(BASE * 2**n,
+ * MAX)) — capped at MAX, and reset the attempt counter on a successful open.
+ * Jitter spreads reconnect storms across many tabs/clients.
+ */
+export const WS_RECONNECT_BASE_MS = 1_000
+export const WS_RECONNECT_MAX_MS = 30_000
+
+/**
  * Canonical pipeline stage definitions.
  * All stage metadata lives here to prevent drift across components.
  * Components derive their own views (uppercase labels, filtered subsets, etc.) from this array.
@@ -33,6 +51,7 @@ export const PIPELINE_STAGES = [
   { key: 'plan',      label: 'Plan',      color: theme.purple,      subtleColor: theme.purpleSubtle,  role: 'planner',     configKey: 'max_planners', track: 'junction' },
   { key: 'implement', label: 'Implement', color: theme.accent,      subtleColor: theme.accentSubtle,  role: 'implementer', configKey: 'max_workers',  track: 'engineering' },
   { key: 'review',    label: 'Review',    color: theme.orange,      subtleColor: theme.orangeSubtle,  role: 'reviewer',    configKey: 'max_reviewers', track: 'engineering' },
+  { key: 'hitl',      label: 'Needs Human', color: theme.yellow,    subtleColor: theme.yellowSubtle,  role: null,           configKey: null,           track: 'engineering' },
   { key: 'merged',    label: 'Merged',    color: theme.green,       subtleColor: theme.greenSubtle,   role: null,           configKey: null,           track: 'engineering' },
 ]
 
@@ -319,6 +338,7 @@ export const BACKGROUND_WORKERS = [
   { key: 'stale_issue_gc', label: 'Stale HITL Issue GC', description: 'Auto-closes stale HITL escalation issues — posts a farewell comment, capped at 10/cycle. Distinct from Stale General Issue Cleanup, which excludes HF lifecycle labels.', color: theme.textMuted, group: 'repo_health', tags: ['hygiene'] },
   { key: 'ci_monitor', label: 'CI Monitor', description: 'Detects failing CI on main and files/auto-closes issues.', color: theme.yellow, group: 'repo_health', tags: ['quality'] },
   { key: 'branch_protection_auditor', label: 'Branch Protection Auditor', description: 'Audits live GitHub branch protection against the canonical rulesets generated from gates.toml; files an issue on drift. See ADR-0082.', color: theme.purple, system: true, group: 'governance', tags: ['audit', 'drift'] },
+  { key: 'gate_activator', label: 'Gate Activator', description: 'Proposes activating planned gates in gates.toml once the surface each protects exists (producing job + make target present, profile matches); files a reviewed issue. See ADR-0082.', color: theme.purple, system: true, group: 'governance', tags: ['audit', 'gates'] },
   { key: 'security_patch', label: 'Security Patch', description: 'Polls Dependabot alerts and files issues for fixable vulnerabilities.', color: theme.red, group: 'repo_health', tags: ['security'] },
   { key: 'repo_wiki', label: 'Repo Wiki', description: 'Lints and maintains per-repo knowledge wikis compiled from plan/implement/review cycles.', color: theme.purple, group: 'learning', tags: ['knowledge'] },
   { key: 'diagnostic', label: 'Diagnostic Agent', description: 'Analyzes escalated issues, classifies severity, and attempts targeted fixes before HITL.', color: theme.blue, system: true, group: 'operations', tags: ['recovery'] },
