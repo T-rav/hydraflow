@@ -1618,7 +1618,10 @@ class ReviewPhase:
         """
         from review_advisor import (  # noqa: PLC0415
             build_surface_config,
+            compute_blast_radius,
+            diff_stats_from_text,
             is_advisor_enabled,
+            post_verify_retry_budget,
         )
 
         surface_cfg = build_surface_config(surface)
@@ -1674,12 +1677,21 @@ class ReviewPhase:
                     )
                 return result, diff
 
-            # VETO — either retry or escalate, up to surface_cfg.max_veto_retries.
-            # (Blast-radius-stratified retry budgets — refinement R-2 — are
-            # deferred to a dedicated PR: they override the surface-config
-            # max_veto_retries model, which needs deliberate co-design with the
-            # advisory-mode surfaces and the veto→HITL escalation scenarios.)
-            if attempt_number >= surface_cfg.max_veto_retries:
+            # VETO — either retry or escalate. Refinement R-2: the retry budget
+            # is stratified by the diff's blast radius (low=1, medium=2, high=3)
+            # rather than a flat surface value, so high-blast changes earn more
+            # automated fix attempts before escalating to a human and trivial
+            # ones escalate sooner. This loop serves the veto-authority PR-review
+            # surfaces (pr_review, pre_merge_spec_check; max_veto_retries>0);
+            # advisory-only surfaces (visual_gate/adr_review/wiki_ingest) run
+            # their own one-shot advisor and never enter this loop. The
+            # max_veto_retries==0 branch in post_verify_retry_budget is a
+            # defensive hard-cap (a zero-budget surface never retries/blocks).
+            _blast = compute_blast_radius(diff_stats_from_text(diff))
+            _retry_budget = post_verify_retry_budget(
+                _blast, surface_cfg.max_veto_retries
+            )
+            if attempt_number >= _retry_budget:
                 _emit_advisor_loop_metric(_veto_exhausted_total, {"surface": surface})
                 _emit_advisor_loop_metric(
                     _veto_retries_total,
