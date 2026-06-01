@@ -1089,9 +1089,24 @@ class PRManager:
                     continue
                 return False
 
+            # Resolve the issue number from the PR title once, here, so it can
+            # both (a) ride the MERGE_UPDATE event — the dashboard needs it to
+            # move the card review -> merged in real time — and (b) feed the
+            # per-issue cost check below. Prefer a Fixes/Closes/Resolves-anchored
+            # match so an embedded reference like "Fixes #12: address #34" picks
+            # the issue the PR actually fixes (not the first bare "#N"); fall
+            # back to the first "#N" for keyword-less titles (e.g.
+            # "feat(x): do thing (#123)") so cost is still attributed.
+            issue_match = re.search(
+                r"(?:Fixes|Closes|Resolves)\s+#(\d+)", pr_title or "", re.IGNORECASE
+            ) or re.search(r"#(\d+)", pr_title or "")
+            issue_no = int(issue_match.group(1)) if issue_match else None
+
             payload = MergeUpdatePayload(pr=pr_number, status="merged")
             if pr_title:
                 payload["title"] = pr_title
+            if issue_no is not None:
+                payload["issue"] = issue_no
             await self._bus.publish(
                 HydraFlowEvent(
                     type=EventType.MERGE_UPDATE,
@@ -1105,8 +1120,6 @@ class PRManager:
             # helper method) so the hook site is self-contained and
             # easy to reason about from merge_pr alone.
             try:
-                issue_match = re.search(r"#(\d+)", pr_title or "")
-                issue_no = int(issue_match.group(1)) if issue_match else None
                 if issue_no is not None:
                     from dedup_store import DedupStore  # noqa: PLC0415
 
