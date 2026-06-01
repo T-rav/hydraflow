@@ -68,3 +68,30 @@ class ReviewStateMixin:
         """Clear the last-reviewed commit SHA for *issue_number*."""
         self._data.last_reviewed_shas.pop(self._key(issue_number), None)
         self.save()
+
+    # --- blast radius ---
+
+    def set_review_blast_radius(self, issue_number: int, radius: str) -> None:
+        """Record the blast-radius tier for *issue_number*."""
+        self._data.review_blast_radii[self._key(issue_number)] = radius
+        self.save()
+
+    def get_review_blast_radius(self, issue_number: int) -> str | None:
+        """Return the blast-radius tier for *issue_number*, or *None*."""
+        return self._data.review_blast_radii.get(self._key(issue_number))
+
+    def min_review_passes_required(self, issue_number: int) -> int:
+        """Return the minimum fresh-eyes review passes for *issue_number*.
+
+        Defaults to 1 (low) when no blast radius has been recorded yet.
+        Delegates the tier->count mapping to ``review_advisor`` so there is a
+        single source of truth (ADR-0051 stratified table).
+        """
+        from review_advisor import (  # noqa: PLC0415
+            min_review_passes_for_blast_radius,
+        )
+
+        radius = self._data.review_blast_radii.get(self._key(issue_number), "low")
+        if radius not in ("low", "medium", "high"):
+            radius = "low"
+        return min_review_passes_for_blast_radius(radius)  # type: ignore[arg-type]

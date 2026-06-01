@@ -496,6 +496,16 @@ class ReviewRunner(BaseRunner):
             advisor_section += (
                 f"\n\n## Suggested direction\n\n{suggested_fix_direction}"
             )
+        if self._config.use_quality_gate_in_review:
+            verify_cmd_step = (
+                "3. Run `make quality` to verify your fixes pass (do not use "
+                "file-targeted subsets — architecture tests only run under the "
+                "full suite)."
+            )
+        else:
+            verify_cmd_step = (
+                f"3. Run `make lint` and `{test_cmd}` to verify your fixes pass."
+            )
         return f"""You are fixing review findings on PR #{pr.number} (issue #{issue.id}: {issue.title}).
 
 ## Review Feedback
@@ -506,8 +516,9 @@ class ReviewRunner(BaseRunner):
 
 1. Read the review feedback above carefully.
 2. Fix every issue identified by the reviewer.
-3. Run `make lint` and `{test_cmd}` to verify your fixes pass.
+{verify_cmd_step}
 4. Commit fixes with message: "review-fix: address review feedback (PR #{pr.number})"
+4a. **Self-review before pushing:** Run `git diff HEAD~N..HEAD` and confirm: no unintended files changed, no debug code remains, the fix's own failure mode is not worse than the original finding.
 5. **Post-commit verification:** After each commit, run `git diff --stat HEAD~1` and verify your commit by confirming that every intended file appears in the stat output. If a file is missing, your commit did NOT actually change it — go back and fix it.
 6. Do NOT introduce new features or refactor beyond what the review requested.
 
@@ -556,6 +567,13 @@ Then a brief summary on the next line starting with "SUMMARY: ".
                 scanning_section = f"\n\n## Code Scanning Alerts\n\n{formatted}"
 
         test_cmd = self._config.test_command
+        if self._config.use_quality_gate_in_review:
+            ci_verify_step = (
+                "3. Run `make quality` to verify locally (full suite: lint, "
+                "types, security, tests — do not use file-targeted subsets)."
+            )
+        else:
+            ci_verify_step = f"3. Run `make lint` and `{test_cmd}` to verify locally."
         prompt = f"""You are fixing CI failures on PR #{pr.number} (issue #{issue.id}: {issue.title}).
 
 ## CI Failure Summary
@@ -566,7 +584,7 @@ Then a brief summary on the next line starting with "SUMMARY: ".
 
 1. Read the failing CI output above.
 2. Fix the root causes — do NOT skip or disable tests.
-3. Run `make lint` and `{test_cmd}` to verify locally.
+{ci_verify_step}
 4. Commit fixes with message: "ci-fix: <description> (PR #{pr.number})"
 5. **Post-commit verification:** After each commit, run `git diff --stat HEAD~1` and verify your commit by confirming that every intended file appears in the stat output. If a file is missing, your commit did NOT actually change it — go back and fix it.
 
@@ -754,6 +772,15 @@ Then a brief summary on the next line starting with "SUMMARY: ".
                 "CI will verify these automatically after review."
             )
             fix_verify = "2. Do NOT run tests locally — CI will verify after push."
+        elif self._config.use_quality_gate_in_review:
+            verify_step = (
+                "5. Run `make quality` to verify everything passes "
+                "(full suite: lint, types, security, tests)."
+            )
+            fix_verify = (
+                "2. Run `make quality` (do not use file-targeted subsets — "
+                "architecture tests only run under the full suite)."
+            )
         else:
             verify_step = (
                 f"5. Run `make lint` and `{test_cmd}` to verify everything passes."
@@ -876,6 +903,7 @@ Then a brief summary on the next line starting with "SUMMARY: ".
 
 1. Evaluate four dimensions: **scope**, correctness, completeness, and quality.
 2. **Scope check (mandatory first step):** Compare every changed file against the issue title, description, and the implementation plan (if provided above). Flag any file or change that is unrelated to the stated goal or not in the plan. Unrelated test files, docs, or config changes are scope creep — reject them. Follow CLAUDE.md rules strictly (e.g., never add tests for ADR markdown content).
+2a. **Verify findings against live code (mandatory):** Before reporting any finding, grep or read the relevant live file to confirm the issue is present in the current codebase, not a stale artifact from a prior fix. A finding that does not appear in the live file at the relevant line is not a finding — skip it.
 3. Look for edge cases, missing error handling, security risks, test gaps, and style violations.
 4. You MUST find at least {min_findings} issues across all categories. If you find fewer, re-examine the code more carefully.
 5. If you genuinely find fewer than {min_findings} issues, include THOROUGH_REVIEW_COMPLETE:
@@ -921,6 +949,7 @@ If you find issues that you can fix:
 1. Make the fixes directly.
 {fix_verify}
 3. Commit with message: "review: fix <description> (PR #{pr.number})"
+3a. **Self-review before pushing (mandatory):** Run `git diff HEAD~N..HEAD` (replacing N with the number of commits in this session) and verify: (a) no unintended files changed, (b) no debug code or TODO comments remain, (c) the fix does not introduce a failure mode broader than the issue it resolves.
 4. **Post-commit verification (mandatory for each commit):** After each commit, run `git diff --stat HEAD~1` and verify your commit by confirming that every intended file appears in the stat output. If a file is missing from the stat, your commit did NOT actually change that file — go back and fix it before proceeding. This is especially critical for scope-creep removal commits. For factory migrations specifically, grep for the old pattern (e.g., `TaskFactory.create()`) in all test files that were supposed to be reverted.
 
 ## Findings Format

@@ -1814,6 +1814,13 @@ class StateData(BaseModel):
     )
     interrupted_issues: dict[str, str] = Field(default_factory=dict)
     last_reviewed_shas: dict[str, str] = Field(default_factory=dict)
+    review_blast_radii: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Per-issue blast-radius tier ('low'|'medium'|'high') computed at "
+            "pre-flight time. Used by the dashboard and ADR-0051 iteration planning."
+        ),
+    )
     pending_reports: list[PendingReport] = Field(default_factory=list)
     tracked_reports: list[TrackedReport] = Field(default_factory=list)
     issue_outcomes: dict[str, IssueOutcome] = Field(default_factory=dict)

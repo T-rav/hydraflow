@@ -276,7 +276,7 @@ def test_implementer_run_tool_prompt_eval_contract(tmp_path: Path) -> None:
 
 
 def test_reviewer_ci_fix_prompt_eval_normal(tmp_path: Path) -> None:
-    cfg = _cfg(tmp_path, test_command="pytest -q")
+    cfg = _cfg(tmp_path, test_command="pytest -q", use_quality_gate_in_review=False)
     runner = ReviewRunner(cfg, EventBus())
     issue = TaskFactory.create(title="CI fix")
     pr = PRInfoFactory.create()
