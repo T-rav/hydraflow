@@ -38,7 +38,7 @@ async def assert_outcome(api, page) -> None:
         "/api/events",
         lambda payload: any(
             isinstance(payload, list)
-            and e.get("type") == "BACKGROUND_WORKER_STATUS"
+            and e.get("type") == "background_worker_status"
             and e.get("data", {}).get("worker") == "ci_monitor"
             and e.get("data", {}).get("details", {}).get("status") == "red"
             and "issue_created" in e.get("data", {}).get("details", {})
@@ -51,7 +51,7 @@ async def assert_outcome(api, page) -> None:
     ci_events = [
         e
         for e in events_payload
-        if e.get("type") == "BACKGROUND_WORKER_STATUS"
+        if e.get("type") == "background_worker_status"
         and e.get("data", {}).get("worker") == "ci_monitor"
     ]
 
