@@ -5,6 +5,26 @@
 **Worktree SHA:** 038f2146
 **Functional area:** Trust Fleet (ADR-0045)
 
+## Reconciliation Status
+
+**Updated:** 2026-06-01 on `staging`.
+
+The April 2026 drift findings have been reconciled against current code and
+tests. The remaining notes below are historical review context; the actionable
+gaps from this audit are now closed:
+
+- `CorpusLearningLoop` returns `status="ok"` when it files corpus PRs, with
+  regression coverage in `tests/regressions/test_corpus_learning_status_telemetry.py`.
+- `StagingBisectLoop._compute_lineage_id` and
+  `PrinciplesAuditLoop._audit_hydraflow_self` are no longer present.
+- `TrustFleetSanityLoop` has filing-path coverage for `repair_ratio` and
+  `tick_error_ratio` in `tests/test_trust_fleet_sanity_loop.py`, plus
+  MockWorld breach coverage in `tests/scenarios/test_trust_fleet_sanity_scenario.py`.
+- `FlakeTrackerLoop._download_junit` has direct failure-path and malformed
+  artifact tests in `tests/test_flake_tracker_loop.py`.
+- `StagingBisectLoop` watchdog green, still-red, and timeout paths are covered
+  in unit tests and MockWorld scenarios.
+
 ---
 
 ## Matrix
@@ -15,16 +35,16 @@
 | ContractRefreshLoop | ⚠️ minor [bd:advisor-nekp] | ✅ covered | ✅ matches-reality | ✅ safe | ✅ documented |
 | CorpusLearningLoop | ⚠️ minor [bd:advisor-uyzu] | ✅ covered | ✅ matches-reality | N/A | ✅ documented |
 | FakeCoverageAuditorLoop | ✅ clean | ✅ covered | ✅ matches-reality | N/A | ✅ documented |
-| FlakeTrackerLoop | ✅ clean | ⚠️ thin [bd:advisor-q08q] | ✅ matches-reality | N/A | ✅ documented |
+| FlakeTrackerLoop | ✅ clean | ✅ covered | ✅ matches-reality | N/A | ✅ documented |
 | PrinciplesAuditLoop | ⚠️ minor [bd:advisor-90yv] | ✅ covered | ⚠️ drift-risk [bd:advisor-0dmd] | N/A | ✅ documented |
 | RCBudgetLoop | ✅ clean | ✅ covered | ✅ matches-reality | N/A | ✅ documented |
-| StagingBisectLoop | ⚠️ minor [bd:advisor-isag] | ✅ covered | ⚠️ drift-risk [bd:advisor-f6sm] | N/A | ✅ documented |
-| TrustFleetSanityLoop | ✅ clean | ⚠️ thin [bd:advisor-t27j] | ✅ matches-reality | N/A | ✅ documented |
+| StagingBisectLoop | ⚠️ minor [bd:advisor-isag] | ✅ covered | ✅ matches-reality | N/A | ✅ documented |
+| TrustFleetSanityLoop | ✅ clean | ✅ covered | ✅ matches-reality | N/A | ✅ documented |
 
 **Column counts:**
 - Code quality: ✅ 5 / ⚠️ 4 / ❌ 0
-- Test coverage: ✅ 7 / ⚠️ 2 / ❌ 0
-- MockWorld fidelity: ✅ 6 / ⚠️ 3 / ❌ 0
+- Test coverage: ✅ 9 / ⚠️ 0 / ❌ 0
+- MockWorld fidelity: ✅ 8 / ⚠️ 1 / ❌ 0
 - Subprocess safety: ✅ 1 / N/A 8 (no loop spawns LLM runner subprocesses)
 - Wiki/ADR currency: ✅ 9 / ⚠️ 0 / ❌ 0
 
@@ -203,23 +223,27 @@ Spec §12.1 cited in module docstring. ADR-0045 covers the loop. Testing wiki ha
 
 ---
 
-## Headline Findings
+## Headline Findings Reconciled
 
-1. **CorpusLearningLoop always returns `status="noop"` regardless of outcome** (`src/corpus_learning_loop.py:899`). When cases are filed, the event log records `status=noop`, which means `TrustFleetSanityLoop._collect_window_metrics` undercounts `issues_filed_day` for this loop. Fix: return `"ok"` when `cases_filed > 0` or `cases_validated > 0`.
+1. **Resolved — CorpusLearningLoop filed-work telemetry.** Current code returns `status="ok"` when `cases_filed > 0`; regression coverage locks this in.
 
-2. **StagingBisectLoop._compute_lineage_id is dead code** (`src/staging_bisect_loop.py:905–921`). The function has a test (`test_compute_lineage_id_is_deterministic`) but is never called in the production path. The actual lineage key comes from `state.find_lineage_for_pr` / `state.increment_retry_lineage_attempts`. The hash function was an earlier design that was superseded. Should be removed or wired in.
+2. **Resolved — StagingBisectLoop dead lineage helper.** `_compute_lineage_id` is no longer present; production lineage remains state-backed via `find_lineage_for_pr` / `increment_retry_lineage_attempts`.
 
-3. **PrinciplesAuditLoop._audit_hydraflow_self is dead code** (`src/principles_audit_loop.py:214–218`). The helper duplicates the `_run_audit` + `_save_snapshot` pair that `_do_work` already calls directly. The unit test `test_audit_hydraflow_self_saves_snapshot` exercises it, but nothing in the production loop calls it. Should be removed.
+3. **Resolved — PrinciplesAuditLoop dead self-audit helper.** `_audit_hydraflow_self` is no longer present; `_do_work` owns the self-audit flow directly.
 
-4. **StagingBisectLoop watchdog paths not covered by MockWorld scenarios.** The 6 scenario tests all short-circuit before `_run_full_bisect_pipeline`. `watchdog_green`, `watchdog_still_red`, and `watchdog_timeout` paths are unit-tested but have no scenario coverage. A scenario that exercises the post-revert watchdog would catch any state-tracker interface drift.
+4. **Resolved — StagingBisectLoop watchdog MockWorld coverage.** `watchdog_green`, `watchdog_still_red`, and `watchdog_timeout` now have scenario coverage.
 
-5. **FlakeTrackerLoop `_download_junit` failure path not tested.** Only 7 unit tests exist for the loop, and none assert the behavior when `gh run download` fails (artifact absent or non-zero exit) for a subset of runs. The loop should skip failed artifact downloads silently, but this is only verified indirectly.
+5. **Resolved — FlakeTrackerLoop `_download_junit` failure path.** Direct tests cover missing `databaseId`, non-zero `gh run download`, empty artifacts, malformed XML, valid XML, and multi-file merge.
 
 ---
 
-## Sampling Check
+## Original Sampling Check
 
-### 3 random ❌ / ⚠️ hand-verified
+The following section preserves the original 2026-05-12 audit evidence for
+traceability. Items marked as findings above have since been reconciled on
+`staging`.
+
+### 3 random ❌ / ⚠️ hand-verified at original audit time
 
 1. **CorpusLearningLoop `status="noop"` bug** — Confirmed at `src/corpus_learning_loop.py:899`. The return dict is hardcoded `"status": "noop"` in a single return statement at the end of `_do_work`, regardless of `cases_filed` value. Cross-checked against `TrustFleetSanityLoop._collect_window_metrics` — it reads `data.get("status") == "error"` only (not "noop"), so this doesn't cause a false error count, but `issues_filed_day` is sourced from `details.filed` (which is correctly returned in the dict). The status label is still misleading for dashboard display.
 
@@ -227,7 +251,7 @@ Spec §12.1 cited in module docstring. ADR-0045 covers the loop. Testing wiki ha
 
 3. **PrinciplesAuditLoop._audit_hydraflow_self dead code** — Confirmed at `src/principles_audit_loop.py:214`. The function calls `_run_audit` + `_save_snapshot` then returns the snapshot. `_do_work` (l.97) calls `_run_audit` + `_save_snapshot` directly and does NOT call `_audit_hydraflow_self`. Only the unit test at l.53 exercises it.
 
-### 3 random ✅ hand-verified
+### 3 random ✅ hand-verified at original audit time
 
 1. **FakeCoverageAuditorLoop code quality ✅** — Confirmed. `catalog_fake_methods` (l.72–117, 46 lines), `catalog_cassette_methods` (l.120–143, 24 lines), `_do_work` (l.316–393, 78 lines — the one function that exceeds 60 lines, but it's a flat dispatch loop with no nesting). The `_FAKE_HELPER_OVERRIDES` override dict correctly handles the `FakeGitHub.clear_rate_limit` case per tests at l.321–352.
 

@@ -10,12 +10,14 @@ Two existing scenarios (class TestTrustFleetSanityScenario):
   one ``hitl-escalation`` + ``trust-loop-anomaly`` issue with labels
   that include the breached detector kind.
 
-New breach-path scenario (class TestTrustFleetSanityBreachScenario):
+New breach-path scenarios (class TestTrustFleetSanityBreachScenario):
 
 * ``test_issues_per_hour_breach_files_escalation`` — rc_budget filing
   many issues within the hour window. Exercises the issues_per_hour
   breach path end-to-end through MockWorld without requiring
   BGWorkerManager (staleness skipped; metrics seeded via EventBus stub).
+* ``test_repair_ratio_breach_files_escalation`` — rc_budget reports a high
+  failed/repaired ratio. Exercises the repair_ratio breach path end-to-end.
 
 The loop's external surface (``_collect_window_metrics`` via the
 EventBus, ``_load_cost_reader``, ``_reconcile_closed_escalations``) is
@@ -248,3 +250,48 @@ class TestTrustFleetSanityBreachScenario:
 
         titles = [issue.title for issue in world.github._issues.values()]
         assert any("tick_error_ratio" in t and "corpus_learning" in t for t in titles)
+
+    async def test_repair_ratio_breach_files_escalation(self, tmp_path) -> None:
+        """rc_budget with failed repairs dominating successes -> escalation."""
+        world = MockWorld(tmp_path)
+
+        now = _dt.datetime.now(_dt.UTC)
+        seeded_bus = EventBus()
+        ts_recent = (now - _dt.timedelta(seconds=900)).isoformat()
+        breach_event = HydraFlowEvent(
+            type=EventType.BACKGROUND_WORKER_STATUS,
+            timestamp=ts_recent,
+            data={
+                "worker": "rc_budget",
+                "status": "ok",
+                "details": {"filed": 0, "repaired": 1, "failed": 10},
+            },
+        )
+
+        async def _preloaded_load(since: _dt.datetime) -> list[HydraFlowEvent]:
+            return [breach_event] if breach_event.timestamp >= since.isoformat() else []
+
+        seeded_bus.load_events_since = _preloaded_load  # type: ignore[method-assign]
+
+        state = MagicMock()
+        state.get_worker_heartbeats.return_value = {}
+        state.get_trust_fleet_sanity_attempts.return_value = 0
+        state.inc_trust_fleet_sanity_attempts.return_value = 1
+        state.get_trust_fleet_sanity_last_seen_counts.return_value = {}
+
+        _seed_ports(
+            world,
+            trust_fleet_sanity_state=state,
+            event_bus=seeded_bus,
+        )
+
+        stats = await world.run_with_loops(["trust_fleet_sanity"], cycles=1)
+
+        assert stats["trust_fleet_sanity"]["status"] == "ok", stats
+        assert stats["trust_fleet_sanity"].get("filed", 0) >= 1, stats
+
+        issue = next(iter(world.github._issues.values()))
+        assert "rc_budget" in issue.title
+        assert "repair_ratio" in issue.title
+        assert "hitl-escalation" in issue.labels
+        assert "trust-loop-anomaly" in issue.labels
