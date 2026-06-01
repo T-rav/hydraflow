@@ -191,9 +191,19 @@ def _get_gh_semaphore() -> asyncio.Semaphore:
 
 
 def _is_rate_limited(stderr: str) -> bool:
-    """Check if stderr indicates a GitHub API rate limit (403)."""
+    """Check if stderr indicates a GitHub API rate limit (HTTP 403 or 429).
+
+    GitHub signals rate limiting two ways: HTTP 403 for the secondary/abuse
+    limit ("You have exceeded a secondary rate limit") and HTTP 429 for the
+    primary limit. Both must route to the global cooldown in ``run_subprocess``
+    rather than the per-call retry path — a 429 that slips through would either
+    fail outright (429 is not in ``_RETRYABLE_PATTERNS``) or retry too fast,
+    amplifying the limit across concurrent agents instead of pausing.
+    """
     lower = stderr.lower()
-    return "rate limit" in lower and ("403" in lower or "http 403" in lower)
+    if "rate limit" not in lower:
+        return False
+    return any(code in lower for code in ("403", "http 403", "429", "http 429"))
 
 
 # Infrastructure/outage failure signatures — GitHub or the network is unhealthy.
