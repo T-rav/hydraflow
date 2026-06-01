@@ -27,7 +27,7 @@ from dedup_store import DedupStore
 from exception_classify import reraise_on_credit_or_bug
 from execution import SubprocessRunner
 from models import PendingReport, TranscriptEventData
-from runner_utils import AuthenticationRetryError, StreamConfig, stream_claude_process
+from runner_utils import AuthenticationRetryError, StreamConfig
 from screenshot_scanner import scan_base64_for_secrets
 from state import StateTracker
 
@@ -360,7 +360,10 @@ class ReportIssueLoop(BaseBackgroundLoop):
                 "source": "report_issue",
             }
 
-            transcript = await stream_claude_process(
+            from runner_utils import stream_claude_with_telemetry  # noqa: PLC0415
+
+            transcript = await stream_claude_with_telemetry(
+                config=self._config,
                 cmd=cmd,
                 prompt=prompt,
                 cwd=self._config.repo_root,
@@ -368,7 +371,7 @@ class ReportIssueLoop(BaseBackgroundLoop):
                 event_bus=self._bus,
                 event_data=event_data,
                 logger=logger,
-                config=StreamConfig(
+                stream_config=StreamConfig(
                     runner=self._runner,
                     gh_token=self._credentials.gh_token,
                 ),

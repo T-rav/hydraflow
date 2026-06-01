@@ -878,24 +878,23 @@ class WikiCompiler:
     async def _call_model(self, prompt: str) -> str | None:
         """Call the configured CLI backend for wiki compilation.
 
-        Never raises — all errors are logged and swallowed.
+        Routes through ``run_lightweight_agent`` so the spawn is
+        cost-visible (PromptTelemetry, source="wiki_compilation") and
+        pauses on credit exhaustion. ``CreditExhaustedError`` propagates;
+        all other errors are logged and swallowed (returns None).
         """
-        from agent_cli import build_lightweight_command  # noqa: PLC0415
-        from subprocess_util import make_clean_env  # noqa: PLC0415
-
-        tool = self._config.wiki_compilation_tool
-        model = self._config.wiki_compilation_model
-        cmd, cmd_input = build_lightweight_command(
-            tool=tool, model=model, prompt=prompt
-        )
-        env = make_clean_env(self._credentials.gh_token)
+        from runner_utils import run_lightweight_agent  # noqa: PLC0415
 
         try:
-            result = await self._runner.run_simple(
-                cmd,
-                env=env,
-                input=cmd_input,
+            result = await run_lightweight_agent(
+                runner=self._runner,
+                config=self._config,
+                tool=self._config.wiki_compilation_tool,
+                model=self._config.wiki_compilation_model,
+                prompt=prompt,
+                source="wiki_compilation",
                 timeout=self._config.wiki_compilation_timeout,
+                gh_token=self._credentials.gh_token,
             )
             if result.returncode != 0:
                 logger.warning(

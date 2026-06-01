@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import logging
 
-from agent_cli import build_lightweight_command
 from config import Credentials, HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from execution import SubprocessRunner, get_default_runner
 from models import TranscriptSummaryPayload
 from pr_manager import PRManager
 from state import StateTracker
-from subprocess_util import make_clean_env
 
 logger = logging.getLogger("hydraflow.transcript_summarizer")
 
@@ -259,20 +257,21 @@ class TranscriptSummarizer:
         """Call the configured CLI backend to summarize.
 
         Returns the model output, or ``None`` on failure.
+        ``CreditExhaustedError`` (raised by ``run_lightweight_agent`` on a
+        billing signal) propagates so the loop can pause.
         """
-        tool = self._config.transcript_summary_tool
-        model = self._config.transcript_summary_model
-        cmd, cmd_input = build_lightweight_command(
-            tool=tool, model=model, prompt=prompt
-        )
-        env = make_clean_env(self._credentials.gh_token)
+        from runner_utils import run_lightweight_agent  # noqa: PLC0415
 
         try:
-            result = await self._runner.run_simple(
-                cmd,
-                env=env,
-                input=cmd_input,
+            result = await run_lightweight_agent(
+                runner=self._runner,
+                config=self._config,
+                tool=self._config.transcript_summary_tool,
+                model=self._config.transcript_summary_model,
+                prompt=prompt,
+                source="transcript_summary",
                 timeout=self._config.transcript_summary_timeout,
+                gh_token=self._credentials.gh_token,
             )
             if result.returncode != 0:
                 logger.warning(

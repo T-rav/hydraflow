@@ -73,7 +73,7 @@ class TestReportEventFlow:
         fake_issue_url = "https://github.com/owner/repo/issues/42"
 
         with patch(
-            "report_issue_loop.stream_claude_process",
+            "runner_utils.stream_claude_process",
             new_callable=AsyncMock,
         ) as mock_stream:
             mock_stream.return_value = (
@@ -136,7 +136,7 @@ class TestReportEventFlow:
         state.add_tracked_report(tracked)
 
         with patch(
-            "report_issue_loop.stream_claude_process",
+            "runner_utils.stream_claude_process",
             new_callable=AsyncMock,
         ) as mock_stream:
             # Return transcript with no issue URL

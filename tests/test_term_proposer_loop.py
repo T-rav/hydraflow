@@ -232,3 +232,28 @@ class TestTermProposerLoopFlow:
         result = await loop._do_work()
         assert result["candidates"] == 0
         assert port.calls == []
+
+
+class TestTermProposerLoopCreditPropagation:
+    """WS-2.2 self-review M1: a credit-exhaustion signal from the LLM draft must
+    propagate out of ``_do_work`` to the loop's pause handler, NOT be swallowed by
+    the broad ``except (ValueError, RuntimeError)`` — ``CreditExhaustedError``
+    subclasses ``RuntimeError``, so without the dedicated re-raise clause the loop
+    keeps spawning against an exhausted billing account."""
+
+    @pytest.mark.asyncio
+    async def test_credit_exhausted_propagates_from_do_work(
+        self, synthetic_repo: Path
+    ) -> None:
+        from unittest.mock import AsyncMock
+
+        from subprocess_util import CreditExhaustedError
+
+        loop, _, port = _build_loop(synthetic_repo, fake_llm_response={})
+        # synthetic_repo yields a BarRunner candidate, so draft() is invoked.
+        loop._llm = MagicMock()
+        loop._llm.draft = AsyncMock(side_effect=CreditExhaustedError("credit out"))
+
+        with pytest.raises(CreditExhaustedError):
+            await loop._do_work()
+        assert port.calls == []  # no PR opened on a billing-blocked tick

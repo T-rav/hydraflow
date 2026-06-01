@@ -90,7 +90,7 @@ class TestAgentExceptionMarksReportFailed:
         state.add_tracked_report(tracked)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.side_effect = RuntimeError("agent crashed unexpectedly")
             await loop._do_work()
@@ -129,7 +129,7 @@ class TestAgentExceptionMarksReportFailed:
         state.add_tracked_report(tracked)
 
         with patch(
-            "report_issue_loop.stream_claude_process", new_callable=AsyncMock
+            "runner_utils.stream_claude_process", new_callable=AsyncMock
         ) as mock_stream:
             mock_stream.side_effect = RuntimeError("agent crashed unexpectedly")
             await loop._do_work()

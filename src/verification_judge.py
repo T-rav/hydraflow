@@ -22,7 +22,7 @@ from models import (
     VerificationJudgePayload,
 )
 from precheck import run_precheck_context
-from runner_utils import StreamConfig, stream_claude_process, terminate_processes
+from runner_utils import StreamConfig, terminate_processes
 
 if TYPE_CHECKING:
     from execution import SubprocessRunner
@@ -551,7 +551,10 @@ Diff excerpt:
 
     async def _execute(self, cmd: list[str], prompt: str, issue_number: int) -> str:
         """Run the claude judge process."""
-        return await stream_claude_process(
+        from runner_utils import stream_claude_with_telemetry  # noqa: PLC0415
+
+        return await stream_claude_with_telemetry(
+            config=self._config,
             cmd=cmd,
             prompt=prompt,
             cwd=self._config.repo_root,
@@ -559,11 +562,12 @@ Diff excerpt:
             event_bus=self._bus,
             event_data={"issue": issue_number, "source": "verification_judge"},
             logger=logger,
-            config=StreamConfig(
+            stream_config=StreamConfig(
                 timeout=self._config.agent_timeout,
                 runner=self._runner,
                 gh_token=self._credentials.gh_token,
             ),
+            issue_number=issue_number,
         )
 
     def terminate(self) -> None:

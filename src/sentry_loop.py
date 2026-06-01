@@ -20,6 +20,7 @@ from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import Credentials, HydraFlowConfig
 from dedup_store import DedupStore
 from exception_classify import reraise_on_credit_or_bug
+from subprocess_util import AuthenticationError, CreditExhaustedError
 
 if TYPE_CHECKING:
     from execution import SubprocessRunner
@@ -118,6 +119,13 @@ class SentryLoop(BaseBackgroundLoop):
                     created, skipped = await self._process_issue(
                         issue, project["slug"], min_events
                     )
+                except (AuthenticationError, CreditExhaustedError):
+                    # Billing/auth -> propagate so the supervised loop pauses
+                    # (BaseBackgroundLoop). This per-issue loop is the resilience
+                    # boundary: malformed per-issue data (e.g. a non-numeric event
+                    # count, issue #6963) must stay tolerated below, NOT crash the
+                    # tick — so reraise credit/auth ONLY, not all likely-bugs.
+                    raise
                 except Exception:  # noqa: BLE001
                     logger.warning(
                         "Sentry issue processing failed — skipping: %s",
@@ -368,7 +376,10 @@ class SentryLoop(BaseBackgroundLoop):
 
         from agent_cli import build_agent_command  # noqa: PLC0415
         from models import TranscriptEventData  # noqa: PLC0415
-        from runner_utils import StreamConfig, stream_claude_process  # noqa: PLC0415
+        from runner_utils import (  # noqa: PLC0415
+            StreamConfig,
+            stream_claude_with_telemetry,
+        )
 
         cmd = build_agent_command(
             tool=self._config.sentry_tool,
@@ -379,7 +390,8 @@ class SentryLoop(BaseBackgroundLoop):
         event_data: TranscriptEventData = {"source": "sentry_ingest"}
 
         try:
-            transcript = await stream_claude_process(
+            transcript = await stream_claude_with_telemetry(
+                config=self._config,
                 cmd=cmd,
                 prompt=prompt,
                 cwd=self._config.repo_root,
@@ -387,7 +399,7 @@ class SentryLoop(BaseBackgroundLoop):
                 event_bus=self._bus,
                 event_data=event_data,
                 logger=logger,
-                config=StreamConfig(
+                stream_config=StreamConfig(
                     runner=self._runner,
                     gh_token=self._credentials.gh_token,
                 ),

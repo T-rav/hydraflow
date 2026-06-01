@@ -8,7 +8,6 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from agent_cli import build_lightweight_command
 from exception_classify import reraise_on_credit_or_bug
 from models import ConflictResolutionResult, HITLUpdatePayload, PRInfo
 from phase_utils import MemorySuggester
@@ -799,42 +798,30 @@ TROUBLESHOOTING_PATTERN_END
 
 If nothing novel, output exactly: NO_NEW_PATTERN"""
 
-        from subprocess_util import (
-            CreditExhaustedError,
-            is_credit_exhaustion,
-            make_clean_env,
-            parse_credit_resume_time,
-        )
+        from runner_utils import run_lightweight_agent  # noqa: PLC0415
 
         tool = self._config.background_tool
         if tool == "inherit":
             tool = "claude"
         model = self._config.background_model or "haiku"
 
-        cmd, cmd_input = build_lightweight_command(
-            tool=tool, model=model, prompt=prompt
-        )
-
-        env = make_clean_env(self._credentials.gh_token)
-
         try:
-            result = await self._agents._runner.run_simple(
-                cmd,
-                env=env,
-                input=cmd_input,
+            # run_lightweight_agent builds the command, raises
+            # CreditExhaustedError on credit-out (exception OR stdout/stderr
+            # text) so the outer loop pauses on the billing signal, reraises
+            # likely-bugs, collapses transient failures to rc=-1, and records
+            # PromptTelemetry(source="pr_unsticker").
+            result = await run_lightweight_agent(
+                runner=self._agents._runner,
+                config=self._config,
+                tool=tool,
+                model=model,
+                prompt=prompt,
+                source="pr_unsticker",
                 timeout=60.0,
+                gh_token=self._credentials.gh_token,
+                issue_number=issue_number,
             )
-            # Dark-factory contract: the lightweight run_simple path surfaces
-            # credit-out as rc!=0 (sometimes with a "usage limit reached" blob)
-            # without raising. Convert that to CreditExhaustedError so the outer
-            # loop pauses on the billing signal instead of silently degrading
-            # reflection to None. Mirrors adversarial_agent_runner.py.
-            for blob in (result.stdout or "", result.stderr or ""):
-                if blob and is_credit_exhaustion(blob):
-                    raise CreditExhaustedError(
-                        "PR unsticker reflection model signaled credit exhaustion",
-                        resume_at=parse_credit_resume_time(blob),
-                    )
             if result.returncode != 0:
                 logger.debug(
                     "Troubleshooting reflection model failed (rc=%d)",

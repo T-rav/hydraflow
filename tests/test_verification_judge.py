@@ -1380,7 +1380,7 @@ class TestExecuteGhToken:
         judge = VerificationJudge(cfg, event_bus, credentials=creds)
 
         with patch(
-            "verification_judge.stream_claude_process",
+            "runner_utils.stream_claude_process",
             new_callable=AsyncMock,
             return_value="transcript",
         ) as mock_stream:
