@@ -54,6 +54,7 @@ def _make_loop(
     security_patch_interval: int = 3600,
     alerts: list[dict] | None = None,
     existing_dedup: list[str] | None = None,
+    existing_issue_number: int = 0,
 ) -> tuple[SecurityPatchLoop, AsyncMock, asyncio.Event]:
     """Build a SecurityPatchLoop with test-friendly defaults."""
     deps = make_bg_loop_deps(
@@ -66,6 +67,11 @@ def _make_loop(
     pr_manager = AsyncMock()
     pr_manager.get_dependabot_alerts = AsyncMock(return_value=alerts or [])
     pr_manager.create_issue = AsyncMock(return_value=42)
+    # The GitHub-side backstop: 0 = no existing open issue with that title
+    # (the common case, so create proceeds). A positive number simulates an
+    # issue already filed on GitHub — e.g. the local dedup file lost the entry
+    # to a crash between create_issue and dedup.add on a prior tick.
+    pr_manager.find_existing_issue = AsyncMock(return_value=existing_issue_number)
 
     # Seed dedup store file if needed
     dedup_path = deps.config.data_root / "memory" / "security_patch_dedup.json"
@@ -146,6 +152,26 @@ class TestSecurityPatchLoopWork:
         assert result["filed"] == 0
         assert result["skipped_dedup"] == 1
         pm.create_issue.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_backstop_skips_create_when_issue_exists_on_github(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression: the alert is NOT in the local dedup file — simulating a
+        # crash between create_issue and dedup.add on a prior tick, which filed
+        # the issue on GitHub but lost the local dedup entry. Relying solely on
+        # the local file would re-file (duplicate). The GitHub-side backstop
+        # (find_existing_issue) must catch it: no second create_issue, and the
+        # local dedup is healed so later ticks skip it without the gh query.
+        alert = _make_alert(1)
+        loop, pm, _stop = _make_loop(tmp_path, alerts=[alert], existing_issue_number=99)
+        result = await loop._do_work()
+        assert result is not None
+        pm.find_existing_issue.assert_awaited_once()
+        pm.create_issue.assert_not_called()
+        assert result["filed"] == 0
+        assert result["skipped_existing"] == 1
+        assert "1" in loop._dedup.get(), "local dedup must be healed by the backstop"
 
     @pytest.mark.asyncio
     async def test_severity_below_threshold_skipped(self, tmp_path: Path) -> None:
