@@ -103,3 +103,51 @@ def test_check_returns_one_when_drifted(populated_repo: Path):
     )
     rc = check(repo_root=populated_repo, generated_dir=out)
     assert rc == 1
+
+
+def test_emitted_artifact_body_has_no_sha_footer(populated_repo: Path):
+    from arch.runner import emit
+
+    out = populated_repo / "docs/arch/generated"
+    emit(repo_root=populated_repo, out_dir=out)
+    loops_text = (out / "loops.md").read_text()
+    assert "_Regenerated from commit" not in loops_text
+    assert "<!-- arch:generated -->" in loops_text
+
+
+def test_strip_footer_handles_html_comment_placeholder():
+    from arch.runner import _strip_footer
+
+    body = "# Title\n\ncontent\n\n<!-- arch:generated -->\n"
+    assert "<!-- arch:generated -->" not in _strip_footer(body)
+
+
+def test_check_no_conflict_after_two_emits_same_repo(populated_repo: Path):
+    from arch.runner import check, emit
+
+    out = populated_repo / "docs/arch/generated"
+    emit(repo_root=populated_repo, out_dir=out)
+    # Second emit simulates a different branch's commit being forced in
+    emit(repo_root=populated_repo, out_dir=out)
+    assert check(repo_root=populated_repo, generated_dir=out) == 0
+
+
+def test_artifact_files_covers_ubiquitous_language():
+    from arch.runner import _ARTIFACT_FILES
+
+    assert "ubiquitous-language.md" in _ARTIFACT_FILES
+    assert "ubiquitous-language-context-map.md" in _ARTIFACT_FILES
+
+
+def test_artifact_files_matches_compute_artifacts_keys(populated_repo: Path):
+    from arch.runner import _ARTIFACT_FILES, _compute_artifacts
+
+    fa_path = populated_repo / "docs/arch/functional_areas.yml"
+    fa_path.parent.mkdir(parents=True, exist_ok=True)
+    fa_path.write_text(
+        "areas:\n  orchestration:\n    label: Orchestration\n    description: x\n"
+    )
+    computed_keys = set(_compute_artifacts(populated_repo).keys())
+    assert (
+        set(_ARTIFACT_FILES) == computed_keys
+    )  # all emitted files must be drift-checked

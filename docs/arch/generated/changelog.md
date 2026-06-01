@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W22
 
+- `57bf27f` — review: enforce test value standards *(2026-05-31)*
+- `afda157` — test(mockworld): assert side effects through fake state (#9124) (#9124) *(2026-05-31)*
 - `1e5ce26` — test(mockworld): count real scenario key invocations (#9121) (#9121) *(2026-05-30)*
 - `347cc9e` — test(mockworld): close loop coverage matrix gaps (#9119) (#9119) *(2026-05-30)*
 - `932dc1d` — fix(mockworld): include FakeHoneycomb in generated map (#9116) (#9116) *(2026-05-30)*
@@ -382,4 +384,4 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `ac0ecda` — Fixes #1883: [Bug Report] remove the processes tab too, and related... (#1906) (#1906) *(2026-03-04)*
 
 
-_Regenerated from commit `23d41c7` on 2026-05-31 06:11 UTC. Source last changed at `23d41c7`. Status: 🟢 fresh._
+<!-- arch:generated -->
