@@ -388,6 +388,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("term_proposer_enabled", "HYDRAFLOW_TERM_PROPOSER_ENABLED", True),
     ("term_pruner_enabled", "HYDRAFLOW_TERM_PRUNER_ENABLED", True),
     ("edge_proposer_enabled", "HYDRAFLOW_EDGE_PROPOSER_ENABLED", True),
+    (
+        "use_quality_gate_in_review",
+        "HYDRAFLOW_REVIEW_USE_QUALITY_GATE",
+        True,
+    ),
     # Static config gates — 34 loops (dark-factory §2.1 #3 defense-in-depth)
     ("adr_reviewer_loop_enabled", "HYDRAFLOW_ADR_REVIEWER_LOOP_ENABLED", True),
     (
@@ -765,6 +770,14 @@ class HydraFlowConfig(BaseModel):
         ge=0,
         le=20,
         description="Minimum review findings threshold for adversarial review",
+    )
+    use_quality_gate_in_review: bool = Field(
+        default=True,
+        description=(
+            "When ci_enabled=False, use `make quality` (full suite) in review fix "
+            "prompts instead of `make lint && {test_cmd}`. Set False for repos "
+            "without a wired Makefile quality target."
+        ),
     )
     max_merge_conflict_fix_attempts: int = Field(
         default=3,
