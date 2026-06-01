@@ -32,10 +32,8 @@ _DISCOVER_START = "DISCOVER_START"
 _DISCOVER_END = "DISCOVER_END"
 _JSON_BLOCK_RE = re.compile(r"```json\s*\n(.*?)\n```", re.DOTALL)
 
-# Evaluator skill + escalation label constants (§4.10)
+# Evaluator skill (§4.10)
 _SKILL_NAME = "discover-completeness"
-_ESCALATION_LABEL_STUCK = "discover-stuck"
-_ESCALATION_LABEL_HITL = "hitl-escalation"
 
 
 def _consume_mockworld_discover_script(
@@ -423,7 +421,10 @@ class DiscoverRunner(BaseRunner):
         issue_number = await prs.create_issue(
             title=f"[discover-stuck] #{task.id} — {task.title}",
             body="\n".join(body_lines),
-            labels=[_ESCALATION_LABEL_HITL, _ESCALATION_LABEL_STUCK],
+            labels=[
+                self._config.hitl_escalation_label[0],
+                self._config.discover_stuck_label[0],
+            ],
         )
         if issue_number and dedup is not None:
             dedup.add(key)

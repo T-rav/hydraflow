@@ -51,8 +51,6 @@ logger = logging.getLogger("hydraflow.wiki_rot_detector_loop")
 
 _MAX_ATTEMPTS = 3
 _EXCERPT_CHARS = 500
-_ISSUE_LABELS_FIND: tuple[str, ...] = ("hydraflow-find", "wiki-rot")
-_ISSUE_LABELS_ESCALATE: tuple[str, ...] = ("hitl-escalation", "wiki-rot-stuck")
 
 
 class WikiRotDetectorLoop(BaseBackgroundLoop):
@@ -157,7 +155,13 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         try:
             emit_loop_subprocess_trace(
                 loop=self._worker_name,
-                command=["gh", "issue", "list", "--label", "wiki-rot-stuck"],
+                command=[
+                    "gh",
+                    "issue",
+                    "list",
+                    "--label",
+                    self._config.wiki_rot_stuck_label[0],
+                ],
                 exit_code=0,
                 duration_ms=duration_ms,
                 stderr_excerpt=(
@@ -203,8 +207,7 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
                 if dedup_key in dedup_seen:
                     continue
 
-                filed += 1
-                await self._file_find(
+                if not await self._file_find(
                     slug=slug,
                     entry_title=title,
                     entry_path=str(entry_path),
@@ -212,16 +215,19 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
                     cite=cite,
                     suggestion=suggestion,
                     hints=hints,
-                )
+                ):
+                    continue
+                filed += 1
                 dedup_seen.add(dedup_key)
 
                 attempts = self._state.inc_wiki_rot_attempts(subject)
                 if attempts >= _MAX_ATTEMPTS:
-                    await self._file_escalation(
+                    if not await self._file_escalation(
                         slug=slug,
                         cite=cite,
                         attempts=attempts,
-                    )
+                    ):
+                        continue
                     escalated += 1
 
         self._dedup.set_all(dedup_seen)
@@ -304,7 +310,7 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         cite: Cite,
         suggestion: str | None,
         hints: list[Cite],
-    ) -> None:
+    ) -> bool:
         title = f"Wiki rot: {entry_title} cites missing {cite.raw}"
         excerpt = _excerpt_around(body, cite.raw, _EXCERPT_CHARS)
         lines: list[str] = [
@@ -332,11 +338,15 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
             "through the standard review + auto-merge flow.",
         ]
         body_out = "\n".join(lines)
-        await self._pr.create_issue(
+        issue_number = await self._pr.create_issue(
             title,
             body_out,
-            list(_ISSUE_LABELS_FIND),
+            [self._config.find_label[0], self._config.wiki_rot_label[0]],
         )
+        if issue_number is None:
+            logger.warning("wiki_rot_detector: failed to file find issue for %s", slug)
+            return False
+        return True
 
     async def _file_escalation(
         self,
@@ -344,7 +354,7 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         slug: str,
         cite: Cite,
         attempts: int,
-    ) -> None:
+    ) -> bool:
         title = f"Wiki rot stuck: {slug} cites missing {cite.raw}"
         body = (
             "**Escalation — WikiRotDetectorLoop (spec §4.9 / §3.2).**\n\n"
@@ -356,11 +366,22 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
             "close this issue. The dedup key + attempt counter clear "
             "automatically on close (spec §3.2).\n"
         )
-        await self._pr.create_issue(
+        issue_number = await self._pr.create_issue(
             title,
             body,
-            list(_ISSUE_LABELS_ESCALATE),
+            [
+                self._config.hitl_escalation_label[0],
+                self._config.wiki_rot_stuck_label[0],
+            ],
         )
+        if issue_number is None:
+            logger.warning(
+                "wiki_rot_detector: failed to file escalation for %s/%s",
+                slug,
+                cite.raw,
+            )
+            return False
+        return True
 
     async def _reconcile_closed_escalations(self) -> None:
         """Poll closed ``wiki-rot-stuck`` escalations and clear the
@@ -415,9 +436,9 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
             "--state",
             "closed",
             "--label",
-            "hitl-escalation",
+            self._config.hitl_escalation_label[0],
             "--label",
-            "wiki-rot-stuck",
+            self._config.wiki_rot_stuck_label[0],
             "--author",
             "@me",
             "--json",

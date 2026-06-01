@@ -1,6 +1,6 @@
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 
 const mockUseHydraFlow = vi.fn()
 
@@ -245,6 +245,45 @@ describe('MetricsPanel', () => {
     expect(screen.getByText('234')).toBeInTheDocument()
     expect(screen.getByText('8,000')).toBeInTheDocument()
     expect(screen.getByText('400')).toBeInTheDocument()
+  })
+
+  it('renders repo-scoped throughput and friction metrics', () => {
+    mockUseHydraFlow.mockReturnValue(defaultContext({
+      metrics: {
+        lifetime: { issues_completed: 0, prs_merged: 0 },
+        rates: {},
+        repo_metrics: {
+          repo: 'T-rav/hydraflow',
+          repo_slug: 'T-rav-hydraflow',
+          throughput: { implemented: 1.5, merged: 0.5 },
+          time_to_merge: { avg: 120, p50: 120, p90: 120 },
+          friction: {
+            quality_fix_rounds: 2,
+            ci_fix_rounds: 1,
+            hitl_escalations: 3,
+            stage_retries: 4,
+            quality_fix_rate: 0.25,
+            hitl_escalation_rate: 0.5,
+          },
+          retries_by_stage: { implement: 2, review: 2 },
+        },
+      },
+    }))
+
+    render(<MetricsPanel />)
+
+    const repoGrid = screen.getByTestId('metrics-grid-repo')
+    expect(screen.getByText('Repo Metrics')).toBeInTheDocument()
+    expect(within(repoGrid).getByText('T-rav/hydraflow')).toBeInTheDocument()
+    expect(within(repoGrid).getByText('Implemented / hr')).toBeInTheDocument()
+    expect(within(repoGrid).getByText('Merged / hr')).toBeInTheDocument()
+    expect(within(repoGrid).getByText('Quality Fix Rounds')).toBeInTheDocument()
+    expect(within(repoGrid).getByText('CI Fix Rounds')).toBeInTheDocument()
+    expect(within(repoGrid).getByText('Stage Retries')).toBeInTheDocument()
+    expect(within(repoGrid).getByText('25.0%')).toBeInTheDocument()
+    expect(within(repoGrid).getByText('50.0%')).toBeInTheDocument()
+    expect(within(repoGrid).getByText('Implement: 2')).toBeInTheDocument()
+    expect(within(repoGrid).getByText('Review: 2')).toBeInTheDocument()
   })
 
   it('uses metrics-grid layout wrappers with data test ids', () => {

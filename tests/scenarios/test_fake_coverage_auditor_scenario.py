@@ -4,10 +4,10 @@ Two scenarios covering the two gap subtypes the loop detects:
 
 * ``test_uncassetted_surface_files_adapter_gap`` — a fake's public
   adapter method has no matching cassette. The loop files exactly one
-  ``fake-coverage-gap`` + ``adapter-surface`` issue.
+  ``hydraflow-fake-coverage-gap`` + ``adapter-surface`` issue.
 * ``test_unused_test_helper_files_helper_gap`` — a fake exposes a
   ``script_*`` helper that no scenario invokes (grep returns False).
-  The loop files exactly one ``fake-coverage-gap`` + ``test-helper``
+  The loop files exactly one ``hydraflow-fake-coverage-gap`` + ``test-helper``
   issue.
 
 The loop's external surface — ``_reconcile_closed_escalations``

@@ -307,6 +307,7 @@ function UnstickWorkersDropdown() {
         value={currentValue}
         onChange={handleChange}
         style={styles.workersSelect}
+        aria-label="Maximum PRs to unstick per cycle"
         data-testid="unstick-workers-dropdown"
       >
         {UNSTICK_BATCH_OPTIONS.map(n => (
@@ -579,8 +580,11 @@ function StagingPromotionSettingsPanel() {
         </label>
       </div>
       <div style={styles.depMergeSection}>
-        <div style={styles.depMergeSectionLabel}>Main branch</div>
+        <label style={styles.depMergeSectionLabel} htmlFor="main-branch-input">
+          Main branch
+        </label>
         <input
+          id="main-branch-input"
           type="text"
           value={current.main_branch}
           disabled={savingField === 'main_branch'}
@@ -594,8 +598,11 @@ function StagingPromotionSettingsPanel() {
         />
       </div>
       <div style={styles.depMergeSection}>
-        <div style={styles.depMergeSectionLabel}>Staging branch</div>
+        <label style={styles.depMergeSectionLabel} htmlFor="staging-branch-input">
+          Staging branch
+        </label>
         <input
+          id="staging-branch-input"
           type="text"
           value={current.staging_branch}
           disabled={savingField === 'staging_branch'}
@@ -609,8 +616,11 @@ function StagingPromotionSettingsPanel() {
         />
       </div>
       <div style={styles.depMergeSection}>
-        <div style={styles.depMergeSectionLabel}>RC cadence (hours)</div>
+        <label style={styles.depMergeSectionLabel} htmlFor="rc-cadence-hours-input">
+          RC cadence (hours)
+        </label>
         <input
+          id="rc-cadence-hours-input"
           type="number"
           min="1"
           max="168"
@@ -749,13 +759,15 @@ export function SystemPanel({ backgroundWorkers, onToggleBgWorker, onTriggerBgWo
 
   return (
     <div style={styles.container}>
-      <div style={styles.subTabSidebar}>
+      <div style={styles.subTabSidebar} role="tablist" aria-label="System sections">
         {SUB_TABS.map(tab => (
           <div
             key={tab.key}
             role="tab"
+            tabIndex={0}
             aria-selected={activeSubTab === tab.key}
             onClick={() => setActiveSubTab(tab.key)}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveSubTab(tab.key) } }}
             data-testid={`system-subtab-${tab.key}`}
             style={activeSubTab === tab.key ? subTabActiveStyle : subTabInactiveStyle}
           >

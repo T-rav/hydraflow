@@ -317,7 +317,7 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
         """File the adapter-surface rollup issue for ``fake``. (#8986 rollup.)"""
         title = f"Fake coverage gap: {fake} adapter surface ({len(uncovered)} methods)"
         body = self._render_surface_body(fake, uncovered, recovered or [])
-        return await self._pr.create_issue(
+        issue_number = await self._pr.create_issue(
             title,
             body,
             [
@@ -326,6 +326,7 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
                 *self._config.adapter_surface_label,
             ],
         )
+        return int(issue_number or 0)
 
     async def _file_helper_gap(
         self, fake: str, uncovered: list[str], recovered: list[str] | None = None
@@ -333,7 +334,7 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
         """File the test-helper rollup issue for ``fake``. (#8986 rollup.)"""
         title = f"Fake coverage gap: {fake} test helpers ({len(uncovered)} methods)"
         body = self._render_helper_body(fake, uncovered, recovered or [])
-        return await self._pr.create_issue(
+        issue_number = await self._pr.create_issue(
             title,
             body,
             [
@@ -342,6 +343,7 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
                 *self._config.test_helper_label,
             ],
         )
+        return int(issue_number or 0)
 
     async def _file_escalation(self, key: str, attempts: int) -> int:
         title = f"HITL: fake coverage gap {key} unresolved after {attempts}"
@@ -350,7 +352,7 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
             f"{attempts} times without closure. Human review needed.\n\n"
             f"_Spec §3.2: closing this issue clears the dedup key._"
         )
-        return await self._pr.create_issue(
+        issue_number = await self._pr.create_issue(
             title,
             body,
             [
@@ -358,6 +360,7 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
                 *self._config.fake_coverage_stuck_label,
             ],
         )
+        return int(issue_number or 0)
 
     async def _reconcile_closed_escalations(self) -> None:
         """Clear dedup keys for closed fake-coverage-stuck escalations.

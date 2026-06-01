@@ -250,7 +250,7 @@ async def test_escalation_fires_after_three_attempts(
 async def test_close_reconcile_clears_dedup_on_closed_escalation(
     loop_env, monkeypatch, tmp_path
 ) -> None:
-    """Closed ``fake-coverage-stuck`` issues clear their dedup key + attempts."""
+    """Closed ``hydraflow-fake-coverage-stuck`` issues clear their dedup key + attempts."""
     cfg, state, pr, dedup = loop_env
     # New rollup key shape: ``{fake}:{kind}``.
     stuck_key = "fake_coverage_auditor:FakeGitHub:adapter-surface"
@@ -293,7 +293,7 @@ async def test_all_emitted_labels_are_registered_hydraflow_labels(loop_env) -> N
     """Every label the auditor passes to ``pr.create_issue`` must be a registered
     HydraFlow lifecycle label, so ``make ensure-labels`` provisions it on the repo.
 
-    Regression for "could not add label: 'fake-coverage-gap' not found" — bare
+    Regression for "could not add label: 'hydraflow-fake-coverage-gap' not found" — bare
     labels were silently failing every gap-issue creation. See PR for context.
     """
     from prep import HYDRAFLOW_LABELS

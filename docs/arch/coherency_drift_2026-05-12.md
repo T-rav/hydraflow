@@ -46,7 +46,6 @@ but coverage is partial** (8 loops):
 |---|---|---|---|---|---|---|
 | `CIMonitorLoop` | Loops | Scenario | ⚠️ in catalog [bd:advisor-g95] | accurate | `TestL5` and `TestL6` in `test_loops.py` invoke the loop but coverage is deliberately scoped; gap unchanged since baseline | closed bd:advisor-g95 |
 | `DependabotMergeLoop` | Loops | Scenario | ⚠️ in catalog [bd:advisor-lq2] | accurate | `TestL7`/`TestL8` in `test_loops.py` invoke it; has sandbox e2e too but MockWorld scenario coverage is partial per original bead | closed bd:advisor-lq2 |
-| `EpicSweeperLoop` | Loops | Scenario | ⚠️ in catalog [bd:advisor-4m0] | accurate | `TestL12` in `test_caretaker_loops.py` invokes it; partial per original bead | closed bd:advisor-4m0 |
 | `HealthMonitorLoop` | Loops | Scenario | ⚠️ in catalog [bd:advisor-ddg] | accurate | `TestL1` in `test_loops.py` invokes it; partial coverage per original bead | closed bd:advisor-ddg |
 | `PRUnstickerLoop` | Loops | Scenario | ⚠️ in catalog [bd:advisor-mfs] | accurate | `TestL4` in `test_loops.py` invokes it; has sandbox e2e; partial per original bead | closed bd:advisor-mfs |
 | `RetrospectiveLoop` | Loops | Scenario | ⚠️ in catalog [bd:advisor-dca] | accurate | `TestL11` in `test_caretaker_loops.py` invokes it; partial per original bead | closed bd:advisor-dca |
@@ -90,7 +89,6 @@ Random seed 2027. 20 cells drawn from 182 ✅ cells across all three sections.
 | `RetrospectiveLoop` | Loops | Standard | ✅ (caretaking/caretaker loop) | accurate | Covered by caretaker loop standard | no action |
 | `StagingBisectLoop` | Loops | Wiki | ✅ `architecture.md` | accurate | `docs/wiki/architecture.md` line 246 describes `StagingBisectLoop` behavior in substantive prose | no action |
 | `triage` | Factory phases | Standard | ✅ `factory_operation/README.md` | accurate | `docs/standards/factory_operation/README.md` line 9 names triage as a required phase | no action |
-| `EpicSweeperLoop` | Loops | Standard | ✅ (caretaking/caretaker loop) | accurate | Covered by caretaker loop standard | no action |
 | `StagingBisectLoop` | Loops | ADR | ✅ [0045][0048][0049] | accurate | All three ADRs exist on staging and substantively mention `StagingBisectLoop` | no action |
 | `SandboxFailureFixerLoop` | Loops | Unit | ✅ `test_sandbox_failure_fixer_loop.py` | accurate | `tests/test_sandbox_failure_fixer_loop.py` exists with direct class tests | no action |
 | `ReviewInsightStorePort` | Ports | Generated | ✅ ports.md | accurate | `docs/arch/generated/ports.md` §ReviewInsightStorePort with adapter table and Protocol methods listed | no action |

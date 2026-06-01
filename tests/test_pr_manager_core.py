@@ -436,11 +436,11 @@ async def test_create_issue_dry_run(dry_config, event_bus):
         number = await mgr.create_issue("Bug", "Details")
 
     mock_create.assert_not_called()
-    assert number == 0
+    assert number is None
 
 
 @pytest.mark.asyncio
-async def test_create_issue_failure_returns_zero(config, event_bus):
+async def test_create_issue_failure_returns_none(config, event_bus):
     mgr = make_pr_manager(config, event_bus)
     mock_create = (
         SubprocessMockBuilder()
@@ -452,7 +452,7 @@ async def test_create_issue_failure_returns_zero(config, event_bus):
     with patch("asyncio.create_subprocess_exec", mock_create):
         number = await mgr.create_issue("Bug", "Details")
 
-    assert number == 0
+    assert number is None
 
 
 @pytest.mark.asyncio
@@ -772,11 +772,64 @@ async def test_push_branch_calls_git_push(config, event_bus, tmp_path):
     args = mock_create.call_args[0]
     assert args[0] == "git"
     assert args[1] == "push"
-    assert "--no-verify" in args
+    assert "--no-verify" not in args
     assert "-u" in args
     assert "origin" in args
     assert "agent/issue-42" in args
     assert "--force-with-lease" not in args
+
+
+@pytest.mark.asyncio
+async def test_push_branch_runs_arch_regen_before_push(config, event_bus, tmp_path):
+    manager = make_pr_manager(config, event_bus)
+
+    with patch("pr_manager.run_subprocess", new_callable=AsyncMock) as mock_run:
+        mock_run.return_value = ""
+        result = await manager.push_branch(tmp_path, "agent/issue-42")
+
+    assert result is True
+    calls = [call.args for call in mock_run.await_args_list]
+    assert calls[0] == ("make", "arch-regen")
+    assert calls[1] == ("git", "status", "--porcelain", "docs/arch")
+    assert calls[-1][:2] == ("git", "push")
+    assert "--no-verify" not in calls[-1]
+
+
+@pytest.mark.asyncio
+async def test_push_branch_commits_regenerated_arch_docs(config, event_bus, tmp_path):
+    manager = make_pr_manager(config, event_bus)
+
+    async def fake_run(*args, cwd=None, gh_token=None):
+        if args == ("git", "status", "--porcelain", "docs/arch"):
+            return " M docs/arch/generated/modules.md\n"
+        return ""
+
+    with patch("pr_manager.run_subprocess", side_effect=fake_run) as mock_run:
+        result = await manager.push_branch(tmp_path, "agent/issue-42")
+
+    assert result is True
+    calls = [call.args for call in mock_run.await_args_list]
+    assert ("git", "add", "docs/arch") in calls
+    assert any(call[:3] == ("git", "commit", "-m") for call in calls)
+    assert calls[-1][:2] == ("git", "push")
+
+
+@pytest.mark.asyncio
+async def test_push_branch_arch_regen_failure_returns_false(
+    config, event_bus, tmp_path, caplog
+):
+    manager = make_pr_manager(config, event_bus)
+
+    with (
+        caplog.at_level(logging.WARNING, logger="hydraflow.pr_manager"),
+        patch("pr_manager.run_subprocess", new_callable=AsyncMock) as mock_run,
+    ):
+        mock_run.side_effect = RuntimeError("arch failed")
+        result = await manager.push_branch(tmp_path, "agent/issue-42")
+
+    assert result is False
+    assert "Architecture regeneration failed" in caplog.text
+    mock_run.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -800,16 +853,15 @@ async def test_push_branch_failure_logs_warning_not_error(
     config, event_bus, tmp_path, caplog
 ):
     manager = make_pr_manager(config, event_bus)
-    mock_create = (
-        SubprocessMockBuilder()
-        .with_returncode(1)
-        .with_stderr("error: failed to push")
-        .build()
-    )
+
+    async def fake_run(*args, cwd=None, gh_token=None):
+        if args[:2] == ("git", "push"):
+            raise RuntimeError("error: failed to push")
+        return ""
 
     with (
         caplog.at_level(logging.WARNING, logger="hydraflow.pr_manager"),
-        patch("asyncio.create_subprocess_exec", mock_create),
+        patch("pr_manager.run_subprocess", side_effect=fake_run),
     ):
         result = await manager.push_branch(tmp_path, "agent/issue-99")
 
@@ -1710,28 +1762,14 @@ async def test_ensure_labels_exist_uses_config_label_names(config, event_bus, tm
         create_idx = list(args).index("create")
         created_labels.add(args[create_idx + 1])
 
-    assert created_labels == {
-        "custom-find",
-        "custom-plan",
-        "custom-ready",
-        "custom-review",
-        "custom-hitl",
-        "custom-hitl-active",
-        "custom-fixed",
-        "custom-dup",
-        "custom-epic",
-        "custom-epic-child",
-        "custom-verify",
-        "hydraflow-parked",
-        "hydraflow-diagnose",
-        "hydraflow-hitl-escalation",
-        "hydraflow-fake-coverage-gap",
-        "hydraflow-adapter-surface",
-        "hydraflow-test-helper",
-        "hydraflow-fake-coverage-stuck",
-        "hydraflow-adr-drift",
-        "hydraflow-adr-drift-stuck",
+    from prep import HYDRAFLOW_LABELS
+
+    expected_labels = {
+        label
+        for field_name, _color, _description in HYDRAFLOW_LABELS
+        for label in getattr(cfg, field_name)
     }
+    assert created_labels == expected_labels
 
 
 @pytest.mark.asyncio
@@ -2136,10 +2174,10 @@ class TestCreateIssueEdgeCases:
     """Edge case tests for PRManager.create_issue."""
 
     @pytest.mark.asyncio
-    async def test_create_issue_malformed_output_returns_zero(
+    async def test_create_issue_malformed_output_returns_none(
         self, config, event_bus
     ) -> None:
-        """create_issue should return 0 when gh output is not a valid URL."""
+        """create_issue should return None when gh output is not a valid URL."""
         mgr = make_pr_manager(config, event_bus)
         mock_create = (
             SubprocessMockBuilder().with_stdout("Error: something went wrong").build()
@@ -2148,20 +2186,20 @@ class TestCreateIssueEdgeCases:
         with patch("asyncio.create_subprocess_exec", mock_create):
             result = await mgr.create_issue("Bug found", "Details here", ["bug"])
 
-        assert result == 0
+        assert result is None
 
     @pytest.mark.asyncio
-    async def test_create_issue_empty_output_returns_zero(
+    async def test_create_issue_empty_output_returns_none(
         self, config, event_bus
     ) -> None:
-        """create_issue should return 0 when gh output is empty."""
+        """create_issue should return None when gh output is empty."""
         mgr = make_pr_manager(config, event_bus)
         mock_create = SubprocessMockBuilder().build()
 
         with patch("asyncio.create_subprocess_exec", mock_create):
             result = await mgr.create_issue("Bug found", "Details here", ["bug"])
 
-        assert result == 0
+        assert result is None
 
 
 class TestWaitForCiEdgeCases:
@@ -2906,7 +2944,7 @@ async def test_create_issue_failure_logs_warning_not_error(config, event_bus, ca
     ):
         result = await manager.create_issue("Test Issue", "body")
 
-    assert result == 0
+    assert result is None
     assert "Issue creation failed" in caplog.text
     error_records = [r for r in caplog.records if r.levelno >= logging.ERROR]
     assert error_records == [], (

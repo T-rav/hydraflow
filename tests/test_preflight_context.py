@@ -22,7 +22,7 @@ async def test_handles_missing_escalation_context(tmp_path: Path) -> None:
     ctx = await gather_context(
         issue_number=8501,
         issue_body="Body here",
-        sub_label="flaky-test-stuck",
+        sub_label="hydraflow-flaky-test-stuck",
         pr_port=pr,
         wiki_store=None,
         state=state,

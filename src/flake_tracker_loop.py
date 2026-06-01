@@ -181,7 +181,7 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
 
     async def _file_flake_issue(
         self, test_id: str, flake_count: int, runs: list[dict[str, Any]]
-    ) -> int:
+    ) -> int | None:
         """File a ``hydraflow-find`` + ``flaky-test`` issue. Returns issue number."""
         title = f"Flaky test: {test_id} (flake rate: {flake_count}/{_RUN_WINDOW})"
         run_lines = "\n".join(
@@ -197,10 +197,10 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
             f"_This issue was auto-filed by HydraFlow's `flake_tracker` loop._"
         )
         return await self._pr.create_issue(
-            title, body, ["hydraflow-find", "flaky-test"]
+            title, body, [self._config.find_label[0], self._config.flaky_test_label[0]]
         )
 
-    async def _file_escalation(self, test_id: str, attempts: int) -> int:
+    async def _file_escalation(self, test_id: str, attempts: int) -> int | None:
         """File ``hitl-escalation`` + ``flaky-test-stuck`` after N failed repairs."""
         title = f"HITL: flaky test {test_id} unresolved after {attempts} attempts"
         body = (
@@ -210,7 +210,12 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
             f"dedup key and let the loop re-fire on the next drift._"
         )
         return await self._pr.create_issue(
-            title, body, ["hitl-escalation", "flaky-test-stuck"]
+            title,
+            body,
+            [
+                self._config.hitl_escalation_label[0],
+                self._config.flaky_test_stuck_label[0],
+            ],
         )
 
     async def _reconcile_closed_escalations(self) -> None:
@@ -224,9 +229,9 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
             "--state",
             "closed",
             "--label",
-            "hitl-escalation",
+            self._config.hitl_escalation_label[0],
             "--label",
-            "flaky-test-stuck",
+            self._config.flaky_test_stuck_label[0],
             "--author",
             "@me",
             "--limit",

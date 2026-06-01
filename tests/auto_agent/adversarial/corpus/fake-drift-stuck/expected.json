@@ -1,6 +1,6 @@
 {
   "status": "resolved",
   "labels_added": [],
-  "labels_removed": ["hitl-escalation", "human-required", "fake-drift-stuck"],
+  "labels_removed": ["hydraflow-hitl-escalation", "human-required", "hydraflow-fake-drift-stuck"],
   "pr_url": "https://github.com/x/y/pull/9031"
 }

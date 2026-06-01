@@ -9,7 +9,9 @@ import { OutcomesPanel } from './components/IssueHistoryPanel'
 import { StreamView } from './components/StreamView'
 import { SessionSidebar } from './components/SessionSidebar'
 import { AtlasExplorer } from './components/atlas/AtlasExplorer'
+import { ProjectView } from './components/ProjectView'
 import { theme } from './theme'
+import { canonicalRepoSlug } from './constants'
 
 const TABS = ['issues', 'hitl', 'outcomes', 'atlas', 'system']
 
@@ -160,6 +162,8 @@ function AppContent() {
     config,
     reporterId,
     mockworldActive,
+    selectedRepoSlug,
+    supervisedRepos = [],
   } = useHydraFlow()
   const [activeTab, setActiveTab] = useState(_initialTabFromUrl)
   const [expandedStages, setExpandedStages] = useState({})
@@ -174,6 +178,13 @@ function AppContent() {
   }, [requestChanges])
 
   const configWarning = useMemo(() => detectConfigWarning(config), [config])
+  const selectedProject = useMemo(() => {
+    if (!selectedRepoSlug) return null
+    return supervisedRepos.find(repo => {
+      const raw = repo?.slug || repo?.repo || repo?.full_name || repo?.path || ''
+      return canonicalRepoSlug(raw) === selectedRepoSlug
+    }) || null
+  }, [selectedRepoSlug, supervisedRepos])
 
   return (
     <div style={styles.layout}>
@@ -190,6 +201,7 @@ function AppContent() {
         <SystemAlertBanner alert={systemAlert} onDismiss={dismissSystemAlert} onRefreshCredit={refreshCreditStatus} />
         <ConfigWarningBanner warning={configWarning} />
         <HumanInputBanner requests={humanInputRequests} onSubmit={submitHumanInput} />
+        <ProjectView project={selectedProject} />
 
         <div style={styles.tabs} data-testid="main-tabs" role="tablist">
           {TABS.map((tab) => (

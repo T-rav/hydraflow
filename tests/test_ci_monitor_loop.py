@@ -1,4 +1,4 @@
-"""Tests for the CIMonitorLoop background worker."""
+"""CIMonitorLoop background worker coverage."""
 
 from __future__ import annotations
 
@@ -149,14 +149,10 @@ class TestCIMonitorLoop:
     async def test_failed_issue_creation_does_not_track_phantom_zero(
         self, tmp_path: Path
     ) -> None:
-        """When create_issue returns 0 (failure sentinel — e.g. missing label),
-        the loop must not store 0 as ``_open_issue``.  Otherwise every later cycle
-        emits ``gh issue comment 0`` / ``gh issue close 0`` calls that GitHub
-        rejects with "Could not resolve to an issue or pull request with the
-        number of 0"."""
+        """When create_issue returns None, the loop must not store a phantom issue."""
         loop, _stop, pr = _make_loop(tmp_path)
         pr.get_latest_ci_status.return_value = ("failure", "https://github.com/runs/1")
-        pr.create_issue = AsyncMock(return_value=0)
+        pr.create_issue = AsyncMock(return_value=None)
 
         result = await loop._do_work()
 

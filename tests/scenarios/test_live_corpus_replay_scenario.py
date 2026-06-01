@@ -28,7 +28,7 @@ pytestmark = pytest.mark.scenario_loops
 class TestLiveCorpusReplayScenario:
     async def test_drift_reaches_hydraflow_find_queue(self, tmp_path: Path) -> None:
         """End-to-end: a shadow sample diverging from the fake fires a
-        ``hydraflow-find`` + ``shadow-drift`` issue via PRManager.create_issue.
+        ``hydraflow-find`` + ``hydraflow-shadow-drift`` issue via PRManager.create_issue.
         No HITL label, no human in the loop."""
         world = MockWorld(tmp_path)
         config = HydraFlowConfig(
@@ -79,9 +79,9 @@ class TestLiveCorpusReplayScenario:
         issue = world.github.issue(9001)
         labels = issue.labels
         assert "hydraflow-find" in labels
-        assert "shadow-drift" in labels
-        # Critically: the issue must NOT carry hitl-escalation or
+        assert "hydraflow-shadow-drift" in labels
+        # Critically: the issue must NOT carry hydraflow-hitl-escalation or
         # human-required labels — the v2 path is auto-agent routing only,
         # human escalation only on N-attempt exhaustion (Phase 3).
-        assert "hitl-escalation" not in labels
+        assert "hydraflow-hitl-escalation" not in labels
         assert "human-required" not in labels

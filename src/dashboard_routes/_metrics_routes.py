@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import logging
 from collections import Counter
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, Response
 from fastapi.responses import JSONResponse
@@ -15,6 +15,7 @@ from config import HydraFlowConfig
 from dashboard_routes._routes import RouteContext
 from metrics_manager import get_metrics_cache_dir
 from models import (
+    LifetimeStats,
     MetricsHistoryResponse,
     MetricsResponse,
     MetricsSnapshot,
@@ -62,6 +63,36 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             )
             return []
         return snapshots[-limit:]
+
+    def _build_repo_metrics(
+        target_config: HydraFlowConfig,
+        target_state: Any,
+        lifetime: LifetimeStats,
+        rates: dict[str, float],
+        time_to_merge: dict[str, float],
+        retries: dict[str, int],
+    ) -> dict[str, object]:
+        """Build the repo-scoped metrics payload consumed by the dashboard."""
+        total_retries = sum(retries.values())
+        return {
+            "repo": target_config.repo,
+            "repo_slug": target_config.repo_slug,
+            "throughput": target_state.compute_session_throughput(),
+            "time_to_merge": time_to_merge,
+            "friction": {
+                "quality_fix_rounds": lifetime.total_quality_fix_rounds,
+                "ci_fix_rounds": lifetime.total_ci_fix_rounds,
+                "hitl_escalations": lifetime.total_hitl_escalations,
+                "reviewer_fixes": lifetime.total_reviewer_fixes,
+                "stage_retries": total_retries,
+                "failed_outcomes": lifetime.total_outcomes_failed,
+                "manual_closes": lifetime.total_outcomes_manual_close,
+                "quality_fix_rate": rates.get("quality_fix_rate", 0.0),
+                "hitl_escalation_rate": rates.get("hitl_escalation_rate", 0.0),
+                "reviewer_fix_rate": rates.get("reviewer_fix_rate", 0.0),
+            },
+            "retries_by_stage": retries,
+        }
 
     @router.get("/api/issues/outcomes")
     async def get_issue_outcomes() -> JSONResponse:
@@ -122,6 +153,14 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                 thresholds=thresholds,
                 inference_lifetime=inference_lifetime,
                 inference_session=inference_session,
+                repo_metrics=_build_repo_metrics(
+                    _cfg,
+                    _state,
+                    lifetime,
+                    rates,
+                    time_to_merge,
+                    retries,
+                ),
             ).model_dump()
         )
 

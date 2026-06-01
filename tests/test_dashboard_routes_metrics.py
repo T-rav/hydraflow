@@ -131,6 +131,47 @@ class TestMetricsEndpoint:
         assert data["inference_lifetime"]["total_tokens"] == 60
         assert data["inference_session"]["total_tokens"] == 60
 
+    @pytest.mark.asyncio
+    async def test_metrics_includes_repo_scoped_throughput_and_friction(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        import json
+        from datetime import UTC, datetime, timedelta
+
+        for _ in range(4):
+            state.record_issue_completed()
+        state.record_quality_fix_rounds(2)
+        state.record_ci_fix_rounds(1)
+        state.record_hitl_escalation()
+        state.record_review_verdict("request-changes", fixes_made=True)
+        state.record_stage_retry(123, "implement")
+        state.record_stage_retry(124, "review")
+        state.record_merge_duration(120.0)
+        state.reset_session_counters(
+            (datetime.now(UTC) - timedelta(hours=2)).isoformat()
+        )
+        state.increment_session_counter("implemented")
+        state.increment_session_counter("merged")
+
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        get_metrics = find_endpoint(router, "/api/metrics")
+        response = await get_metrics()
+        data = json.loads(response.body)
+        repo_metrics = data["repo_metrics"]
+
+        assert repo_metrics["repo_slug"] == config.repo_slug
+        assert repo_metrics["throughput"]["implemented"] == pytest.approx(0.5, abs=0.05)
+        assert repo_metrics["throughput"]["merged"] == pytest.approx(0.5, abs=0.05)
+        assert repo_metrics["time_to_merge"]["avg"] == 120.0
+        assert repo_metrics["retries_by_stage"] == {"implement": 1, "review": 1}
+        assert repo_metrics["friction"]["quality_fix_rounds"] == 2
+        assert repo_metrics["friction"]["ci_fix_rounds"] == 1
+        assert repo_metrics["friction"]["hitl_escalations"] == 1
+        assert repo_metrics["friction"]["reviewer_fixes"] == 1
+        assert repo_metrics["friction"]["stage_retries"] == 2
+        assert repo_metrics["friction"]["quality_fix_rate"] == pytest.approx(0.5)
+        assert repo_metrics["friction"]["hitl_escalation_rate"] == pytest.approx(0.25)
+
 
 class TestGitHubMetricsEndpoint:
     @pytest.mark.asyncio

@@ -124,7 +124,9 @@ class TestShapeRunnerEvaluator:
         await runner.run_turn(_make_task(42), ShapeConversation(issue_number=42))
         prs.create_issue.assert_awaited_once()
         kwargs = prs.create_issue.call_args.kwargs
-        assert {"hitl-escalation", "shape-stuck"} <= set(kwargs["labels"])
+        assert {"hydraflow-hitl-escalation", "hydraflow-shape-stuck"} <= set(
+            kwargs["labels"]
+        )
         assert "#42" in kwargs["title"]
         dedup.add.assert_called_once_with("shape_runner:42")
 

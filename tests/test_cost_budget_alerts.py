@@ -129,12 +129,12 @@ async def test_daily_budget_create_issue_failure_does_not_dedup(
     bus.publish.assert_not_awaited()
 
 
-async def test_daily_budget_create_issue_returns_zero_skips_dedup(
+async def test_daily_budget_create_issue_returns_none_skips_dedup(
     cost_cfg: MagicMock,
 ) -> None:
     cost_cfg.daily_cost_budget_usd = 10.0
     pr = MagicMock()
-    pr.create_issue = AsyncMock(return_value=0)
+    pr.create_issue = AsyncMock(return_value=None)
     dedup = MagicMock()
     dedup.get.return_value = set()
     bus = MagicMock()
@@ -148,6 +148,7 @@ async def test_daily_budget_create_issue_returns_zero_skips_dedup(
         now=datetime(2026, 4, 22, tzinfo=UTC),
     )
     dedup.add.assert_not_called()
+    bus.publish.assert_not_awaited()
 
 
 async def test_issue_cost_under_threshold_noop(cost_cfg: MagicMock) -> None:

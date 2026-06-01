@@ -25,7 +25,7 @@ def _ctx() -> PreflightContext:
         issue_number=42,
         issue_body="body",
         issue_comments=[],
-        sub_label="flaky-test-stuck",
+        sub_label="hydraflow-flaky-test-stuck",
         escalation_context=None,
         wiki_excerpts="",
         sentry_events=[],

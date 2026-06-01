@@ -275,7 +275,7 @@ def test_anomaly_reader_is_cached(config, monkeypatch) -> None:
 
     from dashboard_routes import _trust_routes as _mod
 
-    monkeypatch.setattr(_mod, "_build_anomaly_reader", lambda repo: _reader)
+    monkeypatch.setattr(_mod, "_build_anomaly_reader", lambda repo, **_: _reader)
     monkeypatch.setattr(_mod, "_ANOMALY_CACHE_TTL", 60)
     _mod._ANOMALY_CACHE.clear()
 
@@ -356,8 +356,8 @@ def test_anomaly_reader_argv_contains_both_labels(config, monkeypatch) -> None:
     argv = captured["argv"]
     # Both labels present, each as a value following a --label flag.
     label_values = [argv[i + 1] for i, a in enumerate(argv) if a == "--label"]
-    assert "hitl-escalation" in label_values, argv
-    assert "trust-loop-anomaly" in label_values, argv
+    assert "hydraflow-hitl-escalation" in label_values, argv
+    assert "hydraflow-trust-loop-anomaly" in label_values, argv
     # Pinned to the configured repo.
     assert "--repo" in argv and "acme/widget" in argv, argv
 

@@ -54,6 +54,8 @@ def render_prompt(
         else sub_label.removeprefix("hydraflow-")
     )
     prompt_path = _PROMPT_DIR / f"{template_stem}.md"
+    if not prompt_path.exists() and template_stem.startswith("hydraflow-"):
+        prompt_path = _PROMPT_DIR / f"{template_stem.removeprefix('hydraflow-')}.md"
     if not prompt_path.exists():
         prompt_path = _PROMPT_DIR / "_default.md"
 

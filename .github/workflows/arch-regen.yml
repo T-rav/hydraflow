@@ -8,6 +8,9 @@ on:
       - 'tests/scenarios/fakes/**'
       - 'tests/architecture/**'
 
+permissions:
+  contents: read
+
 jobs:
   arch-check:
     runs-on: ubuntu-latest

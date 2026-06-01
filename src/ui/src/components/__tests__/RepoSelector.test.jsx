@@ -50,6 +50,24 @@ describe('RepoSelector', () => {
     expect(onOpenRegister).toHaveBeenCalledTimes(1)
   })
 
+  it('opens new project wizard from dropdown action', () => {
+    const onOpenNewProject = vi.fn()
+    render(<RepoSelector onOpenNewProject={onOpenNewProject} />)
+    fireEvent.click(screen.getByTestId('repo-selector-trigger'))
+    fireEvent.click(screen.getByText('+ New project'))
+    expect(onOpenNewProject).toHaveBeenCalledTimes(1)
+    expect(screen.queryByTestId('repo-selector-dropdown')).toBeNull()
+  })
+
+  it('shows local-only status for materialized projects', () => {
+    mockUseHydraFlow.mockReturnValue(makeContext({
+      supervisedRepos: [{ slug: 'finance-tool', path: '/tmp/finance-tool', local_only: true }],
+    }))
+    render(<RepoSelector />)
+    fireEvent.click(screen.getByTestId('repo-selector-trigger'))
+    expect(screen.getByText('Local only')).toBeInTheDocument()
+  })
+
   it('disables register button when canRegisterRepos is false', () => {
     mockUseHydraFlow.mockReturnValue(makeContext({ canRegisterRepos: false }))
     render(<RepoSelector />)
@@ -125,6 +143,15 @@ describe('RepoSelector', () => {
     expect(screen.getByText('Running')).toBeInTheDocument()
   })
 
+  it('uses pipeline_enabled over repo.running for enabled repos', () => {
+    mockUseHydraFlow.mockReturnValue(makeContext({
+      supervisedRepos: [{ slug: 'acme/app', running: false, pipeline_enabled: true }],
+    }))
+    render(<RepoSelector />)
+    fireEvent.click(screen.getByTestId('repo-selector-trigger'))
+    expect(screen.getByText('Running')).toBeInTheDocument()
+  })
+
   it('closes dropdown on outside click', () => {
     render(<RepoSelector />)
     fireEvent.click(screen.getByTestId('repo-selector-trigger'))
@@ -177,6 +204,22 @@ describe('RepoSelector', () => {
     render(<RepoSelector />)
     fireEvent.click(screen.getByTestId('repo-selector-trigger'))
     expect(screen.getByText('/home/user/projects/app')).toBeInTheDocument()
+  })
+
+  it('shows fleet health summary when repo metadata is available', () => {
+    mockUseHydraFlow.mockReturnValue(makeContext({
+      supervisedRepos: [{
+        slug: 'acme/app',
+        path: '/home/user/projects/app',
+        current_plan: 'Plan 02',
+        plan_progress: { completed: 3, total: 7 },
+        in_flight_issues: 2,
+        last_green_ci: '2026-05-22',
+      }],
+    }))
+    render(<RepoSelector />)
+    fireEvent.click(screen.getByTestId('repo-selector-trigger'))
+    expect(screen.getByText('Plan 02 3/7 | 2 in flight | green 2026-05-22')).toBeInTheDocument()
   })
 
   it('closes dropdown after selecting a repo', () => {

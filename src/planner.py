@@ -331,7 +331,7 @@ class PlannerRunner(BaseRunner):
         body_raw = issue.body or ""
         body = self._truncate_text(
             issue.body or "",
-            self._config.max_issue_body_chars,
+            max(0, self._config.max_issue_body_chars - 256),
             self._config.max_planner_line_chars,
         )
         builder.record_context("Issue body", body_raw, body)

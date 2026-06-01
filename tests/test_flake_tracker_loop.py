@@ -139,7 +139,7 @@ async def test_do_work_files_issue_when_threshold_hit(loop_env, monkeypatch) -> 
     title = pr.create_issue.await_args.args[0]
     assert "test_flake" in title
     labels = pr.create_issue.await_args.args[2]
-    assert "flaky-test" in labels
+    assert "hydraflow-flaky-test" in labels
 
 
 async def test_escalation_fires_after_three_attempts(loop_env, monkeypatch) -> None:
@@ -178,8 +178,8 @@ async def test_escalation_fires_after_three_attempts(loop_env, monkeypatch) -> N
     stats = await loop._do_work()
     assert stats["escalated"] == 1
     labels = pr.create_issue.await_args.args[2]
-    assert "hitl-escalation" in labels
-    assert "flaky-test-stuck" in labels
+    assert "hydraflow-hitl-escalation" in labels
+    assert "hydraflow-flaky-test-stuck" in labels
 
 
 async def test_reconcile_closed_escalations_clears_dedup(loop_env, monkeypatch) -> None:
