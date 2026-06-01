@@ -110,11 +110,15 @@ class IssueStore:
 
         # Real-time PIPELINE_SNAPSHOT push (PR3): coalesce the QUEUE_UPDATE
         # storm into a single debounced full-snapshot emit. seq is a monotonic
-        # emit counter (per-instance; resets on restart) — used for emit
-        # observability and the coalescing tests, NOT (yet) a frontend guard:
-        # ordering relies on EventBus FIFO delivery + full-snapshot idempotency,
-        # with the REST poll as the reconnect re-sync. A seq-based stale-frame
-        # guard is deferred to the reconnect-resilience work (WS-RT PR5).
+        # emit counter (per-instance; resets on restart) used purely for emit
+        # observability and the coalescing tests — it is NOT a frontend
+        # stale-frame guard. Ordering is guaranteed structurally: PIPELINE_SNAPSHOT
+        # is an ephemeral, live-only event (see EPHEMERAL_EVENT_TYPES in events.py)
+        # that is never retained in history nor replayed on WS reconnect, so a
+        # stale historical frame can't reach the reducer. Within a live connection
+        # EventBus fans out FIFO; the REST poll is the reconnect re-sync. A
+        # seq-based reducer guard was evaluated for PR5 and rejected in favour of
+        # this ephemeral approach, which removes the clobber vector at the source.
         self._snapshot_seq = 0
         self._snapshot_dirty = False
         self._snapshot_flush_task: asyncio.Task[None] | None = None

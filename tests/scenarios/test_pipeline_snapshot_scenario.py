@@ -15,6 +15,13 @@ the load-bearing integration contract:
 * The snapshot arrives WITHOUT any REST poll: the harness fetcher (the only
   GitHub-fetch surface) is never invoked. The push is event-driven off the
   in-memory mutation, not a poll of ``GET /api/pipeline``.
+* (PR5 stale-snapshot regression) The pushed snapshot is delivered LIVE to a
+  subscriber but is NOT retained in ``bus.get_history()`` — so a WS reconnect,
+  which replays ``get_history()`` on connect, can never re-deliver a stale
+  historical snapshot that would clobber the freshly-fetched board state. This
+  is the integration-level proof that the ephemeral mechanism in
+  ``events.EPHEMERAL_EVENT_TYPES`` closes the clobber vector on the real bus the
+  dashboard subscribes to.
 
 Limitation (noted per task brief): ``MockWorld.run_with_loops`` invokes
 ``loop._do_work()`` against catalog-allocated mock ports, which does not route
@@ -37,8 +44,24 @@ from tests.conftest import TaskFactory
 # and tests/scenarios/test_mock_world_apply_seed.py rather than the loop tier.
 
 
-def _snapshots(bus):
-    return [e for e in bus.get_history() if e.type == EventType.PIPELINE_SNAPSHOT]
+def _drain_snapshots(queue):
+    """Drain PIPELINE_SNAPSHOT frames live-delivered to a subscriber queue.
+
+    PIPELINE_SNAPSHOT is ephemeral (PR5): fanned out to subscribers but never
+    retained in ``get_history()``. Assert against the live subscriber — the same
+    delivery path the dashboard WS uses — not history.
+    """
+    import asyncio
+
+    out = []
+    while True:
+        try:
+            event = queue.get_nowait()
+        except asyncio.QueueEmpty:
+            break
+        if event.type == EventType.PIPELINE_SNAPSHOT:
+            out.append(event)
+    return out
 
 
 async def _drain_snapshot_flush(store) -> None:
@@ -58,6 +81,10 @@ class TestPipelineSnapshotScenario:
         harness = world.harness
         store = harness.store
         bus = harness.bus
+
+        # Subscribe BEFORE mutating: snapshots are live-only and won't appear in
+        # history, so the subscriber is the sole capture surface.
+        queue = bus.subscribe()
 
         # Seed the find queue the way a GitHub refresh would, then assert the
         # fetcher (the sole REST-poll surface) is untouched: the push is driven
@@ -79,7 +106,7 @@ class TestPipelineSnapshotScenario:
 
         await _drain_snapshot_flush(store)
 
-        snaps = _snapshots(bus)
+        snaps = _drain_snapshots(queue)
         assert snaps, "membership change must push a PIPELINE_SNAPSHOT to the bus"
 
         snap = snaps[-1]
@@ -97,3 +124,14 @@ class TestPipelineSnapshotScenario:
         # The snapshot reached the bus with no GitHub fetch: it is a push off the
         # in-memory mutation, not a REST poll re-render.
         harness.fetcher.fetch_all.assert_not_called()
+
+        # PR5 stale-snapshot regression: the snapshot was delivered LIVE but is
+        # NOT in history. A WS reconnect replays get_history() on connect; if a
+        # PIPELINE_SNAPSHOT lived there, a stale historical frame could land
+        # after the fresh REST sync and clobber the board (worst on an idle
+        # pipeline). Asserting its absence here proves the clobber vector is
+        # closed on the real bus the dashboard subscribes to.
+        replayed_on_reconnect = bus.get_history()
+        assert all(
+            e.type != EventType.PIPELINE_SNAPSHOT for e in replayed_on_reconnect
+        ), "PIPELINE_SNAPSHOT must not enter WS reconnect replay (get_history)"

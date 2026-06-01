@@ -2220,3 +2220,156 @@ describe('queue_update WS storm fix', () => {
     expect(pipelineCallsAfter).toBe(pipelineCallsBefore)
   })
 })
+
+describe('WebSocket reconnect backoff (PR5)', () => {
+  let originalWebSocket
+  let wsInstances
+
+  beforeEach(() => {
+    originalWebSocket = global.WebSocket
+    wsInstances = []
+    vi.useFakeTimers()
+    // Pin jitter to its ceiling so delay === min(BASE * 2**attempt, MAX);
+    // makes the growth + cap deterministic to assert.
+    vi.spyOn(Math, 'random').mockReturnValue(1)
+    vi.spyOn(global, 'fetch').mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url.includes('/api/system/workers')) return Promise.resolve({ ok: true, json: async () => ({ workers: [] }) })
+      if (url.includes('/api/pipeline')) return Promise.resolve({ ok: true, json: async () => ({ stages: {} }) })
+      return Promise.resolve({ ok: true, json: async () => ({}) })
+    })
+    global.WebSocket = class MockWS {
+      constructor() { wsInstances.push(this) }
+      close() {}
+    }
+  })
+
+  afterEach(() => {
+    global.WebSocket = originalWebSocket
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+    vi.resetModules()
+  })
+
+  // Capture the delay passed to each reconnect setTimeout. The poll/interval
+  // effects also schedule timers, so filter to those whose callback is the
+  // WS reconnect by tagging via a Set of delays observed right after onclose.
+  function reconnectDelays(setTimeoutSpy, fromCallIndex) {
+    return setTimeoutSpy.mock.calls
+      .slice(fromCallIndex)
+      .map(([, delay]) => delay)
+  }
+
+  it('grows the reconnect delay across successive drops and caps at MAX', async () => {
+    const { HydraFlowProvider } = await import('../HydraFlowContext')
+    const { WS_RECONNECT_BASE_MS, WS_RECONNECT_MAX_MS } = await import('../../constants')
+
+    render(<HydraFlowProvider><div /></HydraFlowProvider>)
+
+    // The first WS instance is created on mount.
+    expect(wsInstances.length).toBe(1)
+
+    const observed = []
+    const setTimeoutSpy = vi.spyOn(global, 'setTimeout')
+
+    // Drive several disconnects WITHOUT an intervening successful open. Each
+    // onclose schedules a reconnect; advancing timers fires connect(), which
+    // constructs the next MockWS. We read the delay scheduled by each onclose.
+    for (let i = 0; i < 6; i++) {
+      const ws = wsInstances[wsInstances.length - 1]
+      const before = setTimeoutSpy.mock.calls.length
+      act(() => { ws.onclose({ code: 1006 }) })
+      // The reconnect delay is the largest delay scheduled by this onclose
+      // (poll effects use fixed cadences; the backoff is the growing one).
+      const scheduled = reconnectDelays(setTimeoutSpy, before)
+      observed.push(Math.max(...scheduled))
+      // Fire the reconnect timer to create the next socket.
+      act(() => { vi.advanceTimersByTime(WS_RECONNECT_MAX_MS) })
+    }
+
+    // With Math.random pinned to 1: BASE, 2*BASE, 4*BASE, 8*BASE, ... capped MAX.
+    expect(observed[0]).toBe(WS_RECONNECT_BASE_MS)
+    expect(observed[1]).toBe(2 * WS_RECONNECT_BASE_MS)
+    expect(observed[2]).toBe(4 * WS_RECONNECT_BASE_MS)
+    // Strictly non-decreasing.
+    for (let i = 1; i < observed.length; i++) {
+      expect(observed[i]).toBeGreaterThanOrEqual(observed[i - 1])
+    }
+    // Never exceeds the cap.
+    for (const d of observed) {
+      expect(d).toBeLessThanOrEqual(WS_RECONNECT_MAX_MS)
+    }
+    // Eventually reaches the cap.
+    expect(observed[observed.length - 1]).toBe(WS_RECONNECT_MAX_MS)
+  })
+
+  it('resets the backoff to BASE after a successful open', async () => {
+    const { HydraFlowProvider } = await import('../HydraFlowContext')
+    const { WS_RECONNECT_BASE_MS } = await import('../../constants')
+
+    render(<HydraFlowProvider><div /></HydraFlowProvider>)
+    const setTimeoutSpy = vi.spyOn(global, 'setTimeout')
+
+    // Two drops grow the delay: BASE, then 2*BASE.
+    let ws = wsInstances[wsInstances.length - 1]
+    let before = setTimeoutSpy.mock.calls.length
+    act(() => { ws.onclose({ code: 1006 }) })
+    const firstDelay = Math.max(...reconnectDelays(setTimeoutSpy, before))
+    act(() => { vi.advanceTimersByTime(WS_RECONNECT_BASE_MS) })
+
+    ws = wsInstances[wsInstances.length - 1]
+    before = setTimeoutSpy.mock.calls.length
+    act(() => { ws.onclose({ code: 1006 }) })
+    const secondDelay = Math.max(...reconnectDelays(setTimeoutSpy, before))
+    act(() => { vi.advanceTimersByTime(2 * WS_RECONNECT_BASE_MS) })
+
+    expect(firstDelay).toBe(WS_RECONNECT_BASE_MS)
+    expect(secondDelay).toBe(2 * WS_RECONNECT_BASE_MS)
+
+    // A successful open resets the attempt counter; the NEXT drop is back to BASE.
+    ws = wsInstances[wsInstances.length - 1]
+    act(() => { ws.onopen && ws.onopen() })
+    before = setTimeoutSpy.mock.calls.length
+    act(() => { ws.onclose({ code: 1006 }) })
+    const afterOpenDelay = Math.max(...reconnectDelays(setTimeoutSpy, before))
+
+    expect(afterOpenDelay).toBe(WS_RECONNECT_BASE_MS)
+  })
+
+  it('does not reconnect on a 1008 policy-violation close', async () => {
+    const { HydraFlowProvider } = await import('../HydraFlowContext')
+
+    render(<HydraFlowProvider><div /></HydraFlowProvider>)
+    const countBefore = wsInstances.length
+
+    const ws = wsInstances[wsInstances.length - 1]
+    act(() => { ws.onclose({ code: 1008 }) })
+    // No reconnect timer should fire a new socket.
+    act(() => { vi.advanceTimersByTime(60_000) })
+
+    expect(wsInstances.length).toBe(countBefore)
+  })
+
+  it('cancels a pending reconnect when a second close fires before it elapses', async () => {
+    const { HydraFlowProvider } = await import('../HydraFlowContext')
+    const { WS_RECONNECT_MAX_MS } = await import('../../constants')
+
+    render(<HydraFlowProvider><div /></HydraFlowProvider>)
+    expect(wsInstances.length).toBe(1)
+
+    const ws = wsInstances[wsInstances.length - 1]
+    const countBefore = wsInstances.length
+
+    // Rapid flap: two closes on the SAME socket before any reconnect timer
+    // elapses. wsRef.current still === ws, so both pass the stale-socket guard
+    // and each schedules a reconnect. The second close must clearTimeout the
+    // first, leaving exactly ONE armed timer — otherwise both fire and open
+    // two sockets at once.
+    act(() => { ws.onclose({ code: 1006 }) })
+    act(() => { ws.onclose({ code: 1006 }) })
+
+    // Fire every armed timer: exactly ONE new socket, not two.
+    act(() => { vi.advanceTimersByTime(WS_RECONNECT_MAX_MS) })
+    expect(wsInstances.length).toBe(countBefore + 1)
+  })
+})

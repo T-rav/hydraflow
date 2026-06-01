@@ -1421,19 +1421,29 @@ def create_router(
         return JSONResponse({})
 
     @router.get("/api/events")
-    async def get_events(since: str | None = None) -> JSONResponse:
-        """Return event history, optionally filtered by a since timestamp."""
+    async def get_events(
+        since: str | None = None,
+        repo: RepoSlugParam = None,
+    ) -> JSONResponse:
+        """Return event history, optionally filtered by a since timestamp.
+
+        Resolves the per-repo event bus via ``_resolve_runtime(repo)`` (matching
+        the adjacent operational routes) so the reconnect ``?since=`` backfill
+        returns the requested repo's events in a multi-repo deployment, not the
+        module-level default bus's.
+        """
+        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
         if since is not None:
             try:
                 since_dt = datetime.fromisoformat(since)
                 if since_dt.tzinfo is None:
                     since_dt = since_dt.replace(tzinfo=UTC)
-                events = await event_bus.load_events_since(since_dt)
+                events = await _bus.load_events_since(since_dt)
                 if events is not None:
                     return JSONResponse([e.model_dump() for e in events])
             except (ValueError, TypeError):
                 pass  # Fall through to in-memory history
-        history = event_bus.get_history()
+        history = _bus.get_history()
         return JSONResponse([e.model_dump() for e in history])
 
     @router.get("/api/prs")

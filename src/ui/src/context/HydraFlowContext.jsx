@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useCallback, useReducer, useMemo } from 'react'
-import { MAX_EVENTS, SYSTEM_WORKER_INTERVALS, PIPELINE_POLL_SAFETY_NET_MS } from '../constants'
+import { MAX_EVENTS, SYSTEM_WORKER_INTERVALS, PIPELINE_POLL_SAFETY_NET_MS, WS_RECONNECT_BASE_MS, WS_RECONNECT_MAX_MS } from '../constants'
 import { deriveStageStatus } from '../hooks/useStageStatus'
 
 const emptyPipeline = {
@@ -828,6 +828,7 @@ export function HydraFlowProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState)
   const wsRef = useRef(null)
   const reconnectTimer = useRef(null)
+  const reconnectAttempts = useRef(0)
   const lastEventTsRef = useRef(null)
   const bgWorkersRef = useRef(state.backgroundWorkers)
   const reporterIdRef = useRef(getReporterId())
@@ -1420,6 +1421,9 @@ export function HydraFlowProvider({ children }) {
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws${repoParam}`)
 
     ws.onopen = () => {
+      // Successful connect — reset the reconnect backoff so the next drop
+      // starts again from BASE rather than wherever the last storm left off.
+      reconnectAttempts.current = 0
       dispatch({ type: 'CONNECTED' })
       fetchWithRepo('/api/control/status')
         .then(r => r.json())
@@ -1481,7 +1485,9 @@ export function HydraFlowProvider({ children }) {
       fetchRepos()
       fetchRuntimes()
       if (lastEventTsRef.current) {
-        fetch(`/api/events?since=${encodeURIComponent(lastEventTsRef.current)}`)
+        // Route through fetchWithRepo so applyRepoParam appends &repo=<slug>;
+        // the backfill must hit the SELECTED repo's bus, not the default one.
+        fetchWithRepo(`/api/events?since=${encodeURIComponent(lastEventTsRef.current)}`)
           .then(r => r.json())
           .then(events => dispatch({ type: 'BACKFILL_EVENTS', data: events }))
           .catch(() => {})
@@ -1524,13 +1530,27 @@ export function HydraFlowProvider({ children }) {
       // 1008 = Policy Violation — server explicitly rejected our repo slug.
       // Don't reconnect; the slug is invalid and retrying would loop forever.
       if (event.code === 1008) return
-      reconnectTimer.current = setTimeout(connect, 2000)
+      // Exponential backoff with full jitter so a flapping socket doesn't
+      // re-run the heavy onopen fan-out every 2s, and many clients don't
+      // reconnect in lockstep. delay = random(0, min(BASE * 2**n, MAX)).
+      const attempt = reconnectAttempts.current
+      reconnectAttempts.current = attempt + 1
+      const ceiling = Math.min(WS_RECONNECT_BASE_MS * 2 ** attempt, WS_RECONNECT_MAX_MS)
+      const delay = Math.random() * ceiling
+      // Cancel any still-pending reconnect before scheduling a new one — during
+      // a rapid flap two onclose cycles could otherwise leave two timers armed,
+      // briefly opening a second socket. One timer outstanding at a time.
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
+      reconnectTimer.current = setTimeout(connect, delay)
     }
 
-    // Don't force-close on error — browsers fire `close` after `error`
-    // automatically, and calling close() here races a frame still in flight
-    // through the Vite dev proxy, producing EPIPE noise during reconnect.
-    ws.onerror = () => {}
+    // Log the error for diagnosability, but don't force-close: browsers fire
+    // `close` after `error` automatically, and calling close() here races a
+    // frame still in flight through the Vite dev proxy, producing EPIPE noise
+    // during reconnect. The `close` handler owns the reconnect/backoff.
+    ws.onerror = (err) => {
+      console.warn('[HydraFlow] WebSocket error; awaiting close for reconnect', err)
+    }
     wsRef.current = ws
   }, [state.selectedRepoSlug, fetchLifetimeStats, fetchHitlItems, fetchGithubMetrics, fetchMetricsHistory, fetchPipeline, fetchPipelineStats, fetchEpics, fetchSessions, fetchRepos, fetchRuntimes, fetchWithRepo])
 
