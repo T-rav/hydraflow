@@ -241,7 +241,6 @@ class TestSurfaceConfigs:
         assert c.mid_flight_enabled is True
         assert c.post_verify_enabled is True
         assert c.post_verify_authority == "veto"
-        assert c.max_veto_retries == 2
         assert isinstance(c.pre_flight_trigger, CompositeTrigger)
 
     def test_pre_merge_spec_check_no_preflight(self):
@@ -266,7 +265,6 @@ class TestSurfaceConfigs:
         assert c.mid_flight_enabled is False
         assert c.post_verify_enabled is True
         assert c.post_verify_authority == "veto"
-        assert c.max_veto_retries == 1
 
     def test_wiki_ingest_advisory_only(self):
         c = SURFACE_ADVISOR_CONFIGS["wiki_ingest"]
@@ -274,7 +272,6 @@ class TestSurfaceConfigs:
         assert c.mid_flight_enabled is False
         assert c.post_verify_enabled is True
         assert c.post_verify_authority == "advisory"
-        assert c.max_veto_retries == 0
 
     def test_build_resolves_models_from_env(self, monkeypatch):
         monkeypatch.setenv("HYDRAFLOW_PR_REVIEW_EXECUTOR_MODEL", "haiku")
@@ -1940,26 +1937,20 @@ class TestBlastRadiusRetryBudget:
     def test_BLAST_RADIUS_RETRIES_table_covers_all_tiers(self):
         assert BLAST_RADIUS_RETRIES == {"low": 1, "medium": 2, "high": 3}
 
-    def test_budget_matches_tier_when_surface_allows_retries(self):
-        # pr_review-style surface (max_veto_retries=2): budget == the blast tier.
-        assert post_verify_retry_budget("low", 2) == 1
-        assert post_verify_retry_budget("medium", 2) == 2
-        assert post_verify_retry_budget("high", 2) == 3
+    def test_veto_authority_budget_matches_blast_tier(self):
+        # Veto-authority surfaces (pr_review, pre_merge_spec_check): budget is
+        # purely blast-driven (low=1/medium=2/high=3) — no separate cap.
+        assert post_verify_retry_budget("low", "veto") == 1
+        assert post_verify_retry_budget("medium", "veto") == 2
+        assert post_verify_retry_budget("high", "veto") == 3
 
-    def test_zero_max_veto_retries_hard_caps_every_tier_to_zero(self):
-        # Advisory-only surfaces (wiki_ingest, max_veto_retries=0) must NEVER
-        # gain a retry budget from blast radius — they stay at 0 and never
-        # block a merge, regardless of how risky the diff is.
-        assert post_verify_retry_budget("low", 0) == 0
-        assert post_verify_retry_budget("medium", 0) == 0
-        assert post_verify_retry_budget("high", 0) == 0
-
-    def test_nonzero_max_veto_retries_is_an_enable_flag_not_a_cap(self):
-        # For veto-authority surfaces the numeric max_veto_retries only gates
-        # retries on/off; the count is blast-driven and intentionally exceeds
-        # the configured value for high blast (3 > 1). No zero-vs-one off-by-one.
-        assert post_verify_retry_budget("low", 1) == 1
-        assert post_verify_retry_budget("high", 1) == 3
+    def test_advisory_authority_hard_caps_every_tier_to_zero(self):
+        # Advisory surfaces (wiki_ingest) must NEVER gain a retry budget from
+        # blast radius — they stay at 0 and never block a merge, regardless of
+        # how risky the diff is. The cap derives from post_verify_authority.
+        assert post_verify_retry_budget("low", "advisory") == 0
+        assert post_verify_retry_budget("medium", "advisory") == 0
+        assert post_verify_retry_budget("high", "advisory") == 0
 
 
 class TestSecondOrderFailureProbe:

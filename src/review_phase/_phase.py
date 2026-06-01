@@ -211,8 +211,9 @@ class ReviewPhase:
 
             self._visual_validator = VisualValidator(config)
 
-        # Per-PR advisor retry counter — incremented on VETO. Bounded by
-        # surface_cfg.max_veto_retries.
+        # Per-PR advisor retry counter — incremented on VETO. Bounded by the
+        # blast-radius-stratified post-verify retry budget (R-2; see
+        # review_advisor.post_verify_retry_budget).
         self._advisor_attempt: dict[int, int] = {}
         # Per-PR list of advisor PostVerifyResults collected this run. The
         # transcript hand-back to the executor (on VETO) is rendered from
@@ -358,8 +359,8 @@ class ReviewPhase:
         main host's legacy wiki path.
 
         T28: PostVerifyAdvisor (surface=``wiki_ingest``) is consulted
-        in advisory mode (``post_verify_authority="advisory"``,
-        ``max_veto_retries=0``) before content is written. In advisory
+        in advisory mode (``post_verify_authority="advisory"``) before
+        content is written. In advisory
         mode the advisor's VETO is downgraded to APPROVE inside
         :class:`PostVerifyAdvisor.run` — disagreements are still logged
         for telemetry/calibration but ingestion proceeds. EXCEPTION:
@@ -456,7 +457,7 @@ class ReviewPhase:
         the kill-switch off path, and degraded advisor failures.
 
         Per spec tiering, ``wiki_ingest`` has ``post_verify_authority="advisory"``
-        and ``max_veto_retries=0`` — so the advisor is consulted purely for
+        — so the advisor is consulted purely for
         calibration: disagreements feed
         ``review_advisor_disagreement_total`` (T16.5) and the
         ``review_advisor_disagreement_validated_total`` KPI (T22), and every
@@ -1313,7 +1314,7 @@ class ReviewPhase:
 
         # PostVerifyAdvisor — second-opinion gate on APPROVE verdicts.
         # On VETO, the advisor hands the disagreement back to the executor
-        # for up to ``surface_cfg.max_veto_retries`` retries. After the
+        # for up to a blast-radius-stratified retry budget (R-2). After the
         # retry budget is exhausted, the disagreement is escalated to HITL.
         if result.verdict == ReviewVerdict.APPROVE and pr.number > 0:
             result, diff = await self._run_post_verify_advisor(
@@ -1601,8 +1602,9 @@ class ReviewPhase:
 
         On VETO, hands the full advisor transcript back to ``_attempt_review_fix``
         so the executor can address the disagreement, then re-runs the advisor.
-        Repeats up to ``surface_cfg.max_veto_retries`` retries. Once the
-        retry budget is exhausted, escalates to HITL with the full
+        Repeats up to a blast-radius-stratified retry budget (R-2;
+        ``post_verify_retry_budget``). Once the budget is exhausted,
+        escalates to HITL with the full
         disagreement transcript and returns ``(result, diff)`` flipped to
         REQUEST_CHANGES so the caller skips the merge branch.
 
@@ -1681,15 +1683,14 @@ class ReviewPhase:
             # is stratified by the diff's blast radius (low=1, medium=2, high=3)
             # rather than a flat surface value, so high-blast changes earn more
             # automated fix attempts before escalating to a human and trivial
-            # ones escalate sooner. This loop serves the veto-authority PR-review
-            # surfaces (pr_review, pre_merge_spec_check; max_veto_retries>0);
-            # advisory-only surfaces (visual_gate/adr_review/wiki_ingest) run
-            # their own one-shot advisor and never enter this loop. The
-            # max_veto_retries==0 branch in post_verify_retry_budget is a
-            # defensive hard-cap (a zero-budget surface never retries/blocks).
+            # ones escalate sooner. Only the veto-authority PR-review surfaces
+            # (pr_review, pre_merge_spec_check) reach this loop; the advisory
+            # wiki_ingest surface and the one-shot visual_gate/adr_review
+            # surfaces never enter it. post_verify_retry_budget derives the
+            # advisory hard-cap (budget 0) from post_verify_authority.
             _blast = compute_blast_radius(diff_stats_from_text(diff))
             _retry_budget = post_verify_retry_budget(
-                _blast, surface_cfg.max_veto_retries
+                _blast, surface_cfg.post_verify_authority
             )
             if attempt_number >= _retry_budget:
                 _emit_advisor_loop_metric(_veto_exhausted_total, {"surface": surface})
@@ -2756,8 +2757,8 @@ class ReviewPhase:
 
         T27: PostVerifyAdvisor (surface=``visual_gate``) wraps the visual
         pipeline's PASS verdict. The visual_gate surface is post-verify
-        only (no pre-flight, no mid-flight, ``max_veto_retries=1``) so this
-        is a one-shot binary gate — VETO blocks the merge and routes
+        only (no pre-flight, no mid-flight) so this is a one-shot binary
+        gate — VETO blocks the merge and routes
         through the existing failure/escalation path with the advisor's
         reasoning attached. APPROVE / disabled / degraded all fall through
         to the existing PASS sign-off behaviour.
@@ -2848,8 +2849,8 @@ class ReviewPhase:
         visual diff (verdict, pipeline reason, artifact links/count) — not
         a unified text diff. Visual gate has ``mid_flight_enabled=False``
         and ``pre_flight_enabled=False``, so this is a one-shot binary gate
-        with a tighter retry budget (``max_veto_retries=1`` per spec) — no
-        plan threading, no fix-and-iterate loop. ``reraise_on_credit_or_bug``
+        — a single advisor call, no retry budget, no plan threading, no
+        fix-and-iterate loop. ``reraise_on_credit_or_bug``
         discipline is preserved inside :meth:`_run_post_verify_for_surface`
         per ``docs/wiki/dark-factory.md`` §2.2.
 
