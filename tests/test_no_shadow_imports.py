@@ -71,8 +71,7 @@ def _inline_shadow_imports(tree: ast.Module) -> list[tuple[int, str]]:
 def test_no_inline_shadow_imports(rel_path: str) -> None:
     """Files fixed in #3040 must not regress with new inline shadow imports."""
     path = SRC_DIR / rel_path
-    if not path.exists():
-        pytest.skip(f"{rel_path} not found")
+    assert path.exists(), f"{rel_path} not found"
     tree = ast.parse(path.read_text())
     violations = _inline_shadow_imports(tree)
     if violations:

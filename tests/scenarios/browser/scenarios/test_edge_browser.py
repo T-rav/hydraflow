@@ -380,7 +380,7 @@ async def test_e5_zero_diff_implement(world, page) -> None:
         await expect(flow_dot).to_be_visible(timeout=5_000)
     else:
         # Worker succeeded with 0 commits but pipeline may not have merged —
-        # assert no crash and pipeline sections are present.
+        # Verify no crash and pipeline sections are present.
         implement_section = page.locator('[data-testid="stage-section-implement"]')
         await expect(implement_section).to_be_visible(timeout=5_000)
 

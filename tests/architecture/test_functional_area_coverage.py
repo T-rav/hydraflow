@@ -12,8 +12,7 @@ _PRE_ASSIGNED: set[str] = set()
 
 def test_every_loop_is_assigned_to_an_area(real_repo_root: Path):
     yaml_path = real_repo_root / "docs/arch/functional_areas.yml"
-    if not yaml_path.exists():
-        pytest.skip("docs/arch/functional_areas.yml not yet authored (Task 4)")
+    assert yaml_path.exists(), "docs/arch/functional_areas.yml must be committed"
 
     fa = load_functional_areas(yaml_path)
     assigned: set[str] = set()
@@ -33,8 +32,7 @@ def test_every_loop_is_assigned_to_an_area(real_repo_root: Path):
 
 def test_every_port_is_assigned_to_an_area(real_repo_root: Path):
     yaml_path = real_repo_root / "docs/arch/functional_areas.yml"
-    if not yaml_path.exists():
-        pytest.skip("docs/arch/functional_areas.yml not yet authored")
+    assert yaml_path.exists(), "docs/arch/functional_areas.yml must be committed"
 
     fa = load_functional_areas(yaml_path)
     assigned: set[str] = set()
@@ -64,8 +62,7 @@ def test_functional_areas_modules_paths_exist(real_repo_root: Path):
     generation time by the extractor, not here.
     """
     yaml_path = real_repo_root / "docs/arch/functional_areas.yml"
-    if not yaml_path.exists():
-        pytest.skip("docs/arch/functional_areas.yml not yet authored")
+    assert yaml_path.exists(), "docs/arch/functional_areas.yml must be committed"
 
     data = yaml.safe_load(yaml_path.read_text())
     missing: list[str] = []
@@ -85,8 +82,7 @@ def test_functional_areas_modules_paths_exist(real_repo_root: Path):
 def test_no_phantom_assignments(real_repo_root: Path):
     """Loops/ports listed in the YAML but absent from code → fail."""
     yaml_path = real_repo_root / "docs/arch/functional_areas.yml"
-    if not yaml_path.exists():
-        pytest.skip("docs/arch/functional_areas.yml not yet authored")
+    assert yaml_path.exists(), "docs/arch/functional_areas.yml must be committed"
 
     fa = load_functional_areas(yaml_path)
     discovered_loops = {info.name for info in extract_loops(real_repo_root / "src")}

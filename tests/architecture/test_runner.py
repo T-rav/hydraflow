@@ -50,12 +50,6 @@ def populated_repo(tmp_path: Path):
     return repo
 
 
-import pytest
-
-
-@pytest.mark.xfail(
-    reason="staging artifact count drifts faster than test", strict=False
-)
 def test_emit_writes_all_artifacts(populated_repo: Path):
     fa_path = populated_repo / "docs/arch/functional_areas.yml"
     fa_path.parent.mkdir(parents=True, exist_ok=True)
@@ -77,6 +71,8 @@ def test_emit_writes_all_artifacts(populated_repo: Path):
         "changelog.md",
         "functional_areas.md",
         "coverage_matrix.md",
+        "ubiquitous-language.md",
+        "ubiquitous-language-context-map.md",
     }
     assert {p.name for p in out.iterdir() if p.suffix == ".md"} == expected
     assert (out.parent / ".meta.json").exists()

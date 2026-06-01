@@ -19,10 +19,7 @@ def test_pr_manager_merge_pr_is_decorated():
     from src.pr_manager import PRManager
 
     method = getattr(PRManager, "merge_pr", None)
-    if method is None:
-        import pytest
-
-        pytest.skip("PRManager has no merge_pr method")
+    assert method is not None, "PRManager has no merge_pr method"
     assert hasattr(method, "__wrapped__"), (
         f"{method.__qualname__} is not decorated with @port_span()"
     )
@@ -33,10 +30,7 @@ def test_pr_manager_create_issue_is_decorated():
     from src.pr_manager import PRManager
 
     method = getattr(PRManager, "create_issue", None)
-    if method is None:
-        import pytest
-
-        pytest.skip("PRManager has no create_issue method")
+    assert method is not None, "PRManager has no create_issue method"
     assert hasattr(method, "__wrapped__"), (
         f"{method.__qualname__} is not decorated with @port_span()"
     )
@@ -47,10 +41,7 @@ def test_pr_manager_push_branch_is_decorated():
     from src.pr_manager import PRManager
 
     method = getattr(PRManager, "push_branch", None)
-    if method is None:
-        import pytest
-
-        pytest.skip("PRManager has no push_branch method")
+    assert method is not None, "PRManager has no push_branch method"
     assert hasattr(method, "__wrapped__"), (
         f"{method.__qualname__} is not decorated with @port_span()"
     )

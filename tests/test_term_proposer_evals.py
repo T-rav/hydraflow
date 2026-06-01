@@ -1,8 +1,9 @@
 """Evals for the TermProposerLLM prompt's INCLUDE/SKIP judgment.
 
 Uses the REAL `claude` CLI to evaluate the prompt's classification quality
-against a corpus of happy/sad/edge cases. Skipped on CI by default — these
-cost LLM tokens and are an evals harness, not a regression suite.
+against a corpus of happy/sad/edge cases. Excluded from the default suite by
+the ``evals`` marker, these cost LLM tokens and are an evals harness, not a
+regression suite.
 
 Run locally:
     pytest tests/test_term_proposer_evals.py -v -m evals
@@ -33,10 +34,7 @@ from ubiquitous_language import (
     TermKind,
 )
 
-pytestmark = [
-    pytest.mark.skip(reason="Evals — real LLM calls; run locally with -m evals"),
-    pytest.mark.evals,
-]
+pytestmark = pytest.mark.evals
 
 
 @dataclass(frozen=True)

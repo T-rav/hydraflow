@@ -88,8 +88,7 @@ def test_subprocess_run_has_timeout(rel_path: str) -> None:
     path = _REPO / rel_path
     src = path.read_text()
     blocks = _subprocess_run_blocks(src)
-    if not blocks:
-        pytest.skip(f"{rel_path} has no subprocess.run calls")
+    assert blocks, f"{rel_path} has no subprocess.run calls"
     timeout_pat = re.compile(r"\btimeout\s*=")
     missing = [b for b in blocks if not timeout_pat.search(b)]
     assert not missing, (

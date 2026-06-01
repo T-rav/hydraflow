@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
+from types import SimpleNamespace
 
 import pytest
 
 from models import SessionLog
+from repo_runtime import RepoRuntimeRegistry
+from state import StateTracker
 from tests.helpers import ConfigFactory, find_endpoint, make_dashboard_router
 
 pytestmark = pytest.mark.integration
@@ -101,17 +103,24 @@ class TestSessionAPIRepoFiltering:
 
 
 class TestStateEndpointRepoScoping:
-    def _mock_runtime(self, config, event_bus):
-        """Create a mock runtime with a state that returns repo-specific data."""
-        mock_state = MagicMock()
-        mock_state.to_dict.return_value = {"repo": config.repo, "custom": True}
-
-        runtime = MagicMock()
-        runtime.config = config
-        runtime.state = mock_state
-        runtime.event_bus = event_bus
-        runtime.orchestrator = None
-        return runtime
+    def _runtime_registry(
+        self,
+        config,
+        event_bus,
+        state,
+    ) -> RepoRuntimeRegistry:
+        """Build a real registry containing a runtime-shaped state object."""
+        registry = RepoRuntimeRegistry()
+        registry._runtimes["owner-alpha"] = SimpleNamespace(
+            slug="owner-alpha",
+            config=config,
+            state=state,
+            event_bus=event_bus,
+            orchestrator=None,
+            running=False,
+            last_error=None,
+        )
+        return registry
 
     @pytest.mark.asyncio
     async def test_state_returns_per_repo_data(
@@ -121,19 +130,19 @@ class TestStateEndpointRepoScoping:
         alpha_cfg = ConfigFactory.create(
             repo="owner/alpha", repo_root=tmp_path / "alpha" / "repo"
         )
-        alpha_runtime = self._mock_runtime(alpha_cfg, event_bus)
-
-        mock_registry = MagicMock()
-        mock_registry.get.return_value = alpha_runtime
+        alpha_state = StateTracker(tmp_path / "alpha-state.json")
+        alpha_state.set_active_issue_numbers([301, 302])
+        registry = self._runtime_registry(alpha_cfg, event_bus, alpha_state)
 
         router, _pr = make_dashboard_router(
-            config, event_bus, state, tmp_path, registry=mock_registry
+            config, event_bus, state, tmp_path, registry=registry
         )
         ep = find_endpoint(router, "/api/state")
 
         resp = await ep(repo="owner-alpha")
+        data = json.loads(resp.body)
         assert resp.status_code == 200
-        mock_registry.get.assert_called_once_with("owner-alpha")
+        assert data["active_issue_numbers"] == [301, 302]
 
     @pytest.mark.asyncio
     async def test_state_no_repo_returns_default(
