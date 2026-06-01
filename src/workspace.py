@@ -836,11 +836,22 @@ class WorkspaceManager:
             logger.warning("git identity config failed in %s: %s", wt_path, exc)
 
     async def _create_venv(self, wt_path: Path) -> None:
-        """Create an independent venv in the worktree via ``uv sync``."""
+        """Create an independent venv in the worktree via ``uv sync --all-extras``.
+
+        ``--all-extras`` ensures test and dev extras (pytest, hypothesis, ulid, etc.)
+        are installed, matching the ``make deps`` behaviour in the main repo. Without
+        it, fresh worktree venvs miss test-only deps and route/scenario tests fail to
+        import.
+        """
         try:
             await run_subprocess(
-                "uv", "sync", cwd=wt_path, gh_token=self._credentials.gh_token
+                "uv",
+                "sync",
+                "--all-extras",
+                cwd=wt_path,
+                gh_token=self._credentials.gh_token,
             )
+            logger.info("uv sync --all-extras complete in %s", wt_path)
         except (RuntimeError, FileNotFoundError) as exc:
             logger.warning("uv sync failed in %s: %s", wt_path, exc)
 

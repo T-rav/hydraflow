@@ -92,11 +92,10 @@ def _load_transcript(case_dir: Path, prompt: str) -> str:
     fixture = case_dir / "expected_transcript.txt"
     if fixture.exists():
         return fixture.read_text(encoding="utf-8")
-    if os.environ.get("HYDRAFLOW_TRUST_ADVERSARIAL_LIVE") != "1":
-        pytest.skip(
-            f"No expected_transcript.txt for {case_dir.name}; set "
-            "HYDRAFLOW_TRUST_ADVERSARIAL_LIVE=1 to invoke the real claude CLI."
-        )
+    assert os.environ.get("HYDRAFLOW_TRUST_ADVERSARIAL_LIVE") == "1", (
+        f"No expected_transcript.txt for {case_dir.name}; set "
+        "HYDRAFLOW_TRUST_ADVERSARIAL_LIVE=1 to invoke the real claude CLI."
+    )
     try:
         result = subprocess.run(  # noqa: S603
             ["claude", "-p", prompt, "--output-format", "text"],

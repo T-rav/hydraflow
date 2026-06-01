@@ -187,3 +187,79 @@ class TestRunPhaseGates:
         )
         blocking, warnings = run_phase_gates(plan, config)
         assert any("new files" in w.lower() for w in warnings)
+
+
+class TestKillSwitchGate:
+    def _loop_plan(self, *, with_killswitch: bool) -> str:
+        """Plan that introduces a new BaseBackgroundLoop subclass.
+
+        The new-loop marker is placed in a Task Graph phase's ``**Files:**``
+        line \u2014 that is where ``run_phase_gates`` scans for it (the gate is
+        deliberately scoped to the Task Graph to avoid prose false positives).
+        """
+        ks = (
+            "\nADR-0049 kill-switch: HYDRAFLOW_DISABLE_FOO_LOOP=1 with enabled_cb\n"
+            if with_killswitch
+            else ""
+        )
+        return (
+            _valid_plan().replace(
+                "**Files:** src/models.py (modify)",
+                "**Files:** src/foo_loop.py (create) \u2014 new BaseBackgroundLoop subclass",
+            )
+            + ks
+        )
+
+    def test_new_loop_without_killswitch_blocks(self):
+        config = _make_config()
+        blocking, _ = run_phase_gates(self._loop_plan(with_killswitch=False), config)
+        assert any(
+            "kill-switch" in e.lower() or "adr-0049" in e.lower() for e in blocking
+        ), f"Expected kill-switch blocking error, got: {blocking}"
+
+    def test_new_loop_with_killswitch_passes(self):
+        config = _make_config()
+        blocking, _ = run_phase_gates(self._loop_plan(with_killswitch=True), config)
+        ks_errors = [
+            e for e in blocking if "kill-switch" in e.lower() or "adr-0049" in e.lower()
+        ]
+        assert not ks_errors, f"Unexpected kill-switch error: {ks_errors}"
+
+    def test_non_loop_plan_no_killswitch_error(self):
+        """Plans not introducing loops are not subject to the kill-switch gate."""
+        config = _make_config()
+        blocking, _ = run_phase_gates(_valid_plan(), config)
+        assert not any("kill-switch" in e.lower() for e in blocking)
+
+
+class TestDuplicateEnforcementTestGate:
+    def _plan_with_test(self, proposed_test: str) -> str:
+        return _valid_plan().replace(
+            "- src/models.py \u2014 add new data model",
+            f"- {proposed_test} (create)",
+        )
+
+    def test_exact_wiring_completeness_duplicate_warns(self):
+        config = _make_config()
+        plan = self._plan_with_test("tests/test_loop_wiring_completeness_v2.py")
+        _, warnings = run_phase_gates(plan, config)
+        assert any(
+            "wiring" in w.lower()
+            or "duplicate" in w.lower()
+            or "test_loop_wiring_completeness" in w
+            for w in warnings
+        ), f"Expected duplicate enforcement warning, got: {warnings}"
+
+    def test_parity_keyword_warns(self):
+        config = _make_config()
+        plan = self._plan_with_test("tests/test_event_reducer_parity_new.py")
+        _, warnings = run_phase_gates(plan, config)
+        assert any(
+            "parity" in w.lower() or "duplicate" in w.lower() for w in warnings
+        ), f"Expected parity-enforcement warning, got: {warnings}"
+
+    def test_unrelated_new_test_no_warn(self):
+        config = _make_config()
+        plan = self._plan_with_test("tests/test_widget_service.py")
+        _, warnings = run_phase_gates(plan, config)
+        assert not any("duplicate enforcement" in w.lower() for w in warnings)

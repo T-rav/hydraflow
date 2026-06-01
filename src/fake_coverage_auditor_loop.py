@@ -264,6 +264,8 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
                 "**Repair:** record a cassette exercising each real-adapter "
                 "counterpart and commit. Spec §4.7; filed by "
                 "`fake_coverage_auditor` (#8986 rollup).",
+                "",
+                "<!-- [hydraflow-auditor: source=FakeCoverageAuditorLoop] -->",
             ]
         )
         return "\n".join(lines)
@@ -303,6 +305,8 @@ class FakeCoverageAuditorLoop(BaseBackgroundLoop):
                 "**Repair:** add a scenario that calls each helper so it is "
                 "part of the working contract. Spec §4.7; filed by "
                 "`fake_coverage_auditor` (#8986 rollup).",
+                "",
+                "<!-- [hydraflow-auditor: source=FakeCoverageAuditorLoop] -->",
             ]
         )
         return "\n".join(lines)

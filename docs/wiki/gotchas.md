@@ -807,3 +807,25 @@ These two loops both close stale issues but target completely different populati
 ```json:entry
 {"id":"01KRBX2N4QP7VW8FGH3J5YD0M7","title":"StaleIssueLoop vs StaleIssueGCLoop — distinct scopes, zero business-logic overlap","topic":null,"source_type":"compiled","source_issue":null,"source_repo":null,"created_at":"2026-05-12T00:00:00.000000+00:00","updated_at":"2026-05-12T00:00:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
 ```
+
+
+## Stacked PRs: rebase onto base branch after parent merges
+
+When a child PR is cut from a parent branch (not from `staging`/`main` directly), after the parent squash-merges you must rebase the child past the parent's tip to avoid carrying the parent's commits into the child's diff.
+
+**Pattern:**
+```bash
+make rebase-onto PARENT_TIP=<sha-of-parent-branch-last-commit>
+# If conflicts appear only in docs/arch/generated/:
+git checkout --theirs docs/arch/generated/
+make arch-regen-stage
+git rebase --continue
+```
+
+`make rebase-onto` reads `config.base_branch()` (returns `staging` when `staging_enabled=True`, `main` otherwise) so you never need to hard-code the target branch.
+
+**Why:** `git rebase --onto origin/staging <PARENT_TIP>` rewrites the child's history to start at the current tip of `staging`, excluding the parent's commits. Without `--onto`, a plain `git rebase origin/staging` re-applies the parent's commits as conflicts.
+
+```json:entry
+{"id":"STACKED-PR-REBASE-001","title":"Stacked PRs: rebase onto base branch after parent merges","topic":"git","source_type":"compiled","source_issue":41,"source_repo":null,"created_at":"2026-05-31T00:00:00+00:00","updated_at":"2026-05-31T00:00:00+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":3}
+```

@@ -776,13 +776,16 @@ class TestSaveScreenshotResourceManagement:
         try:
             fd_before = len(os.listdir(f"/proc/{pid}/fd"))
         except OSError:
-            pytest.skip("/proc not available")
+            fd_before = None
 
         result = ReportIssueLoop._save_screenshot(b64)
         result.unlink(missing_ok=True)
 
-        fd_after = len(os.listdir(f"/proc/{pid}/fd"))
-        assert fd_after <= fd_before, "FD leaked after _save_screenshot"
+        if fd_before is None:
+            assert not result.exists()
+        else:
+            fd_after = len(os.listdir(f"/proc/{pid}/fd"))
+            assert fd_after <= fd_before, "FD leaked after _save_screenshot"
 
 
 # ---------------------------------------------------------------------------

@@ -1402,7 +1402,18 @@ class ReviewPhase:
             return
 
         diff_stats = diff_stats_from_text(diff)
-        from review_advisor import PRContext  # noqa: PLC0415
+        from review_advisor import PRContext, compute_blast_radius  # noqa: PLC0415
+
+        blast = compute_blast_radius(diff_stats)
+        self._state.set_review_blast_radius(task.id, blast)
+        logger.debug(
+            "review blast_radius=%s pr=%d issue=%d paths=%d lines=%d",
+            blast,
+            pr.number,
+            task.id,
+            len(diff_stats.changed_paths),
+            diff_stats.lines_changed,
+        )
 
         pr_ctx = PRContext(prior_fix_attempts=self._advisor_attempt.get(pr.number, 0))
         if not surface_cfg.pre_flight_trigger.should_run(diff_stats, pr_ctx):
@@ -1663,7 +1674,11 @@ class ReviewPhase:
                     )
                 return result, diff
 
-            # VETO — either retry or escalate.
+            # VETO — either retry or escalate, up to surface_cfg.max_veto_retries.
+            # (Blast-radius-stratified retry budgets — refinement R-2 — are
+            # deferred to a dedicated PR: they override the surface-config
+            # max_veto_retries model, which needs deliberate co-design with the
+            # advisory-mode surfaces and the veto→HITL escalation scenarios.)
             if attempt_number >= surface_cfg.max_veto_retries:
                 _emit_advisor_loop_metric(_veto_exhausted_total, {"surface": surface})
                 _emit_advisor_loop_metric(

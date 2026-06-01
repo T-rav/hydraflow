@@ -346,6 +346,52 @@ def should_pre_flight(diff_stats: DiffStats, pr: PRContext) -> bool:
     return bool(nontrivial_src and diff_stats.lines_changed > 20)
 
 
+_BLAST_MEDIUM_LINES_THRESHOLD = 200
+
+
+def compute_blast_radius(
+    diff_stats: DiffStats,
+) -> Literal["low", "medium", "high"]:
+    """Classify a diff's blast radius for retry-budget and iteration-count decisions.
+
+    Tiers:
+    - 'high'  — any changed path matches CRITICAL_PATHS_EXACT or CRITICAL_PATH_GLOBS.
+    - 'medium' — no critical paths, but > _BLAST_MEDIUM_LINES_THRESHOLD lines
+                 changed in src/.
+    - 'low'   — everything else (docs, config, small src changes).
+
+    Reuses _matches_critical() so the classification stays in sync with
+    pre-flight trigger logic. Callers (PostVerifyAdvisor retry budget,
+    StateData persistence, ADR-0051 iteration planning) consume the tier
+    as a Literal rather than computing it themselves.
+    """
+    if any(_matches_critical(p) for p in diff_stats.changed_paths):
+        return "high"
+    src_lines = (
+        diff_stats.lines_changed
+        if any(p.startswith("src/") for p in diff_stats.changed_paths)
+        else 0
+    )
+    if src_lines > _BLAST_MEDIUM_LINES_THRESHOLD:
+        return "medium"
+    return "low"
+
+
+BLAST_RADIUS_RETRIES: dict[str, int] = {"low": 1, "medium": 2, "high": 3}
+
+
+def min_review_passes_for_blast_radius(
+    blast_radius: Literal["low", "medium", "high"],
+) -> int:
+    """Return the minimum fresh-eyes review passes required for a given blast radius.
+
+    Per ADR-0051 stratified table: low=1, medium=2, high=3. Exposed as a
+    named function (rather than a dict lookup at call sites) so the dashboard
+    endpoint and ReviewStateMixin can import a single source of truth.
+    """
+    return BLAST_RADIUS_RETRIES[blast_radius]
+
+
 def diff_stats_from_text(diff: str) -> DiffStats:
     """Compute a coarse :class:`DiffStats` from a raw unified-diff string.
 
@@ -743,6 +789,20 @@ class PostVerifyAdvisor:
         if inp.pre_flight_plan is not None:
             sections.append(
                 f"\n## Pre-flight plan\n{inp.pre_flight_plan.model_dump_json(indent=2)}"
+            )
+        # Second-order failure check for critical-path diffs (refinement §R2)
+        _critical_diff = any(
+            _matches_critical(p) for p in diff_stats_from_text(inp.diff).changed_paths
+        )
+        if _critical_diff:
+            sections.append(
+                "\n## Second-order failure check (required for shared-infrastructure diffs)\n"
+                "Before your verdict, answer both questions explicitly:\n"
+                "1. What is the failure mode if THIS fix itself fails (has a bug or "
+                "fails at runtime)?\n"
+                "2. Is that failure mode broader or more severe than the original bug being fixed?\n"
+                "If the answer to (2) is yes, flag it as a blocking disagreement with "
+                "severity='blocking' in your disagreements list."
             )
         sections.append(
             "\nRespond with JSON matching the PostVerifyResult schema:\n"

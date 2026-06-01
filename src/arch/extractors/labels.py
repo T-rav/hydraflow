@@ -6,10 +6,9 @@ Looks for a top-level constant of the form
 
 For codebases where transitions are scattered across imperative
 `swap_pipeline_labels(...)` call-sites (HydraFlow as of v1) this returns an
-empty state machine. That's intentional: the matching ADR-0002 drift test
-is marked xfail in such cases per Plan A's escape hatch (Task 22 step 4),
-and a hydraflow-find issue documents the gap so the cleanup can introduce
-a declarative table later.
+empty state machine. That's intentional: the ADR-0002 drift guard asserts
+that generated labels documentation explicitly reports the empty extraction
+until a later cleanup introduces a declarative transition table.
 """
 
 from __future__ import annotations

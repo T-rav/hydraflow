@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.filter.outputs.code }}
+      full_quality: ${{ steps.filter.outputs.full_quality }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -25,6 +26,18 @@ jobs:
             code:
               - 'src/**'
               - 'tests/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - 'Makefile'
+              - '.github/workflows/**'
+            full_quality:
+              - 'src/**'
+              - '!src/arch/**'
+              - 'tests/**'
+              - '!tests/architecture/**'
+              - '!tests/regressions/**'
+              - '!tests/scenarios/**'
+              - '!tests/sandbox_scenarios/**'
               - 'pyproject.toml'
               - 'uv.lock'
               - 'Makefile'
@@ -143,19 +156,8 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.22'
-      - name: Quality Lite
-        if: needs.changes.outputs.code == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "${{ matrix.project_dir }}"
-          if [ -f Makefile ] || [ -f makefile ] || [ -f GNUmakefile ]; then
-            make quality-lite
-            exit 0
-          fi
-          echo "No Makefile in ${{ matrix.project_dir }}; skipping make quality-lite."
       - name: Quality Full
-        if: needs.changes.outputs.code == 'true'
+        if: needs.changes.outputs.full_quality == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -166,7 +168,7 @@ jobs:
           fi
           echo "No Makefile in ${{ matrix.project_dir }}; skipping make quality."
       - name: Smoke
-        if: needs.changes.outputs.code == 'true'
+        if: needs.changes.outputs.full_quality == 'true'
         shell: bash
         run: |
           set -euo pipefail
