@@ -212,6 +212,8 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("health_monitor_interval", "HYDRAFLOW_HEALTH_MONITOR_INTERVAL", 7200),
     ("wiki_freshness_stale_days", "HYDRAFLOW_WIKI_FRESHNESS_STALE_DAYS", 7),
     ("stale_issue_interval", "HYDRAFLOW_STALE_ISSUE_INTERVAL", 86400),
+    ("auditor_finding_max_age_days", "HYDRAFLOW_AUDITOR_FINDING_MAX_AGE_DAYS", 14),
+    ("triage_max_turns", "HYDRAFLOW_TRIAGE_MAX_TURNS", 3),
     ("triage_retry_interval", "HYDRAFLOW_TRIAGE_RETRY_INTERVAL", 86400),
     ("triage_retry_max_attempts", "HYDRAFLOW_TRIAGE_RETRY_MAX_ATTEMPTS", 3),
     ("sentry_poll_interval", "SENTRY_POLL_INTERVAL", 600),
@@ -1092,6 +1094,23 @@ class HydraFlowConfig(BaseModel):
     triage_model: str = Field(
         default="gemini-3.1-pro-preview",
         description="Model for triage evaluation (fast/cheap)",
+    )
+    triage_max_turns: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description=(
+            "Max LLM turns for triage evaluation. Increase from 1 to allow "
+            "Read/Grep tool calls to verify currency and falsifiable claims."
+        ),
+    )
+    auditor_finding_max_age_days: int = Field(
+        default=14,
+        ge=0,
+        description=(
+            "Auto-close auditor-filed findings older than this many days. "
+            "0 = disabled. Auditor loops re-file findings on their next cycle."
+        ),
     )
     min_plan_words: int = Field(
         default=200,

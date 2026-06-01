@@ -363,6 +363,21 @@ class TriageResult(BaseModel):
         default=False,
         description="Whether the issue needs product discovery before planning",
     )
+    already_addressed: bool = Field(
+        default=False,
+        description=(
+            "Whether the LLM determined the described problem no longer exists "
+            "at HEAD. Triggers auto-close routing in triage_phase."
+        ),
+    )
+    claim_verified: bool | None = Field(
+        default=None,
+        description=(
+            "Whether the LLM verified a falsifiable claim against the codebase. "
+            "None = no falsifiable claim present; True = claim confirmed; "
+            "False = claim was false (problem doesn't exist)."
+        ),
+    )
 
     @field_validator("issue_type", mode="before")
     @classmethod
@@ -633,6 +648,7 @@ class ReproductionOutcome(StrEnum):
     SUCCESS = "success"  # failing test written and confirmed red
     PARTIAL = "partial"  # repro script produced but no automated test
     UNABLE = "unable"  # could not reproduce — escalate to HITL
+    NOT_PRESENT = "not_present"  # described symptom does not exist at HEAD
 
 
 class ReproductionResult(BaseModel):
