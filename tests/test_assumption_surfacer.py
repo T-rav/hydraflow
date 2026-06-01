@@ -148,3 +148,25 @@ async def test_concerns_set_raised_in_phase_and_stage():
     assert len(out.concerns) == 1
     assert out.concerns[0].raised_in_phase == "discover"
     assert out.concerns[0].raised_in_stage == "assumption_surfacer"
+
+
+class TestSurfacerMechanismSpikeCheck:
+    def test_system_prompt_escalates_mechanism_assumptions(self):
+        """_SYSTEM_PROMPT must instruct HIGH severity for subprocess/OS assumptions."""
+        from src.assumption_surfacer import _SYSTEM_PROMPT
+
+        lower = _SYSTEM_PROMPT.lower()
+        assert "subprocess" in lower or "git" in lower, (
+            "_SYSTEM_PROMPT must mention subprocess/git/OS mechanism assumptions"
+        )
+        assert "must_address_by" in _SYSTEM_PROMPT or "spike" in lower, (
+            "_SYSTEM_PROMPT must require spike validation for mechanism assumptions"
+        )
+
+    def test_risk_skeptic_prompt_requires_empirical_validation_for_mechanisms(self):
+        from src.plan_council_prompts import RISK_SKEPTIC_PROMPT
+
+        lower = RISK_SKEPTIC_PROMPT.lower()
+        assert "empirical" in lower or "spike" in lower or "scratch repo" in lower, (
+            "RISK_SKEPTIC_PROMPT must require empirical validation for mechanism assumptions"
+        )

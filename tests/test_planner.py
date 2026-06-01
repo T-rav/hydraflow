@@ -235,6 +235,18 @@ async def test_build_prompt_includes_principles_checklist(config, event_bus, iss
 
 
 @pytest.mark.asyncio
+async def test_step8_includes_killswitch_principle(config, event_bus, issue):
+    """Planner step-8 principles must name the ADR-0049 kill-switch so plans
+    that introduce new loops/runners carry the disable env + enabled_cb check
+    before they reach the run_phase_gates kill-switch gate."""
+    runner = _make_runner(config, event_bus)
+    task = issue.to_task()
+    prompt, _ = await runner._build_prompt_with_stats(task)
+    assert "ADR-0049" in prompt
+    assert "kill-switch" in prompt.lower() or "HYDRAFLOW_DISABLE" in prompt
+
+
+@pytest.mark.asyncio
 async def test_build_prompt_includes_comments_when_present(config, event_bus):
     task = TaskFactory.create(
         body="It is broken.",
