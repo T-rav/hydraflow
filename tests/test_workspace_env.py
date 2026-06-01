@@ -535,7 +535,11 @@ class TestCreateVenv:
             await manager._create_venv(tmp_path)
 
         mock_exec.assert_called_once()
-        assert mock_exec.call_args.args[:2] == ("uv", "sync")
+        call_args = mock_exec.call_args.args
+        assert call_args[:2] == ("uv", "sync")
+        assert "--all-extras" in call_args, (
+            "_create_venv must pass --all-extras so test extras (pytest, ulid, etc.) install"
+        )
 
     @pytest.mark.asyncio
     async def test_create_venv_swallows_errors(self, config, tmp_path: Path) -> None:

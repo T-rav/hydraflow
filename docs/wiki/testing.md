@@ -10,6 +10,10 @@ instead of replacing `create_issue`, `post_comment`, or `add_labels` with raw
 `AsyncMock` call counters. Mock only the unmodeled external boundary, such as a
 `gh` subprocess, `git bisect`, or an LLM corpus runner. Cover parser and
 formatter branches that sit behind those boundaries with focused unit tests.
+`tests/architecture/test_mockworld_scenario_fake_boundaries.py` guards this for
+MockWorld scenario files; documented Pattern B direct-instantiation tests may
+still script a PRPort when the assertion is the loop's reaction to a specific
+port return value.
 **Why:** Adapter-backed assertions catch title/body/label drift and fake-contract
 regressions that call-count-only mocks hide.
 
@@ -46,6 +50,23 @@ Only mark tests that exercise real external dependencies (Docker, network, files
 
 ```json:entry
 {"id":"01KQP10AJV73YGEATZKR6QXCA2","title":"Mark integration tests with @pytest.mark.integration","topic":null,"source_type":"compiled","source_issue":null,"source_repo":null,"created_at":"2026-05-03T04:19:35.643796+00:00","updated_at":"2026-05-03T04:19:35.643797+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"medium","stale":false,"corroborations":1}
+```
+
+
+## Enforce test-value standards during review
+
+Review must request changes for skipped, xfailed, commented-out, or placeholder
+tests in active coverage. Unit tests should use the documented factories and
+world-building helpers instead of ad hoc setup. Integration tests should keep
+real business logic wired and mock only external boundaries whose real effects
+cannot run in the test environment. MockWorld scenarios should assert side
+effects through fake-adapter state, not raw mock call counts. **Why:** Test
+counts are meaningless when the runnable suite contains ignored tests or mocks
+that decide the outcome being asserted.
+
+
+```json:entry
+{"id":"01JRC_TEST_VALUE_REVIEW_GATE","title":"Enforce test-value standards during review","topic":"testing","source_type":"manual","source_issue":"hydraflow-1x87","source_repo":"T-rav/hydraflow","created_at":"2026-05-31T23:45:00+00:00","updated_at":"2026-05-31T23:45:00+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
 ```
 
 

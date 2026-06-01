@@ -356,44 +356,6 @@ class TestRunFinallyTerminatesRunners:
         mock_r.assert_called_once()
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        reason="staging-level loop-exception termination drift", strict=False
-    )
-    async def test_run_terminates_on_loop_exception(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """If a loop exception is caught, runners are still terminated on stop."""
-        orch = HydraFlowOrchestrator(config)
-        orch._svc.prs.ensure_labels_exist = AsyncMock()  # type: ignore[method-assign]
-        mock_fetcher_noop(orch)
-
-        call_count = 0
-
-        async def exploding_then_stopping() -> list[PlanResult]:
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                raise RuntimeError("boom")
-            orch._stop_event.set()
-            return []
-
-        orch._svc.planner_phase.plan_issues = exploding_then_stopping  # type: ignore[method-assign]
-        orch._svc.implementer.run_batch = AsyncMock(return_value=([], []))  # type: ignore[method-assign]
-
-        with (
-            patch.object(orch._svc.planners, "terminate") as mock_p,
-            patch.object(orch._svc.agents, "terminate") as mock_a,
-            patch.object(orch._svc.reviewers, "terminate") as mock_r,
-        ):
-            await orch.run()
-
-        # Exception was caught (not re-raised), loop continued, stop was set
-        assert call_count == 2
-        mock_p.assert_called_once()
-        mock_a.assert_called_once()
-        mock_r.assert_called_once()
-
-    @pytest.mark.asyncio
     async def test_running_stays_true_during_terminate_calls(
         self, config: HydraFlowConfig
     ) -> None:

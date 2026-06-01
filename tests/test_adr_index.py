@@ -162,11 +162,8 @@ def test_cache_handles_directory_creation_after_instantiation(tmp_path):
 def test_scan_real_adr_directory_produces_valid_output():
     """Smoke test against the real docs/adr/ — guards against regression
     if an ADR file's format drifts from the expected template."""
-    import pytest
-
     adr_dir = Path(__file__).resolve().parents[1] / "docs" / "adr"
-    if not adr_dir.exists():
-        pytest.skip("docs/adr not present in this checkout")
+    assert adr_dir.exists(), "docs/adr must be present in this checkout"
 
     adrs = scan_adr_directory(adr_dir)
     assert len(adrs) > 0
