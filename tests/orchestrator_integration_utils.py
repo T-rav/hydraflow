@@ -512,6 +512,7 @@ def build_scripted_services(
     services.edge_proposer_loop = FakeBackgroundLoop()
     services.live_corpus_replay_loop = None
     services.triage_retry_loop = FakeBackgroundLoop()
+    services.entry_evidence_loop = FakeBackgroundLoop()
     services.repo_wiki_store = SimpleNamespace(
         is_ingested=MagicMock(return_value=False),
         mark_ingested=MagicMock(),

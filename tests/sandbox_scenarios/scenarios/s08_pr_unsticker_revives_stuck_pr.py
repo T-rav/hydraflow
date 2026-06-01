@@ -15,7 +15,10 @@ def seed() -> MockWorldSeed:
                 "number": 1,
                 "title": "t",
                 "body": "b",
-                "labels": ["hydraflow-implementing"],
+                # HITL-escalated: PRUnstickerLoop only processes issues carrying
+                # the hitl_label (it calls list_hitl_items(hitl_label) and unsticks
+                # those with a linked PR). The stuck PR #100 links to this issue.
+                "labels": ["hydraflow-hitl"],
             }
         ],
         prs=[
@@ -35,10 +38,16 @@ def seed() -> MockWorldSeed:
 
 async def assert_outcome(api, page) -> None:
     history = await api.wait_until(
-        "/api/timeline/issue/1",
+        "/api/events",
         lambda p: any(
-            e.get("event") == "pr_unsticker_resync" for e in p.get("events", [])
+            e.get("type") == "hitl_update"
+            and e.get("data", {}).get("action") == "unstick_resolved"
+            for e in p
         ),
         timeout=180.0,
     )
-    assert any(e.get("event") == "pr_unsticker_resync" for e in history["events"])
+    assert any(
+        e.get("type") == "hitl_update"
+        and e.get("data", {}).get("action") == "unstick_resolved"
+        for e in history
+    )
